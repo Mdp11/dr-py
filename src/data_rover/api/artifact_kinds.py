@@ -26,6 +26,7 @@ from data_rover.core.script.lint import derive_entry_points
 from data_rover.core.script.schema import SNIPPET_ADAPTER
 from data_rover.core.table.exporter import EXPORTER_ADAPTER
 from data_rover.core.table.schema import TABLE_ADAPTER
+from data_rover.core.validation.rules.schema import RULES_ADAPTER
 
 from .db_models import ArtifactKind
 
@@ -103,6 +104,9 @@ _REGISTRY: dict[ArtifactKind, ArtifactKindSpec] = {
     ),
     ArtifactKind.exporter: ArtifactKindSpec(
         kind=ArtifactKind.exporter, adapter=EXPORTER_ADAPTER
+    ),
+    ArtifactKind.validation_rules: ArtifactKindSpec(
+        kind=ArtifactKind.validation_rules, adapter=RULES_ADAPTER
     ),
 }
 

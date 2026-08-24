@@ -281,7 +281,7 @@ class Snapshot(Base):
 
 
 class ArtifactKind(enum.StrEnum):
-    """Kinds of project artifacts — six today (`diagram`/`diagram_kind` stay
+    """Kinds of project artifacts — seven today (`diagram`/`diagram_kind` stay
     unregistered in `api/artifact_kinds.py` and 422 on write; see that
     module for which kinds routes actually accept).
 
@@ -304,6 +304,7 @@ class ArtifactKind(enum.StrEnum):
     diagram_kind = "diagram_kind"
     code_snippet = "code_snippet"
     exporter = "exporter"
+    validation_rules = "validation_rules"
 
 
 class ArtifactRow(Base):

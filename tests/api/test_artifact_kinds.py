@@ -39,6 +39,16 @@ SNIPPET_PAYLOAD = {
     "code": "def value(el):\n    return el.name\n",
 }
 
+RULES_PAYLOAD = {
+    "schema_version": 1,
+    "yaml": (
+        "rules:\n"
+        "  - name: has-name\n"
+        "    applies_to: Building\n"
+        "    then: {property: name, exists: true}\n"
+    ),
+}
+
 
 def _spec(kind: ArtifactKind) -> ArtifactKindSpec:
     """`get_spec` returns `ArtifactKindSpec | None`; the tests below only ever
@@ -55,6 +65,7 @@ def test_all_current_kinds_are_registered() -> None:
         ArtifactKind.table,
         ArtifactKind.code_snippet,
         ArtifactKind.exporter,
+        ArtifactKind.validation_rules,
     ):
         assert get_spec(kind) is not None
     assert get_spec(ArtifactKind.diagram) is None
@@ -65,6 +76,7 @@ def test_registered_adapters_validate_payloads() -> None:
     _spec(ArtifactKind.navigation).adapter.validate_python(NAV_PAYLOAD)
     _spec(ArtifactKind.table).adapter.validate_python(TABLE_PAYLOAD)
     _spec(ArtifactKind.code_snippet).adapter.validate_python(SNIPPET_PAYLOAD)
+    _spec(ArtifactKind.validation_rules).adapter.validate_python(RULES_PAYLOAD)
 
 
 def test_navigation_deps_cover_operand_and_snippet_refs() -> None:
@@ -81,6 +93,13 @@ def test_table_deps_cover_row_source_columns_and_snippets() -> None:
 
 def test_snippet_has_no_deps() -> None:
     assert extract_refs(SNIPPET_PAYLOAD) == set()
+
+
+def test_rules_has_no_deps() -> None:
+    # stereotype/relationship/property names travel as plain strings inside
+    # the yaml text, not as "ref" dict entries — nothing for the generic
+    # walk to find.
+    assert extract_refs(RULES_PAYLOAD) == set()
 
 
 def test_rewrite_refs_remaps_known_and_keeps_unknown() -> None:

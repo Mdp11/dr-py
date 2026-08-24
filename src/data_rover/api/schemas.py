@@ -322,6 +322,7 @@ class CreateArtifactOp(BaseModel):
         "diagram_kind",
         "code_snippet",
         "exporter",
+        "validation_rules",
     ]
     name: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -1073,6 +1074,7 @@ class ArtifactCreateIn(BaseModel):
         "diagram_kind",
         "code_snippet",
         "exporter",
+        "validation_rules",
     ]
     name: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)
