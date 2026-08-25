@@ -209,6 +209,15 @@ def _check_patch_keys(
             raise KeyError(f"{type_name!r} has no property {key!r}")
 
 
+def _reject_reserved_hint(hint: str) -> None:
+    """An id hint must never look like a temp id: the restore-mode replay
+    branches on the prefix, so a journalled ``tmp_`` id would be ambiguous."""
+    if hint.startswith(TEMP_ID_PREFIX):
+        raise ValueError(
+            f"id hint {hint!r} must not use the reserved {TEMP_ID_PREFIX!r} prefix"
+        )
+
+
 def _apply_one(
     model: Model, op: ModelOpIn, res: _BatchResult, *, restore: bool
 ) -> None:
@@ -225,7 +234,15 @@ def _apply_one(
     if isinstance(op, CreateElementOp):
         props = _resolve_props(op.properties, res.id_map)
         if op.temp_id.startswith(TEMP_ID_PREFIX):
-            element = d.create_element(model, op.type_name)
+            if op.id is None:
+                element = d.create_element(model, op.type_name)
+            else:
+                # restore_element raises ValueError when the id is taken;
+                # _apply_batch maps it to the 422 + rollback every other
+                # mutation-boundary error gets
+                _reject_reserved_hint(op.id)
+                element = model.restore_element(op.id, op.type_name)
+                d.after_element_create(model, element.id)
             res.id_map[op.temp_id] = element.id
         elif restore:
             element = model.restore_element(op.temp_id, op.type_name)
@@ -243,7 +260,9 @@ def _apply_one(
         for key, value in props.items():
             d.set_property(model, element, key, value)
         res.canonical_ops.append(
-            op.model_copy(update={"temp_id": element.id, "properties": props})
+            op.model_copy(
+                update={"temp_id": element.id, "properties": props, "id": None}
+            )
         )
         res.mark_element_changed(element.id)
         return
@@ -332,7 +351,15 @@ def _apply_one(
         target_id = res.id_map.get(op.target_id, op.target_id)
         props = _resolve_props(op.properties, res.id_map)
         if op.temp_id.startswith(TEMP_ID_PREFIX):
-            rel = d.connect(model, op.type_name, source_id, target_id)
+            if op.id is None:
+                rel = d.connect(model, op.type_name, source_id, target_id)
+            else:
+                _reject_reserved_hint(op.id)
+                d.before_connect(model, op.type_name, source_id, target_id)
+                rel = model.restore_relationship(
+                    op.id, op.type_name, source_id, target_id
+                )
+                d.after_connect(model, rel.id)
             res.id_map[op.temp_id] = rel.id
         elif restore:
             d.before_connect(model, op.type_name, source_id, target_id)
@@ -357,6 +384,7 @@ def _apply_one(
                     "source_id": source_id,
                     "target_id": target_id,
                     "properties": props,
+                    "id": None,
                 }
             )
         )

@@ -323,6 +323,11 @@ class CreateElementOp(BaseModel):
     temp_id: str
     type_name: str
     properties: dict[str, Any] = Field(default_factory=dict)
+    #: requested final id (CR / compare proposals carry the file's real ids);
+    #: None = server-minted. The applier reinstates the entity under it via
+    #: Model.restore_element and 422s the batch when it is taken. Canonical
+    #: journalled ops never carry it (temp_id holds the final id there).
+    id: str | None = None
 
 
 class UpdateElementOp(BaseModel):
@@ -345,6 +350,8 @@ class CreateRelationshipOp(BaseModel):
     source_id: str
     target_id: str
     properties: dict[str, Any] = Field(default_factory=dict)
+    #: see CreateElementOp.id
+    id: str | None = None
 
 
 class UpdateRelationshipOp(BaseModel):
