@@ -100,11 +100,11 @@ function indexById<T extends { id: string }>(list: T[]): Map<string, T> {
 	return m;
 }
 
-function elementModifiedFields(before: Element, after: Element): string[] {
+export function elementModifiedFields(before: Element, after: Element): string[] {
 	return propertyDiffKeys(before.properties, after.properties);
 }
 
-function relationshipModifiedFields(before: Relationship, after: Relationship): string[] {
+export function relationshipModifiedFields(before: Relationship, after: Relationship): string[] {
 	const keys = propertyDiffKeys(before.properties, after.properties);
 	if (before.source_id !== after.source_id) keys.push('source_id');
 	if (before.target_id !== after.target_id) keys.push('target_id');

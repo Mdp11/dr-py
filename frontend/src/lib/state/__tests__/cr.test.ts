@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Element, ModelOut, Relationship } from '$lib/api/types';
-import { buildChangeRequest, composeCrFilename } from '../cr';
+import {
+	buildChangeRequest,
+	composeCrFilename,
+	crPrestate,
+	crToDiff,
+	invertChangeRequest
+} from '../cr';
 
 function el(
 	id: string,
@@ -419,5 +425,66 @@ describe('saveWithOptionalCr', () => {
 			expect(result.savedFilename).toBe('m.json');
 			expect(result.message).toBe('quota exceeded');
 		}
+	});
+});
+
+describe('invertChangeRequest', () => {
+	it('swaps added/deleted and before/after, keeping the envelope', () => {
+		const cr = buildChangeRequest(
+			model([el('a', { n: 1 }), el('b')], [rel('r1', 'a', 'b')]),
+			model([el('a', { n: 2 }), el('c')], [rel('r2', 'a', 'c')]),
+			'base.json',
+			() => new Date('2026-01-01T00:00:00Z')
+		);
+		const inv = invertChangeRequest(cr);
+		expect(inv.format).toBe('datarover.cr/v1');
+		expect(inv.createdAt).toBe(cr.createdAt);
+		expect(inv.ops.elements.added.map((e) => e.id)).toEqual(['b']);
+		expect(inv.ops.elements.deleted.map((e) => e.id)).toEqual(['c']);
+		expect(inv.ops.elements.modified).toEqual([
+			{ id: 'a', before: el('a', { n: 2 }), after: el('a', { n: 1 }) }
+		]);
+		expect(inv.ops.relationships.added.map((r) => r.id)).toEqual(['r1']);
+		expect(inv.ops.relationships.deleted.map((r) => r.id)).toEqual(['r2']);
+		expect(invertChangeRequest(inv)).toEqual(cr);
+	});
+});
+
+describe('crToDiff', () => {
+	it('is the inverse of buildChangeRequest', () => {
+		const from = model(
+			[el('a', { n: 1 }), el('b')],
+			[rel('r1', 'a', 'b'), rel('r2', 'a', 'b', { w: 1 })]
+		);
+		const to = model(
+			[el('a', { n: 2 }), el('c')],
+			[rel('r2', 'b', 'a', { w: 1 }), rel('r3', 'a', 'c')]
+		);
+		const cr = buildChangeRequest(from, to, null);
+		const diff = crToDiff(cr);
+		expect(diff.counts).toEqual({ added: 2, modified: 2, deleted: 2 });
+		expect(diff.elements.map((d) => [d.id, d.status])).toEqual([
+			['c', 'added'],
+			['a', 'modified'],
+			['b', 'deleted']
+		]);
+		expect(diff.elements[1].modifiedFields).toEqual(['n']);
+		const r2 = diff.relationships.find((d) => d.id === 'r2')!;
+		expect(r2.status).toBe('modified');
+		expect(r2.modifiedFields).toEqual(['source_id', 'target_id']);
+	});
+});
+
+describe('crPrestate', () => {
+	it('collects the before-state of modified and deleted entities only', () => {
+		const cr = buildChangeRequest(
+			model([el('a', { n: 1 }), el('b')], [rel('r1', 'a', 'b')]),
+			model([el('a', { n: 2 }), el('c')], []),
+			null
+		);
+		expect(crPrestate(cr)).toEqual({
+			elements: [el('a', { n: 1 }), el('b')],
+			relationships: [rel('r1', 'a', 'b')]
+		});
 	});
 });

@@ -1,3 +1,4 @@
+import type { z } from 'zod';
 import { apiFetch, type ClientConfig } from './client';
 import { ConflictError } from './errors';
 import {
@@ -31,9 +32,12 @@ export function compareModel(file: Blob, cfg?: ClientConfig): Promise<CompareOut
  * plus the `ops` batch to stage. Nothing is applied. A 409 names the first
  * conflicting CR by index.
  */
-export async function proposeCr(crs: ChangeRequest[], cfg?: ClientConfig): Promise<ProposeCrResult> {
+export async function proposeCr(
+	crs: ChangeRequest[],
+	cfg?: ClientConfig
+): Promise<ProposeCrResult> {
 	try {
-		const res = await apiFetch(
+		const res = await apiFetch<z.infer<typeof ProposeCrOutSchema>>(
 			'/model/apply-cr',
 			{ method: 'POST', body: { crs }, schema: ProposeCrOutSchema },
 			cfg

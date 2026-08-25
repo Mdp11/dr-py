@@ -1,5 +1,11 @@
-import type { ChangesDoc, Element, ModelOut, Relationship } from '$lib/api/types';
-import { computeDiff, type EntityDiff } from './diff';
+import type { ChangesDoc, Conflict, Element, ModelOut, Relationship } from '$lib/api/types';
+import {
+	computeDiff,
+	elementModifiedFields,
+	relationshipModifiedFields,
+	type Diff,
+	type EntityDiff
+} from './diff';
 
 export interface ModifiedElement {
 	id: string;
@@ -261,5 +267,95 @@ export async function saveWithOptionalCr(input: SaveWithCrInput): Promise<SaveWi
 		kind: 'saved',
 		savedFilename: modelOutcome.filename,
 		savedHandle: modelOutcome.handle
+	};
+}
+
+/** What the dialog's preview renders: the CR as a Diff plus the hidden count. */
+export interface CrPreview {
+	diff: Diff;
+	unchangedHidden: number;
+}
+
+/** A 409 from POST /model/apply-cr: `crIndex` is null for a single-CR flow. */
+export interface CrConflictReport {
+	crIndex: number | null;
+	items: Conflict[];
+}
+
+/**
+ * The change request that undoes `cr` (added↔deleted, before↔after). Pure;
+ * the envelope (format, createdAt, baseline, any extra field such as the
+ * server's `complete`) is kept as-is — the caller relabels it.
+ */
+export function invertChangeRequest<T extends ChangeRequest>(cr: T): T {
+	const { elements, relationships } = cr.ops;
+	return {
+		...cr,
+		ops: {
+			elements: {
+				added: elements.deleted,
+				modified: elements.modified.map((m) => ({ id: m.id, before: m.after, after: m.before })),
+				deleted: elements.added
+			},
+			relationships: {
+				added: relationships.deleted,
+				modified: relationships.modified.map((m) => ({
+					id: m.id,
+					before: m.after,
+					after: m.before
+				})),
+				deleted: relationships.added
+			}
+		}
+	};
+}
+
+/** The inverse of `buildChangeRequest`'s partition: a CR as a renderable Diff. */
+export function crToDiff(cr: ChangeRequest): Diff {
+	const { elements, relationships } = cr.ops;
+	const els: EntityDiff[] = [
+		...elements.added.map((e) => ({ id: e.id, status: 'added' as const, after: e })),
+		...elements.modified.map((m) => ({
+			id: m.id,
+			status: 'modified' as const,
+			before: m.before,
+			after: m.after,
+			modifiedFields: elementModifiedFields(m.before, m.after)
+		})),
+		...elements.deleted.map((e) => ({ id: e.id, status: 'deleted' as const, before: e }))
+	];
+	const rels: EntityDiff[] = [
+		...relationships.added.map((r) => ({ id: r.id, status: 'added' as const, after: r })),
+		...relationships.modified.map((m) => ({
+			id: m.id,
+			status: 'modified' as const,
+			before: m.before,
+			after: m.after,
+			modifiedFields: relationshipModifiedFields(m.before, m.after)
+		})),
+		...relationships.deleted.map((r) => ({ id: r.id, status: 'deleted' as const, before: r }))
+	];
+	const counts = { added: 0, modified: 0, deleted: 0 };
+	for (const d of [...els, ...rels]) {
+		if (d.status !== 'unchanged') counts[d.status]++;
+	}
+	return { elements: els, relationships: rels, counts };
+}
+
+/**
+ * The pre-state a proposal already carries: the `before` of every modified
+ * entity plus every deleted one — exactly the update/delete targets
+ * `stageProposedOps` would otherwise fetch one by one.
+ */
+export function crPrestate(cr: ChangeRequest): {
+	elements: Element[];
+	relationships: Relationship[];
+} {
+	return {
+		elements: [...cr.ops.elements.modified.map((m) => m.before), ...cr.ops.elements.deleted],
+		relationships: [
+			...cr.ops.relationships.modified.map((m) => m.before),
+			...cr.ops.relationships.deleted
+		]
 	};
 }
