@@ -418,32 +418,17 @@ with items History · Compare · Export (Export stays gated on a loaded model, n
 item level). Final order: **Metamodel · Issues · Artifacts · Apply CR · Model ·
 Settings** — pinned by an order test in `TopBar.test.ts`. The three e2e call sites that
 clicked the flat History/Export buttons (`smoke`, `history`, `artifact-commit` specs)
-now go through the menu.
+now go through the menu. Superseded by P-23 on 2026-08-25: Apply CR moved into the Model
+dropdown too, so the order is now **Metamodel · Issues · Artifacts · Model · Settings**.
 
-### P-23 · Apply CR against the loaded model, staged not committed, multiple CRs · `open` · design-heavy
-Three changes to the Apply CR flow (owner notes, 2026-08-19):
-
-- **No model file upload.** `ApplyCrDialog.svelte` today drives the legacy/inline mode of
-  `POST /model/apply-cr` — the user picks a model file *and* a CR file, and the result is
-  saved back out as a new file. Wanted: the CR applies to the **currently loaded model**.
-  Half the answer already exists: the route's **session mode** (`routes/change_request.py`
-  — `model` field absent) applies the CR to the session model. But session mode
-  **replaces the session model and bumps `model_rev` directly**, which conflicts with the
-  next point, so it is a starting point, not the answer.
-- **Staged, not committed.** After apply, every change the CR produced should land in the
-  **staged buffers** (the client's checkout/commit flow), for the user to review and
-  commit — not as an already-durable mutation. That means the CR has to come back to the
-  client as **op proposals** (the `OpIn` vocabulary) rather than being applied
-  server-side — closer in spirit to how snippet runs *propose* ops than to today's
-  apply-cr. Probably a preview/dry-run shape: server applies the CR transiently, derives
-  the op batch + conflicts, rolls back, and the client stages the ops.
-- **Multiple CRs at once.** Apply several CR files in one go. Needs a decision on
-  ordering and cross-CR conflict semantics (two CRs touching the same element: sequential
-  apply with the second seeing the first's result, or reject as a conflict?).
-
-Adjacent to (but not the same as) the **"Real CR workflow"** entry in §10's deferred
-list — that was the full authoring/review lifecycle; this is a UX + staging rework of
-the existing apply endpoint. Still worth a re-ask if scope creeps toward workflow.
+### P-23 · Apply CR against the loaded model, staged not committed, multiple CRs · `done` (2026-08-25)
+Shipped as one feature with Compare's new **Replace** / **Create CR** (either direction):
+`POST /model/apply-cr` is a dry-run proposal over an ordered `crs` list (sequential, 409
+names the failing index), `POST /model/compare` diffs the session against an uploaded
+model, create ops carry an `id` hint so file ids survive staging, and one
+`ModelChangeDialog` (Model menu → Compare… / Apply CR…) previews and stages through
+`stageProposedOps`. The old compare page and file→file apply are gone. Spec:
+`docs/superpowers/specs/2026-08-25-model-compare-apply-cr-design.md`.
 
 ### Already shipped — from the notes, no action needed
 - **Artefact leases** ("extend the Phase 4 lease mechanism so users can lock artifacts"):
