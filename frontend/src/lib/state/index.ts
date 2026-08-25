@@ -293,6 +293,7 @@ export {
 	lockHolderLabel
 } from './edit-gate';
 export { stageSnippetOps, type StageOutcome } from './snippet-stage';
+export { stageProposedOps, type Prestate } from './stage-proposed';
 export { lockBadgeFor, type LockBadge } from './lock-badge';
 export { getLockNotice, setLockNotice } from './lock-notice.svelte';
 export {
