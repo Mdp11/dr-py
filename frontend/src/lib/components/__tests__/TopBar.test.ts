@@ -6,7 +6,6 @@ import { getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
 // Svelte 5 components are compiled to functions (anchor, props) => void.
 // Provide a minimal no-op stub for each dialog/drawer child of TopBar so we
 // don't need QueryClientProvider or other heavy contexts.
-vi.mock('../ApplyCrDialog.svelte', () => ({ default: () => {} }));
 vi.mock('../SettingsDialog.svelte', () => ({ default: () => {} }));
 
 const goto = vi.fn();
@@ -194,16 +193,15 @@ describe('TopBar', () => {
 		});
 	});
 
-	// Six left-nav controls in a fixed order, with Compare/Export/History
-	// folded into the Model dropdown. No overflow menu, no command palette.
+	// Five left-nav controls in a fixed order, with Compare/Apply CR/Export/History folded into the Model dropdown.
 	describe('top bar layout', () => {
-		it('renders Metamodel · Issues · Artifacts · Apply CR · Model · Settings, in order', () => {
+		it('renders Metamodel · Issues · Artifacts · Model · Settings, in order', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
 
 			const nav = document.querySelector('nav[aria-label="Toolbar"]')!;
 			const labels = [...nav.querySelectorAll('button, a')].map((n) => n.textContent?.trim());
-			expect(labels).toEqual(['Metamodel', 'Issues', 'Artifacts', 'Apply CR', 'Model', 'Settings']);
+			expect(labels).toEqual(['Metamodel', 'Issues', 'Artifacts', 'Model', 'Settings']);
 			expect(document.querySelector('[aria-label="More actions"]')).toBeNull();
 			expect(document.querySelector('[title="Command palette"]')).toBeNull();
 
@@ -223,10 +221,10 @@ describe('TopBar', () => {
 		});
 	});
 
-	// History, Compare and Export live in the Model dropdown, the same
+	// History, Compare, Apply CR and Export live in the Model dropdown, the same
 	// treatment as the Artifacts menu, rather than as flat controls.
 	describe('Model menu', () => {
-		it('offers History, Compare and Export, in order', () => {
+		it('offers History, Compare…, Apply CR… and Export, in order', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
 
@@ -235,7 +233,7 @@ describe('TopBar', () => {
 			const items = [...document.querySelectorAll('[role="menuitem"]')].map((n) =>
 				n.textContent?.trim()
 			);
-			expect(items).toEqual(['History', 'Compare', 'Export']);
+			expect(items).toEqual(['History', 'Compare…', 'Apply CR…', 'Export']);
 
 			unmount(c);
 		});
@@ -253,15 +251,29 @@ describe('TopBar', () => {
 			unmount(c);
 		});
 
-		it('Compare navigates to the compare page', () => {
+		it('Compare… opens the compare dialog', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
 
 			openModelMenu();
-			menuItem('Compare')!.click();
+			menuItem('Compare…')!.click();
 			flushSync();
 
-			expect(goto).toHaveBeenCalledWith('/p/p1/compare');
+			expect(document.body.textContent).toContain('Compare models');
+			expect(goto).not.toHaveBeenCalled();
+
+			unmount(c);
+		});
+
+		it('Apply CR… opens the apply-cr dialog', () => {
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+			menuItem('Apply CR…')!.click();
+			flushSync();
+
+			expect(document.body.textContent).toContain('Apply change requests');
 
 			unmount(c);
 		});

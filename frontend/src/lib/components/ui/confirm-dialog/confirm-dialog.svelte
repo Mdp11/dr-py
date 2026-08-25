@@ -67,7 +67,7 @@
 		</Dialog.Description>
 		<div class="flex items-center justify-end gap-2">
 			<!-- `ghost` is this repo's dismissive-footer-button convention (see
-			     SettingsDialog.svelte's Close and ApplyCrDialog.svelte's Cancel);
+			     SettingsDialog.svelte's Close and ModelChangeDialog.svelte's Close);
 			     `xs` matches this dialog's text-xs scale. Using the shared Button
 			     component (rather than hand-rolled classes) keeps every variant's
 			     colours inside vetted tokens — a hand-rolled `bg-destructive` +
