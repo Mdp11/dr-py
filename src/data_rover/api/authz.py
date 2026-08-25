@@ -35,9 +35,10 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #: Deliberately NOT included: ``POST /model/save`` — it writes to the SERVER's
 #: filesystem (a privileged side effect), so it stays a "write" even though it
 #: doesn't mutate the in-memory model. Viewers cannot export to server disk.
-#: Also NOT included: ``POST /model/apply-cr`` — it is dual-mode (inline =
-#: read, session = mutate) and a path suffix can't tell the modes apart, so it
-#: is conservatively treated as a write; viewers can't use the CR tool.
+#: Also NOT included: ``POST /model/apply-cr`` — a dry run that never mutates,
+#: but its only consumer is staging edits, which a viewer cannot do, so it
+#: stays a write. ``POST /model/compare`` only reads (a viewer may compare and
+#: save the resulting CR file), so it IS included.
 #:
 #: ``/clone`` (``POST /projects/{id}/clone``) only READS the source project —
 #: it creates a brand-new project owned by the caller and never mutates the

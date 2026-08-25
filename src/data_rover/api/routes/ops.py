@@ -483,9 +483,8 @@ def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _Batch
 def _ensure_validation_seeded(session: Session, model: Model) -> ValidationState:
     """Make sure a full-run issue baseline exists BEFORE mutating.
 
-    Shared by the ops endpoints and session-mode apply-cr
-    (routes/change_request.py). Load endpoints that already seed the store
-    at load time make this a no-op; it only does work for sessions
+    Shared by the ops and commit endpoints. Load endpoints that already seed
+    the store at load time make this a no-op; it only does work for sessions
     populated through the legacy snapshot routes. Seeding pre-batch keeps
     the post-batch replace() delta exact.
     """

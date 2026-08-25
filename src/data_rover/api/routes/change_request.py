@@ -1,19 +1,20 @@
-"""POST /model/apply-cr — apply a change request.
+"""POST /model/apply-cr — propose an op batch from an ordered CR list.
 
-Two request modes, selected by the OPTIONAL ``model`` field:
+A dry run: the CRs are applied sequentially and TRANSIENTLY to the session
+model (``apply_change_request`` is pure, so each step is a fresh copy), the
+combined base -> final change request is derived, gated, and translated into
+an op batch (``api/change_request_ops.py``). Nothing is applied, journalled
+or validated here — the client stages the batch and ``POST /commits/preview``
+validates it like any manual edit.
 
-- inline mode (``model`` present): the CR is applied to the inline
-  snapshot; the response carries the full result model + its issue list
-  (:class:`ApplyCrResponse`). The session model is never touched.
-- session mode (``model`` absent): the CR is applied to the SESSION model
-  (404 when none is loaded); on success the result REPLACES the session
-  model and the response is an :class:`OpsResponse`-shaped delta
-  (changed/deleted entities + validation-issue delta), so large-model
-  clients never receive a full model body.
+The session model is read WITHOUT the write mutex (the ``/snippets/run``
+precedent): the response carries the ``model_rev`` it saw, and the client
+refuses to stage a proposal whose rev has moved.
 
-Conflict (409, ``{"conflicts": [...], "model_rev": ...}`` — same
-``model_rev`` field as the ops/undo 409 envelope) and 422-gate semantics
-are identical in both modes.
+409 ``{cr_index, conflicts, model_rev}`` names the FIRST CR that conflicts
+with the model as left by its predecessors; 422 is the metamodel gate
+(unknown/abstract type, dangling endpoint, non-cascaded delete) or an
+element type change, which the op protocol cannot express.
 """
 
 from __future__ import annotations
@@ -28,27 +29,26 @@ from data_rover.core.model.change_request import (
     ChangeRequest,
     CRConflictError,
     apply_change_request,
+    diff_models,
 )
 from data_rover.core.model.model import Model
-from data_rover.core.validation.dirty import change_request_dirty_ids
-from data_rover.core.validation.pipeline import default_pipeline
-from data_rover.core.validation.scope import Scope
-from data_rover.core.validation.state import ValidationState
 
-from ..deps import Session, get_request_session, require_metamodel, require_model
-from ..rules import expand_ids, session_pipeline
+from ..change_request_ops import UnsupportedChangeError, ops_for_change
+from ..deps import Session, get_request_session, require_model
 from ..schemas import (
-    ApplyCrRequest,
-    ApplyCrResponse,
+    ChangesOut,
+    CrBaseline,
+    CrElementOps,
+    CrOps,
+    CrRelationshipOps,
     ElementOut,
-    InlineModel,
-    IssueOut,
-    ModelOut,
-    OpsResponse,
+    ModifiedElementOut,
+    ModifiedRelationshipOut,
+    ProposeCrRequest,
+    ProposeCrResponse,
     RelationshipOut,
 )
-from ._snapshot import _build_model_from_payload
-from .ops import _ensure_validation_seeded
+from .read import _now_iso
 
 router = APIRouter()
 
@@ -120,155 +120,77 @@ def _gate_cr_result(
             _require_endpoint(result, rid, "target", survivor.target_id)
 
 
-def _apply_cr_inline(
-    session: Session, inline: InlineModel, payload: ApplyCrRequest
-) -> ApplyCrResponse | JSONResponse:
-    """Inline mode: apply the CR to an inline snapshot; the session model is
-    untouched. Returns the full result model — use session mode (omit
-    ``model``) for a delta response on large models.
-    """
-    metamodel = require_metamodel(session)
-    base = _build_model_from_payload(
-        metamodel,
-        inline.elements,
-        inline.relationships,
-    )
-    cr = payload.cr.to_core()
-
-    try:
-        result = apply_change_request(base, cr)
-    except CRConflictError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "conflicts": [asdict(c) for c in exc.conflicts],
-                "model_rev": session.model_rev,
-            },
-        )
-
-    # Same 422 gate as POST /model so that a CR adding an element/relationship
-    # with an unknown type_name (etc.) is rejected — but checked on the CR
-    # delta only, instead of rebuilding the whole result model a second time.
-    _gate_cr_result(metamodel, base, result, cr)
-
-    # Incremental validation: one full pass on the BASE model seeds the issue
-    # store, then only the entities the CR could have affected are
-    # re-validated on the result and spliced in. The response still carries
-    # the full-equivalent issue list for the result model.
-    #
-    # Rules-blind on purpose: this validates a CALLER-SUPPLIED model, not the
-    # session's, so the session's user rules do not apply to it.
-    pipeline = default_pipeline()
-    state = ValidationState()
-    state.set_full(pipeline.validate(base, Scope.all()))
-    dirty = change_request_dirty_ids(base, result, cr)
-    state.replace(dirty, pipeline.validate(result, Scope(dirty)))
-
-    return ApplyCrResponse(
-        model=ModelOut.from_core(result),
-        issues=[IssueOut.from_core(i) for i in state.all_issues()],
-    )
-
-
-def _apply_cr_session(
-    session: Session, payload: ApplyCrRequest
-) -> OpsResponse | JSONResponse:
-    """Session mode: apply the CR to the session model and return a delta.
-
-    ``apply_change_request`` is pure, so the CR is applied base → result and
-    on success the RESULT replaces the session model via ``set_model``. That
-    bumps ``model_rev`` and clears the op log: applying a CR resets undo
-    history, since the recorded inverses describe a model that no longer
-    exists.
-
-    Validation is incremental: if the session has no full-run baseline yet,
-    the BASE model is fully validated once to seed
-    it (``_ensure_validation_seeded``, shared with the ops endpoints); then
-    only the CR's dirty set is re-validated on the result and spliced in,
-    and the splice delta is returned. The spliced store describes the
-    RESULT model, so it is installed together with it via
-    ``set_model(result, validation=state)``.
-
-    Response delta: changed = CR adds + modifies in CR listing order,
-    serialized in their result-model state; deleted = every base id missing
-    from the result (catches anything beyond the CR's explicit deletes, in
-    base insertion order). ``id_map`` is always empty — CRs carry final ids.
-    """
-    metamodel, base = require_model(session)
-    cr = payload.cr.to_core()
-
-    try:
-        result = apply_change_request(base, cr)
-    except CRConflictError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "conflicts": [asdict(c) for c in exc.conflicts],
-                "model_rev": session.model_rev,
-            },
-        )
-
-    _gate_cr_result(metamodel, base, result, cr)
-
-    state = _ensure_validation_seeded(session, base)
-    dirty = change_request_dirty_ids(base, result, cr)
-    # A user rule reports on the element it applies to but reads across
-    # relationship hops, so an element the CR never listed can still flip.
-    dirty = expand_ids(session, result, dirty)
-    delta = state.replace(
-        dirty, session_pipeline(session).validate(result, Scope(dirty))
-    )
-
-    # bumps rev, clears the op log, installs the spliced store in one step
-    session.set_model(result, validation=state)
-
-    # ordered-set idiom; filtered against the result so an entity the CR
-    # adds/modifies AND deletes in one request counts as deleted only
-    changed_element_ids = dict.fromkeys(
-        eid
-        for eid in (
-            *(e.id for e in cr.elements_added),
-            *(m.id for m in cr.elements_modified),
-        )
-        if eid in result.elements
-    )
-    changed_relationship_ids = dict.fromkeys(
-        rid
-        for rid in (
-            *(r.id for r in cr.relationships_added),
-            *(m.id for m in cr.relationships_modified),
-        )
-        if rid in result.relationships
-    )
-
-    return OpsResponse(
-        model_rev=session.model_rev,
-        id_map={},
-        changed_elements=[
-            ElementOut.from_core(result.elements[eid]) for eid in changed_element_ids
-        ],
-        changed_relationships=[
-            RelationshipOut.from_core(result.relationships[rid])
-            for rid in changed_relationship_ids
-        ],
-        deleted_element_ids=[
-            eid for eid in base.elements if eid not in result.elements
-        ],
-        deleted_relationship_ids=[
-            rid for rid in base.relationships if rid not in result.relationships
-        ],
-        issues_removed_owner_ids=delta.removed_owner_ids,
-        issues_added=[IssueOut.from_core(i) for i in delta.added],
-        issue_counts=state.counts(),
+def _changes_out(base: Model, cr: ChangeRequest) -> ChangesOut:
+    """Serialize a core CR as a ``datarover.cr/v1`` document whose baseline
+    describes *base*. ``filename`` is null — the server never knows the file."""
+    return ChangesOut(
+        createdAt=_now_iso(),
+        baseline=CrBaseline(
+            filename=None,
+            elementCount=len(base.elements),
+            relationshipCount=len(base.relationships),
+        ),
+        ops=CrOps(
+            elements=CrElementOps(
+                added=[ElementOut.from_core(e) for e in cr.elements_added],
+                modified=[
+                    ModifiedElementOut(
+                        id=m.id,
+                        before=ElementOut.from_core(m.before),
+                        after=ElementOut.from_core(m.after),
+                    )
+                    for m in cr.elements_modified
+                ],
+                deleted=[ElementOut.from_core(e) for e in cr.elements_deleted],
+            ),
+            relationships=CrRelationshipOps(
+                added=[RelationshipOut.from_core(r) for r in cr.relationships_added],
+                modified=[
+                    ModifiedRelationshipOut(
+                        id=m.id,
+                        before=RelationshipOut.from_core(m.before),
+                        after=RelationshipOut.from_core(m.after),
+                    )
+                    for m in cr.relationships_modified
+                ],
+                deleted=[
+                    RelationshipOut.from_core(r) for r in cr.relationships_deleted
+                ],
+            ),
+        ),
     )
 
 
 @router.post("/model/apply-cr", response_model=None)
-def apply_cr(
-    payload: ApplyCrRequest,
+def propose_cr(
+    payload: ProposeCrRequest,
     session: Session = Depends(get_request_session),
-) -> ApplyCrResponse | OpsResponse | JSONResponse:
-    """Apply a change request; see the module docstring for the mode split."""
-    if payload.model is not None:
-        return _apply_cr_inline(session, payload.model, payload)
-    return _apply_cr_session(session, payload)
+) -> ProposeCrResponse | JSONResponse:
+    """See the module docstring."""
+    metamodel, base = require_model(session)
+    model_rev = session.model_rev
+
+    current = base
+    for index, cr_in in enumerate(payload.crs):
+        try:
+            current = apply_change_request(current, cr_in.to_core())
+        except CRConflictError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "cr_index": index,
+                    "conflicts": [asdict(c) for c in exc.conflicts],
+                    "model_rev": model_rev,
+                },
+            )
+
+    combined = diff_models(base, current)
+    _gate_cr_result(metamodel, base, current, combined)
+    try:
+        ops = ops_for_change(combined)
+    except UnsupportedChangeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return ProposeCrResponse(
+        model_rev=model_rev, cr=_changes_out(base, combined), ops=ops
+    )

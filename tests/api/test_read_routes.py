@@ -12,11 +12,14 @@ from fastapi.testclient import TestClient
 
 import data_rover.api.session as session_module
 from data_rover.api.main import create_app
+from data_rover.api.routes._snapshot import _build_model_from_payload
 from data_rover.api.routes.read import MAX_PAGE_LIMIT
+from data_rover.api.schemas import ChangeRequestIn, ElementOut, ModelOut, RelationshipOut
 # get_session() returns the DEFAULT project's session; the client fixture seeds
 # and targets that same project (DEFAULT_PROJECT_ID), so these assertions
 # inspect the very session the HTTP requests mutate.
 from data_rover.api.session import get_session
+from data_rover.core.model.change_request import apply_change_request
 
 from .conftest import AUTH_HEADERS, seed_default_project
 
@@ -786,8 +789,8 @@ def test_changes_document_shape(client: TestClient) -> None:
     }
 
 
-def test_changes_round_trip_through_apply_cr(client: TestClient) -> None:
-    """base + GET /model/changes through POST /model/apply-cr == current model."""
+def test_changes_round_trip_through_apply_change_request(client: TestClient) -> None:
+    """base + GET /model/changes applied as a CR == current model."""
     base = _load_model(
         client,
         [_item("p", "P"), _item("ch", "CH"), _item("x", "X")],
@@ -838,9 +841,15 @@ def test_changes_round_trip_through_apply_cr(client: TestClient) -> None:
     assert deleted_rels["r-px"]["properties"] == {"weight": 1}
 
     current = client.get(f"{API}/model").json()
-    applied = client.post(f"{API}/model/apply-cr", json={"model": base, "cr": changes})
-    assert applied.status_code == 200, applied.text
-    assert _entity_state(applied.json()["model"]) == _entity_state(current)
+    session = get_session()
+    assert session.metamodel is not None
+    base_model = _build_model_from_payload(
+        session.metamodel,
+        [ElementOut(**e) for e in base["elements"]],
+        [RelationshipOut(**r) for r in base["relationships"]],
+    )
+    result = apply_change_request(base_model, ChangeRequestIn(**changes).to_core())
+    assert _entity_state(ModelOut.from_core(result).model_dump()) == _entity_state(current)
 
 
 def test_changes_compaction_create_then_modify(client: TestClient) -> None:

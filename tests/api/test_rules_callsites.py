@@ -1,6 +1,5 @@
 """User rules on the validation call sites outside POST /commits: the legacy
-ops/undo protocol, POST /model/validate, POST /model/apply-cr and the
-metamodel-diff sandbox."""
+ops/undo protocol, POST /model/validate and the metamodel-diff sandbox."""
 
 from __future__ import annotations
 
@@ -287,34 +286,3 @@ def test_metamodel_diff_shows_rule_flips(client: TestClient) -> None:
     assert [i["check"] for i in passing] == ["rule:has-name"]
     assert passing[0]["target_ids"] == [building_id]
     assert not _rule_issues(drifted["now_failing"])
-
-
-def test_apply_cr_session_rule_liveness(client: TestClient) -> None:
-    """Session-mode apply-cr validates through the session's rules and widens
-    the CR's dirty set along the rules' reach."""
-    building_id, zone_id, _ = _reach_setup(client)
-
-    zone = {"id": zone_id, "type_name": "Zone", "properties": {}, "rev": 0}
-    payload = {
-        "cr": {
-            "format": "datarover.cr/v1",
-            "createdAt": "2024-01-01T00:00:00Z",
-            "ops": {
-                "elements": {
-                    "modified": [
-                        {
-                            "id": zone_id,
-                            "before": {**zone, "properties": {"label": "set"}},
-                            "after": zone,
-                        }
-                    ]
-                }
-            },
-        }
-    }
-    r = client.post(papi("/model/apply-cr"), json=payload)
-    assert r.status_code == 200, r.text
-    added = _rule_issues(r.json()["issues_added"])
-    assert [i["check"] for i in added] == ["rule:owns-labeled-zone"]
-    assert added[0]["target_ids"] == [building_id]
-    assert _stored_rule_checks(client) == {"rule:owns-labeled-zone"}

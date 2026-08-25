@@ -770,20 +770,23 @@ class ChangesSummaryOut(BaseModel):
     complete: bool = True
 
 
-class ApplyCrRequest(BaseModel):
+class ProposeCrRequest(BaseModel):
+    #: applied in order; each CR sees the result of the previous one
+    crs: list[ChangeRequestIn] = Field(min_length=1)
+
+
+class ProposeCrResponse(BaseModel):
+    """Dry-run result of POST /model/apply-cr: nothing was applied."""
+
     model_config = ConfigDict(protected_namespaces=())
 
-    #: legacy inline mode when present; ``None`` selects session mode (the CR
-    #: is applied to the session model and an OpsResponse delta is returned)
-    model: InlineModel | None = None
-    cr: ChangeRequestIn
-
-
-class ApplyCrResponse(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-
-    model: ModelOut
-    issues: list[IssueOut] = Field(default_factory=list)
+    #: the session rev the proposal was computed against; the client refuses
+    #: to stage the batch if it has moved
+    model_rev: int
+    #: the COMBINED base -> final change request (what the preview renders)
+    cr: ChangesOut
+    #: the op batch that lands ``cr`` when staged and committed
+    ops: list[ModelOpIn] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

@@ -614,12 +614,12 @@ def get_changes(session: Session = Depends(get_request_session)) -> ChangesOut:
     """The pending change set as a ``datarover.cr/v1`` change request.
 
     Same JSON shape as the frontend's ``buildChangeRequest`` export (plus
-    ``complete``), and round-trip applicable: POSTing the BASE model
-    snapshot together with this document to /model/apply-cr reproduces the
-    current session model entity-wise. ``baseline`` counts describe the BASE
-    model (current counts minus adds plus deletes); ``filename`` is null —
-    the server does not know what file the model came from. With an empty
-    op log the document has empty op lists (200, not an error).
+    ``complete``), and round-trip applicable: applied to the BASE model it
+    reproduces the current session model entity-wise. ``baseline`` counts
+    describe the BASE model (current counts minus adds plus deletes);
+    ``filename`` is null — the server does not know what file the model
+    came from. With an empty op log the document has empty op lists (200,
+    not an error).
     """
     _, model = require_model(session)
     ops = compact_changes(model, session.op_log)

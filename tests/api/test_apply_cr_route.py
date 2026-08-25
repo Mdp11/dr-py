@@ -1,23 +1,43 @@
-"""Tests for POST /api/v1/model/apply-cr route."""
-from __future__ import annotations
+"""POST /api/v1/projects/{id}/model/apply-cr — dry-run proposal of an ordered
+CR list against the session model (never applied server-side)."""
 
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api import tenancy
+from data_rover.api.db import db_session
+from data_rover.api.db_models import Role
 from data_rover.api.main import create_app
-from data_rover.api.routes._snapshot import _build_model_from_payload
-from data_rover.api.schemas import ChangeRequestIn, ElementOut, RelationshipOut
-from data_rover.core.metamodel.loader import load_metamodel_file
-from data_rover.core.model.change_request import apply_change_request
-from data_rover.core.validation.pipeline import default_pipeline
-from data_rover.core.validation.scope import Scope
+from data_rover.api.session import get_session
 
 from .conftest import AUTH_HEADERS, seed_default_project
 
-EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
 API = "/api/v1/projects/default"
+
+MM = """
+elements:
+  - name: Item
+    key: [name]
+    properties:
+      - {name: name, datatype: string, multiplicity: "1"}
+      - {name: note, datatype: string}
+  - name: Other
+    properties:
+      - {name: name, datatype: string}
+relationships:
+  - name: Contains
+    containment: true
+    source: Item
+    target: Item
+  - name: Links
+    containment: false
+    source: Item
+    target: Item
+    properties:
+      - {name: weight, datatype: integer}
+"""
 
 
 @pytest.fixture
@@ -25,757 +45,184 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
+    res = c.post(f"{API}/metamodel", content=MM, headers={"content-type": "application/x-yaml"})
+    assert res.status_code == 200, res.text
     return c
 
 
-def _upload_metamodel(client: TestClient) -> None:
-    yaml_text = EXAMPLE.read_text(encoding="utf-8")
-    res = client.post(
-        f"{API}/metamodel",
-        content=yaml_text,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert res.status_code == 200, res.text
-
-
-def _make_apply_cr_payload(model_elements: list[dict], cr_ops: dict) -> dict:
-    return {
-        "model": {
-            "elements": model_elements,
-            "relationships": [],
-        },
-        "cr": {
-            "format": "datarover.cr/v1",
-            "createdAt": "2024-01-01T00:00:00Z",
-            "baseline": {
-                "filename": None,
-                "elementCount": len(model_elements),
-                "relationshipCount": 0,
-            },
-            "ops": cr_ops,
-        },
-    }
-
-
-def test_apply_cr_happy_path(client: TestClient) -> None:
-    """Adding a new element via CR returns 200 with both elements and does not
-    set the session model."""
-    _upload_metamodel(client)
-
-    e1 = {"id": "e1", "type_name": "Block", "properties": {"name": "A"}, "rev": 0}
-    e2_added = {
-        "id": "e2",
-        "type_name": "Block",
-        "properties": {"name": "B"},
-        "rev": 0,
-    }
-
-    payload = _make_apply_cr_payload(
-        model_elements=[e1],
-        cr_ops={
-            "elements": {
-                "added": [e2_added],
-                "modified": [],
-                "deleted": [],
-            },
-            "relationships": {
-                "added": [],
-                "modified": [],
-                "deleted": [],
-            },
-        },
-    )
-
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 200, res.text
-
-    body = res.json()
-    assert "model" in body
-    assert "issues" in body
-
-    result_ids = {e["id"] for e in body["model"]["elements"]}
-    assert result_ids == {"e1", "e2"}
-
-
-def test_apply_cr_does_not_set_session_model(client: TestClient) -> None:
-    """After a successful apply-cr, GET /api/v1/model should still return 404."""
-    _upload_metamodel(client)
-
-    e1 = {"id": "e1", "type_name": "Block", "properties": {"name": "A"}, "rev": 0}
-    e2_added = {
-        "id": "e2",
-        "type_name": "Block",
-        "properties": {"name": "B"},
-        "rev": 0,
-    }
-
-    payload = _make_apply_cr_payload(
-        model_elements=[e1],
-        cr_ops={
-            "elements": {
-                "added": [e2_added],
-                "modified": [],
-                "deleted": [],
-            },
-            "relationships": {
-                "added": [],
-                "modified": [],
-                "deleted": [],
-            },
-        },
-    )
-
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 200, res.text
-
-    # Session model must not have been set
-    get_res = client.get(f"{API}/model")
-    assert get_res.status_code == 404
-
-
-def test_apply_cr_conflict_id_exists(client: TestClient) -> None:
-    """CR that adds an element whose id already exists yields 409 with conflicts."""
-    _upload_metamodel(client)
-
-    e1 = {"id": "e1", "type_name": "Block", "properties": {"name": "A"}, "rev": 0}
-    # CR tries to add e1 which already exists in the model
-    payload = _make_apply_cr_payload(
-        model_elements=[e1],
-        cr_ops={
-            "elements": {
-                "added": [e1],  # same id — conflict!
-                "modified": [],
-                "deleted": [],
-            },
-            "relationships": {
-                "added": [],
-                "modified": [],
-                "deleted": [],
-            },
-        },
-    )
-
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 409, res.text
-
-    body = res.json()
-    assert "conflicts" in body
-    assert len(body["conflicts"]) >= 1
-    conflict = body["conflicts"][0]
-    assert conflict["kind"] == "id_exists"
-    assert conflict["entity"] == "element"
-    # 409 envelope carries model_rev like the ops/undo conflict responses
-    assert isinstance(body["model_rev"], int)
-
-
-def test_apply_cr_unknown_type_in_cr_yields_422(client: TestClient) -> None:
-    """A CR that adds an element with a type_name not in the metamodel must return 422."""
-    _upload_metamodel(client)
-
-    e1 = {"id": "e1", "type_name": "Block", "properties": {"name": "A"}, "rev": 0}
-    # e2 has a type_name that does not exist in the metamodel
-    e2_unknown_type = {
-        "id": "e2",
-        "type_name": "NonExistentType",
-        "properties": {},
-        "rev": 0,
-    }
-
-    payload = _make_apply_cr_payload(
-        model_elements=[e1],
-        cr_ops={
-            "elements": {
-                "added": [e2_unknown_type],
-                "modified": [],
-                "deleted": [],
-            },
-            "relationships": {
-                "added": [],
-                "modified": [],
-                "deleted": [],
-            },
-        },
-    )
-
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 422, res.text
-
-
-def test_apply_cr_dangling_relationship_after_delete_yields_422(
-    client: TestClient,
-) -> None:
-    """Deleting an element while a relationship still references it must be
-    rejected like the former full result-model rebuild did."""
-    _upload_metamodel(client)
-
-    b1 = {"id": "b1", "type_name": "Block", "properties": {"name": "B1"}, "rev": 0}
-    b2 = {"id": "b2", "type_name": "Block", "properties": {"name": "B2"}, "rev": 0}
-    hp = {
-        "id": "hp",
-        "type_name": "BlockHasPart",
-        "source_id": "b1",
-        "target_id": "b2",
-        "properties": {},
-        "rev": 0,
-    }
-    payload = {
-        "model": {"elements": [b1, b2], "relationships": [hp]},
-        "cr": {
-            "format": "datarover.cr/v1",
-            "createdAt": "2024-01-01T00:00:00Z",
-            "baseline": {"filename": None, "elementCount": 2, "relationshipCount": 1},
-            "ops": {
-                "elements": {"added": [], "modified": [], "deleted": [b2]},
-                "relationships": {"added": [], "modified": [], "deleted": []},
-            },
-        },
-    }
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 422, res.text
-    assert "unknown target" in res.json()["detail"]
-
-
-def test_apply_cr_issues_equal_full_validation_of_result(
-    client: TestClient,
-) -> None:
-    """THE incremental-validation correctness gate: the issues returned by
-    apply-cr (full base run + dirty-scoped re-validation + ValidationState
-    merge) must equal a from-scratch FULL validation of the result model."""
-    _upload_metamodel(client)
-
-    elements = [
-        {"id": "b1", "type_name": "Block", "properties": {"name": "B1"}, "rev": 0},
-        {"id": "b2", "type_name": "Block", "properties": {"name": "B2"}, "rev": 0},
-        # duplicate pair (same name, both unowned)
-        {"id": "b3", "type_name": "Block", "properties": {"name": "Dup"}, "rev": 0},
-        {"id": "b4", "type_name": "Block", "properties": {"name": "Dup"}, "rev": 0},
-        {
-            "id": "r1",
-            "type_name": "Requirement",
-            "properties": {"name": "R1", "status": "Draft", "priority": 3},
-            "rev": 0,
-        },
-        {"id": "edel", "type_name": "Block", "properties": {"name": "Del"}, "rev": 0},
-        {"id": "q1", "type_name": "Block", "properties": {"name": "Q"}, "rev": 0},
-    ]
-    relationships = [
-        {
-            "id": "hp1",
-            "type_name": "BlockHasPart",
-            "source_id": "b1",
-            "target_id": "b2",
-            "properties": {},
-            "rev": 0,
-        },
-        {
-            "id": "hpq",
-            "type_name": "BlockHasPart",
-            "source_id": "b1",
-            "target_id": "q1",
-            "properties": {},
-            "rev": 0,
-        },
-        {
-            "id": "s1",
-            "type_name": "Satisfies",
-            "source_id": "edel",
-            "target_id": "r1",
-            "properties": {},
-            "rev": 0,
-        },
-    ]
-    cr = {
-        "format": "datarover.cr/v1",
-        "createdAt": "2024-01-01T00:00:00Z",
-        "baseline": {"filename": None, "elementCount": 7, "relationshipCount": 3},
-        "ops": {
-            "elements": {
-                # b5 duplicates b1; b6 misses its required name
-                "added": [
-                    {
-                        "id": "b5",
-                        "type_name": "Block",
-                        "properties": {"name": "B1"},
-                        "rev": 0,
-                    },
-                    {"id": "b6", "type_name": "Block", "properties": {}, "rev": 0},
-                ],
-                "modified": [
-                    # de-duplicate b4
-                    {
-                        "id": "b4",
-                        "before": {
-                            "id": "b4",
-                            "type_name": "Block",
-                            "properties": {"name": "Dup"},
-                            "rev": 0,
-                        },
-                        "after": {
-                            "id": "b4",
-                            "type_name": "Block",
-                            "properties": {"name": "Unique"},
-                            "rev": 0,
-                        },
-                    },
-                    # facet violation: priority above max
-                    {
-                        "id": "r1",
-                        "before": {
-                            "id": "r1",
-                            "type_name": "Requirement",
-                            "properties": {
-                                "name": "R1",
-                                "status": "Draft",
-                                "priority": 3,
-                            },
-                            "rev": 0,
-                        },
-                        "after": {
-                            "id": "r1",
-                            "type_name": "Requirement",
-                            "properties": {
-                                "name": "R1",
-                                "status": "Draft",
-                                "priority": 99,
-                            },
-                            "rev": 0,
-                        },
-                    },
-                ],
-                "deleted": [
-                    {
-                        "id": "edel",
-                        "type_name": "Block",
-                        "properties": {"name": "Del"},
-                        "rev": 0,
-                    }
-                ],
-            },
-            "relationships": {
-                # q1 gets a second containment parent (multi-parent issue)
-                "added": [
-                    {
-                        "id": "hp2",
-                        "type_name": "BlockHasPart",
-                        "source_id": "b2",
-                        "target_id": "q1",
-                        "properties": {},
-                        "rev": 0,
-                    }
-                ],
-                "modified": [],
-                "deleted": [
-                    {
-                        "id": "s1",
-                        "type_name": "Satisfies",
-                        "source_id": "edel",
-                        "target_id": "r1",
-                        "properties": {},
-                        "rev": 0,
-                    }
-                ],
-            },
-        },
-    }
-
-    res = client.post(
-        f"{API}/model/apply-cr", json={"model": {"elements": elements,
-                                                  "relationships": relationships},
-                                        "cr": cr},
-    )
-    assert res.status_code == 200, res.text
-    got = sorted(
-        (i["severity"], i["message"], tuple(i["target_ids"]))
-        for i in res.json()["issues"]
-    )
-
-    # from-scratch reference: build the result model and validate it fully
-    metamodel = load_metamodel_file(EXAMPLE)
-    base = _build_model_from_payload(
-        metamodel,
-        [ElementOut.model_validate(e) for e in elements],
-        [RelationshipOut.model_validate(r) for r in relationships],
-    )
-    result = apply_change_request(base, ChangeRequestIn.model_validate(cr).to_core())
-    expected = sorted(
-        (i.severity.value, i.message, tuple(i.target_ids))
-        for i in default_pipeline().validate(result, Scope.all())
-    )
-
-    assert got == expected
-    assert expected, "scenario must actually produce issues"
-
-
-# ---------------------------------------------------------------------------
-# Session mode: `model` field absent -> CR applies to the session
-# model and the response is an OpsResponse-shaped delta
-# ---------------------------------------------------------------------------
-
-
-def _session_cr_payload(cr_ops: dict) -> dict:
-    return {
-        "cr": {
-            "format": "datarover.cr/v1",
-            "createdAt": "2024-01-01T00:00:00Z",
-            "baseline": {"filename": None, "elementCount": 0, "relationshipCount": 0},
-            "ops": cr_ops,
-        },
-    }
-
-
-def _set_session_model(
-    client: TestClient, elements: list[dict], relationships: list[dict]
-) -> int:
+@pytest.fixture
+def seeded(client: TestClient) -> TestClient:
+    """a Contains b via r-ab."""
     res = client.post(
         f"{API}/model",
-        json={"elements": elements, "relationships": relationships},
-    )
-    assert res.status_code == 200, res.text
-    return client.get(f"{API}/model/summary").json()["model_rev"]
-
-
-def test_apply_cr_session_mode_requires_model(client: TestClient) -> None:
-    _upload_metamodel(client)
-    payload = _session_cr_payload(
-        {
-            "elements": {"added": [], "modified": [], "deleted": []},
-            "relationships": {"added": [], "modified": [], "deleted": []},
-        }
-    )
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 404
-
-
-def test_apply_cr_session_mode_delta(client: TestClient) -> None:
-    """Session mode returns an OpsResponse delta: changed entities in their
-    result state, deleted = base ids missing from the result (here a parent
-    plus its containment child and relationships — the 'cascade' a CR spells
-    out explicitly), no full model body."""
-    _upload_metamodel(client)
-    elements = [
-        {"id": "b1", "type_name": "Block", "properties": {"name": "B1"}, "rev": 0},
-        {"id": "b2", "type_name": "Block", "properties": {"name": "B2"}, "rev": 0},
-        {"id": "b3", "type_name": "Block", "properties": {"name": "B3"}, "rev": 0},
-    ]
-    relationships = [
-        {
-            "id": "hp1",
-            "type_name": "BlockHasPart",
-            "source_id": "b2",
-            "target_id": "b3",
-            "properties": {},
-            "rev": 0,
+        json={
+            "elements": [_el("a", "A"), _el("b", "B")],
+            "relationships": [_rel("r-ab", "Contains", "a", "b")],
         },
-    ]
-    base_rev = _set_session_model(client, elements, relationships)
-
-    payload = _session_cr_payload(
-        {
-            "elements": {
-                "added": [
-                    {
-                        "id": "b4",
-                        "type_name": "Block",
-                        "properties": {"name": "B4"},
-                        "rev": 0,
-                    }
-                ],
-                "modified": [
-                    {
-                        "id": "b1",
-                        "before": {
-                            "id": "b1",
-                            "type_name": "Block",
-                            "properties": {"name": "B1"},
-                            "rev": 0,
-                        },
-                        "after": {
-                            "id": "b1",
-                            "type_name": "Block",
-                            "properties": {"name": "B1-renamed"},
-                            "rev": 0,
-                        },
-                    }
-                ],
-                # delete the b2 -> b3 containment subtree: the CR must list
-                # every member explicitly (CR deletes do not cascade)
-                "deleted": [
-                    {
-                        "id": "b2",
-                        "type_name": "Block",
-                        "properties": {"name": "B2"},
-                        "rev": 0,
-                    },
-                    {
-                        "id": "b3",
-                        "type_name": "Block",
-                        "properties": {"name": "B3"},
-                        "rev": 0,
-                    },
-                ],
-            },
-            "relationships": {
-                "added": [],
-                "modified": [],
-                "deleted": [
-                    {
-                        "id": "hp1",
-                        "type_name": "BlockHasPart",
-                        "source_id": "b2",
-                        "target_id": "b3",
-                        "properties": {},
-                        "rev": 0,
-                    }
-                ],
-            },
-        }
     )
-    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 200, res.text
-    body = res.json()
-
-    # OpsResponse shape, not the legacy full-model response
-    assert "model" not in body
-    assert body["id_map"] == {}
-    assert body["model_rev"] > base_rev
-
-    changed = {e["id"]: e for e in body["changed_elements"]}
-    assert set(changed) == {"b4", "b1"}
-    assert changed["b1"]["properties"] == {"name": "B1-renamed"}
-    assert changed["b1"]["rev"] == 1  # apply_change_request bumps modified revs
-    assert body["changed_relationships"] == []
-    assert body["deleted_element_ids"] == ["b2", "b3"]
-    assert body["deleted_relationship_ids"] == ["hp1"]
-    assert body["issue_counts"] == {}
-
-    # the session model WAS replaced (unlike legacy mode)
-    model = client.get(f"{API}/model").json()
-    assert {e["id"] for e in model["elements"]} == {"b1", "b4"}
-    assert model["relationships"] == []
+    return client
 
 
-def test_apply_cr_session_mode_conflict_409_shape(client: TestClient) -> None:
-    """Conflicts in session mode use the same 409 body as legacy mode and
-    leave the session model untouched."""
-    _upload_metamodel(client)
-    e1 = {"id": "e1", "type_name": "Block", "properties": {"name": "A"}, "rev": 0}
-    base_rev = _set_session_model(client, [e1], [])
-
-    payload = _session_cr_payload(
-        {
-            "elements": {"added": [e1], "modified": [], "deleted": []},
-            "relationships": {"added": [], "modified": [], "deleted": []},
-        }
-    )
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 409, res.text
-    body = res.json()
-    assert "conflicts" in body
-    conflict = body["conflicts"][0]
-    assert conflict["kind"] == "id_exists"
-    assert conflict["entity"] == "element"
-    assert set(conflict) == {"kind", "entity", "id", "reason"}
-    # 409 envelope carries the (unchanged) session revision, like ops/undo
-    assert body["model_rev"] == base_rev
-    assert client.get(f"{API}/model/summary").json()["model_rev"] == base_rev
+@pytest.fixture
+def viewer_headers(client: TestClient) -> dict[str, str]:
+    with db_session() as s:
+        tenancy.upsert_user(s, user_id="viewer-1", email="v@example.com")
+        tenancy.add_member(s, project_id="default", user_id="viewer-1", role=Role.viewer)
+    return {"x-user-id": "viewer-1", "x-user-email": "v@example.com"}
 
 
-def test_apply_cr_session_mode_422_gate(client: TestClient) -> None:
-    """The 422 gate (unknown type / dangling endpoints after delete) applies
-    in session mode and leaves the session model untouched."""
-    _upload_metamodel(client)
-    b1 = {"id": "b1", "type_name": "Block", "properties": {"name": "B1"}, "rev": 0}
-    b2 = {"id": "b2", "type_name": "Block", "properties": {"name": "B2"}, "rev": 0}
-    hp = {
-        "id": "hp",
-        "type_name": "BlockHasPart",
-        "source_id": "b1",
-        "target_id": "b2",
-        "properties": {},
+def _el(eid: str, name: str, type_name: str = "Item", **props) -> dict:
+    return {"id": eid, "type_name": type_name, "properties": {"name": name, **props}, "rev": 0}
+
+
+def _rel(rid: str, type_name: str, src: str, tgt: str, **props) -> dict:
+    return {
+        "id": rid,
+        "type_name": type_name,
+        "source_id": src,
+        "target_id": tgt,
+        "properties": dict(props),
         "rev": 0,
     }
-    base_rev = _set_session_model(client, [b1, b2], [hp])
-
-    payload = _session_cr_payload(
-        {
-            "elements": {"added": [], "modified": [], "deleted": [b2]},
-            "relationships": {"added": [], "modified": [], "deleted": []},
-        }
-    )
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 422, res.text
-    assert "unknown target" in res.json()["detail"]
-    assert client.get(f"{API}/model/summary").json()["model_rev"] == base_rev
-    assert {e["id"] for e in client.get(f"{API}/model").json()["elements"]} == {
-        "b1",
-        "b2",
-    }
 
 
-def test_apply_cr_session_mode_resets_undo_history(client: TestClient) -> None:
-    """Applying a CR replaces the session model, so undo history is reset
-    (documented behavior) and the rev moves."""
-    _upload_metamodel(client)
-    e1 = {"id": "e1", "type_name": "Block", "properties": {"name": "A"}, "rev": 0}
-    base_rev = _set_session_model(client, [e1], [])
-
-    # one ops batch -> one undo step
-    res = client.post(
-        f"{API}/model/ops",
-        json={
-            "base_rev": base_rev,
-            "ops": [
-                {
-                    "kind": "create_element",
-                    "temp_id": "tmp_1",
-                    "type_name": "Block",
-                    "properties": {"name": "B"},
-                }
-            ],
-        },
-    )
-    assert res.status_code == 200, res.text
-    new_id = res.json()["id_map"]["tmp_1"]
-    assert client.get(f"{API}/model/summary").json()["undo_depth"] == 1
-
-    payload = _session_cr_payload(
-        {
+def _cr(
+    *,
+    e_added=(),
+    e_modified=(),
+    e_deleted=(),
+    r_added=(),
+    r_modified=(),
+    r_deleted=(),
+) -> dict:
+    return {
+        "format": "datarover.cr/v1",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "baseline": {"filename": None, "elementCount": 0, "relationshipCount": 0},
+        "ops": {
             "elements": {
-                "added": [],
-                "modified": [],
-                "deleted": [
-                    {
-                        "id": new_id,
-                        "type_name": "Block",
-                        "properties": {"name": "B"},
-                        "rev": 1,  # rev is ignored by CR matching
-                    }
-                ],
+                "added": list(e_added),
+                "modified": list(e_modified),
+                "deleted": list(e_deleted),
             },
-            "relationships": {"added": [], "modified": [], "deleted": []},
-        }
-    )
-    res = client.post(f"{API}/model/apply-cr", json=payload)
-    assert res.status_code == 200, res.text
-    summary = client.get(f"{API}/model/summary").json()
-    assert summary["undo_depth"] == 0
-    assert summary["model_rev"] == res.json()["model_rev"]
-    # nothing to undo anymore
-    assert client.post(f"{API}/model/undo").status_code == 409
-
-
-def test_apply_cr_session_issues_delta_equals_full_validation(
-    client: TestClient,
-) -> None:
-    """Differential gate for session mode: (full validation of base) minus
-    issues owned by ``issues_removed_owner_ids`` plus ``issues_added`` must
-    equal a from-scratch full validation of the result model."""
-    _upload_metamodel(client)
-    elements = [
-        {"id": "b1", "type_name": "Block", "properties": {"name": "B1"}, "rev": 0},
-        # duplicate pair to give the base a pre-existing issue
-        {"id": "b3", "type_name": "Block", "properties": {"name": "Dup"}, "rev": 0},
-        {"id": "b4", "type_name": "Block", "properties": {"name": "Dup"}, "rev": 0},
-        {
-            "id": "r1",
-            "type_name": "Requirement",
-            "properties": {"name": "R1", "status": "Draft", "priority": 3},
-            "rev": 0,
+            "relationships": {
+                "added": list(r_added),
+                "modified": list(r_modified),
+                "deleted": list(r_deleted),
+            },
         },
-    ]
-    relationships: list[dict] = []
-    _set_session_model(client, elements, relationships)
-
-    cr_ops = {
-        "elements": {
-            # b5 duplicates b1; b6 misses its required name
-            "added": [
-                {
-                    "id": "b5",
-                    "type_name": "Block",
-                    "properties": {"name": "B1"},
-                    "rev": 0,
-                },
-                {"id": "b6", "type_name": "Block", "properties": {}, "rev": 0},
-            ],
-            "modified": [
-                # de-duplicate b4
-                {
-                    "id": "b4",
-                    "before": {
-                        "id": "b4",
-                        "type_name": "Block",
-                        "properties": {"name": "Dup"},
-                        "rev": 0,
-                    },
-                    "after": {
-                        "id": "b4",
-                        "type_name": "Block",
-                        "properties": {"name": "Unique"},
-                        "rev": 0,
-                    },
-                },
-                # facet violation: priority above max
-                {
-                    "id": "r1",
-                    "before": {
-                        "id": "r1",
-                        "type_name": "Requirement",
-                        "properties": {"name": "R1", "status": "Draft", "priority": 3},
-                        "rev": 0,
-                    },
-                    "after": {
-                        "id": "r1",
-                        "type_name": "Requirement",
-                        "properties": {"name": "R1", "status": "Draft", "priority": 99},
-                        "rev": 0,
-                    },
-                },
-            ],
-            "deleted": [],
-        },
-        "relationships": {"added": [], "modified": [], "deleted": []},
     }
 
-    res = client.post(f"{API}/model/apply-cr", json=_session_cr_payload(cr_ops))
+
+def _mod(id: str, before: dict, after: dict) -> dict:
+    return {"id": id, "before": before, "after": after}
+
+
+def _propose(client: TestClient, crs: list[dict], **kw):
+    return client.post(f"{API}/model/apply-cr", json={"crs": crs}, **kw)
+
+
+def test_propose_returns_ops_and_combined_cr_without_touching_session(seeded: TestClient) -> None:
+    rev = get_session().model_rev
+    res = _propose(seeded, [_cr(e_added=[_el("n1", "N")])])
     assert res.status_code == 200, res.text
     body = res.json()
+    assert body["model_rev"] == rev
+    assert body["ops"] == [
+        {
+            "kind": "create_element",
+            "temp_id": "tmp_1",
+            "id": "n1",
+            "type_name": "Item",
+            "properties": {"name": "N"},
+        }
+    ]
+    assert [e["id"] for e in body["cr"]["ops"]["elements"]["added"]] == ["n1"]
+    assert body["cr"]["baseline"] == {"filename": None, "elementCount": 2, "relationshipCount": 1}
+    assert get_session().model_rev == rev
+    model = get_session().model
+    assert model is not None and "n1" not in model.elements
 
-    metamodel = load_metamodel_file(EXAMPLE)
-    base = _build_model_from_payload(
-        metamodel,
-        [ElementOut.model_validate(e) for e in elements],
-        [RelationshipOut.model_validate(r) for r in relationships],
+
+def test_propose_applies_crs_sequentially(seeded: TestClient) -> None:
+    """CR2 modifies what CR1 added: one create op with the FINAL state."""
+    cr1 = _cr(e_added=[_el("n1", "N")])
+    cr2 = _cr(e_modified=[_mod("n1", _el("n1", "N"), _el("n1", "N2", note="x"))])
+    res = _propose(seeded, [cr1, cr2])
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert [op["kind"] for op in body["ops"]] == ["create_element"]
+    assert body["ops"][0]["properties"] == {"name": "N2", "note": "x"}
+    assert body["cr"]["ops"]["elements"]["modified"] == []
+
+
+def test_propose_conflict_reports_index_of_failing_cr(seeded: TestClient) -> None:
+    rev = get_session().model_rev
+    cr1 = _cr(e_added=[_el("n1", "N")])
+    cr2 = _cr(e_modified=[_mod("zzz", _el("zzz", "Z"), _el("zzz", "Z2"))])
+    res = _propose(seeded, [cr1, cr2])
+    assert res.status_code == 409, res.text
+    body = res.json()
+    assert body["cr_index"] == 1
+    assert body["model_rev"] == rev
+    assert [(c["kind"], c["id"]) for c in body["conflicts"]] == [("missing", "zzz")]
+
+
+def test_propose_before_mismatch_against_session_is_409_at_index_0(seeded: TestClient) -> None:
+    res = _propose(seeded, [_cr(e_modified=[_mod("a", _el("a", "WRONG"), _el("a", "A2"))])])
+    assert res.status_code == 409
+    assert res.json()["cr_index"] == 0
+    assert res.json()["conflicts"][0]["kind"] == "before_mismatch"
+
+
+def test_propose_gate_unknown_type_422(seeded: TestClient) -> None:
+    res = _propose(seeded, [_cr(e_added=[_el("n1", "N", type_name="Nope")])])
+    assert res.status_code == 422, res.text
+    assert "Nope" in res.json()["detail"]
+
+
+def test_propose_gate_dangling_delete_422(seeded: TestClient) -> None:
+    """Deleting b without deleting r-ab leaves a dangling relationship."""
+    res = _propose(seeded, [_cr(e_deleted=[_el("b", "B")])])
+    assert res.status_code == 422, res.text
+    assert "r-ab" in res.json()["detail"]
+
+
+def test_propose_retype_422(seeded: TestClient) -> None:
+    res = _propose(seeded, [_cr(e_modified=[_mod("a", _el("a", "A"), _el("a", "A", type_name="Other"))])])
+    assert res.status_code == 422, res.text
+    assert "'a'" in res.json()["detail"] and "type" in res.json()["detail"]
+
+
+def test_propose_orders_relationship_delete_before_element_delete(seeded: TestClient) -> None:
+    res = _propose(
+        seeded,
+        [_cr(e_deleted=[_el("b", "B")], r_deleted=[_rel("r-ab", "Contains", "a", "b")])],
     )
-    base_issues = default_pipeline().validate(base, Scope.all())
-    cr_core = ChangeRequestIn.model_validate(_session_cr_payload(cr_ops)["cr"])
-    result = apply_change_request(base, cr_core.to_core())
-    full_result_issues = default_pipeline().validate(result, Scope.all())
+    assert res.status_code == 200, res.text
+    assert [(op["kind"], op["id"]) for op in res.json()["ops"]] == [
+        ("delete_relationship", "r-ab"),
+        ("delete_element", "b"),
+    ]
 
-    def key(severity: str, message: str, target_ids: list[str]) -> tuple:
-        return (severity, message, tuple(target_ids))
 
-    removed = set(body["issues_removed_owner_ids"])
-    reconstructed = sorted(
-        [
-            key(i.severity.value, i.message, list(i.target_ids))
-            for i in base_issues
-            if i.target_ids[0] not in removed
-        ]
-        + [
-            key(i["severity"], i["message"], i["target_ids"])
-            for i in body["issues_added"]
-        ]
-    )
-    expected = sorted(
-        key(i.severity.value, i.message, list(i.target_ids))
-        for i in full_result_issues
-    )
-    assert reconstructed == expected
-    assert expected, "scenario must actually produce issues"
+def test_propose_modified_becomes_patch(seeded: TestClient) -> None:
+    res = _propose(seeded, [_cr(e_modified=[_mod("a", _el("a", "A"), _el("a", "A2", note="n"))])])
+    assert res.status_code == 200, res.text
+    assert res.json()["ops"] == [
+        {"kind": "update_element", "id": "a", "properties_patch": {"name": "A2", "note": "n"}}
+    ]
 
-    # issue_counts is over the whole post-CR store
-    counts: dict[str, int] = {}
-    for sev, _, _ in expected:
-        counts[sev] = counts.get(sev, 0) + 1
-    assert body["issue_counts"] == counts
+
+def test_propose_empty_list_422(seeded: TestClient) -> None:
+    assert _propose(seeded, []).status_code == 422
+
+
+def test_propose_without_model_404(client: TestClient) -> None:
+    assert _propose(client, [_cr()]).status_code == 404
+
+
+def test_propose_viewer_403(seeded: TestClient, viewer_headers: dict[str, str]) -> None:
+    res = seeded.post(f"{API}/model/apply-cr", json={"crs": [_cr()]}, headers=viewer_headers)
+    assert res.status_code == 403, res.text
