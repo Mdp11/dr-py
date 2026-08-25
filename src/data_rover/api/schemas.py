@@ -742,7 +742,7 @@ class RelationshipPage(BaseModel):
 class ChangesOut(BaseModel):
     """``datarover.cr/v1`` change request derived from the session op log.
 
-    Shape-compatible with the frontend's ``buildChangeRequest`` export
+    Shape-compatible with the frontend's ``ChangeRequest`` type
     (``frontend/src/lib/state/cr.ts``) plus one extra field, ``complete``,
     which :class:`ChangeRequestIn` ignores on the apply path — so the
     document round-trips through POST /model/apply-cr unchanged.
@@ -770,9 +770,14 @@ class ChangesSummaryOut(BaseModel):
     complete: bool = True
 
 
+#: rejected at request-parse time: every CR costs one O(model) copy plus a
+#: full index rebuild, so an unbounded list is an N-fold multiplier on it
+MAX_CRS_PER_REQUEST = 20
+
+
 class ProposeCrRequest(BaseModel):
     #: applied in order; each CR sees the result of the previous one
-    crs: list[ChangeRequestIn] = Field(min_length=1)
+    crs: list[ChangeRequestIn] = Field(min_length=1, max_length=MAX_CRS_PER_REQUEST)
 
 
 class ProposeCrResponse(BaseModel):

@@ -655,8 +655,8 @@ const ModifiedRelationshipSchema = z.object({
 
 /**
  * GET /model/changes: the session op log compacted into a `datarover.cr/v1`
- * change request (the shape `buildChangeRequest` in `$lib/state/cr.ts`
- * produces) plus `complete` — false when op-log truncation means the document
+ * change request (the `ChangeRequest` shape in `$lib/state/cr.ts`) plus
+ * `complete` — false when op-log truncation means the document
  * only describes the retained history.
  */
 export const ChangesDocSchema = z.object({

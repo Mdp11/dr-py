@@ -44,7 +44,9 @@ class UnsupportedChangeError(ValueError):
     """The CR needs a mutation the op protocol cannot express."""
 
 
-def merge_patch(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+def _diff_to_merge_patch(
+    before: dict[str, Any], after: dict[str, Any]
+) -> dict[str, Any]:
     """JSON merge patch turning *before* into *after* (None deletes a key)."""
     patch: dict[str, Any] = {
         k: v for k, v in after.items() if k not in before or before[k] != v
@@ -110,7 +112,7 @@ def ops_for_change(cr: ChangeRequest) -> list[ModelOpIn]:
     ops.extend(create_rel(r) for r in cr.relationships_added)
 
     for m in cr.elements_modified:
-        patch = merge_patch(m.before.properties, m.after.properties)
+        patch = _diff_to_merge_patch(m.before.properties, m.after.properties)
         if patch:
             ops.append(
                 UpdateElementOp(kind="update_element", id=m.id, properties_patch=patch)
@@ -122,7 +124,7 @@ def ops_for_change(cr: ChangeRequest) -> list[ModelOpIn]:
     for rm in cr.relationships_modified:
         if _is_rewire(rm.before, rm.after):
             continue
-        patch = merge_patch(rm.before.properties, rm.after.properties)
+        patch = _diff_to_merge_patch(rm.before.properties, rm.after.properties)
         if patch:
             ops.append(
                 UpdateRelationshipOp(

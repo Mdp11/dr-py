@@ -515,7 +515,10 @@ a button:
   edits (DiffDrawer, Ctrl+S, commit).
 - **Gates**: Replace / Stage edits need `canEdit()` AND an empty model staged
   buffer (`hasStagedOps()` false — the proposal is computed against the
-  committed model); a hint says why. Preview and Create CR are viewer-allowed.
+  committed model); a hint says why. In compare mode Preview and Create CR are
+  viewer-allowed (`POST /model/compare` is a read-only POST); in apply-cr mode
+  Preview is gated on `canEdit()` too, since it goes through
+  `POST /model/apply-cr`, which is deliberately treated as a write.
 
 ### View editing state (staged `view.*` ops)
 

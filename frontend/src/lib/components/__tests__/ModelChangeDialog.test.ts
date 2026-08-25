@@ -28,7 +28,8 @@ vi.mock('$lib/state', async (orig) => {
 
 const EL = (id: string, name: string) => ({ id, type_name: 'Item', properties: { name }, rev: 0 });
 
-const CR_DOC = {
+// the on-disk CR shape (no `complete`) and the wire shape that adds it
+const CR_FILE_DOC = {
 	format: 'datarover.cr/v1' as const,
 	createdAt: '2026-01-01T00:00:00.000Z',
 	baseline: { filename: null, elementCount: 10, relationshipCount: 5 },
@@ -39,15 +40,16 @@ const CR_DOC = {
 			deleted: [EL('b', 'B')]
 		},
 		relationships: { added: [], modified: [], deleted: [] }
-	},
-	complete: true
+	}
 };
+
+const CR_DOC = { ...CR_FILE_DOC, complete: true };
 
 const COMPARE_OUT = {
 	model_rev: 3,
 	cr: CR_DOC,
-	other_element_count: 10,
-	other_relationship_count: 5
+	other_element_count: 7,
+	other_relationship_count: 2
 };
 
 const CREATE_OP = {
@@ -93,6 +95,14 @@ function pickFiles(files: File[]): void {
 	flushSync();
 }
 
+/** Rendered diff cards as `<badge><id>`, in render order (added, modified, deleted). */
+function previewCards(): string[] {
+	const root = byTestId('proposal-preview');
+	const badges = [...root.querySelectorAll('span.font-mono.font-bold')];
+	const ids = [...root.querySelectorAll('span.font-mono.text-xs')];
+	return badges.map((b, i) => `${b.textContent?.trim()}${ids[i]?.textContent?.trim()}`);
+}
+
 async function settle(): Promise<void> {
 	await new Promise((r) => setTimeout(r, 0));
 	await new Promise((r) => setTimeout(r, 0));
@@ -127,6 +137,11 @@ describe('ModelChangeDialog — compare mode', () => {
 		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
 		open('compare');
 		pickFiles([modelFile()]);
+
+		byTestId('mcd-preview').click();
+		await settle();
+		expect(previewCards()).toEqual(['+n1', '~a', '-b']);
+
 		byTestId('mcd-swap').click();
 		flushSync();
 		expect(byTestId<HTMLButtonElement>('mcd-replace').disabled).toBe(true);
@@ -134,10 +149,35 @@ describe('ModelChangeDialog — compare mode', () => {
 		byTestId('mcd-preview').click();
 		await settle();
 		// inverted: the added n1 now reads as deleted and b as added
-		const rows = byTestId('proposal-preview').textContent ?? '';
-		expect(rows).toContain('+1 added');
-		expect(rows).toContain('−1 deleted');
-		expect(document.body.querySelector('[data-testid="proposal-preview"]')).not.toBeNull();
+		expect(previewCards()).toEqual(['+b', '~a', '-n1']);
+	});
+
+	it('Create CR relabels the baseline to the direction it saved', async () => {
+		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
+		const save = vi
+			.spyOn(fileSave, 'saveJsonToFile')
+			.mockResolvedValue({ filename: 'x', handle: null } as never);
+		open('compare');
+		pickFiles([modelFile()]);
+		byTestId('mcd-create-cr').click();
+		await settle();
+		// session → file: the session counts, plus the filename the server lacks
+		expect((save.mock.calls[0][0] as typeof CR_FILE_DOC).baseline).toEqual({
+			filename: 'city.model.json',
+			elementCount: 10,
+			relationshipCount: 5
+		});
+
+		byTestId('mcd-swap').click();
+		flushSync();
+		byTestId('mcd-create-cr').click();
+		await settle();
+		// file → session: the `from` side is now the file, so its counts describe it
+		expect((save.mock.calls[1][0] as typeof CR_FILE_DOC).baseline).toEqual({
+			filename: 'other.model.json',
+			elementCount: 7,
+			relationshipCount: 2
+		});
 	});
 
 	it('Create CR saves the (inverted when swapped) CR under the CR filename', async () => {
@@ -223,11 +263,8 @@ describe('ModelChangeDialog — compare mode', () => {
 	});
 });
 
-const crFile = (name: string, cr = CR_DOC) => {
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping `complete` off the CR shape
-	const { complete: _c, ...doc } = cr;
-	return new File([JSON.stringify(doc)], name, { type: 'application/json' });
-};
+const crFile = (name: string, cr = CR_FILE_DOC) =>
+	new File([JSON.stringify(cr)], name, { type: 'application/json' });
 
 describe('ModelChangeDialog — apply-cr mode', () => {
 	it('lists picked CR files in order, rejects non-CR files, and fires no request', async () => {
@@ -252,8 +289,8 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 		const propose = vi
 			.spyOn(crApi, 'proposeCr')
 			.mockResolvedValue({ ok: true, modelRev: 3, cr: CR_DOC, ops: [CREATE_OP] });
-		const first = { ...CR_DOC, createdAt: 'first' };
-		const second = { ...CR_DOC, createdAt: 'second' };
+		const first = { ...CR_FILE_DOC, createdAt: 'first' };
+		const second = { ...CR_FILE_DOC, createdAt: 'second' };
 		open('apply-cr');
 		pickFiles([crFile('first.cr.json', first), crFile('second.cr.json', second)]);
 		await settle();
@@ -314,6 +351,16 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 			relationships: []
 		});
 		expect(document.body.querySelector('[data-testid="mcd-stage"]')).toBeNull();
+	});
+
+	it('gates Preview too for a viewer — apply-cr proposes through a write route', async () => {
+		vi.mocked(canEdit).mockReturnValue(false);
+		open('apply-cr');
+		pickFiles([crFile('a.cr.json')]);
+		await settle();
+		expect(byTestId<HTMLButtonElement>('mcd-preview').disabled).toBe(true);
+		expect(byTestId<HTMLButtonElement>('mcd-stage').disabled).toBe(true);
+		expect(byTestId('mcd-gate-hint').textContent).toMatch(/view-only/i);
 	});
 
 	it('a stale stage outcome is reported, not swallowed', async () => {

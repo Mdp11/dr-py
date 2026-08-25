@@ -10,6 +10,7 @@ from data_rover.api import tenancy
 from data_rover.api.db import db_session
 from data_rover.api.db_models import Role
 from data_rover.api.main import create_app
+from data_rover.api.schemas import MAX_CRS_PER_REQUEST
 from data_rover.api.session import get_session
 
 from .conftest import AUTH_HEADERS, seed_default_project
@@ -217,6 +218,12 @@ def test_propose_modified_becomes_patch(seeded: TestClient) -> None:
 
 def test_propose_empty_list_422(seeded: TestClient) -> None:
     assert _propose(seeded, []).status_code == 422
+
+
+def test_propose_over_cap_422(seeded: TestClient) -> None:
+    crs = [_cr(e_added=[_el(f"n{i}", f"N{i}")]) for i in range(MAX_CRS_PER_REQUEST + 1)]
+    assert _propose(seeded, crs).status_code == 422
+    assert _propose(seeded, crs[:-1]).status_code == 200
 
 
 def test_propose_without_model_404(client: TestClient) -> None:

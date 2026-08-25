@@ -613,7 +613,7 @@ def _now_iso() -> str:
 def get_changes(session: Session = Depends(get_request_session)) -> ChangesOut:
     """The pending change set as a ``datarover.cr/v1`` change request.
 
-    Same JSON shape as the frontend's ``buildChangeRequest`` export (plus
+    Same JSON shape as the frontend's ``ChangeRequest`` type (plus
     ``complete``), and round-trip applicable: applied to the BASE model it
     reproduces the current session model entity-wise. ``baseline`` counts
     describe the BASE model (current counts minus adds plus deletes);

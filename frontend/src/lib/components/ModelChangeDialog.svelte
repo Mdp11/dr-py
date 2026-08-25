@@ -53,6 +53,9 @@
 	const proceedDisabled = $derived(
 		busy || !hasSource || !editable || bufferDirty || (mode === 'compare' && swapped)
 	);
+	// compare-mode Preview is POST /model/compare (viewer-allowed); apply-cr's
+	// is POST /model/apply-cr, which stays a write, so a viewer would only 403
+	const previewDisabled = $derived(busy || !hasSource || (mode === 'apply-cr' && !editable));
 	const sessionLabel = $derived(getFilename() ?? 'model');
 	const otherLabel = $derived(otherFile?.name ?? 'other');
 
@@ -94,18 +97,21 @@
 			compared = null;
 			return;
 		}
+		// every rejected file is reported, not just the last one
+		const rejected: string[] = [];
 		for (const file of files) {
 			try {
 				const parsed = JSON.parse(await file.text());
 				if (parsed?.format !== 'datarover.cr/v1') {
-					error = `${file.name}: not a CR file (expected format datarover.cr/v1)`;
+					rejected.push(`${file.name}: not a CR file (expected format datarover.cr/v1)`);
 					continue;
 				}
 				crFiles = [...crFiles, { name: file.name, cr: parsed as ChangeRequest }];
 			} catch (err) {
-				error = `${file.name}: ${err instanceof Error ? err.message : 'Invalid JSON'}`;
+				rejected.push(`${file.name}: ${err instanceof Error ? err.message : 'Invalid JSON'}`);
 			}
 		}
+		if (rejected.length > 0) error = `Skipped ${rejected.length} file(s) — ${rejected.join('; ')}`;
 	}
 
 	function moveCr(i: number, delta: number): void {
@@ -191,9 +197,22 @@
 	function onCreateCr(): Promise<void> {
 		return run(async () => {
 			const out = await ensureCompared();
+			const cr = directedCr(out);
 			// strip the transport-only `complete` flag so the file is exactly the
-			// datarover.cr/v1 shape Apply CR expects (same as saveWithOptionalCr)
-			const doc: Record<string, unknown> = { ...directedCr(out) };
+			// datarover.cr/v1 shape Apply CR expects (same as saveWithOptionalCr),
+			// and relabel the baseline: inverting a CR keeps the envelope as-is,
+			// so the baseline must be restated for the direction actually saved
+			// (the filename too — the server never knows it).
+			const doc: Record<string, unknown> = {
+				...cr,
+				baseline: swapped
+					? {
+							filename: otherLabel,
+							elementCount: out.other_element_count,
+							relationshipCount: out.other_relationship_count
+						}
+					: { ...cr.baseline, filename: getFilename() }
+			};
 			delete doc.complete;
 			await saveJsonToFile(doc, composeCrFilename(swapped ? otherLabel : getFilename()));
 		});
@@ -253,7 +272,7 @@
 					onchange={onFilesSelected}
 				/>
 				{#if mode === 'compare'}
-					<span class="font-mono text-xs text-muted-foreground">
+					<span class="font-mono text-xs text-muted-foreground" aria-live="polite">
 						{otherFile?.name ?? 'No file selected'}
 					</span>
 					{#if otherFile}
@@ -325,7 +344,12 @@
 
 			{#if hasSource && !editable}
 				<p class="text-xs text-muted-foreground" data-testid="mcd-gate-hint">
-					You have view-only access — {mode === 'compare' ? 'Replace' : 'Stage edits'} is unavailable.
+					{#if mode === 'compare'}
+						You have view-only access — Replace is unavailable.
+					{:else}
+						You have view-only access — Stage edits is unavailable, and so is Preview diff (it asks
+						the server to propose the edits, which viewers may not do).
+					{/if}
 				</p>
 			{:else if hasSource && bufferDirty}
 				<p class="text-xs text-muted-foreground" data-testid="mcd-gate-hint">
@@ -346,7 +370,7 @@
 				type="button"
 				variant="outline"
 				data-testid="mcd-preview"
-				disabled={busy || !hasSource}
+				disabled={previewDisabled}
 				onclick={() => void onPreview()}
 			>
 				Preview diff

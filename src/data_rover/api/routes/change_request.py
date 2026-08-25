@@ -15,10 +15,12 @@ The session model is read WITHOUT the write mutex (the ``/snippets/run``
 precedent): the response carries the ``model_rev`` it saw, and the client
 refuses to stage a proposal whose rev has moved.
 
-409 ``{cr_index, conflicts, model_rev}`` names the FIRST CR that conflicts
-with the model as left by its predecessors; 422 is the metamodel gate
-(unknown/abstract type, dangling endpoint, non-cascaded delete) or an
-element type change, which the op protocol cannot express.
+For apply-cr, 409 ``{cr_index, conflicts, model_rev}`` names the FIRST CR
+that conflicts with the model as left by its predecessors; 422 is the
+metamodel gate (unknown/abstract type, dangling endpoint, non-cascaded
+delete) or an element type change, which the op protocol cannot express.
+Compare has no 409 — it only 422s on a body that is not a well-formed
+model (undecodable JSON, reserved or duplicate id, dangling endpoint).
 """
 
 from __future__ import annotations
@@ -74,7 +76,7 @@ def _gate_cr_result(
 ) -> None:
     """422 gate for entities the CR introduced or rewired.
 
-    The inline payload was already gated by ``_build_model_from_payload``, so
+    *base* is the session model, which is already metamodel-conformant, so
     only the CR's delta needs checking:
 
     - added/modified elements: type must exist and not be abstract

@@ -695,7 +695,7 @@ def test_changes_empty_log(client: TestClient) -> None:
 
 def test_changes_document_shape(client: TestClient) -> None:
     """Create + update + cascade delete, compared against a hand-written
-    datarover.cr/v1 document (the buildChangeRequest export shape)."""
+    datarover.cr/v1 document (the frontend ChangeRequest shape)."""
     _load_model(
         client,
         [_item("a", "A"), _item("b", "B")],
