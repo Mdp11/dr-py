@@ -318,11 +318,27 @@ class ViewStateResponse(BaseModel):
 TEMP_ID_PREFIX = "tmp_"
 
 
+def is_reserved_id(entity_id: str) -> bool:
+    """True when *entity_id* is reserved for the ops protocol's provisional ids.
+
+    The single statement of the rule: a canonical id carrying the prefix would
+    be ambiguous to the restore-mode applier, so every surface that admits ids
+    (load payloads, create-op ``id`` hints) refuses one — each raising its own
+    exception type with its own message.
+    """
+    return entity_id.startswith(TEMP_ID_PREFIX)
+
+
 class CreateElementOp(BaseModel):
     kind: Literal["create_element"]
     temp_id: str
     type_name: str
     properties: dict[str, Any] = Field(default_factory=dict)
+    #: requested final id (CR / compare proposals carry the file's real ids);
+    #: None = server-minted. The applier reinstates the entity under it via
+    #: Model.restore_element and 422s the batch when it is taken. Canonical
+    #: journalled ops never carry it (temp_id holds the final id there).
+    id: str | None = None
 
 
 class UpdateElementOp(BaseModel):
@@ -345,6 +361,8 @@ class CreateRelationshipOp(BaseModel):
     source_id: str
     target_id: str
     properties: dict[str, Any] = Field(default_factory=dict)
+    #: see CreateElementOp.id
+    id: str | None = None
 
 
 class UpdateRelationshipOp(BaseModel):
@@ -735,7 +753,7 @@ class RelationshipPage(BaseModel):
 class ChangesOut(BaseModel):
     """``datarover.cr/v1`` change request derived from the session op log.
 
-    Shape-compatible with the frontend's ``buildChangeRequest`` export
+    Shape-compatible with the frontend's ``ChangeRequest`` type
     (``frontend/src/lib/state/cr.ts``) plus one extra field, ``complete``,
     which :class:`ChangeRequestIn` ignores on the apply path — so the
     document round-trips through POST /model/apply-cr unchanged.
@@ -763,20 +781,41 @@ class ChangesSummaryOut(BaseModel):
     complete: bool = True
 
 
-class ApplyCrRequest(BaseModel):
+#: rejected at request-parse time: every CR costs one O(model) copy plus a
+#: full index rebuild, so an unbounded list is an N-fold multiplier on it
+MAX_CRS_PER_REQUEST = 20
+
+
+class ProposeCrRequest(BaseModel):
+    #: applied in order; each CR sees the result of the previous one
+    crs: list[ChangeRequestIn] = Field(min_length=1, max_length=MAX_CRS_PER_REQUEST)
+
+
+class ProposeCrResponse(BaseModel):
+    """Dry-run result of POST /model/apply-cr: nothing was applied."""
+
     model_config = ConfigDict(protected_namespaces=())
 
-    #: legacy inline mode when present; ``None`` selects session mode (the CR
-    #: is applied to the session model and an OpsResponse delta is returned)
-    model: InlineModel | None = None
-    cr: ChangeRequestIn
+    #: the session rev the proposal was computed against; the client refuses
+    #: to stage the batch if it has moved
+    model_rev: int
+    #: the COMBINED base -> final change request (what the preview renders)
+    cr: ChangesOut
+    #: the op batch that lands ``cr`` when staged and committed
+    ops: list[ModelOpIn] = Field(default_factory=list)
 
 
-class ApplyCrResponse(BaseModel):
+class CompareResponse(BaseModel):
+    """POST /model/compare: the session -> other-model change request."""
+
     model_config = ConfigDict(protected_namespaces=())
 
-    model: ModelOut
-    issues: list[IssueOut] = Field(default_factory=list)
+    model_rev: int
+    cr: ChangesOut
+    #: entity counts of the OTHER model (the "to" side) so the client can
+    #: report how many unchanged entities the diff hides
+    other_element_count: int
+    other_relationship_count: int
 
 
 # ---------------------------------------------------------------------------

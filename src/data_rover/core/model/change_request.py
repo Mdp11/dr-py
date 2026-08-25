@@ -56,6 +56,28 @@ class CRConflictError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Entity copies (never alias an input entity's property dict)
+# ---------------------------------------------------------------------------
+
+
+def _copy_element(e: Element) -> Element:
+    return Element(
+        id=e.id, type_name=e.type_name, properties=dict(e.properties), rev=e.rev
+    )
+
+
+def _copy_relationship(r: Relationship) -> Relationship:
+    return Relationship(
+        id=r.id,
+        type_name=r.type_name,
+        source_id=r.source_id,
+        target_id=r.target_id,
+        properties=dict(r.properties),
+        rev=r.rev,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Match helpers (rev is intentionally ignored)
 # ---------------------------------------------------------------------------
 
@@ -204,34 +226,15 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
     # --- Phase B: materialize ---
 
     new_elements: dict[str, Element] = {
-        eid: Element(
-            id=e.id,
-            type_name=e.type_name,
-            properties=dict(e.properties),
-            rev=e.rev,
-        )
-        for eid, e in model.elements.items()
+        eid: _copy_element(e) for eid, e in model.elements.items()
     }
 
     new_relationships: dict[str, Relationship] = {
-        rid: Relationship(
-            id=r.id,
-            type_name=r.type_name,
-            source_id=r.source_id,
-            target_id=r.target_id,
-            properties=dict(r.properties),
-            rev=r.rev,
-        )
-        for rid, r in model.relationships.items()
+        rid: _copy_relationship(r) for rid, r in model.relationships.items()
     }
 
     for e in cr.elements_added:
-        new_elements[e.id] = Element(
-            id=e.id,
-            type_name=e.type_name,
-            properties=dict(e.properties),
-            rev=e.rev,
-        )
+        new_elements[e.id] = _copy_element(e)
 
     for me in cr.elements_modified:
         current_rev = new_elements[me.id].rev
@@ -246,14 +249,7 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
         del new_elements[e.id]
 
     for r in cr.relationships_added:
-        new_relationships[r.id] = Relationship(
-            id=r.id,
-            type_name=r.type_name,
-            source_id=r.source_id,
-            target_id=r.target_id,
-            properties=dict(r.properties),
-            rev=r.rev,
-        )
+        new_relationships[r.id] = _copy_relationship(r)
 
     for mr in cr.relationships_modified:
         current_rev = new_relationships[mr.id].rev
@@ -275,3 +271,69 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
     # dicts were populated directly, bypassing the mutation boundary
     result.indexes.rebuild()
     return result
+
+
+# ---------------------------------------------------------------------------
+# diff_models / invert_change_request — pure; never alias input entities
+# ---------------------------------------------------------------------------
+
+
+def diff_models(base: Model, other: Model) -> ChangeRequest:
+    """The change request that turns *base* into *other*.
+
+    Same identity rules as the match helpers above (``rev`` ignored): an
+    entity present only in *other* is added, only in *base* deleted, in
+    both but not matching modified. Added/modified follow *other*'s
+    insertion order, deleted follow *base*'s.
+    """
+    cr = ChangeRequest()
+    for eid, e in other.elements.items():
+        b = base.elements.get(eid)
+        if b is None:
+            cr.elements_added.append(_copy_element(e))
+        elif not _element_matches(b, e):
+            cr.elements_modified.append(
+                ModifiedElement(id=eid, before=_copy_element(b), after=_copy_element(e))
+            )
+    for eid, b in base.elements.items():
+        if eid not in other.elements:
+            cr.elements_deleted.append(_copy_element(b))
+
+    for rid, r in other.relationships.items():
+        br = base.relationships.get(rid)
+        if br is None:
+            cr.relationships_added.append(_copy_relationship(r))
+        elif not _relationship_matches(br, r):
+            cr.relationships_modified.append(
+                ModifiedRelationship(
+                    id=rid, before=_copy_relationship(br), after=_copy_relationship(r)
+                )
+            )
+    for rid, br in base.relationships.items():
+        if rid not in other.relationships:
+            cr.relationships_deleted.append(_copy_relationship(br))
+    return cr
+
+
+def invert_change_request(cr: ChangeRequest) -> ChangeRequest:
+    """The change request that undoes *cr*: added↔deleted, before↔after."""
+    return ChangeRequest(
+        elements_added=[_copy_element(e) for e in cr.elements_deleted],
+        elements_modified=[
+            ModifiedElement(
+                id=m.id, before=_copy_element(m.after), after=_copy_element(m.before)
+            )
+            for m in cr.elements_modified
+        ],
+        elements_deleted=[_copy_element(e) for e in cr.elements_added],
+        relationships_added=[_copy_relationship(r) for r in cr.relationships_deleted],
+        relationships_modified=[
+            ModifiedRelationship(
+                id=m.id,
+                before=_copy_relationship(m.after),
+                after=_copy_relationship(m.before),
+            )
+            for m in cr.relationships_modified
+        ],
+        relationships_deleted=[_copy_relationship(r) for r in cr.relationships_added],
+    )

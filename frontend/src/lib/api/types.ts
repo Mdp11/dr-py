@@ -233,12 +233,13 @@ export const ViewStateResponseSchema = z.object({
 });
 export type ViewStateResponse = z.infer<typeof ViewStateResponseSchema>;
 
-export interface Conflict {
-	kind: 'id_exists' | 'missing' | 'before_mismatch';
-	entity: 'element' | 'relationship';
-	id: string;
-	reason: string;
-}
+export const ConflictSchema = z.object({
+	kind: z.enum(['id_exists', 'missing', 'before_mismatch']),
+	entity: z.enum(['element', 'relationship']),
+	id: z.string(),
+	reason: z.string()
+});
+export type Conflict = z.infer<typeof ConflictSchema>;
 
 // ---------------------------------------------------------------------------
 // Delta-protocol schemas — mirror the backend pydantic models in
@@ -655,8 +656,8 @@ const ModifiedRelationshipSchema = z.object({
 
 /**
  * GET /model/changes: the session op log compacted into a `datarover.cr/v1`
- * change request (the shape `buildChangeRequest` in `$lib/state/cr.ts`
- * produces) plus `complete` — false when op-log truncation means the document
+ * change request (the `ChangeRequest` shape in `$lib/state/cr.ts`) plus
+ * `complete` — false when op-log truncation means the document
  * only describes the retained history.
  */
 export const ChangesDocSchema = z.object({
@@ -692,6 +693,33 @@ export const ChangesSummarySchema = z.object({
 	complete: z.boolean().default(true)
 });
 export type ChangesSummary = z.infer<typeof ChangesSummarySchema>;
+
+/** POST /model/compare — the session → other-model change request. */
+export const CompareOutSchema = z.object({
+	model_rev: z.number().int(),
+	cr: ChangesDocSchema,
+	other_element_count: z.number().int(),
+	other_relationship_count: z.number().int()
+});
+export type CompareOut = z.infer<typeof CompareOutSchema>;
+
+/**
+ * POST /model/apply-cr — dry-run proposal. `ops` is the staged-buffer wire
+ * format (`state/ops.ts` ModelOp); typed loosely here like SnippetRunOut and
+ * narrowed by the client module.
+ */
+export const ProposeCrOutSchema = z.object({
+	model_rev: z.number().int(),
+	cr: ChangesDocSchema,
+	ops: z.array(z.record(z.string(), z.unknown()))
+});
+
+/** The 409 body of POST /model/apply-cr: the FIRST CR that could not apply. */
+export const ProposeCrConflictSchema = z.object({
+	cr_index: z.number().int(),
+	conflicts: z.array(ConflictSchema),
+	model_rev: z.number().int()
+});
 
 // ---------------------------------------------------------------------------
 // Snippet execution — mirrors api/schemas.py SnippetRunOut/SnippetLintOut.

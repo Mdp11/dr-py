@@ -958,3 +958,110 @@ def test_op_log_records_batches_and_failed_undo_is_impossible(
     assert [op.kind for op in batch.ops] == ["update_element"]
     assert [op.kind for op in batch.inverse_ops] == ["update_element"]
     assert batch.inverse_ops[0].properties_patch == {"note": None}  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
+# id hint on create ops (CR / compare proposals carry the file's real ids)
+# ---------------------------------------------------------------------------
+
+
+def _hinted_create(temp_id: str, hint: str, name: str) -> dict:
+    return {
+        "kind": "create_element",
+        "temp_id": temp_id,
+        "id": hint,
+        "type_name": "Item",
+        "properties": {"name": name},
+    }
+
+
+def test_create_element_id_hint_lands_with_that_id(seeded: TestClient) -> None:
+    res = _post_ops(seeded, [_hinted_create("tmp_x", "fixed-1", "X")])
+    assert res.status_code == 200, res.text
+    assert res.json()["id_map"] == {"tmp_x": "fixed-1"}
+    assert res.json()["changed_elements"][0]["id"] == "fixed-1"
+    assert _model().elements["fixed-1"].properties == {"name": "X"}
+
+
+def test_create_relationship_id_hint_lands_with_that_id(seeded: TestClient) -> None:
+    res = _post_ops(
+        seeded,
+        [
+            {
+                "kind": "create_relationship",
+                "temp_id": "tmp_r",
+                "id": "fixed-r",
+                "type_name": "Links",
+                "source_id": "b",
+                "target_id": "c",
+                "properties": {"weight": 5},
+            }
+        ],
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["id_map"] == {"tmp_r": "fixed-r"}
+    rel = _model().relationships["fixed-r"]
+    assert (rel.source_id, rel.target_id, rel.properties) == ("b", "c", {"weight": 5})
+
+
+def test_same_batch_ops_resolve_through_hinted_id(seeded: TestClient) -> None:
+    """A later op may reference the create by temp id; id_map maps it to the hint."""
+    res = _post_ops(
+        seeded,
+        [
+            _hinted_create("tmp_x", "fixed-1", "X"),
+            {
+                "kind": "create_relationship",
+                "temp_id": "tmp_r",
+                "type_name": "Links",
+                "source_id": "tmp_x",
+                "target_id": "c",
+                "properties": {},
+            },
+        ],
+    )
+    assert res.status_code == 200, res.text
+    rid = res.json()["id_map"]["tmp_r"]
+    assert _model().relationships[rid].source_id == "fixed-1"
+
+
+def test_create_id_hint_taken_422_rolls_back_whole_batch(seeded: TestClient) -> None:
+    before = _snapshot(_model())
+    rev = _rev()
+    res = _post_ops(
+        seeded,
+        [_hinted_create("tmp_1", "zzz", "Z"), _hinted_create("tmp_2", "a", "Dup")],
+    )
+    assert res.status_code == 422, res.text
+    assert "already in use" in res.json()["detail"]
+    assert _snapshot(_model()) == before  # the first create was rolled back too
+    assert "zzz" not in _model().elements
+    assert _rev() == rev
+
+
+def test_create_id_hint_reserved_prefix_422(seeded: TestClient) -> None:
+    res = _post_ops(seeded, [_hinted_create("tmp_1", "tmp_zz", "Z")])
+    assert res.status_code == 422, res.text
+    assert "reserved" in res.json()["detail"]
+
+
+def test_undo_removes_id_hinted_create(seeded: TestClient) -> None:
+    assert _post_ops(seeded, [_hinted_create("tmp_x", "fixed-1", "X")]).status_code == 200
+    assert _undo(seeded).status_code == 200
+    assert "fixed-1" not in _model().elements
+
+
+def test_id_hint_journals_canonical_temp_id_without_hint(seeded: TestClient) -> None:
+    """The journal keeps only the canonical temp_id (= final id): hydration
+    replay and undo never see the hint."""
+    from data_rover.api import content
+    from data_rover.api.db import db_session
+
+    base = _rev()
+    assert _post_ops(seeded, [_hinted_create("tmp_x", "fixed-1", "X")]).status_code == 200
+    with db_session() as s:
+        rows = content.commits_after(s, "default", base)
+    assert len(rows) == 1
+    op = rows[0].ops[0]
+    assert op["temp_id"] == "fixed-1"
+    assert op.get("id") is None

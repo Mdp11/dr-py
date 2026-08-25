@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Element, ModelOut, Relationship } from '$lib/api/types';
-import { buildChangeRequest, composeCrFilename } from '../cr';
+import type { Element, Relationship } from '$lib/api/types';
+import {
+	composeCrFilename,
+	crPrestate,
+	crToDiff,
+	invertChangeRequest,
+	type ChangeRequest
+} from '../cr';
 
 function el(
 	id: string,
@@ -22,103 +28,21 @@ function rel(
 	return { id, type_name, source_id, target_id, properties: props, rev };
 }
 
-function model(els: Element[], rels: Relationship[]): ModelOut {
-	return { elements: els, relationships: rels };
+/** A `datarover.cr/v1` document with the named op buckets filled in. */
+function crDoc(ops: {
+	elements?: Partial<ChangeRequest['ops']['elements']>;
+	relationships?: Partial<ChangeRequest['ops']['relationships']>;
+}): ChangeRequest {
+	return {
+		format: 'datarover.cr/v1',
+		createdAt: '2026-05-28T14:30:22.123Z',
+		baseline: { filename: 'base.json', elementCount: 2, relationshipCount: 1 },
+		ops: {
+			elements: { added: [], modified: [], deleted: [], ...ops.elements },
+			relationships: { added: [], modified: [], deleted: [], ...ops.relationships }
+		}
+	};
 }
-
-const FIXED_NOW = (): Date => new Date('2026-05-28T14:30:22.123Z');
-
-describe('buildChangeRequest', () => {
-	it('produces empty op buckets when baseline and saved are identical', () => {
-		const m = model([el('e1', { a: 1 })], [rel('r1', 'e1', 'e1')]);
-		const cr = buildChangeRequest(m, m, 'myModel.json', FIXED_NOW);
-		expect(cr.format).toBe('datarover.cr/v1');
-		expect(cr.createdAt).toBe('2026-05-28T14:30:22.123Z');
-		expect(cr.baseline).toEqual({
-			filename: 'myModel.json',
-			elementCount: 1,
-			relationshipCount: 1
-		});
-		expect(cr.ops.elements.added).toEqual([]);
-		expect(cr.ops.elements.modified).toEqual([]);
-		expect(cr.ops.elements.deleted).toEqual([]);
-		expect(cr.ops.relationships.added).toEqual([]);
-		expect(cr.ops.relationships.modified).toEqual([]);
-		expect(cr.ops.relationships.deleted).toEqual([]);
-	});
-
-	it('captures an added element with the full entity', () => {
-		const before = model([], []);
-		const e = el('e1', { name: 'A' });
-		const after = model([e], []);
-		const cr = buildChangeRequest(before, after, 'm.json', FIXED_NOW);
-		expect(cr.ops.elements.added).toEqual([e]);
-		expect(cr.ops.elements.modified).toEqual([]);
-		expect(cr.ops.elements.deleted).toEqual([]);
-	});
-
-	it('captures a modified element with full before and after', () => {
-		const eBefore = el('e1', { name: 'A' }, 1);
-		const eAfter = el('e1', { name: 'B' }, 2);
-		const cr = buildChangeRequest(model([eBefore], []), model([eAfter], []), 'm.json', FIXED_NOW);
-		expect(cr.ops.elements.modified).toEqual([{ id: 'e1', before: eBefore, after: eAfter }]);
-		expect(cr.ops.elements.added).toEqual([]);
-		expect(cr.ops.elements.deleted).toEqual([]);
-	});
-
-	it('captures a deleted element with the full pre-deletion entity', () => {
-		const e = el('e1', { name: 'A' });
-		const cr = buildChangeRequest(model([e], []), model([], []), 'm.json', FIXED_NOW);
-		expect(cr.ops.elements.deleted).toEqual([e]);
-		expect(cr.ops.elements.added).toEqual([]);
-		expect(cr.ops.elements.modified).toEqual([]);
-	});
-
-	it('omits modified entries when before and after are deep-equal even if rev changed', () => {
-		// Characterises the buildChangeRequest -> computeDiff pass-through:
-		// computeDiff does not emit a 'modified' entry when only `rev` changed,
-		// so the CR should not contain one either.
-		const eBefore = el('e1', { name: 'A' }, 1);
-		const eAfter = el('e1', { name: 'A' }, 2);
-		const cr = buildChangeRequest(model([eBefore], []), model([eAfter], []), 'm.json', FIXED_NOW);
-		expect(cr.ops.elements.modified).toEqual([]);
-	});
-
-	it('captures relationship add / modify / delete with full entities', () => {
-		const rBefore = rel('r1', 'a', 'b', { kind: 'x' }, 1);
-		const rAfter = rel('r1', 'a', 'b', { kind: 'y' }, 2);
-		const rNew = rel('r2', 'a', 'c');
-		const rGone = rel('r3', 'b', 'c');
-		const cr = buildChangeRequest(
-			model([], [rBefore, rGone]),
-			model([], [rAfter, rNew]),
-			'm.json',
-			FIXED_NOW
-		);
-		expect(cr.ops.relationships.added).toEqual([rNew]);
-		expect(cr.ops.relationships.modified).toEqual([{ id: 'r1', before: rBefore, after: rAfter }]);
-		expect(cr.ops.relationships.deleted).toEqual([rGone]);
-	});
-
-	it('reports baseline counts (not saved counts)', () => {
-		const baseline = model([el('a'), el('b'), el('c')], [rel('r1', 'a', 'b')]);
-		const saved = model([el('a'), el('b')], []); // c and r1 deleted
-		const cr = buildChangeRequest(baseline, saved, 'm.json', FIXED_NOW);
-		expect(cr.baseline.elementCount).toBe(3);
-		expect(cr.baseline.relationshipCount).toBe(1);
-	});
-
-	it('accepts a null baseline filename', () => {
-		const cr = buildChangeRequest(model([], []), model([], []), null, FIXED_NOW);
-		expect(cr.baseline.filename).toBeNull();
-	});
-
-	it('uses the runtime clock when none is injected', () => {
-		const cr = buildChangeRequest(model([], []), model([], []), null);
-		// Should be a valid ISO 8601 timestamp ending in Z.
-		expect(cr.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-	});
-});
 
 describe('composeCrFilename', () => {
 	// 2026-05-28 14:30:22 local time. Using a UTC fixed clock would make
@@ -274,6 +198,12 @@ describe('saveWithOptionalCr', () => {
 		expect(written.format).toBe('datarover.cr/v1');
 		// the transport-only `complete` flag is stripped from the file
 		expect('complete' in written).toBe(false);
+		// the server cannot know the file the model came from; the caller can
+		expect(written.baseline).toEqual({
+			filename: 'myModel.json',
+			elementCount: 0,
+			relationshipCount: 0
+		});
 	});
 
 	it('falls back to model.json when no filename is known', async () => {
@@ -419,5 +349,98 @@ describe('saveWithOptionalCr', () => {
 			expect(result.savedFilename).toBe('m.json');
 			expect(result.message).toBe('quota exceeded');
 		}
+	});
+});
+
+describe('invertChangeRequest', () => {
+	it('swaps added/deleted and before/after, keeping the envelope', () => {
+		const cr = crDoc({
+			elements: {
+				added: [el('c')],
+				modified: [{ id: 'a', before: el('a', { n: 1 }), after: el('a', { n: 2 }) }],
+				deleted: [el('b')]
+			},
+			relationships: { added: [rel('r2', 'a', 'c')], deleted: [rel('r1', 'a', 'b')] }
+		});
+		const inv = invertChangeRequest(cr);
+		expect(inv.format).toBe('datarover.cr/v1');
+		expect(inv.createdAt).toBe(cr.createdAt);
+		expect(inv.baseline).toEqual(cr.baseline);
+		expect(inv.ops.elements.added.map((e) => e.id)).toEqual(['b']);
+		expect(inv.ops.elements.deleted.map((e) => e.id)).toEqual(['c']);
+		expect(inv.ops.elements.modified).toEqual([
+			{ id: 'a', before: el('a', { n: 2 }), after: el('a', { n: 1 }) }
+		]);
+		expect(inv.ops.relationships.added.map((r) => r.id)).toEqual(['r1']);
+		expect(inv.ops.relationships.deleted.map((r) => r.id)).toEqual(['r2']);
+		expect(invertChangeRequest(inv)).toEqual(cr);
+	});
+});
+
+describe('crToDiff', () => {
+	it('flattens the six op buckets into per-kind diff entries', () => {
+		const cr = crDoc({
+			elements: {
+				added: [el('c')],
+				modified: [{ id: 'a', before: el('a', { n: 1 }), after: el('a', { n: 2 }) }],
+				deleted: [el('b')]
+			},
+			relationships: {
+				added: [rel('r3', 'a', 'c')],
+				modified: [
+					{
+						id: 'r2',
+						before: rel('r2', 'a', 'b', { w: 1 }),
+						after: rel('r2', 'b', 'a', { w: 1 })
+					}
+				],
+				deleted: [rel('r1', 'a', 'b')]
+			}
+		});
+		const diff = crToDiff(cr);
+		expect(diff.counts).toEqual({ added: 2, modified: 2, deleted: 2 });
+		expect(diff.elements.map((d) => [d.id, d.status])).toEqual([
+			['c', 'added'],
+			['a', 'modified'],
+			['b', 'deleted']
+		]);
+		expect(diff.elements[1].modifiedFields).toEqual(['n']);
+		const r2 = diff.relationships.find((d) => d.id === 'r2')!;
+		expect(r2.status).toBe('modified');
+		expect(r2.modifiedFields).toEqual(['source_id', 'target_id']);
+	});
+});
+
+describe('crPrestate', () => {
+	it('collects the before-state of modified and deleted entities only', () => {
+		const cr = crDoc({
+			elements: {
+				added: [el('c')],
+				modified: [{ id: 'a', before: el('a', { n: 1 }), after: el('a', { n: 2 }) }],
+				deleted: [el('b')]
+			},
+			relationships: { deleted: [rel('r1', 'a', 'b')] }
+		});
+		expect(crPrestate(cr)).toEqual({
+			elements: [el('a', { n: 1 }), el('b')],
+			relationships: [rel('r1', 'a', 'b')]
+		});
+	});
+
+	it('keeps the first entry per id — the output feeds a keyed list', () => {
+		const cr = crDoc({
+			elements: {
+				modified: [{ id: 'a', before: el('a', { n: 1 }), after: el('a', { n: 2 }) }],
+				deleted: [el('a', { n: 9 })]
+			},
+			relationships: {
+				modified: [{ id: 'r1', before: rel('r1', 'a', 'b'), after: rel('r1', 'a', 'c') }],
+				deleted: [rel('r1', 'a', 'z')]
+			}
+		});
+		expect(crPrestate(cr)).toEqual({
+			elements: [el('a', { n: 1 })],
+			relationships: [rel('r1', 'a', 'b')]
+		});
 	});
 });

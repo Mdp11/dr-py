@@ -190,3 +190,25 @@ def test_view_op_commit_survives_eviction(client: TestClient) -> None:
     assert after == before
     assert after["view"]["folders"][0]["name"] == "A2"
     assert after["view_rev"] == expected_view_rev
+
+
+def test_hydrate_replay_ignores_id_hint_in_restore_mode() -> None:
+    """Canonical journal ops carry the final id as temp_id; a stray `id` key
+    is ignored by restore-mode replay."""
+    sess = _seed_baseline()
+    create = {
+        "kind": "create_element",
+        "temp_id": "e1",
+        "id": "ignored",
+        "type_name": _first_concrete_element_type(sess),
+        "properties": {},
+    }
+    with db.db_session() as s:
+        content.append_commit(
+            s, "p1", rev=1, commit_id="c1", author_id=None,
+            ops=[create], inverse_ops=[], id_map={},
+        )
+        content.set_model_rev(s, "p1", 1)
+    h = hydration.hydrate_session("p1")
+    assert h.model is not None
+    assert "e1" in h.model.elements and "ignored" not in h.model.elements

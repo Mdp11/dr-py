@@ -23,6 +23,7 @@ from ..db_models import Membership, User
 from ..deps import (
     Session,
     get_request_session,
+    read_capped_body,
     require_allowed_origin,
     require_metamodel,
     require_model,
@@ -258,11 +259,12 @@ async def upload_model_body(
 
     The frontend streams a picked ``File`` straight into ``fetch``'s body
     — no JS-side parse, no string materialization in the browser. Here the
-    body is buffered (``await request.body()``) and parsed in one
-    ``json.loads``: at the ~80 MB target size that is one transient bytes
-    buffer and a single fast C-level parse, so a true incremental streaming
-    parser would add a dependency and complexity for no measured win; it can
-    be slotted into this handler later without changing the contract.
+    body is buffered (``read_capped_body``) and parsed in one ``json.loads``:
+    at the ~80 MB target size that is one transient bytes buffer and a single
+    fast C-level parse, so a true incremental streaming parser would add a
+    dependency and complexity for no measured win; it can be slotted into
+    this handler later without changing the contract. Buffering is bounded:
+    a body over ``settings.max_request_body_bytes`` is refused with 413.
 
     The content type is deliberately not enforced: browsers send
     ``application/octet-stream`` (or nothing) for streamed File bodies, so
@@ -270,7 +272,7 @@ async def upload_model_body(
     seeding, and summary response as POST /model/load.
     """
     metamodel = require_metamodel(session)
-    body = await request.body()
+    body = await read_capped_body(request)
     try:
         raw = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:

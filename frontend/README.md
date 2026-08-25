@@ -52,15 +52,16 @@ The UI is a fixed grid:
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **TopBar** — a growable toolbar `<nav>` next to the logo holds **eight flat
-  icon+text controls**, in this order: **Artifacts** (`ArtifactsMenu.svelte`
-  — Export…/Import…, with Import hidden for viewers), **Issues** (opens the
-  singleton Issues tab), **Compare** (the two-model compare screen),
-  **Apply CR**, **Edit Metamodel** (opens the live metamodel editor tab),
-  **Export** (downloads the current model), **History** (`HistoryDrawer`),
-  and **Settings** (`SettingsDialog`, where an owner can toggle **strict
-  mode**). There is no overflow/three-dots menu. The right side holds the
-  validation chip, **Undo** the last staged edit, **Validate**, **Commit**
+- **TopBar** — a toolbar `<nav>` next to the logo holds **five flat icon+text
+  controls**, in this order: **Metamodel** (opens the live metamodel editor
+  tab), **Issues** (opens the singleton Issues tab), **Artifacts**
+  (`ArtifactsMenu.svelte` — Export…/Import…, with Import hidden for viewers),
+  **Model** (a dropdown: History (`HistoryDrawer`) · Compare… · Apply CR… ·
+  Export, the last gated on a loaded model) and **Settings**
+  (`SettingsDialog`, where an owner can toggle **strict mode**). Compare… and
+  Apply CR… open `ModelChangeDialog.svelte` in its two modes (see "Compare /
+  Apply CR" below). There is no overflow/three-dots menu. The right side holds
+  the validation chip, **Undo** the last staged edit, **Validate**, **Commit**
   (opens `DiffDrawer`), the strict-mode badge, and the staged-changes counter.
 - **Sidebar** — fuzzy search, type filter (each concrete type has a `+` button
   to create a new element of that type), containment tree with keyboard nav and
@@ -125,7 +126,7 @@ Access is **cookie-based** and project-scoped. The shape:
   `/login`; authed on `/login` → `/projects`; non-admin on `/admin*` → `/projects`.
   `routes/+page.ts` redirects `/` → `/projects`. The routes are: `/login`,
   `/projects` (picker), `/admin` (console, admin-only), and
-  `/p/[projectId]` (the workspace) + `/p/[projectId]/compare`.
+  `/p/[projectId]` (the workspace).
 - **App chrome** — `routes/+layout.svelte` renders `AppHeader` (email, Sign out,
   Projects, Admin-if-admin) on the picker/admin routes, but **not** inside the
   workspace (`/p/…`) or on `/login`.
@@ -487,6 +488,37 @@ client for the four bundle routes is `lib/api/artifact-bundle.ts`.
   backend's `ProjectOut.skipped_artifacts` comes back non-empty, the wizard
   defers navigating to the new project and shows a warning panel listing each
   skipped bundle id and reason first.
+
+### Compare / Apply CR (`ModelChangeDialog`)
+
+Both Model-menu items open `components/ModelChangeDialog.svelte`
+(`mode: 'compare' | 'apply-cr'`), whose lower half is the shared
+`ProposalPreview.svelte` (a `CompareDiff` over the proposal, a conflicts block,
+an error line). **Nothing runs on file selection** — every request sits behind
+a button:
+
+- **Compare…**: `Choose model…` → From/To + ⇄ Swap → **Preview diff**
+  (`POST /model/compare`, cached per file + `model_rev`; inverted client-side
+  by `invertChangeRequest` when swapped) · **Create CR** (saves the possibly-
+  inverted CR via `saveJsonToFile`/`composeCrFilename`, `complete` stripped) ·
+  **Replace** (session → file by definition, so disabled while swapped; posts
+  the compare CR to `POST /model/apply-cr` and stages the result).
+- **Apply CR…**: an ordered list of CR files (multi-select, ↑/↓/✕; each checked
+  for `format === 'datarover.cr/v1'`) → **Preview diff** / **Stage edits**, both
+  `POST /model/apply-cr` with the list in display order; a 409 renders
+  "CR #k conflicts".
+- **Staging** goes through `state/stage-proposed.ts`'s
+  `stageProposedOps(ops, modelRev, prestate)` — the snippet-run primitive
+  generalized: temp-id remap that keeps each create's `id` hint,
+  `crPrestate(cr)` seeded into the caches so a large Replace fetches nothing,
+  per-intent lock groups, then `emit`. From there the edits are ordinary staged
+  edits (DiffDrawer, Ctrl+S, commit).
+- **Gates**: Replace / Stage edits need `canEdit()` AND an empty model staged
+  buffer (`hasStagedOps()` false — the proposal is computed against the
+  committed model); a hint says why. In compare mode Preview and Create CR are
+  viewer-allowed (`POST /model/compare` is a read-only POST); in apply-cr mode
+  Preview is gated on `canEdit()` too, since it goes through
+  `POST /model/apply-cr`, which is deliberately treated as a write.
 
 ### View editing state (staged `view.*` ops)
 
@@ -1495,7 +1527,6 @@ src/
     admin/+page.svelte              Admin console (Users + Members tabs)
     p/[projectId]/+layout.ts        setActiveProject → project-scoped base URL
     p/[projectId]/+page.svelte      The workspace; grids the four panels + drawers
-    p/[projectId]/compare/+page.svelte  Two-model compare screen
   lib/
     api/                Typed REST client (client.ts: cookie creds + CSRF
                         header, dynamic project base URL), zod schemas, errors;
@@ -1510,6 +1541,8 @@ src/
                         getCommitHistory (GET /commits, paged) and
                         getModelAtRev (GET /commits/{rev}/model);
                         revertToCommit (POST /commits/revert)
+    api/changeRequest.ts    compareModel + proposeCr (the dry-run
+                        compare / apply-cr proposals)
     api/settings.ts     REST client for project settings:
                         getSettings (GET /settings) and
                         updateSettings (PATCH /settings → strict_mode bool)
@@ -1584,9 +1617,12 @@ src/
                         guard (beforeNavigate in p/[projectId]/+page);
                         snippet-editor.svelte.ts — per-tab code-snippet
                         drafts, save lifecycle, debounced lint + run/stop
-                        state; snippet-stage.ts — folds a snippet run's op
-                        batch into the staged-edits buffer (temp-id remap,
-                        pre-state prefetch, per-intent lock groups);
+                        state; stage-proposed.ts — folds a server-proposed
+                        op batch (snippet run, CR/compare proposal) into the
+                        staged-edits buffer (temp-id remap that preserves id
+                        hints, prestate seeding or prefetch, per-intent lock
+                        groups); snippet-stage.ts — the snippet-run wrapper
+                        over it;
                         snippet-docs.svelte.ts — fetch-once cache of the
                         facade docs payload (ensureSnippetDocs/
                         getSnippetDocs), silent-degrade on fetch failure,
@@ -1671,6 +1707,10 @@ src/
                         ArtifactsMenu.svelte — the TopBar toolbar's
                         Export…/Import… dropdown, mounting
                         Export/ImportArtifactsDialog.svelte once beside it;
+                        ModelChangeDialog.svelte — Compare… / Apply CR…
+                        (one dialog, two modes), with
+                        ProposalPreview.svelte — its shared diff /
+                        conflicts block;
                         Metamodel/{MetamodelTab,MetamodelYamlEditor,
                         MetamodelPreviewPanel}.svelte — the metamodel tab,
                         its CodeMirror YAML host (readOnly compartment +

@@ -12,18 +12,17 @@ from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 
 from ..schemas import ElementOut, RelationshipOut
-from .ops import TEMP_ID_PREFIX
+from .ops import TEMP_ID_PREFIX, is_reserved_id
 
 
 def _reject_reserved_id(entity_id: str, *, element: bool) -> None:
-    """Reject ids carrying the ops-protocol temp-id prefix.
+    """422 for a loaded entity id carrying the ops-protocol temp-id prefix.
 
-    ``tmp_``-prefixed ids are reserved for client-generated provisional ids
-    in POST /model/ops; a loaded entity carrying one would be ambiguous to
-    the restore-mode applier (delete + undo would mint a fresh canonical id
-    instead of reinstating the original), so they are banned at load time.
+    A loaded ``tmp_`` id would be ambiguous to the restore-mode applier
+    (delete + undo would mint a fresh canonical id instead of reinstating the
+    original), so it is banned at load time.
     """
-    if entity_id.startswith(TEMP_ID_PREFIX):
+    if is_reserved_id(entity_id):
         kind = "Element" if element else "Relationship"
         raise HTTPException(
             status_code=422,

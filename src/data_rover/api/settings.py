@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     #: bounded per-client feed queue. A client whose queue overflows is dropped
     #: and reconnects. Large enough to absorb a burst of commits.
     feed_queue_max: int = 256
+    #: Ceiling (bytes) on a raw request body the API buffers whole — POST
+    #: /model/upload and POST /model/compare (see ``deps.read_capped_body``).
+    #: A runaway/abuse backstop, not a tuning knob: the documented target
+    #: model is ~80 MB, so this sits far above any legitimate upload. 0
+    #: disables the cap.
+    max_request_body_bytes: int = 512 * 1024 * 1024
     #: xlsx export autofit ceiling, in pixels: one huge cell must not
     #: blow a column out to an unusable width, but 300 (~43 chars) proved too
     #: tight in practice. ~86 chars by default; Excel's own hard cap is 1790.

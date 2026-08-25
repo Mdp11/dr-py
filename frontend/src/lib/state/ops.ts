@@ -17,6 +17,10 @@ export type ElementOp =
 			temp_id: string;
 			type_name: string;
 			properties: Record<string, unknown>;
+			/** Requested final id — only proposed batches (CR / compare) set it; the
+			 * server reinstates the entity under it or 422s the batch if taken.
+			 * `temp_id` stays the batch-internal handle. Manual edits never set it. */
+			id?: string;
 	  }
 	| {
 			kind: 'update_element';
@@ -39,6 +43,8 @@ export type RelationshipOp =
 			source_id: string;
 			target_id: string;
 			properties: Record<string, unknown>;
+			/** See `create_element.id`. */
+			id?: string;
 	  }
 	| {
 			kind: 'update_relationship';

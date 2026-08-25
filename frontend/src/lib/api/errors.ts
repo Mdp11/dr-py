@@ -73,5 +73,8 @@ export function messageFromBody(body: unknown, status: number): string {
 		if (typeof b.error === 'string') return b.error;
 		if (typeof b.message === 'string') return b.message;
 	}
+	// A 413 can also come from a proxy ahead of the API, whose body is HTML or
+	// empty — "HTTP 413" alone tells the user nothing actionable.
+	if (status === 413) return 'The file is too large for this server to accept.';
 	return `HTTP ${status}`;
 }

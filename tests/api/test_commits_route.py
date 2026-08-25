@@ -310,3 +310,27 @@ def test_commit_survives_post_commit_snapshot_failure(
     # the durable commit landed and rev advanced despite the snapshot failure
     assert r.status_code == 200, r.text
     assert r.json()["model_rev"] == before + 1
+
+
+def test_commit_honors_create_id_hint(client: TestClient) -> None:
+    """A create needs no lease, so an id-hinted create commits with no tokens."""
+    r = client.post(
+        papi("/commits"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {
+                    "kind": "create_element",
+                    "temp_id": "tmp_x",
+                    "id": "node-7",
+                    "type_name": _etype(client),
+                    "properties": {},
+                }
+            ],
+            "message": "hinted",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["id_map"] == {"tmp_x": "node-7"}
+    assert r.json()["changed_elements"][0]["id"] == "node-7"

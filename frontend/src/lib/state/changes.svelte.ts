@@ -6,8 +6,8 @@
 // `EntityDiff` shape `DiffRow.svelte` already renders.
 //
 // Refresh policy: `TopBar` re-fetches the summary whenever the store's
-// `model_rev` changes (i.e. after every acknowledged ops batch / undo /
-// apply-cr) and after load flows clear it. NOTE: the change set is relative
+// `model_rev` changes (i.e. after every acknowledged ops batch / undo)
+// and after load flows clear it. NOTE: the change set is relative
 // to the model as LOADED into the session — saving to a file does not reset
 // it (the backend op log has no "mark saved" notion), which is a deliberate
 // departure from the old client-diff counter that reset on save.

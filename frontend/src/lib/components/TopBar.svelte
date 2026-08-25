@@ -5,7 +5,6 @@
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import {
-		getActiveProjectId,
 		getEffectiveIssues,
 		getFilename,
 		getLastError,
@@ -50,7 +49,7 @@
 		Undo2
 	} from '@lucide/svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-	import ApplyCrDialog from './ApplyCrDialog.svelte';
+	import ModelChangeDialog from './ModelChangeDialog.svelte';
 	import ArtifactsMenu from './ArtifactsMenu.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
 
@@ -59,6 +58,7 @@
 	const barBtn =
 		'flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50';
 
+	let compareOpen = $state(false);
 	let applyCrOpen = $state(false);
 	let settingsOpen = $state(false);
 	const view = $derived(getView());
@@ -200,23 +200,21 @@
 				<ListChecks class="h-3.5 w-3.5" /> Issues
 			</button>
 			<ArtifactsMenu />
-			<button type="button" class={barBtn} onclick={() => (applyCrOpen = true)}>
-				<FileInput class="h-3.5 w-3.5" /> Apply CR
-			</button>
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger data-testid="model-menu-trigger" class={barBtn}>
 					<Database class="h-3.5 w-3.5" />
 					Model
 					<ChevronDown class="h-3 w-3" />
 				</DropdownMenu.Trigger>
-				<DropdownMenu.Content align="start" class="w-40">
+				<DropdownMenu.Content align="start" class="w-44">
 					<DropdownMenu.Item onSelect={() => setHistoryDrawerOpen(true)}>
 						<History class="h-3.5 w-3.5" /> History
 					</DropdownMenu.Item>
-					<DropdownMenu.Item
-						onSelect={() => void goto(resolve(`/p/${getActiveProjectId()}/compare`))}
-					>
-						<GitCompareArrows class="h-3.5 w-3.5" /> Compare
+					<DropdownMenu.Item onSelect={() => (compareOpen = true)}>
+						<GitCompareArrows class="h-3.5 w-3.5" /> Compare…
+					</DropdownMenu.Item>
+					<DropdownMenu.Item onSelect={() => (applyCrOpen = true)}>
+						<FileInput class="h-3.5 w-3.5" /> Apply CR…
 					</DropdownMenu.Item>
 					<DropdownMenu.Item disabled={summary === null} onSelect={() => void onExport()}>
 						<Download class="h-3.5 w-3.5" /> Export
@@ -331,5 +329,6 @@
 	</div>
 </header>
 
-<ApplyCrDialog bind:open={applyCrOpen} />
+<ModelChangeDialog mode="compare" bind:open={compareOpen} />
+<ModelChangeDialog mode="apply-cr" bind:open={applyCrOpen} />
 <SettingsDialog bind:open={settingsOpen} />

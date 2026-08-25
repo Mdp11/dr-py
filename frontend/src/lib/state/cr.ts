@@ -1,5 +1,10 @@
-import type { ChangesDoc, Element, ModelOut, Relationship } from '$lib/api/types';
-import { computeDiff, type EntityDiff } from './diff';
+import type { ChangesDoc, Conflict, Element, Relationship } from '$lib/api/types';
+import {
+	elementModifiedFields,
+	relationshipModifiedFields,
+	type Diff,
+	type EntityDiff
+} from './diff';
 
 export interface ModifiedElement {
 	id: string;
@@ -33,81 +38,6 @@ export interface ChangeRequest {
 			deleted: Relationship[];
 		};
 	};
-}
-
-/**
- * Build a Change Request describing the diff between `baseline` and `saved`.
- *
- * Both inputs must be canonical ModelOut values — i.e. all IDs are real,
- * not `tmp_*`. Callers are responsible for capturing the pre-save baseline
- * *before* it gets replaced; the post-save returned model is what makes all
- * IDs server-canonical.
- *
- * Pure: no I/O, no state. Inject `now` for deterministic timestamps in tests.
- */
-export function buildChangeRequest(
-	baseline: ModelOut,
-	saved: ModelOut,
-	baselineFilename: string | null,
-	now: () => Date = () => new Date()
-): ChangeRequest {
-	// computeDiff's second parameter is typed Snapshot, but ModelOut is
-	// structurally identical ({ elements, relationships }) and the diff
-	// algorithm doesn't care which type label the working set carries.
-	const diff = computeDiff(baseline, saved);
-
-	const elementsAdded: Element[] = [];
-	const elementsModified: ModifiedElement[] = [];
-	const elementsDeleted: Element[] = [];
-	partitionEntities<Element>(diff.elements, elementsAdded, elementsModified, elementsDeleted);
-
-	const relsAdded: Relationship[] = [];
-	const relsModified: ModifiedRelationship[] = [];
-	const relsDeleted: Relationship[] = [];
-	partitionEntities<Relationship>(diff.relationships, relsAdded, relsModified, relsDeleted);
-
-	return {
-		format: 'datarover.cr/v1',
-		createdAt: now().toISOString(),
-		baseline: {
-			filename: baselineFilename,
-			elementCount: baseline.elements.length,
-			relationshipCount: baseline.relationships.length
-		},
-		ops: {
-			elements: {
-				added: elementsAdded,
-				modified: elementsModified,
-				deleted: elementsDeleted
-			},
-			relationships: {
-				added: relsAdded,
-				modified: relsModified,
-				deleted: relsDeleted
-			}
-		}
-	};
-}
-
-function partitionEntities<T>(
-	diffs: EntityDiff[],
-	added: T[],
-	modified: { id: string; before: T; after: T }[],
-	deleted: T[]
-): void {
-	for (const d of diffs) {
-		if (d.status === 'added' && d.after) {
-			added.push(d.after as T);
-		} else if (d.status === 'modified' && d.before && d.after) {
-			modified.push({
-				id: d.id,
-				before: d.before as T,
-				after: d.after as T
-			});
-		} else if (d.status === 'deleted' && d.before) {
-			deleted.push(d.before as T);
-		}
-	}
 }
 
 /**
@@ -236,8 +166,12 @@ export async function saveWithOptionalCr(input: SaveWithCrInput): Promise<SaveWi
 	try {
 		const doc = await input.fetchChanges();
 		// strip the transport-only `complete` flag so the file is exactly the
-		// datarover.cr/v1 shape Apply CR and the compare flow expect
-		const cr: Record<string, unknown> = { ...doc };
+		// datarover.cr/v1 shape Apply CR and the compare flow expect, and fill
+		// in the baseline filename the server cannot know
+		const cr: Record<string, unknown> = {
+			...doc,
+			baseline: { ...doc.baseline, filename: input.filename }
+		};
 		delete cr.complete;
 		await input.saveFile(cr, crName, null);
 	} catch (err) {
@@ -261,5 +195,110 @@ export async function saveWithOptionalCr(input: SaveWithCrInput): Promise<SaveWi
 		kind: 'saved',
 		savedFilename: modelOutcome.filename,
 		savedHandle: modelOutcome.handle
+	};
+}
+
+/** What the dialog's preview renders: the CR as a Diff plus the hidden count. */
+export interface CrPreview {
+	diff: Diff;
+	unchangedHidden: number;
+}
+
+/** A 409 from POST /model/apply-cr: `crIndex` is null for a single-CR flow. */
+export interface CrConflictReport {
+	crIndex: number | null;
+	items: Conflict[];
+}
+
+/**
+ * The change request that undoes `cr` (added↔deleted, before↔after). Pure;
+ * the envelope (format, createdAt, baseline, any extra field such as the
+ * server's `complete`) is kept as-is — the caller relabels it.
+ */
+export function invertChangeRequest<T extends ChangeRequest>(cr: T): T {
+	const { elements, relationships } = cr.ops;
+	return {
+		...cr,
+		ops: {
+			elements: {
+				added: elements.deleted,
+				modified: elements.modified.map((m) => ({ id: m.id, before: m.after, after: m.before })),
+				deleted: elements.added
+			},
+			relationships: {
+				added: relationships.deleted,
+				modified: relationships.modified.map((m) => ({
+					id: m.id,
+					before: m.after,
+					after: m.before
+				})),
+				deleted: relationships.added
+			}
+		}
+	};
+}
+
+/** A CR as a renderable Diff: its six op buckets flattened back into
+ * added/modified/deleted entries per entity kind. */
+export function crToDiff(cr: ChangeRequest): Diff {
+	const { elements, relationships } = cr.ops;
+	const els: EntityDiff[] = [
+		...elements.added.map((e) => ({ id: e.id, status: 'added' as const, after: e })),
+		...elements.modified.map((m) => ({
+			id: m.id,
+			status: 'modified' as const,
+			before: m.before,
+			after: m.after,
+			modifiedFields: elementModifiedFields(m.before, m.after)
+		})),
+		...elements.deleted.map((e) => ({ id: e.id, status: 'deleted' as const, before: e }))
+	];
+	const rels: EntityDiff[] = [
+		...relationships.added.map((r) => ({ id: r.id, status: 'added' as const, after: r })),
+		...relationships.modified.map((m) => ({
+			id: m.id,
+			status: 'modified' as const,
+			before: m.before,
+			after: m.after,
+			modifiedFields: relationshipModifiedFields(m.before, m.after)
+		})),
+		...relationships.deleted.map((r) => ({ id: r.id, status: 'deleted' as const, before: r }))
+	];
+	const counts = { added: 0, modified: 0, deleted: 0 };
+	for (const d of [...els, ...rels]) {
+		if (d.status !== 'unchanged') counts[d.status]++;
+	}
+	return { elements: els, relationships: rels, counts };
+}
+
+/** First entry per id — the output feeds a keyed list, so a `modified.before`
+ * and a `deleted` sharing an id (impossible for a server CR, which partitions
+ * by id, but a CR file is user-supplied) must not both survive. */
+function byId<T extends { id: string }>(entities: T[]): T[] {
+	const seen = new Set<string>();
+	const out: T[] = [];
+	for (const e of entities) {
+		if (seen.has(e.id)) continue;
+		seen.add(e.id);
+		out.push(e);
+	}
+	return out;
+}
+
+/**
+ * The pre-state a proposal already carries: the `before` of every modified
+ * entity plus every deleted one — exactly the update/delete targets
+ * `stageProposedOps` would otherwise fetch one by one.
+ */
+export function crPrestate(cr: ChangeRequest): {
+	elements: Element[];
+	relationships: Relationship[];
+} {
+	return {
+		elements: byId([...cr.ops.elements.modified.map((m) => m.before), ...cr.ops.elements.deleted]),
+		relationships: byId([
+			...cr.ops.relationships.modified.map((m) => m.before),
+			...cr.ops.relationships.deleted
+		])
 	};
 }
