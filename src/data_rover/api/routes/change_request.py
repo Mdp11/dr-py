@@ -1,4 +1,4 @@
-"""POST /model/apply-cr — propose an op batch from an ordered CR list.
+"""POST /model/apply-cr and POST /model/compare — dry-run proposals.
 
 A dry run: the CRs are applied sequentially and TRANSIENTLY to the session
 model (``apply_change_request`` is pure, so each step is a fresh copy), the
@@ -6,6 +6,10 @@ combined base -> final change request is derived, gated, and translated into
 an op batch (``api/change_request_ops.py``). Nothing is applied, journalled
 or validated here — the client stages the batch and ``POST /commits/preview``
 validates it like any manual edit.
+
+POST /model/compare diffs the session model against an uploaded model and
+returns the same document shape; Replace in the UI is that CR fed straight
+back to apply-cr.
 
 The session model is read WITHOUT the write mutex (the ``/snippets/run``
 precedent): the response carries the ``model_rev`` it saw, and the client
@@ -19,9 +23,10 @@ element type change, which the op protocol cannot express.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from data_rover.core.metamodel.schema import Metamodel
@@ -37,6 +42,7 @@ from ..change_request_ops import UnsupportedChangeError, ops_for_change
 from ..deps import Session, get_request_session, require_model
 from ..schemas import (
     ChangesOut,
+    CompareResponse,
     CrBaseline,
     CrElementOps,
     CrOps,
@@ -48,6 +54,7 @@ from ..schemas import (
     ProposeCrResponse,
     RelationshipOut,
 )
+from ._snapshot import build_model_from_dicts
 from .read import _now_iso
 
 router = APIRouter()
@@ -193,4 +200,37 @@ def propose_cr(
 
     return ProposeCrResponse(
         model_rev=model_rev, cr=_changes_out(base, combined), ops=ops
+    )
+
+
+@router.post("/model/compare")
+async def compare_model(
+    request: Request,
+    session: Session = Depends(get_request_session),
+) -> CompareResponse:
+    """Diff the session model against the raw other-model JSON body.
+
+    The body is the save-file shape (``{"elements": [...], "relationships":
+    [...]}``), buffered and parsed like POST /model/upload. It is built
+    ``strict=False``: an unknown type in the file is still comparable (only
+    staging it is not — the propose route's gate catches that); reserved
+    ids, duplicate ids and dangling endpoints stay 422 because the diff
+    needs a well-formed model. Direction is always session -> other; the
+    client inverts client-side. Read-only, so viewers may call it.
+    """
+    metamodel, base = require_model(session)
+    body = await request.body()
+    try:
+        raw = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Request body is not valid JSON: {exc}"
+        ) from exc
+    other = build_model_from_dicts(metamodel, raw, strict=False)
+    cr = diff_models(base, other)
+    return CompareResponse(
+        model_rev=session.model_rev,
+        cr=_changes_out(base, cr),
+        other_element_count=len(other.elements),
+        other_relationship_count=len(other.relationships),
     )

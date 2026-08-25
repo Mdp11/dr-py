@@ -789,6 +789,19 @@ class ProposeCrResponse(BaseModel):
     ops: list[ModelOpIn] = Field(default_factory=list)
 
 
+class CompareResponse(BaseModel):
+    """POST /model/compare: the session -> other-model change request."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_rev: int
+    cr: ChangesOut
+    #: entity counts of the OTHER model (the "to" side) so the client can
+    #: report how many unchanged entities the diff hides
+    other_element_count: int
+    other_relationship_count: int
+
+
 # ---------------------------------------------------------------------------
 # Streaming load/save schemas (see routes/model.py)
 # ---------------------------------------------------------------------------
