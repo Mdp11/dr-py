@@ -222,3 +222,114 @@ describe('ModelChangeDialog — compare mode', () => {
 		expect(byTestId<HTMLButtonElement>('mcd-create-cr').disabled).toBe(false);
 	});
 });
+
+const crFile = (name: string, cr = CR_DOC) => {
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping `complete` off the CR shape
+	const { complete: _c, ...doc } = cr;
+	return new File([JSON.stringify(doc)], name, { type: 'application/json' });
+};
+
+describe('ModelChangeDialog — apply-cr mode', () => {
+	it('lists picked CR files in order, rejects non-CR files, and fires no request', async () => {
+		const propose = vi.spyOn(crApi, 'proposeCr');
+		open('apply-cr');
+		expect(byTestId<HTMLButtonElement>('mcd-preview').disabled).toBe(true);
+		pickFiles([
+			crFile('one.cr.json'),
+			new File(['{"elements":[]}'], 'not-a-cr.json', { type: 'application/json' }),
+			crFile('two.cr.json')
+		]);
+		await settle();
+		expect(byTestId('mcd-cr-row-0').textContent).toContain('one.cr.json');
+		expect(byTestId('mcd-cr-row-1').textContent).toContain('two.cr.json');
+		expect(document.body.querySelector('[data-testid="mcd-cr-row-2"]')).toBeNull();
+		expect(byTestId('proposal-error').textContent).toContain('not-a-cr.json');
+		expect(propose).not.toHaveBeenCalled();
+		expect(byTestId<HTMLButtonElement>('mcd-preview').disabled).toBe(false);
+	});
+
+	it('reorder changes the request order; Preview proposes and renders the combined cr', async () => {
+		const propose = vi
+			.spyOn(crApi, 'proposeCr')
+			.mockResolvedValue({ ok: true, modelRev: 3, cr: CR_DOC, ops: [CREATE_OP] });
+		const first = { ...CR_DOC, createdAt: 'first' };
+		const second = { ...CR_DOC, createdAt: 'second' };
+		open('apply-cr');
+		pickFiles([crFile('first.cr.json', first), crFile('second.cr.json', second)]);
+		await settle();
+		byTestId('mcd-cr-down-0').click();
+		flushSync();
+		expect(byTestId('mcd-cr-row-0').textContent).toContain('second.cr.json');
+
+		byTestId('mcd-preview').click();
+		await settle();
+		const sent = propose.mock.calls[0][0].map((cr) => cr.createdAt);
+		expect(sent).toEqual(['second', 'first']);
+		expect(byTestId('proposal-preview').textContent).toContain('+1 added');
+	});
+
+	it('remove drops a file', async () => {
+		open('apply-cr');
+		pickFiles([crFile('a.cr.json'), crFile('b.cr.json')]);
+		await settle();
+		byTestId('mcd-cr-remove-0').click();
+		flushSync();
+		expect(byTestId('mcd-cr-row-0').textContent).toContain('b.cr.json');
+		expect(document.body.querySelector('[data-testid="mcd-cr-row-1"]')).toBeNull();
+	});
+
+	it('a 409 names the conflicting CR by index', async () => {
+		vi.spyOn(crApi, 'proposeCr').mockResolvedValue({
+			ok: false,
+			modelRev: 3,
+			crIndex: 1,
+			conflicts: [{ kind: 'missing', entity: 'element', id: 'zzz', reason: 'gone' }]
+		});
+		open('apply-cr');
+		pickFiles([crFile('a.cr.json'), crFile('b.cr.json')]);
+		await settle();
+		byTestId('mcd-stage').click();
+		await settle();
+		expect(byTestId('proposal-conflicts').textContent).toContain('CR #2 conflicts');
+		expect(byTestId('proposal-conflicts').textContent).toContain('element zzz: missing');
+	});
+
+	it('Stage edits stages the proposal and closes', async () => {
+		vi.spyOn(crApi, 'proposeCr').mockResolvedValue({
+			ok: true,
+			modelRev: 3,
+			cr: CR_DOC,
+			ops: [CREATE_OP]
+		});
+		const stage = vi
+			.spyOn(stageProposed, 'stageProposedOps')
+			.mockResolvedValue({ ok: true, count: 1 });
+		open('apply-cr');
+		pickFiles([crFile('a.cr.json')]);
+		await settle();
+		byTestId('mcd-stage').click();
+		await settle();
+		expect(stage).toHaveBeenCalledWith([CREATE_OP], 3, {
+			elements: [EL('a', 'A'), EL('b', 'B')],
+			relationships: []
+		});
+		expect(document.body.querySelector('[data-testid="mcd-stage"]')).toBeNull();
+	});
+
+	it('a stale stage outcome is reported, not swallowed', async () => {
+		vi.spyOn(crApi, 'proposeCr').mockResolvedValue({
+			ok: true,
+			modelRev: 3,
+			cr: CR_DOC,
+			ops: [CREATE_OP]
+		});
+		vi.spyOn(stageProposed, 'stageProposedOps').mockResolvedValue({ ok: false, reason: 'stale' });
+		open('apply-cr');
+		pickFiles([crFile('a.cr.json')]);
+		await settle();
+		byTestId('mcd-stage').click();
+		await settle();
+		expect(byTestId('proposal-error').textContent).toMatch(/changed since the proposal/);
+		expect(document.body.querySelector('[data-testid="mcd-stage"]')).not.toBeNull();
+	});
+});
