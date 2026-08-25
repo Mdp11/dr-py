@@ -305,6 +305,25 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 		expect(byTestId('proposal-preview').textContent).toContain('+1 added');
 	});
 
+	it('blocks a selection past MAX_CRS_PER_REQUEST before the server sees it', async () => {
+		const propose = vi.spyOn(crApi, 'proposeCr');
+		open('apply-cr');
+		pickFiles(
+			Array.from({ length: crApi.MAX_CRS_PER_REQUEST + 1 }, (_, i) => crFile(`cr${i}.cr.json`))
+		);
+		await settle();
+		expect(byTestId('mcd-gate-hint').textContent).toMatch(
+			new RegExp(`at most ${crApi.MAX_CRS_PER_REQUEST}`, 'i')
+		);
+		expect(byTestId<HTMLButtonElement>('mcd-preview').disabled).toBe(true);
+		expect(byTestId<HTMLButtonElement>('mcd-stage').disabled).toBe(true);
+		byTestId('mcd-cr-remove-0').click();
+		flushSync();
+		expect(document.body.querySelector('[data-testid="mcd-gate-hint"]')).toBeNull();
+		expect(byTestId<HTMLButtonElement>('mcd-preview').disabled).toBe(false);
+		expect(propose).not.toHaveBeenCalled();
+	});
+
 	it('remove drops a file', async () => {
 		open('apply-cr');
 		pickFiles([crFile('a.cr.json'), crFile('b.cr.json')]);

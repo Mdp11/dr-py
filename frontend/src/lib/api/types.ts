@@ -233,12 +233,13 @@ export const ViewStateResponseSchema = z.object({
 });
 export type ViewStateResponse = z.infer<typeof ViewStateResponseSchema>;
 
-export interface Conflict {
-	kind: 'id_exists' | 'missing' | 'before_mismatch';
-	entity: 'element' | 'relationship';
-	id: string;
-	reason: string;
-}
+export const ConflictSchema = z.object({
+	kind: z.enum(['id_exists', 'missing', 'before_mismatch']),
+	entity: z.enum(['element', 'relationship']),
+	id: z.string(),
+	reason: z.string()
+});
+export type Conflict = z.infer<typeof ConflictSchema>;
 
 // ---------------------------------------------------------------------------
 // Delta-protocol schemas — mirror the backend pydantic models in
@@ -711,6 +712,13 @@ export const ProposeCrOutSchema = z.object({
 	model_rev: z.number().int(),
 	cr: ChangesDocSchema,
 	ops: z.array(z.record(z.string(), z.unknown()))
+});
+
+/** The 409 body of POST /model/apply-cr: the FIRST CR that could not apply. */
+export const ProposeCrConflictSchema = z.object({
+	cr_index: z.number().int(),
+	conflicts: z.array(ConflictSchema),
+	model_rev: z.number().int()
 });
 
 // ---------------------------------------------------------------------------

@@ -9,19 +9,10 @@ import {
 	seedRelationships
 } from '../model.svelte';
 import { isTempId, type ModelOp } from '../ops';
-
-const EL = { id: 'e1', type_name: 'Building', properties: { name: 'Town Hall' }, rev: 1 };
-const REL = {
-	id: 'r1',
-	type_name: 'Owns',
-	source_id: 'e1',
-	target_id: 'e2',
-	properties: {},
-	rev: 1
-};
+import { EL, EL2, REL } from './fixtures';
 
 beforeEach(() => {
-	seedElements([EL, { id: 'e2', type_name: 'District', properties: {}, rev: 1 }]);
+	seedElements([EL, EL2]);
 	seedRelationships([REL]);
 	vi.spyOn(checkout, 'ensureCheckout').mockResolvedValue({ ok: true } as never);
 });

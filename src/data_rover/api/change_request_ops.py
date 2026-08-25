@@ -76,22 +76,24 @@ def ops_for_change(cr: ChangeRequest) -> list[ModelOpIn]:
             )
 
     ops: list[ModelOpIn] = []
+    #: element id -> its temp id; only elements, because only an element id is
+    #: ever dereferenced as an endpoint. One counter feeds both spaces, so a
+    #: relationship temp id can never collide with an element's.
     temp_of: dict[str, str] = {}
     counter = 0
 
-    def next_temp(real_id: str) -> str:
+    def next_temp() -> str:
         nonlocal counter
         counter += 1
-        temp_of[real_id] = f"{TEMP_ID_PREFIX}{counter}"
-        return temp_of[real_id]
+        return f"{TEMP_ID_PREFIX}{counter}"
 
-    def ref(entity_id: str) -> str:
-        return temp_of.get(entity_id, entity_id)
+    def ref(element_id: str) -> str:
+        return temp_of.get(element_id, element_id)
 
     def create_rel(r: Relationship) -> CreateRelationshipOp:
         return CreateRelationshipOp(
             kind="create_relationship",
-            temp_id=next_temp(r.id),
+            temp_id=next_temp(),
             id=r.id,
             type_name=r.type_name,
             source_id=ref(r.source_id),
@@ -100,9 +102,10 @@ def ops_for_change(cr: ChangeRequest) -> list[ModelOpIn]:
         )
 
     def create_el(e: Element) -> CreateElementOp:
+        temp_of[e.id] = next_temp()
         return CreateElementOp(
             kind="create_element",
-            temp_id=next_temp(e.id),
+            temp_id=temp_of[e.id],
             id=e.id,
             type_name=e.type_name,
             properties=dict(e.properties),

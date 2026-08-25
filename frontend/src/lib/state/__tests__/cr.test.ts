@@ -198,6 +198,12 @@ describe('saveWithOptionalCr', () => {
 		expect(written.format).toBe('datarover.cr/v1');
 		// the transport-only `complete` flag is stripped from the file
 		expect('complete' in written).toBe(false);
+		// the server cannot know the file the model came from; the caller can
+		expect(written.baseline).toEqual({
+			filename: 'myModel.json',
+			elementCount: 0,
+			relationshipCount: 0
+		});
 	});
 
 	it('falls back to model.json when no filename is known', async () => {
@@ -417,6 +423,23 @@ describe('crPrestate', () => {
 		});
 		expect(crPrestate(cr)).toEqual({
 			elements: [el('a', { n: 1 }), el('b')],
+			relationships: [rel('r1', 'a', 'b')]
+		});
+	});
+
+	it('keeps the first entry per id — the output feeds a keyed list', () => {
+		const cr = crDoc({
+			elements: {
+				modified: [{ id: 'a', before: el('a', { n: 1 }), after: el('a', { n: 2 }) }],
+				deleted: [el('a', { n: 9 })]
+			},
+			relationships: {
+				modified: [{ id: 'r1', before: rel('r1', 'a', 'b'), after: rel('r1', 'a', 'c') }],
+				deleted: [rel('r1', 'a', 'z')]
+			}
+		});
+		expect(crPrestate(cr)).toEqual({
+			elements: [el('a', { n: 1 })],
 			relationships: [rel('r1', 'a', 'b')]
 		});
 	});

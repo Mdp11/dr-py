@@ -56,6 +56,28 @@ class CRConflictError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Entity copies (never alias an input entity's property dict)
+# ---------------------------------------------------------------------------
+
+
+def _copy_element(e: Element) -> Element:
+    return Element(
+        id=e.id, type_name=e.type_name, properties=dict(e.properties), rev=e.rev
+    )
+
+
+def _copy_relationship(r: Relationship) -> Relationship:
+    return Relationship(
+        id=r.id,
+        type_name=r.type_name,
+        source_id=r.source_id,
+        target_id=r.target_id,
+        properties=dict(r.properties),
+        rev=r.rev,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Match helpers (rev is intentionally ignored)
 # ---------------------------------------------------------------------------
 
@@ -204,34 +226,15 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
     # --- Phase B: materialize ---
 
     new_elements: dict[str, Element] = {
-        eid: Element(
-            id=e.id,
-            type_name=e.type_name,
-            properties=dict(e.properties),
-            rev=e.rev,
-        )
-        for eid, e in model.elements.items()
+        eid: _copy_element(e) for eid, e in model.elements.items()
     }
 
     new_relationships: dict[str, Relationship] = {
-        rid: Relationship(
-            id=r.id,
-            type_name=r.type_name,
-            source_id=r.source_id,
-            target_id=r.target_id,
-            properties=dict(r.properties),
-            rev=r.rev,
-        )
-        for rid, r in model.relationships.items()
+        rid: _copy_relationship(r) for rid, r in model.relationships.items()
     }
 
     for e in cr.elements_added:
-        new_elements[e.id] = Element(
-            id=e.id,
-            type_name=e.type_name,
-            properties=dict(e.properties),
-            rev=e.rev,
-        )
+        new_elements[e.id] = _copy_element(e)
 
     for me in cr.elements_modified:
         current_rev = new_elements[me.id].rev
@@ -246,14 +249,7 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
         del new_elements[e.id]
 
     for r in cr.relationships_added:
-        new_relationships[r.id] = Relationship(
-            id=r.id,
-            type_name=r.type_name,
-            source_id=r.source_id,
-            target_id=r.target_id,
-            properties=dict(r.properties),
-            rev=r.rev,
-        )
+        new_relationships[r.id] = _copy_relationship(r)
 
     for mr in cr.relationships_modified:
         current_rev = new_relationships[mr.id].rev
@@ -280,23 +276,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
 # ---------------------------------------------------------------------------
 # diff_models / invert_change_request — pure; never alias input entities
 # ---------------------------------------------------------------------------
-
-
-def _copy_element(e: Element) -> Element:
-    return Element(
-        id=e.id, type_name=e.type_name, properties=dict(e.properties), rev=e.rev
-    )
-
-
-def _copy_relationship(r: Relationship) -> Relationship:
-    return Relationship(
-        id=r.id,
-        type_name=r.type_name,
-        source_id=r.source_id,
-        target_id=r.target_id,
-        properties=dict(r.properties),
-        rev=r.rev,
-    )
 
 
 def diff_models(base: Model, other: Model) -> ChangeRequest:

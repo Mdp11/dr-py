@@ -1,5 +1,10 @@
 <script lang="ts">
-	import { compareModel, proposeCr, type CompareOut } from '$lib/api/changeRequest';
+	import {
+		compareModel,
+		proposeCr,
+		MAX_CRS_PER_REQUEST,
+		type CompareOut
+	} from '$lib/api/changeRequest';
 	import {
 		canEdit,
 		getFilename,
@@ -35,8 +40,11 @@
 	let swapped = $state(false);
 	// cached per rev: Preview then Replace must not upload the file twice
 	let compared = $state<{ rev: number; out: CompareOut } | null>(null);
-	// apply-cr-mode source (display order = apply order)
-	let crFiles = $state<{ name: string; cr: ChangeRequest }[]>([]);
+	// apply-cr-mode source (display order = apply order). `uid` is assigned once
+	// per entry so the keyed list moves rows on reorder instead of re-creating
+	// them (two files may share a name).
+	let crFiles = $state<{ uid: string; name: string; cr: ChangeRequest }[]>([]);
+	let uidCounter = 0;
 	// shared output
 	let preview = $state<CrPreview | null>(null);
 	let conflicts = $state<CrConflictReport | null>(null);
@@ -47,15 +55,20 @@
 	const editable = $derived(canEdit());
 	const bufferDirty = $derived(hasStagedOps());
 	const hasSource = $derived(mode === 'compare' ? otherFile !== null : crFiles.length > 0);
+	// the server refuses a longer batch at request-parse time; saying so here
+	// beats surfacing the raw pydantic message
+	const tooManyCrs = $derived(mode === 'apply-cr' && crFiles.length > MAX_CRS_PER_REQUEST);
 	// Replace/Stage compute against the COMMITTED model: pre-existing staged
 	// edits would surface as conflicts or double edits, so a clean buffer is
 	// required. Replace is session -> file by definition, hence off when swapped.
 	const proceedDisabled = $derived(
-		busy || !hasSource || !editable || bufferDirty || (mode === 'compare' && swapped)
+		busy || !hasSource || !editable || bufferDirty || tooManyCrs || (mode === 'compare' && swapped)
 	);
 	// compare-mode Preview is POST /model/compare (viewer-allowed); apply-cr's
 	// is POST /model/apply-cr, which stays a write, so a viewer would only 403
-	const previewDisabled = $derived(busy || !hasSource || (mode === 'apply-cr' && !editable));
+	const previewDisabled = $derived(
+		busy || !hasSource || tooManyCrs || (mode === 'apply-cr' && !editable)
+	);
 	const sessionLabel = $derived(getFilename() ?? 'model');
 	const otherLabel = $derived(otherFile?.name ?? 'other');
 
@@ -106,7 +119,10 @@
 					rejected.push(`${file.name}: not a CR file (expected format datarover.cr/v1)`);
 					continue;
 				}
-				crFiles = [...crFiles, { name: file.name, cr: parsed as ChangeRequest }];
+				crFiles = [
+					...crFiles,
+					{ uid: `cr-${++uidCounter}`, name: file.name, cr: parsed as ChangeRequest }
+				];
 			} catch (err) {
 				rejected.push(`${file.name}: ${err instanceof Error ? err.message : 'Invalid JSON'}`);
 			}
@@ -306,7 +322,7 @@
 					<p class="text-xs text-muted-foreground">No CR files added.</p>
 				{:else}
 					<ol class="flex flex-col gap-1">
-						{#each crFiles as f, i (f.name + i)}
+						{#each crFiles as f, i (f.uid)}
 							<li
 								class="flex items-center gap-2 rounded border border-border px-2 py-1 text-xs"
 								data-testid={`mcd-cr-row-${i}`}
@@ -342,7 +358,12 @@
 				{/if}
 			{/if}
 
-			{#if hasSource && !editable}
+			{#if tooManyCrs}
+				<p class="text-xs text-muted-foreground" data-testid="mcd-gate-hint">
+					{crFiles.length} CR files added — at most {MAX_CRS_PER_REQUEST} can be applied in one request.
+					Remove some and try again.
+				</p>
+			{:else if hasSource && !editable}
 				<p class="text-xs text-muted-foreground" data-testid="mcd-gate-hint">
 					{#if mode === 'compare'}
 						You have view-only access — Replace is unavailable.

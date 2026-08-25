@@ -121,6 +121,7 @@ from ..schemas import (
     RelationshipOut,
     UpdateElementOp,
     UpdateRelationshipOp,
+    is_reserved_id,
 )
 from ..session import AppliedBatch
 
@@ -212,7 +213,7 @@ def _check_patch_keys(
 def _reject_reserved_hint(hint: str) -> None:
     """An id hint must never look like a temp id: the restore-mode replay
     branches on the prefix, so a journalled ``tmp_`` id would be ambiguous."""
-    if hint.startswith(TEMP_ID_PREFIX):
+    if is_reserved_id(hint):
         raise ValueError(
             f"id hint {hint!r} must not use the reserved {TEMP_ID_PREFIX!r} prefix"
         )
@@ -483,7 +484,9 @@ def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _Batch
 def _ensure_validation_seeded(session: Session, model: Model) -> ValidationState:
     """Make sure a full-run issue baseline exists BEFORE mutating.
 
-    Shared by the ops and commit endpoints. Load endpoints that already seed
+    Shared by every endpoint that validates against the issue store: the ops
+    and commit endpoints, ``POST /model/validate`` (routes/validation.py) and
+    the metamodel diff (routes/metamodel_swap.py). Load endpoints that seed
     the store at load time make this a no-op; it only does work for sessions
     populated through the legacy snapshot routes. Seeding pre-batch keeps
     the post-batch replace() delta exact.

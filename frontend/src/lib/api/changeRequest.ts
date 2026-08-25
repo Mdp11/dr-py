@@ -3,6 +3,7 @@ import { apiFetch, type ClientConfig } from './client';
 import { ConflictError } from './errors';
 import {
 	CompareOutSchema,
+	ProposeCrConflictSchema,
 	ProposeCrOutSchema,
 	type ChangesDoc,
 	type CompareOut,
@@ -12,6 +13,11 @@ import type { ChangeRequest } from '$lib/state/cr';
 import type { ModelOp } from '$lib/state/ops';
 
 export type { CompareOut };
+
+/** Mirrors `MAX_CRS_PER_REQUEST` in `api/schemas.py`: the server rejects a
+ * longer `crs` list at request-parse time. Mirrored so the dialog can say so
+ * in its own words — the server bound stays the authority. */
+export const MAX_CRS_PER_REQUEST = 20;
 
 export type ProposeCrResult =
 	| { ok: true; modelRev: number; cr: ChangesDoc; ops: ModelOp[] }
@@ -45,16 +51,15 @@ export async function proposeCr(
 		return { ok: true, modelRev: res.model_rev, cr: res.cr, ops: res.ops as unknown as ModelOp[] };
 	} catch (err) {
 		if (err instanceof ConflictError) {
-			const body = (err.body ?? {}) as {
-				cr_index?: number;
-				conflicts?: Conflict[];
-				model_rev?: number;
-			};
+			const parsed = ProposeCrConflictSchema.safeParse(err.body);
+			// an unrecognized 409 body still stops the flow — the report is then
+			// empty rather than invented, and modelRev -1 can never match a rev
+			if (!parsed.success) return { ok: false, modelRev: -1, crIndex: 0, conflicts: [] };
 			return {
 				ok: false,
-				modelRev: body.model_rev ?? -1,
-				crIndex: body.cr_index ?? 0,
-				conflicts: body.conflicts ?? []
+				modelRev: parsed.data.model_rev,
+				crIndex: parsed.data.cr_index,
+				conflicts: parsed.data.conflicts
 			};
 		}
 		throw err;

@@ -166,8 +166,12 @@ export async function saveWithOptionalCr(input: SaveWithCrInput): Promise<SaveWi
 	try {
 		const doc = await input.fetchChanges();
 		// strip the transport-only `complete` flag so the file is exactly the
-		// datarover.cr/v1 shape Apply CR and the compare flow expect
-		const cr: Record<string, unknown> = { ...doc };
+		// datarover.cr/v1 shape Apply CR and the compare flow expect, and fill
+		// in the baseline filename the server cannot know
+		const cr: Record<string, unknown> = {
+			...doc,
+			baseline: { ...doc.baseline, filename: input.filename }
+		};
 		delete cr.complete;
 		await input.saveFile(cr, crName, null);
 	} catch (err) {
@@ -267,6 +271,20 @@ export function crToDiff(cr: ChangeRequest): Diff {
 	return { elements: els, relationships: rels, counts };
 }
 
+/** First entry per id — the output feeds a keyed list, so a `modified.before`
+ * and a `deleted` sharing an id (impossible for a server CR, which partitions
+ * by id, but a CR file is user-supplied) must not both survive. */
+function byId<T extends { id: string }>(entities: T[]): T[] {
+	const seen = new Set<string>();
+	const out: T[] = [];
+	for (const e of entities) {
+		if (seen.has(e.id)) continue;
+		seen.add(e.id);
+		out.push(e);
+	}
+	return out;
+}
+
 /**
  * The pre-state a proposal already carries: the `before` of every modified
  * entity plus every deleted one — exactly the update/delete targets
@@ -277,10 +295,10 @@ export function crPrestate(cr: ChangeRequest): {
 	relationships: Relationship[];
 } {
 	return {
-		elements: [...cr.ops.elements.modified.map((m) => m.before), ...cr.ops.elements.deleted],
-		relationships: [
+		elements: byId([...cr.ops.elements.modified.map((m) => m.before), ...cr.ops.elements.deleted]),
+		relationships: byId([
 			...cr.ops.relationships.modified.map((m) => m.before),
 			...cr.ops.relationships.deleted
-		]
+		])
 	};
 }

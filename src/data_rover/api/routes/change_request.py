@@ -20,7 +20,9 @@ that conflicts with the model as left by its predecessors; 422 is the
 metamodel gate (unknown/abstract type, dangling endpoint, non-cascaded
 delete) or an element type change, which the op protocol cannot express.
 Compare has no 409 — it only 422s on a body that is not a well-formed
-model (undecodable JSON, reserved or duplicate id, dangling endpoint).
+model: undecodable JSON, a payload whose shape is wrong, a reserved or
+duplicate id, an abstract element type, a dangling endpoint. Unknown
+types are the one thing it tolerates (``strict=False``).
 """
 
 from __future__ import annotations
@@ -76,8 +78,11 @@ def _gate_cr_result(
 ) -> None:
     """422 gate for entities the CR introduced or rewired.
 
-    *base* is the session model, which is already metamodel-conformant, so
-    only the CR's delta needs checking:
+    *base* is the session model, not a caller-supplied payload: entities the
+    CR does not touch stay exactly as the session already holds them and are
+    absent from the op batch, so only the delta needs checking. (The session
+    model is not necessarily conformant — hydration builds ``strict=False``
+    and conformance issues never block a commit.) The delta is checked as:
 
     - added/modified elements: type must exist and not be abstract
     - added/modified relationships: type must exist, endpoints must resolve

@@ -318,6 +318,17 @@ class ViewStateResponse(BaseModel):
 TEMP_ID_PREFIX = "tmp_"
 
 
+def is_reserved_id(entity_id: str) -> bool:
+    """True when *entity_id* is reserved for the ops protocol's provisional ids.
+
+    The single statement of the rule: a canonical id carrying the prefix would
+    be ambiguous to the restore-mode applier, so every surface that admits ids
+    (load payloads, create-op ``id`` hints) refuses one — each raising its own
+    exception type with its own message.
+    """
+    return entity_id.startswith(TEMP_ID_PREFIX)
+
+
 class CreateElementOp(BaseModel):
     kind: Literal["create_element"]
     temp_id: str
