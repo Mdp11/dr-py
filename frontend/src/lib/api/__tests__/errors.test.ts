@@ -52,4 +52,15 @@ describe('messageFromBody', () => {
 		expect(messageFromBody({ detail: [] }, 422)).toBe('HTTP 422');
 		expect(messageFromBody({ detail: [{ nope: 1 }] }, 422)).toBe('HTTP 422');
 	});
+
+	it('explains a bodyless 413 instead of falling back to the bare status', () => {
+		expect(messageFromBody(null, 413)).toBe('The file is too large for this server to accept.');
+		expect(messageFromBody('<html>413</html>', 413)).toBe(
+			'The file is too large for this server to accept.'
+		);
+		// the API's own 413 carries a detail, which still wins
+		expect(messageFromBody({ detail: 'Request body is too large (limit 8 bytes)' }, 413)).toBe(
+			'Request body is too large (limit 8 bytes)'
+		);
+	});
 });

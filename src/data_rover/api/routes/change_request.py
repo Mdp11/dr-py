@@ -22,7 +22,8 @@ delete) or an element type change, which the op protocol cannot express.
 Compare has no 409 — it only 422s on a body that is not a well-formed
 model: undecodable JSON, a payload whose shape is wrong, a reserved or
 duplicate id, an abstract element type, a dangling endpoint. Unknown
-types are the one thing it tolerates (``strict=False``).
+types are the one thing it tolerates (``strict=False``). An over-cap body
+is 413 (``deps.read_capped_body``), never 422 — too large is not malformed.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ from data_rover.core.model.change_request import (
 from data_rover.core.model.model import Model
 
 from ..change_request_ops import UnsupportedChangeError, ops_for_change
-from ..deps import Session, get_request_session, require_model
+from ..deps import Session, get_request_session, read_capped_body, require_model
 from ..schemas import (
     ChangesOut,
     CompareResponse,
@@ -218,15 +219,19 @@ async def compare_model(
     """Diff the session model against the raw other-model JSON body.
 
     The body is the save-file shape (``{"elements": [...], "relationships":
-    [...]}``), buffered and parsed like POST /model/upload. It is built
-    ``strict=False``: an unknown type in the file is still comparable (only
-    staging it is not — the propose route's gate catches that); reserved
-    ids, duplicate ids and dangling endpoints stay 422 because the diff
-    needs a well-formed model. Direction is always session -> other; the
-    client inverts client-side. Read-only, so viewers may call it.
+    [...]}``), buffered and parsed like POST /model/upload — and capped the
+    same way (``read_capped_body``, 413 over
+    ``settings.max_request_body_bytes``), which matters more here than there:
+    compare holds the raw bytes AND builds a second parsed model beside the
+    live one. It is built ``strict=False``: an unknown type in the file is
+    still comparable (only staging it is not — the propose route's gate
+    catches that); reserved ids, duplicate ids and dangling endpoints stay
+    422 because the diff needs a well-formed model. Direction is always
+    session -> other; the client inverts client-side. Read-only, so viewers
+    may call it.
     """
     metamodel, base = require_model(session)
-    body = await request.body()
+    body = await read_capped_body(request)
     try:
         raw = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:

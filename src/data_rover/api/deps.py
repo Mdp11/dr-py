@@ -13,6 +13,7 @@ from .settings import get_settings
 __all__ = [
     "Session",
     "get_request_session",
+    "read_capped_body",
     "require_allowed_origin",
     "require_metamodel",
     "require_model",
@@ -65,6 +66,42 @@ def require_allowed_origin(request: Request) -> None:
         status_code=403,
         detail=f"Origin {origin!r} is not allowed to access this endpoint",
     )
+
+
+def _too_large(limit: int) -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail=f"Request body is too large (limit {limit} bytes)",
+    )
+
+
+async def read_capped_body(request: Request) -> bytes:
+    """Buffer the whole raw request body, refusing an oversized one with 413.
+
+    The single guard for the routes that read an unbounded body and parse it
+    whole (POST /model/upload, POST /model/compare). The cap is
+    ``settings.max_request_body_bytes``; 0 disables it.
+
+    A ``Content-Length`` over the cap is refused before a byte is read, but
+    the header is client-supplied and absent on a chunked body, so the
+    running total is enforced while streaming too — the header is the cheap
+    path, never the guarantee. 413 (not the routes' 422) so a client can
+    tell an oversized body from a malformed one.
+    """
+    limit = get_settings().max_request_body_bytes
+    if limit <= 0:
+        return await request.body()
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise _too_large(limit)
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            raise _too_large(limit)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def require_metamodel(session: Session) -> Metamodel:

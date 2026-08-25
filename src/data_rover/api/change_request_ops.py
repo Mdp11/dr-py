@@ -67,6 +67,10 @@ def _is_rewire(before: Relationship, after: Relationship) -> bool:
 
 def ops_for_change(cr: ChangeRequest) -> list[ModelOpIn]:
     """Translate *cr* into an op batch in the phase order documented above."""
+    # Retype guard and phase-3 patches in one pass, but no op is BUILT here:
+    # the guard must cover every modified element before the batch starts, or
+    # a late retype would leave earlier ops already emitted.
+    element_patches: list[tuple[str, dict[str, Any]]] = []
     for m in cr.elements_modified:
         if m.before.type_name != m.after.type_name:
             raise UnsupportedChangeError(
@@ -74,6 +78,9 @@ def ops_for_change(cr: ChangeRequest) -> list[ModelOpIn]:
                 f"({m.before.type_name!r} -> {m.after.type_name!r}); element type "
                 f"changes are not supported — delete and re-create it in the CR"
             )
+        patch = _diff_to_merge_patch(m.before.properties, m.after.properties)
+        if patch:
+            element_patches.append((m.id, patch))
 
     ops: list[ModelOpIn] = []
     #: element id -> its temp id; only elements, because only an element id is
@@ -114,12 +121,10 @@ def ops_for_change(cr: ChangeRequest) -> list[ModelOpIn]:
     ops.extend(create_el(e) for e in cr.elements_added)
     ops.extend(create_rel(r) for r in cr.relationships_added)
 
-    for m in cr.elements_modified:
-        patch = _diff_to_merge_patch(m.before.properties, m.after.properties)
-        if patch:
-            ops.append(
-                UpdateElementOp(kind="update_element", id=m.id, properties_patch=patch)
-            )
+    ops.extend(
+        UpdateElementOp(kind="update_element", id=eid, properties_patch=patch)
+        for eid, patch in element_patches
+    )
 
     rewires = [
         rm for rm in cr.relationships_modified if _is_rewire(rm.before, rm.after)
