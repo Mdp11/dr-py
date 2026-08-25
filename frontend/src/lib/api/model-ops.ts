@@ -8,7 +8,6 @@ import {
 	type SaveModelResponse
 } from './types';
 import type { ModelOp } from '$lib/state/ops';
-import type { ChangeRequest } from '$lib/state/cr';
 
 /**
  * Mutation side of the delta protocol (Phase D1): op batches, undo,
@@ -47,21 +46,6 @@ export function applyOps(
  */
 export function undoOps(cfg?: ClientConfig): Promise<OpsResponse> {
 	return apiFetch('/model/undo', { method: 'POST', schema: OpsResponseSchema }, cfg);
-}
-
-/**
- * POST /model/apply-cr in SESSION mode (no `model` field): the change request
- * is applied to the session model and an OpsResponse-shaped delta comes back
- * (`id_map` is always empty — CRs carry final ids). Applying a CR resets the
- * server-side undo history. The legacy inline mode lives in
- * `./changeRequest.ts`.
- */
-export function applyCrSession(cr: ChangeRequest, cfg?: ClientConfig): Promise<OpsResponse> {
-	return apiFetch(
-		'/model/apply-cr',
-		{ method: 'POST', body: { cr }, schema: OpsResponseSchema },
-		cfg
-	);
 }
 
 /**

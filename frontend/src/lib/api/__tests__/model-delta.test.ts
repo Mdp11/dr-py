@@ -2,7 +2,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
 import {
-	applyCrSession,
 	applyOps,
 	loadModelFromPath,
 	saveModelToPath,
@@ -22,7 +21,6 @@ import {
 	listElementsPage
 } from '../model-read';
 import { ConflictError, NotFoundError } from '../errors';
-import type { ChangeRequest } from '$lib/state/cr';
 import type { ModelOp } from '$lib/state/ops';
 import { server } from './server';
 
@@ -90,29 +88,6 @@ describe('model-ops client', () => {
 		const res = await undoOps(cfg);
 		expect(res.model_rev).toBe(3);
 		expect(res.deleted_element_ids).toEqual(['e9']);
-	});
-
-	it('applyCrSession sends {cr} WITHOUT a model field (session mode)', async () => {
-		let body: Record<string, unknown> = {};
-		server.use(
-			http.post(`${BASE}/model/apply-cr`, async ({ request }) => {
-				body = (await request.json()) as Record<string, unknown>;
-				return HttpResponse.json({ model_rev: 8 });
-			})
-		);
-		const cr: ChangeRequest = {
-			format: 'datarover.cr/v1',
-			createdAt: '2026-06-11T00:00:00.000Z',
-			baseline: { filename: null, elementCount: 0, relationshipCount: 0 },
-			ops: {
-				elements: { added: [element], modified: [], deleted: [] },
-				relationships: { added: [], modified: [], deleted: [] }
-			}
-		};
-		const res = await applyCrSession(cr, cfg);
-		expect('model' in body).toBe(false);
-		expect(body.cr).toEqual(cr);
-		expect(res.model_rev).toBe(8);
 	});
 
 	it('loadModelFromPath POSTs the path and parses a summary', async () => {

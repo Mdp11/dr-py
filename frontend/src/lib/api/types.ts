@@ -693,6 +693,26 @@ export const ChangesSummarySchema = z.object({
 });
 export type ChangesSummary = z.infer<typeof ChangesSummarySchema>;
 
+/** POST /model/compare — the session → other-model change request. */
+export const CompareOutSchema = z.object({
+	model_rev: z.number().int(),
+	cr: ChangesDocSchema,
+	other_element_count: z.number().int(),
+	other_relationship_count: z.number().int()
+});
+export type CompareOut = z.infer<typeof CompareOutSchema>;
+
+/**
+ * POST /model/apply-cr — dry-run proposal. `ops` is the staged-buffer wire
+ * format (`state/ops.ts` ModelOp); typed loosely here like SnippetRunOut and
+ * narrowed by the client module.
+ */
+export const ProposeCrOutSchema = z.object({
+	model_rev: z.number().int(),
+	cr: ChangesDocSchema,
+	ops: z.array(z.record(z.string(), z.unknown()))
+});
+
 // ---------------------------------------------------------------------------
 // Snippet execution — mirrors api/schemas.py SnippetRunOut/SnippetLintOut.
 // ---------------------------------------------------------------------------
