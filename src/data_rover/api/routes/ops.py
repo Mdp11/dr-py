@@ -70,7 +70,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
+from data_rover.core.model.relationship import Relationship
 from data_rover.core.validation.dirty import DirtyCollector, containment_closure
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
@@ -83,6 +85,7 @@ from ..artifact_ops import (
     broadcast_artifact_events,
     split_ops,
 )
+from ..commit_states import capture_entity_states
 from ..db import get_db
 from ..db_models import User
 from ..deps import Session, get_request_session, require_model
@@ -173,6 +176,14 @@ class _BatchResult:
     changed_relationship_ids: dict[str, None] = field(default_factory=dict)
     deleted_element_ids: dict[str, None] = field(default_factory=dict)
     deleted_relationship_ids: dict[str, None] = field(default_factory=dict)
+    #: pre-batch state per touched id, captured on FIRST touch (None = did
+    #: not exist). Later touches in the same batch never overwrite, so an
+    #: entity created-then-updated stays None and one deleted-then-restored
+    #: keeps its original state. Every id in changed_*/deleted_* has an entry.
+    before_elements: dict[str, ElementOut | None] = field(default_factory=dict)
+    before_relationships: dict[str, RelationshipOut | None] = field(
+        default_factory=dict
+    )
 
     def mark_element_changed(self, element_id: str) -> None:
         self.changed_element_ids[element_id] = None
@@ -189,6 +200,20 @@ class _BatchResult:
     def mark_relationship_deleted(self, rel_id: str) -> None:
         self.deleted_relationship_ids[rel_id] = None
         self.changed_relationship_ids.pop(rel_id, None)
+
+    def note_element_before(self, element_id: str, element: Element | None) -> None:
+        """Record ``element``'s current state as its pre-batch state unless an
+        earlier op in this batch already did. Call BEFORE mutating it."""
+        if element_id not in self.before_elements:
+            self.before_elements[element_id] = (
+                ElementOut.from_core(element) if element is not None else None
+            )
+
+    def note_relationship_before(self, rel_id: str, rel: Relationship | None) -> None:
+        if rel_id not in self.before_relationships:
+            self.before_relationships[rel_id] = (
+                RelationshipOut.from_core(rel) if rel is not None else None
+            )
 
     def inverse_ops(self) -> list[ModelOpIn]:
         """Flat inverse batch: applying it front-to-back undoes this batch."""
@@ -253,6 +278,7 @@ def _apply_one(
                 f"create_element temp_id {op.temp_id!r} must start with "
                 f"{TEMP_ID_PREFIX!r}"
             )
+        res.note_element_before(element.id, None)
         # inverse recorded BEFORE the property sets: if one of them fails,
         # rollback must delete the half-initialized element
         res.inverse_units.append(
@@ -271,6 +297,7 @@ def _apply_one(
     if isinstance(op, UpdateElementOp):
         eid = res.id_map.get(op.id, op.id)
         element = model.get_element(eid)
+        res.note_element_before(eid, element)
         patch = _resolve_props(op.properties_patch, res.id_map)
         _check_patch_keys(model, element.type_name, element=True, patch=patch)
         # mergePatch semantics (frontend apply.ts): None deletes the key,
@@ -318,6 +345,7 @@ def _apply_one(
         unit: list[ModelOpIn] = []
         for ce in closure:
             e = model.elements[ce]
+            res.note_element_before(ce, e)
             unit.append(
                 CreateElementOp(
                     kind="create_element",
@@ -328,6 +356,7 @@ def _apply_one(
             )
         for rid in removed_rel_ids:
             r = model.relationships[rid]
+            res.note_relationship_before(rid, r)
             unit.append(
                 CreateRelationshipOp(
                     kind="create_relationship",
@@ -373,6 +402,7 @@ def _apply_one(
                 f"create_relationship temp_id {op.temp_id!r} must start with "
                 f"{TEMP_ID_PREFIX!r}"
             )
+        res.note_relationship_before(rel.id, None)
         res.inverse_units.append(
             [DeleteRelationshipOp(kind="delete_relationship", id=rel.id)]
         )
@@ -395,6 +425,7 @@ def _apply_one(
     if isinstance(op, UpdateRelationshipOp):
         rid = res.id_map.get(op.id, op.id)
         rel = model.get_relationship(rid)
+        res.note_relationship_before(rid, rel)
         patch = _resolve_props(op.properties_patch, res.id_map)
         _check_patch_keys(model, rel.type_name, element=False, patch=patch)
         inverse_patch = {
@@ -421,6 +452,7 @@ def _apply_one(
     if isinstance(op, DeleteRelationshipOp):
         rid = res.id_map.get(op.id, op.id)
         rel = model.get_relationship(rid)
+        res.note_relationship_before(rid, rel)
         unit = [
             CreateRelationshipOp(
                 kind="create_relationship",
@@ -551,6 +583,7 @@ def _persist_commit(
     _issues: list | None = None,
     _from_metamodel_id: str | None = None,
     _to_metamodel_id: str | None = None,
+    _entity_states: dict[str, Any] | None = None,
 ) -> bool:
     """Append the accepted batch to the durable journal and advance model_rev.
 
@@ -579,6 +612,10 @@ def _persist_commit(
     ``content.first_rebind_after``, history's ``is_rebind``,
     ``commit_diff``'s metamodel arm — is what MAKES a journal row a rebind.
 
+    ``_entity_states`` is ``capture_entity_states(model, res)`` for the
+    applied batch — the diff reader's journal-only input; None (over-cap or
+    a writer that has no model batch) means the reader reconstructs.
+
     Returns True if a durable row existed and the commit was persisted,
     False when the project has no model row (in-memory-only session)."""
     if content.get_model_row(db, project_id) is None:
@@ -597,6 +634,7 @@ def _persist_commit(
         issues=_issues or [],
         from_metamodel_id=_from_metamodel_id,
         to_metamodel_id=_to_metamodel_id,
+        entity_states=_entity_states,
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
@@ -612,6 +650,7 @@ def _persist_undo_commit(
     ops: Sequence[OpIn],
     inverse_ops: Sequence[OpIn],
     id_map: dict[str, str],
+    entity_states: dict[str, Any] | None = None,
 ) -> bool:
     """Record an undo as a forward compensating commit (append-only journal).
 
@@ -636,6 +675,7 @@ def _persist_undo_commit(
         ops=serialize_ops(ops),
         inverse_ops=serialize_ops(inverse_ops),
         id_map=dict(id_map),
+        entity_states=entity_states,
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
@@ -723,6 +763,7 @@ def apply_ops(
                 ops=res.canonical_ops,
                 inverse_ops=res.inverse_ops(),
                 id_map=dict(res.id_map),
+                _entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
@@ -1025,6 +1066,7 @@ def undo(
                 ops=canonical_ops,
                 inverse_ops=inverse_ops,
                 id_map=merged_id_map,
+                entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation

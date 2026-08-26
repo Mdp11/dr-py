@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getCommitHistory, getModelAtRev, revertToCommit } from '../history';
+import { getCommitDiff, getCommitHistory, getModelAtRev, revertToCommit } from '../history';
 
 function jsonFetch(captured: { path?: string; body?: unknown }, payload: unknown) {
 	return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -57,5 +57,33 @@ describe('history api', () => {
 		);
 		expect(cap.path).toContain('/commits/revert');
 		expect(cap.body).toMatchObject({ target_rev: 2, base_rev: 7, message: 'undo' });
+	});
+
+	it('getCommitDiff hits /commits/{rev}/diff and parses the model half', async () => {
+		const cap: { path?: string; body?: unknown } = {};
+		const res = await getCommitDiff(4, {
+			fetch: jsonFetch(cap, {
+				rev: 4,
+				commit_id: 'c4',
+				author_id: null,
+				ts: '2026-01-01T00:00:00Z',
+				message: '',
+				scope: ['model'],
+				is_rebind: false,
+				elements: {
+					added: [{ id: 'e1', type_name: 'Node', properties: { label: 'A' }, rev: 1 }],
+					modified: [],
+					deleted: []
+				},
+				relationships: { added: [], modified: [], deleted: [] },
+				artifacts: { added: [], modified: [], deleted: [] },
+				view: [],
+				metamodel: null,
+				layout_moves: []
+			})
+		});
+		expect(cap.path).toContain('/commits/4/diff');
+		expect(res.elements.added.map((e) => e.id)).toEqual(['e1']);
+		expect(res.scope).toEqual(['model']);
 	});
 });

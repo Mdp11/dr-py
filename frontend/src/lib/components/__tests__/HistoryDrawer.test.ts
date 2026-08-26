@@ -50,11 +50,11 @@ vi.mock('$lib/state', async (orig) => {
 });
 vi.mock('$lib/api/history', async (orig) => {
 	const actual = await orig<typeof import('$lib/api/history')>();
-	return { ...actual, revertToCommit: vi.fn() };
+	return { ...actual, revertToCommit: vi.fn(), getCommitDiff: vi.fn() };
 });
 
 import { loadFirstPage, modelAt } from '$lib/state/history.svelte';
-import { revertToCommit } from '$lib/api/history';
+import { getCommitDiff, revertToCommit } from '$lib/api/history';
 import { applyDelta } from '$lib/state';
 // Left real by the `...actual` spread above so the revert gate is exercised
 // against the actual stores it reads in production.
@@ -101,7 +101,36 @@ describe('HistoryDrawer list', () => {
 });
 
 describe('HistoryDrawer diff', () => {
-	it('shows a per-commit diff when a row is clicked', async () => {
+	it('renders a per-commit diff from GET /commits/{rev}/diff — no reconstruction', async () => {
+		vi.mocked(getCommitDiff).mockResolvedValue({
+			rev: 2,
+			commit_id: 'c2',
+			scope: ['model'],
+			is_rebind: false,
+			elements: {
+				added: [{ id: 'e1', type_name: 'Node', properties: { label: 'A' }, rev: 2 }],
+				modified: [],
+				deleted: []
+			},
+			relationships: { added: [], modified: [], deleted: [] }
+		});
+		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
+		flushSync();
+		await Promise.resolve();
+		flushSync();
+		const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Diff')
+		)!;
+		btn.click();
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+		expect(getCommitDiff).toHaveBeenCalledWith(2);
+		expect(modelAt).not.toHaveBeenCalled();
+		expect(document.body.textContent).toContain('+1 added');
+		unmount(c);
+	});
+
+	it('the two-revision Compare still reconstructs both sides', async () => {
 		vi.mocked(modelAt).mockImplementation(async (rev: number) =>
 			rev <= 1
 				? { elements: [], relationships: [] }
@@ -114,17 +143,20 @@ describe('HistoryDrawer diff', () => {
 		flushSync();
 		await Promise.resolve();
 		flushSync();
-		// click the "Diff" action on the rev-2 row
-		const btn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.includes('Diff')
-		)!;
-		btn.click();
-		// drain microtask queue: showDiff is async (Promise.all + state update)
+		const buttons = () => Array.from(document.querySelectorAll('button'));
+		buttons()
+			.find((b) => b.textContent?.trim() === 'Compare')!
+			.click();
+		flushSync();
+		buttons()
+			.find((b) => b.textContent?.trim() === 'Select B')!
+			.click();
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
-		expect(modelAt).toHaveBeenCalledWith(2);
 		expect(modelAt).toHaveBeenCalledWith(1);
-		expect(document.body.textContent).toContain('added');
+		expect(modelAt).toHaveBeenCalledWith(2);
+		expect(getCommitDiff).not.toHaveBeenCalled();
+		expect(document.body.textContent).toContain('+1 added');
 		unmount(c);
 	});
 });

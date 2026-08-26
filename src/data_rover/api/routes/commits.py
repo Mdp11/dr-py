@@ -49,6 +49,7 @@ from ..artifact_ops import (
 )
 from ..authz import require_membership
 from ..commit_diff import diff_commit
+from ..commit_states import capture_entity_states
 from ..feed import commit_event, lock_event, rebind_event
 from .. import content
 from ..db import get_db
@@ -748,11 +749,11 @@ def commit_diff_endpoint(
     """Render one commit's changes across content families.
 
     Read endpoint — any member (the ``session`` dependency only establishes
-    membership, exactly like GET /commits above). O(model) like
-    GET /commits/{rev}/model, since the model half reconstructs both sides; the
-    artifact half is journal-only. The rendering itself lives in
-    ``commit_diff.diff_commit`` so the future change-request workflow can point
-    it at a draft instead of a commit row.
+    membership, exactly like GET /commits above). O(commit) for rows that
+    carry ``entity_states`` (every commit written since the column exists); a
+    row without them reconstructs both sides like GET /commits/{rev}/model.
+    The rendering itself lives in ``commit_diff.diff_commit`` so the future
+    change-request workflow can point it at a draft instead of a commit row.
     """
     row = content.get_commit(db, project_id, rev)
     if row is None:
@@ -1387,6 +1388,7 @@ def create_commit(
                 # are set from the applier's captured ids, not re-derived.
                 _from_metamodel_id=mm_res.from_metamodel_id if mm_res else None,
                 _to_metamodel_id=mm_res.to_metamodel_id if mm_res else None,
+                _entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
             # undo every live half — see _CommitUnwind. By this point that is
@@ -1755,6 +1757,7 @@ def revert_commit(
                 _message=message,
                 _validation_error_count=len(conformance),
                 _issues=issues_json,
+                _entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
             unwind.unwind()  # undo every live half — see _CommitUnwind

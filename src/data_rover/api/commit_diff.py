@@ -1,9 +1,14 @@
 """Per-commit diff rendering.
 
-Model entities: reconstruct the model at rev-1 and rev (same machinery and
-cost class as GET /commits/{rev}/model) and compare only the entity ids the
-commit's ops name — correct for cold projects and O(model) per request,
-which the history UI tolerates like the model-at-rev endpoint.
+Model entities: journal-only when the commit row carries ``entity_states``
+— the full before/after state of every entity the batch touched, captured
+at commit time (``commit_states``) because the inverse ops alone cannot
+render a ``modified`` entry: an update's inverse patch carries only the
+touched keys, never the whole entity. A row without it (written before the
+column existed, or a batch over ``ENTITY_STATES_MAX``) falls back to
+reconstructing the model at rev-1 and rev (same machinery and cost class as
+GET /commits/{rev}/model) and comparing only the ids the commit's ops name.
+Both paths feed the same renderer, so the output is identical.
 
 Artifacts: journal-only. Canonical artifact ops carry full AFTER state and
 their inverses full BEFORE state (the applier's invariant — see
@@ -44,6 +49,7 @@ may depend on FastAPI, a request, or a live ``Session``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, assert_never
 
 import yaml
@@ -51,11 +57,16 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.diff import MetamodelStructuralDiff, diff_metamodels
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
-from data_rover.core.model.element import Element
-from data_rover.core.model.relationship import Relationship
+from data_rover.core.model.model import Model
 
 from . import content
 from .artifact_ops import ARTIFACT_OP_KINDS, split_ops
+from .commit_states import (
+    ElementPair,
+    EntityStates,
+    RelationshipPair,
+    load_entity_states,
+)
 from .db_models import Commit
 from .hydration import deserialize_ops, reconstruct_model_at
 from .schemas import (
@@ -217,40 +228,59 @@ def _kind_from_row(db: DbSession, project_id: str, artifact_id: str) -> str:
     return row.kind.value
 
 
-def _element_diffs(
-    ids: set[str], before: dict[str, Element], after: dict[str, Element]
-) -> CrElementOps:
+def _element_diffs(states: Mapping[str, ElementPair]) -> CrElementOps:
     out = CrElementOps()
-    for eid in sorted(ids):
-        b, a = before.get(eid), after.get(eid)
-        if b is None and a is not None:
-            out.added.append(ElementOut.from_core(a))
-        elif b is not None and a is None:
-            out.deleted.append(ElementOut.from_core(b))
-        elif b is not None and a is not None:
-            bo, ao = ElementOut.from_core(b), ElementOut.from_core(a)
-            if bo != ao:
-                out.modified.append(ModifiedElementOut(id=eid, before=bo, after=ao))
+    for eid in sorted(states):
+        bo, ao = states[eid]
+        if bo is None and ao is not None:
+            out.added.append(ao)
+        elif bo is not None and ao is None:
+            out.deleted.append(bo)
+        elif bo is not None and ao is not None and bo != ao:
+            out.modified.append(ModifiedElementOut(id=eid, before=bo, after=ao))
     return out
 
 
-def _relationship_diffs(
-    ids: set[str], before: dict[str, Relationship], after: dict[str, Relationship]
-) -> CrRelationshipOps:
+def _relationship_diffs(states: Mapping[str, RelationshipPair]) -> CrRelationshipOps:
     out = CrRelationshipOps()
-    for rid in sorted(ids):
-        b, a = before.get(rid), after.get(rid)
-        if b is None and a is not None:
-            out.added.append(RelationshipOut.from_core(a))
-        elif b is not None and a is None:
-            out.deleted.append(RelationshipOut.from_core(b))
-        elif b is not None and a is not None:
-            bo, ao = RelationshipOut.from_core(b), RelationshipOut.from_core(a)
-            if bo != ao:
-                out.modified.append(
-                    ModifiedRelationshipOut(id=rid, before=bo, after=ao)
-                )
+    for rid in sorted(states):
+        bo, ao = states[rid]
+        if bo is None and ao is not None:
+            out.added.append(ao)
+        elif bo is not None and ao is None:
+            out.deleted.append(bo)
+        elif bo is not None and ao is not None and bo != ao:
+            out.modified.append(ModifiedRelationshipOut(id=rid, before=bo, after=ao))
     return out
+
+
+def _states_from_models(
+    el_ids: set[str],
+    rel_ids: set[str],
+    before: Model | None,
+    after: Model | None,
+) -> EntityStates:
+    """The reconstruction fallback's input: pairs for exactly the ids the
+    commit's ops name, read off two throwaway models (None = contentless)."""
+    b_el = before.elements if before is not None else {}
+    a_el = after.elements if after is not None else {}
+    b_rel = before.relationships if before is not None else {}
+    a_rel = after.relationships if after is not None else {}
+    elements: dict[str, ElementPair] = {}
+    for eid in el_ids:
+        b, a = b_el.get(eid), a_el.get(eid)
+        elements[eid] = (
+            ElementOut.from_core(b) if b is not None else None,
+            ElementOut.from_core(a) if a is not None else None,
+        )
+    relationships: dict[str, RelationshipPair] = {}
+    for rid in rel_ids:
+        rb, ra = b_rel.get(rid), a_rel.get(rid)
+        relationships[rid] = (
+            RelationshipOut.from_core(rb) if rb is not None else None,
+            RelationshipOut.from_core(ra) if ra is not None else None,
+        )
+    return EntityStates(elements=elements, relationships=relationships)
 
 
 def _artifact_diffs(
@@ -437,36 +467,33 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
     """Render one commit's changes across content families.
 
     Four mechanisms on purpose (see the module docstring): model entities are
-    reconstructed at rev-1 and rev and compared, artifacts are read straight
-    out of the journal (state simulated from the inverse-derived base), view
-    ops are rendered as-is — the ops ARE the diff, no reconstruction at all —
-    and the metamodel/layout half is its own pair: the
-    rebind's structural diff is recomputed from the two immutable metamodel
-    rows the commit names, while layout moves are read journal-only off the
-    forward ops. Only the ids the commit's ops name are compared for the model
-    half, so the response size tracks the commit, not the model.
+    read from the row's captured ``entity_states`` when present and
+    reconstructed at rev-1 and rev only for rows without them (pre-column
+    rows, over-cap batches), artifacts are read straight out of the journal
+    (state simulated from the inverse-derived base), view ops are rendered
+    as-is — the ops ARE the diff, no reconstruction at all — and the
+    metamodel/layout half is its own pair: the rebind's structural diff is
+    recomputed from the two immutable metamodel rows the commit names, while
+    layout moves are read journal-only off the forward ops.
 
-    A commit that names no model entity at all (a pure-artifact commit, an
-    empty batch, a rebind) skips reconstruction entirely: the entity halves
-    iterate over the named ids only, so both sides would be discarded anyway,
-    and the model can be ~80 MB — paying two reconstructions to render an
-    unavoidably empty model diff is the one cost worth short-circuiting here.
+    A fallback commit that names no model entity at all (a pure-artifact
+    commit, an empty batch, a rebind) skips reconstruction entirely: the
+    entity halves iterate over the named ids only, so both sides would be
+    discarded anyway, and the model can be ~80 MB — paying two
+    reconstructions to render an unavoidably empty model diff is the one cost
+    worth short-circuiting here.
     """
-    raw = [*commit.ops, *commit.inverse_ops]
-    el_ids = _entity_ids(raw, _EL_KINDS)
-    rel_ids = _entity_ids(raw, _REL_KINDS)
-
-    b_el: dict[str, Element] = {}
-    a_el: dict[str, Element] = {}
-    b_rel: dict[str, Relationship] = {}
-    a_rel: dict[str, Relationship] = {}
-    if el_ids or rel_ids:
-        m_before = reconstruct_model_at(project_id, commit.rev - 1)
-        m_after = reconstruct_model_at(project_id, commit.rev)
-        if m_before is not None:
-            b_el, b_rel = m_before.elements, m_before.relationships
-        if m_after is not None:
-            a_el, a_rel = m_after.elements, m_after.relationships
+    if commit.entity_states is not None:
+        states = load_entity_states(commit.entity_states)
+    else:
+        raw = [*commit.ops, *commit.inverse_ops]
+        el_ids = _entity_ids(raw, _EL_KINDS)
+        rel_ids = _entity_ids(raw, _REL_KINDS)
+        m_before = m_after = None
+        if el_ids or rel_ids:
+            m_before = reconstruct_model_at(project_id, commit.rev - 1)
+            m_after = reconstruct_model_at(project_id, commit.rev)
+        states = _states_from_models(el_ids, rel_ids, m_before, m_after)
 
     # A rebind commit carries no ops at all but changes how the model reads, so
     # it still counts as touching the model scope; an empty batch reports
@@ -498,8 +525,8 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
         message=commit.message,
         scope=scope,
         is_rebind=is_rebind,
-        elements=_element_diffs(el_ids, b_el, a_el),
-        relationships=_relationship_diffs(rel_ids, b_rel, a_rel),
+        elements=_element_diffs(states.elements),
+        relationships=_relationship_diffs(states.relationships),
         artifacts=_artifact_diffs(db, project_id, commit),
         view=_view_diffs(commit),
         metamodel=_metamodel_structural(db, commit) if is_rebind else None,

@@ -240,7 +240,7 @@ export function invertChangeRequest<T extends ChangeRequest>(cr: T): T {
 
 /** A CR as a renderable Diff: its six op buckets flattened back into
  * added/modified/deleted entries per entity kind. */
-export function crToDiff(cr: ChangeRequest): Diff {
+export function crToDiff(cr: Pick<ChangeRequest, 'ops'>): Diff {
 	const { elements, relationships } = cr.ops;
 	const els: EntityDiff[] = [
 		...elements.added.map((e) => ({ id: e.id, status: 'added' as const, after: e })),

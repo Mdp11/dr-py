@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api import db
+from data_rover.api import commit_diff, content, db
 from data_rover.api.commit_diff import _artifact_states, diff_commit, json_structural_diff
 from data_rover.api.db_models import Commit
 from data_rover.api.main import create_app
@@ -29,6 +29,11 @@ elements:
     properties:
       - name: label
         datatype: string
+relationships:
+  - name: Contains
+    containment: true
+    source: Node
+    target: Node
 """
 
 SNIP: dict[str, Any] = {
@@ -883,3 +888,167 @@ def test_diff_of_mixed_layout_and_rebind_renders_both_halves(
     assert [t["name"] for t in body["metamodel"]["element_types"]["added"]] == [
         "Widget"
     ]
+
+
+def _null_states(rev: int) -> None:
+    """Simulate a pre-column journal row: drop the captured states so the
+    reader must reconstruct."""
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        row = content.get_commit(s, DEFAULT_PROJECT_ID, rev)
+        assert row is not None and row.entity_states is not None
+        row.entity_states = None
+        s.commit()
+    finally:
+        gen.close()
+
+
+def _three_commits(client: TestClient) -> tuple[int, int, int, str, str]:
+    """create parent+child+containment; update child; delete parent (cascade).
+    Returns (rev_create, rev_update, rev_delete, parent_id, child_id)."""
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_p", "type_name": "Node",
+                 "properties": {"label": "p"}},
+                {"kind": "create_element", "temp_id": "tmp_c", "type_name": "Node",
+                 "properties": {"label": "c1"}},
+                {"kind": "create_relationship", "temp_id": "tmp_r", "type_name": "Contains",
+                 "source_id": "tmp_p", "target_id": "tmp_c"},
+            ],
+            "lock_tokens": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    rev_create = r.json()["model_rev"]
+    p, c = r.json()["id_map"]["tmp_p"], r.json()["id_map"]["tmp_c"]
+
+    tok = _lock(client, c)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "update_element", "id": c, "properties_patch": {"label": "c2"}}],
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 200, r.text
+    rev_update = r.json()["model_rev"]
+
+    tok = _lock(client, p, intent="delete")
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "delete_element", "id": p}],
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 200, r.text
+    return rev_create, rev_update, r.json()["model_rev"], p, c
+
+
+def test_diff_is_journal_only_when_states_are_present(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit row carrying entity_states never reconstructs the model."""
+    rev_create, rev_update, rev_delete, p, c = _three_commits(client)
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("reconstruct_model_at must not run on the journal path")
+
+    monkeypatch.setattr(commit_diff, "reconstruct_model_at", boom)
+
+    d = client.get(papi(f"/commits/{rev_update}/diff"))
+    assert d.status_code == 200, d.text
+    mod = d.json()["elements"]["modified"]
+    assert [m["id"] for m in mod] == [c]
+    assert mod[0]["before"]["properties"] == {"label": "c1"}
+    assert mod[0]["after"]["properties"] == {"label": "c2"}
+
+    d = client.get(papi(f"/commits/{rev_delete}/diff"))
+    assert d.status_code == 200, d.text
+    body = d.json()
+    assert sorted(e["id"] for e in body["elements"]["deleted"]) == sorted([p, c])
+    assert len(body["relationships"]["deleted"]) == 1
+    assert body["elements"]["added"] == [] and body["elements"]["modified"] == []
+
+    d = client.get(papi(f"/commits/{rev_create}/diff"))
+    assert sorted(e["id"] for e in d.json()["elements"]["added"]) == sorted([p, c])
+    assert len(d.json()["relationships"]["added"]) == 1
+
+
+def test_null_states_fall_back_to_reconstruction_byte_identically(
+    client: TestClient,
+) -> None:
+    """The two paths render the same model half: capture the journal-path
+    output, null the column, and re-render through reconstruction."""
+    revs = _three_commits(client)[:3]
+    journal = {rev: client.get(papi(f"/commits/{rev}/diff")).json() for rev in revs}
+    for rev in revs:
+        _null_states(rev)
+    for rev in revs:
+        d = client.get(papi(f"/commits/{rev}/diff"))
+        assert d.status_code == 200, d.text
+        assert d.json()["elements"] == journal[rev]["elements"]
+        assert d.json()["relationships"] == journal[rev]["relationships"]
+        assert d.json()["scope"] == journal[rev]["scope"]
+
+
+def test_over_cap_commit_diff_still_renders(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from data_rover.api import commit_states
+
+    monkeypatch.setattr(commit_states, "ENTITY_STATES_MAX", 1)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node"},
+                {"kind": "create_element", "temp_id": "tmp_b", "type_name": "Node"},
+            ],
+            "lock_tokens": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    rev = r.json()["model_rev"]
+    d = client.get(papi(f"/commits/{rev}/diff"))
+    assert d.status_code == 200, d.text
+    assert len(d.json()["elements"]["added"]) == 2  # reconstruction fallback
+
+
+def test_undo_commit_diff_is_journal_only(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    r = client.post(
+        papi("/model/ops"),
+        json={"base_rev": _rev(client), "ops": [
+            {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
+             "properties": {"label": "v1"}}]},
+    )
+    assert r.status_code == 200, r.text
+    eid = r.json()["id_map"]["tmp_e"]
+    r = client.post(
+        papi("/model/ops"),
+        json={"base_rev": _rev(client), "ops": [
+            {"kind": "update_element", "id": eid, "properties_patch": {"label": "v2"}}]},
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 200, r.text
+    rev_undo = r.json()["model_rev"]
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("reconstruct_model_at must not run on the journal path")
+
+    monkeypatch.setattr(commit_diff, "reconstruct_model_at", boom)
+    d = client.get(papi(f"/commits/{rev_undo}/diff"))
+    assert d.status_code == 200, d.text
+    mod = d.json()["elements"]["modified"][0]
+    assert mod["before"]["properties"] == {"label": "v2"}
+    assert mod["after"]["properties"] == {"label": "v1"}

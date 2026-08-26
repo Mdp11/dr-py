@@ -27,7 +27,7 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-26 · repo head at time of writing: `perf/deferred-search-index` at `d592915`
+Last updated: 2026-08-26 · repo head at time of writing: `perf/journal-only-history-diff` at `4bbf67f` (K-6 done, journal-only history diff)
 (model-compare-apply-cr merged). The 2026-08-18 additions were a batch of owner notes: P-10
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
@@ -804,7 +804,19 @@ Inherent to the Phase 4 memory-only registry. Bounded (300s), and same-holder le
 self-block, so the user who refreshed isn't locked out of their own work. The lease mirror
 does **not** change this — it makes the strand survive a restart too.
 
-### K-6 · History diff is slow on a big model · `open` · owner-reported · *2026-08-12*
+### K-6 · History diff is slow on a big model · `done` (2026-08-26, perf/journal-only-history-diff) · owner-reported · *2026-08-12*
+
+Closed as the owner proposed, one step further: instead of a reference list, every journal
+writer stores the touched entities' FULL before/after state on the row (`Commit.entity_states`,
+nullable JSON, capped at `ENTITY_STATES_MAX` = 5000 touched entities → NULL → reconstruction
+fallback, alembic `0013`), because a reference list alone cannot render `modified` — the
+inverse patch only carries touched keys. `GET /commits/{rev}/diff` is now O(commit); the
+frontend's per-commit Diff was switched to it (it previously fetched `GET /commits/{rev}/model`
+twice and diffed client-side, so the backend route had no app caller). Measured at 320k:
+11 ms on the journal path vs. 42.7 s reconstructing (+1.6 GB transient RSS). The two-revision
+Compare still reconstructs (O(model), deferred by design). Baseline rows keep NULL. Also folds
+the "backfill or tolerate NULL" question: NULL is tolerated, never backfilled.
+
 Measured 2026-08-26 on a 320k-element fixture (212 MiB snapshot): each `reconstruct_model_at`
 is a full snapshot download + `json.loads` (3 s) + `build_model_from_dicts` (~8 s after K-20,
 ~30 s before) — **two per diff click**, plus ~2 × 1 GB transient RSS. Next in the large-model

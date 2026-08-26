@@ -121,3 +121,21 @@ def test_migration_0011_widens_kind_and_preserves_fks_and_unique(
         row = s.get(ArtifactRow, "a1")
         assert row is not None
         assert row.kind == ArtifactKind.exporter
+
+
+def test_migration_0013_adds_commit_entity_states(tmp_path: Path) -> None:
+    db_path = tmp_path / "t5.db"
+    url = f"sqlite:///{db_path}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    cols = {c["name"]: c for c in inspect(engine).get_columns("commits")}
+    assert "entity_states" in cols
+    assert cols["entity_states"]["nullable"] is True
+
+    command.downgrade(cfg, "0012")
+    cols = {c["name"] for c in inspect(engine).get_columns("commits")}
+    assert "entity_states" not in cols
