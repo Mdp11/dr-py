@@ -121,7 +121,16 @@ def test_empty_transform_on_xlsx_is_not_422(client):
     assert r.status_code == 200
 
 
-def test_empty_transform_on_json_takes_no_concurrency_slot(client):
+def test_empty_transform_on_json_takes_no_concurrency_slot(client, monkeypatch):
+    # `open_transform_host` sits inside the SAME `if` block as the gate this
+    # test exercises (unlike the exporter side below, whose host-open is
+    # gated separately at the run level), so pinning the real
+    # `snippet_concurrency` limit to 1 and holding that one slot ourselves
+    # directly proves an unfixed `is not None` gate would 429 on a `{}`
+    # source instead of exporting cleanly. Settings are constructed
+    # per-request (`get_settings`), so the env var takes effect immediately
+    # — same idiom as `test_exports_transform.py::test_busy_is_429`.
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_CONCURRENCY", "1")
     _bootstrap_model(client)
     from data_rover.api.snippet_concurrency import concurrency_guard
 
@@ -137,6 +146,10 @@ def test_viewer_can_run_draft_export_with_inline_transform(app):
     # Pins a deliberately-accepted surface: EvaluateTableIn.definition is
     # viewer-callable, so an inline transform lets a viewer run sandboxed
     # code — not an escalation, since POST /snippets/run already does.
+    # Posts directly rather than through `_export`, which hardcodes
+    # `headers=AUTH_HEADERS` (the owner identity) at the REQUEST level —
+    # httpx merges client headers then overlays request headers, so
+    # `_export`'s own headers would silently win over the viewer client's.
     seed_default_project()
     app.dependency_overrides[get_runner] = lambda: TrustedRunner()
     owner = TestClient(app)
@@ -145,7 +158,17 @@ def test_viewer_can_run_draft_export_with_inline_transform(app):
 
     viewer = TestClient(app)
     viewer.headers.update(viewer_headers())
-    r = _export(viewer, {**TABLE_PAYLOAD, "transform": {"definition": {"code": WRAP}}})
+    r = viewer.post(
+        papi("/tables/export"),
+        json={
+            "definition": {
+                **TABLE_PAYLOAD,
+                "transform": {"definition": {"code": WRAP}},
+            },
+            "format": "json",
+        },
+        headers=viewer.headers,
+    )
     assert r.status_code == 200
     doc = json.loads(r.content)
     assert doc["count"] == 3
@@ -273,7 +296,16 @@ def test_empty_entry_transform_on_xlsx_is_not_422(client):
     assert r.status_code == 200
 
 
-def test_empty_entry_transform_on_json_takes_no_concurrency_slot(client):
+def test_empty_entry_transform_never_reaches_the_resolver(client, monkeypatch):
+    # Unlike the standalone surface above, the exporter's host-open is
+    # gated separately at the RUN level (`any(code is not None for code in
+    # transform_codes)` in `_execute_export`) — deliberately untouched by
+    # this fix — and `_resolve_transform_source` already returns `None` for
+    # an empty source even if called, so NO concurrency assertion here can
+    # ever discriminate the per-entry `is_empty` gate: a host is never
+    # opened for a lone `{}` entry regardless of that gate's state. What the
+    # per-entry gate DOES control is whether `_resolve_transform_source` is
+    # invoked at all for an unconfigured source — pin that instead.
     _bootstrap_model(client)
     t = _mk_table(client, "zeta")
     art = _mk_export(
@@ -282,14 +314,19 @@ def test_empty_entry_transform_on_json_takes_no_concurrency_slot(client):
             {"source": {"ref": t}, "name": "ok", "format": "json", "transform": {}},
         ],
     )
-    from data_rover.api.snippet_concurrency import concurrency_guard
+    import data_rover.api.routes.exports as exports_module
 
-    assert concurrency_guard.try_acquire_global(global_limit=1)
-    try:
-        r = _run(client, art)
-    finally:
-        concurrency_guard.release_global()
+    real_resolve = exports_module._resolve_transform_source
+    calls: list[object] = []
+
+    def _spy(*args, **kwargs):
+        calls.append(args)
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(exports_module, "_resolve_transform_source", _spy)
+    r = _run(client, art)
     assert r.status_code == 200
+    assert calls == []
 
 
 def test_viewer_can_run_draft_exporter_with_inline_transform(app):
