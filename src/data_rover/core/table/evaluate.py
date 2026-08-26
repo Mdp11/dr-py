@@ -223,8 +223,15 @@ def resolve_source_elements(
         # requested chain step. Off an EXPAND column the row is pinned to one
         # projected element, so only chains projecting to it count.
         roots = resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits,
-            script=script, memo=memo,
+            mm,
+            model,
+            defn,
+            key,
+            ref_col.source,
+            base_slots,
+            limits,
+            script=script,
+            memo=memo,
         )
         match: str | PropertyValue | None = None
         if ref_col.mode == "expand":
@@ -248,13 +255,27 @@ def resolve_source_elements(
         return [b] if isinstance(b, str) else []
     if ref_col.kind == "element":
         return resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits,
-            script=script, memo=memo,
+            mm,
+            model,
+            defn,
+            key,
+            ref_col.source,
+            base_slots,
+            limits,
+            script=script,
+            memo=memo,
         )
     if ref_col.kind == "navigation":
         roots = resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits,
-            script=script, memo=memo,
+            mm,
+            model,
+            defn,
+            key,
+            ref_col.source,
+            base_slots,
+            limits,
+            script=script,
+            memo=memo,
         )
         reached = _navigation_reached(
             mm, model, ref_col, roots, limits, script=script, memo=memo
@@ -269,8 +290,15 @@ def resolve_source_elements(
         if ref_col.snippet.definition is None or script is None:
             return []
         roots = resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits,
-            script=script, memo=memo,
+            mm,
+            model,
+            defn,
+            key,
+            ref_col.source,
+            base_slots,
+            limits,
+            script=script,
+            memo=memo,
         )
         if not roots:
             return []
@@ -343,7 +371,9 @@ def _navigation_reached_ex(
         return [], False
     if not roots:
         return [], False
-    chains, truncated = _evaluate_navigation(mm, model, col, roots, limits, script, memo)
+    chains, truncated = _evaluate_navigation(
+        mm, model, col, roots, limits, script, memo
+    )
     idx = col.step_index if col.step_index is not None else -1
     # Dedup key: an element reached over two paths is ONE reached element, but
     # a value terminal is a property OF the element the chain stepped from, so
@@ -499,8 +529,15 @@ def build_rows_ex(
             kept: list[RowKey] = []
             for key in keys:
                 roots = resolve_source_elements(
-                    mm, model, defn, key, col.source, base_slots, limits,
-                    script=script, memo=memo,
+                    mm,
+                    model,
+                    defn,
+                    key,
+                    col.source,
+                    base_slots,
+                    limits,
+                    script=script,
+                    memo=memo,
                 )
                 has_value, nav_truncated = _collapse_has_value(
                     mm, model, col, roots, limits, script=script, memo=memo
@@ -515,8 +552,15 @@ def build_rows_ex(
         new_keys: list[RowKey] = []
         for key in keys:
             roots = resolve_source_elements(
-                mm, model, defn, key, col.source, base_slots, limits,
-                script=script, memo=memo,
+                mm,
+                model,
+                defn,
+                key,
+                col.source,
+                base_slots,
+                limits,
+                script=script,
+                memo=memo,
             )
             reached, nav_truncated = _expand_values(
                 mm, model, col, roots, limits, script=script, memo=memo
@@ -903,8 +947,15 @@ def _sort_value(
     threads it through, and the fallback decision is not re-taken per row."""
     if isinstance(col, ElementColumn):
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits,
-            script=script, memo=memo,
+            mm,
+            model,
+            defn,
+            key,
+            col.source,
+            base_slots,
+            limits,
+            script=script,
+            memo=memo,
         )
         if not els:
             return (1, "")
@@ -917,8 +968,15 @@ def _sort_value(
                 return (1, ())
             return (0, (float(v),)) if numeric else (0, (str(v).casefold(),))  # type: ignore[arg-type]
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits,
-            script=script, memo=memo,
+            mm,
+            model,
+            defn,
+            key,
+            col.source,
+            base_slots,
+            limits,
+            script=script,
+            memo=memo,
         )
         vals: list[Binding] = []
         for eid in els:
@@ -942,8 +1000,15 @@ def _sort_value(
         if col.snippet.definition is None or script is None:
             return (1, ())
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits,
-            script=script, memo=memo,
+            mm,
+            model,
+            defn,
+            key,
+            col.source,
+            base_slots,
+            limits,
+            script=script,
+            memo=memo,
         )
         if not els:
             return (1, ())
@@ -983,8 +1048,15 @@ def _sort_value(
             return (1, "")
         return (0, (_display_name(model, b).casefold(), b))
     roots = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits,
-        script=script, memo=memo,
+        mm,
+        model,
+        defn,
+        key,
+        col.source,
+        base_slots,
+        limits,
+        script=script,
+        memo=memo,
     )
     reached = _navigation_reached(
         mm, model, col, roots, limits, script=script, memo=memo
@@ -1038,8 +1110,16 @@ def order_rows(
     decorated: list[tuple[int, Any, RowKey]] = [
         (
             *_sort_value(
-                mm, model, defn, k, col, sort.column, base_slots, limits,
-                script=script, memo=memo,
+                mm,
+                model,
+                defn,
+                k,
+                col,
+                sort.column,
+                base_slots,
+                limits,
+                script=script,
+                memo=memo,
             ),
             k,
         )

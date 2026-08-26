@@ -195,12 +195,24 @@ def test_sort_by_step_ref_over_value_terminal_navigates_once_per_root(monkeypatc
 def test_script_navigation_bypasses_memo(monkeypatch):
     # A ScriptStep navigation is NEVER memoized: with `script=None` the step
     # prunes silently, but the bypass must still route every row through
-    # `evaluate()` so per-call side effects are never skipped.
+    # `evaluate()` individually, even when rows share a base element. Column
+    # 0 (expand, plain relationship) multiplies rows under a shared root/part
+    # base element; column 1 (collapse, relationship + script step) sorts off
+    # that SAME base element (`source: {"kind": "row"}` == key[0]). If column
+    # 1 were (wrongly) memoized, rows sharing a base element would collapse
+    # onto one `evaluate()` call each; the bypass means one call per ROW.
     mm = _mm()
     model, _, _ = _split_model(mm)
     defn = TABLE_ADAPTER.validate_python({
         "row_source": {"kind": "scope", "types": ["Block"]},
         "columns": [
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "expand",
+             "keep_empty": False,
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [
+                     {"kind": "relationship", "relationship_type": "BlockHasPart",
+                      "direction": "out"},
+                 ]}}},
             {"kind": "navigation", "source": {"kind": "row"}, "mode": "collapse",
              "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
                  "steps": [
@@ -212,9 +224,14 @@ def test_script_navigation_bypasses_memo(monkeypatch):
         ],
     })
     built = build_rows_ex(mm, model, defn)
+    # Several rows share a base element (a root's FAN parts), so distinct
+    # bases are strictly fewer than rows -- that gap is what proves bypass
+    # over memoization, not just a nonzero call count.
+    assert len(built.keys) > len({key[0] for key in built.keys})
     calls = _count_evaluate(monkeypatch)
-    order_rows(mm, model, defn, built.keys, SortSpec(column=0, direction="asc"))
+    order_rows(mm, model, defn, built.keys, SortSpec(column=1, direction="asc"))
     assert len(calls) == len(built.keys)
+    assert len(calls) > len({key[0] for key in built.keys})
 
 
 def test_public_passes_take_no_memo_parameter():
