@@ -1084,16 +1084,15 @@ browses the project's durable commit journal:
   `state/history.svelte.ts` and renders one row per commit with its rev label,
   message, author, timestamp, and op count. Live-refreshes via the realtime
   feed (commit events trigger a page reload while the drawer is open).
-- **Per-commit diff** — clicking a row's "Diff" button reconstructs the model
-  at `rev - 1` and at `rev` using `GET /commits/{rev}/model` (results are
-  cached in a rev → `ModelOut` map to avoid re-fetching on rapid navigation),
-  then passes both snapshots to `computeDiff`/`CompareDiff` which render
-  element-level added / modified / deleted counts and per-element property
-  changes.
+- **Per-commit diff** — clicking a row's "Diff" button fetches
+  `GET /commits/{rev}/diff` (`getCommitDiff`), which the server renders from
+  the commit row's captured entity states — no model reconstruction on either
+  side — and converts it with `crToDiff` for `CompareDiff`, so the click costs
+  O(commit) regardless of model size.
 - **Two-commit compare** — the "Compare" toggle lets the user select any two
   revisions A and B; the same `computeDiff` path reconstructs both models and
   renders the range diff. A warning banner is shown when the range spans a
-  rebind-carrying commit.
+  rebind-carrying commit. This path is O(model) by design; only the per-commit Diff is journal-backed.
 - **Revert-to-commit** (`POST /commits/revert`) — gated on a quiet project:
   `state/quiet.ts`'s `isProjectQuiet()`, a five-term predicate (no staged
   MODEL ops, no staged ARTIFACT ops, no staged VIEW ops, no staged METAMODEL
@@ -1631,7 +1630,7 @@ src/
                         successful lease acquisition, unlike lock-notice.svelte.ts);
                         api/checkout.ts — the locks + commits REST client;
                         history.svelte.ts — commit-list store (paged
-                        GET /commits), rev→ModelOut reconstruction cache,
+                        GET /commits), rev→ModelOut reconstruction cache (Compare only; the per-commit Diff bypasses it),
                         resetHistory/loadFirstPage/loadMore/modelAt;
                         inspection-history.svelte.ts — the Inspector's
                         back/forward visit trail: in-memory stack + cursor (cap
