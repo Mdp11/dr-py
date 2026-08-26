@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     #: load/upload/hydrate paths. False in production; the API test conftest
     #: pins it true so tests keep deterministic "seeded after load" semantics.
     validation_sweep_sync: bool = False
+    #: Run the background trigram search-index build synchronously on the
+    #: load/upload/hydrate paths. False in production (a daemon thread
+    #: indexes in chunks while search falls back to the scan); the API test
+    #: conftest pins it true so every test sees a complete index after load.
+    search_index_sync: bool = False
     #: Which ScriptRunner ``build_runner_from_settings`` constructs: "wasm"
     #: (the wasmtime/CPython-WASI sandbox, the only choice safe for real
     #: deployments) or "trusted" (the in-process, unsandboxed test runner —
