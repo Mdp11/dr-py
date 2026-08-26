@@ -27,7 +27,7 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-26 · repo head at time of writing: `main` at `96e18c5`
+Last updated: 2026-08-26 · repo head at time of writing: `perf/deferred-search-index` at `d592915`
 (model-compare-apply-cr merged). The 2026-08-18 additions were a batch of owner notes: P-10
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
@@ -54,7 +54,9 @@ export) remains open and needs re-confirmation from the owner before starting. T
 pass on `feat/model-compare-apply-cr` closes P-23 — Compare and Apply CR became one
 server-proposes/client-stages pipeline — and adds K-19 and O-3, both noticed while finishing it.
 The 2026-08-26 UX pass on `fix/ux-minor-batch` closes U-3, U-6, U-9, F-14, F-17 and K-3's
-pluralization bullet, and retires U-5 as already shipped.
+pluralization bullet, and retires U-5 as already shipped. The 2026-08-26 pass on
+`perf/deferred-search-index` closes K-20 and adds K-21 → K-25 as the large-model
+performance program (see K-6, now first in that program).
 
 ---
 
@@ -803,6 +805,11 @@ self-block, so the user who refreshed isn't locked out of their own work. The le
 does **not** change this — it makes the strand survive a restart too.
 
 ### K-6 · History diff is slow on a big model · `open` · owner-reported · *2026-08-12*
+Measured 2026-08-26 on a 320k-element fixture (212 MiB snapshot): each `reconstruct_model_at`
+is a full snapshot download + `json.loads` (3 s) + `build_model_from_dicts` (~8 s after K-20,
+~30 s before) — **two per diff click**, plus ~2 × 1 GB transient RSS. Next in the large-model
+performance program after K-20 (see K-21 → K-25 for the rest of the program and its order).
+
 `GET /commits/{rev}/diff` reconstructs before/after state per entity
 (`api/commit_diff.py`), which doesn't scale with model size. Owner's proposal: store a
 reference list of everything a commit changed (elements, artefacts, …) on the commit row
@@ -991,6 +998,54 @@ metamodel + model + view + artifact bundle in one request, so it is not the smal
 different mechanism than `read_capped_body` (Starlette parses multipart itself; the cap has to
 land on the parser or on the parts, not on a byte stream the route reads). Same 413 contract when
 it lands, so a client can keep telling "too large" from "malformed".
+
+### K-20 · The trigram search index was built inline by `IndexSet.rebuild()` · `done` (2026-08-26, perf/deferred-search-index) · perf · *2026-08-26*
+Measured on a 320k-element / 239k-relationship fixture (212 MiB snapshot — production
+size): `build_model_from_dicts` 30.0 s of which the trigram index 22.5 s, index RSS +1.78 GB
+of which the trigram postings ~1.5 GB (29.5M posting entries; production uuid7 ids add ~28
+per element). The index was also rebuilt — and discarded — by every `rebuild()` caller that
+never searches: rebind preview (twice, under `write_mutex`), rebind commit (+unwind),
+`/metamodel/diff`, apply-cr per CR, history reconstruction. Fixed: `rebuild()` no longer
+builds it (`search_ready=False`, scan fallback), `api/search_index_build.py` builds the live
+session's index in the background, rebind paths keep it via `rebuild(keep_search=True)`.
+Same branch fixed a latent bug: `rebuild()` never cleared its per-type metamodel caches, so
+a containment- or key-flipping rebind left the containment tree, roots order and uniqueness
+groups stale until eviction. NOT done (deliberate): shrinking the posting sets — memory stays
+~1.5 GB for the live session; revisit only if RSS binds after K-21.
+
+### K-21 · Snapshots are stored indented and uncompressed · `open` · perf · *2026-08-26*
+`write_snapshot` streams the indented save-file format to the store: 212 MiB at production
+size, downloaded on every hydration and uploaded on every eviction and every 200th commit
+(`_maybe_periodic_snapshot`, synchronously inside the commit under `write_mutex`: 3.8 s
+serialize + upload). Measured gzip-6 → 10 MiB (+1.3 s); compact JSON alone 138 MiB and
+`json.loads` 2.0 s vs 2.9 s indented. Store `.json.gz` compact, branch the read path on the
+key/encoding. Then re-measure whether the periodic snapshot still needs to leave the commit's
+critical section. Third in the large-model performance program (after K-6).
+
+### K-22 · Uniqueness validator builds a whole-model position map per scoped run · `open` · perf · *2026-08-26*
+`validators/uniqueness.py:56` builds `{eid: i for i, eid in enumerate(model.elements)}` —
+96 ms at 320k — on every scoped run that touches a duplicate group, under `write_mutex`: up
+to 350 × per background sweep (+34 s) and once per commit touching a duplicate. Maintain an
+insertion-position index in `IndexSet` (or hoist the map onto the validator for a sweep's
+lifetime). Fourth in the program.
+
+### K-23 · `Model.set_property`/`delete_property` copy the property list and build a name set per write · `open` · perf · *2026-08-26*
+`core/model/model.py:82-85`, `:105-108` and `routes/ops.py::_check_patch_keys` do
+`list(effective_*_properties)` + `{p.name for p in defs}` per property write; the replay tail
+at hydration (≤200 commits) and every commit pay it per op property, and
+`on_properties_changed` re-derives the element's whole trigram set per write. Add a cached
+`frozenset` name accessor on `Metamodel`. Fifth in the program.
+
+### K-24 · Untyped navigation scope sorts every element id · `open` · perf · *2026-08-26*
+`core/navigation/evaluate.py:244-245`: `set(model.elements.keys())` + criteria filter +
+`sorted()` of ~300k ids for a table/navigation with no `types`, on the first table request
+after every commit (`TableOrderCache` is rev-keyed). Sixth in the program.
+
+### K-25 · `GET /model/relationships` is unpaged · `open` · perf · *2026-08-26*
+`routes/relationships.py:19` materializes all ~400k relationships into pydantic models with
+no `limit`/`offset`; `source_id`/`target_id` filters are already served by
+`IndexSet.outgoing_ids`/`incoming_ids`. No app caller (`frontend/src/lib/api/relationships.ts`
+is test-only). Page it or delete it. Last in the program.
 
 ---
 

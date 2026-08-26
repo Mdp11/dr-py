@@ -7,8 +7,9 @@ This module is their applier — the fourth sibling of ``routes/ops.py``'s
 model applier, ``artifact_ops`` and ``view_ops``:
 
 - ``metamodel.rebind`` swaps the IN-MEMORY metamodel (``session.metamodel``,
-  ``model.metamodel``, ``model.indexes.rebuild()`` — the index is
-  metamodel-derived) and stages the durable rows (new ``MetamodelRow`` at
+  ``model.metamodel``, ``model.indexes.rebuild()`` to re-derive the per-type
+  caches — the search index is kept, since the indexed text does not depend
+  on the metamodel) and stages the durable rows (new ``MetamodelRow`` at
   ``prior_version + 1`` carrying the author's verbatim blob, ``ModelRow``
   repointed) on the caller's DB transaction. The caller (``create_commit``)
   applies this module FIRST so the batch's model ops validate against the

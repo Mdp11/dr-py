@@ -80,9 +80,14 @@ def bench_load(model_path: Path, metamodel_path: Path) -> Model:
     model = build_model_from_dicts(metamodel, raw)
     t_build_direct = time.perf_counter() - t0
 
+    t0 = time.perf_counter()
+    model.indexes.build_search_index()
+    t_search = time.perf_counter() - t0
+
     _report("(1a) json.load", t_parse)
     _report("(1b) OLD pydantic parse + _build_model_from_payload", t_build_pydantic)
-    _report("(1c) NEW direct build_model_from_dicts", t_build_direct)
+    _report("(1c) NEW direct build_model_from_dicts (no search index)", t_build_direct)
+    _report("(1d) trigram search index build (background in the app)", t_search)
     _report("(1)  load + build total (json.load + direct build)",
             t_parse + t_build_direct)
     return model

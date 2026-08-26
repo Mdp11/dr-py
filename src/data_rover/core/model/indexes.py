@@ -21,7 +21,10 @@ any direct writer of ``entity.properties`` must go through
 The trigram search index (``search_postings`` / ``_trigrams_of``) is
 maintained at that same boundary with the same obligations; it feeds
 ``search_candidates`` (the fuzzy-search candidate generator) and, like the
-reference index, is diffed on ``on_properties_changed``.
+reference index, is diffed on ``on_properties_changed``. It is deliberately
+NOT built by ``rebuild()`` (see that method) — ``search_ready`` says whether
+it covers every element, and ``index_search_chunk``/``build_search_index``
+(re)build it.
 
 Uniqueness grouping mirrors the UniquenessValidator exactly: two elements are
 identical when they share ``type_name``, their first containment parent (or
@@ -142,9 +145,9 @@ class IndexSet:
         # entity id -> reference-target ids currently held in its properties
         # (reverse of ref_targets; needed to diff on property changes)
         self._refs_of: dict[str, set[str]] = {}
-        # per-type caches (the metamodel is immutable, so these never need
-        # invalidation); they bypass pydantic attribute-access overhead on the
-        # per-entity hot paths
+        # per-type caches, re-derived by rebuild() when a metamodel swap
+        # replaces model.metamodel under this same IndexSet; they bypass
+        # pydantic attribute-access overhead on the per-entity hot paths
         self._element_ref_props: dict[str, tuple[str, ...]] = {}
         self._relationship_ref_props: dict[str, tuple[str, ...]] = {}
         self._key_specs: dict[str, KeySpec | None] = {}
@@ -156,8 +159,9 @@ class IndexSet:
         # the postings they canonicalize).
         self._canon_trigrams: dict[str, str] = {}
         # relationship-type names that appear with each direction in ANY element
-        # type's effective key; built once (metamodel is immutable). None until
-        # first built. Used to skip rekeying on edges that affect no key.
+        # type's effective key; per-type cache, re-derived by rebuild() when a
+        # metamodel swap replaces model.metamodel. None until first built. Used
+        # to skip rekeying on edges that affect no key.
         self._out_key_rel_types: set[str] | None = None
         self._in_key_rel_types: set[str] | None = None
         self._is_containment: dict[str, bool] = {}
@@ -209,8 +213,8 @@ class IndexSet:
     def search_candidates(self, q: str) -> Set[str] | None:
         """Ids of elements that MAY fuzzy-match ``q`` — a guaranteed superset
         of the true hits — or ``None`` when the index cannot answer OR cannot
-        beat a scan (the index is not built yet (``search_ready`` is False),
-        ``len(q) < 3``, or the query's rarest trigram is ubiquitous); the
+        beat a scan: the index is not built yet (``search_ready`` is False),
+        ``len(q) < 3``, or the query's rarest trigram is ubiquitous. The
         caller falls back to a scan either way. ``q`` must already be trimmed
         and lowercased. May return a live internal set — do NOT mutate.
 
