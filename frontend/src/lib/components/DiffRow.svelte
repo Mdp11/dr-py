@@ -66,7 +66,7 @@
 <div class="flex flex-col gap-1 rounded border border-border bg-muted/40 px-2 py-1.5 text-xs">
 	<div class="flex items-center gap-2">
 		<span class="w-3 font-mono {glyphClass}" aria-label={status}>{glyphChar}</span>
-		<span class="font-mono text-foreground">{label}</span>
+		<span class="min-w-0 break-words font-mono text-foreground">{label}</span>
 		{#if typeName}
 			<span
 				class="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
@@ -74,7 +74,9 @@
 				{typeName}
 			</span>
 		{/if}
-		<span class="ml-auto font-mono text-[10px] text-muted-foreground/70">{diff.id}</span>
+		<span class="ml-auto min-w-0 break-all font-mono text-[10px] text-muted-foreground/70"
+			>{diff.id}</span
+		>
 		{#if onDiscard}
 			<button
 				type="button"
@@ -89,14 +91,14 @@
 	{#if kind === 'relationship' && status === 'added'}
 		{@const eps = endpoints(diff.after)}
 		{#if eps}
-			<div class="pl-5 font-mono text-[11px] text-muted-foreground">{eps}</div>
+			<div class="break-all pl-5 font-mono text-[11px] text-muted-foreground">{eps}</div>
 		{/if}
 	{/if}
 
 	{#if status === 'modified' && diff.modifiedFields && diff.modifiedFields.length > 0}
 		<ul class="flex flex-col gap-0.5 pl-5">
 			{#each diff.modifiedFields as field (field)}
-				<li class="font-mono text-[11px] text-muted-foreground">
+				<li class="break-words font-mono text-[11px] text-muted-foreground">
 					<span class="text-muted-foreground/70">{field}:</span>
 					<span class="text-destructive/80 line-through">{formatValue(beforeValue(field))}</span>
 					<span class="text-muted-foreground/70"> → </span>

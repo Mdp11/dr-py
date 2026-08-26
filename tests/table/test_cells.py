@@ -338,6 +338,40 @@ def test_property_step_navigation_column_resolves_referenced_element():
     assert cell.truncated is False
 
 
+def test_scalar_property_step_values_are_per_reached_element():
+    # Two DISTINCT parts carrying the SAME `name` reach the cell as TWO values:
+    # a value terminal's identity is (owning element, value), not the value
+    # alone — otherwise equal-valued properties silently collapse to one and
+    # the cell under-reports how many elements the row actually reaches.
+    mm = _mm()
+    model, ids = _fixture(mm)
+    for key in ("part1", "part2"):
+        model.set_property(model.elements[ids[key]], "name", "Part")
+    nav = {"definition": {"kind": "path", "start": {"kind": "row"},
+        "steps": [{"kind": "relationship", "relationship_type": "BlockHasPart",
+                   "direction": "out"},
+                  {"kind": "property", "property_name": "name"}],
+        "exclude_visited": True}}
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "navigation", "source": {"kind": "row"},
+                     "navigation": nav}],
+    })
+    cell = next(c[0] for k, c in zip(keys, cells) if k[0] == ids["root"])
+    assert isinstance(cell, ValuesCell)
+    assert cell.values == ["Part", "Part"]
+    assert cell.total == 2
+
+    # Expand mode promotes one row per reached (element, value) pair too.
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "navigation", "source": {"kind": "row"},
+                     "navigation": nav, "mode": "expand", "keep_empty": False}],
+    })
+    root_rows = [c[0] for k, c in zip(keys, cells) if k[0] == ids["root"]]
+    assert [getattr(c, "value", None) for c in root_rows] == ["Part", "Part"]
+
+
 def test_scalar_property_step_navigation_column_yields_values_cell():
     # A navigation column whose path ends in a SCALAR property step shows the
     # property VALUES (a ValuesCell), not an empty elements cell — the chain

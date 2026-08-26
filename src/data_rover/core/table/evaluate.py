@@ -297,11 +297,20 @@ def _navigation_reached_ex(
         mm, model, defn, limits.nav_limits, row_elements=roots, script=script
     )
     idx = col.step_index if col.step_index is not None else -1
-    seen: dict[str | PropertyValue, None] = {}
+    # Dedup key: an element reached over two paths is ONE reached element, but
+    # a value terminal is a property OF the element the chain stepped from, so
+    # its identity is (owner, value) — two distinct elements carrying equal
+    # values are two reached values, never one. A PropertyValue is never at
+    # index 0 (chains start at an element), so `chain[idx - 1]` always exists.
+    seen: dict[str | tuple[str | PropertyValue, PropertyValue], None] = {}
     for chain in result.chains:
         _check_step_index(idx, len(chain))
-        seen[chain[idx]] = None
-    return list(seen), result.truncated
+        node = chain[idx]
+        seen[(chain[idx - 1], node) if isinstance(node, PropertyValue) else node] = None
+    reached: list[str | PropertyValue] = [
+        k[1] if isinstance(k, tuple) else k for k in seen
+    ]
+    return reached, result.truncated
 
 
 def _navigation_reached(

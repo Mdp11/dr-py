@@ -9,6 +9,7 @@ import { lineRangeForType, parseDraft } from '$lib/metamodel/yaml-edit';
 import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
 import {
 	clearStagedNodeMoves,
+	discardStagedNodeMoves,
 	getStagedMetamodelOps,
 	notifyMetamodelCommitted
 } from '../metamodel-stage.svelte';
@@ -468,6 +469,27 @@ describe('a landed commit', () => {
 
 		// The stack's snapshots were taken against a baseline the rebind moved.
 		expect(getMetamodelDiagramView().canUndo).toBe(false);
+	});
+});
+
+describe('discarding the staged moves', () => {
+	it('snaps the canvas back to the baseline positions', async () => {
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
+			positions: { 'el:Zone': { x: 1, y: 1 } }
+		});
+		await initMetamodelDiagram('p1');
+		moveNode('el:Zone', { x: 50, y: 60 });
+		expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 50, y: 60 });
+
+		// The commit drawer's "Discard metamodel changes" (and Discard all) wipe
+		// the staged ops through this call — the canvas must follow, not keep
+		// showing a position that is no longer going anywhere.
+		discardStagedNodeMoves();
+
+		await vi.waitFor(() =>
+			expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 1, y: 1 })
+		);
 	});
 });
 

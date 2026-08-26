@@ -7,7 +7,11 @@
 	import { pythonIndentation } from '$lib/editor/indent-extension';
 	import { python, pythonLanguage } from '@codemirror/lang-python';
 	import { lintGutter, setDiagnostics } from '@codemirror/lint';
-	import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
+	import {
+		acceptCompletion,
+		type CompletionContext,
+		type CompletionResult
+	} from '@codemirror/autocomplete';
 	import { toCmDiagnostics } from '$lib/editor/lint-map';
 	import {
 		computeCompletions,
@@ -202,7 +206,11 @@
 								{ key: 'Mod-Enter', run: () => (onRun(), true) },
 								// VS Code's format shortcut, in the same Prec.highest group as
 								// Mod-Enter so basicSetup's defaultKeymap cannot claim it first.
-								{ key: 'Shift-Alt-f', run: () => (void reformat(), true) }
+								{ key: 'Shift-Alt-f', run: () => (void reformat(), true) },
+								// Tab accepts the open completion. `acceptCompletion` returns
+								// false when no list is open, so the key then falls through to
+								// `pythonIndentation`'s own Tab binding below and indents.
+								{ key: 'Tab', run: acceptCompletion }
 							])
 						),
 						EditorView.updateListener.of((u) => {

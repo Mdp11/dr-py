@@ -218,7 +218,7 @@ def test_import_confirm_lands_one_commit(client: TestClient) -> None:
     # journaled with the default message
     hist = client.get(papi("/commits"), headers=AUTH_HEADERS).json()["commits"]
     assert hist[0]["rev"] == out["rev"]
-    assert hist[0]["message"] == "Imported 1 artifacts from Source"
+    assert hist[0]["message"] == "Imported 1 artifact from Source"
     # diff renders and undo reverts (journal-only artifact commit)
     assert client.get(papi(f"/commits/{out['rev']}/diff"), headers=AUTH_HEADERS).status_code == 200
     undo = client.post(papi("/model/undo"), headers=AUTH_HEADERS)

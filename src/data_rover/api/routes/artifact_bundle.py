@@ -152,8 +152,9 @@ def import_confirm(
             rev=None, created=[], reused=reused, skipped=plan.skipped
         )
 
+    noun = "artifact" if len(ops) == 1 else "artifacts"
     message = body.message or (
-        f"Imported {len(ops)} artifacts from {body.bundle.source_project.name}"
+        f"Imported {len(ops)} {noun} from {body.bundle.source_project.name}"
     )
     req = CommitRequest(
         base_rev=session.model_rev,
