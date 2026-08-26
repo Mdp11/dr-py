@@ -244,3 +244,54 @@ def test_public_passes_take_no_memo_parameter():
 
     for fn in (build_rows, build_rows_ex, order_rows, evaluate_cells, iter_export_rows):
         assert "memo" not in inspect.signature(fn).parameters, fn.__name__
+
+
+def test_cells_window_navigates_once_per_root(monkeypatch):
+    from data_rover.core.table.cells import ValueCell, evaluate_cells
+
+    mm = _mm()
+    model, _, parent_of = _split_model(mm)
+    defn = _step_ref_table()
+    built = build_rows_ex(mm, model, defn)
+    calls = _count_evaluate(monkeypatch)
+    cells = evaluate_cells(mm, model, defn, built.keys)  # build order: roots contiguous
+    assert len(calls) == N_ROOTS
+    # Values are still row-correct: each split row reads ITS part's name.
+    for key, row in zip(built.keys, cells, strict=True):
+        leaf = key[1]
+        assert isinstance(leaf, str)
+        cell = row[1]
+        assert isinstance(cell, ValueCell)
+        assert cell.present
+        assert cell.value == model.elements[parent_of[leaf]].properties["name"]
+        assert cell.element_id == parent_of[leaf]
+
+
+def test_cells_pass_never_reuses_an_earlier_pass_result():
+    # Mutate the model BETWEEN `order_rows` and `evaluate_cells`: the cells
+    # must reflect the new model, proving no memo survives across passes.
+    from data_rover.core.table.cells import ValuesCell, evaluate_cells
+
+    mm = _mm()
+    model, roots, _ = _split_model(mm)
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "collapse",
+             "keep_empty": False,
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [{"kind": "relationship", "relationship_type": "BlockHasPart",
+                            "direction": "out"}]}}},
+            {"kind": "property", "source": {"kind": "column", "index": 0}, "name": "name"},
+        ],
+    })
+    built = build_rows_ex(mm, model, defn)
+    ordered = order_rows(mm, model, defn, built.keys, SortSpec(column=1, direction="asc"))
+    extra = model.create_element("Block")
+    model.set_property(extra, "name", "ZZ-new")
+    model.connect("BlockHasPart", roots[0], extra.id)
+    cells = evaluate_cells(mm, model, defn, ordered)
+    row0 = next(i for i, k in enumerate(ordered) if k[0] == roots[0])
+    cell = cells[row0][1]
+    assert isinstance(cell, ValuesCell)
+    assert "ZZ-new" in cell.values

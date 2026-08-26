@@ -53,6 +53,7 @@ from .evaluate import (
     _navigation_reached,
     resolve_source_elements,
 )
+from .nav_memo import NavMemo
 from .schema import (
     ElementColumn,
     NavigationColumn,
@@ -158,9 +159,10 @@ def _element_cell(
     base_slots: int,
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> ElementCell:
     els = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits, script=script
+        mm, model, defn, key, col.source, base_slots, limits, script=script, memo=memo
     )
     return ElementCell(element_id=els[0] if els else None)
 
@@ -175,9 +177,10 @@ def _property_cell(
     base_slots: int,
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> Cell:
     els = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits, script=script
+        mm, model, defn, key, col.source, base_slots, limits, script=script, memo=memo
     )
     if col.mode == "expand":
         # The value already sits in this row's key slot (build_rows promoted
@@ -226,6 +229,7 @@ def _navigation_cell(
     base_slots: int,
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> Cell:
     if col.mode == "expand":
         slot = _expand_slot_of(defn, base_slots, col_index)
@@ -240,9 +244,11 @@ def _navigation_cell(
             )
         return ElementCell(element_id=b if isinstance(b, str) else None)
     roots = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits, script=script
+        mm, model, defn, key, col.source, base_slots, limits, script=script, memo=memo
     )
-    reached = _navigation_reached(mm, model, col, roots, limits, script=script)
+    reached = _navigation_reached(
+        mm, model, col, roots, limits, script=script, memo=memo
+    )
     # `cell_cap` is a per-column display preference; `max_cell_elements` is the
     # server-wide ceiling, so the effective cap is whichever is stricter. An
     # export sets `ignore_cell_caps` so the workbook carries the COMPLETE
@@ -282,6 +288,7 @@ def _script_cell(
     base_slots: int,
     limits: TableLimits,
     script: ScriptEvalContext | None,
+    memo: NavMemo | None = None,
 ) -> Cell:
     """Cell for one row of a `ScriptColumn`. `expand` reads back the binding
     `build_rows` already promoted into this row's key slot (never re-calls
@@ -306,7 +313,15 @@ def _script_cell(
             return ErrorCell(message=f"snippet artifact {col.snippet.ref!r} not found")
         if col.snippet.definition is not None and script is not None:
             roots = resolve_source_elements(
-                mm, model, defn, key, col.source, base_slots, limits, script=script
+                mm,
+                model,
+                defn,
+                key,
+                col.source,
+                base_slots,
+                limits,
+                script=script,
+                memo=memo,
             )
             if roots:
                 # Force cache-only: the row shape is unknown here (this is a
@@ -330,7 +345,7 @@ def _script_cell(
         # unconfigured navigation/property source
         return ValueCell(present=False, value=None, element_id=None, editable=False)
     els = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits, script=script
+        mm, model, defn, key, col.source, base_slots, limits, script=script, memo=memo
     )
     if not els:
         return ValueCell(present=False, value=None, element_id=None, editable=False)
@@ -388,24 +403,31 @@ def evaluate_cells(
     # already-built set: base_slots = total slots minus one per expand column.
     base_slots = (len(keys[0]) - expand_count) if keys else 1
 
+    # One memo per window pass — never shared with the build/sort passes
+    # (see `nav_memo.py`): a result computed under `script.cache_only`
+    # must not be served to this live pass.
+    memo = NavMemo()
+
     rows: list[list[Cell]] = []
     for key in keys:
         row: list[Cell] = []
         for i, col in enumerate(defn.columns):
             if isinstance(col, ElementColumn):
                 row.append(
-                    _element_cell(mm, model, defn, key, col, base_slots, limits, script)
+                    _element_cell(
+                        mm, model, defn, key, col, base_slots, limits, script, memo
+                    )
                 )
             elif isinstance(col, PropertyColumn):
                 row.append(
                     _property_cell(
-                        mm, model, defn, key, col, i, base_slots, limits, script
+                        mm, model, defn, key, col, i, base_slots, limits, script, memo
                     )
                 )
             elif isinstance(col, ScriptColumn):
                 row.append(
                     _script_cell(
-                        mm, model, defn, key, col, i, base_slots, limits, script
+                        mm, model, defn, key, col, i, base_slots, limits, script, memo
                     )
                 )
             else:
@@ -413,7 +435,7 @@ def evaluate_cells(
                 assert isinstance(col, NavigationColumn)
                 row.append(
                     _navigation_cell(
-                        mm, model, defn, key, col, i, base_slots, limits, script
+                        mm, model, defn, key, col, i, base_slots, limits, script, memo
                     )
                 )
         rows.append(row)
