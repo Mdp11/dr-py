@@ -14,16 +14,24 @@
 		portalProps,
 		children,
 		showCloseButton = true,
+		showOverlay = true,
 		...restProps
 	}: WithoutChildrenOrChild<DialogPrimitive.ContentProps> & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof DialogPortal>>;
 		children: Snippet;
 		showCloseButton?: boolean;
+		/** `false` for a NON-MODAL panel: no backdrop, so the page behind stays
+		 * clickable. Pair it with `trapFocus={false}` and
+		 * `interactOutsideBehavior="ignore"`, or the primitive will still close
+		 * on the first outside click. */
+		showOverlay?: boolean;
 	} = $props();
 </script>
 
 <DialogPortal {...portalProps}>
-	<Dialog.Overlay />
+	{#if showOverlay}
+		<Dialog.Overlay />
+	{/if}
 	<DialogPrimitive.Content
 		bind:ref
 		data-slot="dialog-content"

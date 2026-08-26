@@ -895,7 +895,7 @@ toggle`), a collapsed disclosure that expands to the shared
   normally re-evaluates the whole table — a fresh backend cache key, and for a
   script column a fresh sweep. Inside the settings dialog the user is
   _composing_ (typing a snippet, trying a chain, undoing it), and every
-  intermediate state would pay for that, on a grid the modal is covering
+  intermediate state would pay for that, on a grid the panel has made `inert`
   anyway. So `TableView.openSettings` calls `suspendTableEvaluation(tabId)`
   **before the first edit** (the header "+" menu appends the new column _then_
   opens the dialog — that append is itself an edit), which snapshots the
@@ -917,6 +917,29 @@ toggle`), a collapsed disclosure that expands to the shared
   and nothing else, while a debounce timer would silently discard a rename
   typed and then Escaped inside its window (`change` never fires for an input
   unmounted while still focused).
+- **The settings dialog is a NON-MODAL floating panel.** The point of editing
+  a column is usually to look something up in the model, so the sidebar
+  (tree, search, view) and the inspector stay fully usable while it is open:
+  `Dialog.Content` is rendered with `showOverlay={false}` (a prop on the
+  shared `ui/dialog` wrapper), `trapFocus={false}`, `preventScroll={false}`
+  and `interactOutsideBehavior="ignore"` — an outside click is a click on
+  the sidebar now, not a dismiss. What stays locked is the panel's OWN tab:
+  `TableView`'s tab body is `inert` while the panel is open (evaluation is
+  suspended, so a grid that would not fill its chunks must not be clickable).
+  Escape is OUR keydown handler on the content (`escapeKeydownBehavior=
+"ignore"` turns the primitive's off), because bits-ui's escape layer listens
+  on `document` and, with focus free to roam, an Escape typed in the sidebar
+  search must not close a panel mid-composition; the nested discard
+  confirmation is its own bits-ui layer and keeps working as before. The
+  panel is dragged by its title bar and resized from the corner; its rect is
+  explicit (`left/top/width/height`, overriding the primitive's centering) and
+  ONE global preference in localStorage (`lib/table/settings-rect.ts`,
+  `ui.table.settingsRect`), re-clamped to the live viewport on every open and
+  on window resize. The first open centers it over the table tab's own area
+  rather than the viewport, so the two side panels start out uncovered. Since
+  it is portaled to `<body>`, it hides (state intact — nothing closes) while
+  another workspace tab is active, so switching tabs never leaves a foreign
+  table's editor floating over the new tab.
 - **`warnings` threading.** Both evaluation paths share one
   `ScriptEvalContext` per request and report through its `.warnings` list, but
   the warnings themselves are **structured**, not message strings: each one is
