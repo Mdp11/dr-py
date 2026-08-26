@@ -76,12 +76,37 @@ def _latest_snapshot_rev() -> int | None:
         return None if snap is None else snap.rev
 
 
-def test_async_job_writes_the_snapshot_row(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_route_schedules_the_job_asynchronously(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The route hands off to the thread rather than writing inline: the
+    sentinel replaces ``write_snapshot`` so the job thread performs no
+    database work at all, keeping it from ever overlapping the request's
+    own use of the shared in-memory-SQLite connection."""
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_SYNC", "false")
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_EVERY", "1")
+    calls: list[int] = []
+
+    def _sentinel(project_id: str, session: Session, rev: int) -> None:
+        calls.append(rev)
+
+    monkeypatch.setattr("data_rover.api.snapshot_job.write_snapshot", _sentinel)
     c = _client()
     rev = _create_one(c)
     job = _live_session().snapshot_job
+    assert job is not None
+    assert job.done.wait(10.0), "snapshot job did not finish"
+    assert job.running is False
+    assert job.written_rev == rev
+    assert calls == [rev]
+
+
+def test_async_job_writes_the_snapshot_row() -> None:
+    """No request is in flight here, so the job's ``db_session()`` is the
+    only user of the shared in-memory-SQLite connection: this is what
+    exercises the genuine daemon thread doing a genuine durable write."""
+    c = _client()
+    session = _live_session()
+    rev = session.model_rev
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=False)
     assert job is not None
     assert job.done.wait(10.0), "snapshot job did not finish"
     assert job.running is False
@@ -100,14 +125,17 @@ def test_sync_job_writes_inline_under_the_conftest_pin() -> None:
     assert _latest_snapshot_rev() == rev
 
 
-def test_job_snapshots_the_current_rev_not_the_trigger() -> None:
-    """Any rev at or past the trigger bounds the replay tail equally."""
+def test_job_writes_the_rev_it_finds() -> None:
+    """No rev is plumbed into schedule_periodic_snapshot: it always snapshots
+    whatever rev the session is at when it runs. Any rev at or past the
+    trigger bounds the replay tail equally."""
     c = _client()
     session = _live_session()
     _create_one(c)
     rev2 = _create_one(c)
     job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=True)
     assert job is not None and job.written_rev == rev2
+    assert _latest_snapshot_rev() == rev2
 
 
 def test_job_skips_a_session_the_registry_no_longer_holds() -> None:

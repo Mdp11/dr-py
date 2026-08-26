@@ -15,6 +15,18 @@ on the next cache-miss.
 
 The snapshots that are correctness rather than bounding — rebind-forced,
 evict, baseline — stay synchronous in their callers and never come here.
+
+The job takes ``write_mutex`` and only then opens a DB session, inverting
+the request path's connection-then-mutex order; this is not a regression
+(the inline path had the same inversion, and the job holds no connection
+while it sits queued for the mutex) but matters when tuning the pool.
+
+The legacy direct-mutation routes (``routes/elements.py``,
+``routes/relationships.py``) bump ``session.model_rev`` via ``touch_model()``
+without journaling a commit, so a job waking after one of those calls can
+record a ``Snapshot`` row at a rev ahead of ``models.model_rev``. That row is
+harmless — ``_hydrate_session`` selects with ``max_rev=model_row.model_rev``,
+so it is never chosen — but it leaves a dead row and an orphan blob behind.
 """
 
 from __future__ import annotations
@@ -46,7 +58,9 @@ def schedule_periodic_snapshot(
     """Schedule (or, in sync mode, run inline) a snapshot of ``session``.
 
     ``sync=None`` reads ``settings.snapshot_sync``. Returns ``None`` when a
-    job is already running for the session.
+    job is already running for the session. Callers must hold
+    ``session.write_mutex``: that is what serializes the check-then-set of
+    ``session.snapshot_job`` below — it is not otherwise synchronized.
     """
     current = session.snapshot_job
     if current is not None and current.running:

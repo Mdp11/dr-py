@@ -228,9 +228,11 @@ def latest_snapshot(
 def clear_history(db: Session, project_id: str) -> None:
     """Delete all commits + snapshot rows for a project (baseline reset).
 
-    Does NOT delete the snapshot blobs from the store — callers that reset a
-    baseline overwrite the rev-0 blob immediately afterwards; orphan blobs at
-    other revs are harmless (a later GC pass is out of scope)."""
+    Does NOT delete the snapshot blobs from the store. Callers that reset a
+    baseline write a fresh rev-0 blob immediately afterwards, but its key now
+    carries the ``.json.gz`` suffix, so a pre-existing rev-0 ``.json`` blob
+    from before that change is orphaned rather than overwritten; a later GC
+    pass over orphaned blobs remains out of scope."""
     db.execute(delete(Commit).where(Commit.project_id == project_id))
     db.execute(delete(Snapshot).where(Snapshot.project_id == project_id))
 
