@@ -22,8 +22,9 @@
 	} from '$lib/state';
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import { isEmptySnippetSource } from '$lib/snippet/source';
 	import ExportSettingsPanel from '../Export/ExportSettingsPanel.svelte';
-	import TransformPicker from '../Export/TransformPicker.svelte';
+	import TransformSourceEditor from '../Export/TransformSourceEditor.svelte';
 	import {
 		EXPORT_FORMATS,
 		isJsonFamily,
@@ -160,7 +161,7 @@
 	>
 		<Dialog.Title class="font-display text-lg font-light tracking-wide">Export table</Dialog.Title>
 
-		<div class="flex shrink-0 items-center gap-1 border-b border-border pb-1">
+		<div class="flex shrink-0 flex-wrap items-center gap-1 border-b border-border pb-1">
 			{#each EXPORT_FORMATS as fmt (fmt)}
 				<button
 					type="button"
@@ -174,24 +175,28 @@
 			{/each}
 
 			<!-- This edits the table's OWN `transform` (standalone `POST /tables/export`
-			     only — an exporter entry never inherits it, no-bleed §8); strictness
+			     only — an exporter entry never inherits it; no-bleed); strictness
 			     is server-side at export time. -->
 			{#if isJsonFamily(format) && defn}
-				<span class="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-					Transform
-					<TransformPicker
-						value={defn.transform?.ref ?? null}
-						onChange={(ref) =>
-							updateTableExportSettings(tabId, {
-								...defn,
-								transform: ref ? { ref } : null
-							})}
-					/>
-				</span>
-			{:else if defn?.transform}
+				<div class="flex w-full items-start gap-1.5 pt-1 text-xs text-muted-foreground">
+					<span class="shrink-0 pt-0.5">Transform</span>
+					<div class="min-w-0 flex-1">
+						<TransformSourceEditor
+							value={defn.transform ?? null}
+							collapseKey={`${tabId}::table:transform`}
+							onChange={(next) =>
+								updateTableExportSettings(tabId, {
+									...defn,
+									transform: next
+								})}
+						/>
+					</div>
+				</div>
+			{:else if !isEmptySnippetSource(defn?.transform)}
 				<!-- A transform left behind by a format flip: the server 422s it at
 				     run time, so surface it rather than hiding the state. Never blocks
-				     Export. -->
+				     Export. An UNCONFIGURED source is not one — hence the predicate
+				     rather than a truthiness test. -->
 				<span
 					class="ml-auto shrink-0 text-xs text-warning"
 					data-testid="table-export-transform-warning"

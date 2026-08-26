@@ -27,6 +27,7 @@ import {
 	getTableLoading,
 	loadArtifacts,
 	resetArtifacts,
+	resetSnippetCollapse,
 	setTableSort,
 	updateTableDefinition
 } from '$lib/state';
@@ -40,8 +41,8 @@ const TAB_ID = 'tbl:draft:export-dialog-test';
 const SAVED_TAB_ID = 'tbl:art-export-dialog';
 
 /** A committed code_snippet artifact whose server-derived entry_points cover
- *  `transform` — the transform picker's option pool, same fixture shape as
- *  `ExporterTab.test.ts`'s `TRANSFORM_SNIPPET_HEADER`. */
+ *  `transform` — the transform editor's ref-mode option pool, same fixture
+ *  shape as `ExporterTab.test.ts`'s `TRANSFORM_SNIPPET_HEADER`. */
 const TRANSFORM_SNIPPET_HEADER = {
 	id: 'snip-1',
 	kind: 'code_snippet',
@@ -223,6 +224,9 @@ afterEach(() => {
 	closeTableDraft(TAB_ID);
 	closeTableDraft(SAVED_TAB_ID);
 	resetArtifacts();
+	// The transform disclosure is keyed by the (stable) tab id, so a test that
+	// expanded it would otherwise hand the next one an already-open editor.
+	resetSnippetCollapse();
 	vi.restoreAllMocks();
 });
 
@@ -649,59 +653,90 @@ describe('ExportDialog', () => {
 		expect(byTestId(document, 'json-preview')).toBeTruthy();
 	});
 
-	// --- transform picker ----------------------------------------------------
+	// --- transform ------------------------------------------------------------
 	//
 	// This edits the table's OWN `transform` (standalone `POST /tables/export`
 	// only — an exporter entry never inherits it); strictness is server-side
 	// at export time.
 
-	it('shows the transform picker for a JSON-family format and picking one writes transform', async () => {
+	function clickTestId(id: string): void {
+		const el = byTestId(document, id);
+		if (!el) throw new Error(`no element for ${id}`);
+		el.click();
+		flushSync();
+	}
+
+	/** Add a transform, open the disclosure and pick a saved snippet. */
+	function pickSavedTransform(id: string): void {
+		clickTestId('transform-add');
+		clickTestId('snippet-collapse-toggle');
+		const sel = byTestId(document, 'snippet-ref-select') as HTMLSelectElement;
+		sel.value = id;
+		sel.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+	}
+
+	async function seedSnippetHeaders(): Promise<void> {
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
 			items: [TRANSFORM_SNIPPET_HEADER]
 		});
 		await loadArtifacts();
-		await open('json');
-		const picker = byTestId(document, 'transform-picker') as HTMLSelectElement;
-		expect(picker).toBeTruthy();
+	}
 
-		picker.value = 'snip-1';
-		picker.dispatchEvent(new Event('change', { bubbles: true }));
-		flushSync();
+	it('offers Add transform for a JSON-family format; adding and picking one writes transform', async () => {
+		await seedSnippetHeaders();
+		await open('json');
+		expect(byTestId(document, 'transform-add')).toBeTruthy();
+
+		pickSavedTransform('snip-1');
 
 		expect(current().transform).toEqual({ ref: 'snip-1' });
 	});
 
-	it('hides the transform picker for xlsx', async () => {
+	it('the × writes null, not the unconfigured source', async () => {
+		await seedSnippetHeaders();
+		await open('json');
+		pickSavedTransform('snip-1');
+
+		clickTestId('transform-remove');
+
+		expect(current().transform).toBeNull();
+		expect(byTestId(document, 'transform-add')).toBeTruthy();
+	});
+
+	it('hides the transform editor for xlsx', async () => {
 		await open('xlsx');
-		expect(byTestId(document, 'transform-picker')).toBeNull();
+		expect(byTestId(document, 'transform-add')).toBeNull();
+		expect(byTestId(document, 'transform-source-editor')).toBeNull();
 	});
 
 	// Parity with ExporterTab's per-entry warning: a format flip away from
 	// JSON-family must not silently hide a transform the server will 422 at
 	// run time — surface it instead.
-	it('shows a warning instead of the picker when xlsx carries a leftover transform', async () => {
+	it('shows a warning instead of the editor when xlsx carries a leftover transform', async () => {
 		await open('xlsx', { transform: { ref: 'snip-1' } });
-		expect(byTestId(document, 'transform-picker')).toBeNull();
+		expect(byTestId(document, 'transform-source-editor')).toBeNull();
 		expect(byTestId(document, 'table-export-transform-warning')).toBeTruthy();
 	});
 
+	// The contrast pair for the one above: `{}` is truthy in JS, so a
+	// truthiness test on the field would call an UNCONFIGURED transform a
+	// leftover and warn about it.
+	it('shows no warning when xlsx carries an UNCONFIGURED transform', async () => {
+		await open('xlsx', { transform: {} });
+		expect(byTestId(document, 'table-export-transform-warning')).toBeNull();
+	});
+
 	it('Cancel restores the transform captured when the dialog opened', async () => {
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
-			items: [TRANSFORM_SNIPPET_HEADER]
-		});
-		await loadArtifacts();
+		await seedSnippetHeaders();
 		await open('json');
 		const before = current().transform ?? null;
 		expect(before).toBeNull();
 
-		const picker = byTestId(document, 'transform-picker') as HTMLSelectElement;
-		picker.value = 'snip-1';
-		picker.dispatchEvent(new Event('change', { bubbles: true }));
-		flushSync();
+		pickSavedTransform('snip-1');
 		expect(current().transform).toEqual({ ref: 'snip-1' });
 
-		byTestId(document, 'export-cancel').click();
-		flushSync();
+		clickTestId('export-cancel');
 		expect(current().transform ?? null).toBe(before);
 	});
 });

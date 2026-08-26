@@ -877,10 +877,19 @@ export const SnippetDefinitionSchema = z.object({
 	entry_points: z.array(z.string()).default([])
 });
 
-export const SnippetSourceSchema = z.object({
-	ref: z.string().nullish(),
-	definition: SnippetDefinitionSchema.nullish()
-});
+/** Mirror of core/script/schema.py's `SnippetSource`: a saved snippet `ref`
+ *  XOR inline `definition`. NEITHER set (`{}`) is legal and UNCONFIGURED — the
+ *  editors create the item before the user picks its snippet. BOTH set is
+ *  ambiguous, not incomplete, and is refused here as it is server-side; a
+ *  nullish half counts as not set. */
+export const SnippetSourceSchema = z
+	.object({
+		ref: z.string().nullish(),
+		definition: SnippetDefinitionSchema.nullish()
+	})
+	.refine((s) => s.ref == null || s.definition == null, {
+		message: 'provide at most one of `ref` / `definition`'
+	});
 export type SnippetSource = z.infer<typeof SnippetSourceSchema>;
 
 /** Per-column JSON-export settings. Mirrors core/table/schema.py's
@@ -1005,9 +1014,9 @@ export const JsonSplitOptionsSchema = z.object({
 export type JsonSplitOptions = z.infer<typeof JsonSplitOptionsSchema>;
 
 /** A `{ref}` artifact reference — mirror of core/table/schema.py::TableRef.
- *  For `transform` this is ref-ONLY by design (no inline code, unlike
- *  SnippetSourceSchema): the snippet must be a committed code_snippet
- *  artifact defining a one-arg top-level transform(doc). */
+ *  A plain pointer to a committed artifact, with no inline alternative: the
+ *  shape of an exporter entry's source table. `transform` does NOT use it —
+ *  it takes a `SnippetSource`, which also admits inline code. */
 export const TableRefSchema = z.object({ ref: z.string() });
 export type TableRef = z.infer<typeof TableRefSchema>;
 
@@ -1023,7 +1032,7 @@ export const TableDefinitionSchema = z.object({
 	// JSON-family only (json/jsonl); strict at export time (422/503/429 from
 	// POST /exports/run), never validated client-side, never blocks Save.
 	// `null` means "no transform" — never "inherit the table's" (no-bleed).
-	transform: TableRefSchema.nullish()
+	transform: SnippetSourceSchema.nullish()
 });
 export type TableDefinition = z.infer<typeof TableDefinitionSchema>;
 export type Column = z.infer<typeof ColumnSchema>;
@@ -1068,7 +1077,7 @@ export const JsonDocumentOptionsSchema = z.object({
 export type JsonDocumentOptions = z.infer<typeof JsonDocumentOptionsSchema>;
 
 export const ExporterEntrySchema = z.object({
-	source: z.object({ ref: z.string() }),
+	source: TableRefSchema,
 	name: z.string().default(''),
 	format: z.enum(EXPORT_FORMATS).default('xlsx'),
 	folder: z.string().default(''),
@@ -1081,7 +1090,7 @@ export const ExporterEntrySchema = z.object({
 	// JSON-family only (json/jsonl); strict at export time (422/503/429 from
 	// POST /exports/run), never validated client-side, never blocks Save.
 	// `null` means "no transform" — never "inherit the table's" (no-bleed).
-	transform: TableRefSchema.nullish()
+	transform: SnippetSourceSchema.nullish()
 });
 export type ExporterEntry = z.infer<typeof ExporterEntrySchema>;
 
