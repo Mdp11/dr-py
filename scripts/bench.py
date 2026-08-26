@@ -30,6 +30,7 @@ from data_rover.api.routes._snapshot import (  # noqa: E402
 )
 from data_rover.api.schemas import ElementOut, RelationshipOut  # noqa: E402
 from data_rover.api.serialize import iter_model_json  # noqa: E402
+from data_rover.api.snapshot_codec import encode_snapshot  # noqa: E402
 from data_rover.core.metamodel.loader import load_metamodel_file  # noqa: E402
 from data_rover.core.model.model import Model  # noqa: E402
 from data_rover.core.validation.dirty import DirtyCollector  # noqa: E402
@@ -202,6 +203,12 @@ def bench_serialize(model: Model) -> None:
     tmp_path.unlink()
     _report("(5)  stream-serialize model + write temp file", elapsed,
             f"{size_mib:.1f} MiB")
+
+    t0 = time.perf_counter()
+    blob_bytes = sum(len(chunk) for chunk in encode_snapshot(model))
+    elapsed = time.perf_counter() - t0
+    _report("(5b) snapshot codec: compact JSON + gzip (no file)", elapsed,
+            f"{blob_bytes / 1_048_576:.1f} MiB")
 
 
 def main() -> None:

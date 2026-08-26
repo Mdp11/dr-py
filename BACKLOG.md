@@ -57,6 +57,8 @@ The 2026-08-26 UX pass on `fix/ux-minor-batch` closes U-3, U-6, U-9, F-14, F-17 
 pluralization bullet, and retires U-5 as already shipped. The 2026-08-26 pass on
 `perf/deferred-search-index` closes K-20 and adds K-21 → K-25 as the large-model
 performance program (see K-6, now first in that program).
+The 2026-08-26 pass on `perf/compressed-snapshots` closes K-21 (gzip'd compact snapshots,
+bytes-sniffing reader; see its entry for the numbers).
 
 ---
 
@@ -1025,14 +1027,19 @@ a containment- or key-flipping rebind left the containment tree, roots order and
 groups stale until eviction. NOT done (deliberate): shrinking the posting sets — memory stays
 ~1.5 GB for the live session; revisit only if RSS binds after K-21.
 
-### K-21 · Snapshots are stored indented and uncompressed · `open` · perf · *2026-08-26*
-`write_snapshot` streams the indented save-file format to the store: 212 MiB at production
-size, downloaded on every hydration and uploaded on every eviction and every 200th commit
-(`_maybe_periodic_snapshot`, synchronously inside the commit under `write_mutex`: 3.8 s
-serialize + upload). Measured gzip-6 → 10 MiB (+1.3 s); compact JSON alone 138 MiB and
-`json.loads` 2.0 s vs 2.9 s indented. Store `.json.gz` compact, branch the read path on the
-key/encoding. Then re-measure whether the periodic snapshot still needs to leave the commit's
-critical section. Third in the large-model performance program (after K-6).
+### K-21 · Snapshots are stored indented and uncompressed · `done` (2026-08-26, perf/compressed-snapshots) · perf · *2026-08-26*
+Snapshots are now a gzip member (level 3) of the COMPACT document, encoded in batches of
+2000 entities per `json.dumps` (`serialize.iter_model_json_compact`, `api/snapshot_codec.py`);
+the reader sniffs the gzip magic, so pre-existing `.json` rows load untouched (no migration,
+no `encoding` column). Measured at scale 320 (320k elements / 239k relationships) through the
+real app on the memory store: snapshot blob **212 MiB → 10.9 MiB**; in-process
+`write_snapshot` **2.99 s → 1.59 s**; `decode_snapshot` 2.77 s (was 2.9 s
+`json.loads` of the indented text); hydrate end-to-end 42.9 s with sync sweeps.
+Spike numbers behind the two knobs (scale 170): batching the encoder 1.58 → 0.82 s; gzip
+1/3/6/9 = 0.26/0.29/0.62/2.37 s for 6.7/5.8/4.9/4.5 MiB.
+The periodic snapshot (`_maybe_periodic_snapshot`) now runs on a background job
+(`api/snapshot_job.py`) that takes `write_mutex` itself, so the 200th commit no longer pays
+the encode; rebind-forced, evict and baseline snapshots stay synchronous.
 
 ### K-22 · Uniqueness validator builds a whole-model position map per scoped run · `open` · perf · *2026-08-26*
 `validators/uniqueness.py:56` builds `{eid: i for i, eid in enumerate(model.elements)}` —

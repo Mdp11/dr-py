@@ -3,9 +3,9 @@ back to durable storage.
 
 Hydrate = nearest snapshot (rev <= model_rev) -> ``build_model_from_dicts`` ->
 replay the commit tail (rev > snapshot_rev) through the SAME restore-mode
-applier the ops route uses. Persist = write the model snapshot via the
-streaming serializer + record the row; a baseline reset additionally clears
-old history and writes the rev-0 commit + snapshot.
+applier the ops route uses. Persist = stream the model through the snapshot
+codec + record the row; a baseline reset additionally clears old history and
+writes the rev-0 commit + snapshot.
 
 A contentless project (no ``ModelRow``) hydrates to an EMPTY ``Session``, so
 projects that haven't been given content yet behave identically and the
@@ -14,7 +14,6 @@ existing test suite stays green.
 
 from __future__ import annotations
 
-import json
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -32,8 +31,8 @@ from .db import db_session
 from .db_models import Commit
 from .schemas import OPS_ADAPTER, OpIn
 from .search_index_build import start_search_index_build
-from .serialize import iter_model_json
 from .session import Session
+from .snapshot_codec import decode_snapshot, encode_snapshot
 from .storage import get_snapshot_store, snapshot_key
 from .validation_sweep import start_validation_sweep
 
@@ -74,11 +73,12 @@ def deserialize_ops(raw: list[Any]) -> list[OpIn]:
 
 
 def write_snapshot(project_id: str, session: Session, rev: int) -> None:
-    """Stream the session model to the blob store and record the snapshot row."""
+    """Stream the session model to the blob store (gzip of the compact
+    document) and record the snapshot row."""
     assert session.model is not None
     store = get_snapshot_store()
     key = snapshot_key(project_id, rev)
-    store.put(key, (chunk.encode("utf-8") for chunk in iter_model_json(session.model)))
+    store.put(key, encode_snapshot(session.model))
     with db_session() as s:
         content.record_snapshot(s, project_id, rev=rev, key=key)
 
@@ -177,7 +177,7 @@ def reconstruct_model_at(project_id: str, rev: int) -> Model | None:
     else:
         from .routes._snapshot import build_model_from_dicts
 
-        raw = json.loads(get_snapshot_store().get(snap_key))
+        raw = decode_snapshot(get_snapshot_store().get(snap_key))
         model = build_model_from_dicts(metamodel, raw, strict=False)
 
     throwaway = Session(metamodel=metamodel, model=model)
@@ -244,7 +244,7 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
         progress.phase = "download"
         blob = get_snapshot_store().get(snap_key)
         progress.phase = "parse"
-        raw = json.loads(blob)
+        raw = decode_snapshot(blob)  # "parse" covers decompress + loads
         progress.phase = "build"
 
         def _on_build(done: int, total: int) -> None:

@@ -110,6 +110,61 @@ def iter_model_json(model: Model) -> Iterator[str]:
     yield "\n}"
 
 
+#: entities per ``json.dumps`` call in the compact writer. One C-encoder call
+#: per batch amortizes the per-call overhead that dominates a per-entity dump
+#: (measured 2x faster) while a batch of ~500 KB text bounds the peak extra
+#: memory; the indented writer keeps its per-entity granularity because its
+#: re-indent step is per-entity anyway.
+SNAPSHOT_BATCH = 2000
+_COMPACT_SEPARATORS = (",", ":")
+
+
+def _dump_batch(batch: list[dict[str, Any]], first: bool) -> str:
+    # Dump the batch as a list and strip its brackets: the items' text is
+    # exactly what a whole-document dumps emits for them, so the join stays
+    # byte-identical to json.dumps(doc, separators=(",", ":")).
+    text = json.dumps(
+        batch, separators=_COMPACT_SEPARATORS, ensure_ascii=False, allow_nan=False
+    )
+    return text[1:-1] if first else "," + text[1:-1]
+
+
+def _compact_chunks(entities: Iterator[dict[str, Any]], key: str) -> Iterator[str]:
+    """Yield ``"<key>":[...]`` compact, ``SNAPSHOT_BATCH`` entities per dumps."""
+    yield f'"{key}":['
+    batch: list[dict[str, Any]] = []
+    first = True
+    for entity in entities:
+        batch.append(entity)
+        if len(batch) >= SNAPSHOT_BATCH:
+            yield _dump_batch(batch, first)
+            first = False
+            batch = []
+    if batch:
+        yield _dump_batch(batch, first)
+    yield "]"
+
+
+def iter_model_json_compact(model: Model) -> Iterator[str]:
+    """Yield the snapshot document with no whitespace, batch by batch.
+
+    Same document, entity order and key order as ``iter_model_json``;
+    ``"".join(iter_model_json_compact(m))`` equals
+    ``json.dumps(doc, separators=(",", ":"), ensure_ascii=False)``. Same
+    point-in-time semantics too: the entity SETS are snapshotted when
+    iteration starts, entities are read live (see ``iter_model_json``).
+    This is the snapshot-store form; the save/download routes keep the
+    indented writer, which is the frontend's save-file contract.
+    """
+    elements = list(model.elements.values())
+    relationships = list(model.relationships.values())
+    yield "{"
+    yield from _compact_chunks(_element_dicts(elements), "elements")
+    yield ","
+    yield from _compact_chunks(_relationship_dicts(relationships), "relationships")
+    yield "}"
+
+
 def iter_buffered(chunks: Iterable[str], min_size: int = 64 * 1024) -> Iterator[str]:
     """Re-chunk ``chunks`` into pieces of at least ``min_size`` characters.
 

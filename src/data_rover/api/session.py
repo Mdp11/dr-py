@@ -23,6 +23,7 @@ from .table_cache import TableOrderCache
 if TYPE_CHECKING:
     from .schemas import OpIn
     from .search_index_build import SearchIndexProgress
+    from .snapshot_job import SnapshotJob
     from .validation_sweep import SweepProgress
 
 #: Maximum number of applied batches retained for undo. Each batch holds the
@@ -129,6 +130,11 @@ class Session:
     #: completion. Never blocks eviction — the snapshot does not depend on
     #: it — so ``evict``/``discard`` cancel it instead.
     search_index_build: SearchIndexProgress | None = field(default=None, repr=False)
+    #: the in-flight (or last) periodic snapshot job
+    #: (snapshot_job.schedule_periodic_snapshot); a trigger that finds one
+    #: still running is dropped. Never blocks eviction: the job checks the
+    #: registry under write_mutex and writes nothing for a dropped session.
+    snapshot_job: SnapshotJob | None = field(default=None, repr=False)
     #: per-session cache of ordered table row keys, keyed by
     #: (resolved-definition fingerprint, sort). A stored entry's model_rev
     #: pins it to the model state it was computed against; both model

@@ -89,7 +89,7 @@ from ..commit_states import capture_entity_states
 from ..db import get_db
 from ..db_models import User
 from ..deps import Session, get_request_session, require_model
-from ..hydration import serialize_ops, write_snapshot
+from ..hydration import serialize_ops
 from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..locking import METAMODEL_RESOURCE, artifact_resource, folder_resource
@@ -102,6 +102,7 @@ from ..rules import (
     session_pipeline,
 )
 from ..settings import get_settings
+from ..snapshot_job import schedule_periodic_snapshot
 from ..view_ops import (
     ViewBatchResult,
     apply_view_ops_atomic,
@@ -685,12 +686,14 @@ def _persist_undo_commit(
 def _maybe_periodic_snapshot(
     db: DbSession, project_id: str, session: Session, rev: int
 ) -> None:
-    """Write a full-model snapshot every settings.snapshot_every commits so the
-    hydration replay tail stays bounded for a hot, never-evicted session
-    (on-evict + baseline snapshots otherwise leave it unbounded)."""
+    """Schedule a full-model snapshot every settings.snapshot_every commits so
+    the hydration replay tail stays bounded for a hot, never-evicted session
+    (on-evict + baseline snapshots otherwise leave it unbounded). The write
+    happens on the snapshot job's thread, off this request's critical
+    section; ``snapshot_sync`` (tests) runs it inline instead."""
     every = get_settings().snapshot_every
     if every > 0 and rev % every == 0:
-        write_snapshot(project_id, session, rev)
+        schedule_periodic_snapshot(project_id, session)
 
 
 @router.post("/model/ops", response_model=None)

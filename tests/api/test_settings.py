@@ -36,6 +36,9 @@ def test_phase3_storage_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     # process-wide; clear them so we can observe the code defaults.
     monkeypatch.delenv("DATA_ROVER_SNAPSHOT_STORE", raising=False)
     monkeypatch.delenv("DATA_ROVER_IDLE_EVICT_SECONDS", raising=False)
+    # conftest also pins DATA_ROVER_SNAPSHOT_SYNC=true process-wide; clear it
+    # so we can observe the code default.
+    monkeypatch.delenv("DATA_ROVER_SNAPSHOT_SYNC", raising=False)
     # _env_file=None so a developer's local .env (e.g. copied from .env.example
     # with a fake-gcs emulator host) can't mask the code defaults under test.
     s = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]  # pydantic-settings init kwarg
@@ -44,13 +47,16 @@ def test_phase3_storage_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.storage_emulator_host == ""
     assert s.snapshot_every == 200
     assert s.idle_evict_seconds == 1800
+    assert s.snapshot_sync is False
 
 
 def test_phase3_storage_env_override(monkeypatch) -> None:
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_STORE", "memory")
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_EVERY", "10")
     monkeypatch.setenv("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
+    monkeypatch.setenv("DATA_ROVER_SNAPSHOT_SYNC", "true")
     s = Settings()
     assert s.snapshot_store == "memory"
     assert s.snapshot_every == 10
     assert s.idle_evict_seconds == 0
+    assert s.snapshot_sync is True

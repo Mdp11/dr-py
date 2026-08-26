@@ -133,6 +133,11 @@ class Settings(BaseSettings):
     #: indexes in chunks while search falls back to the scan); the API test
     #: conftest pins it true so every test sees a complete index after load.
     search_index_sync: bool = False
+    #: Run the periodic full-model snapshot inline on the committing request
+    #: (synchronously, inside its write_mutex section) instead of on a daemon
+    #: thread. False in production; the API test conftest pins it true so a
+    #: test can assert the snapshot row right after the commit returns.
+    snapshot_sync: bool = False
     #: Which ScriptRunner ``build_runner_from_settings`` constructs: "wasm"
     #: (the wasmtime/CPython-WASI sandbox, the only choice safe for real
     #: deployments) or "trusted" (the in-process, unsandboxed test runner —

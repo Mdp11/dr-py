@@ -38,8 +38,15 @@ class GcsSnapshotStore:
 
     def put(self, key: str, chunks: Iterable[bytes]) -> None:
         # buffer the chunks then upload: the google client's resumable upload
-        # wants a seekable file-like; one transient bytes buffer at ~80 MB is
-        # the same memory profile as today's upload route (an accepted cost).
+        # wants a seekable file-like; the buffer is the COMPRESSED blob (~10 MiB
+        # for a 300k-element model), so this is far below the model's own RSS.
+        # upload_from_file with no filename defaults content-type to
+        # application/octet-stream and sets no Content-Encoding — load-bearing:
+        # switching to upload_from_filename, or deriving the type from the key,
+        # would make mimetypes.guess_type("x.json.gz") report
+        # ("application/json", "gzip"), and GCS would transcode on download,
+        # silently erasing the compression win (the decoder still sniffs the
+        # bytes, so correctness survives, but the size win would not).
         self._bucket.blob(key).upload_from_file(io.BytesIO(b"".join(chunks)))
 
     def get(self, key: str) -> bytes:
