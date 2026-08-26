@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import zipfile
+from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -71,6 +73,14 @@ from .settings import Settings
 from .snippet_concurrency import concurrency_guard
 from .table_export import build_workbook
 
+logger = logging.getLogger(__name__)
+
+#: LRU cap on `TransformHost._sessions`. An exporter entry's transform can be
+#: inline code, so distinct code per entry (not one snippet shared across
+#: MAX_EXPORTER_ENTRIES entries) is the case to size for, against a
+#: `snippet_pool_size` of warm guests and the per-store memory cap.
+_TRANSFORM_SESSION_CACHE_MAX = 8
+
 
 @dataclass(frozen=True)
 class ExportPending:
@@ -100,11 +110,12 @@ class TransformUnavailableError(Exception):
 
 
 class TransformHost:
-    """One export run's transform executor: one warm SnippetSession per
-    DISTINCT transform code, shared across every entry/file that uses the
-    same snippet, one global interactive slot for the whole run,
-    one ScriptBudget shared by every call. Construct through
-    `open_transform_host`; always `close()` in a finally."""
+    """One export run's transform executor: up to `_TRANSFORM_SESSION_CACHE_MAX`
+    warm SnippetSessions, one per DISTINCT transform code and shared across
+    every entry/file that uses the same snippet, LRU-evicted past that cap;
+    one global interactive slot for the whole run, one ScriptBudget shared by
+    every call. Construct through `open_transform_host`; always `close()` in
+    a finally."""
 
     def __init__(
         self,
@@ -119,7 +130,9 @@ class TransformHost:
         self._limits = limits
         self._budget = budget
         self._max_bytes = max_bytes
-        self._sessions: dict[str, SnippetSession] = {}
+        # Insertion order = recency order: a hit moves its code to the end
+        # (most-recently-used), so the front is always the eviction target.
+        self._sessions: OrderedDict[str, SnippetSession] = OrderedDict()
         self._released = False
 
     def apply(self, code: str, doc: object, name: str) -> object:
@@ -136,7 +149,22 @@ class TransformHost:
                 f"snippet_transform_max_bytes ({self._max_bytes})"
             )
         session = self._sessions.get(code)
-        if session is None:
+        if session is not None:
+            self._sessions.move_to_end(code)
+        else:
+            if len(self._sessions) >= _TRANSFORM_SESSION_CACHE_MAX:
+                _, evicted = self._sessions.popitem(last=False)
+                try:
+                    evicted.close()
+                except Exception:
+                    # Eviction is warm-start upkeep for a DIFFERENT entry, not
+                    # the result `apply()` is currently producing for `name` —
+                    # a failing close() here must not surface as THIS entry's
+                    # ValueError. Best-effort teardown; the interpreter is
+                    # discarded from the cache either way.
+                    logger.warning(
+                        "transform session eviction: close() raised", exc_info=True
+                    )
             session = self._runner.open_session(
                 self._model, code, self._limits, budget=self._budget
             )

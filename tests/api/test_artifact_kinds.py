@@ -161,3 +161,143 @@ def test_transform_ref_is_walked_for_deps_and_rewrite():
     assert "snip-1" in extract_refs(payload)
     rewritten = rewrite_refs(payload, {"snip-1": "snip-2"})
     assert rewritten["entries"][0]["transform"]["ref"] == "snip-2"
+
+
+# `ExporterEntry.transform` / `TableDefinition.transform` are `SnippetSource |
+# None`: at most one of `ref` (saved snippet) / `definition` (inline code) is
+# set. The generic "ref"-key walk must treat both shapes correctly — ref mode
+# is a dependency, inline mode is not — without the inline `definition`
+# subtree (itself full of plain strings: `code`, `language`, `entry_points`)
+# leaking into the walk or masking a real ref sitting beside it.
+
+_INLINE_TRANSFORM_DEFINITION = {
+    "definition": {
+        "schema_version": 1,
+        "language": "python",
+        "code": "def transform(doc):\n    return doc\n",
+        "entry_points": ["transform"],
+    }
+}
+
+
+def test_table_transform_shapes_are_valid_payloads() -> None:
+    # sanity: the dict fixtures below are real TableDefinition payloads, not
+    # just shapes the generic walk happens to tolerate.
+    adapter = _spec(ArtifactKind.table).adapter
+    adapter.validate_python({**TABLE_PAYLOAD, "transform": {"ref": "snip-transform-1"}})
+    adapter.validate_python({**TABLE_PAYLOAD, "transform": _INLINE_TRANSFORM_DEFINITION})
+    adapter.validate_python({**TABLE_PAYLOAD, "transform": {}})
+
+
+def test_exporter_transform_shapes_are_valid_payloads() -> None:
+    adapter = _spec(ArtifactKind.exporter).adapter
+    entry = {"source": {"ref": "tbl-1"}, "name": "a"}
+    adapter.validate_python({"entries": [{**entry, "transform": {"ref": "snip-transform-1"}}]})
+    adapter.validate_python({"entries": [{**entry, "transform": _INLINE_TRANSFORM_DEFINITION}]})
+    adapter.validate_python({"entries": [{**entry, "transform": {}}]})
+
+
+def test_table_transform_ref_mode_is_a_dependency() -> None:
+    payload = {**TABLE_PAYLOAD, "transform": {"ref": "snip-transform-1"}}
+    assert extract_refs(payload) == {
+        "nav-artifact-1",
+        "nav-artifact-2",
+        "snip-artifact-1",
+        "snip-transform-1",
+    }
+    out = rewrite_refs(payload, {"snip-transform-1": "NEW"})
+    assert out["transform"]["ref"] == "NEW"
+
+
+def test_exporter_transform_ref_mode_is_a_dependency() -> None:
+    payload = {
+        "entries": [{"source": {"ref": "tbl-1"}, "transform": {"ref": "snip-transform-1"}}]
+    }
+    assert extract_refs(payload) == {"tbl-1", "snip-transform-1"}
+    out = rewrite_refs(payload, {"snip-transform-1": "NEW"})
+    assert out["entries"][0]["transform"]["ref"] == "NEW"
+
+
+def test_table_transform_inline_mode_contributes_no_dependency() -> None:
+    payload = {
+        "row_source": {"kind": "navigation", "navigation": {"ref": "nav-1"}},
+        "columns": [{"kind": "element"}],
+        "transform": _INLINE_TRANSFORM_DEFINITION,
+    }
+    assert extract_refs(payload) == {"nav-1"}
+
+
+def test_exporter_transform_inline_mode_contributes_no_dependency() -> None:
+    payload = {"entries": [{"transform": _INLINE_TRANSFORM_DEFINITION}]}
+    assert extract_refs(payload) == set()
+
+
+def test_table_transform_inline_mode_survives_rewrite_unchanged() -> None:
+    payload = {
+        "row_source": {"kind": "navigation", "navigation": {"ref": "nav-1"}},
+        "columns": [{"kind": "element"}],
+        "transform": _INLINE_TRANSFORM_DEFINITION,
+    }
+    out = rewrite_refs(payload, {"nav-1": "NEW", "unrelated-id": "x"})
+    assert out["transform"] == _INLINE_TRANSFORM_DEFINITION
+    assert out["row_source"]["navigation"]["ref"] == "NEW"
+    # the input is untouched
+    assert payload["row_source"]["navigation"]["ref"] == "nav-1"
+    assert payload["transform"] == _INLINE_TRANSFORM_DEFINITION
+
+
+def test_exporter_transform_inline_mode_survives_rewrite_unchanged() -> None:
+    payload = {
+        "entries": [{"source": {"ref": "tbl-1"}, "transform": _INLINE_TRANSFORM_DEFINITION}]
+    }
+    out = rewrite_refs(payload, {"tbl-1": "NEW", "unrelated-id": "x"})
+    assert out["entries"][0]["transform"] == _INLINE_TRANSFORM_DEFINITION
+    assert out["entries"][0]["source"]["ref"] == "NEW"
+    # the input is untouched
+    assert payload["entries"][0]["source"]["ref"] == "tbl-1"
+    assert payload["entries"][0]["transform"] == _INLINE_TRANSFORM_DEFINITION
+
+
+def test_table_transform_empty_contributes_and_rewrites_nothing() -> None:
+    payload = {
+        "row_source": {"kind": "navigation", "navigation": {"ref": "nav-1"}},
+        "columns": [{"kind": "element"}],
+        "transform": {},
+    }
+    assert extract_refs(payload) == {"nav-1"}
+    out = rewrite_refs(payload, {"nav-1": "NEW"})
+    assert out["transform"] == {}
+    assert out["row_source"]["navigation"]["ref"] == "NEW"
+
+
+def test_exporter_transform_empty_contributes_and_rewrites_nothing() -> None:
+    payload = {"entries": [{"source": {"ref": "tbl-1"}, "transform": {}}]}
+    assert extract_refs(payload) == {"tbl-1"}
+    out = rewrite_refs(payload, {"tbl-1": "NEW"})
+    assert out["entries"][0]["transform"] == {}
+    assert out["entries"][0]["source"]["ref"] == "NEW"
+
+
+def test_table_transform_inline_does_not_mask_or_add_neighbouring_refs() -> None:
+    # an inline transform sits beside a real ref elsewhere in the same
+    # payload (a script column's snippet ref); extract_refs must return
+    # exactly that neighbour — neither swallowed nor supplemented by
+    # anything from the inline `definition` subtree.
+    payload = {
+        "row_source": {"kind": "navigation", "navigation": {"ref": "nav-mix-1"}},
+        "columns": [
+            {"kind": "element"},
+            {"kind": "script", "snippet": {"ref": "snip-col-1"}},
+        ],
+        "transform": _INLINE_TRANSFORM_DEFINITION,
+    }
+    assert extract_refs(payload) == {"nav-mix-1", "snip-col-1"}
+
+
+def test_exporter_transform_inline_does_not_mask_or_add_neighbouring_refs() -> None:
+    payload = {
+        "entries": [
+            {"source": {"ref": "tbl-mix-1"}, "transform": _INLINE_TRANSFORM_DEFINITION}
+        ]
+    }
+    assert extract_refs(payload) == {"tbl-mix-1"}

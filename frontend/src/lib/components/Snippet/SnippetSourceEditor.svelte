@@ -19,7 +19,7 @@
 	} from '$lib/state';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import { INLINE_MAX_H, INLINE_MIN_H } from '$lib/editor/editor-size';
-	import { entryAvailable, withStub, type ConsoleEntry } from '$lib/snippet/entry-stubs';
+	import { entryAvailable, withStub, type BoundEntry } from '$lib/snippet/entry-stubs';
 	import type { SnippetDiagnostic, SnippetSource } from '$lib/api/types';
 	import CodeEditor from './CodeEditor.svelte';
 	import SnippetTestPanel from './SnippetTestPanel.svelte';
@@ -28,10 +28,11 @@
 		snippet,
 		entry,
 		onChange,
-		collapseKey
+		collapseKey,
+		disabled = false
 	}: {
 		snippet: SnippetSource;
-		entry: ConsoleEntry;
+		entry: BoundEntry;
 		onChange: (next: SnippetSource) => void;
 		/** When set, the editor renders behind a chevron disclosure (default
 		 * collapsed) whose expansion state lives in the snippet-collapse store
@@ -54,6 +55,11 @@
 		 * project bleed, and the growth is bytes per toggle). Prefix-eviction or
 		 * key remapping for this case is a deliberate non-goal for now. */
 		collapseKey?: string;
+		/** Gates editability only — mode toggles, ref select, code editor. The
+		 * collapse disclosure stays enabled: reading a disabled editor's content
+		 * is exactly what a locked-out caller (a viewer, a peer-locked resource)
+		 * needs to do. */
+		disabled?: boolean;
 	} = $props();
 
 	const inline = $derived(snippet.definition != null);
@@ -206,7 +212,7 @@
 				type="button"
 				data-testid="snippet-mode-ref"
 				class="px-1.5 py-0.5 {inline ? 'hover:bg-muted' : 'bg-muted font-medium'}"
-				disabled={seeding}
+				disabled={seeding || disabled}
 				onclick={switchToRef}
 			>
 				saved
@@ -217,7 +223,7 @@
 				class="border-l border-input px-1.5 py-0.5 {inline
 					? 'bg-muted font-medium'
 					: 'hover:bg-muted'}"
-				disabled={seeding}
+				disabled={seeding || disabled}
 				onclick={switchToInline}
 			>
 				inline
@@ -230,7 +236,7 @@
 				aria-label="Saved snippet"
 				value={snippet.ref ?? ''}
 				onchange={setRef}
-				disabled={seeding}
+				disabled={seeding || disabled}
 				class="rounded border border-input bg-card px-1 py-0.5"
 			>
 				<option value="">Select a saved snippet…</option>
@@ -259,6 +265,7 @@
 						bind:this={editor}
 						code={def.code}
 						{diagnostics}
+						readonly={disabled}
 						onChange={handleCodeChange}
 						onRun={() => void testPanel?.requestRun()}
 					/>
@@ -280,17 +287,22 @@
 			{/if}
 		{/if}
 
-		<!-- In ref mode there is no lint response to ask, so `[entry]` stands in
-		     as "the ref covers it" — EXCEPT when `refMissing` is true: the ref
-		     that was covering it is gone (deleted, or its own entry_points moved),
-		     the `snippet-ref-missing` warning above already says so, and Run must
-		     agree rather than post a doomed `artifact_id` to the backend. -->
-		<SnippetTestPanel
-			bind:this={testPanel}
-			{snippet}
-			{entry}
-			entryPoints={inline ? entryPoints : refMissing ? [] : [entry]}
-			onGoToLine={(l) => editor?.goToLine(l)}
-		/>
+		<!-- There is no console run for transform: RunRequest.entry excludes it
+		     server-side, and there is no document to bind a run against outside
+		     an actual export. -->
+		{#if entry !== 'transform'}
+			<!-- In ref mode there is no lint response to ask, so `[entry]` stands in
+			     as "the ref covers it" — EXCEPT when `refMissing` is true: the ref
+			     that was covering it is gone (deleted, or its own entry_points moved),
+			     the `snippet-ref-missing` warning above already says so, and Run must
+			     agree rather than post a doomed `artifact_id` to the backend. -->
+			<SnippetTestPanel
+				bind:this={testPanel}
+				{snippet}
+				{entry}
+				entryPoints={inline ? entryPoints : refMissing ? [] : [entry]}
+				onGoToLine={(l) => editor?.goToLine(l)}
+			/>
+		{/if}
 	{/if}
 </div>

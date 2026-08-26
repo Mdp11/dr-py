@@ -12,8 +12,9 @@ export type BoundEntry = 'value' | 'step' | 'transform';
 /** The subset of `BoundEntry` a console/embedded run (`POST /snippets/run`,
  * `SnippetSourceEditor`'s Test panel) can actually execute — mirrors
  * `RunRequest.entry: Literal["script", "value", "step"]`
- * (core/script/runner.py). `transform` is TableRef-only and runs only
- * server-side during an export (never through the console), so it is
+ * (core/script/runner.py). `transform` has no `RunRequest.entry` member and
+ * no document to bind a console run against — it runs only server-side
+ * during an export, over the export's own rendered document — so it is
  * deliberately excluded here rather than threaded through `SnippetRunBody`,
  * `SnippetSourceEditor`, `ElementContextRow` and `SnippetTestPanel`. */
 export type ConsoleEntry = Exclude<BoundEntry, 'transform'>;

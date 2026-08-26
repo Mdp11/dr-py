@@ -4,6 +4,7 @@ list per session. No write_mutex — same benign-race stance as routes/read.py."
 
 from __future__ import annotations
 
+import ast
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -18,7 +19,11 @@ from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefi
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.lint import derive_entry_points
 from data_rover.core.script.runner import ScriptRunner
-from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
+from data_rover.core.script.schema import (
+    SNIPPET_ADAPTER,
+    SnippetDefinition,
+    SnippetSource,
+)
 from data_rover.core.script.warnings import ScriptWarningCode
 from data_rover.core.table.cells import (
     NOT_COMPUTED_MESSAGE,
@@ -131,28 +136,48 @@ def _resolve_table(
     return resolve_table_refs(defn, _fetch, snippet_fetch=_fetch_snippet)
 
 
-def _resolve_transform_code(db: DbSession, project_id: str, ref: str, name: str) -> str:
-    """Resolve a transform ref to its snippet CODE, strictly.
+def _resolve_transform_source(
+    db: DbSession, project_id: str, src: SnippetSource | None, name: str
+) -> str | None:
+    """Resolve a transform source (ref or inline) to its snippet CODE,
+    strictly. `None` or an empty (unconfigured `{}`) source returns `None` —
+    "no transform" — the caller's whole reason for checking `is_empty`
+    everywhere else this type appears.
 
     Deliberately NOT the tolerant `_fetch_snippet`/resolve path script
     columns use: a dangling script-column ref degrades to error cells, but a
-    dangling transform is a functional-contract hole — silently skipping it
-    ships untransformed data — so every failure is a ValueError naming
-    `name` (the routes' 422 mapping). The entry point is RE-DERIVED from the
-    code, never read off the stored `entry_points` (advisory metadata only —
-    core/script/schema.py — and stale for any snippet last written before
-    "transform" joined _ENTRY_NAMES)."""
-    r = content.get_artifact(db, ref)
+    dangling or broken transform is a functional-contract hole — silently
+    skipping it ships untransformed data — so every failure is a ValueError
+    naming `name` (the routes' 422 mapping). The entry point is RE-DERIVED
+    from the code, never read off the stored/client-supplied `entry_points`
+    (advisory metadata only — core/script/schema.py — and, for a ref, stale
+    for any snippet last written before "transform" joined _ENTRY_NAMES)."""
+    if src is None or src.is_empty:
+        return None
+    if src.definition is not None:
+        code = src.definition.code
+        try:
+            ast.parse(code)
+        except SyntaxError as exc:
+            raise ValueError(f"{name}: transform code does not parse") from exc
+        if "transform" not in derive_entry_points(code):
+            raise ValueError(
+                f"{name}: transform code does not define a one-argument "
+                "top-level transform(doc)"
+            )
+        return code
+    assert src.ref is not None  # SnippetSource: not empty, no definition -> a ref
+    r = content.get_artifact(db, src.ref)
     if (
         r is None
         or r.project_id != project_id
         or r.kind is not ArtifactKind.code_snippet
     ):
-        raise ValueError(f"{name}: unknown transform snippet {ref}")
+        raise ValueError(f"{name}: unknown transform snippet {src.ref}")
     snippet = SNIPPET_ADAPTER.validate_python(r.payload)
     if "transform" not in derive_entry_points(snippet.code):
         raise ValueError(
-            f"{name}: snippet {ref} does not define a one-argument "
+            f"{name}: snippet {src.ref} does not define a one-argument "
             "top-level transform(doc)"
         )
     return snippet.code
@@ -553,10 +578,10 @@ def export_table(
             if row is not None:
                 name = row.name
         transform_code: str | None = None
-        if defn.transform is not None:
+        if defn.transform is not None and not defn.transform.is_empty:
             # Cheap pre-check, mirroring `exports.py`'s per-entry pass: a
             # format the engine would reject anyway must not first cost a DB
-            # hit (`_resolve_transform_code`) or an interactive concurrency
+            # hit (`_resolve_transform_source`) or an interactive concurrency
             # slot (`open_transform_host`) — the engine's own guard inside
             # `run_table_export` stays as defense in depth.
             if payload.format not in JSON_FAMILY:
@@ -564,8 +589,8 @@ def export_table(
                     f"{name}: transform is only supported for JSON-family "
                     f"formats, not {payload.format!r}"
                 )
-            transform_code = _resolve_transform_code(
-                db, project_id, defn.transform.ref, name
+            transform_code = _resolve_transform_source(
+                db, project_id, defn.transform, name
             )
             # Two-slot reality: this holds one interactive slot for the
             # transform run itself, while `run_table_export`'s own

@@ -69,6 +69,90 @@ def test_export_computes_closure_and_streams_bundle(client: TestClient) -> None:
     assert {a["id"] for a in bundle["artifacts"]} == {nav["id"], snip["id"]}
 
 
+_TABLE_NO_TRANSFORM = {
+    "row_source": {"kind": "scope", "types": [], "criteria": []},
+    "columns": [{"kind": "element"}],
+}
+
+_INLINE_TRANSFORM = {
+    "definition": {
+        "schema_version": 1,
+        "language": "python",
+        "code": "def transform(doc):\n    return doc\n",
+    }
+}
+
+
+def test_export_exporter_with_inline_transform_pulls_no_snippet(
+    client: TestClient,
+) -> None:
+    # an exporter entry's inline transform is code carried IN the entry, not
+    # a reference to a saved snippet artifact — the export closure must stay
+    # self-contained: table in, no snippet artifact anywhere in the bundle.
+    tbl = _mk(client, "table", "t", _TABLE_NO_TRANSFORM)
+    exporter = _mk(
+        client,
+        "exporter",
+        "e",
+        {
+            "entries": [
+                {
+                    "source": {"ref": tbl["id"]},
+                    "name": "a",
+                    "format": "json",
+                    "transform": _INLINE_TRANSFORM,
+                }
+            ]
+        },
+    )
+    r = client.post(
+        papi("/artifacts/export"),
+        json={"root_ids": [exporter["id"]]},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    bundle = r.json()
+    assert {a["id"] for a in bundle["artifacts"]} == {exporter["id"], tbl["id"]}
+    kinds = {a["id"]: a["kind"] for a in bundle["artifacts"]}
+    assert "code_snippet" not in kinds.values()
+
+
+def test_export_exporter_with_ref_transform_pulls_in_the_snippet(
+    client: TestClient,
+) -> None:
+    # contrast case: a REF transform is a real dependency and belongs in the
+    # bundle, same as any other artifact reference.
+    snip = _mk(client, "code_snippet", "s", SNIP)
+    tbl = _mk(client, "table", "t", _TABLE_NO_TRANSFORM)
+    exporter = _mk(
+        client,
+        "exporter",
+        "e",
+        {
+            "entries": [
+                {
+                    "source": {"ref": tbl["id"]},
+                    "name": "a",
+                    "format": "json",
+                    "transform": {"ref": snip["id"]},
+                }
+            ]
+        },
+    )
+    r = client.post(
+        papi("/artifacts/export"),
+        json={"root_ids": [exporter["id"]]},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    bundle = r.json()
+    assert {a["id"] for a in bundle["artifacts"]} == {
+        exporter["id"],
+        tbl["id"],
+        snip["id"],
+    }
+
+
 def test_export_preview_metadata_only(client: TestClient) -> None:
     snip = _mk(client, "code_snippet", "s", SNIP)
     nav = _mk(client, "navigation", "n", _nav(snip["id"]))

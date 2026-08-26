@@ -20,9 +20,11 @@ import {
 	loadArtifacts,
 	resetArtifacts,
 	resetEditorSize,
+	resetSnippetCollapse,
 	setInlineEditorHeight
 } from '$lib/state';
 import { INLINE_MIN_H } from '$lib/editor/editor-size';
+import type { BoundEntry } from '$lib/snippet/entry-stubs';
 import type { Artifact, ArtifactHeader, SnippetSource } from '$lib/api/types';
 import SnippetSourceEditor from '../SnippetSourceEditor.svelte';
 
@@ -31,6 +33,7 @@ beforeEach(() => resetArtifacts());
 afterEach(() => {
 	server.resetHandlers();
 	resetArtifacts();
+	resetSnippetCollapse();
 	document.body.innerHTML = '';
 	vi.restoreAllMocks();
 });
@@ -47,12 +50,13 @@ async function setArtifactHeaders(
 
 function render(
 	snippet: SnippetSource,
-	entry: 'value' | 'step',
-	onChange: (next: SnippetSource) => void
+	entry: BoundEntry,
+	onChange: (next: SnippetSource) => void,
+	extra?: { disabled?: boolean; collapseKey?: string }
 ) {
 	const c = mount(SnippetSourceEditor, {
 		target: document.body,
-		props: { snippet, entry, onChange }
+		props: { snippet, entry, onChange, ...extra }
 	});
 	flushSync();
 	return c;
@@ -633,6 +637,188 @@ describe('SnippetSourceEditor — inline editor height', () => {
 		const c = render(inlineSnippet(CODE), 'value', () => {});
 		try {
 			expect(box().style.height).toBe(`${INLINE_MIN_H}px`);
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('SnippetSourceEditor — entry="transform"', () => {
+	it('filters the ref select, labels the missing-ref hint, and mounts no test panel', async () => {
+		await setArtifactHeaders([
+			{
+				id: 'transform-snip',
+				kind: 'code_snippet',
+				name: 'Transform snippet',
+				updated_at: '2026-07-17T00:00:00Z',
+				updated_by: null,
+				entry_points: ['script', 'transform']
+			},
+			{
+				id: 'value-only-snip',
+				kind: 'code_snippet',
+				name: 'Value only',
+				updated_at: '2026-07-17T00:00:00Z',
+				updated_by: null,
+				entry_points: ['script', 'value']
+			}
+		]);
+		const c = render({ ref: 'gone' }, 'transform', vi.fn());
+		try {
+			const opts = [...select('snippet-ref-select').options].map((o) => o.value);
+			expect(opts).toContain('transform-snip');
+			expect(opts).not.toContain('value-only-snip');
+
+			expect(document.querySelector('[data-testid="snippet-ref-missing"]')?.textContent).toContain(
+				'snippet not found or lacks a transform() entry point'
+			);
+
+			// No console run exists for transform — the Test panel (and its
+			// `snippet-test-toggle`) must not mount at all, not merely render
+			// disabled.
+			expect(document.querySelector('[data-testid="snippet-test-toggle"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('seeds the transform() stub on switching to inline with no ref', () => {
+		vi.useFakeTimers();
+		server.use(
+			http.post('*/snippets/lint', () => HttpResponse.json({ diagnostics: [], entry_points: [] }))
+		);
+		const onChange = vi.fn();
+		const c = render({}, 'transform', onChange);
+		try {
+			click(document.querySelector('[data-testid="snippet-mode-inline"]'));
+			expect(onChange).toHaveBeenCalledTimes(1);
+			const next = onChange.mock.calls[0][0] as SnippetSource;
+			expect(next.definition?.code).toContain('def transform(doc):');
+		} finally {
+			unmount(c);
+			vi.useRealTimers();
+		}
+	});
+
+	it('shows the transform entry warning once lint reports entry_points lacking transform, and still mounts no test panel', async () => {
+		vi.useFakeTimers();
+		server.use(
+			http.post('*/snippets/lint', () =>
+				HttpResponse.json({ diagnostics: [], entry_points: ['script'] })
+			)
+		);
+		const c = render(inlineSnippet('def transform(doc):\n    return doc\n'), 'transform', vi.fn());
+		try {
+			await vi.advanceTimersByTimeAsync(310);
+			expect(
+				document.querySelector('[data-testid="snippet-entry-warning"]')?.textContent
+			).toContain('define transform() to use this snippet here');
+			expect(document.querySelector('[data-testid="snippet-test-toggle"]')).toBeNull();
+		} finally {
+			unmount(c);
+			vi.useRealTimers();
+		}
+	});
+});
+
+describe('SnippetSourceEditor — test panel still mounts for console entries (regression guard)', () => {
+	it.each(['value', 'step'] as const)('entry=%s mounts the test panel', async (entry) => {
+		await setArtifactHeaders([
+			{
+				id: 'snip',
+				kind: 'code_snippet',
+				name: 'Snippet',
+				updated_at: '2026-07-17T00:00:00Z',
+				updated_by: null,
+				entry_points: ['script', entry]
+			}
+		]);
+		const c = render({ ref: 'snip' }, entry, vi.fn());
+		try {
+			expect(document.querySelector('[data-testid="snippet-test-toggle"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('SnippetSourceEditor — disabled', () => {
+	function editorView(): EditorView {
+		const content = document.querySelector(
+			'[data-testid="snippet-editor"] .cm-content'
+		) as HTMLElement;
+		const view = EditorView.findFromDOM(content);
+		if (!view) throw new Error('editor view not found');
+		return view;
+	}
+
+	it('combines with `seeding` to disable the mode toggles and the ref select', async () => {
+		await setArtifactHeaders([
+			{
+				id: 'snip',
+				kind: 'code_snippet',
+				name: 'Snippet',
+				updated_at: '2026-07-17T00:00:00Z',
+				updated_by: null,
+				entry_points: ['script', 'value']
+			}
+		]);
+		const c = render({ ref: 'snip' }, 'value', vi.fn(), { disabled: true });
+		try {
+			expect(
+				(document.querySelector('[data-testid="snippet-mode-ref"]') as HTMLButtonElement).disabled
+			).toBe(true);
+			expect(
+				(document.querySelector('[data-testid="snippet-mode-inline"]') as HTMLButtonElement)
+					.disabled
+			).toBe(true);
+			expect(select('snippet-ref-select').disabled).toBe(true);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('makes the inline code editor read-only', () => {
+		const c = render(inlineSnippet('def value(elements):\n    return 1\n'), 'value', vi.fn(), {
+			disabled: true
+		});
+		try {
+			const view = editorView();
+			expect(view.state.readOnly).toBe(true);
+			expect(view.contentDOM.contentEditable).toBe('false');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('leaves the collapse toggle enabled and working', () => {
+		const c = render(inlineSnippet('def value(elements):\n    return 1\n'), 'value', vi.fn(), {
+			disabled: true,
+			collapseKey: 'disabled-collapse-key'
+		});
+		try {
+			const toggle = document.querySelector(
+				'[data-testid="snippet-collapse-toggle"]'
+			) as HTMLButtonElement;
+			expect(toggle.disabled).toBe(false);
+			expect(toggle.getAttribute('aria-expanded')).toBe('false'); // default collapsed
+			click(toggle);
+			expect(toggle.getAttribute('aria-expanded')).toBe('true');
+			expect(document.querySelector('[data-testid="snippet-editor-box"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('defaults to false — an editor mounted without the prop stays fully editable', () => {
+		const c = render(inlineSnippet('def value(elements):\n    return 1\n'), 'value', vi.fn());
+		try {
+			const view = editorView();
+			expect(view.state.readOnly).toBe(false);
+			expect(view.contentDOM.contentEditable).toBe('true');
+			expect(
+				(document.querySelector('[data-testid="snippet-mode-ref"]') as HTMLButtonElement).disabled
+			).toBe(false);
 		} finally {
 			unmount(c);
 		}

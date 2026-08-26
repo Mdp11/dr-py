@@ -19,6 +19,7 @@ import {
 	resetArtifacts,
 	resetCheckout,
 	resetExporterEditors,
+	resetSnippetCollapse,
 	resetWorkspaceTabs,
 	setProjectInfo,
 	stageArtifactCreate
@@ -69,7 +70,7 @@ const TABLE_ARTIFACT = {
 };
 
 /** A committed code_snippet artifact whose server-derived entry_points cover
- *  `transform` — the transform picker's option pool. */
+ *  `transform` — the transform editor's ref-mode option pool. */
 const TRANSFORM_SNIPPET_HEADER = {
 	id: 'snip-1',
 	kind: 'code_snippet',
@@ -213,6 +214,7 @@ afterEach(() => {
 	resetArtifactEdits();
 	resetWorkspaceTabs();
 	resetArtifacts();
+	resetSnippetCollapse();
 	vi.useRealTimers();
 	vi.restoreAllMocks();
 });
@@ -743,76 +745,128 @@ describe('ExporterTab', () => {
 		expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(0);
 	});
 
-	// The transform picker rides in each entry row, gated on the entry's own
+	// The transform editor rides in each entry row, gated on the entry's own
 	// format — never a whole-artifact setting.
-	it('a json-family entry row renders the transform picker and picking a snippet patches the entry', async () => {
+
+	function click(selector: string): void {
+		const el = document.querySelector<HTMLElement>(selector);
+		if (!el) throw new Error(`no element for ${selector}`);
+		el.click();
+		flushSync();
+	}
+
+	/** Add a transform, open the disclosure and pick a saved snippet — the
+	 *  full ref-mode path through the wrapper and the shared editor. */
+	function pickSavedTransform(id: string): void {
+		click('[data-testid="transform-add"]');
+		click('[data-testid="snippet-collapse-toggle"]');
+		const sel = document.querySelector<HTMLSelectElement>('[data-testid="snippet-ref-select"]')!;
+		sel.value = id;
+		sel.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+	}
+
+	async function renderJsonEntry(): Promise<void> {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
 			items: [TRANSFORM_SNIPPET_HEADER]
 		});
 		await loadArtifacts();
-
 		render('exp:art-1');
+		// EXPORT_ARTIFACT's one entry is already format: 'json'.
 		await vi.waitFor(() =>
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
+	}
 
-		// EXPORT_ARTIFACT's one entry is already format: 'json'.
-		const picker = document.querySelector<HTMLSelectElement>('[data-testid="transform-picker"]')!;
-		expect(picker).not.toBeNull();
+	it('a json-family entry row offers Add transform; adding and picking a snippet patches the entry', async () => {
+		await renderJsonEntry();
+		expect(document.querySelector('[data-testid="transform-add"]')).not.toBeNull();
 
-		picker.value = 'snip-1';
-		picker.dispatchEvent(new Event('change', { bubbles: true }));
-		flushSync();
+		pickSavedTransform('snip-1');
 
 		const draft = getExporterDraft('exp:art-1')!;
 		expect(draft.entries[0].transform).toEqual({ ref: 'snip-1' });
 		expect(draft.dirty).toBe(true);
 	});
 
-	it('an xlsx/csv entry row hides the transform picker', async () => {
+	// createColumnDrag's reorder snapshots real element rects, so the editor's
+	// extra height must live INSIDE the row's own drop element.
+	it('renders the transform editor inside the entry row drop element', async () => {
+		await renderJsonEntry();
+		click('[data-testid="transform-add"]');
+		const drop = document.querySelector('[data-export-entry-drop="0"]')!;
+		const editor = document.querySelector('[data-testid="transform-source-editor"]')!;
+		expect(editor).not.toBeNull();
+		expect(drop.contains(editor)).toBe(true);
+	});
+
+	it('the × writes null, not the unconfigured source', async () => {
+		await renderJsonEntry();
+		pickSavedTransform('snip-1');
+		expect(getExporterDraft('exp:art-1')!.entries[0].transform).toEqual({ ref: 'snip-1' });
+
+		click('[data-testid="transform-remove"]');
+
+		expect(getExporterDraft('exp:art-1')!.entries[0].transform).toBeNull();
+		expect(document.querySelector('[data-testid="transform-add"]')).not.toBeNull();
+	});
+
+	it('an xlsx/csv entry row hides the transform editor', async () => {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
 		render('exp:art-1');
 		await vi.waitFor(() =>
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		document
-			.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-format-xlsx"]')!
-			.click();
-		flushSync();
+		click('[data-testid="export-entry-0-format-xlsx"]');
 
-		expect(document.querySelector('[data-testid="transform-picker"]')).toBeNull();
+		expect(document.querySelector('[data-testid="transform-add"]')).toBeNull();
+		expect(document.querySelector('[data-testid="transform-source-editor"]')).toBeNull();
 	});
 
 	it('an xlsx entry that still carries a transform (format flipped after picking) shows the warning instead of hiding the state', async () => {
-		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
-			items: [TRANSFORM_SNIPPET_HEADER]
-		});
-		await loadArtifacts();
-
-		render('exp:art-1');
-		await vi.waitFor(() =>
-			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
-		);
-
-		const picker = document.querySelector<HTMLSelectElement>('[data-testid="transform-picker"]')!;
-		picker.value = 'snip-1';
-		picker.dispatchEvent(new Event('change', { bubbles: true }));
-		flushSync();
+		await renderJsonEntry();
+		pickSavedTransform('snip-1');
 		expect(getExporterDraft('exp:art-1')!.entries[0].transform).toEqual({ ref: 'snip-1' });
 
-		document
-			.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-format-xlsx"]')!
-			.click();
-		flushSync();
+		click('[data-testid="export-entry-0-format-xlsx"]');
 
-		expect(document.querySelector('[data-testid="transform-picker"]')).toBeNull();
+		expect(document.querySelector('[data-testid="transform-source-editor"]')).toBeNull();
 		const warning = document.querySelector('[data-testid="export-entry-0-transform-warning"]');
 		expect(warning).not.toBeNull();
 		expect(warning!.textContent).toMatch(/transform/i);
 		// The state survives the format flip — never silently cleared.
 		expect(getExporterDraft('exp:art-1')!.entries[0].transform).toEqual({ ref: 'snip-1' });
+	});
+
+	// The contrast pair for the one above: `{}` is truthy in JS, so a
+	// truthiness test on the field would call an UNCONFIGURED transform a
+	// leftover and warn about it.
+	it('an xlsx entry carrying an UNCONFIGURED transform shows no warning', async () => {
+		await renderJsonEntry();
+		click('[data-testid="transform-add"]');
+		expect(getExporterDraft('exp:art-1')!.entries[0].transform).toEqual({});
+
+		click('[data-testid="export-entry-0-format-xlsx"]');
+
+		expect(document.querySelector('[data-testid="export-entry-0-transform-warning"]')).toBeNull();
+	});
+
+	// The Export button ships a dirty draft's definition inline, so a caller
+	// who may not edit must not be able to author transform code here.
+	it('a viewer gets the transform affordances disabled', async () => {
+		setProjectInfo({ role: 'viewer', lockTtlSeconds: 300 });
+		await renderJsonEntry();
+		expect(
+			(document.querySelector('[data-testid="transform-add"]') as HTMLButtonElement).disabled
+		).toBe(true);
+	});
+
+	it('an editor keeps the transform affordances live', async () => {
+		await renderJsonEntry();
+		expect(
+			(document.querySelector('[data-testid="transform-add"]') as HTMLButtonElement).disabled
+		).toBe(false);
 	});
 });

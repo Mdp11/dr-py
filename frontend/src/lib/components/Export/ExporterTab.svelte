@@ -34,9 +34,10 @@
 		type TableDefinition
 	} from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
+	import { isEmptySnippetSource } from '$lib/snippet/source';
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
 	import AddTablePicker from './AddTablePicker.svelte';
-	import TransformPicker from './TransformPicker.svelte';
+	import TransformSourceEditor from './TransformSourceEditor.svelte';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -387,21 +388,6 @@
 								</button>
 							{/each}
 						</div>
-						{#if isJsonFamily(entry.format)}
-							<TransformPicker
-								value={entry.transform?.ref ?? null}
-								disabled={disabledEntry}
-								onChange={(ref) =>
-									updateExporterEntry(tabId, i, { transform: ref ? { ref } : null })}
-							/>
-						{:else if entry.transform}
-							<!-- A transform left behind by a format flip: the server 422s it at
-							     run time, so surface it rather than hiding the state. Never
-							     blocks Save. -->
-							<span class="shrink-0 text-warning" data-testid="export-entry-{i}-transform-warning">
-								transform needs a JSON format
-							</span>
-						{/if}
 						<button
 							type="button"
 							data-testid="export-entry-{i}-layout"
@@ -421,6 +407,31 @@
 						>
 							Remove
 						</button>
+						{#if isJsonFamily(entry.format)}
+							<!-- Last child, `w-full`: the row is `flex flex-wrap`, so the
+							     editor breaks onto its own line under the controls and its
+							     height stays INSIDE `data-export-entry-drop` — the reorder
+							     drag snapshots real element rects. -->
+							<div class="flex w-full items-start gap-1.5 pt-0.5">
+								<span class="shrink-0 pt-0.5 text-muted-foreground">Transform</span>
+								<div class="min-w-0 flex-1">
+									<TransformSourceEditor
+										value={entry.transform ?? null}
+										disabled={disabledEntry}
+										collapseKey={`${tabId}::entry:${i}::transform`}
+										onChange={(next) => updateExporterEntry(tabId, i, { transform: next })}
+									/>
+								</div>
+							</div>
+						{:else if !isEmptySnippetSource(entry.transform)}
+							<!-- A transform left behind by a format flip: the server 422s it at
+							     run time, so surface it rather than hiding the state. Never
+							     blocks Save. An UNCONFIGURED source (`{}`) is not one — hence
+							     the predicate rather than a truthiness test. -->
+							<span class="shrink-0 text-warning" data-testid="export-entry-{i}-transform-warning">
+								transform needs a JSON format
+							</span>
+						{/if}
 					</div>
 				{/each}
 			</div>
