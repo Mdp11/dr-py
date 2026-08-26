@@ -27,8 +27,8 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-21 · repo head at time of writing: `main` at `3b31492`
-(top-bar-restructure merged). The 2026-08-18 additions were a batch of owner notes: P-10
+Last updated: 2026-08-26 · repo head at time of writing: `main` at `96e18c5`
+(model-compare-apply-cr merged). The 2026-08-18 additions were a batch of owner notes: P-10
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
 reorder + Model dropdown, a P-10 follow-up) and P-23 (Apply CR against the loaded model,
@@ -50,7 +50,9 @@ longer blocks on a bad split template) — closing P-15.1, the exporter half of 
 A follow-up pass on `feat/exporter-v2-phase4` (Exporter v2 Phase 4) ships the
 `transform(doc)` snippet hook on both export surfaces (`ExporterEntry.transform` and
 `TableDefinition.transform`, spec §8) plus the entries cap fix below; Phase 5 (bundle-draft
-export) remains open and needs re-confirmation from the owner before starting.
+export) remains open and needs re-confirmation from the owner before starting. The 2026-08-25
+pass on `feat/model-compare-apply-cr` closes P-23 — Compare and Apply CR became one
+server-proposes/client-stages pipeline — and adds K-19 and O-3, both noticed while finishing it.
 
 ---
 
@@ -962,6 +964,15 @@ minted by a deleted or renamed rule have to drop — but that population lands i
 writes a very large journal row. K-8 already records the rebind case; rule edits are far more
 frequent than rebinds. Whatever caps K-8 should cap this too.
 
+### K-19 · `POST /projects` is the one upload path the body cap doesn't reach · `open` · *2026-08-26*
+`deps.read_capped_body` caps the two raw-body routes (`POST /model/upload`, `POST /model/compare`)
+at `max_request_body_bytes`, 413 over. The project-creation upload takes **FormData**, not a raw
+body, so it never calls the helper and stays unbounded — and it is the path that accepts a
+metamodel + model + view + artifact bundle in one request, so it is not the small one. Needs a
+different mechanism than `read_capped_body` (Starlette parses multipart itself; the cap has to
+land on the parser or on the parts, not on a byte stream the route reads). Same 413 contract when
+it lands, so a client can keep telling "too large" from "malformed".
+
 ---
 
 ## 7. Cleanups & dead code
@@ -1045,6 +1056,10 @@ positions survive under the new names. Those four are exactly the paths where th
 frontend and the layout route have to agree, and they are currently verified only by a
 manual browser pass. The 2026-08-20 metamodel-navigation features (LOD, hover
 highlighting, type search, panel TOC/collapse) join this list — unit-covered, no e2e.
+`ModelChangeDialog` (Compare… / Apply CR…, 2026-08-25) joins them on the same terms: the dialog,
+`stageProposedOps`, the CR helpers and both routes are unit- and API-covered, but nothing
+exercises pick a file → Preview diff → Replace → commit, or the multi-CR ordering and its 409,
+against a real backend.
 
 ---
 
@@ -1063,6 +1078,15 @@ a token is **not** a standalone capability — `release`, `renew` and `verify_he
 require `le.holder == user.id`, so a stolen token is useless without authenticating as its
 holder. Documented in the `redis_url` setting docstring; network isolation (or `rediss://`)
 is the operator's job. Revisit if Redis ever leaves the private network.
+
+### O-3 · `dr-tidy` does not lint or format `tests/` · `open` · *2026-08-26*
+`core-format`/`core-lint` and their backend twins set `cwd` to the package directories, so
+`ruff format`, `ruff check`, mypy and pyright all run over `src/data_rover/{core,api}` and never
+see `tests/`. A badly formatted or lint-dirty test file passes the repo's own tidy gate, and the
+gap is invisible — `dr-tidy` reports "All checks passed" either way. Every test file added since
+has been formatted only because someone ran ruff on it by hand. Fix is a task (or a `cwd`) that
+covers `tests/` too; the only decision is whether the type-checkers join ruff there, since the
+test suite leans on fixtures pyright will have opinions about.
 
 ---
 
