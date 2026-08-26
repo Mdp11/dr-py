@@ -15,6 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 
+from data_rover.core.script.schema import SnippetSource
+
 from .schema import (
     ColumnExportOptions,
     JsonColumnOptions,
@@ -97,12 +99,12 @@ class ExporterEntry(BaseModel):
     export_row_number: RowNumberExportOptions | None = None
     json_split: JsonSplitOptions | None = None
     json_doc: JsonDocumentOptions | None = None
-    #: Per-entry snippet post-processor: a `code_snippet` artifact
-    #: ref whose `transform(doc)` runs render -> shape -> TRANSFORM ->
-    #: serialize, JSON-family formats only. Ref-only by design (no inline
-    #: code, unlike SnippetSource). None means "no transform", never
-    #: "inherit the table's own" — the no-bleed rule, both directions.
-    transform: TableRef | None = None
+    #: Per-entry snippet post-processor: `transform(doc)` runs render ->
+    #: shape -> TRANSFORM -> serialize, JSON-family formats only. Ref or
+    #: inline, like every other `SnippetSource`. `None` OR an empty
+    #: (`{}`/unconfigured) source both mean "no transform", never "inherit
+    #: the table's own" — the no-bleed rule, both directions.
+    transform: SnippetSource | None = None
 
 
 class ExporterDefinition(BaseModel):

@@ -303,10 +303,12 @@ class TableDefinition(BaseModel):
     json_split: JsonSplitOptions | None = None
     #: Standalone-export snippet post-processor: applies to
     #: POST /tables/export in JSON-family formats ONLY — an exporter entry
-    #: never consults it (no-bleed). Presentation-family: never consulted
-    #: during evaluation; cell values, row order and script cache keys are
+    #: never consults it (no-bleed). Ref or inline, like every other
+    #: `SnippetSource`; `None` or an empty (`{}`/unconfigured) source both
+    #: mean "no transform". Presentation-family: never consulted during
+    #: evaluation; cell values, row order and script cache keys are
     #: unaffected (the transform runs after rendering).
-    transform: TableRef | None = None
+    transform: SnippetSource | None = None
 
     @model_validator(mode="after")
     def _validate_sources(self) -> TableDefinition:

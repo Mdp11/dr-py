@@ -222,9 +222,36 @@ def test_json_split_accepts_any_template_at_schema_level():
 
 
 def test_table_definition_transform_field_optional():
-    from data_rover.core.table.schema import TableRef
-
     d = _table()
     assert d.transform is None
-    d2 = d.model_copy(update={"transform": TableRef(ref="s1")})
+    d2 = _table(transform={"ref": "s1"})
     assert d2.transform is not None and d2.transform.ref == "s1"
+
+
+def test_table_definition_transform_roundtrips_inline():
+    code = "def transform(doc):\n    return doc\n"
+    d = _table(transform={"definition": {"code": code}})
+    dumped = d.model_dump()
+    d2 = TABLE_ADAPTER.validate_python(dumped)
+    assert d2.transform is not None
+    assert d2.transform.definition is not None and d2.transform.definition.code == code
+
+
+def test_table_definition_transform_legacy_ref_payload_parses_unchanged():
+    # No-migration guarantee: a `{"ref": "..."}` payload predating
+    # SnippetSource loads identically under the new type.
+    from data_rover.core.script.schema import SnippetSource
+
+    d = _table(transform={"ref": "s1"})
+    assert d.transform == SnippetSource(ref="s1")
+
+
+def test_table_definition_transform_empty_dict_is_no_transform():
+    d = _table(transform={})
+    assert d.transform is not None
+    assert d.transform.is_empty
+
+
+def test_table_definition_transform_both_set_is_rejected():
+    with pytest.raises(ValidationError):
+        _table(transform={"ref": "s1", "definition": {"code": "x=1"}})

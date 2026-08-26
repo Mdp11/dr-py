@@ -47,7 +47,7 @@ from ..table_export_engine import (
     open_transform_host,
     run_table_export,
 )
-from .tables import _resolve_table, _resolve_transform_code
+from .tables import _resolve_table, _resolve_transform_source
 
 router = APIRouter()
 
@@ -273,7 +273,7 @@ def _execute_export(
             segs = []
         folders.append(segs)
         code_: str | None = None
-        if entry.transform is not None:
+        if entry.transform is not None and not entry.transform.is_empty:
             label = entry.name or entry.source.ref
             try:
                 if entry.format not in JSON_FAMILY:
@@ -281,8 +281,8 @@ def _execute_export(
                         f"{label}: transform is only supported for JSON-family "
                         f"formats, not {entry.format!r}"
                     )
-                code_ = _resolve_transform_code(
-                    db, project_id, entry.transform.ref, label
+                code_ = _resolve_transform_source(
+                    db, project_id, entry.transform, label
                 )
             except ValueError as exc:
                 bad_transforms.append(str(exc))

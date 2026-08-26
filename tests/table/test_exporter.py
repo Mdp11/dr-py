@@ -5,6 +5,7 @@ that it never touches structural fields and never mutates its input."""
 import pytest
 from pydantic import ValidationError
 
+from data_rover.core.script.schema import SnippetDefinition, SnippetSource
 from data_rover.core.table.exporter import (
     EXPORTER_ADAPTER,
     ExporterEntry,
@@ -160,8 +161,45 @@ def test_json_doc_defaults_preserve_todays_behavior():
 def test_entry_transform_defaults_none_and_roundtrips():
     e = ExporterEntry(source=TableRef(ref="t1"))
     assert e.transform is None
-    e2 = ExporterEntry(source=TableRef(ref="t1"), transform=TableRef(ref="s1"))
+    e2 = ExporterEntry(source=TableRef(ref="t1"), transform=SnippetSource(ref="s1"))
     assert e2.transform is not None and e2.transform.ref == "s1"
+
+
+def test_entry_transform_roundtrips_inline():
+    code = "def transform(doc):\n    return doc\n"
+    e = ExporterEntry(
+        source=TableRef(ref="t1"),
+        transform=SnippetSource(definition=SnippetDefinition(code=code)),
+    )
+    dumped = e.model_dump()
+    e2 = ExporterEntry.model_validate(dumped)
+    assert e2.transform is not None
+    assert e2.transform.definition is not None and e2.transform.definition.code == code
+
+
+def test_entry_transform_legacy_ref_payload_parses_unchanged():
+    # No-migration guarantee: a `{"ref": "..."}` payload predating
+    # SnippetSource loads identically under the new type.
+    e = ExporterEntry.model_validate(
+        {"source": {"ref": "t1"}, "transform": {"ref": "s1"}}
+    )
+    assert e.transform == SnippetSource(ref="s1")
+
+
+def test_entry_transform_empty_dict_is_no_transform():
+    e = ExporterEntry.model_validate({"source": {"ref": "t1"}, "transform": {}})
+    assert e.transform is not None
+    assert e.transform.is_empty
+
+
+def test_entry_transform_both_set_is_rejected():
+    with pytest.raises(ValidationError):
+        ExporterEntry.model_validate(
+            {
+                "source": {"ref": "t1"},
+                "transform": {"ref": "s1", "definition": {"code": "x=1"}},
+            }
+        )
 
 
 def test_entries_capped_at_50():
@@ -176,10 +214,10 @@ def test_entries_capped_at_50():
 
 def test_overridden_table_restates_entry_transform():
     sample_defn = _defn()
-    entry = ExporterEntry(source=TableRef(ref="t1"), transform=TableRef(ref="s1"))
+    entry = ExporterEntry(source=TableRef(ref="t1"), transform=SnippetSource(ref="s1"))
     out = overridden_table(sample_defn, entry)
     assert out.transform is not None and out.transform.ref == "s1"
     # no-bleed: an entry WITHOUT a transform must not inherit the table's
-    tainted = sample_defn.model_copy(update={"transform": TableRef(ref="tbl-own")})
+    tainted = sample_defn.model_copy(update={"transform": SnippetSource(ref="tbl-own")})
     out2 = overridden_table(tainted, ExporterEntry(source=TableRef(ref="t1")))
     assert out2.transform is None
