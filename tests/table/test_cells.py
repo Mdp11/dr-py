@@ -372,6 +372,57 @@ def test_scalar_property_step_values_are_per_reached_element():
     assert [getattr(c, "value", None) for c in root_rows] == ["Part", "Part"]
 
 
+def test_expanded_property_over_multi_binding_source_splits_rows():
+    # A property column sourced from a COLLAPSE navigation column reaches
+    # MANY elements per row. Collapsed it renders their joined values; split
+    # it must yield one row per (element, value) pair — list values flattened
+    # across the reached elements, in reached order — with the row's other
+    # columns duplicated. The value cell carries no owner (element_id None):
+    # the promoted slot holds only the value, and two reached elements may
+    # share one.
+    mm = _mm()
+    model, ids = _fixture(mm)
+    model.set_property(model.elements[ids["part1"]], "tags", ["x", "y"])
+    model.set_property(model.elements[ids["part2"]], "tags", ["z"])
+    nav = {"definition": {"kind": "path", "start": {"kind": "row"},
+        "steps": [{"kind": "relationship", "relationship_type": "BlockHasPart",
+                   "direction": "out"}],
+        "exclude_visited": True}}
+
+    def table(name: str, keep_empty: bool) -> dict:
+        return {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}},
+                {"kind": "navigation", "source": {"kind": "row"}, "navigation": nav},
+                {"kind": "property", "source": {"kind": "column", "index": 1},
+                 "name": name, "mode": "expand", "keep_empty": keep_empty},
+            ],
+        }
+
+    _, keys, cells = _eval(mm, model, table("name", False))
+    root_rows = [row for k, row in zip(keys, cells) if k[0] == ids["root"]]
+    assert len(root_rows) == 2
+    for row, expected in zip(root_rows, ["Part 1", "Part 2"]):
+        assert isinstance(row[0], ElementCell) and row[0].element_id == ids["root"]
+        assert isinstance(row[2], ValueCell)
+        assert row[2].value == expected
+        assert row[2].present is True and row[2].editable is False
+        assert row[2].element_id is None
+    # parts reach nothing: their rows are dropped under keep_empty=False
+    assert all(k[0] == ids["root"] for k in keys)
+
+    _, keys, cells = _eval(mm, model, table("tags", True))
+    root_cells = [row[2] for k, row in zip(keys, cells) if k[0] == ids["root"]]
+    assert all(isinstance(c, ValueCell) for c in root_cells)
+    assert [c.value for c in root_cells if isinstance(c, ValueCell)] == ["x", "y", "z"]
+    # keep_empty=True: a row whose source reaches nothing survives with a
+    # None slot, same as an expand navigation column
+    part_rows = [row for k, row in zip(keys, cells) if k[0] == ids["part1"]]
+    assert len(part_rows) == 1
+    assert isinstance(part_rows[0][2], ValueCell) and part_rows[0][2].value is None
+
+
 def test_scalar_property_step_navigation_column_yields_values_cell():
     # A navigation column whose path ends in a SCALAR property step shows the
     # property VALUES (a ValuesCell), not an empty elements cell — the chain

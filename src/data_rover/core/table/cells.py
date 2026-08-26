@@ -7,7 +7,7 @@ API-layer projection over the API's own tree-item shape); the route maps ids to
 | element    | n/a      | single        | `ElementCell`                           |
 | property   | collapse | single        | `ValueCell` (editable iff declared)     |
 | property   | collapse | many          | `ValuesCell` (read-only, joined)        |
-| property   | expand   | single (req.) | `ValueCell` (read-only — see below)     |
+| property   | expand   | any           | `ValueCell` (read-only — see below)     |
 | navigation | collapse | any           | `ElementsCell` (capped for display)     |
 | navigation | expand   | single (req.) | `ElementCell` (one binding per row)     |
 
@@ -125,10 +125,11 @@ def _prop_present(mm: Metamodel, type_name: str, prop: str) -> bool:
 def expand_property_values(
     model: Model, col: PropertyColumn, roots: list[str]
 ) -> list[Binding]:
-    """Values an `expand` property column contributes for ONE row's roots.
-
-    The schema guarantees an expand property column has a single-binding
-    source, so `roots` holds at most one element id here.
+    """Values an `expand` property column contributes for ONE row's roots:
+    one binding per (element, value) pair, in root order with list values
+    flattened — a multi-binding source (a collapse navigation column) splits
+    into a row per reached element's value, mirroring what the collapse cell
+    joins. An element with the property unset contributes nothing.
 
     A single-valued (or undeclared) property is NOT an error: its scalar value
     expands to exactly one row, so mixed scopes (some types multi-valued, some
@@ -136,14 +137,16 @@ def expand_property_values(
     table. The UI additionally greys the split toggle out when it can prove no
     scoped type is multi-valued — this is the tolerant evaluation half.
     """
-    if not roots:
-        return []
-    eid = roots[0]
-    el = model.elements[eid]
-    raw = el.properties.get(col.name)
-    if raw is None:
-        return []
-    return list(raw) if isinstance(raw, (list, tuple)) else [raw]
+    out: list[Binding] = []
+    for eid in roots:
+        raw = model.elements[eid].properties.get(col.name)
+        if raw is None:
+            continue
+        if isinstance(raw, (list, tuple)):
+            out.extend(raw)
+        else:
+            out.append(raw)
+    return out
 
 
 def _element_cell(
@@ -182,9 +185,12 @@ def _property_cell(
         # (slot == None) and a genuine value agree with the row they're in.
         slot = _expand_slot_of(defn, base_slots, col_index)
         val = key[slot]
-        eid = els[0] if els else None
-        present = eid is not None and _prop_present(
-            mm, model.elements[eid].type_name, col.name
+        # The slot holds only the value: a multi-binding source has no single
+        # owner to attribute it to (two reached elements may share a value),
+        # so `element_id` is set only when the source is exactly one element.
+        eid = els[0] if len(els) == 1 else None
+        present = any(
+            _prop_present(mm, model.elements[e].type_name, col.name) for e in els
         )
         return ValueCell(present=present, value=val, element_id=eid, editable=False)
     if not els:
