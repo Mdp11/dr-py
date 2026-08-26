@@ -457,7 +457,7 @@ class _CommitUnwind:
             # why cache invalidation is deferred to the shared step below.
             self.session.metamodel = self.prior_metamodel
             self.model.metamodel = self.prior_metamodel
-            self.model.indexes.rebuild()
+            self.model.indexes.rebuild(keep_search=True)
             self.session.validation = None
         if self.prior_compiled is not None:
             # One reassignment, exactly as the forward path swaps it — a
@@ -592,7 +592,7 @@ def preview_commit(
             assert prior_mm is not None
             session.metamodel = candidate
             model.metamodel = candidate
-            model.indexes.rebuild()
+            model.indexes.rebuild(keep_search=True)
         try:
             # _apply_batch raises 422 on a mutation-boundary structural error
             # (unknown type, missing endpoint, unknown property) — the safety
@@ -641,7 +641,7 @@ def preview_commit(
                 assert prior_mm is not None
                 session.metamodel = prior_mm
                 model.metamodel = prior_mm
-                model.indexes.rebuild()
+                model.indexes.rebuild(keep_search=True)
             # The in-place apply-then-rollback leaves model_rev unchanged, so a
             # concurrent lock-free /tables/evaluate could have cached rows AND
             # script cell values computed mid-preview at this rev. Invalidate

@@ -111,6 +111,18 @@ def test_direct_property_write_via_hook() -> None:
     m.indexes.verify_consistent()
 
 
+def _bulk_loaded(names: list[str]) -> Model:
+    """Populate the dicts directly (the bulk-load path) and rebuild()."""
+    from data_rover.core.model.element import Element
+
+    m = _model()
+    for i, name in enumerate(names):
+        eid = f"bulk-{i}"
+        m.elements[eid] = Element(id=eid, type_name="Item", properties={"name": name})
+    m.indexes.rebuild()
+    return m
+
+
 def test_rebuild_recomputes_from_scratch() -> None:
     m = _model()
     _named(m, "Pump")
@@ -118,8 +130,83 @@ def test_rebuild_recomputes_from_scratch() -> None:
     snapshot = {t: set(ids) for t, ids in m.indexes.search_postings.items()}
     trig_snapshot = dict(m.indexes._trigrams_of)
     m.indexes.rebuild()
+    # rebuild() drops the search index (bulk-load semantics) ...
+    assert m.indexes.search_ready is False
+    assert m.indexes.search_postings == {}
+    assert m.indexes._trigrams_of == {}
+    # ... and a synchronous full build restores it exactly
+    m.indexes.build_search_index()
+    assert m.indexes.search_ready is True
     assert {t: set(ids) for t, ids in m.indexes.search_postings.items()} == snapshot
     assert m.indexes._trigrams_of == trig_snapshot
+
+
+def test_fresh_index_is_ready_and_hooks_keep_it_complete() -> None:
+    m = _model()
+    assert m.indexes.search_ready is True  # an empty model's empty index is complete
+    a = _named(m, "Pump")
+    assert m.indexes.search_candidates("pump") == {a.id}
+    m.indexes.verify_consistent()
+
+
+def test_rebuild_keep_search_preserves_the_index() -> None:
+    m = _model()
+    a = _named(m, "Pump")
+    postings = {t: set(ids) for t, ids in m.indexes.search_postings.items()}
+    m.indexes.rebuild(keep_search=True)
+    assert m.indexes.search_ready is True
+    assert {t: set(ids) for t, ids in m.indexes.search_postings.items()} == postings
+    assert m.indexes.search_candidates("pump") == {a.id}
+    m.indexes.verify_consistent()
+
+
+def test_candidates_none_until_ready_then_exact() -> None:
+    m = _bulk_loaded(["Pump", "Valve"])
+    assert m.indexes.search_ready is False
+    assert m.indexes.search_candidates("pump") is None  # scan fallback
+    m.indexes.build_search_index()
+    assert m.indexes.search_candidates("pump") == {"bulk-0"}
+    assert m.indexes.search_candidates("valve") == {"bulk-1"}
+    m.indexes.verify_consistent()
+
+
+def test_chunked_build_skips_hook_maintained_and_deleted_elements() -> None:
+    """The background builder's contract: ids are snapshotted up front, then
+    indexed chunk by chunk while the mutation hooks keep running. An element
+    edited before its chunk lands already has its entry (skipped, not
+    duplicated); a deleted one is absent from the model (skipped)."""
+    m = _bulk_loaded(["Pump", "Valve", "Turbine"])
+    ids = list(m.elements)  # snapshot, as the builder does
+    # mutations BEFORE the build reaches them
+    m.set_property(m.elements["bulk-0"], "name", "Compressor")
+    m.delete_element("bulk-2")
+    created = _named(m, "Boiler")  # hook-indexed, never in the snapshot
+    m.indexes.index_search_chunk(ids[:2])
+    m.indexes.index_search_chunk(ids[2:])
+    m.indexes.mark_search_ready()
+    assert m.indexes.search_candidates("compressor") == {"bulk-0"}
+    assert m.indexes.search_candidates("pump") == frozenset()
+    assert m.indexes.search_candidates("valve") == {"bulk-1"}
+    assert m.indexes.search_candidates("turbine") == frozenset()
+    assert m.indexes.search_candidates("boiler") == {created.id}
+    m.indexes.verify_consistent()
+
+
+def test_index_search_chunk_is_idempotent() -> None:
+    m = _bulk_loaded(["Pump"])
+    m.indexes.index_search_chunk(["bulk-0"])
+    m.indexes.index_search_chunk(["bulk-0", "bulk-0", "missing"])
+    assert _posting_ids(m, "pum") == {"bulk-0"}
+    assert m.indexes._trigrams_of.keys() == {"bulk-0"}
+
+
+def test_verify_consistent_tolerates_a_partial_index() -> None:
+    m = _bulk_loaded(["Pump", "Valve"])
+    m.indexes.index_search_chunk(["bulk-0"])  # half built, not ready
+    m.indexes.verify_consistent()  # search structures excluded while not ready
+    m.indexes.mark_search_ready()
+    with pytest.raises(AssertionError, match="search_postings"):
+        m.indexes.verify_consistent()  # ready but incomplete => caught
 
 
 def test_mixed_mutation_sequence_stays_consistent() -> None:

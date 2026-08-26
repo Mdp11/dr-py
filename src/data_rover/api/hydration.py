@@ -31,6 +31,7 @@ from .artifact_ops import split_ops
 from .db import db_session
 from .db_models import Commit
 from .schemas import OPS_ADAPTER, OpIn
+from .search_index_build import start_search_index_build
 from .serialize import iter_model_json
 from .session import Session
 from .storage import get_snapshot_store, snapshot_key
@@ -265,4 +266,5 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
     session.strict_mode = strict_mode
     session.compiled_rules = rules.compile_sources(rule_sources, metamodel)
     start_validation_sweep(session)
+    start_search_index_build(session)
     return session

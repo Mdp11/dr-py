@@ -441,6 +441,9 @@ def test_mid_batch_model_failure_restores_the_old_schema(client: TestClient) -> 
     # no journal row was written for the rejected batch
     hist = client.get(papi("/commits"), params={"limit": 5}).json()["commits"]
     assert all(not c["is_rebind"] for c in hist)
+    # the unwind's rebuild(keep_search=True) left search intact
+    assert session.model.indexes.search_ready is True
+    assert eid in (session.model.indexes.search_candidates(eid[:3].lower()) or set())
 
 
 def test_layout_only_commit_is_cheap_and_journalled(client: TestClient) -> None:
@@ -985,3 +988,42 @@ def test_orphan_db_commit_failure_unwinds_the_batch(
     assert r.status_code == 500, r.text
     assert session.model_rev == base  # rev bump unwound
     assert len(session.op_log) == log_depth  # batch not left undoable
+
+
+def test_rebind_preview_and_commit_keep_the_search_index(client: TestClient) -> None:
+    """The search index is metamodel-independent, so the rebind paths rebuild
+    with ``keep_search=True``: after a preview (swap + restore = two
+    rebuilds) and after a real rebind commit the live index is still ready
+    and still answers — no scan fallback, no background rebuild."""
+    from data_rover.api.session import get_session
+
+    eid = _create_node(client, "turbine hall")
+    session = get_session()
+    assert session.model is not None
+    idx = session.model.indexes
+    assert idx.search_ready is True
+    assert idx.search_candidates("turbine") == {eid}
+
+    r = client.post(
+        papi("/commits/preview"),
+        json={"base_rev": _rev(client), "ops": [{"kind": "metamodel.rebind", "blob": MM_V4}]},
+    )
+    assert r.status_code == 200, r.text
+    assert idx.search_ready is True
+    assert idx.search_candidates("turbine") == {eid}
+
+    token = _acquire_mm(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "metamodel.rebind", "blob": MM_V4}],
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert session.model is not None and session.model.indexes is idx
+    assert idx.search_ready is True
+    assert idx.search_candidates("turbine") == {eid}
+    r = client.get(papi("/model/elements"), params={"q": "turbine"})
+    assert [e["id"] for e in r.json()["items"]] == [eid]

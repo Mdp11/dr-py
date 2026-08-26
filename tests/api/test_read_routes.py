@@ -1203,3 +1203,26 @@ def test_excluded_roots_paging_over_filtered_subset(client: TestClient) -> None:
     body = res.json()
     assert [i["id"] for i in body["items"]] == ["i3", "i4"]
     assert body["total"] == 3
+
+
+def test_search_scan_fallback_while_index_not_ready(client: TestClient) -> None:
+    """With the index unbuilt (as during a real cold open) the q-branch scans
+    and returns exactly what the index path returns once the build lands."""
+    from data_rover.api.search_index_build import start_search_index_build
+    from data_rover.api.session import get_session
+
+    _load_model(client, [_item("a", "Pump alpha"), _item("b", "Pump beta"), _item("c", "Valve")], [])
+    session = get_session()
+    assert session.model is not None
+    idx = session.model.indexes
+    assert idx.search_ready is True  # the sync-pinned build already ran
+    idx.rebuild()  # bulk-load semantics: drops the index, not ready
+    assert idx.search_ready is False
+    scanned = client.get(f"{API}/model/elements", params={"q": "pum"}).json()
+    start_search_index_build(session, sync=True)
+    assert idx.search_ready is True
+    indexed = client.get(f"{API}/model/elements", params={"q": "pum"}).json()
+    assert scanned == indexed
+    # both "Pump alpha"/"Pump beta" hit the prefix tier; the length-bias
+    # tiebreak (_search_score) ranks the shorter name ("Pump beta") first
+    assert [e["id"] for e in indexed["items"]] == ["b", "a"]

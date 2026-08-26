@@ -7,8 +7,9 @@ This module is their applier — the fourth sibling of ``routes/ops.py``'s
 model applier, ``artifact_ops`` and ``view_ops``:
 
 - ``metamodel.rebind`` swaps the IN-MEMORY metamodel (``session.metamodel``,
-  ``model.metamodel``, ``model.indexes.rebuild()`` — the index is
-  metamodel-derived) and stages the durable rows (new ``MetamodelRow`` at
+  ``model.metamodel``, ``model.indexes.rebuild()`` to re-derive the per-type
+  caches — the search index is kept, since the indexed text does not depend
+  on the metamodel) and stages the durable rows (new ``MetamodelRow`` at
   ``prior_version + 1`` carrying the author's verbatim blob, ``ModelRow``
   repointed) on the caller's DB transaction. The caller (``create_commit``)
   applies this module FIRST so the batch's model ops validate against the
@@ -183,7 +184,9 @@ def apply_metamodel_ops(
             on_swap(session.metamodel)
         session.metamodel = candidate
         model.metamodel = candidate
-        model.indexes.rebuild()  # containment flags + key groups are mm-derived
+        model.indexes.rebuild(
+            keep_search=True
+        )  # mm-derived only; the search text is not
         # Persist unconditionally, even when the project has no ModelRow yet:
         # upsert_model_row self-creates one (content.py), so gating this on
         # model_row's presence bought nothing but a rebind with NULL

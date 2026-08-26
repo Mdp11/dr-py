@@ -39,6 +39,7 @@ from ..schemas import (
     SaveModelResponse,
     SnapshotIn,
 )
+from ..search_index_build import start_search_index_build
 from ..serialize import iter_buffered, iter_model_json
 from ..session import get_registry
 from ..validation_sweep import start_validation_sweep
@@ -119,6 +120,7 @@ def upload_model(
         metamodel, payload.elements, payload.relationships
     )
     session.set_model(model)
+    start_search_index_build(session)
     return ModelOut.from_core(model)
 
 
@@ -151,6 +153,7 @@ def snapshot_model(
         metamodel, payload.elements, payload.relationships
     )
     session.set_model(model)
+    start_search_index_build(session)
     return ModelOut.from_core(model)
 
 
@@ -189,7 +192,8 @@ def _install_model(
     load itself is not the O(model) validation cost; validation
     streams in via ``validation_sweep`` and the returned summary's
     ``issue_counts`` starts at zero and grows as chunks land. Returns the same
-    shape as GET /model/summary.
+    shape as GET /model/summary. The trigram search index is built the same
+    way — in the background, search scanning until it lands.
     """
     model = build_model_from_dicts(metamodel, raw)
     # install with a PRESENT-but-EMPTY issue store: ops batches splice into it
@@ -201,6 +205,7 @@ def _install_model(
     if content.get_model_row(db, project_id) is not None:
         persist_baseline(project_id, session, author_id=author_id)
     start_validation_sweep(session)
+    start_search_index_build(session)
     return model_summary(session)
 
 

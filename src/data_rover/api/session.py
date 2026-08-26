@@ -22,6 +22,7 @@ from .table_cache import TableOrderCache
 
 if TYPE_CHECKING:
     from .schemas import OpIn
+    from .search_index_build import SearchIndexProgress
     from .validation_sweep import SweepProgress
 
 #: Maximum number of applied batches retained for undo. Each batch holds the
@@ -123,6 +124,11 @@ class Session:
     #: stays set after completion (running=False) so /model/status can report
     #: "ready". Replaced wholesale by the next sweep.
     validation_sweep: SweepProgress | None = field(default=None, repr=False)
+    #: progress of the in-flight background search-index build
+    #: (search_index_build.start_search_index_build); stays set after
+    #: completion. Never blocks eviction — the snapshot does not depend on
+    #: it — so ``evict``/``discard`` cancel it instead.
+    search_index_build: SearchIndexProgress | None = field(default=None, repr=False)
     #: per-session cache of ordered table row keys, keyed by
     #: (resolved-definition fingerprint, sort). A stored entry's model_rev
     #: pins it to the model state it was computed against; both model
@@ -387,6 +393,8 @@ class SessionRegistry:
             # the idle sweeper's next retry would kill it again — a sweep on a
             # long-lived session would restart forever and never converge.
             session.script_sweeps.cancel_all()
+            if session.search_index_build is not None:
+                session.search_index_build.cancel.set()
             if self._evict_hook is not None:
                 self._evict_hook(project_id, session)
             # Remove only after the snapshot hook completes, and only when we
@@ -423,6 +431,8 @@ class SessionRegistry:
             return
         with session.write_mutex:
             session.script_sweeps.cancel_all()
+            if session.search_index_build is not None:
+                session.search_index_build.cancel.set()
             with self._guard:
                 self._sessions.pop(project_id, None)
 

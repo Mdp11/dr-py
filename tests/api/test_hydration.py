@@ -212,3 +212,23 @@ def test_hydrate_replay_ignores_id_hint_in_restore_mode() -> None:
     h = hydration.hydrate_session("p1")
     assert h.model is not None
     assert "e1" in h.model.elements and "ignored" not in h.model.elements
+
+
+def test_hydrate_builds_the_search_index() -> None:
+    """Hydration rebuilds from a snapshot (search index reset) and must kick
+    the builder; under the conftest's sync pin the index is complete by the
+    time the session is returned."""
+    from data_rover.core.model.element import Element
+
+    sess = _seed_baseline()
+    assert sess.model is not None
+    sess.model.elements["x1"] = Element(
+        id="x1", type_name=_first_concrete_element_type(sess), properties={"name": "turbine"}
+    )
+    sess.model.indexes.rebuild()
+    hydration.persist_baseline("p1", sess, author_id=None)
+    h = hydration.hydrate_session("p1")
+    assert h.model is not None
+    assert h.search_index_build is not None and h.search_index_build.running is False
+    assert h.model.indexes.search_ready is True
+    assert h.model.indexes.search_candidates("turbine") == {"x1"}
