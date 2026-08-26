@@ -341,10 +341,9 @@ class TableDefinition(BaseModel):
                 raise ValueError(
                     f"column {i}: element column needs a single-binding source"
                 )
-            if col.kind == "property" and col.mode == "expand" and not single:
-                raise ValueError(
-                    f"column {i}: expanded property needs a single-binding source"
-                )
+            # An expand PROPERTY column accepts a multi-binding source: it
+            # promotes one row per (element, value) pair over everything the
+            # source reaches (`cells.expand_property_values`).
         return self
 
     def _source_arity(self, src: ColumnSource) -> tuple[bool, bool]:

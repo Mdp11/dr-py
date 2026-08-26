@@ -77,6 +77,18 @@ def test_element_column_source_must_be_element_producing():
         ])
 
 
+def test_expanded_property_accepts_multi_binding_source():
+    # An expand property column sourced from a COLLAPSE navigation column
+    # (many elements per row) is valid: build_rows promotes one row per
+    # (element, value) pair, which is exactly what "split into rows" means.
+    _table(columns=[
+        {"kind": "element", "source": {"kind": "row"}},
+        {"kind": "navigation", "source": {"kind": "row"}, "navigation": {}},
+        {"kind": "property", "source": {"kind": "column", "index": 1},
+         "name": "name", "mode": "expand"},
+    ])
+
+
 def test_element_column_source_from_element_producing_column_ok():
     # A legitimate ColumnRef chain: an element column sourced from an earlier
     # element column must still validate.
