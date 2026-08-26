@@ -2,14 +2,17 @@
 	// The table tab root: a slim chrome bar (name input, dirty dot, Settings,
 	// Export, Save/Save as…, lock-denied banner) above a full-height
 	// `TableGrid`.
-	// Definition editing (row source + columns) lives in a modal opened by the
-	// ⚙ Settings button so the grid gets the whole area.
+	// Definition editing (row source + columns) lives in a NON-MODAL floating
+	// panel opened by the ⚙ Settings button (or a column's edit button), so the
+	// grid gets the whole area and the sidebar/inspector stay usable while a
+	// column is being composed.
 	import {
 		abandonTableEvaluationSuspension,
 		canEdit,
 		canRequestScriptErrors,
 		downloadTable,
 		ensureTableDraft,
+		getActiveTab,
 		getScriptErrors,
 		getScriptErrorsPhase,
 		getTableDraft,
@@ -45,6 +48,13 @@
 		newPropertyColumn,
 		newScriptColumn
 	} from '$lib/table/columns';
+	import {
+		clampSettingsRect,
+		defaultSettingsRect,
+		loadSettingsRect,
+		saveSettingsRect,
+		type Rect
+	} from '$lib/table/settings-rect';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 	import ColumnManager from './ColumnManager.svelte';
 	import ExportDialog from './ExportDialog.svelte';
@@ -198,30 +208,27 @@
 	// Set by the Save button just before it closes the dialog, so whichever
 	// close path runs (Save's onOpenChange, or applyClose() called directly by
 	// a discard path) can tell "Save" apart from every DISCARD path (Cancel,
-	// the X, Escape, an overlay click) and skip reverting the staged edits.
-	// Plain variable, not $state: control flow only, never rendered.
+	// the X, Escape) and skip reverting the staged edits. Plain variable, not
+	// $state: control flow only, never rendered.
 	//
 	// Save is the only footer button still a `Dialog.Close`: it sets this flag
 	// then closes through the primitive, so bits-ui's `onOpenChange` fires (see
-	// its own DialogRootState's handleClose(), wired through Close/Escape/
-	// overlay) and applyClose() there sees the flag and keeps the edits. Every
-	// discard path (Cancel, the X, Escape, an overlay click) must be gated
-	// BEFORE an edit is lost — see `requestClose`/`discardAndClose` below, and
-	// the `onEscapeKeydown`/`onInteractOutside` handlers on `Dialog.Content` —
-	// but the paths get there differently. Cancel and the X are plain buttons
-	// (never a `Dialog.Close`, which closes on click before a handler could
-	// intercept it), so `requestClose` runs first and only closes — by
+	// its own DialogRootState's handleClose()) and applyClose() there sees the
+	// flag and keeps the edits. Every discard path (Cancel, the X, Escape) is
+	// gated BEFORE an edit is lost and never goes through the primitive: Cancel
+	// and the X are plain buttons (never a `Dialog.Close`, which closes on click
+	// before a handler could intercept it), and Escape is OUR keydown handler on
+	// `Dialog.Content` — the primitive's own escape layer is switched off
+	// (`escapeKeydownBehavior="ignore"`) because it listens on `document`, and
+	// with focus free to roam the sidebar and inspector an Escape typed there
+	// must not touch this panel. All three run `requestClose`, which closes by
 	// assigning `settingsOpen = false` directly and calling `applyClose()`
-	// itself — once it has confirmed there is nothing staged to lose; a dirty
+	// itself once it has confirmed there is nothing staged to lose; a dirty
 	// dialog gets the confirmation instead, whose "Discard changes" closes the
-	// same direct way. Escape and an overlay click are gated the OTHER way:
-	// their primitive callbacks below `preventDefault()` and open the
-	// confirmation only when dirty; when clean, they do nothing and bits-ui's
-	// own primitive proceeds to close on its own, which is what still reaches
-	// `onOpenChange` below — an external assignment to the bound `open` value
-	// closes the dialog too (the bound prop still drives presence), but bits-ui
-	// does NOT report that through `onOpenChange`, only its own internal
-	// handleClose() does.
+	// same direct way. An external assignment to the bound `open` value closes
+	// the dialog (the bound prop still drives presence), but bits-ui does NOT
+	// report that through `onOpenChange`, only its own internal handleClose()
+	// does — so `onOpenChange` below is reached by Save alone.
 	let settingsSaved = false;
 
 	function saveSettings(): void {
@@ -234,16 +241,14 @@
 	/** Everything a settings-dialog close must do, regardless of which path
 	 * got there. Lives in a function rather than inline in `onOpenChange`
 	 * because `applyClose` is reached by TWO routes and both need it: (1)
-	 * `onOpenChange` below, for Save (which sets `settingsSaved` first) AND
-	 * for a CLEAN Escape/overlay click (dirty ones are intercepted by the
-	 * gated handlers below and never reach bits-ui's own close at all); and
-	 * (2) directly, from the ungated Cancel/X (`requestClose`, when nothing
-	 * is staged) and from the confirmation's "Discard changes"
+	 * `onOpenChange` below, for Save (which sets `settingsSaved` first); and
+	 * (2) directly, from `requestClose` (Cancel/X/Escape, when nothing is
+	 * staged) and from the confirmation's "Discard changes"
 	 * (`discardAndClose`) — both of which assign `settingsOpen` themselves,
 	 * which bits-ui does NOT report through `onOpenChange` — see the note by
 	 * `settingsSaved`'s declaration. The `if (!settingsSaved)` guard just
 	 * below is live on both routes: `settingsSaved` is true only for Save, so
-	 * every other arrival here (clean Escape/overlay included) reverts.
+	 * every other arrival here reverts.
 	 *
 	 * Safe to run twice: `revertSuspendedTableEdits` returns early once the
 	 * suspend-time snapshot is gone, and `resumeTableEvaluation` returns early
@@ -254,8 +259,8 @@
 		resumeTableEvaluation(tabId);
 	}
 
-	/** The gate. Every DISCARD path (Cancel, the X, Escape, an overlay click)
-	 * funnels through here; Save does not, because it keeps the edits. */
+	/** The gate. Every DISCARD path (Cancel, the X, Escape) funnels through
+	 * here; Save does not, because it keeps the edits. */
 	function requestClose(): void {
 		if (hasSuspendedTableEdits(tabId)) {
 			confirmDiscardOpen = true;
@@ -271,37 +276,69 @@
 		settingsOpen = false;
 	}
 
-	// The settings dialog is a working surface, not an alert: open big
-	// (most of the viewport) and let the user resize from the corner. The
-	// Dialog primitive centers via translate(-50%,-50%), so width/height are
-	// controlled here and deltas are doubled to keep the grip under the cursor.
-	const DLG_MIN_W = 640;
-	const DLG_MIN_H = 400;
-	let dlgW = $state(
-		Math.min(1280, (typeof window === 'undefined' ? 1280 : window.innerWidth) * 0.92)
-	);
-	let dlgH = $state((typeof window === 'undefined' ? 720 : window.innerHeight) * 0.85);
-	let dlgResize: { x: number; y: number; w: number; h: number } | null = null;
-	function onDlgResizeStart(e: PointerEvent): void {
+	// The settings dialog is a working surface, not an alert: a floating,
+	// non-modal panel that opens big and that the user drags by its title bar
+	// and resizes from the corner. Its rect is explicit (`left/top/width/
+	// height`, overriding the primitive's centering transform) so a drag is a
+	// plain offset, and it is remembered across opens and tables
+	// (`settings-rect.ts`). It is resolved on every open, not at mount: a
+	// stored rect is re-clamped against the CURRENT viewport, and the first-
+	// open default is centered over this tab's own area (`tabEl`) so the
+	// sidebar and inspector beside it start out uncovered.
+	let tabEl = $state<HTMLElement | null>(null);
+	let dlg = $state<Rect>({ x: 0, y: 0, w: 0, h: 0 });
+	function viewport(): { w: number; h: number } {
+		return { w: window.innerWidth, h: window.innerHeight };
+	}
+	function resolveSettingsRect(): Rect {
+		const stored = loadSettingsRect();
+		if (stored) return clampSettingsRect(stored, viewport());
+		const a = tabEl?.getBoundingClientRect();
+		const anchor = a
+			? { x: a.left, y: a.top, w: a.width, h: a.height }
+			: { x: 0, y: 0, ...viewport() };
+		return defaultSettingsRect(anchor, viewport());
+	}
+	/** Re-clamp when the window shrinks under an open panel, so it can never
+	 * end up with its title bar (the only way to drag it back) off screen. */
+	function onWindowResize(): void {
+		if (settingsOpen) dlg = clampSettingsRect(dlg, viewport());
+	}
+	// Drag (title bar) and resize (bottom-right corner) share one shape: the
+	// pointer-down origin plus the rect at that moment; every move is an
+	// absolute delta from it, clamped, and the end persists the result.
+	let dlgGesture: { x: number; y: number; rect: Rect } | null = null;
+	function dlgGestureStart(e: PointerEvent): void {
 		if (e.button !== 0) return;
-		dlgResize = { x: e.clientX, y: e.clientY, w: dlgW, h: dlgH };
-		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		dlgGesture = { x: e.clientX, y: e.clientY, rect: dlg };
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
 		e.preventDefault();
 	}
+	function onDlgDragMove(e: PointerEvent): void {
+		if (!dlgGesture) return;
+		const { x, y, rect } = dlgGesture;
+		dlg = clampSettingsRect(
+			{ ...rect, x: rect.x + (e.clientX - x), y: rect.y + (e.clientY - y) },
+			viewport()
+		);
+	}
 	function onDlgResizeMove(e: PointerEvent): void {
-		if (!dlgResize) return;
-		dlgW = Math.min(
-			Math.max(DLG_MIN_W, dlgResize.w + 2 * (e.clientX - dlgResize.x)),
-			window.innerWidth * 0.98
-		);
-		dlgH = Math.min(
-			Math.max(DLG_MIN_H, dlgResize.h + 2 * (e.clientY - dlgResize.y)),
-			window.innerHeight * 0.95
+		if (!dlgGesture) return;
+		const { x, y, rect } = dlgGesture;
+		dlg = clampSettingsRect(
+			{ ...rect, w: rect.w + (e.clientX - x), h: rect.h + (e.clientY - y) },
+			viewport()
 		);
 	}
-	function onDlgResizeEnd(): void {
-		dlgResize = null;
+	function dlgGestureEnd(): void {
+		if (!dlgGesture) return;
+		dlgGesture = null;
+		saveSettingsRect(dlg);
 	}
+	/** The panel is portaled to `<body>`, so while another workspace tab is
+	 * active it would float over that tab: hide it (state intact — nothing
+	 * closes) until this tab is back. */
+	const settingsHidden = $derived(getActiveTab() !== tabId);
 
 	// Opening the settings dialog STAGES definition edits: the draft still
 	// updates on every keystroke (the editors and Save stay immediate), but the
@@ -322,6 +359,7 @@
 		// dialog's NEXT close — even a Cancel — would wrongly keep the edits.
 		settingsSaved = false;
 		confirmDiscardOpen = false;
+		dlg = resolveSettingsRect();
 		settingsOpen = true;
 	}
 
@@ -414,10 +452,22 @@
 	}
 </script>
 
+<svelte:window onresize={onWindowResize} />
+
 {#if !draft}
 	<p class="p-4 text-xs text-muted-foreground/70">Loading…</p>
 {:else}
-	<div class="flex h-full flex-col">
+	<!-- `inert` while the settings panel is open: the panel is non-modal so
+	     the sidebar and inspector stay live, but THIS tab's toolbar and grid do
+	     not — evaluation is suspended while the panel is open, and a grid that
+	     will not fill its chunks would only mislead. The panel itself is
+	     portaled to <body>, outside this subtree. -->
+	<div
+		class="flex h-full flex-col"
+		data-testid="table-tab-body"
+		inert={settingsOpen}
+		bind:this={tabEl}
+	>
 		<div class="flex items-center gap-2 border-b border-border px-3 py-2">
 			<input
 				data-testid="table-name"
@@ -737,42 +787,65 @@
 			bind:open={settingsOpen}
 			onOpenChange={(o) => {
 				if (o) return; // opening is handled by openSettings, not here — see its comment
-				// TWO routes reach here, both needing `applyClose()`: Save (which
-				// sets `settingsSaved` first, so the guard inside keeps the edits)
-				// and a CLEAN Escape/overlay click — the `onEscapeKeydown`/
-				// `onInteractOutside` handlers below only `preventDefault()` when
-				// `hasSuspendedTableEdits` is true, so a clean dialog's Escape/
-				// overlay click falls through to bits-ui's own close and lands
-				// here. Cancel/the X and the confirmation's "Discard changes" do
-				// NOT come through here — they close by assigning `settingsOpen`
-				// directly (see the note by `settingsSaved`'s declaration), which
-				// bits-ui does not report through `onOpenChange`.
+				// Only Save reaches here (it sets `settingsSaved` first, so the
+				// guard inside keeps the edits). Cancel/the X/Escape and the
+				// confirmation's "Discard changes" do NOT — they close by
+				// assigning `settingsOpen` directly (see the note by
+				// `settingsSaved`'s declaration), which bits-ui does not report
+				// through `onOpenChange`.
 				applyClose();
 			}}
 		>
+			<!-- Non-modal: no overlay, no focus trap, no scroll lock, outside
+			     clicks ignored (they are clicks on the sidebar/inspector now),
+			     and Escape handled by our own keydown below rather than the
+			     primitive's document-level layer. The explicit left/top override
+			     the wrapper's centering classes (tailwind-merge keeps the last
+			     conflicting utility). `transition-none`: the wrapper's
+			     `duration-200` sets `transition-duration` alone, and the CSS
+			     initial `transition-property` is `all`, so without it every
+			     drag/resize write is tweened and the panel trails the pointer
+			     (the open/close `animate-in` keyframes are an animation, not a
+			     transition, and keep their duration). `display:none` while
+			     another tab is active — see `settingsHidden`. -->
 			<Dialog.Content
 				data-testid="table-settings-dialog"
-				class="flex max-w-none flex-col overflow-hidden sm:max-w-none"
-				style="width:{dlgW}px;height:{dlgH}px"
+				class="top-0 left-0 flex max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden transition-none sm:max-w-none"
+				style="left:{dlg.x}px;top:{dlg.y}px;width:{dlg.w}px;height:{dlg.h}px;{settingsHidden
+					? 'display:none;'
+					: ''}"
 				showCloseButton={false}
-				onEscapeKeydown={(e) => {
-					// Gate Escape rather than letting the primitive close: a stray
-					// Escape would otherwise bin a fully composed script column silently.
-					if (hasSuspendedTableEdits(tabId)) {
-						e.preventDefault();
-						confirmDiscardOpen = true;
-					}
-				}}
-				onInteractOutside={(e) => {
-					if (hasSuspendedTableEdits(tabId)) {
-						e.preventDefault();
-						confirmDiscardOpen = true;
-					}
+				showOverlay={false}
+				trapFocus={false}
+				preventScroll={false}
+				interactOutsideBehavior="ignore"
+				escapeKeydownBehavior="ignore"
+				onkeydown={(e) => {
+					// Only an Escape that bubbled up from INSIDE the panel, and one no
+					// child already consumed (a code editor, a picker popover). Gated
+					// like every other discard path: a stray Escape must not bin a
+					// fully composed script column silently.
+					if (e.key !== 'Escape' || e.defaultPrevented) return;
+					e.preventDefault();
+					requestClose();
 				}}
 			>
-				<Dialog.Title class="font-display text-lg font-light tracking-wide">
-					{settingsFocus === null ? 'Table settings' : 'Column settings'}
-				</Dialog.Title>
+				<!-- The title bar is the drag grip. `role="presentation"`: the
+				     drag is pointer-only sugar (the panel is fully usable where it
+				     opens), so it is not exposed as a control. -->
+				<div
+					role="presentation"
+					data-testid="settings-drag-handle"
+					class="-mx-6 -mt-6 cursor-move touch-none select-none px-6 pt-6 pb-1"
+					onpointerdown={dlgGestureStart}
+					onpointermove={onDlgDragMove}
+					onpointerup={dlgGestureEnd}
+					onpointercancel={dlgGestureEnd}
+				>
+					<Dialog.Title class="font-display text-lg font-light tracking-wide">
+						{settingsFocus === null ? 'Table settings' : 'Column settings'}
+					</Dialog.Title>
+				</div>
 				<!-- One body, no tab strip: the JSON export options moved out to the
 				     export dialog, where they sit beside the inclusion/order settings
 				     they share a file with. -->
@@ -806,10 +879,10 @@
 					tabindex="-1"
 					data-testid="settings-resize-handle"
 					class="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize touch-none select-none"
-					onpointerdown={onDlgResizeStart}
+					onpointerdown={dlgGestureStart}
 					onpointermove={onDlgResizeMove}
-					onpointerup={onDlgResizeEnd}
-					onpointercancel={onDlgResizeEnd}
+					onpointerup={dlgGestureEnd}
+					onpointercancel={dlgGestureEnd}
 				></div>
 				<!-- Our own X: the primitive's built-in one is a `Dialog.Close`,
 				     whose click cannot be preventDefault-ed, so it could not be

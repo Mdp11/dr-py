@@ -57,6 +57,10 @@ const h = vi.hoisted(() => ({
 	/** Mirrors `hasSuspendedTableEdits`: did the definition change since the
 	 * settings dialog opened? Drives the discard-confirmation gate. */
 	dirtySinceOpen: false,
+	/** Mirrors `getActiveTab`: the settings panel hides while its tab is not
+	 * the one on screen (it is portaled to `<body>`, so it would otherwise
+	 * float over whatever tab the user switched to). */
+	activeTab: 'tbl:draft:1' as string | null,
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -84,6 +88,7 @@ vi.mock('$lib/state', () => ({
 	getDynamicTabs: () => [
 		{ id: 'tbl:draft:1', kind: 'table' as const, artifactId: 'a1', title: 'My Table' }
 	],
+	getActiveTab: () => h.activeTab,
 	openExportArtifacts: vi.fn(),
 	getTableDraft: () => h.draft,
 	getTableLockHolder: () => h.lockHolder,
@@ -169,7 +174,23 @@ afterEach(() => {
 	h.revertSuspendedTableEdits.mockClear();
 	h.resumeTableEvaluation.mockClear();
 	h.dirtySinceOpen = false;
+	h.activeTab = 'tbl:draft:1';
+	localStorage.clear();
 });
+
+/** The settings panel's content node (bits-ui portals it to `<body>`). */
+function settingsDialog(): HTMLElement | null {
+	return document.querySelector('[data-testid="table-settings-dialog"]');
+}
+
+/** A real Escape keypress reaches the panel by bubbling from the focused
+ * control INSIDE it; dispatching on the content node is that path minus the
+ * focus. `cancelable: true` mirrors a native keypress. */
+function pressEscapeInside(): void {
+	settingsDialog()!.dispatchEvent(
+		new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+	);
+}
 
 describe('TableView settings popup', () => {
 	it('shows a Settings button and does not mount the column manager inline', () => {
@@ -256,16 +277,225 @@ describe('TableView settings popup', () => {
 		}
 	});
 
-	it('closing via Escape behaves like Cancel', async () => {
+	it('closing via Escape inside the panel behaves like Cancel', async () => {
 		const c = render('tbl:draft:1');
 		try {
 			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
 			flushSync();
-			await waitFor(() => !!document.querySelector('[data-testid="table-settings-dialog"]'));
-			document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			await waitFor(() => !!settingsDialog());
+			pressEscapeInside();
 			flushSync();
-			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			await waitFor(() => !settingsDialog());
 			expect(h.revertSuspendedTableEdits).toHaveBeenCalledWith('tbl:draft:1');
+			expect(h.resumeTableEvaluation).toHaveBeenCalledTimes(1);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// The panel is non-modal: focus is free to be in the sidebar search or
+	// the inspector, and an Escape typed THERE (to clear a search, dismiss a
+	// picker) must not close a settings panel the user is still composing in.
+	// bits-ui's own escape layer listens on `document`, so this is exactly the
+	// event it would otherwise act on.
+	it('Escape outside the panel leaves it open', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!settingsDialog());
+			document.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+			);
+			flushSync();
+			await new Promise((r) => setTimeout(r, 30));
+			flushSync();
+			expect(settingsDialog()).not.toBeNull();
+			expect(document.querySelector('[data-testid="confirm-dialog"]')).toBeNull();
+			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+			expect(h.resumeTableEvaluation).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// The settings dialog is a NON-MODAL floating panel: the sidebar (tree,
+// search, view) and the inspector stay usable while a column is being
+// composed, so the user can look up the model the column is about. What
+// stays locked is the panel's OWN tab — its toolbar and grid — because
+// evaluation is suspended while the panel is open and a grid that will not
+// fill its chunks would only mislead.
+describe('TableView settings floating panel', () => {
+	async function openSettings(): Promise<void> {
+		(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+		flushSync();
+		await waitFor(() => !!settingsDialog());
+	}
+
+	it('renders no overlay behind the panel', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('makes its own tab body inert while open, and releases it on close', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			const body = document.querySelector('[data-testid="table-tab-body"]') as HTMLElement;
+			expect(body).not.toBeNull();
+			expect(body.hasAttribute('inert')).toBe(false);
+			await openSettings();
+			expect(body.hasAttribute('inert')).toBe(true);
+			(document.querySelector('[data-testid="settings-cancel"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !settingsDialog());
+			expect(body.hasAttribute('inert')).toBe(false);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// A click outside is now just a click on the sidebar/inspector — it must
+	// neither close the panel nor raise the discard confirmation, dirty or not.
+	// (bits-ui's dismissable layer registers its `document` listeners on a
+	// real 1ms timer after the layer enables, so give that a tick first.)
+	it('a click outside the panel neither closes it nor gates, even when dirty', async () => {
+		h.dirtySinceOpen = true;
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			await new Promise((r) => setTimeout(r, 20));
+			document.body.dispatchEvent(
+				new PointerEvent('pointerdown', {
+					bubbles: true,
+					cancelable: true,
+					pointerId: 1,
+					clientX: 9999,
+					clientY: 9999
+				})
+			);
+			flushSync();
+			await new Promise((r) => setTimeout(r, 30));
+			flushSync();
+			expect(settingsDialog()).not.toBeNull();
+			expect(document.querySelector('[data-testid="confirm-dialog"]')).toBeNull();
+			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+			expect(h.resumeTableEvaluation).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('hides (without closing) while its tab is not the active one', async () => {
+		h.activeTab = 'tbl:other';
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			expect(settingsDialog()!.style.display).toBe('none');
+			// Still open: nothing was reverted or resumed.
+			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+			expect(h.resumeTableEvaluation).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('is visible while its tab is the active one', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			expect(settingsDialog()!.style.display).not.toBe('none');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	function drag(handle: HTMLElement, from: [number, number], to: [number, number]): void {
+		handle.setPointerCapture = () => {};
+		handle.dispatchEvent(
+			new PointerEvent('pointerdown', {
+				bubbles: true,
+				pointerId: 1,
+				button: 0,
+				clientX: from[0],
+				clientY: from[1]
+			})
+		);
+		handle.dispatchEvent(
+			new PointerEvent('pointermove', {
+				bubbles: true,
+				pointerId: 1,
+				clientX: to[0],
+				clientY: to[1]
+			})
+		);
+		flushSync();
+		handle.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+		flushSync();
+	}
+
+	it('opens where it was last left', async () => {
+		localStorage.setItem('ui.table.settingsRect', JSON.stringify({ x: 40, y: 60, w: 700, h: 500 }));
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			const s = settingsDialog()!.style;
+			expect([s.left, s.top, s.width, s.height]).toEqual(['40px', '60px', '700px', '500px']);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('drags by its title bar and remembers the new position', async () => {
+		localStorage.setItem('ui.table.settingsRect', JSON.stringify({ x: 40, y: 60, w: 700, h: 500 }));
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			const handle = document.querySelector('[data-testid="settings-drag-handle"]') as HTMLElement;
+			expect(handle).not.toBeNull();
+			drag(handle, [100, 100], [130, 115]);
+			const s = settingsDialog()!.style;
+			expect([s.left, s.top, s.width, s.height]).toEqual(['70px', '75px', '700px', '500px']);
+			expect(JSON.parse(localStorage.getItem('ui.table.settingsRect')!)).toEqual({
+				x: 70,
+				y: 75,
+				w: 700,
+				h: 500
+			});
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// The shared dialog wrapper's `duration-200` sets `transition-duration`
+	// with no `transition-property`, whose CSS initial value is `all` — so
+	// without this every left/top/width/height write during a drag or resize
+	// is tweened over 200ms and the panel trails the pointer. happy-dom
+	// computes no styles, so the class is the only thing to pin.
+	it('opts out of CSS transitions so a drag tracks the pointer', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			expect(settingsDialog()!.classList.contains('transition-none')).toBe(true);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('cannot be dragged off screen', async () => {
+		localStorage.setItem('ui.table.settingsRect', JSON.stringify({ x: 40, y: 60, w: 700, h: 500 }));
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			const handle = document.querySelector('[data-testid="settings-drag-handle"]') as HTMLElement;
+			drag(handle, [100, 100], [-500, -500]);
+			const s = settingsDialog()!.style;
+			expect([s.left, s.top]).toEqual(['0px', '0px']);
 		} finally {
 			unmount(c);
 		}
@@ -357,18 +587,7 @@ describe('TableView settings discard confirmation', () => {
 		const c = render('tbl:draft:1');
 		try {
 			await openSettings();
-			// `cancelable: true` matters here (unlike the ungated Escape test
-			// above): bits-ui's escape-layer clones the native event via
-			// `new KeyboardEvent(e.type, e)` before handing it to Content's
-			// `onEscapeKeydown`, inheriting `cancelable` from the original — a
-			// non-cancelable event makes our `preventDefault()` a silent no-op, so
-			// bits-ui's own close would fire right alongside the confirmation,
-			// same as it would for a keypress-derived event that had been
-			// (incorrectly) built non-cancelable. A real Escape keypress is always
-			// cancelable, so this matches production.
-			document.dispatchEvent(
-				new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
-			);
+			pressEscapeInside();
 			flushSync();
 			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog"]'));
 			expect(document.querySelector('[data-testid="table-settings-dialog"]')).not.toBeNull();
@@ -432,60 +651,6 @@ describe('TableView settings discard confirmation', () => {
 			flushSync();
 			await waitFor(() => !document.querySelector('[data-testid="confirm-dialog"]'));
 			// The settings dialog is still here, and nothing was discarded.
-			expect(document.querySelector('[data-testid="table-settings-dialog"]')).not.toBeNull();
-			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
-			expect(h.resumeTableEvaluation).not.toHaveBeenCalled();
-		} finally {
-			unmount(c);
-		}
-	});
-
-	// A dirty overlay click must be gated exactly like Escape/Cancel/the X —
-	// `onInteractOutside` on `Dialog.Content` preventDefault's it and opens the
-	// confirmation instead of letting bits-ui close the settings dialog
-	// straight through. Deleting that handler would leave the rest of this
-	// suite green, since every other test closes via an explicit button or a
-	// keyboard Escape.
-	//
-	// bits-ui's dismissable-layer drives `onInteractOutside` off a capture +
-	// bubble `pointerdown` PAIR on `document` (see
-	// node_modules/bits-ui/dist/bits/utilities/dismissible-layer/
-	// use-dismissable-layer.svelte.js), not a `click` — dispatching one
-	// `pointerdown` that bubbles through `document` fires both listeners in
-	// one go, exactly like a real click's mousedown does. The event must also
-	// pass `isClickTrulyOutside` (a `getBoundingClientRect` comparison
-	// against the dialog content node): happy-dom's `getBoundingClientRect`
-	// unconditionally returns a zero rect (`new DOMRect()` — see
-	// node_modules/happy-dom/lib/nodes/element/Element.js), so any nonzero
-	// `clientX`/`clientY` reads as "outside" regardless of the coordinates'
-	// real relationship to the dialog; that's what `9999` buys here.
-	it('a dirty overlay click is gated too, and does not close the settings dialog', async () => {
-		h.dirtySinceOpen = true;
-		const c = render('tbl:draft:1');
-		try {
-			await openSettings();
-			const overlay = document.querySelector('[data-slot="dialog-overlay"]') as HTMLElement;
-			expect(overlay).not.toBeNull();
-			// bits-ui's dismissable-layer registers its document-level listeners
-			// on a real (non-Svelte-scheduled) 1ms `setTimeout` after the layer
-			// becomes enabled (`afterSleep(1, ...)` in
-			// use-dismissable-layer.svelte.js) — unlike the escape-layer, which
-			// attaches synchronously. `openSettings()`'s `waitFor` can return as
-			// soon as the dialog testid appears, without ever yielding a real
-			// timer tick, so the dismissable layer may not be registered yet;
-			// give that 1ms timer room to fire before dispatching.
-			await new Promise((r) => setTimeout(r, 20));
-			overlay.dispatchEvent(
-				new PointerEvent('pointerdown', {
-					bubbles: true,
-					cancelable: true,
-					pointerId: 1,
-					clientX: 9999,
-					clientY: 9999
-				})
-			);
-			flushSync();
-			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog"]'));
 			expect(document.querySelector('[data-testid="table-settings-dialog"]')).not.toBeNull();
 			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
 			expect(h.resumeTableEvaluation).not.toHaveBeenCalled();
@@ -989,9 +1154,8 @@ describe('TableView settings dialog sizing', () => {
 	// Opening the dialog unfocused mounts RowSourceEditor -> ScopeEditor for
 	// real (see seedTwoColumnPage above), which needs `types`/`criteria`
 	// present on a scope row source.
-	// dlgW/dlgH are seeded from window.innerWidth/innerHeight when TableView is
-	// created, so the viewport must be sized before mount, not before the
-	// click that opens the dialog.
+	// The panel's rect is resolved on every open against the live viewport, so
+	// the viewport is sized before the click that opens it.
 	function renderWithSettingsOpen(tabId: string): ReturnType<typeof render> {
 		window.innerWidth = 1920;
 		window.innerHeight = 1080;
@@ -1008,10 +1172,9 @@ describe('TableView settings dialog sizing', () => {
 		return c;
 	}
 
-	// Use a roomy viewport so the max-width/max-height caps (98%/95% of the
-	// viewport) don't clip the deltas this suite asserts on — the happy-dom
-	// default (1024x768) leaves too little headroom above the capped initial
-	// size (min(1280, 92vw) x 85vh).
+	// Use a roomy viewport so the viewport-size cap doesn't clip the deltas
+	// this suite asserts on — the happy-dom default (1024x768) leaves too
+	// little headroom above the initial size.
 	const origInnerWidth = window.innerWidth;
 	const origInnerHeight = window.innerHeight;
 
@@ -1043,7 +1206,10 @@ describe('TableView settings dialog sizing', () => {
 		}
 	});
 
-	it('dragging the resize handle grows width/height by 2x the pointer delta', () => {
+	// 1:1 — the panel is anchored by its top-left corner (an explicit left/
+	// top, not the primitive's centering transform), so the grip stays under
+	// the cursor without doubling the delta.
+	it('dragging the resize handle grows width/height by the pointer delta', () => {
 		const c = renderWithSettingsOpen('tbl:draft:1');
 		try {
 			const dialog = document.querySelector('[data-testid="table-settings-dialog"]') as HTMLElement;
@@ -1071,8 +1237,8 @@ describe('TableView settings dialog sizing', () => {
 				})
 			);
 			flushSync();
-			expect(parseFloat(dialog.style.width)).toBeCloseTo(startW + 100);
-			expect(parseFloat(dialog.style.height)).toBeCloseTo(startH + 80);
+			expect(parseFloat(dialog.style.width)).toBeCloseTo(startW + 50);
+			expect(parseFloat(dialog.style.height)).toBeCloseTo(startH + 40);
 			handle.dispatchEvent(
 				new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 50, clientY: 40 })
 			);
