@@ -70,7 +70,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
+from data_rover.core.model.relationship import Relationship
 from data_rover.core.validation.dirty import DirtyCollector, containment_closure
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
@@ -173,6 +175,14 @@ class _BatchResult:
     changed_relationship_ids: dict[str, None] = field(default_factory=dict)
     deleted_element_ids: dict[str, None] = field(default_factory=dict)
     deleted_relationship_ids: dict[str, None] = field(default_factory=dict)
+    #: pre-batch state per touched id, captured on FIRST touch (None = did
+    #: not exist). Later touches in the same batch never overwrite, so an
+    #: entity created-then-updated stays None and one deleted-then-restored
+    #: keeps its original state. Every id in changed_*/deleted_* has an entry.
+    before_elements: dict[str, ElementOut | None] = field(default_factory=dict)
+    before_relationships: dict[str, RelationshipOut | None] = field(
+        default_factory=dict
+    )
 
     def mark_element_changed(self, element_id: str) -> None:
         self.changed_element_ids[element_id] = None
@@ -189,6 +199,20 @@ class _BatchResult:
     def mark_relationship_deleted(self, rel_id: str) -> None:
         self.deleted_relationship_ids[rel_id] = None
         self.changed_relationship_ids.pop(rel_id, None)
+
+    def note_element_before(self, element_id: str, element: Element | None) -> None:
+        """Record ``element``'s current state as its pre-batch state unless an
+        earlier op in this batch already did. Call BEFORE mutating it."""
+        if element_id not in self.before_elements:
+            self.before_elements[element_id] = (
+                ElementOut.from_core(element) if element is not None else None
+            )
+
+    def note_relationship_before(self, rel_id: str, rel: Relationship | None) -> None:
+        if rel_id not in self.before_relationships:
+            self.before_relationships[rel_id] = (
+                RelationshipOut.from_core(rel) if rel is not None else None
+            )
 
     def inverse_ops(self) -> list[ModelOpIn]:
         """Flat inverse batch: applying it front-to-back undoes this batch."""
@@ -253,6 +277,7 @@ def _apply_one(
                 f"create_element temp_id {op.temp_id!r} must start with "
                 f"{TEMP_ID_PREFIX!r}"
             )
+        res.note_element_before(element.id, None)
         # inverse recorded BEFORE the property sets: if one of them fails,
         # rollback must delete the half-initialized element
         res.inverse_units.append(
@@ -271,6 +296,7 @@ def _apply_one(
     if isinstance(op, UpdateElementOp):
         eid = res.id_map.get(op.id, op.id)
         element = model.get_element(eid)
+        res.note_element_before(eid, element)
         patch = _resolve_props(op.properties_patch, res.id_map)
         _check_patch_keys(model, element.type_name, element=True, patch=patch)
         # mergePatch semantics (frontend apply.ts): None deletes the key,
@@ -318,6 +344,7 @@ def _apply_one(
         unit: list[ModelOpIn] = []
         for ce in closure:
             e = model.elements[ce]
+            res.note_element_before(ce, e)
             unit.append(
                 CreateElementOp(
                     kind="create_element",
@@ -328,6 +355,7 @@ def _apply_one(
             )
         for rid in removed_rel_ids:
             r = model.relationships[rid]
+            res.note_relationship_before(rid, r)
             unit.append(
                 CreateRelationshipOp(
                     kind="create_relationship",
@@ -373,6 +401,7 @@ def _apply_one(
                 f"create_relationship temp_id {op.temp_id!r} must start with "
                 f"{TEMP_ID_PREFIX!r}"
             )
+        res.note_relationship_before(rel.id, None)
         res.inverse_units.append(
             [DeleteRelationshipOp(kind="delete_relationship", id=rel.id)]
         )
@@ -395,6 +424,7 @@ def _apply_one(
     if isinstance(op, UpdateRelationshipOp):
         rid = res.id_map.get(op.id, op.id)
         rel = model.get_relationship(rid)
+        res.note_relationship_before(rid, rel)
         patch = _resolve_props(op.properties_patch, res.id_map)
         _check_patch_keys(model, rel.type_name, element=False, patch=patch)
         inverse_patch = {
@@ -421,6 +451,7 @@ def _apply_one(
     if isinstance(op, DeleteRelationshipOp):
         rid = res.id_map.get(op.id, op.id)
         rel = model.get_relationship(rid)
+        res.note_relationship_before(rid, rel)
         unit = [
             CreateRelationshipOp(
                 kind="create_relationship",
