@@ -132,6 +132,11 @@ class IndexSet:
         #: maintain postings regardless of this flag — that is what lets a
         #: chunked background build interleave with live edits.
         self.search_ready: bool = True
+        #: bumped every time ``rebuild()`` resets the search index (i.e. every
+        #: ``not keep_search`` call). Lets a chunked background build in flight
+        #: detect that the postings it is filling were thrown away underneath
+        #: it, even though ``session.model`` and this ``IndexSet`` are unchanged.
+        self._rebuild_gen: int = 0
         # element id -> its current merged trigram set (reverse map; needed
         # to diff on property change and to drop postings on delete — by hook
         # time the old text is gone — mirroring _refs_of). No entry when the
@@ -378,6 +383,7 @@ class IndexSet:
             self._trigrams_of.clear()
             self._canon_trigrams.clear()
             self.search_ready = False
+            self._rebuild_gen += 1
 
         # relationships first so containment parents are known before grouping
         for rel in self._model.relationships.values():

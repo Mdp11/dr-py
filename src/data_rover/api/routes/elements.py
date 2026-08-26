@@ -10,6 +10,10 @@ router = APIRouter()
 
 # NOTE: GET /model/elements (paged listing + search) lives in routes/read.py;
 # this module keeps the legacy mutation endpoints and the single-element GET.
+# These mutate the model WITHOUT session.write_mutex, and so already race
+# each other (pre-existing; the frontend never calls them) and now also race
+# the background search-index builder (search_index_build.py), which writes
+# search_postings under the mutex.
 
 
 @router.post("/model/elements", status_code=201)

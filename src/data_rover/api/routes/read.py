@@ -206,7 +206,9 @@ def list_elements(
     ``IndexSet.search_candidates`` (byte-identical results); shorter queries
     fall back to the full scan, as does a query whose rarest trigram is
     ubiquitous (matches too large a fraction of the model for the index to
-    beat a scan).
+    beat a scan), as does any query while the background index build has not
+    finished (``search_ready`` is False — the common case right after a cold
+    open).
     """
     _, model = require_model(session)
     query = (q or "").strip().lower()
@@ -217,10 +219,10 @@ def list_elements(
         #: lowercase + substring scan per element on large models)
         type_matches: dict[str, bool] = {}
         # trigram candidate generation: a SUPERSET of the true hits, or None
-        # when the index can't answer (len(q) < 3, or q's rarest trigram is
-        # ubiquitous) and the full scan runs. The score check below stays the
-        # sole arbiter of matching and order, so results are byte-identical
-        # either way.
+        # when the index can't answer (len(q) < 3, q's rarest trigram is
+        # ubiquitous, or the background build has not finished yet) and the
+        # full scan runs. The score check below stays the sole arbiter of
+        # matching and order, so results are byte-identical either way.
         candidate_ids = model.indexes.search_candidates(query)
         elements: Iterable[Element] = (
             model.elements.values()

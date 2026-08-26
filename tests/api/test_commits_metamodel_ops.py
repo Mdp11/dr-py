@@ -441,6 +441,9 @@ def test_mid_batch_model_failure_restores_the_old_schema(client: TestClient) -> 
     # no journal row was written for the rejected batch
     hist = client.get(papi("/commits"), params={"limit": 5}).json()["commits"]
     assert all(not c["is_rebind"] for c in hist)
+    # the unwind's rebuild(keep_search=True) left search intact
+    assert session.model.indexes.search_ready is True
+    assert eid in (session.model.indexes.search_candidates(eid[:3].lower()) or set())
 
 
 def test_layout_only_commit_is_cheap_and_journalled(client: TestClient) -> None:

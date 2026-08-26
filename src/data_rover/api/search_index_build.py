@@ -15,12 +15,21 @@ hooks already indexed or the model no longer holds, so the interleaving
 converges on exactly what a synchronous full build produces. Readiness is
 declared under the mutex only after the last chunk, and only if the session
 still holds the model the build started on.
+
+Correctness against a concurrent reset: a ``rebuild()`` (default
+``keep_search=False``) on the live model clears the postings the build is
+filling and drops ``search_ready`` without changing ``session.model`` or
+``model.indexes`` identity, so the identity check alone would not notice.
+``IndexSet._rebuild_gen`` bumps on every such reset; the build snapshots it
+alongside the id list and aborts (leaving ``search_ready`` False, search on
+the scan) if it ever no longer matches.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 
 from data_rover.core.model.model import Model
@@ -74,20 +83,35 @@ def start_search_index_build(
 
 
 def _run(session: Session, model: Model, progress: SearchIndexProgress) -> None:
+    start_time = time.monotonic()
     try:
         # list(dict) is one C-level operation, atomic under the GIL
         ids = list(model.elements.keys())
+        gen = model.indexes._rebuild_gen
         progress.total = len(ids)
         for start in range(0, len(ids), CHUNK_SIZE):
             chunk = ids[start : start + CHUNK_SIZE]
             with session.write_mutex:
-                if session.model is not model or progress.cancel.is_set():
+                if (
+                    session.model is not model
+                    or model.indexes._rebuild_gen != gen
+                    or progress.cancel.is_set()
+                ):
                     return
                 model.indexes.index_search_chunk(chunk)
             progress.done = min(start + CHUNK_SIZE, len(ids))
         with session.write_mutex:
-            if session.model is model and not progress.cancel.is_set():
+            if (
+                session.model is model
+                and model.indexes._rebuild_gen == gen
+                and not progress.cancel.is_set()
+            ):
                 model.indexes.mark_search_ready()
+                logger.info(
+                    "search index build complete: %d elements in %.1fs",
+                    len(ids),
+                    time.monotonic() - start_time,
+                )
     except Exception:
         logger.exception("search index build failed; search stays on the scan path")
         progress.error = True

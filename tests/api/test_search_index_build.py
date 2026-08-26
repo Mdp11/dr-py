@@ -114,6 +114,35 @@ def test_build_aborts_when_model_is_replaced(monkeypatch: pytest.MonkeyPatch) ->
     assert progress.done < progress.total
 
 
+def test_build_aborts_when_index_is_reset_mid_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``rebuild()`` on the live model between chunks clears the postings
+    the build is filling and drops ``search_ready`` without changing
+    ``session.model``/``model.indexes`` identity; the generation counter
+    must catch it where the identity check alone would not."""
+    monkeypatch.setattr(search_index_build, "CHUNK_SIZE", 2)
+    session = _bulk_session(6)
+    model = session.model
+    assert model is not None
+    calls = 0
+    orig = model.indexes.index_search_chunk
+
+    def spy(ids):
+        nonlocal calls
+        calls += 1
+        orig(ids)
+        if calls == 1:
+            model.indexes.rebuild()
+
+    monkeypatch.setattr(model.indexes, "index_search_chunk", spy)
+    progress = start_search_index_build(session, sync=True)
+    assert progress.running is False
+    assert calls == 1  # aborted at the next chunk's generation check
+    assert model.indexes.search_ready is False  # never marked ready
+    assert progress.done < progress.total
+
+
 def test_already_ready_index_is_a_noop() -> None:
     metamodel = load_metamodel_str(MM)
     session = Session(metamodel=metamodel, model=Model(metamodel))
@@ -122,9 +151,35 @@ def test_already_ready_index_is_a_noop() -> None:
     assert session.model is not None and session.model.indexes.search_ready is True
 
 
-def test_session_field_and_cancel() -> None:
+def test_session_field_holds_the_build_progress() -> None:
     session = _bulk_session(3)
     progress = start_search_index_build(session, sync=True)
     assert session.search_index_build is progress
-    progress.cancel.set()  # cancel is a plain Event the evict path sets
-    assert progress.cancel.is_set()
+
+
+def test_build_stops_early_when_cancelled_mid_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(search_index_build, "CHUNK_SIZE", 2)
+    session = _bulk_session(6)
+    model = session.model
+    assert model is not None
+    calls = 0
+    orig = model.indexes.index_search_chunk
+
+    def spy(ids):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            # the evict path sets .cancel on session.search_index_build
+            in_flight = session.search_index_build
+            assert in_flight is not None
+            in_flight.cancel.set()
+        orig(ids)
+
+    monkeypatch.setattr(model.indexes, "index_search_chunk", spy)
+    progress = start_search_index_build(session, sync=True)
+    assert progress.running is False
+    assert calls == 1  # stopped at the next chunk's cancel check
+    assert model.indexes.search_ready is False  # never marked ready
+    assert progress.done < progress.total
