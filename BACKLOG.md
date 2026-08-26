@@ -1167,7 +1167,8 @@ can't be reversed by an implementer acting alone.
   dialogs was chosen.
 
 **Process / infra**
-- **Pushing to `origin`** — never asked for. `main` is 67+ commits ahead deliberately.
+- ~~**Pushing to `origin`** — never asked for.~~ **Superseded 2026-08-26**: the owner asked
+  for merge-and-push of `fix/ux-minor-batch`; `main` is pushed from here on.
 - **Committing anything under `docs/superpowers/` or `.superpowers/`** — gitignored by
   convention.
 - **AbortSignal plumbing for wizard uploads** — a cancelled submit still uploads the full
