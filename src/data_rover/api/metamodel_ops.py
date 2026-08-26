@@ -183,7 +183,9 @@ def apply_metamodel_ops(
             on_swap(session.metamodel)
         session.metamodel = candidate
         model.metamodel = candidate
-        model.indexes.rebuild()  # containment flags + key groups are mm-derived
+        model.indexes.rebuild(
+            keep_search=True
+        )  # mm-derived only; the search text is not
         # Persist unconditionally, even when the project has no ModelRow yet:
         # upsert_model_row self-creates one (content.py), so gating this on
         # model_row's presence bought nothing but a rebind with NULL

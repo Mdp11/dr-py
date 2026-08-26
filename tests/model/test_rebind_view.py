@@ -52,3 +52,17 @@ def test_view_does_not_mutate_live_index() -> None:
     m, a_id, b_id = _model_with_contains()
     build_rebind_view(m, load_metamodel_str(_MM_B))
     assert list(m.indexes.parents_of(b_id)) == [a_id]
+
+
+def test_rebuild_after_metamodel_swap_rederives_containment() -> None:
+    """A rebind swaps ``model.metamodel`` and rebuilds the SAME IndexSet: the
+    per-type caches (containment flags, key specs, reference props) must be
+    re-derived, or the containment tree, roots order and uniqueness groups
+    keep reflecting the outgoing schema."""
+    m, a, b = _model_with_contains()
+    assert m.indexes.parents_of(b) == [a]
+    m.metamodel = load_metamodel_str(_MM_B)
+    m.indexes.rebuild(keep_search=True)
+    assert m.indexes.parents_of(b) == ()
+    assert set(m.indexes.iter_roots()) == {a, b}
+    m.indexes.verify_consistent()
