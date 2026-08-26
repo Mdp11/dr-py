@@ -9,7 +9,7 @@ page. See core/table/schema.py for the binding model.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -22,12 +22,14 @@ from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.model.naming import display_name
 from data_rover.core.navigation.evaluate import (
+    ChainNode,
     EvalLimits,
     PropertyValue,
     evaluate,
 )
 from data_rover.core.script.warnings import ScriptWarningCode
 
+from .nav_memo import MemoEntry, NavMemo
 from .schema import (
     ChainRows,
     Column,
@@ -169,6 +171,7 @@ def resolve_source_elements(
     base_slots: int,
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> list[str]:
     """Ordered element ids a column source resolves to for ONE row.
 
@@ -198,6 +201,10 @@ def resolve_source_elements(
     resolve to nothing (same as an unconfigured snippet) and makes any
     `ScriptStep` inside a reached navigation prune silently (same as an
     unconfigured navigation source).
+
+    `memo` is the current pass's `NavMemo` (see `nav_memo.py`) — `None` for
+    callers outside a pass; threaded, like `script`, into every navigation
+    evaluation this function reaches.
     """
     if isinstance(source, RowSlot):
         # Static validation only pins chain_index for NON-chains row sources;
@@ -216,7 +223,8 @@ def resolve_source_elements(
         # requested chain step. Off an EXPAND column the row is pinned to one
         # projected element, so only chains projecting to it count.
         roots = resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits, script=script
+            mm, model, defn, key, ref_col.source, base_slots, limits,
+            script=script, memo=memo,
         )
         match: str | PropertyValue | None = None
         if ref_col.mode == "expand":
@@ -233,19 +241,24 @@ def resolve_source_elements(
             step=source.step_index,
             match_projected=match,
             script=script,
+            memo=memo,
         )
     if getattr(ref_col, "mode", "collapse") == "expand":
         b = key[_expand_slot_of(defn, base_slots, source.index)]
         return [b] if isinstance(b, str) else []
     if ref_col.kind == "element":
         return resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits, script=script
+            mm, model, defn, key, ref_col.source, base_slots, limits,
+            script=script, memo=memo,
         )
     if ref_col.kind == "navigation":
         roots = resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits, script=script
+            mm, model, defn, key, ref_col.source, base_slots, limits,
+            script=script, memo=memo,
         )
-        reached = _navigation_reached(mm, model, ref_col, roots, limits, script=script)
+        reached = _navigation_reached(
+            mm, model, ref_col, roots, limits, script=script, memo=memo
+        )
         # element-producing by contract: PropertyValue terminals contribute none
         return [n for n in reached if isinstance(n, str)]
     if ref_col.kind == "script":
@@ -256,7 +269,8 @@ def resolve_source_elements(
         if ref_col.snippet.definition is None or script is None:
             return []
         roots = resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits, script=script
+            mm, model, defn, key, ref_col.source, base_slots, limits,
+            script=script, memo=memo,
         )
         if not roots:
             return []
@@ -272,6 +286,40 @@ def resolve_source_elements(
     return []  # property columns are not element-producing (schema rejects this)
 
 
+def _evaluate_navigation(
+    mm: Metamodel,
+    model: Model,
+    col: NavigationColumn,
+    roots: list[str],
+    limits: TableLimits,
+    script: ScriptEvalContext | None,
+    memo: NavMemo | None,
+) -> tuple[Sequence[tuple[ChainNode, ...]], bool]:
+    """`(chains, truncated)` of `col`'s navigation from `roots` — the ONE
+    place this module calls `evaluate()` for a navigation column. With a
+    `memo` in play (and only for a navigation with no `ScriptStep`, whose
+    `evaluate()` carries per-call side effects a cache would skip) the
+    result is served from the memo for a repeated `(col, roots)`; the memo
+    holds an immutable tuple copy, so callers must only iterate."""
+    defn = col.navigation.definition
+    assert defn is not None  # callers gate on the unconfigured case
+    if memo is None or memo.scripted(col):
+        result = evaluate(
+            mm, model, defn, limits.nav_limits, row_elements=roots, script=script
+        )
+        return result.chains, result.truncated
+    key = (id(col), tuple(roots))
+    hit = memo.get(key)
+    if hit is not None:
+        return hit.chains, hit.truncated
+    result = evaluate(
+        mm, model, defn, limits.nav_limits, row_elements=roots, script=script
+    )
+    entry = MemoEntry(chains=tuple(result.chains), truncated=result.truncated)
+    memo.put(key, entry)
+    return entry.chains, entry.truncated
+
+
 def _navigation_reached_ex(
     mm: Metamodel,
     model: Model,
@@ -279,6 +327,7 @@ def _navigation_reached_ex(
     roots: list[str],
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> tuple[list[str | PropertyValue], bool]:
     """(reached nodes, navigation-truncated) — the flag is consumed by
     `build_rows`' expand loop; display-only callers use `_navigation_reached`.
@@ -294,9 +343,7 @@ def _navigation_reached_ex(
         return [], False
     if not roots:
         return [], False
-    result = evaluate(
-        mm, model, defn, limits.nav_limits, row_elements=roots, script=script
-    )
+    chains, truncated = _evaluate_navigation(mm, model, col, roots, limits, script, memo)
     idx = col.step_index if col.step_index is not None else -1
     # Dedup key: an element reached over two paths is ONE reached element, but
     # a value terminal is a property OF the element the chain stepped from, so
@@ -304,14 +351,14 @@ def _navigation_reached_ex(
     # values are two reached values, never one. A PropertyValue is never at
     # index 0 (chains start at an element), so `chain[idx - 1]` always exists.
     seen: dict[str | tuple[str | PropertyValue, PropertyValue], None] = {}
-    for chain in result.chains:
+    for chain in chains:
         _check_step_index(idx, len(chain))
         node = chain[idx]
         seen[(chain[idx - 1], node) if isinstance(node, PropertyValue) else node] = None
     reached: list[str | PropertyValue] = [
         k[1] if isinstance(k, tuple) else k for k in seen
     ]
-    return reached, result.truncated
+    return reached, truncated
 
 
 def _navigation_reached(
@@ -321,8 +368,11 @@ def _navigation_reached(
     roots: list[str],
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> list[str | PropertyValue]:
-    return _navigation_reached_ex(mm, model, col, roots, limits, script=script)[0]
+    return _navigation_reached_ex(
+        mm, model, col, roots, limits, script=script, memo=memo
+    )[0]
 
 
 def _navigation_step_elements(
@@ -335,6 +385,7 @@ def _navigation_step_elements(
     step: int,
     match_projected: str | PropertyValue | None,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> list[str]:
     """Elements at chain step `step` of `col`'s navigation, evaluated from
     `roots`. With `match_projected` set (the expand-column case) only chains
@@ -348,12 +399,10 @@ def _navigation_step_elements(
     defn = col.navigation.definition
     if defn is None or not roots:
         return []
-    result = evaluate(
-        mm, model, defn, limits.nav_limits, row_elements=roots, script=script
-    )
+    chains, _ = _evaluate_navigation(mm, model, col, roots, limits, script, memo)
     proj = col.step_index if col.step_index is not None else -1
     seen: dict[str, None] = {}
-    for chain in result.chains:
+    for chain in chains:
         _check_step_index(step, len(chain))
         if match_projected is not None:
             _check_step_index(proj, len(chain))
@@ -432,10 +481,14 @@ def build_rows_ex(
     property column would re-navigate/re-read, AND so any `ScriptStep` inside
     a navigation (row source, navigation column, or a `ColumnRef`'s
     step-index re-navigation) rides the same context rather than pruning to
-    nothing."""
+    nothing.
+
+    A fresh `NavMemo` is created here and dies with the call: nothing this
+    pass evaluates under `script.cache_only` can be served to a later pass."""
     keys, truncated = _base_row_keys(mm, model, defn, limits, script=script)
     base_total = len(keys)
     base_slots = _row_source_base_slots(defn, keys)
+    memo = NavMemo()
     for col in defn.columns:
         if isinstance(col, ElementColumn):
             continue
@@ -446,10 +499,11 @@ def build_rows_ex(
             kept: list[RowKey] = []
             for key in keys:
                 roots = resolve_source_elements(
-                    mm, model, defn, key, col.source, base_slots, limits, script=script
+                    mm, model, defn, key, col.source, base_slots, limits,
+                    script=script, memo=memo,
                 )
                 has_value, nav_truncated = _collapse_has_value(
-                    mm, model, col, roots, limits, script=script
+                    mm, model, col, roots, limits, script=script, memo=memo
                 )
                 if nav_truncated:
                     truncated = True
@@ -461,10 +515,11 @@ def build_rows_ex(
         new_keys: list[RowKey] = []
         for key in keys:
             roots = resolve_source_elements(
-                mm, model, defn, key, col.source, base_slots, limits, script=script
+                mm, model, defn, key, col.source, base_slots, limits,
+                script=script, memo=memo,
             )
             reached, nav_truncated = _expand_values(
-                mm, model, col, roots, limits, script=script
+                mm, model, col, roots, limits, script=script, memo=memo
             )
             if nav_truncated:
                 truncated = True
@@ -497,6 +552,7 @@ def _collapse_has_value(
     roots: list[str],
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> tuple[bool, bool]:
     """(cell would be non-empty, navigation-truncated) for one row of a
     COLLAPSE column — the `keep_empty=False` filter in `build_rows_ex`.
@@ -529,7 +585,7 @@ def _collapse_has_value(
         return any(i in model.elements for i in p["ids"]), False
     if isinstance(col, NavigationColumn):
         reached, truncated = _navigation_reached_ex(
-            mm, model, col, roots, limits, script=script
+            mm, model, col, roots, limits, script=script, memo=memo
         )
         return bool(reached), truncated
     for eid in roots:
@@ -551,6 +607,7 @@ def _expand_values(
     roots: list[str],
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> tuple[list[Binding], bool]:
     """(values, navigation-truncated) an expand column contributes for one row."""
     if isinstance(col, ScriptColumn):
@@ -581,7 +638,7 @@ def _expand_values(
         return [PropertyValue(v) for v in p["values"] if v is not None], False
     if isinstance(col, NavigationColumn):
         reached, truncated = _navigation_reached_ex(
-            mm, model, col, roots, limits, script=script
+            mm, model, col, roots, limits, script=script, memo=memo
         )
         # PropertyValue terminals ride into the RowKey as-is (see Binding);
         # cells.py renders them back as read-only ValueCells.
@@ -824,6 +881,7 @@ def _sort_value(
     base_slots: int,
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
+    memo: NavMemo | None = None,
 ) -> tuple[int, Any]:
     """`(is_empty, comparable)` for one row's sort column. `is_empty=1` always
     sorts last (see `order_rows`); the comparable half is only ever compared
@@ -845,7 +903,8 @@ def _sort_value(
     threads it through, and the fallback decision is not re-taken per row."""
     if isinstance(col, ElementColumn):
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits, script=script
+            mm, model, defn, key, col.source, base_slots, limits,
+            script=script, memo=memo,
         )
         if not els:
             return (1, "")
@@ -858,7 +917,8 @@ def _sort_value(
                 return (1, ())
             return (0, (float(v),)) if numeric else (0, (str(v).casefold(),))  # type: ignore[arg-type]
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits, script=script
+            mm, model, defn, key, col.source, base_slots, limits,
+            script=script, memo=memo,
         )
         vals: list[Binding] = []
         for eid in els:
@@ -882,7 +942,8 @@ def _sort_value(
         if col.snippet.definition is None or script is None:
             return (1, ())
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits, script=script
+            mm, model, defn, key, col.source, base_slots, limits,
+            script=script, memo=memo,
         )
         if not els:
             return (1, ())
@@ -922,9 +983,12 @@ def _sort_value(
             return (1, "")
         return (0, (_display_name(model, b).casefold(), b))
     roots = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits, script=script
+        mm, model, defn, key, col.source, base_slots, limits,
+        script=script, memo=memo,
     )
-    reached = _navigation_reached(mm, model, col, roots, limits, script=script)
+    reached = _navigation_reached(
+        mm, model, col, roots, limits, script=script, memo=memo
+    )
     if not reached:
         return (1, 0 if col.sort_mode == "count" else ())
     if col.sort_mode == "count":
@@ -953,7 +1017,10 @@ def order_rows(
     `base_slots` is derived from the FULL key set exactly as in
     `evaluate_cells`: `keys` here is always the complete, already-built row set
     (never a partial key mid-`build_rows`), so `len(keys[0])` minus one slot
-    per `expand` column recovers the row-source's own slot count."""
+    per `expand` column recovers the row-source's own slot count.
+
+    A fresh `NavMemo` is created here and dies with the call: nothing this
+    pass evaluates under `script.cache_only` can be served to a later pass."""
     if sort is None:
         return list(keys)
     col = defn.columns[sort.column]
@@ -963,6 +1030,7 @@ def order_rows(
     # here and the decorate loop mutates what it reads (`cache_only` is a phase
     # flag the caller flips around whole passes, never mid-pass).
     script = _sort_script(defn, col, script)
+    memo = NavMemo()
     expand_count = sum(
         1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
     )
@@ -970,7 +1038,8 @@ def order_rows(
     decorated: list[tuple[int, Any, RowKey]] = [
         (
             *_sort_value(
-                mm, model, defn, k, col, sort.column, base_slots, limits, script=script
+                mm, model, defn, k, col, sort.column, base_slots, limits,
+                script=script, memo=memo,
             ),
             k,
         )
