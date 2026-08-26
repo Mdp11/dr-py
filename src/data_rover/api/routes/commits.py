@@ -49,6 +49,7 @@ from ..artifact_ops import (
 )
 from ..authz import require_membership
 from ..commit_diff import diff_commit
+from ..commit_states import capture_entity_states
 from ..feed import commit_event, lock_event, rebind_event
 from .. import content
 from ..db import get_db
@@ -1387,6 +1388,7 @@ def create_commit(
                 # are set from the applier's captured ids, not re-derived.
                 _from_metamodel_id=mm_res.from_metamodel_id if mm_res else None,
                 _to_metamodel_id=mm_res.to_metamodel_id if mm_res else None,
+                _entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
             # undo every live half — see _CommitUnwind. By this point that is
@@ -1755,6 +1757,7 @@ def revert_commit(
                 _message=message,
                 _validation_error_count=len(conformance),
                 _issues=issues_json,
+                _entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
             unwind.unwind()  # undo every live half — see _CommitUnwind

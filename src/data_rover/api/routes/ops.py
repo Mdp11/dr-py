@@ -85,6 +85,7 @@ from ..artifact_ops import (
     broadcast_artifact_events,
     split_ops,
 )
+from ..commit_states import capture_entity_states
 from ..db import get_db
 from ..db_models import User
 from ..deps import Session, get_request_session, require_model
@@ -582,6 +583,7 @@ def _persist_commit(
     _issues: list | None = None,
     _from_metamodel_id: str | None = None,
     _to_metamodel_id: str | None = None,
+    _entity_states: dict[str, Any] | None = None,
 ) -> bool:
     """Append the accepted batch to the durable journal and advance model_rev.
 
@@ -610,6 +612,10 @@ def _persist_commit(
     ``content.first_rebind_after``, history's ``is_rebind``,
     ``commit_diff``'s metamodel arm — is what MAKES a journal row a rebind.
 
+    ``_entity_states`` is ``capture_entity_states(model, res)`` for the
+    applied batch — the diff reader's journal-only input; None (over-cap or
+    a writer that has no model batch) means the reader reconstructs.
+
     Returns True if a durable row existed and the commit was persisted,
     False when the project has no model row (in-memory-only session)."""
     if content.get_model_row(db, project_id) is None:
@@ -628,6 +634,7 @@ def _persist_commit(
         issues=_issues or [],
         from_metamodel_id=_from_metamodel_id,
         to_metamodel_id=_to_metamodel_id,
+        entity_states=_entity_states,
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
@@ -643,6 +650,7 @@ def _persist_undo_commit(
     ops: Sequence[OpIn],
     inverse_ops: Sequence[OpIn],
     id_map: dict[str, str],
+    entity_states: dict[str, Any] | None = None,
 ) -> bool:
     """Record an undo as a forward compensating commit (append-only journal).
 
@@ -667,6 +675,7 @@ def _persist_undo_commit(
         ops=serialize_ops(ops),
         inverse_ops=serialize_ops(inverse_ops),
         id_map=dict(id_map),
+        entity_states=entity_states,
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
@@ -754,6 +763,7 @@ def apply_ops(
                 ops=res.canonical_ops,
                 inverse_ops=res.inverse_ops(),
                 id_map=dict(res.id_map),
+                _entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
@@ -1056,6 +1066,7 @@ def undo(
                 ops=canonical_ops,
                 inverse_ops=inverse_ops,
                 id_map=merged_id_map,
+                entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation

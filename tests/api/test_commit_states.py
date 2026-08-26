@@ -5,13 +5,15 @@ pairs it with the post-apply state for the journal row."""
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
-from data_rover.api import commit_states
+from data_rover.api import commit_states, content, db
 from data_rover.api.commit_states import (
     EntityStates,
     capture_entity_states,
     load_entity_states,
 )
+from data_rover.api.main import create_app
 from data_rover.api.routes.ops import _apply_batch
 from data_rover.api.schemas import (
     CreateElementOp,
@@ -23,8 +25,11 @@ from data_rover.api.schemas import (
     UpdateElementOp,
     UpdateRelationshipOp,
 )
+from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
+
+from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 _MM = """
 elements:
@@ -203,3 +208,163 @@ def test_load_round_trips_capture() -> None:
     assert before.properties == {"label": "a"} and after.properties == {"label": "b"}
     assert after == ElementOut.from_core(m.elements[eid])
     assert loaded.relationships == {}
+
+
+# --- persistence through every journal writer ------------------------------
+
+
+@pytest.fixture
+def client() -> TestClient:
+    seed_default_project()
+    c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
+    r = c.post(papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"})
+    assert r.status_code == 200, r.text
+    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
+    assert r.status_code == 200, r.text
+    return c
+
+
+def _rev(c: TestClient) -> int:
+    rev: int = c.get(papi("/model/summary")).json()["model_rev"]
+    return rev
+
+
+def _lock(c: TestClient, resource_id: str, intent: str = "edit") -> str:
+    r = c.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": resource_id, "mode": "exclusive", "type": "element"}],
+            "intent": intent,
+        },
+    )
+    assert r.status_code == 200, r.text
+    token: str = r.json()["token"]
+    return token
+
+
+def _states_at(rev: int) -> dict | None:
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        row = content.get_commit(s, DEFAULT_PROJECT_ID, rev)
+        assert row is not None
+        return row.entity_states
+    finally:
+        gen.close()
+
+
+def _commit(c: TestClient, ops: list[dict], tokens: list[str] | None = None) -> dict:
+    """POST /commits; returns the response body (``model_rev``, ``id_map``, ...)."""
+    r = c.post(
+        papi("/commits"),
+        json={"base_rev": _rev(c), "ops": ops, "lock_tokens": tokens or []},
+    )
+    assert r.status_code == 200, r.text
+    body: dict = r.json()
+    return body
+
+
+def test_post_commits_persists_states(client: TestClient) -> None:
+    body = _commit(
+        client,
+        [{"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
+          "properties": {"label": "before"}}],
+    )
+    eid = body["id_map"]["tmp_e"]
+    states = _states_at(body["model_rev"])
+    assert states is not None
+    assert states["elements"][eid]["before"] is None
+    assert states["elements"][eid]["after"]["properties"] == {"label": "before"}
+
+    tok = _lock(client, eid)
+    body = _commit(
+        client,
+        [{"kind": "update_element", "id": eid, "properties_patch": {"label": "after"}}],
+        [tok],
+    )
+    states = _states_at(body["model_rev"])
+    assert states is not None
+    assert states["elements"][eid]["before"]["properties"] == {"label": "before"}
+    assert states["elements"][eid]["after"]["properties"] == {"label": "after"}
+
+
+def test_artifact_only_commit_persists_empty_states(client: TestClient) -> None:
+    body = _commit(
+        client,
+        [{
+            "kind": "create_artifact", "temp_id": "tmp_a", "artifact_kind": "code_snippet",
+            "name": "s1",
+            "payload": {"schema_version": 1, "language": "python",
+                        "code": "def value(el):\n    return 1\n"},
+        }],
+    )
+    assert _states_at(body["model_rev"]) == {"elements": {}, "relationships": {}}
+
+
+def test_legacy_ops_and_undo_persist_states(client: TestClient) -> None:
+    r = client.post(
+        papi("/model/ops"),
+        json={"base_rev": _rev(client), "ops": [
+            {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
+             "properties": {"label": "v1"}}]},
+    )
+    assert r.status_code == 200, r.text
+    eid = r.json()["id_map"]["tmp_e"]
+    r = client.post(
+        papi("/model/ops"),
+        json={"base_rev": _rev(client), "ops": [
+            {"kind": "update_element", "id": eid, "properties_patch": {"label": "v2"}}]},
+    )
+    assert r.status_code == 200, r.text
+    rev_update = r.json()["model_rev"]
+    states = _states_at(rev_update)
+    assert states is not None
+    assert states["elements"][eid]["before"]["properties"] == {"label": "v1"}
+    assert states["elements"][eid]["after"]["properties"] == {"label": "v2"}
+
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 200, r.text
+    rev_undo = r.json()["model_rev"]
+    states = _states_at(rev_undo)
+    assert states is not None  # the compensating commit is journal-diffable too
+    assert states["elements"][eid]["before"]["properties"] == {"label": "v2"}
+    assert states["elements"][eid]["after"]["properties"] == {"label": "v1"}
+
+
+def test_revert_persists_states(client: TestClient) -> None:
+    body = _commit(
+        client,
+        [{"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
+          "properties": {"label": "a"}}],
+    )
+    rev_a, eid = body["model_rev"], body["id_map"]["tmp_e"]
+    tok = _lock(client, eid)
+    _commit(
+        client,
+        [{"kind": "update_element", "id": eid, "properties_patch": {"label": "b"}}],
+        [tok],
+    )
+    r = client.post(
+        papi("/commits/revert"),
+        json={"target_rev": rev_a, "base_rev": _rev(client)},
+    )
+    assert r.status_code == 200, r.text
+    states = _states_at(r.json()["model_rev"])
+    assert states is not None
+    assert states["elements"][eid]["before"]["properties"] == {"label": "b"}
+    assert states["elements"][eid]["after"]["properties"] == {"label": "a"}
+
+
+def test_over_cap_commit_persists_null(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(commit_states, "ENTITY_STATES_MAX", 1)
+    body = _commit(
+        client,
+        [
+            {"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node"},
+            {"kind": "create_element", "temp_id": "tmp_b", "type_name": "Node"},
+        ],
+    )
+    assert _states_at(body["model_rev"]) is None
