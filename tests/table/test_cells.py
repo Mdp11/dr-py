@@ -9,6 +9,7 @@ Fixture extends the Block/BlockHasPart metamodel with a `Widget` type
 
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef, RelationshipType
 from data_rover.core.model.model import Model
+from data_rover.core.navigation.evaluate import PropertyValue
 from data_rover.core.table.cells import ElementCell, ElementsCell, ValueCell, ValuesCell, evaluate_cells
 from data_rover.core.table.evaluate import build_rows
 from data_rover.core.table.schema import TABLE_ADAPTER
@@ -264,6 +265,56 @@ def test_column_ref_step_index_expand_filters_by_row_element():
     cell_c2 = cells[by_target[c2]][1]
     assert isinstance(cell_c2, ValueCell)
     assert cell_c2.value == "B2"
+
+
+def test_column_ref_step_index_expand_over_value_terminal():
+    # nav column (expand) ending in a scalar PROPERTY step promotes a
+    # PropertyValue binding per row; a column sourced from it with a
+    # step_index must still resolve the chain's elements at that step, pinned
+    # to the row's own value — never go empty because the slot is not an id.
+    mm = _mm()
+    model = Model(mm)
+
+    def _mk(name: str, mass: int) -> str:
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+        model.set_property(el, "mass", mass)
+        return el.id
+
+    root, p1, p2 = _mk("Root", 1), _mk("Part 1", 10), _mk("Part 2", 20)
+    model.connect("BlockHasPart", root, p1)
+    model.connect("BlockHasPart", root, p2)
+    nav_steps = [
+        {"kind": "relationship", "relationship_type": "BlockHasPart", "direction": "out"},
+        {"kind": "property", "property_name": "mass"},
+    ]
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "expand",
+             "keep_empty": False,
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": nav_steps}}},
+            {"kind": "property", "source": {"kind": "column", "index": 0, "step_index": 1},
+             "name": "name"},
+        ],
+    })
+    rows_for_root = [i for i, k in enumerate(keys) if k[0] == root]
+    assert len(rows_for_root) == 2
+    by_mass: dict[object, int] = {}
+    for i in rows_for_root:
+        slot = keys[i][1]
+        assert isinstance(slot, PropertyValue)
+        by_mass[slot.value] = i
+    assert set(by_mass) == {10, 20}
+    for mass, (pid, pname) in {10: (p1, "Part 1"), 20: (p2, "Part 2")}.items():
+        nav_cell = cells[by_mass[mass]][0]
+        assert isinstance(nav_cell, ValueCell)
+        assert nav_cell.value == mass
+        prop_cell = cells[by_mass[mass]][1]
+        assert isinstance(prop_cell, ValueCell)
+        assert prop_cell.present and prop_cell.value == pname
+        assert prop_cell.element_id == pid
 
 
 def test_column_ref_step_index_out_of_range_raises():

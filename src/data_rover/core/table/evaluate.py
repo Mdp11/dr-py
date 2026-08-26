@@ -184,9 +184,10 @@ def resolve_source_elements(
     navigation-column reference: instead of the referenced column's own
     projected step, it re-navigates from the referenced column's OWN source
     and reads the requested chain step. Off an `expand` navigation column this
-    row is pinned to one projected element (read back from the expand slot),
-    so only chains whose projection matches it contribute — otherwise a
-    step-index cell would mix in other rows' chains.
+    row is pinned to one projected node (read back from the expand slot) — an
+    element id, or a `PropertyValue` terminal when the projected step is a
+    scalar property/script step — so only chains whose projection matches it
+    contribute; otherwise a step-index cell would mix in other rows' chains.
 
     `script` is the shared per-request `ScriptEvalContext` (memoized calls,
     one budget) — required to resolve a COLLAPSE script column as a source,
@@ -217,11 +218,11 @@ def resolve_source_elements(
         roots = resolve_source_elements(
             mm, model, defn, key, ref_col.source, base_slots, limits, script=script
         )
-        match: str | None = None
+        match: str | PropertyValue | None = None
         if ref_col.mode == "expand":
             b = key[_expand_slot_of(defn, base_slots, source.index)]
-            if not isinstance(b, str):
-                return []
+            if not isinstance(b, (str, PropertyValue)):
+                return []  # keep_empty row (slot None): nothing was reached
             match = b
         return _navigation_step_elements(
             mm,
@@ -332,14 +333,18 @@ def _navigation_step_elements(
     limits: TableLimits,
     *,
     step: int,
-    match_projected: str | None,
+    match_projected: str | PropertyValue | None,
     script: ScriptEvalContext | None = None,
 ) -> list[str]:
     """Elements at chain step `step` of `col`'s navigation, evaluated from
     `roots`. With `match_projected` set (the expand-column case) only chains
     whose OWN projection — the column's `step_index` — equals it contribute,
-    keeping the reference row-correct. Mirrors `_navigation_reached_ex`'s
-    dedup-preserving-order and its ValueError-on-out-of-range (API → 422)."""
+    keeping the reference row-correct. A `PropertyValue` projection matches by
+    value alone (the expand slot carries no owner — see `_expand_values`), so
+    two elements reached with EQUAL values share their step elements between
+    their two rows; an over-approximation, never an empty cell. Mirrors
+    `_navigation_reached_ex`'s dedup-preserving-order and its
+    ValueError-on-out-of-range (API → 422)."""
     defn = col.navigation.definition
     if defn is None or not roots:
         return []
