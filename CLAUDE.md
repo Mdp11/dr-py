@@ -103,6 +103,14 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   `build_store_from_settings` passes `create_bucket=` **iff** an emulator
   endpoint is set, so the bucket is provisioned at backend boot in dev (docker
   compose owns containers only) while prod never calls `storage.buckets.create`.
+  **`snapshot_codec.py`** is the ONE place that knows the blob format — `encode_snapshot`
+  streams a gzip member (level 3) of the COMPACT document (`serialize.iter_model_json_compact`,
+  one `json.dumps` per `SNAPSHOT_BATCH` = 2000 entities, byte-identical to a whole-document
+  dumps; ~5 % of the indented save-file size), and `decode_snapshot` sniffs the gzip magic and
+  falls through to plain `json.loads`, so every row written before compression (indented JSON
+  under a `.json` key) still loads: the `.json.gz` key suffix is naming only, readers NEVER
+  branch on it, and there is no migration, `encoding` column or backfill. The indented
+  `iter_model_json` stays the `/model/save` + `/model/download` contract.
 - **`content.py`** — service functions over the content tables (the `tenancy.py`
   of model content). **`hydration.py`** — `hydrate_session` (nearest snapshot +
   replay commit tail through the restore-mode applier) and `persist_baseline`/
@@ -118,6 +126,14 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   forward). Upload routes (`metamodel`/`model`/`view`) persist their content so a
   project survives eviction; `/model/save` + `/model/download` remain read-only
   **export** conveniences.
+  The every-`snapshot_every` **periodic snapshot** (`routes/ops.py::_maybe_periodic_snapshot`,
+  shared by `/commits`, `/commits/revert`, `/model/ops`, `/model/undo`) is scheduled on a
+  daemon thread (`api/snapshot_job.py`) that takes `write_mutex` itself, snapshots whatever
+  rev it finds (any rev at or past the trigger bounds the replay tail equally), writes nothing
+  for a session the registry no longer holds, and logs-and-drops failures; one job per session
+  at a time. `DATA_ROVER_SNAPSHOT_SYNC=true` (the test conftest) runs it inline. The
+  rebind-forced, evict and baseline snapshots stay synchronous — they are correctness, not
+  bounding.
 - **`Commit.entity_states`** (nullable JSON) is the full before/after state of every model
   entity a batch touched, captured by every journal writer (`POST /commits`, `/commits/revert`,
   `/model/ops`, `/model/undo`) via `api/commit_states.capture_entity_states` — the applier
