@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.navigation.resolve import NavigationResolveError
 from data_rover.core.script.runner import ScriptRunner
+from data_rover.core.script.schema import SnippetSource
 from data_rover.core.table.exporter import (
     EXPORTER_ADAPTER,
     ExporterDefinition,
@@ -33,7 +34,12 @@ from .. import content
 from ..db import get_db
 from ..db_models import ArtifactKind, ArtifactRow
 from ..deps import Session, get_request_session, require_model
-from ..export_manifest import MANIFEST_NAME, ManifestEntry, build_manifest
+from ..export_manifest import (
+    MANIFEST_NAME,
+    ManifestEntry,
+    build_manifest,
+    inline_transform_marker,
+)
 from ..schemas import EvaluateTableIn, RunExportIn, ScriptStatusOut
 from ..script_runner import get_runner
 from ..settings import Settings, get_settings
@@ -50,6 +56,21 @@ from ..table_export_engine import (
 from .tables import _resolve_table, _resolve_transform_source
 
 router = APIRouter()
+
+
+def _manifest_transform(source: SnippetSource | None, code: str | None) -> str | None:
+    """The manifest marker for one entry's transform: the artifact id for a
+    ref source, `inline_transform_marker(code)` for an inline source, `None`
+    for no transform. `code` is the entry's already-resolved transform code
+    (`transform_codes` in the assembly loop below) — guaranteed non-`None`
+    whenever `source` names an inline definition, since resolution failure
+    would have 422'd before this point ever runs."""
+    if source is None or source.is_empty:
+        return None
+    if source.ref is not None:
+        return source.ref
+    assert code is not None
+    return inline_transform_marker(code)
 
 
 def _dedupe_path(prefix: str, stem: str, taken: set[str]) -> str:
@@ -347,6 +368,7 @@ def _execute_export(
                         t,
                         segments,
                         out_name,
+                        code_,
                         run_table_export(
                             session=session,
                             settings=settings,
@@ -405,7 +427,7 @@ def _execute_export(
             taken.add(MANIFEST_NAME.rpartition(".")[0])
         manifest_entries: list[ManifestEntry] = []
         truncated = degraded = False
-        for entry, t, segments, out_name, res in results:
+        for entry, t, segments, out_name, code_, res in results:
             assert isinstance(res, ExportFiles)
             assert t is not None
             truncated |= res.truncated
@@ -478,9 +500,7 @@ def _execute_export(
                         truncated=res.truncated,
                         degraded=res.degraded,
                         files=entry_paths,
-                        transform=(
-                            entry.transform.ref if entry.transform is not None else None
-                        ),
+                        transform=_manifest_transform(entry.transform, code_),
                     )
                 )
 

@@ -3,6 +3,7 @@
 `is_empty` gate fixes. Ref-mode coverage stays in `test_table_export_transform.py`
 / `test_exports_transform.py` — this file is additive."""
 
+import hashlib
 import io
 import json
 import zipfile
@@ -360,3 +361,105 @@ def test_viewer_can_run_draft_exporter_with_inline_transform(app):
     z = zipfile.ZipFile(io.BytesIO(r.content))
     doc = json.loads(z.read("doc.json"))
     assert doc["count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# manifest marker for an inline transform
+# ---------------------------------------------------------------------------
+
+
+def test_manifest_records_inline_marker_not_none(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "manifest-inline")
+    art = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "doc",
+                "format": "json",
+                "transform": {"definition": {"code": WRAP}},
+            },
+        ],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    manifest = json.loads(z.read("manifest.json"))
+    marker = manifest["entries"][0]["transform"]
+    expected = f"inline:{hashlib.sha256(WRAP.encode()).hexdigest()[:12]}"
+    assert marker == expected
+
+
+def test_manifest_records_none_for_no_transform(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "manifest-none")
+    art = _mk_export(
+        client,
+        [{"source": {"ref": t}, "name": "plain", "format": "json"}],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    manifest = json.loads(z.read("manifest.json"))
+    assert manifest["entries"][0]["transform"] is None
+
+
+def test_manifest_marker_is_deterministic_across_runs(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "manifest-det")
+    art = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "doc",
+                "format": "json",
+                "transform": {"definition": {"code": WRAP}},
+            },
+        ],
+    )
+    r1 = _run(client, art)
+    r2 = _run(client, art)
+    assert r1.status_code == 200 and r2.status_code == 200
+    z1 = zipfile.ZipFile(io.BytesIO(r1.content))
+    z2 = zipfile.ZipFile(io.BytesIO(r2.content))
+    assert z1.read("manifest.json") == z2.read("manifest.json")
+
+
+def test_manifest_marker_same_code_same_marker_different_code_differs(client):
+    _bootstrap_model(client)
+    t1 = _mk_table(client, "manifest-a")
+    t2 = _mk_table(client, "manifest-b")
+    t3 = _mk_table(client, "manifest-c")
+    other_code = "def transform(doc):\n    return {'other': True}\n"
+    art = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t1},
+                "name": "a",
+                "format": "json",
+                "transform": {"definition": {"code": WRAP}},
+            },
+            {
+                "source": {"ref": t2},
+                "name": "b",
+                "format": "json",
+                "transform": {"definition": {"code": WRAP}},
+            },
+            {
+                "source": {"ref": t3},
+                "name": "c",
+                "format": "json",
+                "transform": {"definition": {"code": other_code}},
+            },
+        ],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    manifest = json.loads(z.read("manifest.json"))
+    markers = {e["name"]: e["transform"] for e in manifest["entries"]}
+    assert markers["a"] == markers["b"]
+    assert markers["a"] != markers["c"]

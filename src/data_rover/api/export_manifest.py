@@ -18,6 +18,7 @@ file is not the place for it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 
@@ -28,6 +29,14 @@ MANIFEST_NAME = "manifest.json"
 
 #: Bumped only on a wire-incompatible change to the document shape below.
 MANIFEST_VERSION = 1
+
+
+def inline_transform_marker(code: str) -> str:
+    """Content-addressed stand-in for an inline transform's missing artifact
+    id: `inline:` + the first 12 hex chars of the snippet code's sha256.
+    Deterministic (same code, same marker) and wall-clock-free, so it never
+    threatens `build_manifest`'s byte-identical-at-the-same-rev guarantee."""
+    return f"inline:{hashlib.sha256(code.encode()).hexdigest()[:12]}"
 
 
 @dataclass(frozen=True)
@@ -43,8 +52,14 @@ class ManifestEntry:
     truncated: bool
     degraded: bool
     files: list[str]  # final member paths
-    #: The entry's `transform` snippet artifact id, or `None` when the entry
-    #: has no transform.
+    #: The entry's transform, or `None` when the entry has no transform.
+    #: Two-form grammar: a saved snippet artifact id (ref mode), or
+    #: `inline:<sha12>` (`inline_transform_marker`, inline mode) — an inline
+    #: source has no artifact id to record, and `None` would then be
+    #: indistinguishable from "no transform". The `inline:` prefix can never
+    #: collide with an artifact id (those are uuids), so a consumer that
+    #: resolves this field as an artifact id must check for the prefix
+    #: first, not assume every non-`None` value is one.
     transform: str | None = None
 
 
