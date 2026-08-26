@@ -259,6 +259,12 @@ class Commit(Base):
     to_metamodel_id: Mapped[str | None] = mapped_column(
         ForeignKey("metamodels.id", ondelete="SET NULL"), nullable=True
     )
+    #: Full before/after state of every model entity this commit touched
+    #: (``commit_states`` has the shape). NULL means "not captured": rows
+    #: written before the column existed, or a batch that touched more than
+    #: ``ENTITY_STATES_MAX`` entities — the diff reader reconstructs the model
+    #: instead. Never backfilled.
+    entity_states: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     #: Declared so the ORM unit-of-work can order INSERTs correctly.
     project: Mapped[Project] = relationship()
