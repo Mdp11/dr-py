@@ -248,8 +248,8 @@ follows a pessimistic **check-out → stage → commit** loop:
      `collapseKey` disclosure. The wrapper owns only the nullable add/×
      edge (`null` "no transform" vs. the tolerant unconfigured `{}`) and
      delegates saved ↔ inline mode entirely to `SnippetSourceEditor` with
-     `entry="transform"`. `ExporterTab` forwards `disabled` (`!editable ||
-     locked`) so a caller who may not edit cannot stage inline code either —
+     `entry="transform"`. `ExporterTab` forwards `disabled` (`!editable || locked`)
+     so a caller who may not edit cannot stage inline code either —
      the standalone table `ExportDialog` does NOT forward it (see "Table
      export settings" below): that dialog mounts outside the `editable` gate
      on purpose, so there is no `disabled` value to forward there. Ref options are
