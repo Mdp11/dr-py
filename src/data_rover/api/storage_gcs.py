@@ -38,8 +38,8 @@ class GcsSnapshotStore:
 
     def put(self, key: str, chunks: Iterable[bytes]) -> None:
         # buffer the chunks then upload: the google client's resumable upload
-        # wants a seekable file-like; one transient bytes buffer at ~80 MB is
-        # the same memory profile as today's upload route (an accepted cost).
+        # wants a seekable file-like; the buffer is the COMPRESSED blob (~10 MiB
+        # for a 300k-element model), so this is far below the model's own RSS.
         self._bucket.blob(key).upload_from_file(io.BytesIO(b"".join(chunks)))
 
     def get(self, key: str) -> bytes:

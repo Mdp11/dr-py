@@ -1,9 +1,10 @@
 """Blob store for full-model snapshots.
 
-The model is ~80 MB, so writes stream (``put`` takes an iterable of byte
-chunks straight from ``serialize.iter_model_json``) and reads buffer the whole
-blob (``get`` returns bytes; hydration then ``json.loads`` +
-``build_model_from_dicts`` — identical to today's ``POST /model/upload``).
+Writes stream (``put`` takes an iterable of byte chunks straight from
+``snapshot_codec.encode_snapshot``) and reads buffer the whole blob (``get``
+returns bytes; hydration then ``decode_snapshot`` + ``build_model_from_dicts``).
+The blob is a gzip member of the compact model document — ~5 % of the
+indented save-file size.
 
 One Protocol, two impls: ``GcsSnapshotStore`` (the real one — dev points it at
 a fake-gcs-server emulator, prod at GCS) and ``MemorySnapshotStore`` (hermetic
@@ -19,8 +20,10 @@ from collections.abc import Iterable
 if TYPE_CHECKING:
     from .settings import Settings
 
-#: blob key for one project's snapshot at a given rev
-_SNAPSHOT_KEY = "projects/{project_id}/snapshots/{rev}.json"
+#: blob key for one project's snapshot at a given rev. The suffix documents
+#: the format written today; readers never branch on it (snapshot_codec
+#: sniffs the bytes), so rows under the older ``.json`` suffix keep loading.
+_SNAPSHOT_KEY = "projects/{project_id}/snapshots/{rev}.json.gz"
 
 
 def snapshot_key(project_id: str, rev: int) -> str:

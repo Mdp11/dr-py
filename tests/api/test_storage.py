@@ -14,7 +14,7 @@ from data_rover.api.storage import (
 
 
 def test_snapshot_key_scheme() -> None:
-    assert snapshot_key("p1", 7) == "projects/p1/snapshots/7.json"
+    assert snapshot_key("p1", 7) == "projects/p1/snapshots/7.json.gz"
 
 
 def test_memory_put_get_roundtrip() -> None:
