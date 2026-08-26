@@ -2,7 +2,7 @@
 	import { onDestroy, untrack } from 'svelte';
 	import { basicSetup } from 'codemirror';
 	import { EditorView, keymap, hoverTooltip, placeholder } from '@codemirror/view';
-	import { Prec } from '@codemirror/state';
+	import { Compartment, EditorState, Prec } from '@codemirror/state';
 	import { expandTabs, hasTabs, INDENT_WIDTH } from '$lib/editor/indent';
 	import { pythonIndentation } from '$lib/editor/indent-extension';
 	import { python, pythonLanguage } from '@codemirror/lang-python';
@@ -30,6 +30,7 @@
 		diagnostics = [],
 		docs = null,
 		vocab = null,
+		readonly = false,
 		onChange,
 		onRun
 	}: {
@@ -37,12 +38,24 @@
 		diagnostics?: SnippetDiagnostic[];
 		docs?: SnippetDocsOut | null;
 		vocab?: VocabSummary | null;
+		/** Blocks typing and the Reformat control; navigation (cursor, search,
+		 * goToLine) and external `code` replacement stay live — a disabled
+		 * editor is still readable. */
+		readonly?: boolean;
 		onChange: (code: string) => void;
 		onRun: () => void;
 	} = $props();
 
 	let host: HTMLDivElement;
 	let view: EditorView | undefined;
+
+	// `readonly` CAN change at runtime (a lock acquired mid-session), but the
+	// view itself must not be recreated for it (see the creation effect's own
+	// comment) — reconfigured through a Compartment instead.
+	const readonlyCompartment = new Compartment();
+	function readonlyExtensions(ro: boolean) {
+		return [EditorView.editable.of(!ro), EditorState.readOnly.of(ro)];
+	}
 
 	/** Whether the CURRENT document still holds a tab character. Derived from the
 	 * `code` prop rather than the view so it is correct before the editor mounts
@@ -98,7 +111,7 @@
 	 * or the formatter is absent.
 	 */
 	async function reformat(): Promise<void> {
-		if (!view || formatting || formatUnavailable) return;
+		if (!view || formatting || formatUnavailable || readonly) return;
 		const before = view.state.doc.toString();
 		const expanded = expandTabs(before);
 		formatting = true;
@@ -217,7 +230,8 @@
 							if (u.docChanged) onChange(u.state.doc.toString());
 						}),
 						pythonLanguage.data.of({ autocomplete: completionSource }),
-						docHover
+						docHover,
+						readonlyCompartment.of(readonlyExtensions(readonly))
 					]
 				})
 		);
@@ -234,6 +248,13 @@
 	$effect(() => {
 		if (view)
 			view.dispatch(setDiagnostics(view.state, toCmDiagnostics(view.state.doc, diagnostics)));
+	});
+
+	// `readonly` reconfigured through the compartment, not a view recreate —
+	// this effect DOES track it (unlike the creation effect above).
+	$effect(() => {
+		if (view)
+			view.dispatch({ effects: readonlyCompartment.reconfigure(readonlyExtensions(readonly)) });
 	});
 </script>
 
@@ -264,7 +285,7 @@
 			title={tabby
 				? `This snippet mixes tab and space indentation, which Python rejects. Reformat expands every tab to ${INDENT_WIDTH} spaces and reformats the rest (Shift+Alt+F).`
 				: 'Reformat this snippet (Shift+Alt+F)'}
-			disabled={formatting || formatUnavailable}
+			disabled={formatting || formatUnavailable || readonly}
 			onclick={() => void reformat()}
 		>
 			{formatting ? 'Formatting…' : 'Reformat'}
