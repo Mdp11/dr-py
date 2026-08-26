@@ -243,25 +243,33 @@ follows a pessimistic **check-out → stage → commit** loop:
      never-block-Save rule, a bad token or an absolute/traversal folder saves
      fine and only 422s at `POST /exports/run`, naming the offending entry.
    - **The transform hook.** Each JSON-family entry row
-     (`isJsonFamily(entry.format)`) shows `Export/TransformPicker.svelte`, a
-     ref-only combobox (the reusable core of `SnippetSourceEditor`'s ref mode,
-     without its inline-code half — `transform` is `TableRef`-only by schema)
-     over `entry.transform`; its options are committed `code_snippet`
-     artifacts whose server-derived `entry_points` include `'transform'`
-     (`entryAvailable`, `referenceableArtifactHeaders` — staged temp ids never
-     reach a payload). Flipping an entry to `xlsx`/`csv` while it still holds
-     a `transform` does not clear it (the server 422s it at run time — a
-     functional contract is never tolerate-and-ignored) — the row
-     shows a `export-entry-{i}-transform-warning` hint instead of silently
-     dropping state the user might restore by flipping the format back.
-     `entryForTable` deliberately does NOT copy the source table's own
-     `transform` at add time (`transform: null`): a transform is a functional
-     contract, not cosmetic presentation, so no-bleed applies at add-time too,
-     not just at render time. In `lib/snippet/entry-stubs.ts`,
+     (`isJsonFamily(entry.format)`) shows `Export/TransformSourceEditor.svelte`
+     over `entry.transform`, collapsed under the entry row via the shared
+     `collapseKey` disclosure. The wrapper owns only the nullable add/×
+     edge (`null` "no transform" vs. the tolerant unconfigured `{}`) and
+     delegates saved ↔ inline mode entirely to `SnippetSourceEditor` with
+     `entry="transform"`, forwarding `disabled` (`!editable || locked`) so a
+     caller who may not edit cannot stage inline code either. Ref options are
+     committed `code_snippet` artifacts whose server-derived `entry_points`
+     include `'transform'` (`entryAvailable`, `referenceableArtifactHeaders` —
+     staged temp ids never reach a payload). Flipping an entry to `xlsx`/`csv`
+     while it still holds a transform does not clear it (the server 422s it
+     at run time — a functional contract is never tolerate-and-ignored) — the
+     row shows a `export-entry-{i}-transform-warning` hint instead of
+     silently dropping state the user might restore by flipping the format
+     back, gated on `isEmptySnippetSource(entry.transform)` rather than
+     truthiness (`{}` is truthy in JS, and an unconfigured source must not
+     itself warn). `entryForTable` deliberately does NOT copy the source
+     table's own `transform` at add time (`transform: null`): a transform is
+     a functional contract, not cosmetic presentation, so no-bleed applies at
+     add-time too, not just at render time. In `lib/snippet/entry-stubs.ts`,
      `BoundEntry = 'value' | 'step' | 'transform'` names all three and
      `ConsoleEntry = Exclude<BoundEntry, 'transform'>` carves out the subset a
-     console/embedded run (`POST /snippets/run`) supports — a console
-     run has no document to bind `transform` against.
+     console/embedded run (`POST /snippets/run`) supports — `transform` has
+     no `RunRequest.entry` member and no document to bind against in a
+     console run, ref or inline alike, so it is excluded from
+     `SnippetRunBody`/`SnippetTestPanel`/`ElementContextRow` regardless of
+     source form.
    - **No already-added filter on the add-table picker — deliberate.**
      `ExporterTab.svelte`'s `availableTables` lists every table, so the same
      table can be added more than once — e.g. once as a wide `.xlsx` and
@@ -986,11 +994,11 @@ JSON writes `json_export.key`, so one row never shows two rename boxes). JSON
 keeps its per-column extras (`json_export: {key, item_key, value, group}`) and
 its live sample pane. The overrides are part of the saved definition, so a table
 exported the same way every week is configured once. When the selected format is
-JSON-family, the format-toggle row also shows a `TransformPicker` bound to the
-table's OWN `TableDefinition.transform` — a SEPARATE field
-from any exporter entry's `transform`: an exporter entry built from this table
+JSON-family, the format-toggle row also shows a `TransformSourceEditor` bound
+to the table's OWN `TableDefinition.transform` — a SEPARATE field from any
+exporter entry's `transform`: an exporter entry built from this table
 never inherits it (`entryForTable` sets `transform: null`, not a copy), and this
-picker never reflects an entry's choice either — the no-bleed rule holds in both
+editor never reflects an entry's choice either — the no-bleed rule holds in both
 directions, same as every other `overridden_table` field. `ExportSettingsPanel`
 gates every JSON-only control on a derived `jsonFamily` (`format === 'json' ||
 format === 'jsonl'`) rather than `format === 'json'` alone, since JSONL renders

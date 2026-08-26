@@ -325,11 +325,14 @@ def _execute_export(
         )
 
     # A run-level host: `TransformHost` shares one warm SnippetSession per
-    # DISTINCT code across every entry that uses it, so it is
-    # opened ONCE for the whole request — never per entry — and only when at
-    # least one entry actually carries a transform (an export with no
-    # transforms takes no interactive concurrency slot at all). Mapped to
-    # 429/503 here, same as the standalone `/tables/export` route.
+    # DISTINCT code across every entry that uses it, up to its LRU cap
+    # (`_TRANSFORM_SESSION_CACHE_MAX` in `table_export_engine.py`) — a run
+    # with more distinct codes than the cap evicts and re-opens rather than
+    # holding them all. It is opened ONCE for the whole request — never per
+    # entry — and only when at least one entry actually carries a transform
+    # (an export with no transforms takes no interactive concurrency slot at
+    # all). Mapped to 429/503 here, same as the standalone `/tables/export`
+    # route.
     transform_host = None
     if any(c is not None for c in transform_codes):
         try:
