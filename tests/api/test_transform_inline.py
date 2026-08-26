@@ -93,6 +93,29 @@ def test_inline_no_transform_def_is_422_naming_the_entry(client):
     assert "snippet" not in detail  # not the ref-mode wording
 
 
+def test_inline_transform_ignores_claimed_entry_points(client):
+    # `entry_points` on an inline `definition` is fully client-supplied (no
+    # save-time server derivation touches a nested inline payload, unlike a
+    # saved snippet artifact) — pin that `_resolve_transform_source` still
+    # re-derives from the AST rather than trusting the claim. `NO_ENTRY`
+    # defines `not_transform`, not `transform`; without re-derivation this
+    # would resolve as if valid instead of 422ing.
+    _bootstrap_model(client)
+    r = _export(
+        client,
+        {
+            **TABLE_PAYLOAD,
+            "transform": {
+                "definition": {"code": NO_ENTRY, "entry_points": ["transform"]}
+            },
+        },
+    )
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "table" in detail
+    assert "does not define a one-argument top-level transform(doc)" in detail
+
+
 def test_inline_syntax_error_is_422_with_syntax_wording(client):
     _bootstrap_model(client)
     r = _export(

@@ -1,7 +1,6 @@
 """TransformHost: session reuse per code, the LRU eviction cap, size caps,
 the failure-is-failure ValueError mapping, and slot acquisition/release."""
 
-import threading
 from typing import Literal
 
 import pytest
@@ -54,8 +53,7 @@ class _TrackingSession:
         *,
         doc: object | None = None,
     ) -> CallResult:
-        with self._runner.lock:
-            self._runner.calls.append(self._code)
+        self._runner.calls.append(self._code)
         return CallResult(
             value={"kind": "scalar", "value": {"code": self._code, "doc": doc}},
             error=None,
@@ -63,8 +61,7 @@ class _TrackingSession:
         )
 
     def close(self) -> None:
-        with self._runner.lock:
-            self._runner.closed.append(self._code)
+        self._runner.closed.append(self._code)
         if self._runner.raise_on_close:
             raise RuntimeError("close failed")
 
@@ -81,13 +78,11 @@ class TrackingRunner:
         self.closed: list[str] = []
         self.calls: list[str] = []
         self.raise_on_close = raise_on_close
-        self.lock = threading.Lock()
 
     def open_session(
         self, model: Model, code: str, limits: RunLimits, *, budget: ScriptBudget
     ) -> SnippetSession:
-        with self.lock:
-            self.opens.append(code)
+        self.opens.append(code)
         return _TrackingSession(code, self)
 
     def run(

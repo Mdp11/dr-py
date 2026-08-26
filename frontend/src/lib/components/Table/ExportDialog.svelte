@@ -181,6 +181,14 @@
 				<div class="flex w-full items-start gap-1.5 pt-1 text-xs text-muted-foreground">
 					<span class="shrink-0 pt-0.5">Transform</span>
 					<div class="min-w-0 flex-1">
+						<!-- No `disabled` here, unlike `ExporterTab`'s: this dialog mounts
+						     outside the `editable` gate on purpose (see the note above
+						     `<ExportDialog` in TableView.svelte), and a viewer authoring an
+						     inline transform for their own export is not an escalation --
+						     they already run arbitrary sandboxed code via `POST /snippets/run`
+						     and inline `ScriptColumn`s. The one wart: "Add transform" writes
+						     `{}` and dirties the draft, and a viewer has no Save button to
+						     clean it with (`restoreTableExportSettings`'s docstring). -->
 						<TransformSourceEditor
 							value={defn.transform ?? null}
 							collapseKey={`${tabId}::table:transform`}

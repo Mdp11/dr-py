@@ -430,7 +430,7 @@ def _execute_export(
             taken.add(MANIFEST_NAME.rpartition(".")[0])
         manifest_entries: list[ManifestEntry] = []
         truncated = degraded = False
-        for entry, t, segments, out_name, code_, res in results:
+        for entry, t, segments, out_name, transform_code, res in results:
             assert isinstance(res, ExportFiles)
             assert t is not None
             truncated |= res.truncated
@@ -503,7 +503,7 @@ def _execute_export(
                         truncated=res.truncated,
                         degraded=res.degraded,
                         files=entry_paths,
-                        transform=_manifest_transform(entry.transform, code_),
+                        transform=_manifest_transform(entry.transform, transform_code),
                     )
                 )
 

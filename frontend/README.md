@@ -248,8 +248,11 @@ follows a pessimistic **check-out → stage → commit** loop:
      `collapseKey` disclosure. The wrapper owns only the nullable add/×
      edge (`null` "no transform" vs. the tolerant unconfigured `{}`) and
      delegates saved ↔ inline mode entirely to `SnippetSourceEditor` with
-     `entry="transform"`, forwarding `disabled` (`!editable || locked`) so a
-     caller who may not edit cannot stage inline code either. Ref options are
+     `entry="transform"`. `ExporterTab` forwards `disabled` (`!editable ||
+     locked`) so a caller who may not edit cannot stage inline code either —
+     the standalone table `ExportDialog` does NOT forward it (see "Table
+     export settings" below): that dialog mounts outside the `editable` gate
+     on purpose, so there is no `disabled` value to forward there. Ref options are
      committed `code_snippet` artifacts whose server-derived `entry_points`
      include `'transform'` (`entryAvailable`, `referenceableArtifactHeaders` —
      staged temp ids never reach a payload). Flipping an entry to `xlsx`/`csv`
@@ -257,7 +260,7 @@ follows a pessimistic **check-out → stage → commit** loop:
      at run time — a functional contract is never tolerate-and-ignored) — the
      row shows a `export-entry-{i}-transform-warning` hint instead of
      silently dropping state the user might restore by flipping the format
-     back, gated on `isEmptySnippetSource(entry.transform)` rather than
+     back, gated on `!isEmptySnippetSource(entry.transform)` rather than
      truthiness (`{}` is truthy in JS, and an unconfigured source must not
      itself warn). `entryForTable` deliberately does NOT copy the source
      table's own `transform` at add time (`transform: null`): a transform is
@@ -999,7 +1002,11 @@ to the table's OWN `TableDefinition.transform` — a SEPARATE field from any
 exporter entry's `transform`: an exporter entry built from this table
 never inherits it (`entryForTable` sets `transform: null`, not a copy), and this
 editor never reflects an entry's choice either — the no-bleed rule holds in both
-directions, same as every other `overridden_table` field. `ExportSettingsPanel`
+directions, same as every other `overridden_table` field. Unlike `ExporterTab`'s
+editor, this one gets no `disabled` prop: the dialog mounts outside the
+`editable` gate on purpose (a viewer may export too, and its overrides are
+export-only and never saved as-is), so there is nothing to gate — see the
+comment at its call site. `ExportSettingsPanel`
 gates every JSON-only control on a derived `jsonFamily` (`format === 'json' ||
 format === 'jsonl'`) rather than `format === 'json'` alone, since JSONL renders
 through the same per-column extras and live sample pane as JSON while CSV
