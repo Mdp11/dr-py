@@ -35,6 +35,13 @@
 	 * errors are message-only far more often than not — only a YAML PARSE
 	 * failure carries a position, so every schema violation lands here. */
 	const stripError = $derived(draft?.lintErrors.find((e) => e.line === null) ?? null);
+	/** Lint ERRORS gate Save (drift warnings never do): the server refuses an
+	 * unparseable rule set at commit, and a staged one takes the whole batch
+	 * down with it — unrelated model and view edits included. Unlike the
+	 * exporter's never-block-Save templates, this is a structural payload
+	 * error every write path rejects, not a presentation setting only
+	 * export-time rendering can judge. */
+	const lintBlocked = $derived((draft?.lintErrors.length ?? 0) > 0);
 
 	let saveError = $state<string | null>(null);
 
@@ -66,7 +73,8 @@
 					type="button"
 					data-testid="rules-save"
 					class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
-					disabled={locked}
+					disabled={locked || lintBlocked}
+					title={lintBlocked ? 'Fix the lint errors before saving' : undefined}
 					onclick={save}
 				>
 					Save{draft.dirty ? ' *' : ''}

@@ -27,10 +27,11 @@ import {
 } from './metamodel-editor.svelte';
 import { acquireMetamodelLease, getMetamodelLockHolder } from './metamodel-lease.svelte';
 import {
-	discardStagedNodeMoves,
+	clearStagedNodeMoves,
 	getStagedNodeMoves,
 	initMetamodelStage,
 	onMetamodelCommitted,
+	onStagedMovesDiscarded,
 	stageNodeMove
 } from './metamodel-stage.svelte';
 import { METAMODEL_RESOURCE } from './ops';
@@ -392,9 +393,11 @@ function maybeAcquireLayoutLease(): void {
 			// so leaving them would poison every later batch. The canvas keeps
 			// them in `_positions` — the drag stays LOCAL, exactly like the
 			// editor keeping the characters typed before its own refusal — until
-			// the next baseline refetch re-derives from the server.
+			// the next baseline refetch re-derives from the server. Hence the
+			// silent wipe, not `discardStagedNodeMoves`: that one is the user's
+			// discard, whose listener below snaps the canvas back immediately.
 			noteMetamodelLockConflict(holder);
-			discardStagedNodeMoves();
+			clearStagedNodeMoves();
 		},
 		() => {
 			// `ensureCheckout` re-raises anything that is not a 409. Nothing to
@@ -773,5 +776,16 @@ onMetamodelCommitted(({ rebound }) => {
 		_undo = [];
 		_canUndo = false;
 	}
+	void refetchBaselineLayout();
+});
+
+/**
+ * The user discarded the staged moves (commit drawer, Discard all). Nothing
+ * durable changed, but the canvas is still showing where the nodes were
+ * dragged to — re-derive from the baseline so it stops promising a position
+ * the next commit will not carry.
+ */
+onStagedMovesDiscarded(() => {
+	if (_projectId === null) return;
 	void refetchBaselineLayout();
 });

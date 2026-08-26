@@ -630,7 +630,11 @@ way the client does: a `view.*` op batch through `POST /commits`, under a
   into `_view` and a discard surface that forgot to refetch would leave the
   sidebar showing a tree that exists nowhere. There are two such surfaces —
   `discardViewChanges` and checkout's global `discardAll()` — and the registry
-  is what keeps a third one from missing the refetch.
+  is what keeps a third one from missing the refetch. The metamodel diagram's
+  staged node moves follow the same shape: `discardStagedNodeMoves()` fires
+  `onStagedMovesDiscarded`, which `metamodel-diagram.svelte.ts` answers with a
+  baseline-layout refetch, so a discarded drag snaps back on every discard
+  surface rather than lingering on the canvas.
 - **Two page-level resets take the journal with them.** It is a module-scope
   singleton whose ops name `folder:` ids that only mean anything for one
   project at one rev, so `boot()` calls `clearViewState()` on every project

@@ -121,6 +121,43 @@ describe('RulesTab', () => {
 		expect(host.querySelector('[data-testid="rules-lint-error"]')).toBeNull();
 	});
 
+	it('disables Save while the lint reports errors', async () => {
+		// The server refuses an unparseable rule set at commit, and a staged one
+		// takes the whole batch down with it — the client already knows.
+		vi.spyOn(rulesApi, 'lintRules').mockResolvedValue({
+			ok: false,
+			errors: [{ message: 'Malformed rules YAML', line: 2, column: 5 }],
+			warnings: []
+		});
+		const tabId = openArtifactTab('rules', { artifactId: null, title: 'New rules' });
+		await ensureRulesDraft(tabId);
+		await vi.waitFor(() => expect(getRulesDraft(tabId)?.lintErrors).toHaveLength(1));
+		app = mount(RulesTab, { target: host, props: { tabId } });
+		flushSync();
+
+		const save = host.querySelector<HTMLButtonElement>('[data-testid="rules-save"]')!;
+		expect(save.disabled).toBe(true);
+		expect(save.title).toMatch(/lint error/i);
+	});
+
+	it('keeps Save enabled when the lint reports only drift warnings', async () => {
+		// Drift is a degradation the server tolerates at save; only errors gate.
+		vi.spyOn(rulesApi, 'lintRules').mockResolvedValue({
+			ok: true,
+			errors: [],
+			warnings: [{ rule: 'sensor-has-owner', message: "unknown stereotype 'Sensor'" }]
+		});
+		const tabId = openArtifactTab('rules', { artifactId: null, title: 'New rules' });
+		await ensureRulesDraft(tabId);
+		await vi.waitFor(() => expect(getRulesDraft(tabId)?.lintWarnings).toHaveLength(1));
+		app = mount(RulesTab, { target: host, props: { tabId } });
+		flushSync();
+
+		expect(host.querySelector<HTMLButtonElement>('[data-testid="rules-save"]')!.disabled).toBe(
+			false
+		);
+	});
+
 	it('renders the drift warnings strip when the lint reports drift', async () => {
 		vi.spyOn(rulesApi, 'lintRules').mockResolvedValue({
 			ok: true,

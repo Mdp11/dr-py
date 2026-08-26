@@ -440,13 +440,16 @@
 									<span class="w-3 font-mono {artifactGlyphClass(e)}" aria-label={e.kind}
 										>{artifactGlyph(e)}</span
 									>
-									<span class="font-mono text-foreground">{artifactEntryName(e)}</span>
+									<span class="min-w-0 break-words font-mono text-foreground"
+										>{artifactEntryName(e)}</span
+									>
 									<span
 										class="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
 									>
 										{artifactEntryNote(e)}
 									</span>
-									<span class="ml-auto font-mono text-[10px] text-muted-foreground/70"
+									<span
+										class="ml-auto min-w-0 break-all font-mono text-[10px] text-muted-foreground/70"
 										>{artifactEntryId(e)}</span
 									>
 									<!-- `discardArtifact`, never the raw `revertStagedArtifact` — this
@@ -518,7 +521,7 @@
 						class="flex flex-col gap-2 rounded border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
 						role="alert"
 					>
-						<p>Failed to preview changes: {previewError}</p>
+						<p class="break-words">Failed to preview changes: {previewError}</p>
 					</div>
 				{/if}
 
@@ -527,7 +530,7 @@
 						class="flex flex-col gap-2 rounded border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
 						role="alert"
 					>
-						<p>Commit failed: {commitError}</p>
+						<p class="break-words">Commit failed: {commitError}</p>
 					</div>
 				{/if}
 
@@ -590,12 +593,14 @@
 						<p class="text-xs text-muted-foreground/70">No view changes.</p>
 					{:else}
 						{#each viewEntries as entry, i (i)}
-							<p class="rounded bg-card px-2 py-1 font-mono text-[11px]">{entry.label}</p>
+							<p class="break-words rounded bg-card px-2 py-1 font-mono text-[11px]">
+								{entry.label}
+							</p>
 						{/each}
 					{/if}
 					{#if viewSaveError}
 						<div
-							class="mt-1 rounded border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
+							class="mt-1 break-words rounded border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
 							role="alert"
 						>
 							Save view failed: {viewSaveError}

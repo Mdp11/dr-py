@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Element } from '$lib/api/types';
-	import { ensureElement, getCachedElements, getMetamodel } from '$lib/state';
+	import { ensureElement, getCachedElements, getMetamodel, select } from '$lib/state';
 	import { fetchElementsOfType } from '$lib/state/element-queries';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import { X } from '@lucide/svelte';
@@ -66,6 +66,12 @@
 	function clear(): void {
 		onChange(null);
 	}
+
+	/** The resolved name is a way to get there, not just a label — navigation
+	 * only, never an edit (`onChange` stays untouched). */
+	function goto(): void {
+		if (valueId !== null) select({ kind: 'element', id: valueId });
+	}
 </script>
 
 <div class="relative flex items-center gap-2">
@@ -73,9 +79,15 @@
 		<span
 			class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/90"
 		>
-			<span class="truncate max-w-[160px]" title={valueId}>
+			<button
+				type="button"
+				data-testid="element-ref-goto"
+				class="max-w-[160px] truncate rounded text-left transition-colors hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				title={valueId}
+				onclick={goto}
+			>
 				{current ? displayName(current) : valueId}
-			</span>
+			</button>
 			<button
 				type="button"
 				class="text-muted-foreground transition-colors hover:text-foreground"

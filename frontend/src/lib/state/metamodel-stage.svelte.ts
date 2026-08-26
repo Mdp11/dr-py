@@ -182,14 +182,31 @@ export function clearStagedNodeMoves(): void {
 	writeMoves();
 }
 
+const _movesDiscardListeners: (() => void)[] = [];
+
 /** User-discard path: same wipe, different meaning — the moves are abandoned,
- * so the canvas caller is responsible for re-deriving `_positions` from the
- * server baseline. Kept separate from {@link clearStagedNodeMoves} so the two
- * intents stay distinguishable at the call sites (and so a discard listener
- * can be hung here later without firing it on every commit). */
+ * so the canvas must re-derive `_positions` from the server baseline, which
+ * is what {@link onStagedMovesDiscarded} tells it. Kept separate from
+ * {@link clearStagedNodeMoves} so the two intents stay distinguishable at the
+ * call sites and the listener never fires on a commit. */
 export function discardStagedNodeMoves(): void {
 	_moves.clear();
 	writeMoves();
+	for (const cb of [..._movesDiscardListeners]) cb();
+}
+
+/**
+ * Subscribe to "the user discarded the staged node moves" — the commit
+ * drawer's per-family discard or Discard all. Same registration shape and
+ * same cycle reason as {@link onMetamodelCommitted}: the diagram module
+ * imports this one, so this one cannot import the diagram.
+ */
+export function onStagedMovesDiscarded(cb: () => void): () => void {
+	_movesDiscardListeners.push(cb);
+	return () => {
+		const i = _movesDiscardListeners.indexOf(cb);
+		if (i !== -1) _movesDiscardListeners.splice(i, 1);
+	};
 }
 
 // --- committed listeners ---------------------------------------------------

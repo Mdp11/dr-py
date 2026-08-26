@@ -11,6 +11,7 @@
 // This test dispatches a REAL keydown (not a synthetic facet lookup) so it
 // actually exercises CodeMirror's precedence resolution end to end.
 import { flushSync, mount, unmount } from 'svelte';
+import { completionStatus, startCompletion } from '@codemirror/autocomplete';
 import { EditorView } from '@codemirror/view';
 import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -180,6 +181,46 @@ describe('CodeEditor — Reformat', () => {
 			await settle();
 			expect(formatButton().disabled).toBe(true);
 			expect(docText()).toBe('x=1\n');
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('CodeEditor — Tab accepts the open completion', () => {
+	it('a Tab keydown with the completion list open inserts the top suggestion instead of indenting', async () => {
+		const code = 'dr.elements("B';
+		const c = mount(CodeEditor, {
+			target: document.body,
+			props: {
+				code,
+				onChange: vi.fn(),
+				onRun: vi.fn(),
+				vocab: { typeNames: ['Building', 'Bus'] }
+			}
+		});
+		flushSync();
+		try {
+			const content = document.querySelector(
+				'[data-testid="snippet-editor"] .cm-content'
+			) as HTMLElement;
+			const view = EditorView.findFromDOM(content)!;
+			view.dispatch({ selection: { anchor: code.length } });
+			startCompletion(view);
+			await vi.waitFor(() => expect(completionStatus(view.state)).toBe('active'));
+			// `acceptCompletion` ignores a key that lands within 75ms of the list
+			// opening (CodeMirror's CompletionInteractMargin — a popup must not
+			// steal a keystroke already in flight), so let that window pass.
+			await new Promise((r) => setTimeout(r, 100));
+
+			content.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+			);
+			flushSync();
+
+			// Without the binding, Tab reaches the indentation keymap and the
+			// document gains four spaces instead of the suggestion.
+			expect(view.state.doc.toString()).toBe('dr.elements("Building');
 		} finally {
 			unmount(c);
 		}

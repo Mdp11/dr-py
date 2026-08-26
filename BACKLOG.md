@@ -53,6 +53,8 @@ A follow-up pass on `feat/exporter-v2-phase4` (Exporter v2 Phase 4) ships the
 export) remains open and needs re-confirmation from the owner before starting. The 2026-08-25
 pass on `feat/model-compare-apply-cr` closes P-23 — Compare and Apply CR became one
 server-proposes/client-stages pipeline — and adds K-19 and O-3, both noticed while finishing it.
+The 2026-08-26 UX pass on `fix/ux-minor-batch` closes U-3, U-6, U-9, F-14, F-17 and K-3's
+pluralization bullet, and retires U-5 as already shipped.
 
 ---
 
@@ -515,7 +517,9 @@ Excel's hard cap is 1790). Read per call in `build_workbook`, so a fresh env val
 effect without a restart. The export still deliberately ignores per-definition
 `width_px` — that half was left as-is (display preference, not export layout).
 
-### U-3 · Snippet autocomplete: Tab doesn't accept the first suggestion · `open`
+### U-3 · Snippet autocomplete: Tab doesn't accept the first suggestion · `done` (2026-08-26, fix/ux-minor-batch)
+A `Tab → acceptCompletion` binding in `CodeEditor.svelte`'s `Prec.highest` keymap; with no
+list open it returns false and Tab falls through to the indentation keymap as before.
 `frontend/src/lib/components/Snippet/` (CodeMirror). Wanted: Tab accepts the top
 completion.
 
@@ -525,11 +529,16 @@ Making it type-aware means the client needs a model of the facade's shape — th
 documented in `src/data_rover/core/script/README.md`, so the open question is whether the
 client hardcodes that model or the server exposes it (the latter keeps them from drifting).
 
-### U-5 · Relationship details panel doesn't show source and destination · `open`
+### U-5 · Relationship details panel doesn't show source and destination · `done` (already shipped)
+Verified 2026-08-26: `Inspector.svelte`'s `relationship-endpoints` block renders both endpoints
+as `goto-source`/`goto-target` buttons that select the element, pinned by
+`inspector-relationship-nav.test.ts`. The backlog entry predated the fix.
 Both should be listed and **clickable** (navigate to that element's details).
 `frontend/src/lib/components/Inspector.svelte` + `Inspector/RelationshipsList.svelte`.
 
-### U-6 · Element-valued properties render a name but aren't clickable · `open`
+### U-6 · Element-valued properties render a name but aren't clickable · `done` (2026-08-26, fix/ux-minor-batch)
+The resolved name in `ElementRefPicker` is now a button (`element-ref-goto`) that selects the
+element — navigation only, `onChange` untouched; Clear/Browse unchanged.
 In the element/relationship details panel, a property whose value is an element correctly
 resolves and shows its name, but clicking does nothing — it should navigate to that
 element's details. `frontend/src/lib/components/Inspector/PropertyField.svelte`.
@@ -552,7 +561,11 @@ count. So the count and the list read from different places. Almost certainly th
 root cause as **F-4** (the issue list is only ever refreshed by `validate-action.ts`) —
 fix them together in `frontend/src/lib/state/validation.svelte.ts`.
 
-### U-9 · Commit panel content overflows its bounds · `open` · *2026-08-18*
+### U-9 · Commit panel content overflows its bounds · `done` (2026-08-26, fix/ux-minor-batch) · *2026-08-18*
+Cause confirmed as diagnosed: flex children with no `min-w-0` and unbroken strings (ids, names
+without spaces). `DiffRow` label/id/endpoint/value spans and the drawer's artifact rows, view
+entries and error alerts now carry `min-w-0` + `break-words`/`break-all`; the dialog keeps its
+width. Pinned by `diff-row.test.ts` (class-level — happy-dom has no layout engine).
 When there are validation issues — and per the owner possibly in other cases not yet
 pinned down — text and controls in the commit panel spill **outside** the panel instead of
 the panel growing to fit. `DiffDrawer.svelte:356` fixes the dialog at `max-w-2xl` and its
@@ -659,7 +672,12 @@ honors — one recoverable 409 (the commit fails cleanly, the draft is untouched
 retries and the lease re-acquires). Deliberately not fixed: clearing the draft on reload would
 mean silently discarding a user's typed YAML, which is worse than one 409.
 
-### F-14 · Discarding staged metamodel moves doesn't re-derive the canvas · `open` · cosmetic · *2026-08-16*
+### F-14 · Discarding staged metamodel moves doesn't re-derive the canvas · `done` (2026-08-26, fix/ux-minor-batch) · cosmetic · *2026-08-16*
+`discardStagedNodeMoves` now fires an `onStagedMovesDiscarded` listener (same seam shape as
+`onMetamodelCommitted`) and the diagram module refetches the baseline layout on it, so every
+discard caller (drawer, Discard all, tab) snaps the canvas back. The lease-conflict path in the
+diagram switched to the silent `clearStagedNodeMoves` so a peer's lease keeps the drag local as
+documented.
 "Discard metamodel changes" in the DiffDrawer's Metamodel section wipes the staged ops
 (`discardStagedNodeMoves`), so the next commit is correct, but does not re-run the diagram's
 position derivation — a dragged node visibly stays at its dragged position until the
@@ -741,7 +759,9 @@ Resolved in Phase 3: Save no longer blocks on it (matching F-10's principle and 
 `key_column` hint's stance) — an inline `entry-split-template-warning` next to Save replaces the
 gate, and enforcement stays the export-time 422.
 
-### F-17 · Rules tab Save stays enabled on a document the server will reject · `open` · *2026-08-24*
+### F-17 · Rules tab Save stays enabled on a document the server will reject · `done` (2026-08-26, fix/ux-minor-batch) · *2026-08-24*
+Save is disabled (with a title) while `draft.lintErrors` is non-empty; drift warnings never gate
+it, per the distinction below.
 `components/Rules/RulesTab.svelte` disables Save only while the tab is lock-denied, so an
 unparseable rule set can be staged. It then 422s the **whole** commit batch
 (`api/artifact_ops.py`: `invalid validation_rules payload: …`), taking unrelated model and view
@@ -767,8 +787,7 @@ The debt is the fallback's breadth.
 
 ### K-3 · Artefacts Phase 3 minors · `open` · cosmetic · *2026-08-08 → 2026-08-10*
 - Inert `ack_errors` in the 422→409 remap.
-- "Imported 1 artifacts" — unpluralized default message (**test-pinned**, so fixing it
-  requires touching the test).
+- ~~"Imported 1 artifacts" — unpluralized default message~~ **done** (2026-08-26).
 - Unbounded bundle sizes on import/export.
 - `importer._landable_artifacts` vs `derive_plan_ex` order-of-checks reason-string
   mismatch (cosmetic divergence between two paths that should report identically).
@@ -1148,7 +1167,8 @@ can't be reversed by an implementer acting alone.
   dialogs was chosen.
 
 **Process / infra**
-- **Pushing to `origin`** — never asked for. `main` is 67+ commits ahead deliberately.
+- ~~**Pushing to `origin`** — never asked for.~~ **Superseded 2026-08-26**: the owner asked
+  for merge-and-push of `fix/ux-minor-batch`; `main` is pushed from here on.
 - **Committing anything under `docs/superpowers/` or `.superpowers/`** — gitignored by
   convention.
 - **AbortSignal plumbing for wizard uploads** — a cancelled submit still uploads the full
