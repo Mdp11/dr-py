@@ -124,6 +124,9 @@ def test_index_search_matches_reference_scan(seed: int) -> None:
     client = _client_with_random_model(seed)
     model = get_session().model
     assert model is not None
+    # the deprecated POST /model installer kicks the (sync-pinned) build too:
+    # without a ready index this parity test would be vacuous (scan vs scan)
+    assert model.indexes.search_ready is True
     # add a real element name to the battery so the exact-match tier is hit
     # (resolved via name_of so any casing/shape the generator emits qualifies)
     real_name = next(
