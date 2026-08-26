@@ -654,6 +654,22 @@ const ModifiedRelationshipSchema = z.object({
 	after: RelationshipSchema
 });
 
+/** The six op buckets a change request / commit diff carries per entity kind
+ * (`CrOps` on the server). */
+export const CrOpsSchema = z.object({
+	elements: z.object({
+		added: z.array(ElementSchema).default([]),
+		modified: z.array(ModifiedElementSchema).default([]),
+		deleted: z.array(ElementSchema).default([])
+	}),
+	relationships: z.object({
+		added: z.array(RelationshipSchema).default([]),
+		modified: z.array(ModifiedRelationshipSchema).default([]),
+		deleted: z.array(RelationshipSchema).default([])
+	})
+});
+export type CrOps = z.infer<typeof CrOpsSchema>;
+
 /**
  * GET /model/changes: the session op log compacted into a `datarover.cr/v1`
  * change request (the `ChangeRequest` shape in `$lib/state/cr.ts`) plus
@@ -668,18 +684,7 @@ export const ChangesDocSchema = z.object({
 		elementCount: z.number().int().default(0),
 		relationshipCount: z.number().int().default(0)
 	}),
-	ops: z.object({
-		elements: z.object({
-			added: z.array(ElementSchema).default([]),
-			modified: z.array(ModifiedElementSchema).default([]),
-			deleted: z.array(ElementSchema).default([])
-		}),
-		relationships: z.object({
-			added: z.array(RelationshipSchema).default([]),
-			modified: z.array(ModifiedRelationshipSchema).default([]),
-			deleted: z.array(RelationshipSchema).default([])
-		})
-	}),
+	ops: CrOpsSchema,
 	complete: z.boolean().default(true)
 });
 export type ChangesDoc = z.infer<typeof ChangesDocSchema>;
@@ -819,6 +824,21 @@ export const CommitHistoryResponseSchema = z.object({
 	has_more: z.boolean()
 });
 export type CommitHistoryResponse = z.infer<typeof CommitHistoryResponseSchema>;
+
+/**
+ * GET /commits/{rev}/diff — the model half only. The server also ships
+ * artifact/view/metamodel sections; zod strips what is not declared here, so
+ * adding a section later is a schema change, not a parse failure.
+ */
+export const CommitDiffSchema = z.object({
+	rev: z.number(),
+	commit_id: z.string(),
+	scope: z.array(z.string()).default([]),
+	is_rebind: z.boolean().default(false),
+	elements: CrOpsSchema.shape.elements,
+	relationships: CrOpsSchema.shape.relationships
+});
+export type CommitDiff = z.infer<typeof CommitDiffSchema>;
 
 export const ProjectSettingsSchema = z.object({
 	strict_mode: z.boolean()

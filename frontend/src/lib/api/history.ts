@@ -1,8 +1,10 @@
 import { apiFetch, type ClientConfig } from './client';
 import {
+	CommitDiffSchema,
 	CommitHistoryResponseSchema,
 	CommitResponseSchema,
 	ModelOutSchema,
+	type CommitDiff,
 	type CommitHistoryResponse,
 	type CommitResponse,
 	type ModelOut
@@ -27,6 +29,12 @@ export function getCommitHistory(
 /** GET /commits/{rev}/model — full model as it existed at `rev`. */
 export function getModelAtRev(rev: number, cfg?: ClientConfig): Promise<ModelOut> {
 	return apiFetch(`/commits/${rev}/model`, { method: 'GET', schema: ModelOutSchema }, cfg);
+}
+
+/** GET /commits/{rev}/diff — one commit's changes, rendered by the server
+ * from the journal row (no model reconstruction on either side). */
+export function getCommitDiff(rev: number, cfg?: ClientConfig): Promise<CommitDiff> {
+	return apiFetch(`/commits/${rev}/diff`, { method: 'GET', schema: CommitDiffSchema }, cfg);
 }
 
 /** POST /commits/revert — revert-to-commit. Throws ConflictError (409:

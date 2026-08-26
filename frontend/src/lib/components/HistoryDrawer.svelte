@@ -15,9 +15,10 @@
 	import { GitCommitVertical, RefreshCw, AlertTriangle, ArrowLeft } from '@lucide/svelte';
 	import CompareDiff from './CompareDiff.svelte';
 	import { computeDiff, type Diff } from '$lib/state/diff';
-	import { revertToCommit } from '$lib/api/history';
+	import { getCommitDiff, revertToCommit } from '$lib/api/history';
 	import { getRole, getModelRev, isProjectQuiet, applyDelta } from '$lib/state';
 	import { ConflictError, ValidationError } from '$lib/api';
+	import { crToDiff } from '$lib/state/cr';
 
 	type Props = { open: boolean };
 	let { open = $bindable(false) }: Props = $props();
@@ -34,12 +35,30 @@
 		return _allCommits().some((c) => c.is_rebind && c.rev > lo && c.rev <= hi);
 	}
 
-	async function showDiff(fromRev: number, toRev: number, title: string): Promise<void> {
+	function beginDiff(title: string, crossesRebind: boolean): void {
 		mode = 'diff';
 		diff = null;
 		diffError = null;
 		diffTitle = title;
-		spanRebind = spanCrossesRebind(fromRev, toRev);
+		spanRebind = crossesRebind;
+	}
+
+	// One commit: the server renders it from the journal row, so the cost
+	// tracks the commit, not the model.
+	async function showCommitDiff(rev: number): Promise<void> {
+		beginDiff(`Changes in r${rev}`, spanCrossesRebind(rev - 1, rev));
+		try {
+			const d = await getCommitDiff(rev);
+			diff = crToDiff({ ops: { elements: d.elements, relationships: d.relationships } });
+		} catch (e) {
+			diffError = e instanceof Error ? e.message : 'Failed to load diff';
+		}
+	}
+
+	// Two arbitrary revisions: both sides are reconstructed on the server and
+	// diffed here — inherently O(model).
+	async function showRangeDiff(fromRev: number, toRev: number): Promise<void> {
+		beginDiff(`r${fromRev} → r${toRev}`, spanCrossesRebind(fromRev, toRev));
 		try {
 			const [from, to] = await Promise.all([modelAt(fromRev), modelAt(toRev)]);
 			diff = computeDiff(from, to);
@@ -49,7 +68,7 @@
 	}
 
 	function diffCommit(rev: number): void {
-		void showDiff(rev - 1, rev, `Changes in r${rev}`);
+		void showCommitDiff(rev);
 	}
 
 	function pickCompare(rev: number): void {
@@ -63,7 +82,7 @@
 			const lo = Math.min(compareFrom, rev);
 			const hi = Math.max(compareFrom, rev);
 			compareFrom = null;
-			void showDiff(lo, hi, `r${lo} → r${hi}`);
+			void showRangeDiff(lo, hi);
 		}
 	}
 
