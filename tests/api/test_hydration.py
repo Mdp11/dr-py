@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gzip
+import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,12 @@ from fastapi.testclient import TestClient
 from data_rover.api import content, db, hydration
 from data_rover.api.db_models import Project
 from data_rover.api.main import create_app
-from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store
+from data_rover.api.storage import (
+    MemorySnapshotStore,
+    get_snapshot_store,
+    set_snapshot_store,
+    snapshot_key,
+)
 from data_rover.api.session import Session
 from data_rover.core.metamodel.loader import load_metamodel_str
 
@@ -232,3 +239,79 @@ def test_hydrate_builds_the_search_index() -> None:
     assert h.search_index_build is not None and h.search_index_build.running is False
     assert h.model.indexes.search_ready is True
     assert h.model.indexes.search_candidates("turbine") == {"x1"}
+
+
+def test_snapshot_blob_is_gzip_under_the_gz_key() -> None:
+    _seed_baseline()
+    key = snapshot_key("p1", 0)
+    assert key.endswith(".json.gz")
+    blob = get_snapshot_store().get(key)
+    assert blob[:2] == b"\x1f\x8b"
+    assert gzip.decompress(blob) == b'{"elements":[],"relationships":[]}'
+    with db.db_session() as s:
+        snap = content.latest_snapshot(s, "p1")
+        assert snap is not None and snap.key == key
+
+
+def test_persist_then_hydrate_roundtrip_nonempty_model() -> None:
+    from data_rover.core.model.element import Element
+
+    sess = _seed_baseline()
+    assert sess.model is not None
+    et = _first_concrete_element_type(sess)
+    for i in range(3):
+        sess.model.elements[f"x{i}"] = Element(
+            id=f"x{i}", type_name=et, properties={"name": f"türbine {i}", "n": i}
+        )
+    sess.model.indexes.rebuild()
+    hydration.persist_baseline("p1", sess, author_id=None)
+    h = hydration.hydrate_session("p1")
+    assert h.model is not None
+    assert sorted(h.model.elements) == ["x0", "x1", "x2"]
+    assert h.model.elements["x2"].properties == {"name": "türbine 2", "n": 2}
+
+
+def test_hydrate_loads_a_legacy_plain_json_snapshot_row() -> None:
+    """A row written before compression: indented JSON under a ``.json`` key.
+    Neither the key nor the bytes are migrated — the reader sniffs."""
+    mm = load_metamodel_str(MM_YAML)
+    et = next(t.name for t in mm.elements if not t.abstract)
+    legacy_key = "projects/p1/snapshots/0.json"
+    doc = {
+        "elements": [{"id": "old1", "type_name": et, "properties": {"name": "v"}, "rev": 0}],
+        "relationships": [],
+    }
+    get_snapshot_store().put(
+        legacy_key, [json.dumps(doc, indent=2, ensure_ascii=False).encode("utf-8")]
+    )
+    with db.db_session() as s:
+        mmrow = content.create_metamodel(s, name="smart-city", version=1, blob=MM_YAML)
+        content.upsert_model_row(s, "p1", metamodel_id=mmrow.id)
+        content.record_snapshot(s, "p1", rev=0, key=legacy_key)
+    h = hydration.hydrate_session("p1")
+    assert h.model is not None
+    assert h.model.elements["old1"].properties == {"name": "v"}
+    assert h.model.indexes.search_ready is True  # sync pin: index built after load
+
+
+def test_reconstruct_model_at_reads_the_compressed_snapshot() -> None:
+    from data_rover.core.model.element import Element
+
+    sess = _seed_baseline()
+    assert sess.model is not None
+    et = _first_concrete_element_type(sess)
+    sess.model.elements["base"] = Element(id="base", type_name=et, properties={})
+    sess.model.indexes.rebuild()
+    hydration.persist_baseline("p1", sess, author_id=None)
+    create = {"kind": "create_element", "temp_id": "e1", "type_name": et, "properties": {}}
+    with db.db_session() as s:
+        content.append_commit(
+            s, "p1", rev=1, commit_id="c1", author_id=None,
+            ops=[create], inverse_ops=[], id_map={},
+        )
+        content.set_model_rev(s, "p1", 1)
+    at0 = hydration.reconstruct_model_at("p1", 0)
+    at1 = hydration.reconstruct_model_at("p1", 1)
+    assert at0 is not None and sorted(at0.elements) == ["base"]
+    assert at1 is not None and sorted(at1.elements) == ["base", "e1"]
+    assert at1.indexes.search_ready is False  # transient model: no search index
