@@ -749,11 +749,11 @@ def commit_diff_endpoint(
     """Render one commit's changes across content families.
 
     Read endpoint — any member (the ``session`` dependency only establishes
-    membership, exactly like GET /commits above). O(model) like
-    GET /commits/{rev}/model, since the model half reconstructs both sides; the
-    artifact half is journal-only. The rendering itself lives in
-    ``commit_diff.diff_commit`` so the future change-request workflow can point
-    it at a draft instead of a commit row.
+    membership, exactly like GET /commits above). O(commit) for rows that
+    carry ``entity_states`` (every commit written since the column exists); a
+    row without them reconstructs both sides like GET /commits/{rev}/model.
+    The rendering itself lives in ``commit_diff.diff_commit`` so the future
+    change-request workflow can point it at a draft instead of a commit row.
     """
     row = content.get_commit(db, project_id, rev)
     if row is None:
