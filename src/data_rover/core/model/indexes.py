@@ -18,6 +18,10 @@ rebuild` afterwards; code that writes ``entity.properties`` directly must call
 carries the same obligations: ``rebuild()`` recomputes it from scratch, and
 any direct writer of ``entity.properties`` must go through
 ``on_properties_changed`` so a root's display-name reposition is not missed.
+The element insertion-order index (``element_order``) is maintained by the
+two element hooks alone — an element never moves within ``model.elements``,
+so property and relationship changes leave it untouched — and re-derived by
+``rebuild()``.
 The trigram search index (``search_postings`` / ``_trigrams_of``) is
 maintained at that same boundary with the same obligations; it feeds
 ``search_candidates`` (the fuzzy-search candidate generator) and, like the
@@ -117,6 +121,17 @@ class IndexSet:
         # element id -> its CURRENT key in roots_order (needed to remove/reposition
         # after a rename, since the old display name is gone from the element)
         self._root_key_of: dict[str, Pair] = {}
+        #: element id -> monotonic insertion sequence number. Invariant:
+        #: ``sorted(model.elements, key=element_order.__getitem__) ==
+        #: list(model.elements)`` — dict iteration order IS insertion order,
+        #: a deletion never reorders the survivors, and a re-inserted id
+        #: (restore) lands last and gets a fresh, larger number. Lets the
+        #: uniqueness validator pick a duplicate group's insertion-first
+        #: primary without enumerating the model. Numbers are sparse after
+        #: churn; only their ORDER is meaningful. Replaced wholesale by
+        #: ``rebuild()``: never cache the dict across one.
+        self.element_order: dict[str, int] = {}
+        self._next_order: int = 0
         #: lowercased trigram -> ids of elements whose searchable text
         #: contains it. The searchable text is exactly the fields the fuzzy
         #: element search scores (routes/read.py _search_score): the id, the
@@ -256,6 +271,8 @@ class IndexSet:
     # -- mutation hooks (called from the Model mutation boundary) ----------
 
     def on_element_created(self, element: Element) -> None:
+        self.element_order[element.id] = self._next_order
+        self._next_order += 1
         self.elements_by_type.setdefault(element.type_name, set()).add(element.id)
         self._add_to_group(element)
         self._update_refs(element.id, self._element_refs(element))
@@ -275,6 +292,7 @@ class IndexSet:
         self._update_refs(element.id, set())
         self._roots_remove(element.id)
         self._update_trigrams(element.id, frozenset())
+        self.element_order.pop(element.id, None)
 
     def on_relationship_created(self, rel: Relationship) -> None:
         self.out_rels.setdefault(rel.source_id, set()).add(rel.id)
@@ -397,12 +415,16 @@ class IndexSet:
                     rel.source_id
                 )
                 self._containment_rel_ids.setdefault(rel.target_id, []).append(rel.id)
-        for element in self._model.elements.values():
+        order: dict[str, int] = {}
+        for i, element in enumerate(self._model.elements.values()):
+            order[element.id] = i
             self.elements_by_type.setdefault(element.type_name, set()).add(element.id)
             self._add_to_group(element)
             self._add_refs(element.id, self._element_refs(element))
             if element.id not in self.containment_parents:
                 self._root_key_of[element.id] = (display_name(element), element.id)
+        self.element_order = order
+        self._next_order = len(order)
         # bulk-construct in one O(n log n) pass instead of n incremental adds
         self.roots_order = SortedPairs(self._root_key_of.values())
 
@@ -486,6 +508,17 @@ class IndexSet:
             )
             if _norm(name, getattr(self, name)) != _norm(name, getattr(fresh, name))
         ]
+        # element_order carries sparse numbers after churn (a rebuild's are
+        # dense), so compare the ORDER it induces, never the numbers; the
+        # numbers must also be distinct, since a stable sort hides a duplicate
+        order = self.element_order
+        ids = list(self._model.elements)
+        if (
+            set(order) != set(ids)
+            or len(set(order.values())) != len(order)
+            or sorted(ids, key=order.__getitem__) != ids
+        ):
+            mismatched.append("element_order")
         if mismatched:
             raise AssertionError(
                 "IndexSet inconsistent with a fresh rebuild in: "
