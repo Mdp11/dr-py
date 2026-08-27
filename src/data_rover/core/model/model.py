@@ -79,10 +79,12 @@ class Model:
         ):
             raise KeyError(f"Entity {target.id!r} is not part of this model")
         if isinstance(target, Element):
-            defs = self.metamodel.effective_element_properties(target.type_name)
+            names = self.metamodel.effective_element_property_names(target.type_name)
         else:
-            defs = self.metamodel.effective_relationship_properties(target.type_name)
-        if prop not in {p.name for p in defs}:
+            names = self.metamodel.effective_relationship_property_names(
+                target.type_name
+            )
+        if prop not in names:
             raise KeyError(f"{target.type_name!r} has no property {prop!r}")
         target.properties[prop] = value
         target.rev += 1
@@ -102,10 +104,12 @@ class Model:
         ):
             raise KeyError(f"Entity {target.id!r} is not part of this model")
         if isinstance(target, Element):
-            defs = self.metamodel.effective_element_properties(target.type_name)
+            names = self.metamodel.effective_element_property_names(target.type_name)
         else:
-            defs = self.metamodel.effective_relationship_properties(target.type_name)
-        if prop not in {p.name for p in defs}:
+            names = self.metamodel.effective_relationship_property_names(
+                target.type_name
+            )
+        if prop not in names:
             raise KeyError(f"{target.type_name!r} has no property {prop!r}")
         if prop not in target.properties:
             return

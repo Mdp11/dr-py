@@ -118,3 +118,63 @@ def test_relationship_key_inherited_on_supertype_ok():
         relationships=[RelationshipType(name="Link", source="Sub", target="Sub")],
     )
     assert check_metamodel(mm) == []
+
+
+def test_effective_property_names_follow_inheritance_and_are_cached():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Named",
+                abstract=True,
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+            ElementType(
+                name="Block",
+                extends="Named",
+                properties=[PropertyDef(name="mass", datatype="float")],
+            ),
+        ],
+        relationships=[
+            RelationshipType(
+                name="Link",
+                source="Block",
+                target="Block",
+                properties=[PropertyDef(name="label", datatype="string")],
+            ),
+        ],
+    )
+    names = mm.effective_element_property_names("Block")
+    assert names == frozenset({"name", "mass"})
+    assert names == {p.name for p in mm.effective_element_properties("Block")}
+    # one shared object per type per cache build: no copy per call
+    assert mm.effective_element_property_names("Block") is names
+    assert mm.effective_element_property_names("Named") == frozenset({"name"})
+    assert mm.effective_relationship_property_names("Link") == frozenset({"label"})
+    assert mm.effective_element_property_names("Missing") == frozenset()
+    assert mm.effective_relationship_property_names("Missing") == frozenset()
+
+
+def test_effective_property_names_rebuild_on_model_copy():
+    base = Metamodel(
+        elements=[
+            ElementType(
+                name="Block", properties=[PropertyDef(name="name", datatype="string")]
+            )
+        ]
+    )
+    assert base.effective_element_property_names("Block") == frozenset({"name"})
+    grown = base.model_copy(
+        update={
+            "elements": [
+                ElementType(
+                    name="Block",
+                    properties=[
+                        PropertyDef(name="name", datatype="string"),
+                        PropertyDef(name="mass", datatype="float"),
+                    ],
+                )
+            ]
+        }
+    )
+    assert grown.effective_element_property_names("Block") == frozenset({"name", "mass"})
+    assert base.effective_element_property_names("Block") == frozenset({"name"})
