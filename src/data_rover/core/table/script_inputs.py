@@ -24,8 +24,13 @@ from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.model.naming import display_name
 from data_rover.core.navigation.evaluate import PropertyValue
-from data_rover.core.script.lint import entry_arity
-from data_rover.core.script.runner import CallResult, ScriptError, WireInput
+from data_rover.core.script.runner import (
+    CallResult,
+    ElementsInput,
+    ScalarsInput,
+    ScriptError,
+    WireInput,
+)
 
 from .evaluate import (
     RowKey,
@@ -52,12 +57,37 @@ class InputFailure:
 ResolvedInputs = dict[str, WireInput]
 
 
-def _elements(ids: list[str]) -> WireInput:
+def _elements(ids: list[str]) -> ElementsInput:
     return {"kind": "elements", "ids": ids}
 
 
-def _scalars(values: list[object]) -> WireInput:
+def _scalars(values: list[object]) -> ScalarsInput:
     return {"kind": "scalars", "values": values}
+
+
+#: The two "script column can't produce anything" messages, shared verbatim
+#: between an input's failure (`_script_result`) and the cell's own render
+#: (`cells._script_cell`) so the two can never drift apart.
+RUNNER_UNAVAILABLE_MESSAGE = "script runner unavailable"
+
+
+def dangling_ref_message(ref: str) -> str:
+    return f"snippet artifact {ref!r} not found"
+
+
+def navigation_display_values(
+    model: Model, reached: list[str | PropertyValue]
+) -> list[object]:
+    """Render a value-projected navigation frontier for display: a
+    `PropertyValue` terminal contributes its value; an element node (a mixed
+    frontier — the same property scalar on one type, element-typed on
+    another) degrades to its display name so nothing silently drops. Shared
+    between a navigation input and `cells._navigation_cell` so an input's
+    values and the rendered cell cannot drift."""
+    return [
+        n.value if isinstance(n, PropertyValue) else display_name(model.elements[n])
+        for n in reached
+    ]
 
 
 def property_input_values(
@@ -172,14 +202,7 @@ def _resolve_one(
         if any(isinstance(n, PropertyValue) for n in reached):
             # value-projected navigation: the cell shows VALUES (mixed
             # frontiers degrade element nodes to display names, as the cell does)
-            return _scalars(
-                [
-                    n.value
-                    if isinstance(n, PropertyValue)
-                    else display_name(model.elements[n])
-                    for n in reached
-                ]
-            )
+            return _scalars(navigation_display_values(model, reached))
         return _elements([n for n in reached if isinstance(n, str)])
     assert isinstance(ref_col, ScriptColumn)
     res = _script_result(
@@ -192,7 +215,7 @@ def _resolve_one(
     if p["kind"] == "scalar":
         return _scalars([] if p["value"] is None else [p["value"]])
     if p["kind"] == "scalars":
-        return _scalars([v for v in p["values"] if v is not None])
+        return _scalars(list(p["values"]))
     if p["kind"] == "element":
         return _elements([p["id"]] if p["id"] in model.elements else [])
     return _elements([i for i in dict.fromkeys(p["ids"]) if i in model.elements])
@@ -283,7 +306,7 @@ def _script_result(
             value=None,
             error=ScriptError(
                 kind="runtime",
-                message=f"snippet artifact {col.snippet.ref!r} not found",
+                message=dangling_ref_message(col.snippet.ref),
             ),
             duration_ms=0,
         )
@@ -294,7 +317,7 @@ def _script_result(
     if script is None:
         return CallResult(
             value=None,
-            error=ScriptError(kind="unavailable", message="script runner unavailable"),
+            error=ScriptError(kind="unavailable", message=RUNNER_UNAVAILABLE_MESSAGE),
             duration_ms=0,
         )
     return evaluate_script_column(
@@ -331,7 +354,7 @@ def evaluate_script_column(
     dangling-ref / unconfigured / no-roots cases the way their cell renders."""
     assert col.snippet.definition is not None
     code = col.snippet.definition.code
-    arity = entry_arity(code, "value")
+    arity = script.value_arity(code)
     n = len(col.inputs)
     if arity == 1 and n:
         return _arity_error(

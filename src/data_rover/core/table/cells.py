@@ -42,7 +42,6 @@ if TYPE_CHECKING:
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
-from data_rover.core.model.naming import display_name
 from data_rover.core.navigation.evaluate import PropertyValue
 
 from .evaluate import (
@@ -61,7 +60,13 @@ from .schema import (
     ScriptColumn,
     TableDefinition,
 )
-from .script_inputs import evaluate_script_column, property_input_values
+from .script_inputs import (
+    RUNNER_UNAVAILABLE_MESSAGE,
+    dangling_ref_message,
+    evaluate_script_column,
+    navigation_display_values,
+    property_input_values,
+)
 
 
 @dataclass
@@ -256,10 +261,7 @@ def _navigation_cell(
         # A mixed frontier (the same property name element-typed on one type,
         # scalar on another) degrades element nodes to their display names so
         # nothing silently drops.
-        vals: list[object] = [
-            n.value if isinstance(n, PropertyValue) else display_name(model.elements[n])
-            for n in reached
-        ]
+        vals: list[object] = navigation_display_values(model, reached)
         return ValuesCell(
             present=True,
             values=vals[:cap],
@@ -302,7 +304,7 @@ def _script_cell(
         if isinstance(b, str):
             return ElementCell(element_id=b)
         if col.snippet.ref is not None:
-            return ErrorCell(message=f"snippet artifact {col.snippet.ref!r} not found")
+            return ErrorCell(message=dangling_ref_message(col.snippet.ref))
         if col.snippet.definition is not None and script is not None:
             roots = resolve_source_elements(
                 mm,
@@ -342,7 +344,7 @@ def _script_cell(
         return ValueCell(present=False, value=None, element_id=None, editable=False)
 
     if col.snippet.ref is not None:  # post-resolve: dangling ref
-        return ErrorCell(message=f"snippet artifact {col.snippet.ref!r} not found")
+        return ErrorCell(message=dangling_ref_message(col.snippet.ref))
     if col.snippet.definition is None:  # unconfigured ({}): empty, like an
         # unconfigured navigation/property source
         return ValueCell(present=False, value=None, element_id=None, editable=False)
@@ -353,7 +355,7 @@ def _script_cell(
         return ValueCell(present=False, value=None, element_id=None, editable=False)
     if script is None:
         # Defensive: routes always supply a context when table_has_script().
-        return ErrorCell(message="script runner unavailable")
+        return ErrorCell(message=RUNNER_UNAVAILABLE_MESSAGE)
     res = evaluate_script_column(
         mm, model, defn, key, col, els, base_slots, limits, script, memo
     )

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol, TypedDict
 
 from ..model.model import Model
 
@@ -33,9 +33,24 @@ from ..model.model import Model
 #: ("children", id) | ("parent", id) | ("scan", type_name_or_None).
 ReadKey = tuple[str, str | None]
 
+
+class ElementsInput(TypedDict):
+    """A resolved input's wire form when it carries elements."""
+
+    kind: Literal["elements"]
+    ids: list[str]
+
+
+class ScalarsInput(TypedDict):
+    """A resolved input's wire form when it carries scalar values."""
+
+    kind: Literal["scalars"]
+    values: list[object]
+
+
 #: One resolved script-column input as it crosses the bridge: the elements a
 #: column holds for the row, or its scalar values. The tag set is closed.
-WireInput = dict[str, Any]
+WireInput = ElementsInput | ScalarsInput
 WireInputs = dict[str, WireInput]
 
 
@@ -46,8 +61,8 @@ def input_element_ids(inputs: WireInputs | None) -> list[str]:
         return []
     out: dict[str, None] = {}
     for spec in inputs.values():
-        if spec.get("kind") == "elements":
-            for i in spec.get("ids", ()):
+        if spec["kind"] == "elements":
+            for i in spec["ids"]:
                 out.setdefault(i, None)
     return list(out)
 

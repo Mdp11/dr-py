@@ -53,6 +53,7 @@ from typing import Literal
 
 from ..model.model import Model
 from .cell_cache import CellKey, ScriptCellCache, inputs_digest
+from .lint import entry_arity
 from .runner import (
     CallResult,
     RunLimits,
@@ -108,6 +109,7 @@ class ScriptEvalContext:
         self._cell_cache = cell_cache
         self._rev = rev
         self._code_sha: dict[str, str] = {}
+        self._value_arity: dict[str, int | None] = {}
         self.cache_only = cache_only
         self._should_abort = should_abort
         self.pending_misses = 0
@@ -120,6 +122,13 @@ class ScriptEvalContext:
             sha = hashlib.sha256(code.encode()).hexdigest()
             self._code_sha[code] = sha
         return (sha, entry, ids, digest)
+
+    def value_arity(self, code: str) -> int | None:
+        """`entry_arity(code, "value")`, memoized per distinct code — an
+        `ast.parse` is not free, and every row of every script column asks."""
+        if code not in self._value_arity:
+            self._value_arity[code] = entry_arity(code, "value")
+        return self._value_arity[code]
 
     def call(
         self,

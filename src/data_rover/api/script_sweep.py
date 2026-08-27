@@ -431,6 +431,18 @@ def _run_inner(
             and c.mode != "expand"  # expand items were built above
             and c.snippet.definition is not None
         ]
+        # A column whose `value()` arity doesn't match its declared inputs has
+        # nothing to compute: `evaluate_script_column` renders the arity error
+        # itself without ever calling the guest with `inputs=`, so calling it
+        # here would only mint a cached result under a digest key the page
+        # never probes. Checked once per column (memoized by `ctx.value_arity`),
+        # not per row.
+        mismatched_cols: set[int] = set()
+        for c in script_cols:
+            assert c.snippet.definition is not None
+            arity = ctx.value_arity(c.snippet.definition.code)
+            if (arity == 1 and c.inputs) or (arity == 2 and not c.inputs):
+                mismatched_cols.add(id(c))
         expand_count = sum(
             1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
         )
@@ -458,6 +470,9 @@ def _run_inner(
                 return
             for col in script_cols:
                 assert col.snippet.definition is not None
+                if id(col) in mismatched_cols:
+                    dup_or_empty += 1
+                    continue
                 roots = resolve_source_elements(
                     metamodel,
                     model,

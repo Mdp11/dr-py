@@ -128,12 +128,13 @@ def lint_code(code: str) -> list[Diagnostic]:
             allowed = _ENTRY_ARITIES[node.name]
             if argc not in allowed:
                 expect = " or ".join(str(a) for a in allowed)
+                word = "argument" if allowed[-1] == 1 else "arguments"
                 diags.append(
                     Diagnostic(
                         node.lineno,
                         node.col_offset,
                         "warning",
-                        f"{node.name}() must take {expect} argument(s) "
+                        f"{node.name}() must take {expect} {word} "
                         f"({_ENTRY_ARG_DESC[node.name]}), got {argc}",
                     )
                 )
