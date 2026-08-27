@@ -556,9 +556,7 @@ def test_parallel_consecutive_timeout_abort_is_global(
     settings = _parallel(settings_sync_sweep)
     abort_at = settings.snippet_sweep_timeout_abort
 
-    job = kick_or_join_sweep(
-        session, model.metamodel, model, defn, runner, settings, 0
-    )
+    job = kick_or_join_sweep(session, model.metamodel, model, defn, runner, settings, 0)
     assert job.state == "failed"
     assert "consecutive snippet timeouts" in (job.message or "")
     # >= threshold (it takes that many to trip) and <= threshold + one in-flight
@@ -581,10 +579,124 @@ def test_parallel_consecutive_unavailable_abort_is_global(
     settings = _parallel(settings_sync_sweep)
     abort_at = settings.snippet_sweep_timeout_abort
 
-    job = kick_or_join_sweep(
-        session, model.metamodel, model, defn, runner, settings, 0
-    )
+    job = kick_or_join_sweep(session, model.metamodel, model, defn, runner, settings, 0)
     assert job.state == "failed"
     assert "unavailable" in (job.message or "")
     assert abort_at <= runner.opens <= abort_at + PARALLEL_WORKERS
     assert session.script_cell_cache.size == 0
+
+
+from data_rover.core.table.schema import ColumnRef, PropertyColumn, ScriptInput
+
+
+def _defn_with_inputs() -> TableDefinition:
+    """Property input → every row's inputs differ (name), so no dedupe."""
+    return TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            PropertyColumn(name="name"),
+            ScriptColumn(
+                snippet=SnippetSource(
+                    definition=SnippetDefinition(
+                        code="def value(els, inputs): return inputs['n']"
+                    )
+                ),
+                inputs=[ScriptInput(name="n", ref=ColumnRef(index=0))],
+            ),
+        ],
+    )
+
+
+def test_sweep_items_are_keyed_by_inputs(settings_sync_sweep: Settings) -> None:
+    model = _model(3)
+    session = _session_with(model)
+    runner = CountingRunner()
+    job = kick_or_join_sweep(
+        session,
+        model.metamodel,
+        model,
+        _defn_with_inputs(),
+        runner,
+        settings_sync_sweep,
+        0,
+    )
+    assert job.state == "done" and job.done == job.total == 3
+    assert runner.calls == 3
+    ctx = ScriptEvalContext(
+        runner,
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=session.script_cell_cache,
+        rev=0,
+        cache_only=True,
+    )
+    built = build_rows_ex(model.metamodel, model, _defn_with_inputs(), script=ctx)
+    from data_rover.core.table.cells import evaluate_cells
+
+    evaluate_cells(model.metamodel, model, _defn_with_inputs(), built.keys, script=ctx)
+    assert ctx.pending_misses == 0
+
+
+def test_sweep_computes_a_script_input_at_enumeration(
+    settings_sync_sweep: Settings,
+) -> None:
+    model = _model(2)
+    session = _session_with(model)
+    runner = CountingRunner()
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ScriptColumn(
+                snippet=SnippetSource(definition=SnippetDefinition(code=VALUE_CODE))
+            ),
+            ScriptColumn(
+                snippet=SnippetSource(
+                    definition=SnippetDefinition(
+                        code="def value(els, inputs): return inputs['n']"
+                    )
+                ),
+                inputs=[ScriptInput(name="n", ref=ColumnRef(index=0))],
+            ),
+        ],
+    )
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, defn, runner, settings_sync_sweep, 0
+    )
+    assert job.state == "done"
+    # column 0: 2 cells (computed serially while resolving column 1's input);
+    # column 1: 2 cells → 4 guest calls, and total counts every script cell
+    assert runner.calls == 4
+    assert job.total == 4 and job.done == 4
+
+
+def test_sweep_counts_a_failed_input_as_done(settings_sync_sweep: Settings) -> None:
+    model = _model(2)
+    session = _session_with(model)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ScriptColumn(
+                snippet=SnippetSource(
+                    definition=SnippetDefinition(
+                        code="def value(els): raise ValueError('x')"
+                    )
+                )
+            ),
+            ScriptColumn(
+                snippet=SnippetSource(
+                    definition=SnippetDefinition(
+                        code="def value(els, inputs): return 1"
+                    )
+                ),
+                inputs=[ScriptInput(name="n", ref=ColumnRef(index=0))],
+            ),
+        ],
+    )
+    from tests.script.trusted_runner import TrustedRunner
+
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, defn, TrustedRunner(), settings_sync_sweep, 0
+    )
+    assert job.state == "done"
+    assert job.total == 4 and job.done == 4  # the 2 errored-input cells count as done
