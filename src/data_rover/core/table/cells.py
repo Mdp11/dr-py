@@ -61,6 +61,7 @@ from .schema import (
     ScriptColumn,
     TableDefinition,
 )
+from .script_inputs import property_input_values
 
 
 @dataclass
@@ -206,16 +207,7 @@ def _property_cell(
         return ValueCell(present=present, value=val, element_id=eid, editable=present)
     # many-element collapse → joined read-only values (undeclared-on-some-types
     # elements simply contribute nothing, rather than failing the whole cell)
-    vals: list[object] = []
-    for eid in els:
-        el = model.elements[eid]
-        if not _prop_present(mm, el.type_name, col.name):
-            continue
-        v = el.properties.get(col.name)
-        if isinstance(v, (list, tuple)):
-            vals.extend(v)
-        elif v is not None:
-            vals.append(v)
+    vals = property_input_values(mm, model, col, els)
     return ValuesCell(present=True, values=vals, total=len(vals), truncated=False)
 
 
