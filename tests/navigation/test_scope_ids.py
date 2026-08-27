@@ -169,7 +169,7 @@ def test_matchers_stop_at_the_first_failing_criterion(monkeypatch: pytest.Monkey
     calls: list[str] = []
     real = ev._match_nav_criterion
 
-    def counting(model, element, criterion):  # noqa: ANN001
+    def counting(model, element, criterion):
         calls.append(getattr(criterion, "op", "?"))
         return real(model, element, criterion)
 

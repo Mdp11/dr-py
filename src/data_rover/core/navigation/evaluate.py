@@ -241,7 +241,11 @@ def _scope_ids(metamodel: Metamodel, model: Model, scope: Scope) -> list[str]:
     through an id set: ids minted in order (UUIDv7, sequential import ids)
     hand `sorted` a presorted run, so the sort is O(n) comparisons on such a
     model and never worse than a set's hash order on any other. An empty
-    criteria list skips the matcher entirely.
+    criteria list skips the matcher entirely. The criteria walk runs on a list
+    snapshot of the dict — readers hold no write mutex, and a peer's create or
+    delete mid-walk must be a benign miss, not a ``RuntimeError``; the
+    no-criteria ``sorted(model.elements)`` is a single C-level call and needs
+    none.
     """
     if scope.types:
         by_type = model.indexes.elements_by_type
@@ -256,7 +260,9 @@ def _scope_ids(metamodel: Metamodel, model: Model, scope: Scope) -> list[str]:
     if not scope.criteria:
         return sorted(model.elements)
     return sorted(
-        e.id for e in model.elements.values() if _matches_criteria(model, e, scope)
+        e.id
+        for e in list(model.elements.values())
+        if _matches_criteria(model, e, scope)
     )
 
 
