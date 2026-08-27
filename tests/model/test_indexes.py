@@ -721,3 +721,90 @@ def test_rel_key_exact_type_match_ignores_subtype_edges():
     model.connect("Knows", a.id, c.id)
     assert model.indexes.duplicate_keys == set()
     model.indexes.verify_consistent()
+
+
+# ---------------------------------------------------------------------------
+# element insertion-order index
+# ---------------------------------------------------------------------------
+
+
+def _assert_order_matches_dict(model: Model) -> None:
+    order = model.indexes.element_order
+    ids = list(model.elements)
+    assert set(order) == set(ids)
+    assert sorted(ids, key=order.__getitem__) == ids
+
+
+def test_element_order_tracks_insertion_through_churn():
+    model = Model(_mm())
+    a = model.create_element("Doc")
+    b = model.create_element("Doc")
+    c = model.create_element("Doc")
+    order = model.indexes.element_order
+    assert order[a.id] < order[b.id] < order[c.id]
+
+    model.delete_element(b.id)
+    assert b.id not in model.indexes.element_order
+    _assert_order_matches_dict(model)
+
+    # a re-inserted id lands LAST in the dict and gets a fresh, larger number
+    restored = model.restore_element(b.id, "Doc")
+    assert restored.id == b.id
+    assert list(model.elements)[-1] == b.id
+    assert model.indexes.element_order[b.id] > model.indexes.element_order[c.id]
+    _assert_order_matches_dict(model)
+    model.indexes.verify_consistent()
+
+
+def test_element_order_rebuilt_from_dict_order():
+    model = Model(_mm())
+    for i in range(5):
+        model.elements[f"e{i}"] = Element(id=f"e{i}", type_name="Doc")
+    model.indexes.rebuild()
+    assert model.indexes.element_order == {f"e{i}": i for i in range(5)}
+
+    # the counter continues past the rebuilt numbers
+    d = model.create_element("Doc")
+    assert model.indexes.element_order[d.id] == 5
+    _assert_order_matches_dict(model)
+    model.indexes.verify_consistent()
+
+
+def test_element_order_rederived_by_keep_search_rebuild():
+    model = Model(_mm())
+    a = model.create_element("Doc")
+    b = model.create_element("Doc")
+    model.delete_element(a.id)
+    model.restore_element(a.id, "Doc")
+    assert model.indexes.element_order[a.id] > model.indexes.element_order[b.id]
+
+    model.indexes.rebuild(keep_search=True)
+    # dense numbers in dict order: b was never deleted, a was re-inserted last
+    assert model.indexes.element_order == {b.id: 0, a.id: 1}
+    _assert_order_matches_dict(model)
+
+
+def test_element_order_empty_model():
+    model = Model(_mm())
+    assert model.indexes.element_order == {}
+    model.indexes.rebuild()
+    assert model.indexes.element_order == {}
+    model.indexes.verify_consistent()
+
+
+def test_verify_consistent_detects_element_order_drift():
+    model = Model(_mm())
+    a = model.create_element("Doc")
+    b = model.create_element("Doc")
+    order = model.indexes.element_order
+    order[a.id], order[b.id] = order[b.id], order[a.id]  # swapped: wrong order
+    with pytest.raises(AssertionError, match="element_order"):
+        model.indexes.verify_consistent()
+
+
+def test_verify_consistent_detects_element_order_missing_key():
+    model = Model(_mm())
+    a = model.create_element("Doc")
+    del model.indexes.element_order[a.id]
+    with pytest.raises(AssertionError, match="element_order"):
+        model.indexes.verify_consistent()
