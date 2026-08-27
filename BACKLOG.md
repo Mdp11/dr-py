@@ -27,7 +27,7 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-26 · repo head at time of writing: `perf/journal-only-history-diff` at `4bbf67f` (K-6 done, journal-only history diff)
+Last updated: 2026-08-27 · repo head at time of writing: `main` at `4d95d1c` (feat/script-column-inputs merged; P-1 table half done)
 (model-compare-apply-cr merged). The 2026-08-18 additions were a batch of owner notes: P-10
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
@@ -65,6 +65,9 @@ The 2026-08-27 pass on `perf/property-write-hot-path` closes K-23 (the per-prope
 diff and cold-element ownership; see its entry for the numbers).
 The 2026-08-27 pass on `perf/untyped-navigation-scope` closes K-24 (the untyped scope walks
 `model.elements` in insertion order; see its entry for the numbers).
+The 2026-08-27 pass on `feat/script-column-inputs` (merged at `4d95d1c`) closes the **table**
+half of P-1 — named script-column inputs, `value(elements, inputs)` — leaves its navigation
+`parents` half open, and adds K-26 → K-28 and C-16 → C-19 from its final review.
 
 ---
 
@@ -141,7 +144,7 @@ end-to-end backend + frontend rename); items below still say `custom_export`/"cu
 export" where that was the shipped name at the time and are unedited beyond the specific
 sub-items closed in this pass.
 
-### P-1 · Additional inputs for `value` / `step` entry points · `open` · design-heavy
+### P-1 · Additional inputs for `value` / `step` entry points · `in progress` · design-heavy
 Today both entry points receive only the element(s) they act on. Wanted:
 - **`value` (navigation)** → `parents`: this element's ancestor chain up to the
   navigation root, **root at index 0**.
@@ -154,6 +157,25 @@ the simplest rule and reuses existing machinery. Two other surfaces move with it
 `core/script/lint.derive_entry_points` derives signatures server-side (arity change), and
 a wider input widens each cell's read-set, so `core/script/cell_cache.py` keying and
 `api/invalidation.touched_keys` need a look or invalidation goes wrong.
+
+**Table half shipped** (2026-08-27, `feat/script-column-inputs`, merged at `4d95d1c`) as
+*explicit named inputs*, not a whole-row dict: `ScriptColumn.inputs: [{name, ref: ColumnRef}]`
+(backward-only, exactly the rule predicted above — the referenced column must be to the left,
+any column kind is legal, `step_index` keeps its meaning) and the snippet is called as
+`value(elements, inputs)` with `inputs: dict[str, list]`. `core/table/script_inputs.py`
+resolves each input per row to what that cell holds and is the ONE `value()` call site
+(`evaluate_script_column`); the resolved values are a fourth cell-key component
+(`inputs_digest`, `""` without inputs, so pre-existing keys and the one-arg call are
+byte-identical), which is why invalidation needed nothing new; a pending/errored input yields
+an uncached pending/error cell (`input '<name>': …`), never `[]`; the sweep resolves inputs
+live at serial enumeration. Whole-row visibility, keyword-argument calling, best-effort `[]`,
+inputs on navigation `ScriptStep`, cross-table inputs and wave-scheduling the sweep were all
+decided against (spec §8). Two spec-text errors noted by the final review, code is right: §3.2's
+"type tags" are unnecessary (canonical JSON already separates `1`/`1.0`/`"1"`/`true`), and §3.1's
+"exactly what the cell holds" should say inputs are *uncapped* (display caps don't apply).
+
+**Still open — the navigation half**: `step` (navigation) → `parents`, this element's
+ancestor chain up to the navigation root, root at index 0. Not designed yet.
 
 ### P-2 · Table search with per-column include/exclude · `open`
 Search UI gains the ability to restrict which columns are searched.
@@ -1098,6 +1120,33 @@ no `limit`/`offset`; `source_id`/`target_id` filters are already served by
 `IndexSet.outgoing_ids`/`incoming_ids`. No app caller (`frontend/src/lib/api/relationships.ts`
 is test-only). Page it or delete it. Last in the program.
 
+### K-26 · A wide element input charges every input element to the cell's read-set · `open` · perf · *2026-08-27*
+`core/script/facade_src.py::_dr_call_entry` fetches every `elements`-input id eagerly through
+`_fetch_element`, which notes a read unconditionally. A navigation input can reach up to
+`EvalLimits.max_chains` (5,000) elements, so one input can push a call past `_READS_CAP`
+(2,000) → `reads=None` → "depends on everything" → evicted on every commit, and past
+`ScriptCellCache.put`'s `_MAX_STORED_READS` too. Conservative and correct, but such a cell
+stops being incrementally cacheable. Cheapest fix: a sentence in `core/script/README.md`'s
+read-set section so authors know a wide element input costs invalidation granularity. Lazy
+handle construction would fix it properly but breaks the read-set-is-conservative invariant.
+
+### K-27 · The host→guest frame is unbounded in the inputs direction · `open` · *2026-08-27*
+`api/script_runner.py::_WasmSnippetSession.call` puts every resolved input (and the projected
+input elements) on the `call` frame with no size cap; a property input over many roots or a
+5,000-element navigation input fails as guest OOM → `ScriptError(kind="memory")` — degraded,
+not a 500, and it mirrors the pre-existing root-projection exposure, so not a new risk class.
+`snippet_transform_max_bytes` is the precedent; a symmetric `snippet_inputs_max_bytes`
+(both directions, 422/error cell over) would be cheap insurance. Inputs are host-built from
+the model — no client-forgeable path.
+
+### K-28 · Console "Run as value" on a two-arg `value()` dies with a bare `TypeError` · `open` · *2026-08-27*
+`derive_entry_points` now advertises `"value"` for a 2-arg snippet, but the console run path
+(`api/script_runner.py` `_run_embedded`, the `fn(els)` call) has no inputs to pass, so a snippet
+written for a table column with inputs shows an enabled "Run as value" and fails with
+`TypeError: value() missing 1 required positional argument: 'inputs'`. Self-explanatory, but a
+targeted message ("this value() takes column inputs; run it from the table") or disabling the
+entry in the console for arity-2 snippets would save a support round-trip.
+
 ---
 
 ## 7. Cleanups & dead code
@@ -1119,6 +1168,10 @@ is test-only). Page it or delete it. Last in the program.
 | C-14 | A rule's `check` is `rule:<name>`, and names are unique only *within* a rule set — two `validation_rules` artifacts can each define `has-zone`. Their issues then share one Issues-panel chip and one `eval_errors` bucket. Either qualify the check with the artifact id or record the merge as accepted. | P-12 re-review, 2026-08-24 |
 | C-15 | `RulesValidator`'s generated message is `"Rule 'x' violated[: description]"`, where the design's pinned shape is `"<rule-name>: <failed-assertion summary>"`, and it never names the far elements that witnessed the failure. The design hedges that context with "where cheaply available", so the omission is fine — but the format is a straight deviation. Match it or amend the design. | P-12 re-review, 2026-08-24 |
 | C-13 | ~~`frontend/src/lib/api/rules.ts`'s `RulesLintErrorSchema` duplicates `api/types.ts`'s `MetamodelLintErrorSchema` field for field.~~ **done** (2026-08-24, feat/validation-rules) — the client now reuses one shared schema, matching the backend's `LintErrorOut`. | P-12 final review, 2026-08-24 |
+| C-16 | `frontend/src/lib/table/columns.ts::remapColumnRefs` calls `f(i.ref.index)` up to three times per script input (`.some` predicate, `.map` condition, `.map` value). `f` is pure and throws-on-forward, so a hoist must still *call* it once per input. | script-column-inputs final review, 2026-08-27 |
+| C-17 | `columns.ts::removeColumn`'s `ColumnInUseError` says "column N sources column M" even when the reference is a script *input*, not the source. `columnRefIndices` could return `{index, why}`. | script-column-inputs final review, 2026-08-27 |
+| C-18 | `ScriptInputsEditor.svelte` calls `nameError(inp.name, i)` twice per row per render (the `{#if}` guard and the span body); a per-row `$derived` errors array is tidier. Imperceptible at ≤50 inputs. | script-column-inputs final review, 2026-08-27 |
+| C-19 | Mid-file imports appended by TDD steps in `tests/table/test_schema.py`, `tests/script/test_embed_cache.py`, `tests/api/test_script_sweep.py` (ruff E402 — invisible because no task lints `tests/`, see C-11); plus `core/script/README.md` ~§142 states the `step`/`transform` one-arg rule twice within four lines. | script-column-inputs final review, 2026-08-27 |
 
 ---
 
