@@ -13,7 +13,10 @@ maintained incrementally at the mutation boundary (``create_element``,
 ``connect``, ``disconnect``, ``set_property``, ``delete_element``). Bulk
 loaders that populate the model dicts directly must call :meth:`IndexSet.
 rebuild` afterwards; code that writes ``entity.properties`` directly must call
-:meth:`IndexSet.on_properties_changed`. The containment-roots order index
+:meth:`IndexSet.on_properties_changed` (``set_property``/``delete_property``
+themselves go through :meth:`IndexSet.on_property_changed`, the
+single-property form that diffs the search index from the changed value).
+The containment-roots order index
 (``roots_order`` / ``_root_key_of``) is maintained at that same boundary and
 carries the same obligations: ``rebuild()`` recomputes it from scratch, and
 any direct writer of ``entity.properties`` must go through
@@ -39,6 +42,7 @@ or, when no key is declared, on all properties.
 from __future__ import annotations
 
 from collections import Counter
+from bisect import bisect_left, insort
 from collections.abc import Hashable, Iterable, Iterator, Set, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +77,12 @@ def _frozen(value: Any) -> Hashable:
     if isinstance(value, list):
         return tuple(_frozen(v) for v in value)
     return value
+
+
+def _text_trigrams(text: str) -> set[str]:
+    """Lowercased trigrams of one field's text (fewer than 3 chars: none)."""
+    s = text.lower()
+    return {s[i : i + 3] for i in range(len(s) - 2)}
 
 
 class IndexSet:
@@ -346,14 +356,32 @@ class IndexSet:
         self._rekey_key_rel_endpoints(rel)
 
     def on_properties_changed(self, entity: Element | Relationship) -> None:
-        """Re-derive property-driven indexes (references, uniqueness) for one
-        entity. Also the explicit hook for code that writes
-        ``entity.properties`` directly instead of using ``set_property``."""
+        """Re-derive property-driven indexes (references, uniqueness, roots,
+        search) for one entity from scratch. The explicit hook for code that
+        writes ``entity.properties`` directly instead of using
+        ``set_property``; see :meth:`on_property_changed` for the diffing
+        form the mutation boundary uses."""
         if isinstance(entity, Element):
             self._update_refs(entity.id, self._element_refs(entity))
             self._rekey(entity)
             self._roots_reposition(entity)
             self._update_trigrams(entity.id, self._element_trigrams(entity))
+        else:
+            self._update_refs(entity.id, self._relationship_refs(entity))
+
+    def on_property_changed(
+        self, entity: Element | Relationship, prop: str, old_value: Any
+    ) -> None:
+        """Same post-state as :meth:`on_properties_changed`, after ONE
+        property changed from ``old_value`` (``None`` = absent) to its current
+        value — the ``set_property``/``delete_property`` hook. The search
+        index is diffed from the changed value's text where that is exact
+        (``_update_trigrams_for``) instead of re-deriving the element."""
+        if isinstance(entity, Element):
+            self._update_refs(entity.id, self._element_refs(entity))
+            self._rekey(entity)
+            self._roots_reposition(entity)
+            self._update_trigrams_for(entity, prop, old_value)
         else:
             self._update_refs(entity.id, self._relationship_refs(entity))
 
@@ -782,6 +810,73 @@ class IndexSet:
             self._trigrams_of[element_id] = tuple(sorted(new))
         else:
             self._trigrams_of.pop(element_id, None)
+
+    def _update_trigrams_for(self, element: Element, prop: str, old_value: Any) -> None:
+        """Trigram diff for one changed property.
+
+        Exact only when both values are plain strings (or absent) and no
+        name-keyed property holds a list (``name_of`` then reads inside the
+        list — text a per-value diff never sees); anything else, and an
+        element without an entry, falls back to the whole-element
+        re-derivation. Additions are the new value's trigrams not already
+        present; a removal candidate (in the old value, not the new) is kept
+        when any OTHER searchable field still contains it — one substring
+        test per candidate instead of re-deriving every field. The sorted
+        tuple is patched in place (bisect) rather than re-sorted.
+        """
+        eid = element.id
+        cur = self._trigrams_of.get(eid)
+        if cur is None:
+            self._update_trigrams(eid, self._element_trigrams(element))
+            return
+        new_value = element.properties.get(prop)
+        if (
+            not (old_value is None or isinstance(old_value, str))
+            or not (new_value is None or isinstance(new_value, str))
+            or any(
+                isinstance(v, list)
+                for k, v in element.properties.items()
+                if k.lower() == "name"
+            )
+        ):
+            self._update_trigrams(eid, self._element_trigrams(element))
+            return
+        old_t = _text_trigrams(old_value) if old_value else set()
+        new_t = _text_trigrams(new_value) if new_value else set()
+        if old_t == new_t:
+            return
+        removed = old_t - new_t
+        if removed:
+            others = [eid.lower(), element.type_name.lower()]
+            others.extend(
+                v.lower()
+                for k, v in element.properties.items()
+                if k != prop and isinstance(v, str)
+            )
+            removed = {t for t in removed if not any(t in s for s in others)}
+        added = new_t.difference(cur)
+        if not removed and not added:
+            return
+        postings = self.search_postings
+        canon = self._canon_trigrams
+        trigs = list(cur)
+        for t in removed:
+            ids = postings.get(t)
+            if ids is not None:
+                ids.discard(eid)
+                if not ids:
+                    del postings[t]
+            i = bisect_left(trigs, t)
+            if i < len(trigs) and trigs[i] == t:
+                del trigs[i]
+        for t in added:
+            t = canon.setdefault(t, t)
+            postings.setdefault(t, set()).add(eid)
+            insort(trigs, t)
+        if trigs:
+            self._trigrams_of[eid] = tuple(trigs)
+        else:
+            self._trigrams_of.pop(eid, None)
 
     # -- internals: counters --------------------------------------------------
 

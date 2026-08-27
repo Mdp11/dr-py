@@ -5,6 +5,8 @@ Trigram keys asserted below ("pum", "coo", ...) contain non-hex letters, so
 they can never collide with trigrams of UUIDv7 element ids (hex + dashes).
 """
 
+import random
+
 import pytest
 
 from data_rover.core.metamodel.loader import load_metamodel_str
@@ -274,4 +276,80 @@ def test_delete_property_removes_postings() -> None:
     assert el.id in _posting_ids(m, "coo")
     m.delete_property(el, "note")
     assert "coo" not in m.indexes.search_postings
+    m.indexes.verify_consistent()
+
+
+# ---------------------------------------------------------------------------
+# per-property diff (set_property / delete_property hook)
+# ---------------------------------------------------------------------------
+
+
+def test_diff_keeps_trigrams_another_field_still_holds() -> None:
+    m = _model()
+    el = _named(m, "cooling pump")
+    m.set_property(el, "note", "cooling circuit")
+    m.set_property(el, "note", "heat circuit")
+    assert el.id in _posting_ids(m, "coo")  # left the note, still in the name
+    assert el.id not in _posting_ids(m, "g c")  # only ever in the old note
+    assert el.id in _posting_ids(m, "hea")
+    m.indexes.verify_consistent()
+
+
+def test_diff_falls_back_for_list_values_and_list_names() -> None:
+    m = _model()
+    el = _named(m, "Pump")
+    el.properties["name"] = ["Valve", "Gauge"]  # multiplicity-many name (legacy models)
+    m.indexes.on_properties_changed(el)
+    assert el.id in _posting_ids(m, "val")
+    m.set_property(el, "note", "turbine")  # a list-valued name: whole-element path
+    assert el.id in _posting_ids(m, "tur")
+    assert el.id in _posting_ids(m, "val")
+    m.set_property(el, "name", "Boiler")  # list -> str: fallback again, list text gone
+    assert el.id in _posting_ids(m, "boi")
+    assert "val" not in m.indexes.search_postings
+    m.set_property(el, "note", ["turbine", "hall"])  # str -> list value: fallback
+    assert "tur" not in m.indexes.search_postings
+    m.indexes.verify_consistent()
+
+
+def test_diff_delete_property_and_same_value_rewrite() -> None:
+    m = _model()
+    el = _named(m, "Pump")
+    m.set_property(el, "note", "cooling")
+    before = m.indexes._trigrams_of[el.id]
+    m.set_property(el, "note", "cooling")  # same text again: nothing moves
+    assert m.indexes._trigrams_of[el.id] == before
+    m.delete_property(el, "note")
+    assert "coo" not in m.indexes.search_postings
+    assert el.id in _posting_ids(m, "pum")
+    m.indexes.verify_consistent()
+
+
+def test_diff_matches_full_derivation_over_random_edits() -> None:
+    """The per-value diff must land on exactly what a whole-element
+    re-derivation produces, after every single write."""
+    rng = random.Random(23)
+    words = ["pump", "valve", "cooling", "heat", "pumps", "ab", "", "turbine hall", "coo"]
+    m = _model()
+    els = [_named(m, rng.choice(words)) for _ in range(6)]
+    for _ in range(300):
+        el = rng.choice(els)
+        prop = rng.choice(["name", "note"])
+        if rng.random() < 0.2:
+            m.delete_property(el, prop)
+        else:
+            m.set_property(el, prop, rng.choice(words))
+        have = frozenset(m.indexes._trigrams_of.get(el.id) or ())
+        assert have == m.indexes._element_trigrams(el)
+    m.indexes.verify_consistent()
+
+
+def test_on_property_changed_is_the_model_hook() -> None:
+    m = _model()
+    el = _named(m, "Pump")
+    old = el.properties["name"]
+    el.properties["name"] = "Valve"
+    m.indexes.on_property_changed(el, "name", old)
+    assert el.id in _posting_ids(m, "val")
+    assert "pum" not in m.indexes.search_postings
     m.indexes.verify_consistent()
