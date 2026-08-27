@@ -33,9 +33,17 @@ def test_dr_names_are_known():
 
 
 def test_entry_points_derived():
-    assert set(derive_entry_points("def value(el):\n    return 1\n")) == {"script", "value"}
-    assert set(derive_entry_points("def step(el):\n    return []\n")) == {"script", "step"}
-    both = derive_entry_points("def value(el):\n    return 1\ndef step(el):\n    return []\n")
+    assert set(derive_entry_points("def value(el):\n    return 1\n")) == {
+        "script",
+        "value",
+    }
+    assert set(derive_entry_points("def step(el):\n    return []\n")) == {
+        "script",
+        "step",
+    }
+    both = derive_entry_points(
+        "def value(el):\n    return 1\ndef step(el):\n    return []\n"
+    )
     assert set(both) == {"script", "value", "step"}
     assert derive_entry_points("x = (") == []  # unparseable
 
@@ -43,7 +51,9 @@ def test_entry_points_derived():
 def test_bad_entry_signature_is_warning():
     diags = lint_code("def value(a, b, c):\n    return 1\n")
     assert any(
-        d.severity == "warning" and "value" in d.message and "the list of elements" in d.message
+        d.severity == "warning"
+        and "value" in d.message
+        and "the list of elements" in d.message
         for d in diags
     )
     diags = lint_code("def step(a, b):\n    return 1\n")
@@ -68,7 +78,7 @@ def test_transform_wrong_arity_warns_not_derived():
     assert "transform" not in derive_entry_points(code)
     diags = lint_code(code)
     assert any(
-        d.severity == "warning" and "transform() must take 1 argument(s)" in d.message
+        d.severity == "warning" and "transform() must take 1 argument" in d.message
         for d in diags
     )
 

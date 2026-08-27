@@ -289,9 +289,10 @@ def test_write_through_carries_reads() -> None:
 
 
 from data_rover.core.script.cell_cache import inputs_digest
+from data_rover.core.script.runner import WireInputs
 
 
-def _in(*values):
+def _in(*values: object) -> WireInputs:
     return {"a": {"kind": "scalars", "values": list(values)}}
 
 

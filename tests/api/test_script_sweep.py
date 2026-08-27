@@ -700,3 +700,48 @@ def test_sweep_counts_a_failed_input_as_done(settings_sync_sweep: Settings) -> N
     )
     assert job.state == "done"
     assert job.total == 4 and job.done == 4  # the 2 errored-input cells count as done
+
+
+def test_sweep_skips_arity_mismatched_column(settings_sync_sweep: Settings) -> None:
+    """A REF-resolved snippet whose `value()` takes only 1 argument despite
+    the column declaring inputs (the schema cannot pin this at save — only
+    an inline definition is checked there) has nothing to compute: the
+    arity check is hoisted to enumeration (once per column), so the sweep
+    never calls the guest for it — a mismatch is `dup_or_empty` exactly
+    like a failed input."""
+    model = _model(2)
+    session = _session_with(model)
+    runner = CountingRunner()
+    unresolved = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            PropertyColumn(name="name"),
+            ScriptColumn(
+                snippet=SnippetSource(ref="s1"),
+                inputs=[ScriptInput(name="n", ref=ColumnRef(index=0))],
+            ),
+        ],
+    )
+    col1 = unresolved.columns[1]
+    defn = unresolved.model_copy(
+        update={
+            "columns": [
+                unresolved.columns[0],
+                col1.model_copy(
+                    update={
+                        "snippet": SnippetSource(
+                            definition=SnippetDefinition(
+                                code="def value(els): return 1"
+                            )
+                        )
+                    }
+                ),
+            ]
+        }
+    )
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, defn, runner, settings_sync_sweep, 0
+    )
+    assert job.state == "done"
+    assert runner.calls == 0
+    assert job.total == 2 and job.done == 2

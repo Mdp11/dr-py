@@ -501,6 +501,82 @@ def test_evaluate_script_column_with_no_inputs_calls_one_arg():
     assert out.value == {"kind": "scalar", "value": 1}
 
 
+def test_value_arity_is_memoized_per_distinct_code(monkeypatch):
+    from data_rover.core.script import lint as lint_mod
+
+    model = _model()
+    defn = _table_with_inputs(mode="expand", keep_empty=True)
+    ctx = _ctx(model)
+    calls = {"n": 0}
+    orig_parse = lint_mod._parse
+
+    def counting_parse(code):
+        calls["n"] += 1
+        return orig_parse(code)
+
+    monkeypatch.setattr(lint_mod, "_parse", counting_parse)
+    build = build_rows_ex(model.metamodel, model, defn, TableLimits(), script=ctx)
+    evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx)
+    # build_rows_ex' expand loop AND evaluate_cells' per-row render both
+    # call through evaluate_script_column, several times over; the code is
+    # parsed exactly once regardless.
+    assert calls["n"] == 1
+
+
+def test_scalars_script_input_keeps_none_values():
+    model = _model()
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ScriptColumn(snippet=_snip("def value(els): return [1, None, 2]")),
+            ScriptColumn(
+                snippet=_snip("def value(els, inputs): return inputs['v']"),
+                inputs=[ScriptInput(name="v", ref=ColumnRef(index=0))],
+            ),
+        ],
+    )
+    build, res = _resolve(model, defn, 1, _ctx(model))
+    a = _row_of(model, "A")
+    r = next(r for key, r in zip(build.keys, res) if key[0] == a)
+    # the input equals what the collapse ValuesCell would show — unfiltered.
+    assert r == {"v": {"kind": "scalars", "values": [1, None, 2]}}
+
+
+def test_step_index_input_ref_reads_the_chain_step_not_the_terminal():
+    model = _model()
+    c = model.create_element("Block")
+    model.set_property(c, "name", "C")
+    b = _row_of(model, "B")
+    model.connect("Uses", b, c.id)
+    two_step_nav = NavigationSource(
+        definition=PathNavigation(
+            kind="path",
+            start=RowStart(),
+            steps=[
+                RelationshipStep(relationship_type="Uses", direction="out"),
+                RelationshipStep(relationship_type="Uses", direction="out"),
+            ],
+        )
+    )
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            NavigationColumn(navigation=two_step_nav),  # projects to the terminal (C)
+            ScriptColumn(
+                snippet=_snip(
+                    "def value(els, inputs): return [e.name for e in inputs['mid']]"
+                ),
+                inputs=[ScriptInput(name="mid", ref=ColumnRef(index=0, step_index=1))],
+            ),
+        ],
+    )
+    build, res = _resolve(model, defn, 1, _ctx(model))
+    by_row = {key[0]: r for key, r in zip(build.keys, res)}
+    a = by_row[_row_of(model, "A")]
+    # step 1 of the chain (A -> B -> C) is B, not the projected terminal C.
+    assert a == {"mid": {"kind": "elements", "ids": [b]}}
+
+
 def test_dangling_ref_input_checked_before_empty_roots():
     # The input's referenced column has a dangling ref AND its own roots
     # resolve to nothing for this row: the dangling check must still win.
