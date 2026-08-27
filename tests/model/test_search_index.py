@@ -402,3 +402,17 @@ def test_indexed_element_keeps_an_entry_when_its_text_has_no_trigram() -> None:
     m.set_property(el, "name", "ab")  # empty again: the entry stays
     assert m.indexes._trigrams_of[el.id] == ()
     m.indexes.verify_consistent()
+
+
+def test_tuple_valued_name_takes_the_whole_element_fallback() -> None:
+    """A tuple is accepted by name_of exactly like a list (naming._name_str
+    reads both), so it must force the whole-element fallback the same way a
+    list does: otherwise a per-value diff on another property can drop a
+    trigram the tuple-valued name still contributes."""
+    m = _model()
+    el = _named(m, "seed")
+    m.set_property(el, "name", ("zebra",))
+    m.set_property(el, "note", "zebra")
+    m.set_property(el, "note", "kite")
+    assert el.id in _posting_ids(m, "zeb")
+    m.indexes.verify_consistent()

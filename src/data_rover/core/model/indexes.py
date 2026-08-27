@@ -91,9 +91,13 @@ def _text_trigrams(text: str) -> set[str]:
 class IndexSet:
     """Incrementally maintained secondary indexes for one Model.
 
-    All structures are kept SPARSE: keys whose set/list/count becomes empty or
-    zero are removed, so an incrementally maintained instance compares equal,
-    structure by structure, to a freshly :meth:`rebuild`-t one.
+    All structures are kept SPARSE — keys whose set/list/count becomes empty
+    or zero are removed — with one exception: ``_trigrams_of`` keeps an empty
+    tuple entry for an indexed element, marking it as reached (as opposed to
+    left for the chunked search build); see ``_update_trigrams``. An
+    incrementally maintained instance compares equal, structure by structure,
+    to a freshly :meth:`rebuild`-t one, except the search structures, which
+    only compare once ``search_ready`` is set (see :meth:`verify_consistent`).
     """
 
     def __init__(self, model: Model) -> None:
@@ -852,7 +856,7 @@ class IndexSet:
             not (old_value is None or isinstance(old_value, str))
             or not (new_value is None or isinstance(new_value, str))
             or any(
-                isinstance(v, list)
+                isinstance(v, (list, tuple))
                 for k, v in element.properties.items()
                 if k.lower() == "name"
             )
