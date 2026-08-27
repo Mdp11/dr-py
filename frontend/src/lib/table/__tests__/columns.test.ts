@@ -814,3 +814,94 @@ describe('json_split', () => {
 		expect(templateIsValid('static')).toBe(false);
 	});
 });
+
+describe('script column inputs', () => {
+	const withInputs: TableDefinition = {
+		...base,
+		columns: [
+			{
+				kind: 'element',
+				source: { kind: 'row', chain_index: 0 },
+				header: '',
+				width_px: null,
+				hidden: false
+			},
+			{
+				kind: 'property',
+				source: { kind: 'row', chain_index: 0 },
+				name: 'name',
+				mode: 'collapse',
+				keep_empty: true,
+				header: '',
+				width_px: null,
+				hidden: false
+			},
+			{
+				kind: 'script',
+				source: { kind: 'row', chain_index: 0 },
+				snippet: {},
+				inputs: [
+					{ name: 'el', ref: { kind: 'column', index: 0, step_index: null } },
+					{ name: 'nm', ref: { kind: 'column', index: 1, step_index: null } }
+				],
+				mode: 'collapse',
+				keep_empty: true,
+				header: '',
+				width_px: null,
+				hidden: false
+			}
+		]
+	};
+
+	it('parses with a default empty inputs list', () => {
+		const col = ColumnSchema.parse({ kind: 'script' });
+		expect(col.kind === 'script' && col.inputs).toEqual([]);
+	});
+
+	it('removeColumn refuses a column an input reads, and shifts later refs', () => {
+		expect(() => removeColumn(withInputs, 0)).toThrow(ColumnInUseError);
+		// duplicate the element column at index 1; property (now at index 2) is
+		// what 'nm' must reference post-duplication for the fixture to be
+		// internally consistent — reusing the original [0, 1] refs would leave
+		// 'nm' pointing at the just-inserted duplicate, which the in-use guard
+		// (correctly) refuses to remove.
+		const dup: TableDefinition = {
+			...withInputs,
+			columns: [
+				withInputs.columns[0],
+				withInputs.columns[0],
+				withInputs.columns[1],
+				{
+					kind: 'script',
+					source: { kind: 'row', chain_index: 0 },
+					snippet: {},
+					inputs: [
+						{ name: 'el', ref: { kind: 'column', index: 0, step_index: null } },
+						{ name: 'nm', ref: { kind: 'column', index: 2, step_index: null } }
+					],
+					mode: 'collapse',
+					keep_empty: true,
+					header: '',
+					width_px: null,
+					hidden: false
+				}
+			]
+		};
+		const next = removeColumn(dup, 1);
+		const script = next.columns[2];
+		expect(script.kind === 'script' && script.inputs.map((i) => i.ref.index)).toEqual([0, 1]);
+	});
+
+	it('moveColumn remaps input refs and rejects a forward input', () => {
+		const moved = moveColumn(withInputs, 0, 1); // element ↔ property
+		const script = moved.columns[2];
+		expect(script.kind === 'script' && script.inputs.map((i) => i.ref.index)).toEqual([1, 0]);
+		expect(() => moveColumn(withInputs, 2, 0)).toThrow(/forward/);
+	});
+
+	it('cloneColumn shifts input refs past the insertion point', () => {
+		const next = cloneColumn(withInputs, 0);
+		const script = next.columns[3];
+		expect(script.kind === 'script' && script.inputs.map((i) => i.ref.index)).toEqual([0, 2]);
+	});
+});

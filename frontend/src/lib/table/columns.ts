@@ -27,7 +27,6 @@
 import type {
 	Column,
 	ColumnExportOptions,
-	ColumnSource,
 	JsonColumnOptions,
 	JsonSplitOptions,
 	NavigationDefinition,
@@ -66,8 +65,30 @@ function remapExportOrder(order: number[], f: (i: number) => number | null): num
 	return out;
 }
 
-function sourcesColumn(source: ColumnSource, index: number): boolean {
-	return source.kind === 'column' && source.index === index;
+/** Every ColumnRef a column carries: its source plus, for a script column,
+ * each input's ref. The remappers below treat them uniformly. */
+function columnRefIndices(c: Column): number[] {
+	const out: number[] = [];
+	if (c.source.kind === 'column') out.push(c.source.index);
+	if (c.kind === 'script') for (const i of c.inputs) out.push(i.ref.index);
+	return out;
+}
+
+/** Copy-on-write: returns `c` itself when no ref changes. `f` returns the
+ * new index for an old one, or throws. */
+function remapColumnRefs(c: Column, f: (i: number) => number): Column {
+	let next: Column = c;
+	if (c.source.kind === 'column') {
+		const to = f(c.source.index);
+		if (to !== c.source.index) next = { ...next, source: { ...c.source, index: to } };
+	}
+	if (c.kind === 'script' && c.inputs.some((i) => f(i.ref.index) !== i.ref.index)) {
+		const inputs = c.inputs.map((i) =>
+			f(i.ref.index) === i.ref.index ? i : { ...i, ref: { ...i.ref, index: f(i.ref.index) } }
+		);
+		next = { ...(next as Extract<Column, { kind: 'script' }>), inputs };
+	}
+	return next;
 }
 
 /** Fresh default columns for the two addable kinds — shared by ColumnManager's
@@ -106,6 +127,7 @@ export function newScriptColumn(): Column {
 		kind: 'script',
 		source: { kind: 'row', chain_index: 0 },
 		snippet: {},
+		inputs: [],
 		mode: 'collapse',
 		keep_empty: true,
 		header: '',
@@ -146,7 +168,7 @@ export function replaceColumn(defn: TableDefinition, index: number, col: Column)
 
 export function removeColumn(defn: TableDefinition, index: number): TableDefinition {
 	for (let i = 0; i < defn.columns.length; i++) {
-		if (i !== index && sourcesColumn(defn.columns[i].source, index)) {
+		if (i !== index && columnRefIndices(defn.columns[i]).includes(index)) {
 			throw new ColumnInUseError(`column ${i} sources column ${index}`);
 		}
 	}
@@ -154,11 +176,7 @@ export function removeColumn(defn: TableDefinition, index: number): TableDefinit
 	next.columns.splice(index, 1);
 	// shift down any ColumnRef.index that pointed past the removed column
 	// (copy-on-write: only the columns whose ref actually shifts are re-made)
-	next.columns = next.columns.map((c) =>
-		c.source.kind === 'column' && c.source.index > index
-			? { ...c, source: { ...c.source, index: c.source.index - 1 } }
-			: c
-	);
+	next.columns = next.columns.map((c) => remapColumnRefs(c, (i) => (i > index ? i - 1 : i)));
 	// drop it, shift the ones above down
 	next.export_order = remapExportOrder(defn.export_order ?? [], (i) =>
 		i === index ? null : i > index ? i - 1 : i
@@ -190,11 +208,7 @@ export function cloneColumn(defn: TableDefinition, index: number): TableDefiniti
 	if (copy.header) copy.header = `${copy.header} (copy)`;
 	const next = clone(defn);
 	// copy-on-write: only the columns whose ref actually shifts are re-made
-	next.columns = next.columns.map((c) =>
-		c.source.kind === 'column' && c.source.index > index
-			? { ...c, source: { ...c.source, index: c.source.index + 1 } }
-			: c
-	);
+	next.columns = next.columns.map((c) => remapColumnRefs(c, (i) => (i > index ? i + 1 : i)));
 	next.columns.splice(index + 1, 0, copy);
 	// the copy lands at index + 1, so shift and then insert
 	{
@@ -220,13 +234,14 @@ export function moveColumn(defn: TableDefinition, from: number, to: number): Tab
 	// (copy-on-write: only ref-carrying columns are re-made)
 	next.columns = order.map((oldIdx, newIdx) => {
 		const c = defn.columns[oldIdx];
-		if (c.source.kind !== 'column') return c;
-		const remapped = oldToNew.get(c.source.index);
-		if (remapped === undefined) throw new Error('dangling column source');
-		if (remapped >= newIdx) {
-			throw new Error(`move makes column ${newIdx} source column ${remapped} (forward)`);
-		}
-		return { ...c, source: { ...c.source, index: remapped } };
+		return remapColumnRefs(c, (i) => {
+			const remapped = oldToNew.get(i);
+			if (remapped === undefined) throw new Error('dangling column source');
+			if (remapped >= newIdx) {
+				throw new Error(`move makes column ${newIdx} source column ${remapped} (forward)`);
+			}
+			return remapped;
+		});
 	});
 	// reuse the oldToNew map the function already built above
 	next.export_order = remapExportOrder(defn.export_order ?? [], (i) => oldToNew.get(i) ?? null);

@@ -98,6 +98,7 @@ async function seedScript(): Promise<void> {
 						entry_points: []
 					}
 				},
+				inputs: [],
 				mode: 'collapse',
 				keep_empty: true,
 				header: 'S',
