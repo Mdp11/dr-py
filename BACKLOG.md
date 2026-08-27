@@ -63,6 +63,8 @@ The 2026-08-27 pass on `perf/uniqueness-position-index` closes K-22 (the maintai
 `IndexSet.element_order`; see its entry for the numbers).
 The 2026-08-27 pass on `perf/property-write-hot-path` closes K-23 (the per-property search-index
 diff and cold-element ownership; see its entry for the numbers).
+The 2026-08-27 pass on `perf/untyped-navigation-scope` closes K-24 (the untyped scope walks
+`model.elements` in insertion order; see its entry for the numbers).
 
 ---
 
@@ -1076,10 +1078,19 @@ tail of 10 × 3-key `update_element` **736 → 108 ms** cold / 409 → 127 ms
 warm, `_check_patch_keys` 2.49 → 1.17 µs; 0 of 3000 edited elements differ from a full
 derivation and `verify_consistent` passes at 320k.
 
-### K-24 · Untyped navigation scope sorts every element id · `open` · perf · *2026-08-26*
-`core/navigation/evaluate.py:244-245`: `set(model.elements.keys())` + criteria filter +
-`sorted()` of ~300k ids for a table/navigation with no `types`, on the first table request
-after every commit (`TableOrderCache` is rev-keyed). Sixth in the program.
+### K-24 · Untyped navigation scope sorts every element id · `done` (2026-08-27, perf/untyped-navigation-scope) · perf · *2026-08-26*
+`core/navigation/evaluate.py::_scope_ids` built `set(model.elements.keys())`, re-looked every id
+up for a criteria filter that ran `all(())` even with no criteria, and `sorted()` the hash-ordered
+survivors — once per table per commit (`TableOrderCache` is rev-keyed). The spike put the set at
+pure loss: 48 ms to build, a per-id lookup, and a real O(n log n) sort (172 ms) where the dict's
+own insertion order is a presorted run (production ids are UUIDv7, the importer's sequential).
+Now the untyped branch walks `model.elements.values()`, an empty criteria list short-circuits
+to `sorted(...)` in both branches, and the two matchers are plain loops; the result stays the
+ascending-id list (row order and paging byte-identical — returning insertion order was decided
+against, see the spec's non-goals). Measured at scale 320 (320,640 elements): untyped no-criteria
+**465 → 24.1 ms**, untyped + one criterion **762 → 307.4 ms**, typed `Person` (51,200 el)
+45 → 16.6 ms; a shuffled insertion order (the degraded case) 167.4 ms; 0 of 40 scope shapes
+differ from the set-based derivation on both the ordered and the shuffled model.
 
 ### K-25 · `GET /model/relationships` is unpaged · `open` · perf · *2026-08-26*
 `routes/relationships.py:19` materializes all ~400k relationships into pydantic models with
