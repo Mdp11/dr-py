@@ -255,3 +255,149 @@ def test_table_definition_transform_empty_dict_is_no_transform():
 def test_table_definition_transform_both_set_is_rejected():
     with pytest.raises(ValidationError):
         _table(transform={"ref": "s1", "definition": {"code": "x=1"}})
+
+
+# ---- script inputs ----------------------------------------------------------
+import pytest
+from pydantic import ValidationError
+
+from data_rover.core.script.schema import SnippetDefinition, SnippetSource
+from data_rover.core.table.schema import (
+    TABLE_ADAPTER,
+    ColumnRef,
+    ElementColumn,
+    PropertyColumn,
+    ScopeRows,
+    ScriptColumn,
+    ScriptInput,
+    TableDefinition,
+)
+
+
+def _code(code: str) -> SnippetSource:
+    return SnippetSource(definition=SnippetDefinition(code=code))
+
+
+TWO_ARG = "def value(els, inputs): return 1"
+ONE_ARG = "def value(els): return 1"
+
+
+def _cols(*extra):
+    return [ElementColumn(), PropertyColumn(name="name"), *extra]
+
+
+def test_script_inputs_default_empty_and_round_trip():
+    defn = TableDefinition(row_source=ScopeRows(types=[]), columns=[ScriptColumn()])
+    col = defn.columns[0]
+    assert isinstance(col, ScriptColumn) and col.inputs == []
+    assert "inputs" in TABLE_ADAPTER.dump_python(defn)["columns"][0]
+    parsed = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {"kind": "scope", "types": []},
+            "columns": [
+                {"kind": "property", "name": "name"},
+                {
+                    "kind": "script",
+                    "snippet": {"definition": {"code": TWO_ARG}},
+                    "inputs": [{"name": "nm", "ref": {"kind": "column", "index": 0}}],
+                },
+            ],
+        }
+    )
+    col1 = parsed.columns[1]
+    assert isinstance(col1, ScriptColumn)
+    assert col1.inputs[0].name == "nm" and col1.inputs[0].ref.index == 0
+
+
+def test_script_input_must_point_backward():
+    with pytest.raises(ValidationError, match="must be < 2"):
+        TableDefinition(
+            row_source=ScopeRows(types=[]),
+            columns=_cols(
+                ScriptColumn(
+                    snippet=_code(TWO_ARG),
+                    inputs=[ScriptInput(name="x", ref=ColumnRef(index=2))],
+                )
+            ),
+        )
+
+
+def test_script_input_names_are_identifiers_and_unique():
+    with pytest.raises(ValidationError, match="not a valid identifier"):
+        ScriptInput(name="not valid", ref=ColumnRef(index=0))
+    with pytest.raises(ValidationError, match="not a valid identifier"):
+        ScriptInput(name="class", ref=ColumnRef(index=0))
+    with pytest.raises(ValidationError, match="duplicate input name"):
+        TableDefinition(
+            row_source=ScopeRows(types=[]),
+            columns=_cols(
+                ScriptColumn(
+                    snippet=_code(TWO_ARG),
+                    inputs=[
+                        ScriptInput(name="a", ref=ColumnRef(index=0)),
+                        ScriptInput(name="a", ref=ColumnRef(index=1)),
+                    ],
+                )
+            ),
+        )
+
+
+def test_script_input_step_index_requires_navigation_ref():
+    with pytest.raises(ValidationError, match="navigation column"):
+        TableDefinition(
+            row_source=ScopeRows(types=[]),
+            columns=_cols(
+                ScriptColumn(
+                    snippet=_code(TWO_ARG),
+                    inputs=[ScriptInput(name="a", ref=ColumnRef(index=0, step_index=1))],
+                )
+            ),
+        )
+
+
+def test_script_input_any_column_kind_is_legal():
+    # property (not element-producing) is fine as an INPUT, unlike a source
+    TableDefinition(
+        row_source=ScopeRows(types=[]),
+        columns=_cols(
+            ScriptColumn(
+                snippet=_code(TWO_ARG),
+                inputs=[ScriptInput(name="a", ref=ColumnRef(index=1))],
+            )
+        ),
+    )
+
+
+def test_inline_arity_mismatch_rejected_both_directions():
+    with pytest.raises(ValidationError, match="takes 1 argument but column declares 1 input"):
+        TableDefinition(
+            row_source=ScopeRows(types=[]),
+            columns=_cols(
+                ScriptColumn(
+                    snippet=_code(ONE_ARG),
+                    inputs=[ScriptInput(name="a", ref=ColumnRef(index=0))],
+                )
+            ),
+        )
+    with pytest.raises(ValidationError, match="takes 2 arguments but column declares no inputs"):
+        TableDefinition(row_source=ScopeRows(types=[]), columns=[ScriptColumn(snippet=_code(TWO_ARG))])
+    # a ref snippet cannot be checked at save time: accepted here, error cell at runtime
+    TableDefinition(
+        row_source=ScopeRows(types=[]),
+        columns=_cols(
+            ScriptColumn(
+                snippet=SnippetSource(ref="s1"),
+                inputs=[ScriptInput(name="a", ref=ColumnRef(index=0))],
+            )
+        ),
+    )
+    # no value() at all (e.g. still being written) is not an arity mismatch
+    TableDefinition(
+        row_source=ScopeRows(types=[]),
+        columns=_cols(
+            ScriptColumn(
+                snippet=_code("x = 1"),
+                inputs=[ScriptInput(name="a", ref=ColumnRef(index=0))],
+            )
+        ),
+    )

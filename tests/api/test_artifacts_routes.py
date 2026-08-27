@@ -545,3 +545,22 @@ def test_exporter_payload_is_validated_on_create(client: TestClient) -> None:
         headers=AUTH_HEADERS,
     )
     assert r.status_code == 422
+
+
+def test_create_table_with_inline_arity_mismatch_422(client: TestClient) -> None:
+    payload = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "property", "name": "name"},
+            {
+                "kind": "script",
+                "snippet": {"definition": {"code": "def value(els): return 1"}},
+                "inputs": [{"name": "nm", "ref": {"kind": "column", "index": 0}}],
+            },
+        ],
+    }
+    res = client.post(
+        f"{API}/artifacts", json={"kind": "table", "name": "t", "payload": payload}
+    )
+    assert res.status_code == 422
+    assert "takes 1 argument" in res.text
