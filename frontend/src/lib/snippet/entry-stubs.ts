@@ -43,6 +43,12 @@ const STUBS: Record<BoundEntry, string> = {
 		'    return doc\n'
 };
 
+const VALUE_INPUTS_STUB =
+	'def value(elements, inputs):\n' +
+	'    # Read-only. inputs[name] is a list: the Elements or values the\n' +
+	'    # named column holds for this row.\n' +
+	'    return [el.name for el in elements]\n';
+
 export function entryAvailable(
 	entry: 'script' | BoundEntry,
 	entryPoints: string[] | undefined
@@ -51,8 +57,10 @@ export function entryAvailable(
 }
 
 /** Append the entry's stub, PEP8-separated (two blank lines) from existing
- * top-level code; an empty document gets the stub alone. */
-export function withStub(code: string, entry: BoundEntry): string {
-	const stub = STUBS[entry];
+ * top-level code; an empty document gets the stub alone. `opts.inputs` swaps
+ * in the two-arg `value(elements, inputs)` stub for a script column that has
+ * named inputs configured. */
+export function withStub(code: string, entry: BoundEntry, opts: { inputs?: boolean } = {}): string {
+	const stub = entry === 'value' && opts.inputs ? VALUE_INPUTS_STUB : STUBS[entry];
 	return code.trim() === '' ? stub : `${code.trimEnd()}\n\n\n${stub}`;
 }

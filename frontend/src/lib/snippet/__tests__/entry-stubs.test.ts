@@ -52,3 +52,10 @@ describe('transform entry', () => {
 		expect(withStub('', 'transform')).toContain('def transform(doc):');
 	});
 });
+
+describe('withStub inputs variant', () => {
+	it('emits a two-arg value() when the column has inputs', () => {
+		expect(withStub('', 'value', { inputs: true })).toMatch(/^def value\(elements, inputs\):/);
+		expect(withStub('', 'value')).toMatch(/^def value\(elements\):/);
+	});
+});
