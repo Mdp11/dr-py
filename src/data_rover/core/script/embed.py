@@ -112,7 +112,9 @@ class ScriptEvalContext:
         self._should_abort = should_abort
         self.pending_misses = 0
 
-    def _cell_key(self, code: str, entry: str, ids: tuple[str, ...], digest: str) -> CellKey:
+    def _cell_key(
+        self, code: str, entry: str, ids: tuple[str, ...], digest: str
+    ) -> CellKey:
         sha = self._code_sha.get(code)
         if sha is None:
             sha = hashlib.sha256(code.encode()).hexdigest()
@@ -176,7 +178,11 @@ class ScriptEvalContext:
         return res
 
     def _call_uncached(
-        self, code: str, entry: Literal["value", "step"], element_ids: list[str], inputs: WireInputs | None
+        self,
+        code: str,
+        entry: Literal["value", "step"],
+        element_ids: list[str],
+        inputs: WireInputs | None,
     ) -> CallResult:
         if self._unavailable is not None:
             return CallResult(

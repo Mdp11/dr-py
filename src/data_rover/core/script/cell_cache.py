@@ -56,6 +56,7 @@ def inputs_digest(inputs: WireInputs | None) -> str:
     canon = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canon.encode()).hexdigest()[:32]
 
+
 _CACHEABLE_ERROR_KINDS = frozenset({"runtime", "syntax"})
 
 #: `put` degrades an oversized incoming read-set to `None` above this many
