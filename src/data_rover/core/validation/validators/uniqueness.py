@@ -17,10 +17,12 @@ class UniquenessValidator(EntityValidator):
 
     The grouping itself is maintained incrementally by the model's
     :class:`~data_rover.core.model.indexes.IndexSet`; this validator only
-    reads ``uniq_groups`` / ``uniq_key_of`` / ``duplicate_keys``. All work
-    happens in :meth:`validate_global` (it needs the scope to avoid
-    double-reporting), keyed on each duplicate group's *primary* member —
-    the group member that comes first in ``model.elements`` insertion order.
+    reads ``uniq_groups`` / ``uniq_key_of`` / ``duplicate_keys`` and
+    ``element_order``. All work happens in :meth:`validate_global` (it needs
+    the scope to avoid double-reporting), keyed on each duplicate group's
+    *primary* member — the group member that comes first in
+    ``model.elements`` insertion order, read off ``element_order`` so no run
+    ever enumerates the model.
     """
 
     check_name = "uniqueness"
@@ -30,32 +32,26 @@ class UniquenessValidator(EntityValidator):
         if not indexes.duplicate_keys:
             return []
 
+        # element insertion order decides the primary of each group and
+        # keeps the report deterministic
+        order = indexes.element_order
         issues: list[Issue] = []
         if scope.ids is None:
-            # element insertion order decides the primary of each group and
-            # keeps the report deterministic
-            position = {eid: i for i, eid in enumerate(model.elements)}
             ordered_keys = sorted(
                 indexes.duplicate_keys,
-                key=lambda k: min(position[i] for i in indexes.uniq_groups[k]),
+                key=lambda k: min(order[i] for i in indexes.uniq_groups[k]),
             )
             for group_key in ordered_keys:
-                ids = sorted(indexes.uniq_groups[group_key], key=position.__getitem__)
+                ids = sorted(indexes.uniq_groups[group_key], key=order.__getitem__)
                 primary = ids[0]
                 for dup in ids[1:]:
                     issues.append(self._issue(model, group_key, dup, primary))
         else:
-            position = None
             for entity_id in scope.ids:
                 group_key = indexes.uniq_key_of.get(entity_id)
                 if group_key is None or group_key not in indexes.duplicate_keys:
                     continue
-                if position is None:
-                    # built at most once per scoped run, and only when the
-                    # scope actually touches a duplicate group
-                    position = {eid: i for i, eid in enumerate(model.elements)}
-                ids = sorted(indexes.uniq_groups[group_key], key=position.__getitem__)
-                primary = ids[0]
+                primary = min(indexes.uniq_groups[group_key], key=order.__getitem__)
                 if entity_id != primary:
                     issues.append(self._issue(model, group_key, entity_id, primary))
         return issues

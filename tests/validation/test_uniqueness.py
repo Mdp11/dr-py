@@ -256,3 +256,91 @@ def test_property_only_key_descriptor_renders_name():
     issues = UniquenessValidator().validate(model, Scope.all())
     assert len(issues) == 1
     assert "name='Foo'" in issues[0].message
+
+
+# ---------------------------------------------------------------------------
+# primary = insertion-first, on both branches, without enumerating the model
+# ---------------------------------------------------------------------------
+
+
+class _IterCountingDict(dict):
+    """model.elements stand-in that counts whole-dict iterations."""
+
+    iterations = 0
+
+    def __iter__(self):
+        type(self).iterations += 1
+        return super().__iter__()
+
+
+def _three_foos(model: Model) -> None:
+    for eid in ("z-first", "a-second", "m-third"):
+        el = model.restore_element(eid, "Requirement")
+        _set_name(model, el, "Foo")
+
+
+def test_primary_is_insertion_first_not_lexically_first():
+    model = Model(_named_mm(named_key=["name"]))
+    _three_foos(model)
+
+    issues = UniquenessValidator().validate(model, Scope.all())
+    assert [i.target_ids for i in issues] == [
+        ["a-second", "z-first"],
+        ["m-third", "z-first"],
+    ]
+
+
+def test_scoped_run_reports_same_issues_as_full_run():
+    model = Model(_named_mm(named_key=["name"]))
+    _three_foos(model)
+
+    full = UniquenessValidator().validate(model, Scope.all())
+    scoped = UniquenessValidator().validate(
+        model, Scope(["m-third", "z-first", "a-second"])
+    )
+    # scope order decides the scoped report order; the primary never reports
+    assert [i.target_ids for i in scoped] == [
+        ["m-third", "z-first"],
+        ["a-second", "z-first"],
+    ]
+    assert {i.message for i in scoped} == {i.message for i in full}
+
+
+def test_full_run_orders_groups_by_their_primary():
+    model = Model(_named_mm(named_key=["name"]))
+    b1 = model.restore_element("b1", "Requirement")
+    a1 = model.restore_element("a1", "Requirement")
+    a2 = model.restore_element("a2", "Requirement")
+    b2 = model.restore_element("b2", "Requirement")
+    for el, name in ((b1, "Bar"), (a1, "Foo"), (a2, "Foo"), (b2, "Bar")):
+        _set_name(model, el, name)
+
+    issues = UniquenessValidator().validate(model, Scope.all())
+    # the Bar group's primary (b1) was inserted before the Foo group's (a1)
+    assert [i.target_ids for i in issues] == [["b2", "b1"], ["a2", "a1"]]
+
+
+def test_restoring_a_deleted_primary_makes_it_last():
+    model = Model(_named_mm(named_key=["name"]))
+    _three_foos(model)
+    model.delete_element("z-first")
+    restored = model.restore_element("z-first", "Requirement")
+    _set_name(model, restored, "Foo")
+
+    issues = UniquenessValidator().validate(model, Scope.all())
+    assert [i.target_ids for i in issues] == [
+        ["m-third", "a-second"],
+        ["z-first", "a-second"],
+    ]
+
+
+def test_scoped_run_never_enumerates_the_model():
+    model = Model(_named_mm(named_key=["name"]))
+    _three_foos(model)
+    counting = _IterCountingDict(model.elements)
+    model.elements = counting
+    _IterCountingDict.iterations = 0
+
+    issues = UniquenessValidator().validate(model, Scope(["a-second"]))
+    assert [i.target_ids for i in issues] == [["a-second", "z-first"]]
+    assert _IterCountingDict.iterations == 0
