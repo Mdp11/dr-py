@@ -61,7 +61,7 @@ from .schema import (
     ScriptColumn,
     TableDefinition,
 )
-from .script_inputs import property_input_values
+from .script_inputs import evaluate_script_column, property_input_values
 
 
 @dataclass
@@ -320,8 +320,18 @@ def _script_cell(
                 # re-derive, not the original build-time call), so a live call
                 # could not change the single-row rendering anyway; recomputing
                 # it live would also bypass sweep accounting.
-                res = script.call(
-                    col.snippet.definition.code, "value", roots, cache_only=True
+                res = evaluate_script_column(
+                    mm,
+                    model,
+                    defn,
+                    key,
+                    col,
+                    roots,
+                    base_slots,
+                    limits,
+                    script,
+                    memo,
+                    cache_only=True,
                 )
                 if res.error is not None:
                     if res.error.kind == "pending":
@@ -344,7 +354,9 @@ def _script_cell(
     if script is None:
         # Defensive: routes always supply a context when table_has_script().
         return ErrorCell(message="script runner unavailable")
-    res = script.call(col.snippet.definition.code, "value", els)
+    res = evaluate_script_column(
+        mm, model, defn, key, col, els, base_slots, limits, script, memo
+    )
     if res.error is not None:
         if res.error.kind == "pending":
             return PendingCell()
