@@ -302,7 +302,11 @@ def resolve_source_elements(
         )
         if not roots:
             return []
-        res = script.call(ref_col.snippet.definition.code, "value", roots)
+        from .script_inputs import evaluate_script_column  # cells/evaluate cycle guard
+
+        res = evaluate_script_column(
+            mm, model, defn, key, ref_col, roots, base_slots, limits, script, memo
+        )
         if res.error is not None or res.value is None:
             return []
         p = res.value
@@ -540,7 +544,16 @@ def build_rows_ex(
                     memo=memo,
                 )
                 has_value, nav_truncated = _collapse_has_value(
-                    mm, model, col, roots, limits, script=script, memo=memo
+                    mm,
+                    model,
+                    defn,
+                    key,
+                    col,
+                    roots,
+                    base_slots,
+                    limits,
+                    script=script,
+                    memo=memo,
                 )
                 if nav_truncated:
                     truncated = True
@@ -563,7 +576,16 @@ def build_rows_ex(
                 memo=memo,
             )
             reached, nav_truncated = _expand_values(
-                mm, model, col, roots, limits, script=script, memo=memo
+                mm,
+                model,
+                defn,
+                key,
+                col,
+                roots,
+                base_slots,
+                limits,
+                script=script,
+                memo=memo,
             )
             if nav_truncated:
                 truncated = True
@@ -592,8 +614,11 @@ def build_rows_ex(
 def _collapse_has_value(
     mm: Metamodel,
     model: Model,
+    defn: TableDefinition,
+    key: RowKey,
     col: NavigationColumn | PropertyColumn | ScriptColumn,
     roots: list[str],
+    base_slots: int,
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
     memo: NavMemo | None = None,
@@ -616,7 +641,11 @@ def _collapse_has_value(
             return True, False  # dangling ref → error cell stays
         if col.snippet.definition is None or script is None or not roots:
             return False, False
-        res = script.call(col.snippet.definition.code, "value", roots)
+        from .script_inputs import evaluate_script_column  # cells/evaluate cycle guard
+
+        res = evaluate_script_column(
+            mm, model, defn, key, col, roots, base_slots, limits, script, memo
+        )
         if res.error is not None or res.value is None:
             return True, False
         p = res.value
@@ -647,8 +676,11 @@ def _collapse_has_value(
 def _expand_values(
     mm: Metamodel,
     model: Model,
+    defn: TableDefinition,
+    key: RowKey,
     col: NavigationColumn | PropertyColumn | ScriptColumn,
     roots: list[str],
+    base_slots: int,
     limits: TableLimits,
     script: ScriptEvalContext | None = None,
     memo: NavMemo | None = None,
@@ -667,7 +699,11 @@ def _expand_values(
             return [None], False  # dangling ref → one error row
         if col.snippet.definition is None or script is None or not roots:
             return [], False
-        res = script.call(col.snippet.definition.code, "value", roots)
+        from .script_inputs import evaluate_script_column  # cells/evaluate cycle guard
+
+        res = evaluate_script_column(
+            mm, model, defn, key, col, roots, base_slots, limits, script, memo
+        )
         if res.error is not None or res.value is None:
             return [None], False
         p = res.value
@@ -1012,7 +1048,11 @@ def _sort_value(
         )
         if not els:
             return (1, ())
-        res = script.call(col.snippet.definition.code, "value", els)
+        from .script_inputs import evaluate_script_column  # cells/evaluate cycle guard
+
+        res = evaluate_script_column(
+            mm, model, defn, key, col, els, base_slots, limits, script, memo
+        )
         if res.error is not None or res.value is None:
             return (1, ())  # errors AND pending sort with empties
         p = res.value

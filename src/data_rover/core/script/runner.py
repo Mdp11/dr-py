@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TypedDict
 
 from ..model.model import Model
 
@@ -32,6 +32,39 @@ from ..model.model import Model
 #: ("el", id) | ("out", id) | ("in", id) |
 #: ("children", id) | ("parent", id) | ("scan", type_name_or_None).
 ReadKey = tuple[str, str | None]
+
+
+class ElementsInput(TypedDict):
+    """A resolved input's wire form when it carries elements."""
+
+    kind: Literal["elements"]
+    ids: list[str]
+
+
+class ScalarsInput(TypedDict):
+    """A resolved input's wire form when it carries scalar values."""
+
+    kind: Literal["scalars"]
+    values: list[object]
+
+
+#: One resolved script-column input as it crosses the bridge: the elements a
+#: column holds for the row, or its scalar values. The tag set is closed.
+WireInput = ElementsInput | ScalarsInput
+WireInputs = dict[str, WireInput]
+
+
+def input_element_ids(inputs: WireInputs | None) -> list[str]:
+    """Deduped ids of every `elements` input, in input order — the extra
+    roots the host projects so the guest's first touch costs no round trip."""
+    if not inputs:
+        return []
+    out: dict[str, None] = {}
+    for spec in inputs.values():
+        if spec["kind"] == "elements":
+            for i in spec["ids"]:
+                out.setdefault(i, None)
+    return list(out)
 
 
 @dataclass(frozen=True)
@@ -199,6 +232,9 @@ class SnippetSession(Protocol):
     ``doc`` is the transform entry's input document (any JSON value, already
     decoded); ignored for ``value``/``step``. ``element_ids`` is empty for
     ``transform``.
+
+    ``inputs`` is a ``value`` call's named column inputs; ignored for
+    ``step``/``transform``.
     """
 
     boot_error: ScriptError | None
@@ -209,6 +245,7 @@ class SnippetSession(Protocol):
         element_ids: list[str],
         *,
         doc: object | None = None,
+        inputs: WireInputs | None = None,
     ) -> CallResult: ...
 
     def close(self) -> None:

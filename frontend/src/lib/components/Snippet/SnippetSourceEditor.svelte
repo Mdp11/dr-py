@@ -29,7 +29,8 @@
 		entry,
 		onChange,
 		collapseKey,
-		disabled = false
+		disabled = false,
+		withInputs = false
 	}: {
 		snippet: SnippetSource;
 		entry: BoundEntry;
@@ -60,6 +61,10 @@
 		 * is exactly what a locked-out caller (a viewer, a peer-locked resource)
 		 * needs to do. */
 		disabled?: boolean;
+		/** Seeds a freshly-switched-to-inline `value` stub with the two-arg
+		 * `value(elements, inputs)` signature instead of the one-arg default —
+		 * for a script column that has named inputs configured. */
+		withInputs?: boolean;
 	} = $props();
 
 	const inline = $derived(snippet.definition != null);
@@ -171,7 +176,7 @@
 			definition: {
 				schema_version: 1,
 				language: 'python',
-				code: code ?? withStub('', entry),
+				code: code ?? withStub('', entry, { inputs: withInputs }),
 				entry_points: []
 			}
 		});

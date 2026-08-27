@@ -42,7 +42,6 @@ if TYPE_CHECKING:
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
-from data_rover.core.model.naming import display_name
 from data_rover.core.navigation.evaluate import PropertyValue
 
 from .evaluate import (
@@ -60,6 +59,13 @@ from .schema import (
     PropertyColumn,
     ScriptColumn,
     TableDefinition,
+)
+from .script_inputs import (
+    RUNNER_UNAVAILABLE_MESSAGE,
+    dangling_ref_message,
+    evaluate_script_column,
+    navigation_display_values,
+    property_input_values,
 )
 
 
@@ -206,16 +212,7 @@ def _property_cell(
         return ValueCell(present=present, value=val, element_id=eid, editable=present)
     # many-element collapse → joined read-only values (undeclared-on-some-types
     # elements simply contribute nothing, rather than failing the whole cell)
-    vals: list[object] = []
-    for eid in els:
-        el = model.elements[eid]
-        if not _prop_present(mm, el.type_name, col.name):
-            continue
-        v = el.properties.get(col.name)
-        if isinstance(v, (list, tuple)):
-            vals.extend(v)
-        elif v is not None:
-            vals.append(v)
+    vals = property_input_values(mm, model, col, els)
     return ValuesCell(present=True, values=vals, total=len(vals), truncated=False)
 
 
@@ -264,10 +261,7 @@ def _navigation_cell(
         # A mixed frontier (the same property name element-typed on one type,
         # scalar on another) degrades element nodes to their display names so
         # nothing silently drops.
-        vals: list[object] = [
-            n.value if isinstance(n, PropertyValue) else display_name(model.elements[n])
-            for n in reached
-        ]
+        vals: list[object] = navigation_display_values(model, reached)
         return ValuesCell(
             present=True,
             values=vals[:cap],
@@ -310,7 +304,7 @@ def _script_cell(
         if isinstance(b, str):
             return ElementCell(element_id=b)
         if col.snippet.ref is not None:
-            return ErrorCell(message=f"snippet artifact {col.snippet.ref!r} not found")
+            return ErrorCell(message=dangling_ref_message(col.snippet.ref))
         if col.snippet.definition is not None and script is not None:
             roots = resolve_source_elements(
                 mm,
@@ -328,8 +322,18 @@ def _script_cell(
                 # re-derive, not the original build-time call), so a live call
                 # could not change the single-row rendering anyway; recomputing
                 # it live would also bypass sweep accounting.
-                res = script.call(
-                    col.snippet.definition.code, "value", roots, cache_only=True
+                res = evaluate_script_column(
+                    mm,
+                    model,
+                    defn,
+                    key,
+                    col,
+                    roots,
+                    base_slots,
+                    limits,
+                    script,
+                    memo,
+                    cache_only=True,
                 )
                 if res.error is not None:
                     if res.error.kind == "pending":
@@ -340,7 +344,7 @@ def _script_cell(
         return ValueCell(present=False, value=None, element_id=None, editable=False)
 
     if col.snippet.ref is not None:  # post-resolve: dangling ref
-        return ErrorCell(message=f"snippet artifact {col.snippet.ref!r} not found")
+        return ErrorCell(message=dangling_ref_message(col.snippet.ref))
     if col.snippet.definition is None:  # unconfigured ({}): empty, like an
         # unconfigured navigation/property source
         return ValueCell(present=False, value=None, element_id=None, editable=False)
@@ -351,8 +355,10 @@ def _script_cell(
         return ValueCell(present=False, value=None, element_id=None, editable=False)
     if script is None:
         # Defensive: routes always supply a context when table_has_script().
-        return ErrorCell(message="script runner unavailable")
-    res = script.call(col.snippet.definition.code, "value", els)
+        return ErrorCell(message=RUNNER_UNAVAILABLE_MESSAGE)
+    res = evaluate_script_column(
+        mm, model, defn, key, col, els, base_slots, limits, script, memo
+    )
     if res.error is not None:
         if res.error.kind == "pending":
             return PendingCell()

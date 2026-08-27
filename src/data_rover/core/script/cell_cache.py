@@ -33,14 +33,29 @@ whole cache. See `evict_touched`'s docstring for the exact contract.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 from collections import OrderedDict
 
-from .runner import CallResult, ReadKey
+from .runner import CallResult, ReadKey, WireInputs
 
-#: (sha256(code).hexdigest(), entry, element_ids) — code is hashed so keys
-#: stay small; ScriptEvalContext computes the hash once per distinct code.
-CellKey = tuple[str, str, tuple[str, ...]]
+#: (sha256(code).hexdigest(), entry, element_ids, inputs digest) — code is
+#: hashed so keys stay small; the digest is "" for a call without column
+#: inputs, so every pre-inputs key is unchanged.
+CellKey = tuple[str, str, tuple[str, ...], str]
+
+
+def inputs_digest(inputs: WireInputs | None) -> str:
+    """Key component for a call's resolved column inputs: "" when there are
+    none, else a sha256 prefix of the canonical JSON. JSON keeps 1, 1.0, "1"
+    and true distinct, so no type tags are needed; hashing bounds the key
+    size for long text inputs."""
+    if not inputs:
+        return ""
+    canon = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canon.encode()).hexdigest()[:32]
+
 
 _CACHEABLE_ERROR_KINDS = frozenset({"runtime", "syntax"})
 

@@ -324,7 +324,7 @@ def test_partially_cached_sort_degrades_to_build_order(
     sha = hashlib.sha256(VALUE_CODE.encode()).hexdigest()
     for tid in ("t4", "t5"):
         session.script_cell_cache.put(
-            (sha, "value", (tid,)), ok(10 - int(tid[1:])), session.model_rev
+            (sha, "value", (tid,), ""), ok(10 - int(tid[1:])), session.model_rev
         )
 
     page = _evaluate(client, _script_table())
@@ -642,7 +642,7 @@ def test_ops_persist_failure_restores_the_cell_cache_stamp(
     session = get_session()
     base_rev = session.model_rev
     sha = hashlib.sha256(VALUE_CODE.encode()).hexdigest()
-    raced_key = (sha, "value", ("t1",))
+    raced_key = (sha, "value", ("t1",), "")
     fp = _fingerprint()
     session.script_sweeps.kick(fp, base_rev, lambda job: None)
 
@@ -906,7 +906,7 @@ def test_export_terminal_job_with_cache_that_completed_anyway_202s_once(
     rev = session.model_rev
     sha = hashlib.sha256(VALUE_CODE.encode()).hexdigest()
     for tid in ("t2", "t3", "t4", "t5"):
-        session.script_cell_cache.put((sha, "value", (tid,)), ok(1), rev)
+        session.script_cell_cache.put((sha, "value", (tid,), ""), ok(1), rev)
 
     def _outcome(i: int, ids: list[str]) -> CallResult:
         assert ids == ["t1"]  # the sweep's only real call: t2..t5 are cached

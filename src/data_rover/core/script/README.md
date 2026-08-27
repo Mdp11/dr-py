@@ -139,9 +139,13 @@ any `dr` write call in that mode raises `dr.ReadOnlyError` in the snippet.
 Entry-point calling convention: a `"value"` run calls the snippet's
 top-level `value(elements)` with a **list of `Element` handles** — one per
 id in the request's `element_ids`, in that order (validated non-empty at the
-route); a `"step"` run calls `step(el)` with its single bound element. The
-arity rule for both is exactly one argument; for `value` that one argument is
-the list. This is the same calling convention an embedded session (see
+route); a `"step"` run calls `step(el)` with its single bound element. `step`
+and `transform` are exactly one argument. A table script column that
+declares `inputs` calls `value(elements, inputs)` instead — `inputs` is a
+`dict[str, list]`, one key per declared input, each value the `Element`
+handles or scalars the named column holds for the row (`[]` for an empty
+cell). Lint accepts a `value` of arity 1 or 2; `step`/`transform` stay
+one-arg. This is the same calling convention an embedded session (see
 "Evaluation sessions" below) uses for its `value`/`step` calls — the only difference is that a console run boots a fresh guest per
 call, while a session boots once and serves many calls off the same warm
 instance.
@@ -313,8 +317,13 @@ see above), emits a boot ack
 call loop reading newline-JSON frames from the host:
 
 - `{"call": {"entry": "value"|"step"|"transform", "element_ids": [...],
-  "elements": [<projection>, ...], "doc": <any JSON value> | null}}` — the
-  additive `"elements"` field is the root piggyback (trip-collapse): the host
+  "elements": [<projection>, ...], "doc": <any JSON value> | null,
+  "inputs": {name: {"kind": "elements", "ids": [...]} | {"kind": "scalars",
+  "values": [...]}} | null}}` — `"inputs"` is null except on a `value` call
+  from a script column with inputs; element inputs are projected into
+  `"elements"` beside the roots (trip collapse), and the guest fetches them
+  through the same memoized path, so their reads land in the call's
+  read-set. The additive `"elements"` field is the root piggyback (trip-collapse): the host
   projects each bound root it can still find in the live model (`bridge.py`'s
   `project_roots`) and ships those projections alongside the ids, so a
   property-math cell that never navigates past its bound element(s) costs
@@ -397,9 +406,9 @@ fresh one.
 - **Sessions keyed by code** — two columns/steps carrying byte-identical
   code share one guest instance, opened lazily on the first `.call()` that
   needs it; all sessions are closed together by `.close()`.
-- **Calls memoized by `(code, entry, element_ids)`** — `.call()` checks its
-  memo before dispatching to a session, so sorting a table by a script
-  column and then rendering the page calls `value()` at most once per
+- **Calls memoized by `(code, entry, element_ids, inputs digest)`** — `.call()`
+  checks its memo before dispatching to a session, so sorting a table by a
+  script column and then rendering the page calls `value()` at most once per
   distinct binding, and identical bindings across rows dedupe for free.
   This is sound under the WASM determinism guarantee (same code + same
   model ⇒ same output — see "Determinism guarantees" above) — but an entry
@@ -409,7 +418,13 @@ fresh one.
   returns the FIRST call's cached result rather than re-running against the
   now-mutated module state. This is not detected or warned about — it is a
   documented caveat for snippet authors, not a bug the context guards
-  against.
+  against. The digest (`cell_cache.inputs_digest`) is `""` without inputs
+  (existing keys unchanged) else a sha256 prefix of the canonical JSON of the
+  resolved inputs — an input's VALUE is in the key, so a commit that changes
+  what an input column holds simply misses. A pending or errored input never
+  reaches the guest: `core/table/script_inputs.evaluate_script_column`
+  returns a synthetic pending/error result that is neither memoized nor
+  cached (`input 'name': …`).
 - **Build lookup indexes at module top level, never lazily.** A read-set
   capture pass (`facade_src.py`'s `_note_read`, threaded into
   `CallResult.reads`) records which parts of the model each call USES, so a
@@ -698,6 +713,11 @@ cache is internally locked, and the pathology counters are job-global.
     sweep at all (a degrade records no pending miss). Sorting by an
     ELEMENT/PROPERTY column sourced from that same navigation column has no
     such backstop and does degrade.
+  - Script-column INPUTS are resolved the same way — live, through the
+    serial context during enumeration — so an input that is itself a script
+    column is computed and cached before the dependent item is queued; a
+    pending/errored input counts the dependent cell as done (its state
+    derives from a cell the sweep accounts for separately).
   - **The warning survives the order cache.** A degraded order records no
     pending miss, so `TableOrderCache` stores it and later requests skip
     `order_rows` entirely. `evaluate_table` therefore re-derives the warning on

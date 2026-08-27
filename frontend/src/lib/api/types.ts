@@ -870,6 +870,14 @@ const ColumnRefSchema = z.object({
 });
 export const ColumnSourceSchema = z.discriminatedUnion('kind', [RowSlotSchema, ColumnRefSchema]);
 
+/** Mirror of core/table/schema.py's ScriptInput: a named earlier column a
+ *  script column reads for the same row (`value(elements, inputs)`). */
+export const ScriptInputSchema = z.object({
+	name: z.string(),
+	ref: ColumnRefSchema
+});
+export type ScriptInput = z.infer<typeof ScriptInputSchema>;
+
 export const SnippetDefinitionSchema = z.object({
 	schema_version: z.number().int().default(1),
 	language: z.literal('python').default('python'),
@@ -929,6 +937,7 @@ const ScriptColumnSchema = z.object({
 	kind: z.literal('script'),
 	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
 	snippet: SnippetSourceSchema.default({}),
+	inputs: z.array(ScriptInputSchema).default([]),
 	mode: z.enum(['collapse', 'expand']).default('collapse'),
 	keep_empty: z.boolean().default(true),
 	header: z.string().default(''),

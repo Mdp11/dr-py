@@ -20,7 +20,9 @@ class _FakeSession:
         self._outcome = outcome
         self._counter = counter
 
-    def call(self, entry: Literal["value", "step"], element_ids: list[str]) -> CallResult:
+    def call(
+        self, entry: Literal["value", "step"], element_ids: list[str], *, doc=None, inputs=None
+    ) -> CallResult:
         self._counter[0] += 1
         return self._outcome
 
@@ -284,3 +286,39 @@ def test_write_through_carries_reads() -> None:
     # ...and is evicted by one that does
     cache.evict_touched(frozenset({("el", "b1")}), 5)
     assert cache.size == 0
+
+
+from data_rover.core.script.cell_cache import inputs_digest
+from data_rover.core.script.runner import WireInputs
+
+
+def _in(*values: object) -> WireInputs:
+    return {"a": {"kind": "scalars", "values": list(values)}}
+
+
+def test_inputs_participate_in_memo_and_cell_key():
+    runner = _FakeRunner(OK)
+    cache = ScriptCellCache()
+    ctx = _ctx(runner, cache)
+    ctx.call("c", "value", ["e1"], inputs=_in(1))
+    ctx.call("c", "value", ["e1"], inputs=_in(1))  # memo hit
+    assert runner.calls[0] == 1
+    ctx.call("c", "value", ["e1"], inputs=_in("1"))  # different value → new key
+    assert runner.calls[0] == 2
+    ctx.call("c", "value", ["e1"])  # no inputs → a third key
+    assert runner.calls[0] == 3
+    assert cache.size == 3
+    # a fresh context reads all three back without a guest call
+    ctx2 = _ctx(runner, cache)
+    ctx2.call("c", "value", ["e1"], inputs=_in(1))
+    ctx2.call("c", "value", ["e1"], inputs=_in("1"))
+    ctx2.call("c", "value", ["e1"])
+    assert runner.calls[0] == 3
+
+
+def test_inputs_digest_empty_without_inputs_and_type_sensitive():
+    assert inputs_digest(None) == ""
+    assert inputs_digest({}) == ""
+    digests = {inputs_digest(_in(v)) for v in (1, 1.0, "1", True)}
+    assert len(digests) == 4
+    assert inputs_digest(_in(1)) == inputs_digest(_in(1))  # deterministic

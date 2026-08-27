@@ -734,6 +734,13 @@ element, and both share one component: `components/Snippet/
 SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
 }`) plus the entry point it must satisfy (`"value"` or `"step"`).
 
+- **Inputs.** `ScriptInputsEditor.svelte` (mounted by `ScriptColumnEditor`)
+  edits `column.inputs`: a name plus a column-only `ColumnSourceEditor`
+  (`allowRow={false}`) per input. Names are validated as Python identifiers
+  and unique; the server re-validates. `columns.ts`'s move/remove/clone
+  helpers remap `inputs[].ref.index` exactly like `source`
+  (`remapColumnRefs`). When a column has inputs the snippet stub is the
+  two-arg `value(elements, inputs)`.
 - **Ref/inline contract.** Mode is derived, not stored: `definition != null`
   means inline, ref mode otherwise — including the freshly-added, unconfigured
   `{}`. **Ref mode** narrows the saved-snippet dropdown (`snippet-ref-select`)

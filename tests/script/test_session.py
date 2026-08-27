@@ -349,3 +349,53 @@ def test_ctx_boot_error_and_warnings(small_model) -> None:
     assert ctx.warnings[0].occurrences == 2
     assert len(ctx.warnings) == 20  # capped
     ctx.close()
+
+
+def test_session_value_receives_named_inputs(small_model) -> None:
+    ids = sorted(small_model.elements)
+    sess = _open(
+        small_model,
+        "def value(els, inputs):\n"
+        "    return [inputs['n'][0] + len(inputs['els']), inputs['els'][0].id]",
+    )
+    assert sess.boot_error is None
+    r = sess.call(
+        "value",
+        [ids[0]],
+        inputs={
+            "n": {"kind": "scalars", "values": [10]},
+            "els": {"kind": "elements", "ids": ids[:2]},
+        },
+    )
+    assert r.error is None, r.error
+    assert r.value == {"kind": "scalars", "values": [12, ids[0]]}
+    sess.close()
+
+
+def test_session_value_without_inputs_is_called_with_one_arg(small_model) -> None:
+    ids = sorted(small_model.elements)
+    sess = _open(small_model, "def value(els): return len(els)")
+    r = sess.call("value", [ids[0]])
+    assert r.value == {"kind": "scalar", "value": 1}
+    sess.close()
+
+
+def test_session_empty_inputs_are_empty_lists(small_model) -> None:
+    ids = sorted(small_model.elements)
+    sess = _open(small_model, "def value(els, inputs): return len(inputs['x'])")
+    r = sess.call("value", [ids[0]], inputs={"x": {"kind": "scalars", "values": []}})
+    assert r.value == {"kind": "scalar", "value": 0}
+    sess.close()
+
+
+def test_input_element_ids_dedupes_in_order() -> None:
+    from data_rover.core.script.runner import input_element_ids
+
+    assert input_element_ids(None) == []
+    assert input_element_ids(
+        {
+            "a": {"kind": "elements", "ids": ["e2", "e1"]},
+            "b": {"kind": "scalars", "values": [1]},
+            "c": {"kind": "elements", "ids": ["e1", "e3"]},
+        }
+    ) == ["e2", "e1", "e3"]

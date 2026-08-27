@@ -9,18 +9,26 @@ the column maps over it. `collapse` keeps the mapped values in one cell;
 
 Static validation here rejects cycles (a ColumnRef must point strictly
 backward), non-element navigation sources, multi-binding element sources, and
-chain_index on a non-chains row source. Two further rules need the metamodel or
-the resolved navigation and are checked at evaluation time (see evaluate.py):
-expand-on-a-scalar-property and chain_index-out-of-range.
+chain_index on a non-chains row source. A `ScriptColumn.inputs` entry is
+checked the same way: its `ref` must point strictly backward, `step_index`
+requires the referenced column to be a navigation column, its `name` must be
+a valid Python identifier and unique within the column, and — for inline code
+only, since a ref snippet is checked at evaluation time instead — the
+declared `value()` arity (1 or 2) must match whether any inputs are declared.
+Two further rules need the metamodel or the resolved navigation and are
+checked at evaluation time (see evaluate.py): expand-on-a-scalar-property and
+chain_index-out-of-range.
 """
 
 from __future__ import annotations
 
+import keyword
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
 
 from data_rover.core.navigation.schema import NavigationDefinition
+from data_rover.core.script.lint import entry_arity
 from data_rover.core.script.schema import SnippetSource
 from data_rover.core.search.criteria import Criterion
 
@@ -98,6 +106,21 @@ class ColumnRef(BaseModel):
 
 
 ColumnSource = Annotated[RowSlot | ColumnRef, Field(discriminator="kind")]
+
+
+class ScriptInput(BaseModel):
+    """A named earlier column a script column reads for the same row.
+    `ref` is backward-only like every ColumnRef; ANY column kind is legal."""
+
+    name: str
+    ref: ColumnRef
+
+    @field_validator("name")
+    @classmethod
+    def _identifier(cls, v: str) -> str:
+        if not v.isidentifier() or keyword.iskeyword(v):
+            raise ValueError(f"input name {v!r} is not a valid identifier")
+        return v
 
 
 # ---- columns ----------------------------------------------------------------
@@ -256,6 +279,9 @@ class ScriptColumn(BaseModel):
     kind: Literal["script"] = "script"
     source: ColumnSource = Field(default_factory=RowSlot)
     snippet: SnippetSource = Field(default_factory=SnippetSource)
+    #: Named earlier columns handed to `value(elements, inputs)` as
+    #: `inputs[name]` (always a list). Empty → `value(elements)`, one arg.
+    inputs: list[ScriptInput] = Field(default_factory=list)
     mode: Literal["collapse", "expand"] = "collapse"
     keep_empty: bool = True
     header: str = ""
@@ -343,10 +369,46 @@ class TableDefinition(BaseModel):
                 raise ValueError(
                     f"column {i}: element column needs a single-binding source"
                 )
+            if col.kind == "script":
+                self._validate_script_inputs(i, col)
             # An expand PROPERTY column accepts a multi-binding source: it
             # promotes one row per (element, value) pair over everything the
             # source reaches (`cells.expand_property_values`).
         return self
+
+    def _validate_script_inputs(self, i: int, col: ScriptColumn) -> None:
+        seen: set[str] = set()
+        for inp in col.inputs:
+            if inp.name in seen:
+                raise ValueError(f"column {i}: duplicate input name {inp.name!r}")
+            seen.add(inp.name)
+            if inp.ref.index >= i:
+                raise ValueError(
+                    f"column {i}: input {inp.name!r} references column "
+                    f"{inp.ref.index} (must be < {i})"
+                )
+            if (
+                inp.ref.step_index is not None
+                and self.columns[inp.ref.index].kind != "navigation"
+            ):
+                raise ValueError(
+                    f"column {i}: input {inp.name!r} step_index requires the "
+                    "referenced column to be a navigation column"
+                )
+        # Inline code is pinned here; a ref snippet is edited independently and
+        # is checked at evaluation time instead (error cell).
+        if col.snippet.definition is not None:
+            arity = entry_arity(col.snippet.definition.code, "value")
+            n = len(col.inputs)
+            if arity == 1 and n:
+                raise ValueError(
+                    f"column {i}: value() takes 1 argument but column declares "
+                    f"{n} input{'s' if n != 1 else ''}"
+                )
+            if arity == 2 and not n:
+                raise ValueError(
+                    f"column {i}: value() takes 2 arguments but column declares no inputs"
+                )
 
     def _source_arity(self, src: ColumnSource) -> tuple[bool, bool]:
         """(element_producing, single_binding) for a column source.

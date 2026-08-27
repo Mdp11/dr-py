@@ -349,9 +349,9 @@ class _CountingRunner:
         class _CountingSession:
             boot_error = session.boot_error
 
-            def call(self, entry, element_ids, *, doc=None):
+            def call(self, entry, element_ids, *, doc=None, inputs=None):
                 counts[0] += 1
-                return session.call(entry, element_ids, doc=doc)
+                return session.call(entry, element_ids, doc=doc, inputs=inputs)
 
             def close(self) -> None:
                 session.close()

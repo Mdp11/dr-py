@@ -136,8 +136,10 @@ from data_rover.core.script.runner import (
     ScriptBudget,
     ScriptError,
     ScriptRunner,
+    WireInputs,
     decode_call_payload,
     decode_reads,
+    input_element_ids,
 )
 
 from .settings import Settings
@@ -426,12 +428,13 @@ def _run_embedded(start):
         element_ids = call["element_ids"]
         elements = call.get("elements")
         doc = call.get("doc")
+        inputs = call.get("inputs")
         cerr = None
         payload = None
         reads = None
         sys.stdout = stdout
         try:
-            res = namespace["_dr_call_entry"](entry, element_ids, elements, doc)
+            res = namespace["_dr_call_entry"](entry, element_ids, elements, doc, inputs)
             payload = res["payload"]
             reads = res["reads"]
         except MemoryError:
@@ -1226,6 +1229,7 @@ class _WasmSnippetSession:
         element_ids: list[str],
         *,
         doc: object | None = None,
+        inputs: WireInputs | None = None,
     ) -> CallResult:
         t0 = time.perf_counter()
         if self.boot_error is not None or self._closed:
@@ -1245,15 +1249,15 @@ class _WasmSnippetSession:
         # `transform` never has element_ids to project (empty by contract),
         # so skip it the same way regardless of the memo cap -- mirrors the
         # trusted (in-process) runner's identical guard in
-        # `tests/script/trusted_runner.py`.
+        # `tests/script/trusted_runner.py`. Input elements ride along with
+        # the roots so the guest's first touch on either costs no round trip.
+        project_ids = (
+            [] if entry == "transform" else [*element_ids, *input_element_ids(inputs)]
+        )
         elements = (
-            []
-            if entry == "transform"
-            else (
-                project_roots(self._dispatcher.model, element_ids)
-                if self._limits.read_memo_max > 0
-                else []
-            )
+            project_roots(self._dispatcher.model, list(dict.fromkeys(project_ids)))
+            if project_ids and self._limits.read_memo_max > 0
+            else []
         )
         frame = (
             json.dumps(
@@ -1263,6 +1267,7 @@ class _WasmSnippetSession:
                         "element_ids": element_ids,
                         "elements": elements,
                         "doc": doc,
+                        "inputs": inputs,
                     }
                 }
             )

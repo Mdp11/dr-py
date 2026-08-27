@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING, Literal
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
+from data_rover.core.script.cell_cache import inputs_digest
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import ScriptBudget, ScriptRunner
 from data_rover.core.table.evaluate import (
@@ -53,6 +54,11 @@ from data_rover.core.table.evaluate import (
     resolve_source_elements,
 )
 from data_rover.core.table.schema import TABLE_ADAPTER, ScriptColumn, TableDefinition
+from data_rover.core.table.script_inputs import (
+    InputFailure,
+    ResolvedInputs,
+    resolve_script_inputs,
+)
 
 from .script_runner import run_limits_from_settings
 from .settings import Settings
@@ -272,10 +278,10 @@ def _run(
         _fail(job, "internal sweep error")
 
 
-#: One unit of shardable sweep work: (snippet code, root element ids). The
-#: entry point is always "value" — expand columns were resolved by the serial
-#: row build, which happens before any fan-out.
-_Item = tuple[str, tuple[str, ...]]
+#: One unit of shardable sweep work: (snippet code, root element ids, resolved
+#: column inputs or None). The entry point is always "value" — expand columns
+#: were resolved by the serial row build, which happens before any fan-out.
+_Item = tuple[str, tuple[str, ...], ResolvedInputs | None]
 
 
 @dataclass
@@ -322,7 +328,7 @@ def _drain(
     """
     while True:
         try:
-            code, roots = q.get_nowait()
+            code, roots, inputs = q.get_nowait()
         except queue.Empty:
             return
         with guards.lock:
@@ -338,7 +344,7 @@ def _drain(
                 if job.state == "running":
                     _fail(job, _ceiling_message(settings))
             return
-        res = wctx.call(code, "value", list(roots))
+        res = wctx.call(code, "value", list(roots), inputs=inputs)
         kind = res.error.kind if res.error is not None else None
         with guards.lock:
             if kind == "timeout":
@@ -425,6 +431,18 @@ def _run_inner(
             and c.mode != "expand"  # expand items were built above
             and c.snippet.definition is not None
         ]
+        # A column whose `value()` arity doesn't match its declared inputs has
+        # nothing to compute: `evaluate_script_column` renders the arity error
+        # itself without ever calling the guest with `inputs=`, so calling it
+        # here would only mint a cached result under a digest key the page
+        # never probes. Checked once per column (memoized by `ctx.value_arity`),
+        # not per row.
+        mismatched_cols: set[int] = set()
+        for c in script_cols:
+            assert c.snippet.definition is not None
+            arity = ctx.value_arity(c.snippet.definition.code)
+            if (arity == 1 and c.inputs) or (arity == 2 and not c.inputs):
+                mismatched_cols.add(id(c))
         expand_count = sum(
             1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
         )
@@ -432,14 +450,16 @@ def _run_inner(
         job.total = len(built.keys) * len(script_cols)
 
         # Enumerate the cell work list through the SERIAL context: resolving a
-        # script-as-source column may itself call the guest, and the resolution
-        # order is part of the definition's dependency order. Dedupe: rows
-        # sharing a binding produce identical (code, roots) items, and
-        # computing them once matches ScriptEvalContext's own memo semantics
-        # (which is what the serial implementation did too — a repeat binding
-        # hit the memo instead of the guest).
+        # script-as-source column (or a column's inputs) may itself call the
+        # guest, and the resolution order is part of the definition's
+        # dependency order. Dedupe: rows sharing a binding AND the same
+        # resolved inputs produce identical items, and computing them once
+        # matches ScriptEvalContext's own memo semantics (which is what the
+        # serial implementation did too — a repeat binding hit the memo
+        # instead of the guest). `ResolvedInputs` is a dict and unhashable, so
+        # `seen` keys on the inputs digest rather than the item itself.
         items: list[_Item] = []
-        seen: set[_Item] = set()
+        seen: set[tuple[str, tuple[str, ...], str]] = set()
         dup_or_empty = 0
         for key in built.keys:
             if _aborted(session, job):
@@ -450,6 +470,9 @@ def _run_inner(
                 return
             for col in script_cols:
                 assert col.snippet.definition is not None
+                if id(col) in mismatched_cols:
+                    dup_or_empty += 1
+                    continue
                 roots = resolve_source_elements(
                     metamodel,
                     model,
@@ -460,15 +483,31 @@ def _run_inner(
                     TableLimits(),
                     script=ctx,
                 )
-                item = (col.snippet.definition.code, tuple(roots))
-                if not roots or item in seen:
-                    # Empty-source cells have nothing to compute and duplicate
-                    # bindings are computed by the item they duplicate, so both
-                    # are already "done" as far as progress is concerned.
+                if not roots:
+                    # Empty-source cells have nothing to compute, so this one
+                    # is already "done" as far as progress is concerned.
                     dup_or_empty += 1
                     continue
-                seen.add(item)
-                items.append(item)
+                inputs = resolve_script_inputs(
+                    metamodel, model, defn, key, col, base_slots, TableLimits(), ctx
+                )
+                if isinstance(inputs, InputFailure):
+                    # Nothing to compute for this cell: its pending/error is
+                    # derived from an input cell the sweep accounts for itself.
+                    dup_or_empty += 1
+                    continue
+                seen_key = (
+                    col.snippet.definition.code,
+                    tuple(roots),
+                    inputs_digest(inputs),
+                )
+                if seen_key in seen:
+                    # A duplicate binding is computed by the item it
+                    # duplicates, already "done" as far as progress goes.
+                    dup_or_empty += 1
+                    continue
+                seen.add(seen_key)
+                items.append((col.snippet.definition.code, tuple(roots), inputs))
         job.done += dup_or_empty  # still single-threaded here
 
         guards = _SharedGuards()

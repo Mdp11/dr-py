@@ -9,6 +9,7 @@
 	// statically knowable, so the toggle is always enabled.
 	import type { Column, RowSource } from '$lib/api/types';
 	import ColumnSourceEditor from './ColumnSourceEditor.svelte';
+	import ScriptInputsEditor from './ScriptInputsEditor.svelte';
 	import SnippetSourceEditor from '$lib/components/Snippet/SnippetSourceEditor.svelte';
 
 	type ScriptColumn = Extract<Column, { kind: 'script' }>;
@@ -49,10 +50,24 @@
 		{rowSource}
 		onSourceChange={(source) => onChange({ ...column, source })}
 	/>
+	<div class="flex items-start gap-2">
+		<span
+			class="text-muted-foreground/70"
+			title="Earlier columns the script receives as inputs[name]">inputs</span
+		>
+		<ScriptInputsEditor
+			inputs={column.inputs}
+			{columns}
+			{columnIndex}
+			{rowSource}
+			onChange={(inputs) => onChange({ ...column, inputs })}
+		/>
+	</div>
 	<SnippetSourceEditor
 		snippet={column.snippet}
 		entry="value"
 		collapseKey={`${tabId}::col:${columnIndex}`}
+		withInputs={column.inputs.length > 0}
 		onChange={(s) => onChange({ ...column, snippet: s })}
 	/>
 	<div class="flex flex-wrap items-center gap-2">

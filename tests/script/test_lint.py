@@ -1,4 +1,4 @@
-from data_rover.core.script.lint import derive_entry_points, lint_code
+from data_rover.core.script.lint import derive_entry_points, entry_arity, lint_code
 
 
 def test_syntax_error_is_blocking_error():
@@ -33,17 +33,27 @@ def test_dr_names_are_known():
 
 
 def test_entry_points_derived():
-    assert set(derive_entry_points("def value(el):\n    return 1\n")) == {"script", "value"}
-    assert set(derive_entry_points("def step(el):\n    return []\n")) == {"script", "step"}
-    both = derive_entry_points("def value(el):\n    return 1\ndef step(el):\n    return []\n")
+    assert set(derive_entry_points("def value(el):\n    return 1\n")) == {
+        "script",
+        "value",
+    }
+    assert set(derive_entry_points("def step(el):\n    return []\n")) == {
+        "script",
+        "step",
+    }
+    both = derive_entry_points(
+        "def value(el):\n    return 1\ndef step(el):\n    return []\n"
+    )
     assert set(both) == {"script", "value", "step"}
     assert derive_entry_points("x = (") == []  # unparseable
 
 
 def test_bad_entry_signature_is_warning():
-    diags = lint_code("def value(a, b):\n    return 1\n")
+    diags = lint_code("def value(a, b, c):\n    return 1\n")
     assert any(
-        d.severity == "warning" and "value" in d.message and "the list of elements" in d.message
+        d.severity == "warning"
+        and "value" in d.message
+        and "the list of elements" in d.message
         for d in diags
     )
     diags = lint_code("def step(a, b):\n    return 1\n")
@@ -68,6 +78,26 @@ def test_transform_wrong_arity_warns_not_derived():
     assert "transform" not in derive_entry_points(code)
     diags = lint_code(code)
     assert any(
-        d.severity == "warning" and "transform() must take exactly one argument" in d.message
+        d.severity == "warning" and "transform() must take 1 argument" in d.message
         for d in diags
     )
+
+
+def test_two_arg_value_is_an_entry_point():
+    assert "value" in derive_entry_points("def value(els, inputs):\n    return 1\n")
+    assert "value" not in derive_entry_points("def value(a, b, c):\n    return 1\n")
+    # step/transform keep the strict one-arg rule
+    assert "step" not in derive_entry_points("def step(el, x):\n    return []\n")
+
+
+def test_entry_arity():
+    assert entry_arity("def value(els):\n    return 1\n", "value") == 1
+    assert entry_arity("def value(els, inputs):\n    return 1\n", "value") == 2
+    assert entry_arity("x = 1\n", "value") is None
+    assert entry_arity("x = (", "value") is None
+
+
+def test_two_arg_value_is_not_a_lint_warning():
+    assert lint_code("def value(els, inputs):\n    return inputs\n") == []
+    diags = lint_code("def value(a, b, c):\n    return 1\n")
+    assert any("value()" in d.message and d.severity == "warning" for d in diags)

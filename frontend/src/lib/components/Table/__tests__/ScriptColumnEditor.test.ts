@@ -20,6 +20,7 @@ function scriptColumn(overrides: Partial<ScriptColumn> = {}): ScriptColumn {
 		kind: 'script',
 		source: { kind: 'row', chain_index: 0 },
 		snippet: {},
+		inputs: [],
 		mode: 'collapse',
 		keep_empty: true,
 		header: '',

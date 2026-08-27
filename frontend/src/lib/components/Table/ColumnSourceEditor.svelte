@@ -21,12 +21,19 @@
 		columns,
 		columnIndex,
 		rowSource,
+		allowRow = true,
+		label = 'source',
 		onSourceChange
 	}: {
 		source: ColumnSource;
 		columns: Column[];
 		columnIndex: number;
 		rowSource: RowSource | null;
+		/** false hides the kind select and pins this editor to `column` refs —
+		 * for a column-only caller (ScriptInputsEditor) whose source is never a
+		 * row slot. */
+		allowRow?: boolean;
+		label?: string;
 		onSourceChange: (next: ColumnSource) => void;
 	} = $props();
 
@@ -83,6 +90,7 @@
 	}
 
 	$effect(() => {
+		if (!allowRow) return; // a column-only editor's source is never a row slot
 		resolveNav(
 			rowSource?.kind === 'chains' ? rowSource.navigation : null,
 			(d) => (rowNavDefn = d),
@@ -134,16 +142,18 @@
 </script>
 
 <div class="flex flex-wrap items-center gap-2">
-	<span class="text-muted-foreground/70">source</span>
-	<select
-		aria-label="Column source kind"
-		value={source.kind}
-		onchange={setSourceKind}
-		class="rounded border border-input bg-card px-1 py-0.5"
-	>
-		<option value="row">Row</option>
-		<option value="column" disabled={priorColumns.length === 0}>Earlier column</option>
-	</select>
+	<span class="text-muted-foreground/70">{label}</span>
+	{#if allowRow}
+		<select
+			aria-label="Column source kind"
+			value={source.kind}
+			onchange={setSourceKind}
+			class="rounded border border-input bg-card px-1 py-0.5"
+		>
+			<option value="row">Row</option>
+			<option value="column" disabled={priorColumns.length === 0}>Earlier column</option>
+		</select>
+	{/if}
 	{#if source.kind === 'row'}
 		<!-- chain_index only means something for a `chains` row source (it picks
 		     which chain step the column reads); the schema rejects != 0 for any

@@ -34,8 +34,10 @@ from data_rover.core.script.runner import (
     ScriptBudget,
     ScriptError,
     SnippetSession,
+    WireInputs,
     decode_call_payload,
     decode_reads,
+    input_element_ids,
 )
 
 #: The filename `compile()`/`exec()` see for the USER's snippet source. The
@@ -230,7 +232,14 @@ class _TrustedSession:
                     traceback=_format_guest_traceback(),
                 )
 
-    def call(self, entry: str, element_ids: list[str], *, doc: object | None = None) -> CallResult:
+    def call(
+        self,
+        entry: str,
+        element_ids: list[str],
+        *,
+        doc: object | None = None,
+        inputs: WireInputs | None = None,
+    ) -> CallResult:
         start = time.monotonic()
         if self.boot_error is not None:
             return CallResult(value=None, error=self.boot_error, duration_ms=0)
@@ -240,21 +249,21 @@ class _TrustedSession:
         # Doesn't change results, only whether we bother -- mirrors the
         # WASM host's identical guard in `api/script_runner.py`. `transform`
         # never has element_ids to project (empty by contract), so skip it
-        # the same way regardless of the memo cap.
+        # the same way regardless of the memo cap. Input elements ride along
+        # with the roots so the guest's first touch on either is free.
+        project_ids = (
+            [] if entry == "transform" else [*element_ids, *input_element_ids(inputs)]
+        )
         elements = (
-            []
-            if entry == "transform"
-            else (
-                project_roots(self._dispatcher.model, element_ids)
-                if self._limits.read_memo_max > 0
-                else []
-            )
+            project_roots(self._dispatcher.model, list(dict.fromkeys(project_ids)))
+            if project_ids and self._limits.read_memo_max > 0
+            else []
         )
         stdout = _CappedStdout(self._limits.stdout_bytes)
         with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
             try:
                 res = self._namespace["_dr_call_entry"](
-                    entry, element_ids, elements, doc
+                    entry, element_ids, elements, doc, inputs
                 )
             except Exception:
                 return CallResult(
