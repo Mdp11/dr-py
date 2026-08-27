@@ -235,14 +235,29 @@ def _start_ids(
 
 
 def _scope_ids(metamodel: Metamodel, model: Model, scope: Scope) -> list[str]:
+    """Ascending-id list of the elements a scope selects.
+
+    The untyped branch walks `model.elements` in insertion order instead of
+    through an id set: ids minted in order (UUIDv7, sequential import ids)
+    hand `sorted` a presorted run, so the sort is O(n) comparisons on such a
+    model and never worse than a set's hash order on any other. An empty
+    criteria list skips the matcher entirely.
+    """
     if scope.types:
-        ids: set[str] = set()
+        by_type = model.indexes.elements_by_type
+        typed: set[str] = set()
         for type_name in scope.types:
             for concrete in metamodel.element_descendants(type_name):
-                ids |= model.indexes.elements_by_type.get(concrete, set())
-    else:
-        ids = set(model.elements.keys())
-    return sorted(i for i in ids if _matches_criteria(model, model.elements[i], scope))
+                typed |= by_type.get(concrete, set())
+        if not scope.criteria:
+            return sorted(typed)
+        elements = model.elements
+        return sorted(i for i in typed if _matches_criteria(model, elements[i], scope))
+    if not scope.criteria:
+        return sorted(model.elements)
+    return sorted(
+        e.id for e in model.elements.values() if _matches_criteria(model, e, scope)
+    )
 
 
 def _match_nav_criterion(model: Model, element: Element, criterion) -> bool:
