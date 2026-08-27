@@ -59,6 +59,8 @@ pluralization bullet, and retires U-5 as already shipped. The 2026-08-26 pass on
 performance program (see K-6, now first in that program).
 The 2026-08-26 pass on `perf/compressed-snapshots` closes K-21 (gzip'd compact snapshots,
 bytes-sniffing reader; see its entry for the numbers).
+The 2026-08-27 pass on `perf/uniqueness-position-index` closes K-22 (the maintained
+`IndexSet.element_order`; see its entry for the numbers).
 
 ---
 
@@ -1041,12 +1043,19 @@ The periodic snapshot (`_maybe_periodic_snapshot`) now runs on a background job
 (`api/snapshot_job.py`) that takes `write_mutex` itself, so the 200th commit no longer pays
 the encode; rebind-forced, evict and baseline snapshots stay synchronous.
 
-### K-22 · Uniqueness validator builds a whole-model position map per scoped run · `open` · perf · *2026-08-26*
-`validators/uniqueness.py:56` builds `{eid: i for i, eid in enumerate(model.elements)}` —
-96 ms at 320k — on every scoped run that touches a duplicate group, under `write_mutex`: up
-to 350 × per background sweep (+34 s) and once per commit touching a duplicate. Maintain an
-insertion-position index in `IndexSet` (or hoist the map onto the validator for a sweep's
-lifetime). Fourth in the program.
+### K-22 · Uniqueness validator builds a whole-model position map per scoped run · `done` (2026-08-27, perf/uniqueness-position-index) · perf · *2026-08-26*
+`IndexSet.element_order` (element id → monotonic insertion sequence number, maintained by
+the two element hooks and re-derived by `rebuild()`; `verify_consistent` checks the order
+invariant) replaces the validator's per-run `{eid: i for i, eid in enumerate(model.elements)}`
+— 79 ms + 17 MiB per build at 320k, paid in ~120 of the sweep's ~160 element chunks and in
+every commit touching a duplicate group. Measured at scale 320 with 231 sporadic duplicate
+groups injected (the fixture generator avoids duplicates): element half of the sweep
+**17.10 s → 5.47 s** (median 126 → 32.7 ms per chunk); full-scope
+uniqueness run 185 → 92 ms; `create_element` / `delete_element` 46.0 / 17.8 µs per
+op (was 42.8 / 16.8 — the index is one dict insert / one pop); `rebuild()` 3.32 s (was
+3.23); +15.9 MiB resident. The per-sweep hoist alternative was declined: a fresh
+pipeline per request means every commit would still pay the build, and the core has no
+mutation counter to key a cached map on.
 
 ### K-23 · `Model.set_property`/`delete_property` copy the property list and build a name set per write · `open` · perf · *2026-08-26*
 `core/model/model.py:82-85`, `:105-108` and `routes/ops.py::_check_patch_keys` do
