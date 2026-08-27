@@ -61,6 +61,8 @@ The 2026-08-26 pass on `perf/compressed-snapshots` closes K-21 (gzip'd compact s
 bytes-sniffing reader; see its entry for the numbers).
 The 2026-08-27 pass on `perf/uniqueness-position-index` closes K-22 (the maintained
 `IndexSet.element_order`; see its entry for the numbers).
+The 2026-08-27 pass on `perf/property-write-hot-path` closes K-23 (the per-property search-index
+diff and cold-element ownership; see its entry for the numbers).
 
 ---
 
@@ -1057,12 +1059,22 @@ op (was 42.8 / 16.8 — the index is one dict insert / one pop); `rebuild()` 3.3
 pipeline per request means every commit would still pay the build, and the core has no
 mutation counter to key a cached map on.
 
-### K-23 · `Model.set_property`/`delete_property` copy the property list and build a name set per write · `open` · perf · *2026-08-26*
-`core/model/model.py:82-85`, `:105-108` and `routes/ops.py::_check_patch_keys` do
-`list(effective_*_properties)` + `{p.name for p in defs}` per property write; the replay tail
-at hydration (≤200 commits) and every commit pay it per op property, and
-`on_properties_changed` re-derives the element's whole trigram set per write. Add a cached
-`frozenset` name accessor on `Metamodel`. Fifth in the program.
+### K-23 · `Model.set_property`/`delete_property` copy the property list and build a name set per write · `done` (2026-08-27, perf/property-write-hot-path) · perf · *2026-08-26*
+The spike said the list copy was 2.5 µs of a 76 µs write: ~85 % was `on_properties_changed`
+re-deriving the element's WHOLE trigram set for one changed value (and 95 % of a 130 µs
+first touch of a never-indexed element — the replay tail's case). Three legs:
+`Metamodel.effective_*_property_names` (cached frozensets, shared with `_check_patch_keys`);
+`IndexSet.on_property_changed(entity, prop, old_value)`, which diffs the search index from
+the changed value's text (removal candidates verified by substring against the other fields,
+the sorted tuple patched with `bisect`; whole-element fallback for list values) —
+`verify_consistent` pins it byte-identical to a full build; and per-element ownership of
+the search index (`_trigrams_of` entry ⇔ indexed, `()` included), so a bulk-loaded element
+the chunked build has not reached is left to that build instead of being indexed on first
+touch. Measured at scale 320: cold `set_property` **129.8 → 5.6 µs**, warm
+**75.8 → 34.5 µs**, restore-style replay 54.5 → 23.8 µs per write, a 200-batch
+tail of 10 × 3-key `update_element` **736 → 108 ms** cold / 409 → 127 ms
+warm, `_check_patch_keys` 2.49 → 1.17 µs; 0 of 3000 edited elements differ from a full
+derivation and `verify_consistent` passes at 320k.
 
 ### K-24 · Untyped navigation scope sorts every element id · `open` · perf · *2026-08-26*
 `core/navigation/evaluate.py:244-245`: `set(model.elements.keys())` + criteria filter +

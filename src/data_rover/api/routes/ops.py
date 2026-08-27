@@ -227,10 +227,9 @@ def _check_patch_keys(
     """Reject unknown patch keys upfront so a patch can never fail half-applied
     (set/delete_property on an attached entity only fails on unknown keys)."""
     if element:
-        defs = model.metamodel.effective_element_properties(type_name)
+        valid = model.metamodel.effective_element_property_names(type_name)
     else:
-        defs = model.metamodel.effective_relationship_properties(type_name)
-    valid = {p.name for p in defs}
+        valid = model.metamodel.effective_relationship_property_names(type_name)
     for key in patch:
         if key not in valid:
             raise KeyError(f"{type_name!r} has no property {key!r}")

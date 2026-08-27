@@ -9,12 +9,16 @@ snapshot the element ids, then index ``CHUNK_SIZE`` of them per
 ``session.write_mutex`` acquisition so an ops batch never waits for more
 than one chunk.
 
-Correctness with concurrent edits: the IndexSet mutation hooks maintain
-postings regardless of readiness, and ``index_search_chunk`` skips ids the
-hooks already indexed or the model no longer holds, so the interleaving
-converges on exactly what a synchronous full build produces. Readiness is
-declared under the mutex only after the last chunk, and only if the session
-still holds the model the build started on.
+Correctness with concurrent edits: ownership is per element. The IndexSet
+mutation hooks maintain postings for every element that has a
+``_trigrams_of`` entry (created through the hooks, or already reached by a
+chunk) and leave the rest — bulk-loaded, not yet reached — to this build,
+which indexes each one's CURRENT text when its chunk lands and skips ids
+that already have an entry or that the model no longer holds; so the
+interleaving converges on exactly what a synchronous full build produces
+without deriving any element twice. Readiness is declared under the mutex
+only after the last chunk, and only if the session still holds the model
+the build started on.
 
 Correctness against a concurrent reset: a ``rebuild()`` (default
 ``keep_search=False``) on the live model clears the postings the build is

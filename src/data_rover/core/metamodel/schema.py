@@ -16,6 +16,8 @@ PRIMITIVES = frozenset({"string", "integer", "float", "boolean", "date"})
 #: a finite number or one of these tokens.
 FLOAT_INFINITIES = frozenset({"Infinity", "-Infinity"})
 
+_NO_NAMES: frozenset[str] = frozenset()
+
 
 class PropertyDef(BaseModel):
     name: str
@@ -157,6 +159,10 @@ class _Caches:
     relationship_ancestor_sets: dict[str, frozenset[str]]
     effective_element_props: dict[str, list[PropertyDef]]
     effective_relationship_props: dict[str, list[PropertyDef]]
+    #: the same lists' names as one shared frozenset per type — the per-write
+    #: membership check at the mutation boundary
+    effective_element_prop_names: dict[str, frozenset[str]]
+    effective_relationship_prop_names: dict[str, frozenset[str]]
     effective_element_keys: dict[str, tuple[str, ...] | None]
     effective_element_key_specs: dict[str, KeySpec | None]
     containment: dict[str, bool]
@@ -306,6 +312,14 @@ def _build_caches(mm: Metamodel) -> _Caches:
             if not mapping_targets.isdisjoint(ancestors):
                 rel_types_to[type_name].append(rt.name)
 
+    effective_element_props = {
+        n: _effective_props(c, types_by_name) for n, c in element_ancestors.items()
+    }
+    effective_relationship_props = {
+        n: _effective_props(c, rel_types_by_name)
+        for n, c in relationship_ancestors.items()
+    }
+
     return _Caches(
         types_by_name=types_by_name,
         rel_types_by_name=rel_types_by_name,
@@ -313,12 +327,15 @@ def _build_caches(mm: Metamodel) -> _Caches:
         relationship_ancestors=relationship_ancestors,
         element_ancestor_sets=element_ancestor_sets,
         relationship_ancestor_sets=relationship_ancestor_sets,
-        effective_element_props={
-            n: _effective_props(c, types_by_name) for n, c in element_ancestors.items()
+        effective_element_props=effective_element_props,
+        effective_relationship_props=effective_relationship_props,
+        effective_element_prop_names={
+            n: frozenset(p.name for p in ps)
+            for n, ps in effective_element_props.items()
         },
-        effective_relationship_props={
-            n: _effective_props(c, rel_types_by_name)
-            for n, c in relationship_ancestors.items()
+        effective_relationship_prop_names={
+            n: frozenset(p.name for p in ps)
+            for n, ps in effective_relationship_props.items()
         },
         effective_element_keys=effective_element_keys,
         effective_element_key_specs=effective_element_key_specs,
@@ -401,6 +418,12 @@ class Metamodel(BaseModel):
         # shared, as they were with the uncached implementation
         return list(self._caches().effective_element_props.get(name, ()))
 
+    def effective_element_property_names(self, name: str) -> frozenset[str]:
+        """Names of :meth:`effective_element_properties` as one shared, cached
+        frozenset (empty for an unknown type) — the per-write membership check
+        at the mutation boundary, which must not copy the list per call."""
+        return self._caches().effective_element_prop_names.get(name, _NO_NAMES)
+
     def effective_element_key(self, name: str) -> list[str] | None:
         """First declared key found walking from `name` up its `extends` chain.
 
@@ -419,6 +442,9 @@ class Metamodel(BaseModel):
 
     def effective_relationship_properties(self, name: str) -> list[PropertyDef]:
         return list(self._caches().effective_relationship_props.get(name, ()))
+
+    def effective_relationship_property_names(self, name: str) -> frozenset[str]:
+        return self._caches().effective_relationship_prop_names.get(name, _NO_NAMES)
 
     def is_containment(self, rel_type_name: str) -> bool:
         return self._caches().containment.get(rel_type_name, False)

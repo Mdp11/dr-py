@@ -65,3 +65,26 @@ def test_set_on_relationship_target():
     model.set_property(rel, "label", "wire")
     assert rel.properties["label"] == "wire"
     assert rel.rev == 1
+
+
+def test_set_and_delete_inherited_property_accepted():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Named",
+                abstract=True,
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+            ElementType(name="Block", extends="Named"),
+        ]
+    )
+    model = Model(mm)
+    el = model.create_element("Block")
+    model.set_property(el, "name", "Engine")
+    assert el.properties == {"name": "Engine"}
+    model.delete_property(el, "name")
+    assert el.properties == {}
+    with pytest.raises(KeyError, match="ghost"):
+        model.set_property(el, "ghost", 1)
+    with pytest.raises(KeyError, match="ghost"):
+        model.delete_property(el, "ghost")

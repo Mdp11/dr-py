@@ -79,14 +79,17 @@ class Model:
         ):
             raise KeyError(f"Entity {target.id!r} is not part of this model")
         if isinstance(target, Element):
-            defs = self.metamodel.effective_element_properties(target.type_name)
+            names = self.metamodel.effective_element_property_names(target.type_name)
         else:
-            defs = self.metamodel.effective_relationship_properties(target.type_name)
-        if prop not in {p.name for p in defs}:
+            names = self.metamodel.effective_relationship_property_names(
+                target.type_name
+            )
+        if prop not in names:
             raise KeyError(f"{target.type_name!r} has no property {prop!r}")
+        old = target.properties.get(prop)
         target.properties[prop] = value
         target.rev += 1
-        self.indexes.on_properties_changed(target)
+        self.indexes.on_property_changed(target, prop, old)
 
     def delete_property(self, target: Element | Relationship, prop: str) -> None:
         """Remove a property key from an attached entity (merge-patch null).
@@ -102,16 +105,18 @@ class Model:
         ):
             raise KeyError(f"Entity {target.id!r} is not part of this model")
         if isinstance(target, Element):
-            defs = self.metamodel.effective_element_properties(target.type_name)
+            names = self.metamodel.effective_element_property_names(target.type_name)
         else:
-            defs = self.metamodel.effective_relationship_properties(target.type_name)
-        if prop not in {p.name for p in defs}:
+            names = self.metamodel.effective_relationship_property_names(
+                target.type_name
+            )
+        if prop not in names:
             raise KeyError(f"{target.type_name!r} has no property {prop!r}")
         if prop not in target.properties:
             return
-        del target.properties[prop]
+        old = target.properties.pop(prop)
         target.rev += 1
-        self.indexes.on_properties_changed(target)
+        self.indexes.on_property_changed(target, prop, old)
 
     def connect(self, rel_type: str, source_id: str, target_id: str) -> Relationship:
         if self.metamodel.relationship_type(rel_type) is None:
