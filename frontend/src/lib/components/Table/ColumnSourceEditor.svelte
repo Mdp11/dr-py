@@ -90,6 +90,7 @@
 	}
 
 	$effect(() => {
+		if (!allowRow) return; // a column-only editor's source is never a row slot
 		resolveNav(
 			rowSource?.kind === 'chains' ? rowSource.navigation : null,
 			(d) => (rowNavDefn = d),

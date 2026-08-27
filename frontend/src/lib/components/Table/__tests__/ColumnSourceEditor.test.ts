@@ -314,4 +314,25 @@ describe('ColumnSourceEditor', () => {
 			unmount(c);
 		}
 	});
+
+	it('never resolves the row source when allowRow is false (column-only caller)', () => {
+		const getArtifactSpy = vi.spyOn(artifactsApi, 'getArtifact');
+		const c = mount(ColumnSourceEditor, {
+			target: document.body,
+			props: {
+				source: { kind: 'column', index: 0, step_index: null },
+				columns: [propColumn()],
+				columnIndex: 1,
+				rowSource: { kind: 'chains', navigation: { ref: 'nav1' }, unique: false },
+				allowRow: false,
+				onSourceChange: vi.fn()
+			}
+		});
+		flushSync();
+		try {
+			expect(getArtifactSpy).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
 });
