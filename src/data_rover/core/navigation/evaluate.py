@@ -283,11 +283,17 @@ def _match_nav_criterion(model: Model, element: Element, criterion) -> bool:
 
 
 def _matches_criteria(model: Model, element: Element, scope: Scope) -> bool:
-    return all(_match_nav_criterion(model, element, c) for c in scope.criteria)
+    for c in scope.criteria:
+        if not _match_nav_criterion(model, element, c):
+            return False
+    return True
 
 
 def _matches_filter(model: Model, element: Element, step: FilterStep) -> bool:
-    return all(_match_nav_criterion(model, element, c) for c in step.criteria)
+    for c in step.criteria:
+        if not _match_nav_criterion(model, element, c):
+            return False
+    return True
 
 
 def _matches_target_types(

@@ -6,6 +6,8 @@ model whose insertion order is deliberately NOT id order."""
 
 import random
 
+import pytest
+
 from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
@@ -138,3 +140,44 @@ def test_differential_against_set_based_derivation() -> None:
                 types,
                 criteria,
             )
+
+
+def test_matchers_truth_table() -> None:
+    from data_rover.core.navigation.evaluate import _matches_criteria, _matches_filter
+    from data_rover.core.navigation.schema import FilterStep
+
+    model = _unsorted_model()
+    named = model.elements["z"]
+    unnamed = model.elements["m"]
+    assert _matches_criteria(model, unnamed, Scope()) is True
+    assert _matches_criteria(model, named, Scope(criteria=[_exists()])) is True
+    assert _matches_criteria(model, unnamed, Scope(criteria=[_exists()])) is False
+    assert _matches_criteria(model, named, Scope(criteria=[_exists(), _contains("q")])) is False
+    assert _matches_criteria(model, named, Scope(criteria=[_contains("q"), _exists()])) is False
+    assert _matches_criteria(model, named, Scope(criteria=[_exists(), _contains("z")])) is True
+    assert _matches_filter(model, unnamed, FilterStep(criteria=[])) is True
+    assert _matches_filter(model, named, FilterStep(criteria=[_contains("z")])) is True
+    assert _matches_filter(model, named, FilterStep(criteria=[_contains("q"), _exists()])) is False
+
+
+def test_matchers_stop_at_the_first_failing_criterion(monkeypatch: pytest.MonkeyPatch) -> None:
+    import data_rover.core.navigation.evaluate as ev
+    from data_rover.core.navigation.schema import FilterStep
+
+    model = _unsorted_model()
+    named = model.elements["z"]
+    calls: list[str] = []
+    real = ev._match_nav_criterion
+
+    def counting(model, element, criterion):  # noqa: ANN001
+        calls.append(getattr(criterion, "op", "?"))
+        return real(model, element, criterion)
+
+    monkeypatch.setattr(ev, "_match_nav_criterion", counting)
+    scope = Scope(criteria=[_contains("q"), _exists(), _contains("z")])
+    assert ev._matches_criteria(model, named, scope) is False
+    assert calls == ["contains"]  # the two later criteria are never evaluated
+    calls.clear()
+    step = FilterStep(criteria=[_exists(), _contains("q"), _exists()])
+    assert ev._matches_filter(model, named, step) is False
+    assert calls == ["exists", "contains"]
