@@ -28,11 +28,15 @@ IMPORT_ALLOWLIST: frozenset[str] = frozenset(
 )
 DR_NAMES: frozenset[str] = frozenset({"dr"})
 _ENTRY_NAMES = ("value", "step", "transform")
-#: What the single argument means, per entry — `value` receives the full list
-#: of bound elements; `step` receives its one simulated element; `transform`
-#: receives the rendered export document.
+#: Accepted positional-parameter counts per entry. `value` takes the bound
+#: element list plus, on a column that declares inputs, the inputs dict.
+_ENTRY_ARITIES: dict[str, tuple[int, ...]] = {
+    "value": (1, 2),
+    "step": (1,),
+    "transform": (1,),
+}
 _ENTRY_ARG_DESC = {
-    "value": "the list of elements",
+    "value": "the list of elements, optionally followed by the inputs dict",
     "step": "the element",
     "transform": "the document",
 }
@@ -55,6 +59,10 @@ def _parse(code: str) -> tuple[ast.Module | None, Diagnostic | None]:
         )
 
 
+def _positional_count(node: ast.FunctionDef) -> int:
+    return len(node.args.posonlyargs) + len(node.args.args)
+
+
 def derive_entry_points(code: str) -> list[str]:
     tree, _ = _parse(code)
     if tree is None:
@@ -62,10 +70,22 @@ def derive_entry_points(code: str) -> list[str]:
     eps = ["script"]
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in _ENTRY_NAMES:
-            if len(node.args.posonlyargs) + len(node.args.args) == 1:
+            if _positional_count(node) in _ENTRY_ARITIES[node.name]:
                 eps.append(node.name)
     # stable, de-duped
     return list(dict.fromkeys(eps))
+
+
+def entry_arity(code: str, name: str) -> int | None:
+    """Positional-parameter count of the top-level `def <name>`; None when the
+    code does not parse or defines no such function."""
+    tree, _ = _parse(code)
+    if tree is None:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return _positional_count(node)
+    return None
 
 
 def lint_code(code: str) -> list[Diagnostic]:
@@ -104,14 +124,16 @@ def lint_code(code: str) -> list[Diagnostic]:
     # entry-point signature checks
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in _ENTRY_NAMES:
-            argc = len(node.args.posonlyargs) + len(node.args.args)
-            if argc != 1:
+            argc = _positional_count(node)
+            allowed = _ENTRY_ARITIES[node.name]
+            if argc not in allowed:
+                expect = " or ".join(str(a) for a in allowed)
                 diags.append(
                     Diagnostic(
                         node.lineno,
                         node.col_offset,
                         "warning",
-                        f"{node.name}() must take exactly one argument "
+                        f"{node.name}() must take {expect} argument(s) "
                         f"({_ENTRY_ARG_DESC[node.name]}), got {argc}",
                     )
                 )
