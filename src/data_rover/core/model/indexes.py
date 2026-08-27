@@ -835,8 +835,8 @@ class IndexSet:
         """Trigram diff for one changed property.
 
         Exact only when both values are plain strings (or absent) and no
-        name-keyed property holds a list (``name_of`` then reads inside the
-        list — text a per-value diff never sees); anything else, and an
+        name-keyed property holds a list or tuple (``name_of`` then reads inside the
+        value — text a per-value diff never sees); anything else, and an
         element without an entry, falls back to the whole-element
         re-derivation. Additions are the new value's trigrams not already
         present; a removal candidate (in the old value, not the new) is kept
