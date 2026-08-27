@@ -676,7 +676,7 @@ dr = _Dr()
 _WIRE_SCALARS = (str, int, float, bool)
 
 
-def _dr_call_entry(entry, element_ids, elements=None, doc=None):
+def _dr_call_entry(entry, element_ids, elements=None, doc=None, inputs=None):
     # Single per-call driver for embedded sessions: prime the read
     # memo with the host-projected roots, build handles, invoke the entry
     # point, serialize, and report the call's read-set (boot reads union
@@ -710,7 +710,20 @@ def _dr_call_entry(entry, element_ids, elements=None, doc=None):
             value = fn(doc)
         else:
             els = [_fetch_element(i) for i in element_ids]
-            value = fn(els if entry == "value" else (els[0] if els else None))
+            arg = els if entry == "value" else (els[0] if els else None)
+            if entry == "value" and inputs is not None:
+                # Column inputs: element inputs become handles through the
+                # same memoized fetch as the roots, so their reads are
+                # charged to this call's read-set like any other.
+                bound = {}
+                for name, spec in inputs.items():
+                    if spec.get("kind") == "elements":
+                        bound[name] = [_fetch_element(i) for i in spec["ids"]]
+                    else:
+                        bound[name] = list(spec["values"])
+                value = fn(arg, bound)
+            else:
+                value = fn(arg)
         payload = _dr_serialize_entry_result(entry, value)
         if _boot_overflow[0] or _call_overflow[0]:
             reads = None

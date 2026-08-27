@@ -52,6 +52,7 @@ class _TrackingSession:
         element_ids: list[str],
         *,
         doc: object | None = None,
+        inputs: object | None = None,
     ) -> CallResult:
         self._runner.calls.append(self._code)
         return CallResult(

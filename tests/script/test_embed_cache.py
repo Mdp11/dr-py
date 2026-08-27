@@ -20,7 +20,9 @@ class _FakeSession:
         self._outcome = outcome
         self._counter = counter
 
-    def call(self, entry: Literal["value", "step"], element_ids: list[str]) -> CallResult:
+    def call(
+        self, entry: Literal["value", "step"], element_ids: list[str], *, doc=None, inputs=None
+    ) -> CallResult:
         self._counter[0] += 1
         return self._outcome
 
