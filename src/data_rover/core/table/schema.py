@@ -9,9 +9,15 @@ the column maps over it. `collapse` keeps the mapped values in one cell;
 
 Static validation here rejects cycles (a ColumnRef must point strictly
 backward), non-element navigation sources, multi-binding element sources, and
-chain_index on a non-chains row source. Two further rules need the metamodel or
-the resolved navigation and are checked at evaluation time (see evaluate.py):
-expand-on-a-scalar-property and chain_index-out-of-range.
+chain_index on a non-chains row source. A `ScriptColumn.inputs` entry is
+checked the same way: its `ref` must point strictly backward, `step_index`
+requires the referenced column to be a navigation column, its `name` must be
+a valid Python identifier and unique within the column, and — for inline code
+only, since a ref snippet is checked at evaluation time instead — the
+declared `value()` arity (1 or 2) must match whether any inputs are declared.
+Two further rules need the metamodel or the resolved navigation and are
+checked at evaluation time (see evaluate.py): expand-on-a-scalar-property and
+chain_index-out-of-range.
 """
 
 from __future__ import annotations

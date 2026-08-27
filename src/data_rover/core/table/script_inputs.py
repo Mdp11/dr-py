@@ -5,6 +5,9 @@ An input resolves to exactly what the referenced column's cell holds for the
 row — elements for an element-producing column, scalars for a property or
 scalar-script column, this row's single binding for an expand column — as
 the tagged wire shape the guest turns into `inputs[name]` (always a list).
+Display caps (`cell_cap`/`max_cell_elements`, `truncated`) do not apply: an
+input carries the complete set the referenced column holds, never a
+UI-truncated view of it.
 
 A pending or errored input never reaches the guest: `evaluate_script_column`
 returns a synthetic result instead, which — because it never goes through

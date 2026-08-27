@@ -542,3 +542,32 @@ def test_embedded_session_trip_collapse_wasm(
         assert calls == ["outgoing"]
     finally:
         sess.close()
+
+
+def test_wasm_session_value_receives_inputs(wasm_runner: WasmScriptRunner, small_model) -> None:
+    """Real-sandbox leg of the script-column inputs feature: `value(els,
+    inputs)` receives element-input handles and scalar-input values through
+    the real bridge, keyed by name."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    ids = sorted(small_model.elements)
+    sess = wasm_runner.open_session(
+        small_model,
+        "def value(els, inputs):\n    return [inputs['n'][0], inputs['e'][0].id]",
+        RunLimits(),
+        budget=ScriptBudget.start(30),
+    )
+    try:
+        assert sess.boot_error is None, sess.boot_error
+        r = sess.call(
+            "value",
+            [ids[0]],
+            inputs={
+                "n": {"kind": "scalars", "values": [7]},
+                "e": {"kind": "elements", "ids": [ids[1]]},
+            },
+        )
+        assert r.error is None, r.error
+        assert r.value == {"kind": "scalars", "values": [7, ids[1]]}
+    finally:
+        sess.close()
