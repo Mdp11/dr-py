@@ -782,6 +782,7 @@ def test_element_order_rederived_by_keep_search_rebuild():
     # dense numbers in dict order: b was never deleted, a was re-inserted last
     assert model.indexes.element_order == {b.id: 0, a.id: 1}
     _assert_order_matches_dict(model)
+    model.indexes.verify_consistent()
 
 
 def test_element_order_empty_model():
@@ -806,5 +807,14 @@ def test_verify_consistent_detects_element_order_missing_key():
     model = Model(_mm())
     a = model.create_element("Doc")
     del model.indexes.element_order[a.id]
+    with pytest.raises(AssertionError, match="element_order"):
+        model.indexes.verify_consistent()
+
+
+def test_verify_consistent_detects_element_order_duplicate_number():
+    model = Model(_mm())
+    a = model.create_element("Doc")
+    b = model.create_element("Doc")
+    model.indexes.element_order[b.id] = model.indexes.element_order[a.id]
     with pytest.raises(AssertionError, match="element_order"):
         model.indexes.verify_consistent()

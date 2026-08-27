@@ -128,7 +128,8 @@ class IndexSet:
         #: (restore) lands last and gets a fresh, larger number. Lets the
         #: uniqueness validator pick a duplicate group's insertion-first
         #: primary without enumerating the model. Numbers are sparse after
-        #: churn; only their ORDER is meaningful.
+        #: churn; only their ORDER is meaningful. Replaced wholesale by
+        #: ``rebuild()``: never cache the dict across one.
         self.element_order: dict[str, int] = {}
         self._next_order: int = 0
         #: lowercased trigram -> ids of elements whose searchable text
@@ -508,10 +509,15 @@ class IndexSet:
             if _norm(name, getattr(self, name)) != _norm(name, getattr(fresh, name))
         ]
         # element_order carries sparse numbers after churn (a rebuild's are
-        # dense), so compare the ORDER it induces, never the numbers
+        # dense), so compare the ORDER it induces, never the numbers; the
+        # numbers must also be distinct, since a stable sort hides a duplicate
         order = self.element_order
         ids = list(self._model.elements)
-        if set(order) != set(ids) or sorted(ids, key=order.__getitem__) != ids:
+        if (
+            set(order) != set(ids)
+            or len(set(order.values())) != len(order)
+            or sorted(ids, key=order.__getitem__) != ids
+        ):
             mismatched.append("element_order")
         if mismatched:
             raise AssertionError(

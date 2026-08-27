@@ -264,13 +264,26 @@ def test_property_only_key_descriptor_renders_name():
 
 
 class _IterCountingDict(dict):
-    """model.elements stand-in that counts whole-dict iterations."""
+    """model.elements stand-in that counts whole-dict iterations (via
+    __iter__, keys(), values() or items())."""
 
     iterations = 0
 
     def __iter__(self):
         type(self).iterations += 1
         return super().__iter__()
+
+    def keys(self):
+        type(self).iterations += 1
+        return super().keys()
+
+    def values(self):
+        type(self).iterations += 1
+        return super().values()
+
+    def items(self):
+        type(self).iterations += 1
+        return super().items()
 
 
 def _three_foos(model: Model) -> None:
