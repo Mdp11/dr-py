@@ -9,7 +9,7 @@ and one warnings channel.
 - **Sessions are keyed by code**: two columns/steps carrying identical code
   share one guest instance. Opened lazily on first call; all closed by
   `close()` (route-level `finally`).
-- **Calls are memoized by `(code, entry, element_ids)`**: sorting by a script
+- **Calls are memoized by `(code, entry, element_ids, inputs digest)`**: sorting by a script
   column and then rendering the page calls `value()` at most once per
   distinct binding, and identical bindings across rows dedupe for free. Sound
   under the determinism guarantee (same code + same model ⇒ same output);
@@ -52,7 +52,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from ..model.model import Model
-from .cell_cache import CellKey, ScriptCellCache
+from .cell_cache import CellKey, ScriptCellCache, inputs_digest
 from .runner import (
     CallResult,
     RunLimits,
@@ -60,6 +60,7 @@ from .runner import (
     ScriptError,
     ScriptRunner,
     SnippetSession,
+    WireInputs,
 )
 from .warnings import (
     MAX_SCRIPT_WARNINGS,
@@ -101,7 +102,7 @@ class ScriptEvalContext:
             "script runner unavailable" if runner is None else None
         )
         self._sessions: dict[str, SnippetSession] = {}
-        self._memo: dict[tuple[str, str, tuple[str, ...]], CallResult] = {}
+        self._memo: dict[tuple[str, str, tuple[str, ...], str], CallResult] = {}
         self._warning_log = ScriptWarningLog()
         self.errored = False
         self._cell_cache = cell_cache
@@ -111,12 +112,12 @@ class ScriptEvalContext:
         self._should_abort = should_abort
         self.pending_misses = 0
 
-    def _cell_key(self, code: str, entry: str, ids: tuple[str, ...]) -> CellKey:
+    def _cell_key(self, code: str, entry: str, ids: tuple[str, ...], digest: str) -> CellKey:
         sha = self._code_sha.get(code)
         if sha is None:
             sha = hashlib.sha256(code.encode()).hexdigest()
             self._code_sha[code] = sha
-        return (sha, entry, ids)
+        return (sha, entry, ids, digest)
 
     def call(
         self,
@@ -124,15 +125,17 @@ class ScriptEvalContext:
         entry: Literal["value", "step"],
         element_ids: list[str],
         *,
+        inputs: WireInputs | None = None,
         cache_only: bool | None = None,
     ) -> CallResult:
-        key = (code, entry, tuple(element_ids))
+        digest = inputs_digest(inputs)
+        key = (code, entry, tuple(element_ids), digest)
         hit = self._memo.get(key)
         if hit is not None:
             return hit
         ckey: CellKey | None = None
         if self._cell_cache is not None:
-            ckey = self._cell_key(code, entry, key[2])
+            ckey = self._cell_key(code, entry, key[2], digest)
             cached = self._cell_cache.get(ckey, self._rev)
             if cached is not None:
                 if cached.error is not None:
@@ -163,7 +166,7 @@ class ScriptEvalContext:
                 error=ScriptError(kind="pending", message="not computed yet"),
                 duration_ms=0,
             )
-        res = self._call_uncached(code, entry, element_ids)
+        res = self._call_uncached(code, entry, element_ids, inputs)
         if res.error is not None:
             self.errored = True
         self._memo[key] = res
@@ -173,7 +176,7 @@ class ScriptEvalContext:
         return res
 
     def _call_uncached(
-        self, code: str, entry: Literal["value", "step"], element_ids: list[str]
+        self, code: str, entry: Literal["value", "step"], element_ids: list[str], inputs: WireInputs | None
     ) -> CallResult:
         if self._unavailable is not None:
             return CallResult(
@@ -210,7 +213,7 @@ class ScriptEvalContext:
             self._sessions[code] = sess
         if sess.boot_error is not None:
             return CallResult(value=None, error=sess.boot_error, duration_ms=0)
-        return sess.call(entry, element_ids)
+        return sess.call(entry, element_ids, inputs=inputs)
 
     @property
     def warnings(self) -> list[ScriptWarning]:

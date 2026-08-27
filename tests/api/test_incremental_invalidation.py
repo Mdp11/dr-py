@@ -85,8 +85,8 @@ def _res(v: str) -> CallResult:
     return CallResult(value={"kind": "scalar", "value": v}, error=None, duration_ms=1)
 
 
-KEY_T1 = ("a" * 64, "value", ("t1",))
-KEY_T2 = ("a" * 64, "value", ("t2",))
+KEY_T1 = ("a" * 64, "value", ("t1",), "")
+KEY_T2 = ("a" * 64, "value", ("t2",), "")
 
 
 def _prime_cells(session: Session) -> int:
@@ -491,7 +491,7 @@ def test_surviving_cells_equal_fresh_recompute() -> None:
             TrustedRunner(), model, RunLimits(), ScriptBudget.start(300)
         )
         try:
-            for (sha, entry, ids), (cached, _reads) in list(cache._d.items()):
+            for (sha, entry, ids, _digest), (cached, _reads) in list(cache._d.items()):
                 # `CellKey`'s `entry` field is a plain `str` (it round-trips
                 # through the cache verbatim); every entry this test ever
                 # writes is `"value"` (see `SNIPPETS`/`_fill_cache`), so the

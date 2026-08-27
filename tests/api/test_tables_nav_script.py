@@ -161,10 +161,10 @@ def _evaluate(client: TestClient, code: str) -> dict:
     return r.json()
 
 
-def _step_cell_key(code: str, element_id: str) -> tuple[str, str, tuple[str, ...]]:
+def _step_cell_key(code: str, element_id: str) -> tuple[str, str, tuple[str, ...], str]:
     """The `ScriptCellCache` key a `step()` call on one element writes under —
     `ScriptEvalContext._cell_key`'s shape, with the "step" entry point."""
-    return (hashlib.sha256(code.encode()).hexdigest(), "step", (element_id,))
+    return (hashlib.sha256(code.encode()).hexdigest(), "step", (element_id,), "")
 
 
 def test_nav_script_step_row_source_over_http(
