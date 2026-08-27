@@ -175,7 +175,8 @@ def test_candidates_none_until_ready_then_exact() -> None:
 def test_chunked_build_skips_hook_maintained_and_deleted_elements() -> None:
     """The background builder's contract: ids are snapshotted up front, then
     indexed chunk by chunk while the mutation hooks keep running. An element
-    edited before its chunk lands already has its entry (skipped, not
+    edited before its chunk lands is left to that chunk (indexed once, with
+    its current text); a hook-created one already has its entry (skipped, not
     duplicated); a deleted one is absent from the model (skipped)."""
     m = _bulk_loaded(["Pump", "Valve", "Turbine"])
     ids = list(m.elements)  # snapshot, as the builder does
@@ -352,4 +353,52 @@ def test_on_property_changed_is_the_model_hook() -> None:
     m.indexes.on_property_changed(el, "name", old)
     assert el.id in _posting_ids(m, "val")
     assert "pum" not in m.indexes.search_postings
+    m.indexes.verify_consistent()
+
+
+# ---------------------------------------------------------------------------
+# ownership: a cold (bulk-loaded, not yet built) element is the builder's
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_loaded_element_edit_is_left_to_the_builder() -> None:
+    """Under a not-ready index the hooks maintain only what they own: an
+    element the bulk load left unindexed is the chunked build's, which
+    indexes its CURRENT text when it reaches it — never derived twice."""
+    m = _bulk_loaded(["Pump", "Valve"])
+    m.set_property(m.elements["bulk-0"], "name", "Compressor")
+    assert "bulk-0" not in m.indexes._trigrams_of  # deferred
+    assert m.indexes.search_postings == {}
+    m.indexes.build_search_index()
+    assert m.indexes.search_candidates("compressor") == {"bulk-0"}
+    assert m.indexes.search_candidates("pump") == frozenset()
+    m.indexes.verify_consistent()
+
+
+def test_hook_created_element_is_indexed_while_not_ready() -> None:
+    m = _bulk_loaded(["Pump"])
+    created = _named(m, "Boiler")  # hook-owned from creation on
+    assert created.id in m.indexes._trigrams_of
+    m.set_property(created, "note", "turbine")  # diffed, not deferred
+    assert created.id in _posting_ids(m, "tur")
+    m.indexes.build_search_index()
+    assert m.indexes.search_candidates("turbine") == {created.id}
+    m.indexes.verify_consistent()
+
+
+def test_indexed_element_keeps_an_entry_when_its_text_has_no_trigram() -> None:
+    """An entry marks 'indexed' and must exist even when empty — otherwise a
+    text-less element looks builder-owned and is skipped forever after it
+    gains text."""
+    m = Model(load_metamodel_str(MM.replace("Item", "It")))
+    el = m.restore_element("e1", "It")  # id and type name both under 3 chars
+    assert m.indexes._trigrams_of[el.id] == ()
+    m.indexes.rebuild()  # bulk-load semantics: builder-owned again
+    assert el.id not in m.indexes._trigrams_of
+    m.set_property(el, "name", "Pump")  # deferred ...
+    assert "pum" not in m.indexes.search_postings
+    m.indexes.build_search_index()  # ... and picked up by the build
+    assert m.indexes.search_candidates("pump") == {"e1"}
+    m.set_property(el, "name", "ab")  # empty again: the entry stays
+    assert m.indexes._trigrams_of[el.id] == ()
     m.indexes.verify_consistent()
