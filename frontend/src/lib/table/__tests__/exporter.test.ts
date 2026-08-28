@@ -13,7 +13,7 @@ const defn: TableDefinition = {
 			header: 'A',
 			width_px: null,
 			hidden: false,
-			json_export: { key: 'a', item_key: '', value: 'name', group: false },
+			json_export: { key: 'a', item_key: '', value: 'name', group: false, single: false },
 			export: { include: false, header: '' }
 		},
 		{
@@ -43,7 +43,7 @@ describe('exporter helpers', () => {
 			{
 				index: 0,
 				export: { include: false, header: '' },
-				json_export: { key: 'a', item_key: '', value: 'name', group: false }
+				json_export: { key: 'a', item_key: '', value: 'name', group: false, single: false }
 			}
 		]); // column 1 has nothing to copy
 		expect(e.export_order).toEqual([1, 0]);

@@ -435,7 +435,8 @@ const DEFAULT_JSON_OPTIONS: JsonColumnOptions = {
 	key: '',
 	item_key: '',
 	value: 'name',
-	group: false
+	group: false,
+	single: false
 };
 
 const DEFAULT_EXPORT_OPTIONS: ColumnExportOptions = { include: null, header: '' };

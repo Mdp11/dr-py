@@ -1020,7 +1020,7 @@ Everything the dialog edits is an **export override**: it changes the file and
 never the grid. Include/exclude, output order and the row-number entry are
 shared across formats; only the rename differs (xlsx writes `export.header`,
 JSON writes `json_export.key`, so one row never shows two rename boxes). JSON
-keeps its per-column extras (`json_export: {key, item_key, value, group}`) and
+keeps its per-column extras (`json_export: {key, item_key, value, group, single}`) and
 its live sample pane. The overrides are part of the saved definition, so a table
 exported the same way every week is configured once. When the selected format is
 JSON-family, the format-toggle row also shows a `TransformSourceEditor` bound

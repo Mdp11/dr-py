@@ -151,6 +151,12 @@ class JsonColumnOptions(BaseModel):
     #: a VISIBLE EXPAND column; ignored elsewhere (the column editor can flip
     #: expand->collapse at any time and a 422 would block the whole export).
     group: bool = False
+    #: Render a cell's elements as ONE value (`key: value`) instead of an
+    #: array: zero -> `null`, one -> that element per `value`, more -> the
+    #: export fails (422) naming the column. Strict rather than tolerant
+    #: because the shape is a contract a consumer branches on. Ignored, like
+    #: `value`, on a cell that is never an array of elements.
+    single: bool = False
 
 
 class ColumnExportOptions(BaseModel):

@@ -344,3 +344,89 @@ def test_json_export_accepts_item_key_over_the_wire(client):
     docs = json.loads(r.content)
     assert set(docs[0]) == {"Block", "Masses"}
     assert isinstance(docs[0]["Masses"], list)
+
+
+
+def _bootstrap_parts(client, parts: int) -> None:
+    """root -has-> `parts` children, over the same example metamodel as
+    `_bootstrap_model` (which hard-wires two parts on root)."""
+    from .test_artifacts_routes import EXAMPLE
+
+    client.post(
+        papi("/metamodel"),
+        content=EXAMPLE.read_text(encoding="utf-8"),
+        headers={"content-type": "application/x-yaml"},
+    )
+    client.post(papi("/model"), json={"elements": [], "relationships": []})
+    root = client.post(
+        papi("/model/elements"),
+        json={"type": "Block", "properties": {"name": "root", "mass": 1.0}},
+    ).json()["id"]
+    for n in range(parts):
+        child = client.post(
+            papi("/model/elements"),
+            json={"type": "Block", "properties": {"name": f"p{n}", "mass": 1.0}},
+        ).json()["id"]
+        client.post(
+            papi("/model/relationships"),
+            json={"type": "BlockHasPart", "source_id": root, "target_id": child},
+        )
+
+
+def _single_body(single: bool):
+    """Block rows with a collapse navigation over BlockHasPart."""
+    return _body(
+        [
+            {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            {
+                "kind": "navigation",
+                "source": {"kind": "row"},
+                "navigation": {
+                    "definition": {
+                        "kind": "path",
+                        "start": {"kind": "row"},
+                        "steps": [
+                            {
+                                "kind": "relationship",
+                                "relationship_type": "BlockHasPart",
+                                "direction": "out",
+                            }
+                        ],
+                    }
+                },
+                "mode": "collapse",
+                "header": "Part",
+                "json_export": {"single": single},
+            },
+        ]
+    )
+
+
+def test_json_export_single_renders_a_scalar_over_the_wire(client):
+    _bootstrap_parts(client, parts=1)
+    r = client.post(papi("/tables/export"), json=_single_body(True), headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    parts = {d["Block"]: d["Part"] for d in json.loads(r.content)}
+    assert parts == {"root": "p0", "p0": None}
+
+
+def test_json_export_single_is_a_422_on_a_multi_element_cell(client):
+    _bootstrap_parts(client, parts=2)
+    r = client.post(papi("/tables/export"), json=_single_body(True), headers=AUTH_HEADERS)
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "'Part'" in detail and "2 elements" in detail
+    # Off, the same table exports the array it always did.
+    r = client.post(papi("/tables/export"), json=_single_body(False), headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    parts = {d["Block"]: d["Part"] for d in json.loads(r.content)}
+    assert sorted(parts["root"]) == ["p0", "p1"]
+
+
+def test_json_preview_reports_the_single_violation(client):
+    _bootstrap_parts(client, parts=2)
+    body = _single_body(True)
+    body.pop("format")
+    r = client.post(papi("/tables/json-preview"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 422, r.text
+    assert "'Part'" in r.json()["detail"]

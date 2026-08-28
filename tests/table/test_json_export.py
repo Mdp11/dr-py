@@ -1549,3 +1549,100 @@ def test_doc_key_duplicates_raise():
     model.set_property(dup, "name", "Root")  # second "Root"
     with pytest.raises(ValueError, match="duplicate"):
         _render_ex(mm, model, _keys_doc(), key_column=0)
+
+
+# ---- single: one element per cell, never an array -------------------------
+
+
+def test_single_defaults_to_false():
+    defn = _cols({"json_export": {}})
+    assert defn.columns[0].json_export is not None
+    assert defn.columns[0].json_export.single is False
+
+
+def _render_single(model, cell, mode="name"):
+    return render_cell(model, cell, mode, single=True)
+
+
+def test_single_unwraps_a_one_element_cell_per_mode():
+    model, eid = _one_element_model()
+    cell = ElementsCell(element_ids=[eid], total=1, truncated=False)
+    assert _render_single(model, cell) == "Root"
+    assert _render_single(model, cell, "id") == eid
+    assert _render_single(model, cell, "object") == {
+        "id": eid,
+        "name": "Root",
+        "type": "Block",
+    }
+
+
+def test_single_renders_an_empty_cell_as_null_not_an_empty_list():
+    model, _ = _one_element_model()
+    cell = ElementsCell(element_ids=[], total=0, truncated=False)
+    assert _render_single(model, cell) is None
+
+
+def test_single_raises_on_more_than_one_element():
+    model, eid = _one_element_model()
+    cell = ElementsCell(element_ids=[eid, eid, eid], total=3, truncated=False)
+    with pytest.raises(ValueError, match="3 elements"):
+        _render_single(model, cell)
+
+
+def test_single_is_ignored_on_cells_that_are_never_arrays_of_elements():
+    """Same tolerance as `value` on a property column: the flag means
+    nothing there and must not change the output."""
+    model, eid = _one_element_model()
+    assert _render_single(model, ElementCell(element_id=eid)) == "Root"
+    assert _render_single(
+        model, ValueCell(present=True, value=7, element_id=None, editable=False)
+    ) == 7
+    assert _render_single(
+        model, ValuesCell(present=True, values=["a"], total=1, truncated=False)
+    ) == ["a"]
+
+
+def _single_nav_doc() -> dict:
+    """Name + a COLLAPSE navigation over BlockHasPart flagged `single`."""
+    return {
+        "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+        "columns": [
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "name",
+                "header": "Name",
+            },
+            {**_hop_nav("collapse", group=False), "json_export": {"single": True}},
+        ],
+    }
+
+
+def test_single_through_render_json_names_the_column_on_a_multi_element_row():
+    mm = _parts_mm()
+    model = _parts_model(mm)  # Root has TWO parts
+    with pytest.raises(ValueError, match="'Component'.*2 elements"):
+        _render(mm, model, _single_nav_doc())
+
+
+def test_single_through_render_json_renders_a_scalar_and_null():
+    mm = _parts_mm()
+    model = Model(mm)
+    root = model.create_element("Block")
+    model.set_property(root, "name", "Root")
+    part = model.create_element("Block")
+    model.set_property(part, "name", "Only Part")
+    model.connect("BlockHasPart", root.id, part.id)
+    docs = _render(mm, model, _single_nav_doc())
+    by_name = {d["Name"]: d["Component"] for d in docs}
+    assert by_name == {"Root": "Only Part", "Only Part": None}
+
+
+def test_single_is_off_by_default_so_a_one_element_cell_stays_a_list():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    doc = _single_nav_doc()
+    doc["columns"][1]["json_export"] = {}
+    docs = _render(mm, model, doc)
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root["Component"] == ["Part 1", "Part 2"]

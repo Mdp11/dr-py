@@ -132,8 +132,13 @@ def _element_json(model: Model, eid: str, mode: str) -> object:
     return display_name(el)
 
 
-def render_cell(model: Model, cell: Cell, mode: str) -> object:
+def render_cell(model: Model, cell: Cell, mode: str, *, single: bool = False) -> object:
     """One evaluated cell as a JSON-serializable value.
+
+    `single` collapses an `ElementsCell` to ONE value: empty -> `None`, one
+    element -> that element rendered per `mode`, more -> `ValueError` (the
+    routes' 422 mapping) — the caller prefixes the column name. Every other
+    cell kind ignores it, the way `mode` is ignored by a property column.
 
     Both "the type does not declare this property" and "declared but unset"
     render `null`: JSON has one absence, and the distinction the grid draws
@@ -157,6 +162,14 @@ def render_cell(model: Model, cell: Cell, mode: str) -> object:
             else _element_json(model, cell.element_id, mode)
         )
     if isinstance(cell, ElementsCell):
+        if single:
+            if len(cell.element_ids) > 1:
+                raise ValueError(
+                    f"json_export.single: cell holds {len(cell.element_ids)} "
+                    "elements, expected at most one"
+                )
+            ids = cell.element_ids
+            return _element_json(model, ids[0], mode) if ids else None
         return [_element_json(model, e, mode) for e in cell.element_ids]
     if isinstance(cell, ErrorCell):
         return {"$error": cell.message}
@@ -196,6 +209,18 @@ def contains_error_marker(value: object) -> bool:
 
 def _mode_of(col: Column) -> str:
     return col.json_export.value if col.json_export is not None else "name"
+
+
+def _render_column_cell(model: Model, col: Column, key: str, cell: Cell) -> object:
+    """`render_cell` with the column's own `value`/`single` settings, naming
+    the column in the `single` violation so the 422 points at the setting
+    that caused it rather than at an anonymous cell."""
+    opts = col.json_export
+    single = opts.single if opts is not None else False
+    try:
+        return render_cell(model, cell, _mode_of(col), single=single)
+    except ValueError as exc:
+        raise ValueError(f"column {key!r}: {exc}") from None
 
 
 @dataclass(frozen=True)
@@ -385,11 +410,12 @@ def render_json_ex(
                 f"json_doc.key_column {key_column} out of range "
                 f"(table has {len(defn.columns)} columns)"
             )
-        mode = _mode_of(defn.columns[key_column])
+        key_col = defn.columns[key_column]
+        key_name = keys.level[key_column] or f"#{key_column}"
         doc_keys = []
         seen: set[str] = set()
         for b in buckets:
-            rendered = render_cell(model, b[0][1][key_column], mode)
+            rendered = _render_column_cell(model, key_col, key_name, b[0][1][key_column])
             if (
                 rendered is None
                 or rendered == ""
@@ -505,7 +531,7 @@ def _render_level(
             key = keys.item[i] if i in plan.grouped else keys.level[i]
             if key is None:  # hidden: evaluated, never emitted
                 continue
-            obj[key] = render_cell(model, rows[0][1][i], _mode_of(defn.columns[i]))
+            obj[key] = _render_column_cell(model, defn.columns[i], key, rows[0][1][i])
     return obj
 
 
@@ -541,8 +567,10 @@ def _render_group(
 
     members, children = plan.members[g], plan.children[g]
     if len(members) == 1 and not children:
-        mode = _mode_of(defn.columns[g])
-        return [render_cell(model, sub[0][1][g], mode) for sub in parts.values()]
+        col, key = defn.columns[g], keys.level[g] or f"#{g}"
+        return [
+            _render_column_cell(model, col, key, sub[0][1][g]) for sub in parts.values()
+        ]
     return [
         _render_level(model, defn, keys, plan, members, children, sub, order=order)
         for sub in parts.values()

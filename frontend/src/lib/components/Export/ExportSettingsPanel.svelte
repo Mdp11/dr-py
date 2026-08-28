@@ -344,6 +344,18 @@
 							<option value="object">object</option>
 						</select>
 					</label>
+					<label
+						class="flex items-center gap-1 text-muted-foreground"
+						title="Render one value instead of an array; the export fails if any cell holds more than one element"
+					>
+						<input
+							type="checkbox"
+							data-testid={`json-single-${entry.index}`}
+							checked={col.json_export?.single ?? false}
+							onchange={(e) => patchJson(entry.index, { single: e.currentTarget.checked })}
+						/>
+						single
+					</label>
 				{/if}
 				{#if canGroup(col)}
 					<label class="flex items-center gap-1 text-muted-foreground">

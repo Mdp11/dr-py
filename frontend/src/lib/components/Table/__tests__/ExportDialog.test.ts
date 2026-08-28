@@ -450,6 +450,21 @@ describe('ExportDialog', () => {
 		expect(byTestId(document, 'json-value-0')).toBeNull();
 	});
 
+	it('offers the single toggle only on element-producing columns', async () => {
+		await open('json');
+		expect(byTestId(document, 'json-single-1')).toBeTruthy();
+		expect(byTestId(document, 'json-single-0')).toBeNull();
+	});
+
+	it('writes the single flag into the definition', async () => {
+		await open('json');
+		const box = byTestId(document, 'json-single-1') as HTMLInputElement;
+		box.checked = true;
+		box.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		expect(current().columns[1].json_export?.single).toBe(true);
+	});
+
 	it('writes the picked value mode into the definition', async () => {
 		await open('json');
 		const select = byTestId(document, 'json-value-1') as HTMLSelectElement;
