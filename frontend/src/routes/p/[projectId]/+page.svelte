@@ -47,6 +47,7 @@
 		initWorkspaceTabs,
 		loadArtifacts,
 		loadProjectInfo,
+		markEditorLockDenied,
 		markViewUnresolved,
 		onLockEvent,
 		refetchIssues,
@@ -201,7 +202,7 @@
 			// next feed event heals it.
 			void refetchIssues();
 			try {
-				await loadProjectInfo();
+				await loadProjectInfo(markEditorLockDenied);
 			} catch {
 				// role/ttl best-effort; editing stays gated as viewer until it loads
 			}
@@ -339,7 +340,7 @@
 				// from /open (mirrors boot()'s placement after refreshSummary), best-
 				// effort so a failure doesn't break the reload. Without this, an in-app
 				// reload leaves the user stuck view-only until a full browser refresh.
-				await loadProjectInfo();
+				await loadProjectInfo(markEditorLockDenied);
 			} catch {
 				// role/ttl best-effort; editing stays gated as viewer until it loads
 			}

@@ -265,14 +265,31 @@ async function _renewAll(): Promise<void> {
 
 // --- project open + expiry ---------------------------------------------------
 
-/** Fetch role + lock TTL from /open and adopt them. */
-export async function loadProjectInfo(cfg?: ClientConfig): Promise<void> {
+/**
+ * Fetch role + lock TTL from /open and adopt them, then check out every open
+ * artifact tab that is not yet held.
+ *
+ * The sweep is load-bearing, not tidiness: restored workspace tabs mount (and
+ * run their editor's check-out) BEFORE /open answers, and the in-app reload
+ * path `resetCheckout()`s under still-open tabs. In both cases the editor's
+ * `ensureCheckout` short-circuited as 'viewer' — no lease, and no banner,
+ * because only a peer conflict earns one — so the tab turns editable the
+ * moment the role lands while holding nothing, and its first commit 409s
+ * "required lock not held". Same best-effort contract as the post-commit
+ * sweep: a peer who got there first is reported through `onDenied`, never
+ * thrown; `reacquireOpenArtifactLeases` is a no-op for a viewer.
+ */
+export async function loadProjectInfo(
+	onDenied: (tabId: string, holder: string) => void = () => {},
+	cfg?: ClientConfig
+): Promise<void> {
 	const info = await openProject(cfg ?? _clientConfig);
 	setProjectInfo({
 		role: info.role,
 		lockTtlSeconds: info.lock_ttl_seconds,
 		strictMode: info.strict_mode
 	});
+	await reacquireOpenArtifactLeases(onDenied);
 }
 
 export function getStaleResources(): string[] {

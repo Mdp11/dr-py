@@ -11,6 +11,7 @@ import {
 	onArtifactCommit,
 	openArtifactTab,
 	previewStaged,
+	loadProjectInfo,
 	reacquireOpenArtifactLeases,
 	releaseArtifactIfUnneeded,
 	resetArtifactEdits,
@@ -478,6 +479,80 @@ describe('reacquireOpenArtifactLeases', () => {
 		const acquire = mockAcquire();
 		openArtifactTab('table', { artifactId: 'a9', title: 'a9' });
 		await reacquireOpenArtifactLeases(() => {});
+		expect(acquire).not.toHaveBeenCalled();
+	});
+});
+
+describe('loadProjectInfo re-checks-out tabs opened before the role was known', () => {
+	function mockOpen(role: string) {
+		vi.spyOn(api, 'openProject').mockResolvedValue({
+			model_rev: 5,
+			role,
+			element_count: 0,
+			relationship_count: 0,
+			issue_counts: {},
+			lock_ttl_seconds: 120,
+			strict_mode: false
+		});
+	}
+
+	it('acquires the lease of an open artifact tab once the role turns out editable', async () => {
+		// Boot order: restored tabs mount (and try to check out) BEFORE /open
+		// answers, so the check-out short-circuits as 'viewer' with no lease and no
+		// banner — the tab would otherwise become editable with nothing held.
+		resetCheckout(); // role back to the 'viewer' default
+		const acquire = mockAcquire();
+		const tabId = openArtifactTab('table', { artifactId: 'a9', title: 'a9' });
+		await checkoutArtifact('a9');
+		expect(acquire).not.toHaveBeenCalled();
+		expect(isCheckedOutByMe('art:a9')).toBe(false);
+
+		mockOpen('editor');
+		const denied: [string, string][] = [];
+		await loadProjectInfo((t, holder) => denied.push([t, holder]));
+
+		expect(acquire).toHaveBeenCalledTimes(1);
+		expect(acquire.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a9', mode: 'exclusive', type: 'artifact' }],
+			intent: 'edit'
+		});
+		expect(isCheckedOutByMe('art:a9')).toBe(true);
+		expect(denied).toEqual([]);
+		expect(tabId).toBeTruthy();
+	});
+
+	it('reports a peer-held artifact through onDenied', async () => {
+		resetCheckout();
+		const { ConflictError } = await import('$lib/api/errors');
+		vi.spyOn(api, 'acquireLocks').mockRejectedValue(
+			new ConflictError(
+				409,
+				{
+					conflicts: [
+						{
+							resource_id: 'art:a9',
+							held_by: 'bob-uuid',
+							held_by_email: 'bob@x.io',
+							held_mode: 'exclusive'
+						}
+					]
+				},
+				'lock conflict'
+			)
+		);
+		const tabId = openArtifactTab('table', { artifactId: 'a9', title: 'a9' });
+		mockOpen('editor');
+		const denied: [string, string][] = [];
+		await loadProjectInfo((t, holder) => denied.push([t, holder]));
+		expect(denied).toEqual([[tabId, 'bob@x.io']]);
+	});
+
+	it('acquires nothing when the role is viewer', async () => {
+		resetCheckout();
+		const acquire = mockAcquire();
+		openArtifactTab('table', { artifactId: 'a9', title: 'a9' });
+		mockOpen('viewer');
+		await loadProjectInfo(() => {});
 		expect(acquire).not.toHaveBeenCalled();
 	});
 });

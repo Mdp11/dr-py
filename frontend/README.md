@@ -361,7 +361,13 @@ follows a pessimistic **check-out → stage → commit** loop:
      `reacquireOpenArtifactLeases` (fire-and-forget, `.catch`ed — the commit
      is already durable), re-checking-out every open artifact tab and
      flipping to lock-denied (unsaveable) via `markEditorLockDenied` any a peer
-     grabbed in between.
+     grabbed in between. `loadProjectInfo` runs the same sweep once `/open`
+     has answered: restored workspace tabs mount (and try to check out)
+     BEFORE the role is known, and the in-app reload `resetCheckout()`s under
+     open tabs — either way the editor's own check-out short-circuited as
+     'viewer' with no lease and no banner, so without the sweep the tab turns
+     editable holding nothing and its first commit 409s "required lock not
+     held".
    - **The DiffDrawer reviews them.** Staged artifact entries render as
      `+`/`~`/`-` rows in their own section, same glyph vocabulary as the
      entity rows, each per-row discardable through `discardArtifact` — the
