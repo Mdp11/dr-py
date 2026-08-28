@@ -467,6 +467,17 @@ class Element:
         """Record a dry-run delete of this element (containment children cascade at commit)."""
         _write({"kind": "delete_element", "id": self.id})
 
+    # Every accessor mints a fresh handle over its own snapshot copy, so
+    # identity is meaningless: two handles are the same element iff their ids
+    # match, which is what `e1 == e2`, `in` and set/dict keys must answer.
+    def __eq__(self, other):
+        if not isinstance(other, Element):
+            return NotImplemented
+        return self.id == other.id
+
+    def __hash__(self):
+        return hash(("element", self.id))
+
     def __repr__(self):
         return "Element(id=" + repr(self.id) + ", stereotype=" + repr(self.stereotype) + ")"
 
@@ -533,6 +544,15 @@ class Relationship:
             owned = rel.destination()
         """
         return _fetch_element(self._data["target_id"])
+
+    # Same by-id equality contract as `Element` (see the note there).
+    def __eq__(self, other):
+        if not isinstance(other, Relationship):
+            return NotImplemented
+        return self.id == other.id
+
+    def __hash__(self):
+        return hash(("relationship", self.id))
 
     def __repr__(self):
         return (

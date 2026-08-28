@@ -202,6 +202,26 @@ def test_element_stereotype_property_and_repr():
     assert res.result_repr == "('Building', \"Element(id='b1', stereotype='Building')\")"
 
 
+def test_element_and_relationship_equality_is_by_id():
+    # Every accessor mints a fresh handle, so equality must be by id — not
+    # object identity — for `e1 == e2`, `in` and set membership to work.
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "a = dr.element('b1')\n"
+                    "b = dr.element('b1')\n"
+                    "c = dr.element('b2')\n"
+                    "ra = a.outgoing()[0]\n"
+                    "rb = dr.element('b1').outgoing()[0]\n"
+                    "result = (a is b, a == b, a != c, a == a.id, "
+                    "len({a, b, c}), a in [c, b], "
+                    "ra is rb, ra == rb, len({ra, rb}))"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "(False, True, True, False, 2, True, False, True, 1)"
+
+
 def test_element_type_attribute_is_gone():
     r = TrustedRunner()
     res = r.run(tiny_model(),
