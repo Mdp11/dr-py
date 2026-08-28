@@ -1036,6 +1036,11 @@ export const TableDefinitionSchema = z.object({
 	default_cell_mode: z.enum(['collapse', 'expand']).default('collapse'),
 	show_row_numbers: z.boolean().default(false),
 	export_order: z.array(z.number().int()).default([]),
+	// The grid's column order (definition indices; `[]` = definition order).
+	// Presentation only, normalized on read like `export_order` — see
+	// `lib/table/export-layout.ts::displayOrder`. An export with no explicit
+	// `export_order` follows it.
+	display_order: z.array(z.number().int()).default([]),
 	export_row_number: RowNumberExportOptionsSchema.nullish(),
 	json_split: JsonSplitOptionsSchema.nullish(),
 	// JSON-family only (json/jsonl); strict at export time (422/503/429 from

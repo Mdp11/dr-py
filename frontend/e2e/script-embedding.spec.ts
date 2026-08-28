@@ -143,7 +143,7 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	// no such trailing entry).
 	const columnHeaders = header.getByRole('columnheader');
 	await tabpanel.getByTestId('table-settings-button').click();
-	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	const settings = page.getByRole('dialog', { name: 'Columns' });
 	await expect(settings).toBeVisible();
 	const columnCountBefore = await columnHeaders.count();
 	const columnCards = settings.locator('[data-testid^="column-header-band-"]');
@@ -314,7 +314,7 @@ test('script column: the Test panel runs the inline snippet against a bound elem
 	await expect(tabpanel.getByTestId('table-row')).toHaveCount(12, { timeout: 15_000 });
 
 	await tabpanel.getByTestId('table-settings-button').click();
-	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	const settings = page.getByRole('dialog', { name: 'Columns' });
 	await expect(settings).toBeVisible();
 	await settings.getByTestId('add-script-column').click();
 

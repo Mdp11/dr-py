@@ -28,6 +28,7 @@ const defn: TableDefinition = {
 	],
 	default_cell_mode: 'collapse',
 	show_row_numbers: true,
+	display_order: [],
 	export_order: [1, 0],
 	export_row_number: null,
 	json_split: null

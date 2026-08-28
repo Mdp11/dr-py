@@ -10,6 +10,7 @@ from data_rover.core.table.export_layout import (
     export_definition,
     export_header,
     export_layout,
+    normalized_display_order,
     normalized_order,
 )
 from data_rover.core.table.schema import TABLE_ADAPTER
@@ -236,3 +237,52 @@ def test_export_definition_leaves_headers_alone():
         ]
     )
     assert export_definition(defn).columns[0].header == "Block"
+
+
+# ---- display_order ---------------------------------------------------------
+# The grid's own column order. An export with NO explicit `export_order`
+# follows it (the file matches what the user arranged on screen); a partial
+# `export_order` is completed in display order rather than definition order.
+
+
+def test_normalized_display_order_defaults_to_definition_order():
+    assert normalized_display_order(_defn()) == (0, 1)
+
+
+def test_normalized_display_order_drops_garbage_and_appends_the_rest():
+    # 7 is out of range, the second 1 a duplicate, -1 is not a column; 0 was
+    # never listed and comes back at the end.
+    defn = _defn(display_order=[7, 1, 1, -1])
+    assert normalized_display_order(defn) == (1, 0)
+
+
+def test_empty_export_order_follows_the_display_order():
+    defn = _defn(display_order=[1, 0])
+    assert normalized_order(defn) == (1, 0)
+    layout = export_layout(defn)
+    assert layout.order == (1, 0)
+    # the definition itself is untouched
+    assert [c.header for c in defn.columns] == ["Block", "Mass"]
+
+
+def test_explicit_export_order_wins_over_the_display_order():
+    defn = _defn(display_order=[1, 0], export_order=[0, 1])
+    assert normalized_order(defn) == (0, 1)
+
+
+def test_partial_export_order_is_completed_in_display_order():
+    defn = _defn(
+        columns=[
+            {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            {"kind": "property", "source": {"kind": "row"}, "name": "a"},
+            {"kind": "property", "source": {"kind": "row"}, "name": "b"},
+        ],
+        display_order=[2, 1, 0],
+        export_order=[0],
+    )
+    assert normalized_order(defn) == (0, 2, 1)
+
+
+def test_row_number_slot_still_leads_a_display_ordered_export():
+    defn = _defn(display_order=[1, 0], show_row_numbers=True)
+    assert normalized_order(defn) == (ROW_NUMBER_SLOT, 1, 0)

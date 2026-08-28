@@ -939,7 +939,25 @@ toggle`), a collapsed disclosure that expands to the shared
   and nothing else, while a debounce timer would silently discard a rename
   typed and then Escaped inside its window (`change` never fires for an input
   unmounted while still focused).
-- **The settings dialog is a NON-MODAL floating panel.** The point of editing
+- **Computation order vs display order.** `TableDefinition.columns` is the
+  COMPUTATION order (backward-only `ColumnRef`, positional expand slots — the
+  Columns panel's drag and ↑/↓ reorder it, constrained by `moveColumn`), and
+  `display_order` is the grid's own permutation of it (`lib/table/export-layout.ts::
+displayOrder` normalizes it like `export_order`: `[]` = computation order,
+  garbage dropped, forgotten columns appended). `TableGrid` renders
+  `visibleCols` in display order while cells, sort, resize and `ColumnRef`s keep
+  speaking definition indices; its header drag (`data-col-hdr-drop` = on-screen
+  position, `validate: () => true`) and the **Reorder** button's
+  `ColumnReorderDialog` (names only, drag + ↑/↓ + "Reset to computation order")
+  both edit `display_order` through `updateTableDisplayOrder` — reload-free,
+  like the export settings, since the evaluate response is indexed by definition
+  index either way. An export with an empty `export_order` follows the display
+  order (backend and client mirror alike). Every structural mutator in
+  `columns.ts` remaps `display_order` alongside `export_order` (`remapOrders`),
+  and `insertColumn(defn, at, col, place)` — the "Insert before/after" in both
+  the Columns panel's per-card menu and the grid header's pencil menu — places
+  the new column next to its anchor in BOTH lists, in the anchor's own slot.
+- **The Columns dialog (`table-settings-button`, title "Columns") is a NON-MODAL floating panel.** The point of editing
   a column is usually to look something up in the model, so the sidebar
   (tree, search, view) and the inspector stay fully usable while it is open:
   `Dialog.Content` is rendered with `showOverlay={false}` (a prop on the
@@ -953,7 +971,8 @@ toggle`), a collapsed disclosure that expands to the shared
   on `document` and, with focus free to roam, an Escape typed in the sidebar
   search must not close a panel mid-composition; the nested discard
   confirmation is its own bits-ui layer and keeps working as before. The
-  panel is dragged by its title bar and resized from the corner; its rect is
+  panel is dragged by its title bar and resized from every edge and corner
+  (`RESIZE_EDGES`; the south-east grip is the visible one); its rect is
   explicit (`left/top/width/height`, overriding the primitive's centering) and
   ONE global preference in localStorage (`lib/table/settings-rect.ts`,
   `ui.table.settingsRect`), re-clamped to the live viewport on every open and
@@ -1061,6 +1080,21 @@ export-time 422 is the entire contract.
   recap and pulsing the activity bar, once per keystroke. `restore…` is Cancel's
   half and puts `dirty` back with the definition; discarding an edit has to
   discard the unsaved-ness the edit created.
+- **Column drag-and-drop (`lib/table/column-dnd.svelte.ts`)** is one
+  pointer-driven controller shared by the Columns panel's grip, the grid
+  header, the export list and the Reorder dialog. It snapshots the drop
+  targets' rects at drag start and hit-tests that snapshot (the live preview
+  translates the real elements), re-captures it on ANY scroll — backing the
+  live preview offset out of the measured rect — and re-hit-tests the last
+  pointer position, so a wheel scroll mid-drag keeps the target under the
+  pointer; near the scroll container's edge it auto-scrolls
+  (`edgeScrollVelocity`, rAF-driven). Hosts render the ghost themselves and
+  portal it to `<body>` (`lib/util/portal.ts`) — `position: fixed` inside the
+  transformed `Dialog.Content` resolves against the panel, not the viewport.
+  The reflow `transform` is applied ONLY while a drag is live: a permanent
+  one made every card/cell a stacking context, which trapped the
+  property-name suggestion list under the next card and turned CodeMirror's
+  fixed tooltips relative.
 - **`export_order` bookkeeping** lives with the column mutators in
   `lib/table/columns.ts` (the backend normalizes defensively on read, but the
   client remaps precisely on move/insert/remove/clone, like

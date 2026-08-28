@@ -62,13 +62,36 @@ def _included(defn: TableDefinition) -> list[bool]:
     return out
 
 
+def normalized_display_order(defn: TableDefinition) -> tuple[int, ...]:
+    """`display_order` made safe: the grid's column order over every
+    definition column exactly once.
+
+    Drops out-of-range and duplicate entries, then appends every definition
+    column the list forgot, in definition order — so `[]` IS definition order,
+    and a stale list left behind by a column insert or remove degrades to a
+    sensible order instead of dropping a column from view.
+    """
+    n = len(defn.columns)
+    seen: set[int] = set()
+    out: list[int] = []
+    for i in defn.display_order:
+        if not (0 <= i < n) or i in seen:
+            continue
+        seen.add(i)
+        out.append(i)
+    out.extend(i for i in range(n) if i not in seen)
+    return tuple(out)
+
+
 def normalized_order(defn: TableDefinition) -> tuple[int, ...]:
     """`export_order` made safe, INCLUDING excluded entries.
 
     Drops out-of-range and duplicate entries, drops `ROW_NUMBER_SLOT` when
     `show_row_numbers` is off, then appends every definition column the list
-    forgot. When row numbers are on and the slot is absent it leads — that is
-    where the "#" column has always sat.
+    forgot — in DISPLAY order (`normalized_display_order`), so an export with
+    no explicit order matches the grid the user arranged, and a partial one is
+    completed the way the grid shows the rest. When row numbers are on and the
+    slot is absent it leads — that is where the "#" column has always sat.
 
     Normalized, never validated: `export_order` is a presentation setting, and
     a stale list left behind by a column insert or remove must not be able to
@@ -87,7 +110,7 @@ def normalized_order(defn: TableDefinition) -> tuple[int, ...]:
         out.append(i)
     if defn.show_row_numbers and ROW_NUMBER_SLOT not in seen:
         out.insert(0, ROW_NUMBER_SLOT)
-    out.extend(i for i in range(n) if i not in seen)
+    out.extend(i for i in normalized_display_order(defn) if i not in seen)
     return tuple(out)
 
 

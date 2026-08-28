@@ -46,6 +46,7 @@ const DRAFT: store.TableDraft = {
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
 		export_order: [],
+		display_order: [],
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns: [
 			{
@@ -189,11 +190,12 @@ describe('TableGrid', () => {
 		}
 	});
 
-	it('dragging header 1 onto header 0 reorders the definition through updateTableDefinition', () => {
+	it('dragging header 1 onto header 0 reorders the DISPLAY order through updateTableDisplayOrder', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
 		const update = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
+		const display = vi.spyOn(store, 'updateTableDisplayOrder').mockImplementation(() => {});
 		const c = render('tbl:draft:hdrdrag');
 		try {
 			// happy-dom has no real layout: stub elementFromPoint to resolve
@@ -226,9 +228,14 @@ describe('TableGrid', () => {
 			);
 			flushSync();
 
-			expect(update).toHaveBeenCalledTimes(1);
-			const defn = update.mock.calls[0][1] as TableDefinition;
-			expect(defn.columns.map((col) => col.header)).toEqual(['Mass', 'Block']);
+			// A header drag reorders the DISPLAY order only: the definition's
+			// columns (the computation order) are untouched, and no reload is
+			// asked for (`updateTableDisplayOrder`, not `updateTableDefinition`).
+			expect(update).not.toHaveBeenCalled();
+			expect(display).toHaveBeenCalledTimes(1);
+			const defn = display.mock.calls[0][1] as TableDefinition;
+			expect(defn.columns.map((col) => col.header)).toEqual(['Block', 'Mass']);
+			expect(defn.display_order).toEqual([1, 0]);
 		} finally {
 			unmount(c);
 		}
@@ -538,7 +545,12 @@ describe('TableGrid', () => {
 			expect(document.querySelector('[data-testid="header-edit-0"]')).not.toBeNull();
 			const btn2 = document.querySelector('[data-testid="header-edit-2"]') as HTMLElement;
 			expect(btn2).not.toBeNull();
+			// The pencil opens a menu; "Edit column…" is its first item.
 			btn2.click();
+			flushSync();
+			const item = document.querySelector('[data-testid="header-edit-column-2"]') as HTMLElement;
+			expect(item).not.toBeNull();
+			item.click();
 			flushSync();
 			expect(onEditColumn).toHaveBeenCalledWith(2);
 		} finally {
@@ -696,6 +708,77 @@ describe('TableGrid', () => {
 		try {
 			expect(document.querySelector('[data-testid="row-number-header"]')).toBeNull();
 			expect(document.querySelector('[data-testid="row-number-cell"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('TableGrid display order', () => {
+	it('renders the columns in display_order, keeping definition indices for cells and sort', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue({
+			...DRAFT,
+			definition: { ...DRAFT.definition, display_order: [1, 0] }
+		});
+		const c = render('tbl:draft:displayorder');
+		try {
+			const headers = [...document.querySelectorAll('[data-col-hdr-drop]')];
+			expect(headers.map((h) => h.textContent?.trim().split(/\s/)[0])).toEqual(['Mass', 'Block']);
+			// on-screen positions are what the drag speaks; the definition index rides along
+			expect(headers.map((h) => h.getAttribute('data-col-hdr-drop'))).toEqual(['0', '1']);
+			expect(headers.map((h) => h.getAttribute('data-col-index'))).toEqual(['1', '0']);
+			const row = document.querySelector('[data-testid="table-row"]') as HTMLElement;
+			// the value cell (definition column 1) now comes first
+			expect(row.children[0].textContent).toContain('10');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the header strip is at least as wide as its cells and every cell paints its own background', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
+		const c = render('tbl:draft:hdrbg');
+		try {
+			const header = document.querySelector('[data-testid="table-header"]') as HTMLElement;
+			expect(header.classList.contains('min-w-max')).toBe(true);
+			expect(header.classList.contains('bg-card')).toBe(true);
+			for (const cell of header.querySelectorAll('[data-col-hdr-drop]')) {
+				expect(cell.classList.contains('bg-card')).toBe(true);
+				// no permanent transform: it would trap popups under later cells
+				expect((cell as HTMLElement).style.transform).toBe('');
+			}
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the header menu offers insert-before/after per kind and reports the definition index', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
+		const onInsertColumn = vi.fn();
+		const c = mount(TableGrid, {
+			target: document.body,
+			props: { tabId: 'tbl:draft:insert', onEditColumn: vi.fn(), onInsertColumn }
+		});
+		flushSync();
+		try {
+			(document.querySelector('[data-testid="header-edit-1"]') as HTMLElement).click();
+			flushSync();
+			const item = document.querySelector(
+				'[data-testid="header-insert-after-script-1"]'
+			) as HTMLElement;
+			expect(item).not.toBeNull();
+			expect(
+				document.querySelector('[data-testid="header-insert-before-property-1"]')
+			).not.toBeNull();
+			item.click();
+			flushSync();
+			expect(onInsertColumn).toHaveBeenCalledWith(1, 'after', 'script');
 		} finally {
 			unmount(c);
 		}

@@ -265,3 +265,27 @@ describe('PropertyColumnEditor', () => {
 		}
 	});
 });
+
+describe('PropertyColumnEditor suggestion list focus', () => {
+	it('a mousedown on the list (an option, its scrollbar) is default-prevented so the input keeps focus and the list stays open', () => {
+		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
+		const c = render(propColumn(''), { kind: 'scope', types: ['Block'], criteria: [] }, () => {});
+		try {
+			const input = document.querySelector(
+				'[data-testid="property-name-input"]'
+			) as HTMLInputElement;
+			input.focus();
+			input.dispatchEvent(new Event('focus'));
+			flushSync();
+			const list = document.querySelector('[data-testid="property-suggestions"]') as HTMLElement;
+			expect(list).not.toBeNull();
+			const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+			list.dispatchEvent(down);
+			expect(down.defaultPrevented).toBe(true);
+			flushSync();
+			expect(document.querySelector('[data-testid="property-suggestions"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+});

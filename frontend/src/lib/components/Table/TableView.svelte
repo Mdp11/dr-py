@@ -24,6 +24,7 @@
 		getUncomputedScriptCellReason,
 		hasSuspendedTableEdits,
 		reloadTableDraft,
+		remapTableSortForInsert,
 		requestScriptErrors,
 		requestScrollToCell,
 		resumeTableEvaluation,
@@ -38,17 +39,20 @@
 		type ExportProgress
 	} from '$lib/state';
 	import type { ExportFormat } from '$lib/api/types';
-	import { AlertTriangle, Check, Search, Settings, X } from '@lucide/svelte';
+	import { AlertTriangle, Check, Columns3, ListOrdered, Search, X } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
 	import {
 		addColumn,
+		insertColumn,
 		newNavigationColumn,
 		newPropertyColumn,
 		newScriptColumn
 	} from '$lib/table/columns';
 	import {
+		SETTINGS_MIN_H,
+		SETTINGS_MIN_W,
 		clampSettingsRect,
 		defaultSettingsRect,
 		loadSettingsRect,
@@ -57,6 +61,7 @@
 	} from '$lib/table/settings-rect';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 	import ColumnManager from './ColumnManager.svelte';
+	import ColumnReorderDialog from './ColumnReorderDialog.svelte';
 	import ExportDialog from './ExportDialog.svelte';
 	import ScriptErrorsPanel from './ScriptErrorsPanel.svelte';
 	import ScriptWarningsPanel from './ScriptWarningsPanel.svelte';
@@ -304,13 +309,24 @@
 	function onWindowResize(): void {
 		if (settingsOpen) dlg = clampSettingsRect(dlg, viewport());
 	}
-	// Drag (title bar) and resize (bottom-right corner) share one shape: the
+	// Drag (title bar) and resize (any edge or corner) share one shape: the
 	// pointer-down origin plus the rect at that moment; every move is an
 	// absolute delta from it, clamped, and the end persists the result.
-	let dlgGesture: { x: number; y: number; rect: Rect } | null = null;
-	function dlgGestureStart(e: PointerEvent): void {
+	// `edges` names the sides a resize gesture moves ('' for a drag).
+	type Edges = '' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+	const RESIZE_EDGES: { edges: Edges; cls: string }[] = [
+		{ edges: 'n', cls: 'top-0 left-3 right-3 h-1.5 cursor-ns-resize' },
+		{ edges: 's', cls: 'bottom-0 left-3 right-3 h-1.5 cursor-ns-resize' },
+		{ edges: 'e', cls: 'top-3 bottom-3 right-0 w-1.5 cursor-ew-resize' },
+		{ edges: 'w', cls: 'top-3 bottom-3 left-0 w-1.5 cursor-ew-resize' },
+		{ edges: 'ne', cls: 'top-0 right-0 size-3 cursor-nesw-resize' },
+		{ edges: 'nw', cls: 'top-0 left-0 size-3 cursor-nwse-resize' },
+		{ edges: 'sw', cls: 'bottom-0 left-0 size-3 cursor-nesw-resize' }
+	];
+	let dlgGesture: { x: number; y: number; rect: Rect; edges: Edges } | null = null;
+	function dlgGestureStart(e: PointerEvent, edges: Edges = ''): void {
 		if (e.button !== 0) return;
-		dlgGesture = { x: e.clientX, y: e.clientY, rect: dlg };
+		dlgGesture = { x: e.clientX, y: e.clientY, rect: dlg, edges };
 		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
 		e.preventDefault();
 	}
@@ -322,13 +338,28 @@
 			viewport()
 		);
 	}
+	/** A north/west edge moves the opposite corner's anchor: the rect's far
+	 * edge stays put and `x`/`y` follow the pointer. At the minimum size the
+	 * near edge stops rather than the far edge drifting, which is what the
+	 * explicit `Math.min` on the origin buys over letting the clamp fix the
+	 * size after the fact. */
 	function onDlgResizeMove(e: PointerEvent): void {
 		if (!dlgGesture) return;
-		const { x, y, rect } = dlgGesture;
-		dlg = clampSettingsRect(
-			{ ...rect, w: rect.w + (e.clientX - x), h: rect.h + (e.clientY - y) },
-			viewport()
-		);
+		const { x, y, rect, edges } = dlgGesture;
+		const dx = e.clientX - x;
+		const dy = e.clientY - y;
+		const next: Rect = { ...rect };
+		if (edges.includes('e')) next.w = rect.w + dx;
+		if (edges.includes('s')) next.h = rect.h + dy;
+		if (edges.includes('w')) {
+			next.w = Math.max(SETTINGS_MIN_W, rect.w - dx);
+			next.x = rect.x + rect.w - next.w;
+		}
+		if (edges.includes('n')) {
+			next.h = Math.max(SETTINGS_MIN_H, rect.h - dy);
+			next.y = rect.y + rect.h - next.h;
+		}
+		dlg = clampSettingsRect(next, viewport());
 	}
 	function dlgGestureEnd(): void {
 		if (!dlgGesture) return;
@@ -391,6 +422,36 @@
 		updateTableDefinition(tabId, addColumn(d.definition, column));
 		openSettings(getTableDraft(tabId)!.definition.columns.length - 1);
 	}
+
+	// The header menu's "Insert before/after": same staging as
+	// `addColumnFromHeader`, but the column lands at a definition index in the
+	// middle, so every later ColumnRef and the active sort shift up one
+	// (`insertColumn` + `remapTableSortForInsert`, paired like ColumnManager's
+	// own insert handler), and the dialog focuses on that index.
+	function insertColumnFromHeader(
+		index: number,
+		place: 'before' | 'after',
+		kind: 'property' | 'navigation' | 'script'
+	): void {
+		const d = getTableDraft(tabId);
+		if (!d) return;
+		const column =
+			kind === 'property'
+				? newPropertyColumn()
+				: kind === 'script'
+					? newScriptColumn()
+					: newNavigationColumn();
+		const at = place === 'before' ? index : index + 1;
+		suspendTableEvaluation(tabId);
+		if (kind === 'script') seedSnippetExpanded(`${tabId}::col:${at}`);
+		remapTableSortForInsert(tabId, at);
+		updateTableDefinition(tabId, insertColumn(d.definition, at, column, place));
+		openSettings(at);
+	}
+
+	/** The Reorder dialog (display order only) — modal, and independent of
+	 * the Columns panel: it edits nothing the grid needs re-evaluated. */
+	let reorderOpen = $state(false);
 
 	async function save(): Promise<void> {
 		saveError = null;
@@ -499,10 +560,20 @@
 					<button
 						type="button"
 						data-testid="table-settings-button"
+						title="Row source and columns: what the table computes"
 						class="flex items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
 						onclick={() => openSettings(null)}
 					>
-						<Settings class="h-3.5 w-3.5" /> Settings
+						<Columns3 class="h-3.5 w-3.5" /> Columns
+					</button>
+					<button
+						type="button"
+						data-testid="table-reorder-button"
+						title="Arrange the columns on screen (display order only)"
+						class="flex items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+						onclick={() => (reorderOpen = true)}
+					>
+						<ListOrdered class="h-3.5 w-3.5" /> Reorder
 					</button>
 				{/if}
 				<DropdownMenu.Root>
@@ -768,9 +839,14 @@
 				{tabId}
 				onEditColumn={editable ? editColumn : undefined}
 				onAddColumn={editable ? addColumnFromHeader : undefined}
+				onInsertColumn={editable ? insertColumnFromHeader : undefined}
 			/>
 		</div>
 	</div>
+
+	{#if editable}
+		<ColumnReorderDialog {tabId} bind:open={reorderOpen} />
+	{/if}
 
 	<!-- Outside the `editable` gate, like the Export ▾ trigger that opens it: a
 	     viewer can export too, and the overrides it edits are export-only. -->
@@ -843,7 +919,7 @@
 					onpointercancel={dlgGestureEnd}
 				>
 					<Dialog.Title class="font-display text-lg font-light tracking-wide">
-						{settingsFocus === null ? 'Table settings' : 'Column settings'}
+						{settingsFocus === null ? 'Columns' : 'Column settings'}
 					</Dialog.Title>
 				</div>
 				<!-- One body, no tab strip: the JSON export options moved out to the
@@ -873,17 +949,46 @@
 						Save
 					</Dialog.Close>
 				</div>
+				<!-- Resize from every edge and corner. The south-east corner is
+				     the one with a VISIBLE grip (the diagonal hatching), since an
+				     invisible 16px corner was the only handle for a while and
+				     nobody found it; the others are thin invisible strips along
+				     the frame, `inset` so they never overlap the title bar's
+				     drag grip or the body's scrollbar by more than a hair. -->
+				{#each RESIZE_EDGES as { edges, cls } (edges)}
+					<div
+						role="separator"
+						aria-orientation={edges === 'n' || edges === 's' ? 'horizontal' : 'vertical'}
+						tabindex="-1"
+						data-testid="settings-resize-{edges}"
+						class="absolute touch-none select-none {cls}"
+						onpointerdown={(e) => dlgGestureStart(e, edges)}
+						onpointermove={onDlgResizeMove}
+						onpointerup={dlgGestureEnd}
+						onpointercancel={dlgGestureEnd}
+					></div>
+				{/each}
 				<div
 					role="separator"
 					aria-orientation="horizontal"
 					tabindex="-1"
 					data-testid="settings-resize-handle"
-					class="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize touch-none select-none"
-					onpointerdown={dlgGestureStart}
+					title="Resize"
+					class="absolute right-0 bottom-0 size-4 cursor-nwse-resize touch-none select-none text-muted-foreground/60"
+					onpointerdown={(e) => dlgGestureStart(e, 'se')}
 					onpointermove={onDlgResizeMove}
 					onpointerup={dlgGestureEnd}
 					onpointercancel={dlgGestureEnd}
-				></div>
+				>
+					<svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+						<path
+							d="M15 1 1 15M15 6 6 15M15 11l-4 4"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.25"
+						/>
+					</svg>
+				</div>
 				<!-- Our own X: the primitive's built-in one is a `Dialog.Close`,
 				     whose click cannot be preventDefault-ed, so it could not be
 				     gated. `showCloseButton={false}` above turns that one off.

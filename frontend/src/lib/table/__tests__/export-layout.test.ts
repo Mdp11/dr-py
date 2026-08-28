@@ -4,7 +4,7 @@
 // drops) without a round trip.
 import { describe, expect, it } from 'vitest';
 import type { TableDefinition } from '$lib/api/types';
-import { ROW_NUMBER_SLOT, exportEntries } from '../export-layout';
+import { ROW_NUMBER_SLOT, displayOrder, exportEntries } from '../export-layout';
 
 function defn(over: Partial<TableDefinition> = {}): TableDefinition {
 	return {
@@ -30,6 +30,7 @@ function defn(over: Partial<TableDefinition> = {}): TableDefinition {
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
 		export_order: [],
+		display_order: [],
 		export_row_number: null,
 		...over
 	} as TableDefinition;
@@ -81,5 +82,39 @@ describe('exportEntries', () => {
 			})
 		);
 		expect(e[0]).toEqual({ index: ROW_NUMBER_SLOT, included: false });
+	});
+});
+
+describe('displayOrder', () => {
+	it('defaults to definition order', () => {
+		expect(displayOrder(defn())).toEqual([0, 1]);
+	});
+
+	it('drops out-of-range and duplicate entries and appends the forgotten ones', () => {
+		expect(displayOrder(defn({ display_order: [7, 1, 1, -1] }))).toEqual([1, 0]);
+	});
+
+	it('an empty export order follows the display order', () => {
+		expect(exportEntries(defn({ display_order: [1, 0] })).map((e) => e.index)).toEqual([1, 0]);
+	});
+
+	it('an explicit export order wins over the display order', () => {
+		expect(
+			exportEntries(defn({ display_order: [1, 0], export_order: [0, 1] })).map((e) => e.index)
+		).toEqual([0, 1]);
+	});
+
+	it('a partial export order is completed in display order', () => {
+		const d = defn({ display_order: [1, 0], export_order: [] });
+		d.columns.push({ ...d.columns[1], header: 'B' });
+		d.display_order = [2, 1, 0];
+		d.export_order = [0];
+		expect(exportEntries(d).map((e) => e.index)).toEqual([0, 2, 1]);
+	});
+
+	it('the row-number slot still leads a display-ordered export', () => {
+		expect(
+			exportEntries(defn({ display_order: [1, 0], show_row_numbers: true })).map((e) => e.index)
+		).toEqual([ROW_NUMBER_SLOT, 1, 0]);
 	});
 });

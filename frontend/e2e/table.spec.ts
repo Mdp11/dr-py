@@ -130,7 +130,7 @@ test('open navigation as table, add a column, edit a cell, commit, save, and reo
 	// to the body, so its controls are scoped to the dialog, not the tabpanel;
 	// the grid keeps rendering live underneath. -----------------------------
 	await tabpanel.getByTestId('table-settings-button').click();
-	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	const settings = page.getByRole('dialog', { name: 'Columns' });
 	await expect(settings).toBeVisible();
 	// Settings edits are STAGED: the draft updates immediately, but the grid is
 	// deliberately NOT re-evaluated while the dialog is open (composing a column
@@ -254,7 +254,7 @@ test('lazy loads rows while scrolling a large scope table', async ({ page }) => 
 	// the settings popup's scope picker (Select all types) to get the large scope.
 	await expect(tabpanel.getByTestId('table-empty-hint')).toBeVisible();
 	await tabpanel.getByTestId('table-settings-button').click();
-	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	const settings = page.getByRole('dialog', { name: 'Columns' });
 	await expect(settings).toBeVisible();
 	await settings.getByText('any element', { exact: true }).click();
 	await page.getByRole('button', { name: 'Select all', exact: true }).click();
@@ -329,7 +329,7 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	// checkpoints below read the dialog's own column list, and the grid is
 	// asserted once at the end, after saving.
 	await tabpanel.getByTestId('table-settings-button').click();
-	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	const settings = page.getByRole('dialog', { name: 'Columns' });
 	await expect(settings).toBeVisible();
 	const columnCountBefore = await header.locator('> div').count();
 	const columnCards = settings.locator('[data-testid^="column-header-band-"]');

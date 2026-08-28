@@ -10,7 +10,13 @@
 // tests).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TableDefinition } from '$lib/api/types';
-import { createColumnDrag, type ColumnDragState } from '../column-dnd.svelte';
+import {
+	AUTO_SCROLL_EDGE_PX,
+	AUTO_SCROLL_MAX_PX,
+	createColumnDrag,
+	edgeScrollVelocity,
+	type ColumnDragState
+} from '../column-dnd.svelte';
 
 const ATTR = 'data-col-drop';
 
@@ -49,6 +55,7 @@ function defWithColumns(
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
 		export_order: [],
+		display_order: [],
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns
 	};
@@ -331,5 +338,136 @@ describe('createColumnDrag', () => {
 		drag.onPointerMove(fakeEvent({ clientX: 200, clientY: 0 }));
 		expect(drag.from).toBeNull();
 		expect(drag.over).toBeNull();
+	});
+});
+
+describe('edgeScrollVelocity', () => {
+	it('is zero away from both edges', () => {
+		expect(edgeScrollVelocity(500, 0, 1000)).toBe(0);
+	});
+
+	it('ramps up towards the near edge, negative at the start, positive at the end', () => {
+		const shallow = edgeScrollVelocity(AUTO_SCROLL_EDGE_PX - 4, 0, 1000);
+		const deep = edgeScrollVelocity(4, 0, 1000);
+		expect(shallow).toBeLessThan(0);
+		expect(deep).toBeLessThan(shallow);
+		expect(edgeScrollVelocity(0, 0, 1000)).toBe(-AUTO_SCROLL_MAX_PX);
+		expect(edgeScrollVelocity(1000, 0, 1000)).toBe(AUTO_SCROLL_MAX_PX);
+		expect(edgeScrollVelocity(996, 0, 1000)).toBeGreaterThan(0);
+	});
+
+	it('keeps scrolling past the edge (an overshooting pointer still scrolls)', () => {
+		expect(edgeScrollVelocity(-200, 0, 1000)).toBe(-AUTO_SCROLL_MAX_PX);
+		expect(edgeScrollVelocity(1200, 0, 1000)).toBe(AUTO_SCROLL_MAX_PX);
+	});
+
+	it('never scrolls a container too small to have two edge bands', () => {
+		expect(edgeScrollVelocity(2, 0, 60)).toBe(0);
+	});
+});
+
+describe('scrolling under a live drag', () => {
+	let container: HTMLElement;
+	const rects = new Map<number, { left: number; width: number }>();
+
+	function layoutTarget(index: number, left: number, width: number): HTMLElement {
+		const el = document.createElement('div');
+		el.setAttribute(ATTR, String(index));
+		rects.set(index, { left, width });
+		// Reads the map on every call, so a test can "scroll" by rewriting it.
+		el.getBoundingClientRect = () => {
+			const r = rects.get(index)!;
+			return {
+				left: r.left,
+				top: 0,
+				width: r.width,
+				height: 20,
+				right: r.left + r.width,
+				bottom: 20,
+				x: r.left,
+				y: 0,
+				toJSON: () => ({})
+			} as DOMRect;
+		};
+		container.appendChild(el);
+		return el;
+	}
+
+	function slotEvent(target: HTMLElement, clientX: number, clientY: number): PointerEvent {
+		return {
+			button: 0,
+			clientX,
+			clientY,
+			pointerId: 1,
+			currentTarget: target
+		} as unknown as PointerEvent;
+	}
+
+	beforeEach(() => {
+		rects.clear();
+		container = document.createElement('div');
+		document.body.appendChild(container);
+	});
+
+	it('re-measures the slots and re-hit-tests the last pointer position on scroll', () => {
+		const onDrop = vi.fn();
+		const defn = defWithColumns(3);
+		const drag = createColumnDrag({ attr: ATTR, getDefinition: () => defn, onDrop });
+		const s0 = layoutTarget(0, 0, 100);
+		layoutTarget(1, 100, 100);
+		layoutTarget(2, 200, 100);
+
+		drag.onPointerDown(slotEvent(s0, 10, 10), 0);
+		drag.onPointerMove(slotEvent(s0, 150, 10));
+		expect(drag.over).toBe(1);
+
+		// The list scrolls 100px to the left under a pointer that stays put:
+		// slot 2 now spans [100, 200) and is what sits under x=150. The DOM
+		// reports rects WITH the live preview translation applied, as a real
+		// getBoundingClientRect would.
+		for (const [i, r] of rects) rects.set(i, { ...r, left: r.left - 100 + drag.offsetOf(i) });
+		container.dispatchEvent(new Event('scroll'));
+		expect(drag.over).toBe(2);
+
+		drag.onPointerUp(slotEvent(s0, 150, 10));
+		expect(onDrop).toHaveBeenCalledExactlyOnceWith(0, 2);
+	});
+
+	it('backs the live preview offset out of a re-measured rect', () => {
+		const defn = defWithColumns(3);
+		const drag = createColumnDrag({ attr: ATTR, getDefinition: () => defn, onDrop: vi.fn() });
+		const s0 = layoutTarget(0, 0, 100);
+		layoutTarget(1, 100, 100);
+		layoutTarget(2, 200, 100);
+
+		drag.onPointerDown(slotEvent(s0, 10, 10), 0);
+		drag.onPointerMove(slotEvent(s0, 250, 10)); // over slot 2: preview [1, 2, 0]
+		expect(drag.offsetOf(1)).toBe(-100);
+		// The DOM now reports the TRANSLATED rects (the preview is live), and
+		// nothing scrolled. A naive re-capture would read slot 1 at x=0 and
+		// slot 0 at x=200 and flip the preview; backing the offsets out keeps
+		// the untranslated geometry and the preview stable.
+		rects.set(1, { left: 0, width: 100 });
+		rects.set(2, { left: 100, width: 100 });
+		rects.set(0, { left: 200, width: 100 });
+		container.dispatchEvent(new Event('scroll'));
+		expect(drag.over).toBe(2);
+		expect(drag.offsetOf(1)).toBe(-100);
+		expect(drag.offsetOf(0)).toBe(200);
+		drag.onPointerCancel(slotEvent(s0, 250, 10));
+	});
+
+	it('stops listening once the drag ends', () => {
+		const defn = defWithColumns(2);
+		const drag = createColumnDrag({ attr: ATTR, getDefinition: () => defn, onDrop: vi.fn() });
+		const s0 = layoutTarget(0, 0, 100);
+		layoutTarget(1, 100, 100);
+		drag.onPointerDown(slotEvent(s0, 10, 10), 0);
+		drag.onPointerMove(slotEvent(s0, 150, 10));
+		drag.onPointerUp(slotEvent(s0, 150, 10));
+		const spy = vi.spyOn(document, 'elementFromPoint');
+		container.dispatchEvent(new Event('scroll'));
+		expect(drag.over).toBeNull();
+		expect(spy).not.toHaveBeenCalled();
 	});
 });

@@ -27,9 +27,27 @@ export function columnIncluded(defn: TableDefinition, index: number): boolean {
 	return opts.include;
 }
 
+/** The grid's column order: every definition index exactly once. Mirrors
+ *  `normalized_display_order` — drops out-of-range and duplicate entries and
+ *  appends the forgotten ones in definition order, so `[]` IS definition
+ *  order and a stale list never hides a column. */
+export function displayOrder(defn: TableDefinition): number[] {
+	const n = defn.columns.length;
+	const seen = new Set<number>();
+	const out: number[] = [];
+	for (const i of defn.display_order ?? []) {
+		if (!Number.isInteger(i) || i < 0 || i >= n || seen.has(i)) continue;
+		seen.add(i);
+		out.push(i);
+	}
+	for (let i = 0; i < n; i++) if (!seen.has(i)) out.push(i);
+	return out;
+}
+
 /** Every export entry in output order, INCLUDED OR NOT. Drops out-of-range and
  *  duplicate `export_order` entries, drops the row-number slot when the grid
- *  flag is off, and appends any definition column the list forgot. */
+ *  flag is off, and appends any definition column the list forgot — in DISPLAY
+ *  order, so an export with no explicit order matches the grid. */
 export function exportEntries(defn: TableDefinition): ExportEntry[] {
 	const n = defn.columns.length;
 	const seen = new Set<number>();
@@ -44,7 +62,7 @@ export function exportEntries(defn: TableDefinition): ExportEntry[] {
 		order.push(i);
 	}
 	if (defn.show_row_numbers && !seen.has(ROW_NUMBER_SLOT)) order.unshift(ROW_NUMBER_SLOT);
-	for (let i = 0; i < n; i++) if (!seen.has(i)) order.push(i);
+	for (const i of displayOrder(defn)) if (!seen.has(i)) order.push(i);
 
 	return order.map((index) => ({
 		index,

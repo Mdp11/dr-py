@@ -27,7 +27,7 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-27 · repo head at time of writing: `main` at `4d95d1c` (feat/script-column-inputs merged; P-1 table half done)
+Last updated: 2026-08-28 · repo head at time of writing: `feat/table-ux-batch` on top of `main` at `0d3337b` (U-10 table columns UX batch, C-17)
 (model-compare-apply-cr merged). The 2026-08-18 additions were a batch of owner notes: P-10
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
@@ -592,6 +592,27 @@ Issues tab renders empty until an explicit **Validate**, which then reports the 
 count. So the count and the list read from different places. Almost certainly the same
 root cause as **F-4** (the issue list is only ever refreshed by `validate-action.ts`) —
 fix them together in `frontend/src/lib/state/validation.svelte.ts`.
+
+### U-10 · Table columns UX batch · `done` (2026-08-28, feat/table-ux-batch) · *2026-08-28*
+Nine owner items in one pass. **Reordering**: the Columns panel's drag (and the
+grid header's) auto-scrolls near the container's edge, re-hit-tests on a wheel
+scroll mid-drag, and the ghost is portaled to `<body>` (it used to stay behind,
+`position:fixed` inside the transformed `Dialog.Content`); "Settings" is now
+**Columns**, with a **Reorder** button beside it (`ColumnReorderDialog`, names
+only); and **display order is decoupled from computation order**
+(`TableDefinition.display_order`, `[]` = definition order, normalized like
+`export_order`; the grid and the header drag speak it, the Columns panel keeps
+the constrained computation order, an empty `export_order` follows it).
+**Usability**: the panel resizes from every edge/corner with a visible grip;
+"Insert before/after" per kind in both the panel's per-card menu and the
+header's pencil menu (`columns.ts::insertColumn`); cards get `bg-card` + a
+kind-coloured left edge against the panel's `bg-popover`. **Bugs**: the sticky
+header was viewport-wide while rows were wider (`min-w-max` + per-cell
+`bg-card`); every card carried a permanent `transform`, a stacking context that
+trapped the property-name dropdown under the next card (drag-only transforms
+now, in the grid too); a mousedown on the dropdown's scrollbar blurred the input
+and closed it (`preventDefault`). Not in scope, still open: P-2 (per-column
+search).
 
 ### U-9 · Commit panel content overflows its bounds · `done` (2026-08-26, fix/ux-minor-batch) · *2026-08-18*
 Cause confirmed as diagnosed: flex children with no `min-w-0` and unbroken strings (ids, names
@@ -1169,7 +1190,7 @@ entry in the console for arity-2 snippets would save a support round-trip.
 | C-15 | `RulesValidator`'s generated message is `"Rule 'x' violated[: description]"`, where the design's pinned shape is `"<rule-name>: <failed-assertion summary>"`, and it never names the far elements that witnessed the failure. The design hedges that context with "where cheaply available", so the omission is fine — but the format is a straight deviation. Match it or amend the design. | P-12 re-review, 2026-08-24 |
 | C-13 | ~~`frontend/src/lib/api/rules.ts`'s `RulesLintErrorSchema` duplicates `api/types.ts`'s `MetamodelLintErrorSchema` field for field.~~ **done** (2026-08-24, feat/validation-rules) — the client now reuses one shared schema, matching the backend's `LintErrorOut`. | P-12 final review, 2026-08-24 |
 | C-16 | `frontend/src/lib/table/columns.ts::remapColumnRefs` calls `f(i.ref.index)` up to three times per script input (`.some` predicate, `.map` condition, `.map` value). `f` is pure and throws-on-forward, so a hoist must still *call* it once per input. | script-column-inputs final review, 2026-08-27 |
-| C-17 | `columns.ts::removeColumn`'s `ColumnInUseError` says "column N sources column M" even when the reference is a script *input*, not the source. `columnRefIndices` could return `{index, why}`. | script-column-inputs final review, 2026-08-27 |
+| C-17 | `done` (2026-08-28, feat/table-ux-batch) — `columnRefs` returns `{index, why}`; the error now reads `column N reads input "x" from column M` for a script input. | script-column-inputs final review, 2026-08-27 |
 | C-18 | `ScriptInputsEditor.svelte` calls `nameError(inp.name, i)` twice per row per render (the `{#if}` guard and the span body); a per-row `$derived` errors array is tidier. Imperceptible at ≤50 inputs. | script-column-inputs final review, 2026-08-27 |
 | C-19 | Mid-file imports appended by TDD steps in `tests/table/test_schema.py`, `tests/script/test_embed_cache.py`, `tests/api/test_script_sweep.py` (ruff E402 — invisible because no task lints `tests/`, see C-11); plus `core/script/README.md` ~§142 states the `step`/`transform` one-arg rule twice within four lines. | script-column-inputs final review, 2026-08-27 |
 

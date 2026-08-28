@@ -79,7 +79,7 @@ test('property-step values, unsaved asterisk, auto-fit convergence, drag ghost',
 
 	// Settings panel labels (a portaled dialog — scope to it, close via Escape).
 	await tabpanel.getByTestId('table-settings-button').click();
-	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	const settings = page.getByRole('dialog', { name: 'Columns' });
 	await expect(settings.getByTestId('add-property-column')).toHaveText('+ Property');
 	await expect(settings.getByTestId('add-navigation-column')).toHaveText('+ Navigation');
 	// Add a property column (name) so the grid has two columns for the checks.

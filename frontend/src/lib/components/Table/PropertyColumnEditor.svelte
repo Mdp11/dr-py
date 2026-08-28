@@ -132,8 +132,17 @@
 				}}
 			/>
 			{#if suggestOpen && filtered.length > 0}
+				<!-- mousedown is where focus would move to the list (or to its
+				     scrollbar, which is not focusable — focus then lands on the body):
+				     either way the input blurs and `onComboFocusOut` closes the list
+				     under the pointer. Cancelling it keeps focus in the input; the
+				     option's `click` still fires, and so does the scrollbar drag. The
+				     list itself is presentational (its options are the buttons), so
+				     the handler is focus plumbing, not an interaction of its own. -->
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<ul
 					data-testid="property-suggestions"
+					onmousedown={(e) => e.preventDefault()}
 					class="absolute top-full left-0 z-50 mt-1 max-h-48 w-64 overflow-auto rounded border border-border bg-popover py-1 shadow-xl"
 				>
 					{#each filtered as it (`${it.name} ${it.datatype ?? ''}`)}

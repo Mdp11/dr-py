@@ -22,6 +22,7 @@
 		cloneColumn,
 		columnKindLabel,
 		columnLabel,
+		insertColumn,
 		moveColumn,
 		newNavigationColumn,
 		newPropertyColumn,
@@ -31,8 +32,10 @@
 		replaceColumn
 	} from '$lib/table/columns';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
+	import { portal } from '$lib/util/portal';
 	import type { Column, TableDefinition } from '$lib/api/types';
-	import { Copy, Eye, EyeOff } from '@lucide/svelte';
+	import { Copy, Eye, EyeOff, Plus } from '@lucide/svelte';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import NavigationColumnEditor from './NavigationColumnEditor.svelte';
 	import PropertyColumnEditor from './PropertyColumnEditor.svelte';
 	import RowSourceEditor from './RowSourceEditor.svelte';
@@ -145,6 +148,42 @@
 		}
 	});
 
+	type ColumnKind = 'property' | 'navigation' | 'script';
+	const ADDABLE_KINDS: { kind: ColumnKind; label: string }[] = [
+		{ kind: 'property', label: 'Property' },
+		{ kind: 'navigation', label: 'Navigation' },
+		{ kind: 'script', label: 'Script' }
+	];
+	const INSERT_PLACES: { place: 'before' | 'after'; label: string }[] = [
+		{ place: 'before', label: 'Insert before' },
+		{ place: 'after', label: 'Insert after' }
+	];
+
+	function freshColumn(kind: ColumnKind): Column {
+		return kind === 'property'
+			? newPropertyColumn()
+			: kind === 'script'
+				? newScriptColumn()
+				: newNavigationColumn();
+	}
+
+	// Insert a fresh column right before/after card `index`. `insertColumn`
+	// shifts every later ColumnRef, so the sort is remapped in the same breath
+	// (same pairing as onClone); a script column is seeded expanded under its
+	// FINAL index, before the apply, since its editor reads the store on first
+	// render.
+	function onInsert(index: number, place: 'before' | 'after', kind: ColumnKind): void {
+		if (!defn) return;
+		const current = defn;
+		const at = place === 'before' ? index : index + 1;
+		tryApply(() => {
+			if (kind === 'script') seedSnippetExpanded(`${tabId}::col:${at}`);
+			const next = insertColumn(current, at, freshColumn(kind), place);
+			remapTableSortForInsert(tabId, at);
+			return next;
+		});
+	}
+
 	function addPropertyColumn(): void {
 		if (!defn) return;
 		apply(addColumn(defn, newPropertyColumn()));
@@ -193,6 +232,25 @@
 		if (kind === 'script') return 'bg-warning/15 text-warning';
 		return 'bg-muted text-muted-foreground';
 	}
+
+	/** The card's left accent, in the badge's colour: one more cue telling
+	 * cards apart in a long list, readable even where the badge has scrolled
+	 * out of the band. */
+	function kindAccentClass(kind: string): string {
+		if (kind === 'property') return 'border-l-info/60';
+		if (kind === 'navigation') return 'border-l-success/60';
+		if (kind === 'script') return 'border-l-warning/60';
+		return 'border-l-foreground/25';
+	}
+
+	/** The reflow translation for card `i`, applied ONLY while a drag is
+	 * live. A permanent `transform` (even `translateY(0)`) made every card a
+	 * stacking context, so a popup rendered inside card N — the property-name
+	 * suggestion list, a CodeMirror tooltip — could never paint above card
+	 * N+1, and `position: fixed` inside the card became relative to it. */
+	function dragTransform(i: number): string | undefined {
+		return drag.dragging ? `translateY(${drag.offsetOf(i)}px)` : undefined;
+	}
 </script>
 
 {#if defn}
@@ -215,7 +273,7 @@
 			<p data-testid="column-manager-error" class="text-destructive">{error}</p>
 		{/if}
 
-		<div class="space-y-1.5">
+		<div class="space-y-3">
 			{#each defn.columns as col, i (i)}
 				{#if focusIndex === null || focusIndex === i}
 					<!-- NEVER put `overflow-hidden` back on this card: it was tried
@@ -225,14 +283,20 @@
 					     property-name suggestion list (`position:absolute`, anchored to
 					     the last row of that editor) and CodeMirror's completion/hover/
 					     lint tooltips inside ScriptColumnEditor/CodeEditor (some
-					     `position:fixed`, since the `transform` below makes this card a
-					     containing block for those too). The header band gets its own
-					     `rounded-t` instead, so the tint still meets the card's rounded
-					     top corners without the card clipping anything. -->
+					     `position:fixed`). The header band gets its own `rounded-t`
+					     instead, so the tint still meets the card's rounded top corners
+					     without the card clipping anything. The same popups are why the
+					     reflow `transform` is drag-only (`dragTransform`).
+					     `bg-card` sets the card off from the panel's `bg-popover` —
+					     with both the same tint the cards read as one continuous wall
+					     of controls; the kind-coloured left edge does the rest. -->
 					<div
-						class="rounded border border-border/70"
+						class="rounded border border-border border-l-3 bg-card shadow-sm {kindAccentClass(
+							col.kind
+						)}"
 						data-col-drop={i}
-						style="transform:translateY({drag.offsetOf(i)}px)"
+						data-testid="column-card-{i}"
+						style:transform={dragTransform(i)}
 						class:transition-transform={drag.dragging}
 						class:duration-150={drag.dragging}
 						class:ring-1={drag.over === i && drag.from !== null && !drag.valid}
@@ -323,6 +387,34 @@
 									/>{/if}
 							</button>
 							{#if focusIndex === null}
+								<!-- Insert a fresh column right beside this one — the
+								     panel-side twin of the grid header's pencil menu. -->
+								<DropdownMenu.Root>
+									<DropdownMenu.Trigger
+										data-testid="insert-column-{i}"
+										aria-label="Insert a column before or after"
+										title="Insert a column before or after this one"
+										class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted"
+									>
+										<Plus class="size-3" />
+									</DropdownMenu.Trigger>
+									<DropdownMenu.Content align="end">
+										{#each INSERT_PLACES as { place, label }, p (place)}
+											{#if p > 0}<DropdownMenu.Separator />{/if}
+											<DropdownMenu.Group>
+												<DropdownMenu.GroupHeading>{label}</DropdownMenu.GroupHeading>
+												{#each ADDABLE_KINDS as k (k.kind)}
+													<DropdownMenu.Item
+														data-testid="insert-{place}-{k.kind}-{i}"
+														onSelect={() => onInsert(i, place, k.kind)}
+													>
+														+ {k.label}
+													</DropdownMenu.Item>
+												{/each}
+											</DropdownMenu.Group>
+										{/each}
+									</DropdownMenu.Content>
+								</DropdownMenu.Root>
 								<button
 									type="button"
 									data-testid="clone-column-{i}"
@@ -386,7 +478,10 @@
 		{#if drag.dragging && drag.ghost && drag.ghost.w > 0 && drag.from !== null}
 			{@const dragCol = defn.columns[drag.from]}
 			<!-- Detached drag ghost: a slim copy of the grabbed row following the
-			     pointer (position:fixed so the settings panel doesn't clip it).
+			     pointer. Portaled to <body>: `position:fixed` alone resolves
+			     against the panel (its `Dialog.Content` is transformed), so the
+			     ghost scrolled along with the list on a wheel scroll and stayed
+			     behind while the pointer went on without it.
 			     Opaque background, unlike the header band's `bg-muted/50`: the
 			     band sits on the (opaque) card, but this ghost floats over the
 			     column list itself, and `bg-muted/50` stacked with `opacity-90`
@@ -394,6 +489,7 @@
 			     ghost's own label got hard to read. The badge tint below still
 			     mirrors the band's per-kind colours. -->
 			<div
+				use:portal
 				data-testid="column-drag-ghost"
 				class="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-primary/40 bg-card p-1.5 text-xs opacity-90 shadow-lg"
 				style="left:{drag.ghost.x}px; top:{drag.ghost.y}px; width:{drag.ghost.w}px"

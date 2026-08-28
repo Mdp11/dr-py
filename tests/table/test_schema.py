@@ -401,3 +401,24 @@ def test_inline_arity_mismatch_rejected_both_directions():
             )
         ),
     )
+
+
+def test_display_order_defaults_empty_and_roundtrips():
+    t = _table()
+    assert t.display_order == []
+    t = _table(
+        columns=[
+            {"kind": "element", "source": {"kind": "row", "chain_index": 0}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "mass"},
+        ],
+        display_order=[1, 0],
+    )
+    assert t.display_order == [1, 0]
+    assert TABLE_ADAPTER.validate_python(t.model_dump()).display_order == [1, 0]
+
+
+def test_display_order_is_never_validated_against_the_columns():
+    # Presentation, normalized on read (export_layout.normalized_display_order):
+    # a stale list left by a column edit must not 422 the definition.
+    t = _table(display_order=[5, -1, 0, 0])
+    assert t.display_order == [5, -1, 0, 0]

@@ -116,6 +116,7 @@ function emptyDefinition(): TableDefinition {
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
 		export_order: [],
+		display_order: [],
 		row_source: { kind: 'scope', types: [], criteria: [] },
 		columns: [
 			{
@@ -1432,6 +1433,17 @@ export function updateTableExportSettings(tabId: string, defn: TableDefinition):
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	_drafts.set(tabId, { ...draft, definition: defn, dirty: true });
+}
+
+/**
+ * `display_order` is the third reload-free field: the grid permutes its
+ * columns client-side (`displayOrder`), the evaluate response is indexed by
+ * DEFINITION index either way, so a reload could only repaint the identical
+ * page. Same contract as `updateTableExportSettings`, and the same reason it
+ * is a separate function rather than a flag.
+ */
+export function updateTableDisplayOrder(tabId: string, defn: TableDefinition): void {
+	updateTableExportSettings(tabId, defn);
 }
 
 /**

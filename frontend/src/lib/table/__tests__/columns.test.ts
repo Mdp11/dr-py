@@ -22,7 +22,10 @@ import {
 	setRowNumberExportOptions,
 	moveExportEntry,
 	setJsonSplitOptions,
-	templateIsValid
+	templateIsValid,
+	insertColumn,
+	moveDisplayColumn,
+	resetDisplayOrder
 } from '$lib/table/columns';
 import { ROW_NUMBER_SLOT } from '$lib/table/export-layout';
 import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
@@ -33,6 +36,7 @@ const base: TableDefinition = {
 	default_cell_mode: 'collapse',
 	show_row_numbers: false,
 	export_order: [],
+	display_order: [],
 	row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 	columns: [
 		{
@@ -610,7 +614,8 @@ function defn(...columns: unknown[]): TableDefinition {
 		columns,
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
-		export_order: []
+		export_order: [],
+		display_order: []
 	} as TableDefinition;
 }
 
@@ -903,5 +908,141 @@ describe('script column inputs', () => {
 		const next = cloneColumn(withInputs, 0);
 		const script = next.columns[3];
 		expect(script.kind === 'script' && script.inputs.map((i) => i.ref.index)).toEqual([0, 2]);
+	});
+});
+
+// display_order is a second index list over the definition, so every
+// structural mutator has to keep it in step exactly like export_order — a
+// stale entry would silently reshuffle the grid.
+describe('display_order bookkeeping', () => {
+	it('removeColumn drops the entry and shifts the ones above it', () => {
+		const d = { ...defn(el(), el(), el()), display_order: [2, 0, 1] };
+		expect(removeColumn(d, 0).display_order).toEqual([1, 0]);
+	});
+
+	it('moveColumn remaps entries to the new definition indices', () => {
+		const d = { ...defn(el(), el(), el()), display_order: [2, 1, 0] };
+		expect(moveColumn(d, 0, 2).display_order).toEqual([1, 0, 2]);
+	});
+
+	it('addColumn appends the new index when an order exists, and leaves an empty one empty', () => {
+		expect(
+			addColumn({ ...defn(el(), el()), display_order: [1, 0] }, newPropertyColumn()).display_order
+		).toEqual([1, 0, 2]);
+		expect(addColumn(defn(el()), newPropertyColumn()).display_order).toEqual([]);
+	});
+
+	it('cloneColumn shows the copy right after its original', () => {
+		const d = { ...defn(el(), el()), display_order: [1, 0] };
+		expect(cloneColumn(d, 0).display_order).toEqual([2, 0, 1]);
+	});
+
+	it('moveDisplayColumn permutes the display order only, materializing the natural one', () => {
+		const d = defn(el(), el(), el());
+		const next = moveDisplayColumn(d, 0, 2);
+		expect(next.display_order).toEqual([1, 2, 0]);
+		expect(next.columns).toBe(d.columns === next.columns ? d.columns : next.columns);
+		expect(next.columns.map((c) => c.header)).toEqual(d.columns.map((c) => c.header));
+		// positions are DISPLAY positions: with [1, 2, 0] on screen, moving
+		// display position 2 (definition column 0) back to the front
+		expect(moveDisplayColumn(next, 2, 0).display_order).toEqual([0, 1, 2]);
+	});
+
+	it('moveDisplayColumn ignores an out-of-range or no-op move', () => {
+		const d = { ...defn(el(), el()), display_order: [1, 0] };
+		expect(moveDisplayColumn(d, 0, 0).display_order).toEqual([1, 0]);
+		expect(moveDisplayColumn(d, 0, 5).display_order).toEqual([1, 0]);
+	});
+
+	it('resetDisplayOrder empties the list (definition order again)', () => {
+		const d = { ...defn(el(), el()), display_order: [1, 0] };
+		expect(resetDisplayOrder(d).display_order).toEqual([]);
+	});
+});
+
+describe('insertColumn', () => {
+	const prop = (name: string): Column => ({
+		...(newPropertyColumn() as Extract<Column, { kind: 'property' }>),
+		name,
+		header: name
+	});
+
+	it('inserts at the position, shifting later ColumnRefs up by one', () => {
+		const nav: Column = {
+			...newNavigationColumn(),
+			header: 'nav',
+			source: { kind: 'column', index: 1 }
+		};
+		const d = defn(el(), prop('a'), nav);
+		const next = insertColumn(d, 1, prop('x'));
+		expect(next.columns.map((c) => c.header)).toEqual(['', 'x', 'a', 'nav']);
+		expect(next.columns[3].source).toEqual({ kind: 'column', index: 2 });
+		// refs pointing BEFORE the insertion point are untouched
+		expect(insertColumn(d, 2, prop('x')).columns[3].source).toEqual({
+			kind: 'column',
+			index: 1
+		});
+	});
+
+	it('shifts script inputs too', () => {
+		const script: Column = {
+			...(newScriptColumn() as Extract<Column, { kind: 'script' }>),
+			header: 's',
+			inputs: [{ name: 'a', ref: { kind: 'column', index: 1 } }]
+		};
+		const d = defn(el(), prop('a'), script);
+		const next = insertColumn(d, 1, prop('x'));
+		expect((next.columns[3] as Extract<Column, { kind: 'script' }>).inputs[0].ref.index).toBe(2);
+	});
+
+	it('appends when the position is the length', () => {
+		const d = defn(el(), prop('a'));
+		expect(insertColumn(d, 2, prop('x')).columns.map((c) => c.header)).toEqual(['', 'a', 'x']);
+	});
+
+	it('keeps export_order and display_order pointing at the same columns, showing the new one at its slot', () => {
+		const d = {
+			...defn(el(), prop('a'), prop('b')),
+			export_order: [2, 0, 1],
+			display_order: [2, 1, 0]
+		};
+		const next = insertColumn(d, 1, prop('x'));
+		// old 1->2, old 2->3; the new column (1) shows right before old 1 (now 2)
+		expect(next.export_order).toEqual([3, 0, 1, 2]);
+		expect(next.display_order).toEqual([3, 1, 2, 0]);
+	});
+
+	it('leaves empty orders empty', () => {
+		const next = insertColumn(defn(el(), prop('a')), 1, prop('x'));
+		expect(next.export_order).toEqual([]);
+		expect(next.display_order).toEqual([]);
+	});
+});
+
+describe('insertColumn placement in a reordered grid', () => {
+	const prop = (name: string): Column => ({
+		...(newPropertyColumn() as Extract<Column, { kind: 'property' }>),
+		name,
+		header: name
+	});
+
+	it("'after' shows the new column right after its anchor's DISPLAY slot, not its definition slot", () => {
+		// grid shows [b, a, scope]; "insert after a" must land between a and scope
+		const d = { ...defn(el(), prop('a'), prop('b')), display_order: [2, 1, 0] };
+		const next = insertColumn(d, 2, prop('x'), 'after');
+		expect(next.columns.map((c) => c.header)).toEqual(['', 'a', 'x', 'b']);
+		expect(next.display_order).toEqual([3, 1, 2, 0]);
+	});
+
+	it("'before' at the end anchors to nothing and appends", () => {
+		const d = { ...defn(el(), prop('a')), display_order: [1, 0] };
+		expect(insertColumn(d, 2, prop('x'), 'before').display_order).toEqual([1, 0, 2]);
+	});
+
+	it("'after' at the front anchors to nothing and appends", () => {
+		const d = { ...defn(el(), prop('a')), display_order: [1, 0] };
+		const next = insertColumn(d, 0, prop('x'), 'after');
+		expect(next.columns.map((c) => c.header)).toEqual(['x', '', 'a']);
+		expect(next.display_order).toEqual([2, 1, 0]);
 	});
 });

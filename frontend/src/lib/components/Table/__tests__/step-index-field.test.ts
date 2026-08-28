@@ -264,6 +264,7 @@ describe('RowSourceEditor step-index field', () => {
 			default_cell_mode: 'collapse',
 			show_row_numbers: false,
 			export_order: [],
+			display_order: [],
 			row_source: rowSource,
 			columns: [
 				{

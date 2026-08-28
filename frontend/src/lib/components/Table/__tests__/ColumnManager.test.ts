@@ -50,6 +50,7 @@ async function seedForClone(extraColumns: Column[] = []): Promise<void> {
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
 		export_order: [],
+		display_order: [],
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns: [
 			{
@@ -87,6 +88,7 @@ function scopeDraft(columns: TableDefinition['columns']) {
 			default_cell_mode: 'collapse' as const,
 			show_row_numbers: false,
 			export_order: [],
+			display_order: [],
 			row_source: { kind: 'scope' as const, types: ['Block'], criteria: [] },
 			columns
 		}
@@ -518,6 +520,97 @@ describe('ColumnManager', () => {
 			expect(getTableDraft(CLONE_TAB)!.definition.show_row_numbers).toBe(true);
 		} finally {
 			unmount(c);
+		}
+	});
+});
+
+describe('ColumnManager insert menu and card contrast', () => {
+	it('each card offers insert-before/after per kind; the choice lands at the right definition index', async () => {
+		await seedForClone();
+		const component = mount(ColumnManager, {
+			target: document.body,
+			props: { tabId: CLONE_TAB, focusIndex: null }
+		});
+		flushSync();
+		try {
+			(document.querySelector('[data-testid="insert-column-0"]') as HTMLElement).click();
+			flushSync();
+			const item = document.querySelector('[data-testid="insert-after-property-0"]') as HTMLElement;
+			expect(item).not.toBeNull();
+			expect(document.querySelector('[data-testid="insert-before-script-0"]')).not.toBeNull();
+			item.click();
+			flushSync();
+			const cols = getTableDraft(CLONE_TAB)!.definition.columns;
+			expect(cols.map((c) => c.kind)).toEqual(['element', 'property', 'property']);
+			expect(cols[1].header).toBe('');
+			expect(cols[2].header).toBe('Mass');
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('shifts a sort at/after the insertion point so it keeps naming the same column', async () => {
+		await seedForClone();
+		setTableSort(CLONE_TAB, { column: 1, direction: 'asc' });
+		const component = mount(ColumnManager, {
+			target: document.body,
+			props: { tabId: CLONE_TAB, focusIndex: null }
+		});
+		flushSync();
+		try {
+			(document.querySelector('[data-testid="insert-column-1"]') as HTMLElement).click();
+			flushSync();
+			(document.querySelector('[data-testid="insert-before-navigation-1"]') as HTMLElement).click();
+			flushSync();
+			expect(getTableDraft(CLONE_TAB)!.definition.columns.map((c) => c.kind)).toEqual([
+				'element',
+				'navigation',
+				'property'
+			]);
+			expect(getTableSort(CLONE_TAB)).toEqual({ column: 2, direction: 'asc' });
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('cards paint their own background with a kind-coloured edge and carry no permanent transform', async () => {
+		await seedForClone();
+		const component = mount(ColumnManager, {
+			target: document.body,
+			props: { tabId: CLONE_TAB, focusIndex: null }
+		});
+		flushSync();
+		try {
+			const card = document.querySelector('[data-testid="column-card-1"]') as HTMLElement;
+			expect(card.classList.contains('bg-card')).toBe(true);
+			expect(card.classList.contains('border-l-info/60')).toBe(true);
+			expect(card.style.transform).toBe('');
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('the focused (single-column) view offers no insert menu', () => {
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(
+			scopeDraft([
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				}
+			])
+		);
+		const component = mount(ColumnManager, {
+			target: document.body,
+			props: { tabId: 't', focusIndex: 0 }
+		});
+		flushSync();
+		try {
+			expect(document.querySelector('[data-testid="insert-column-0"]')).toBeNull();
+		} finally {
+			unmount(component);
 		}
 	});
 });

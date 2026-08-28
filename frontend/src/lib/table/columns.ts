@@ -34,7 +34,7 @@ import type {
 	TableDefinition
 } from '$lib/api/types';
 import { chainColumns } from '$lib/navigation/tree';
-import { ROW_NUMBER_SLOT, columnIncluded, exportEntries } from './export-layout';
+import { ROW_NUMBER_SLOT, columnIncluded, displayOrder, exportEntries } from './export-layout';
 
 export class ColumnInUseError extends Error {}
 
@@ -44,14 +44,16 @@ function clone(defn: TableDefinition): TableDefinition {
 	return { ...defn, columns: defn.columns.slice() };
 }
 
-/** `export_order` holds DEFINITION indices, so every structural column edit
- * has to move them — a stale list would silently reorder the export, which
- * the backend's normalizer cannot detect (its entries are all still in range).
- * An EMPTY order is left empty throughout: it already means "definition
- * order", which stays correct across every one of these edits. A FRESH empty
- * array, never the input one — a caller that splices into the result (see
- * `cloneColumn`) would otherwise reach into the original definition. */
-function remapExportOrder(order: number[], f: (i: number) => number | null): number[] {
+/** `export_order` and `display_order` both hold DEFINITION indices, so every
+ * structural column edit has to move them — a stale list would silently
+ * reorder the export or the grid, which the backend's normalizers cannot
+ * detect (their entries are all still in range). An EMPTY order is left empty
+ * throughout: it already means "definition order", which stays correct across
+ * every one of these edits. A FRESH empty array, never the input one — a
+ * caller that splices into the result (see `cloneColumn`) would otherwise
+ * reach into the original definition. `ROW_NUMBER_SLOT` (export only) is
+ * passed through untouched: it is not a definition index. */
+function remapOrder(order: number[], f: (i: number) => number | null): number[] {
 	if (order.length === 0) return [];
 	const out: number[] = [];
 	for (const i of order) {
@@ -65,12 +67,25 @@ function remapExportOrder(order: number[], f: (i: number) => number | null): num
 	return out;
 }
 
-/** Every ColumnRef a column carries: its source plus, for a script column,
- * each input's ref. The remappers below treat them uniformly. */
-function columnRefIndices(c: Column): number[] {
-	const out: number[] = [];
-	if (c.source.kind === 'column') out.push(c.source.index);
-	if (c.kind === 'script') for (const i of c.inputs) out.push(i.ref.index);
+/** Both index lists remapped through the same `f`. */
+function remapOrders(
+	next: TableDefinition,
+	defn: TableDefinition,
+	f: (i: number) => number | null
+): void {
+	next.export_order = remapOrder(defn.export_order ?? [], f);
+	next.display_order = remapOrder(defn.display_order ?? [], f);
+}
+
+/** One `(index, why)` per ColumnRef a column carries: its source plus, for a
+ * script column, each input's ref. The remappers below treat them uniformly;
+ * `why` only feeds the `ColumnInUseError` message. */
+function columnRefs(c: Column): { index: number; why: string }[] {
+	const out: { index: number; why: string }[] = [];
+	if (c.source.kind === 'column') out.push({ index: c.source.index, why: 'sources' });
+	if (c.kind === 'script') {
+		for (const i of c.inputs) out.push({ index: i.ref.index, why: `reads input "${i.name}" from` });
+	}
 	return out;
 }
 
@@ -147,8 +162,48 @@ export function addColumn(defn: TableDefinition, col: Column): TableDefinition {
 	const next = clone(defn);
 	next.columns.push(col);
 	// the appended column takes the next index
-	next.export_order = remapExportOrder(defn.export_order ?? [], (i) => i);
+	remapOrders(next, defn, (i) => i);
 	if (next.export_order.length) next.export_order = [...next.export_order, defn.columns.length];
+	if (next.display_order.length) next.display_order = [...next.display_order, defn.columns.length];
+	return next;
+}
+
+/**
+ * Insert `col` at definition index `at` (0..length; `length` appends). Every
+ * `ColumnRef.index` at or past `at` shifts up one — the column it names moved
+ * — and, unlike `moveColumn`, no move can turn a backward ref forward: the
+ * new column is fresh (no refs of its own) and every existing ref keeps its
+ * relative position. Both index lists shift the same way and place the new
+ * column next to its ANCHOR — the column at `at` when `place` is 'before',
+ * the one at `at - 1` when 'after' — in the anchor's own slot of that list,
+ * which is what "before/after column X" means on a grid or export whose
+ * order differs from the definition's (an empty list stays empty: it already
+ * means definition order, where the new column IS at `at`). Callers with an
+ * active sort must remap it with `remapTableSortForInsert(tabId, at)` in the
+ * same breath.
+ */
+export function insertColumn(
+	defn: TableDefinition,
+	at: number,
+	col: Column,
+	place: 'before' | 'after' = 'before'
+): TableDefinition {
+	const n = defn.columns.length;
+	if (at < 0 || at > n) throw new Error(`insert position ${at} out of range`);
+	const next = clone(defn);
+	// copy-on-write: only the columns whose ref actually shifts are re-made
+	next.columns = next.columns.map((c) => remapColumnRefs(c, (i) => (i >= at ? i + 1 : i)));
+	next.columns.splice(at, 0, col);
+	remapOrders(next, defn, (i) => (i >= at ? i + 1 : i));
+	const anchorOld = place === 'before' ? at : at - 1;
+	const anchor = anchorOld < 0 || anchorOld >= n ? -1 : anchorOld >= at ? anchorOld + 1 : anchorOld;
+	for (const key of ['export_order', 'display_order'] as const) {
+		const order = next[key];
+		if (order.length === 0) continue;
+		const slot = anchor < 0 ? -1 : order.indexOf(anchor);
+		if (slot < 0) order.push(at);
+		else order.splice(place === 'before' ? slot : slot + 1, 0, at);
+	}
 	return next;
 }
 
@@ -168,9 +223,9 @@ export function replaceColumn(defn: TableDefinition, index: number, col: Column)
 
 export function removeColumn(defn: TableDefinition, index: number): TableDefinition {
 	for (let i = 0; i < defn.columns.length; i++) {
-		if (i !== index && columnRefIndices(defn.columns[i]).includes(index)) {
-			throw new ColumnInUseError(`column ${i} sources column ${index}`);
-		}
+		if (i === index) continue;
+		const ref = columnRefs(defn.columns[i]).find((r) => r.index === index);
+		if (ref) throw new ColumnInUseError(`column ${i} ${ref.why} column ${index}`);
 	}
 	const next = clone(defn);
 	next.columns.splice(index, 1);
@@ -178,9 +233,7 @@ export function removeColumn(defn: TableDefinition, index: number): TableDefinit
 	// (copy-on-write: only the columns whose ref actually shifts are re-made)
 	next.columns = next.columns.map((c) => remapColumnRefs(c, (i) => (i > index ? i - 1 : i)));
 	// drop it, shift the ones above down
-	next.export_order = remapExportOrder(defn.export_order ?? [], (i) =>
-		i === index ? null : i > index ? i - 1 : i
-	);
+	remapOrders(next, defn, (i) => (i === index ? null : i > index ? i - 1 : i));
 	return next;
 }
 
@@ -210,12 +263,12 @@ export function cloneColumn(defn: TableDefinition, index: number): TableDefiniti
 	// copy-on-write: only the columns whose ref actually shifts are re-made
 	next.columns = next.columns.map((c) => remapColumnRefs(c, (i) => (i > index ? i + 1 : i)));
 	next.columns.splice(index + 1, 0, copy);
-	// the copy lands at index + 1, so shift and then insert
-	{
-		const shifted = remapExportOrder(defn.export_order ?? [], (i) => (i > index ? i + 1 : i));
-		const at = shifted.indexOf(index);
-		if (at >= 0) shifted.splice(at + 1, 0, index + 1);
-		next.export_order = shifted;
+	// the copy lands at index + 1, so shift and then insert it right after
+	// its original in both lists
+	remapOrders(next, defn, (i) => (i > index ? i + 1 : i));
+	for (const order of [next.export_order, next.display_order]) {
+		const at = order.indexOf(index);
+		if (at >= 0) order.splice(at + 1, 0, index + 1);
 	}
 	return next;
 }
@@ -244,8 +297,32 @@ export function moveColumn(defn: TableDefinition, from: number, to: number): Tab
 		});
 	});
 	// reuse the oldToNew map the function already built above
-	next.export_order = remapExportOrder(defn.export_order ?? [], (i) => oldToNew.get(i) ?? null);
+	remapOrders(next, defn, (i) => oldToNew.get(i) ?? null);
 	return next;
+}
+
+/** Reorder the GRID. `from`/`to` are positions in `displayOrder(defn)`, not
+ *  definition indices, and the move carries none of `moveColumn`'s
+ *  backward-reference constraints: the definition (computation) order is
+ *  untouched, only what the user sees moves. Always writes a FULL order,
+ *  materializing the natural one first, so the result no longer depends on
+ *  the empty-means-definition-order fallback. */
+export function moveDisplayColumn(
+	defn: TableDefinition,
+	from: number,
+	to: number
+): TableDefinition {
+	const order = displayOrder(defn);
+	if (from === to || from < 0 || to < 0 || from >= order.length || to >= order.length) {
+		return clone(defn);
+	}
+	order.splice(to, 0, order.splice(from, 1)[0]);
+	return { ...clone(defn), display_order: order };
+}
+
+/** Back to computation order (`[]`). */
+export function resetDisplayOrder(defn: TableDefinition): TableDefinition {
+	return { ...clone(defn), display_order: [] };
 }
 
 export function renameColumn(
@@ -328,7 +405,8 @@ export function navigationAsTableDefinition({
 		columns,
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
-		export_order: []
+		export_order: [],
+		display_order: []
 	};
 }
 

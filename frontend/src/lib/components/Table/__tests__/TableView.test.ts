@@ -28,7 +28,7 @@ vi.mock('$lib/api/tables', async () => ({
 // The whole `$lib/state` barrel is mocked below (`downloadTable: vi.fn(...)`)
 // — importing the name here resolves to that SAME mock instance, so calls
 // made through TableView's onclick handlers show up on it.
-import { downloadTable, saveAsTableDraft } from '$lib/state';
+import { downloadTable, saveAsTableDraft, updateTableDefinition } from '$lib/state';
 import TableView from '../TableView.svelte';
 
 // Hoisted so the vi.mock factory (hoisted above imports) can reference it, and
@@ -54,6 +54,8 @@ const h = vi.hoisted(() => ({
 	jump: vi.fn(),
 	revertSuspendedTableEdits: vi.fn(),
 	resumeTableEvaluation: vi.fn(),
+	remapTableSortForInsert: vi.fn(),
+	updateTableDisplayOrder: vi.fn(),
 	/** Mirrors `hasSuspendedTableEdits`: did the definition change since the
 	 * settings dialog opened? Drives the discard-confirmation gate. */
 	dirtySinceOpen: false,
@@ -125,8 +127,10 @@ vi.mock('$lib/state', () => ({
 	lockBadgeFor: () => ({ state: 'none' }),
 	// ColumnManager's own reorder/clone dependencies — needed once a test opens
 	// the dialog and ColumnManager mounts for real.
-	remapTableSortForInsert: vi.fn(),
+	remapTableSortForInsert: h.remapTableSortForInsert,
 	remapTableSortForMove: vi.fn(),
+	// The Reorder dialog's (and the header drag's) reload-free write.
+	updateTableDisplayOrder: h.updateTableDisplayOrder,
 	remapTableSortForRemove: vi.fn(),
 	// RowSourceEditor's dependencies (mounted once the settings dialog opens
 	// unfocused — the "shows every column" path renders it for real).
@@ -1077,14 +1081,25 @@ describe('TableView header edit / add-column focus', () => {
 		};
 	}
 
+	/** The header pencil is a menu now: open it, then pick "Edit column…". */
+	function openHeaderEdit(index: number): void {
+		const editBtn = document.querySelector(`[data-testid="header-edit-${index}"]`) as HTMLElement;
+		expect(editBtn).not.toBeNull();
+		editBtn.click();
+		flushSync();
+		const item = document.querySelector(
+			`[data-testid="header-edit-column-${index}"]`
+		) as HTMLElement;
+		expect(item).not.toBeNull();
+		item.click();
+		flushSync();
+	}
+
 	it('clicking a header edit button opens the dialog focused on just that column', () => {
 		seedTwoColumnPage();
 		const c = render('tbl:draft:1');
 		try {
-			const editBtn = document.querySelector('[data-testid="header-edit-1"]') as HTMLElement;
-			expect(editBtn).not.toBeNull();
-			editBtn.click();
-			flushSync();
+			openHeaderEdit(1);
 			const manager = document.querySelector('[data-testid="column-manager"]') as HTMLElement;
 			expect(manager).not.toBeNull();
 			expect(manager.querySelectorAll('[data-testid^="toggle-hidden-"]').length).toBe(1);
@@ -1107,7 +1122,7 @@ describe('TableView header edit / add-column focus', () => {
 			const manager = document.querySelector('[data-testid="column-manager"]') as HTMLElement;
 			expect(manager).not.toBeNull();
 			expect(manager.querySelectorAll('[data-testid^="toggle-hidden-"]').length).toBe(2);
-			expect(document.body.textContent).toContain('Table settings');
+			expect(document.body.textContent).toContain('Columns');
 		} finally {
 			unmount(c);
 		}
@@ -1117,9 +1132,7 @@ describe('TableView header edit / add-column focus', () => {
 		seedTwoColumnPage();
 		const c = render('tbl:draft:1');
 		try {
-			const editBtn = document.querySelector('[data-testid="header-edit-1"]') as HTMLElement;
-			editBtn.click();
-			flushSync();
+			openHeaderEdit(1);
 			// Close the dialog via the custom X button (the primitive's built-in
 			// X is disabled via `showCloseButton={false}`, replaced by a plain
 			// button with a stable testid instead of picking it out of a
@@ -1572,6 +1585,195 @@ describe('TableView lock-denied banner', () => {
 
 			expect(window.prompt).toHaveBeenCalledWith('Save copy as', 'My Table (copy)');
 			expect(saveAsTableDraft).toHaveBeenCalledWith('tbl:draft:1', 'Copy of table');
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('TableView header insert menu', () => {
+	afterEach(() => {
+		h.page = undefined;
+		h.remapTableSortForInsert.mockClear();
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', scope: {} },
+			columns: []
+		};
+	});
+
+	it('"Insert after" lands a fresh column at index+1, remaps the sort, and opens the dialog on it', () => {
+		h.page = {
+			columns: [
+				{ kind: 'element', header: 'Scope', width_px: null },
+				{ kind: 'property', header: 'Mass', width_px: null }
+			],
+			rows: [],
+			total: 0,
+			truncated: false,
+			offset: 0,
+			model_rev: 1
+		};
+		(h.draft as { definition: unknown }).definition = {
+			schema_version: 1,
+			default_cell_mode: 'collapse',
+			show_row_numbers: false,
+			export_order: [],
+			display_order: [],
+			row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+			columns: [
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
+				{
+					kind: 'property',
+					source: { kind: 'row', chain_index: 0 },
+					name: 'mass',
+					mode: 'collapse',
+					keep_empty: true,
+					header: '',
+					width_px: null,
+					hidden: false
+				}
+			]
+		};
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="header-edit-0"]') as HTMLElement).click();
+			flushSync();
+			(
+				document.querySelector('[data-testid="header-insert-after-property-0"]') as HTMLElement
+			).click();
+			flushSync();
+			expect(updateTableDefinition).toHaveBeenCalledTimes(1);
+			const defn = (updateTableDefinition as unknown as { mock: { calls: unknown[][] } }).mock
+				.calls[0][1] as { columns: { kind: string }[] };
+			expect(defn.columns.map((col) => col.kind)).toEqual(['element', 'property', 'property']);
+			expect(h.remapTableSortForInsert).toHaveBeenCalledWith('tbl:draft:1', 1);
+			// the mocked store never updates h.draft, so the dialog focuses on
+			// the requested index over the (unchanged) two-column draft
+			expect(document.body.textContent).toContain('Column settings');
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('TableView reorder dialog', () => {
+	it('the Reorder button opens the display-order dialog; it is editor-only', () => {
+		const c = render('tbl:draft:1');
+		try {
+			const btn = document.querySelector('[data-testid="table-reorder-button"]') as HTMLElement;
+			expect(btn).not.toBeNull();
+			expect(document.querySelector('[data-testid="column-reorder-dialog"]')).toBeNull();
+			btn.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="column-reorder-dialog"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('hides the Reorder button for read-only users', () => {
+		h.editable = false;
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="table-reorder-button"]')).toBeNull();
+		} finally {
+			h.editable = true;
+			unmount(c);
+		}
+	});
+});
+
+describe('TableView settings dialog edge resizing', () => {
+	function renderWithSettingsOpen(tabId: string): ReturnType<typeof render> {
+		window.innerWidth = 1920;
+		window.innerHeight = 1080;
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', types: [], criteria: [] },
+			columns: []
+		};
+		const c = render(tabId);
+		(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+		flushSync();
+		return c;
+	}
+	const origInnerWidth = window.innerWidth;
+	const origInnerHeight = window.innerHeight;
+	afterEach(() => {
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', scope: {} },
+			columns: []
+		};
+		window.innerWidth = origInnerWidth;
+		window.innerHeight = origInnerHeight;
+	});
+
+	function drag(handle: HTMLElement, dx: number, dy: number): void {
+		handle.dispatchEvent(
+			new PointerEvent('pointerdown', {
+				bubbles: true,
+				button: 0,
+				pointerId: 1,
+				clientX: 0,
+				clientY: 0
+			})
+		);
+		flushSync();
+		handle.dispatchEvent(
+			new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: dx, clientY: dy })
+		);
+		flushSync();
+		handle.dispatchEvent(
+			new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: dx, clientY: dy })
+		);
+		flushSync();
+	}
+
+	it('offers a handle on every edge and corner, and the south-east one is visible', () => {
+		const c = renderWithSettingsOpen('tbl:draft:1');
+		try {
+			for (const edge of ['n', 's', 'e', 'w', 'ne', 'nw', 'sw']) {
+				expect(document.querySelector(`[data-testid="settings-resize-${edge}"]`)).not.toBeNull();
+			}
+			const se = document.querySelector('[data-testid="settings-resize-handle"]') as HTMLElement;
+			expect(se.querySelector('svg')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the west edge grows the panel leftwards, keeping its right edge in place', () => {
+		const c = renderWithSettingsOpen('tbl:draft:1');
+		try {
+			const dialog = document.querySelector('[data-testid="table-settings-dialog"]') as HTMLElement;
+			// park the panel away from the left edge so it has room to grow that way
+			drag(document.querySelector('[data-testid="settings-drag-handle"]') as HTMLElement, 200, 0);
+			const x0 = parseFloat(dialog.style.left);
+			const w0 = parseFloat(dialog.style.width);
+			drag(document.querySelector('[data-testid="settings-resize-w"]') as HTMLElement, -50, 0);
+			expect(parseFloat(dialog.style.left)).toBeCloseTo(x0 - 50);
+			expect(parseFloat(dialog.style.width)).toBeCloseTo(w0 + 50);
+			expect(parseFloat(dialog.style.height)).toBeCloseTo(parseFloat(dialog.style.height));
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the north edge at the minimum height stops the top edge rather than moving the bottom one', () => {
+		const c = renderWithSettingsOpen('tbl:draft:1');
+		try {
+			const dialog = document.querySelector('[data-testid="table-settings-dialog"]') as HTMLElement;
+			drag(document.querySelector('[data-testid="settings-drag-handle"]') as HTMLElement, 0, 200);
+			const y0 = parseFloat(dialog.style.top);
+			const h0 = parseFloat(dialog.style.height);
+			drag(document.querySelector('[data-testid="settings-resize-n"]') as HTMLElement, 0, 5000);
+			expect(parseFloat(dialog.style.height)).toBe(400);
+			expect(parseFloat(dialog.style.top)).toBeCloseTo(y0 + h0 - 400);
 		} finally {
 			unmount(c);
 		}

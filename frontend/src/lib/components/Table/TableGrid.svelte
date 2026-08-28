@@ -16,12 +16,14 @@
 		getTablePage,
 		getTableSort,
 		lockBadgeFor,
-		remapTableSortForMove,
 		setTableSort,
-		updateTableDefinition
+		updateTableDefinition,
+		updateTableDisplayOrder
 	} from '$lib/state';
-	import { columnKindLabel, moveColumn, setColumnWidth } from '$lib/table/columns';
+	import { columnKindLabel, moveDisplayColumn, setColumnWidth } from '$lib/table/columns';
+	import { displayOrder } from '$lib/table/export-layout';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
+	import { portal } from '$lib/util/portal';
 	import { computeWindowVariable } from '$lib/components/Sidebar/windowing';
 	import { Pencil, Plus } from '@lucide/svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -35,12 +37,27 @@
 	let {
 		tabId,
 		onEditColumn,
-		onAddColumn
+		onAddColumn,
+		onInsertColumn
 	}: {
 		tabId: string;
 		onEditColumn?: (index: number) => void;
-		onAddColumn?: (kind: 'property' | 'navigation' | 'script') => void;
+		onAddColumn?: (kind: ColumnKind) => void;
+		/** Insert a fresh column of `kind` before/after DEFINITION column
+		 * `index` (the header menu's "Insert before/after"). */
+		onInsertColumn?: (index: number, place: 'before' | 'after', kind: ColumnKind) => void;
 	} = $props();
+
+	type ColumnKind = 'property' | 'navigation' | 'script';
+	const ADDABLE_KINDS: { kind: ColumnKind; label: string }[] = [
+		{ kind: 'property', label: 'Property' },
+		{ kind: 'navigation', label: 'Navigation' },
+		{ kind: 'script', label: 'Script' }
+	];
+	const INSERT_PLACES: { place: 'before' | 'after'; label: string }[] = [
+		{ place: 'before', label: 'Insert before' },
+		{ place: 'after', label: 'Insert after' }
+	];
 
 	const ROW_H = 28;
 	const OVERSCAN = 8;
@@ -65,12 +82,19 @@
 	const rows = $derived(page?.rows ?? []);
 
 	// Hidden columns are evaluated server-side (ColumnRefs may target them)
-	// but never rendered. Pairs keep the DEFINITION index i — sort, resize and
-	// width all speak definition indices; only DOM order is compacted.
+	// but never rendered. Pairs keep the DEFINITION index i — sort, resize,
+	// width and cells all speak definition indices; only DOM order differs:
+	// it follows the definition's DISPLAY order (`display_order`, the grid's
+	// own permutation, decoupled from the computation order) with hidden
+	// columns compacted out. `pos` is the on-screen position, what the header
+	// drag speaks.
 	const visibleCols = $derived.by(() => {
 		const cols = page?.columns ?? [];
-		const defCols = getTableDraft(tabId)?.definition.columns;
-		return cols.map((col, i) => ({ col, i })).filter(({ i }) => !defCols?.[i]?.hidden);
+		const defn = getTableDraft(tabId)?.definition;
+		const order = defn ? displayOrder(defn) : cols.map((_, i) => i);
+		return order
+			.filter((i) => i < cols.length && !defn?.columns[i]?.hidden)
+			.map((i, pos) => ({ col: cols[i], i, pos }));
 	});
 
 	// Item 10: a presentation-only "#" gutter. NOT a definition column — it
@@ -302,25 +326,40 @@
 		return col?.kind === 'property' ? col.name : undefined;
 	}
 
-	// Header-cell drag-to-reorder: the same pointer-driven controller
-	// as ColumnManager's grip, hit-testing DEFINITION indices via
-	// `data-col-hdr-drop` so a drop onto a visible header still resolves to the
-	// right column even with hidden columns compacting the DOM order.
+	// Header-cell drag-to-reorder: the same pointer-driven controller as
+	// ColumnManager's grip, but it reorders the DISPLAY order, not the
+	// definition — so it speaks on-screen positions (`data-col-hdr-drop={pos}`,
+	// compacted over hidden columns) and carries none of `moveColumn`'s
+	// backward-ref constraints (`validate: () => true`): what the user sees
+	// can be arranged freely, computation order is the Columns panel's job.
+	// `moveDisplayColumn` takes positions in `displayOrder(defn)`, which still
+	// lists HIDDEN columns, so the visible positions are mapped back through
+	// `visibleCols`. Display order needs no re-evaluation, hence
+	// `updateTableDisplayOrder` rather than `updateTableDefinition`.
 	const hdrDrag = createColumnDrag({
 		attr: 'data-col-hdr-drop',
-		getDefinition: () => getTableDraft(tabId)?.definition,
-		onDrop: (fromIdx, toIdx) => {
+		validate: () => true,
+		onDrop: (fromPos, toPos) => {
 			const draft = getTableDraft(tabId);
-			if (!draft) return;
-			try {
-				const next = moveColumn(draft.definition, fromIdx, toIdx);
-				remapTableSortForMove(tabId, fromIdx, toIdx);
-				updateTableDefinition(tabId, next);
-			} catch {
-				/* forward-ref move: the hover highlight already showed invalid */
-			}
+			const from = visibleCols[fromPos]?.i;
+			const to = visibleCols[toPos]?.i;
+			if (!draft || from === undefined || to === undefined) return;
+			const order = displayOrder(draft.definition);
+			updateTableDisplayOrder(
+				tabId,
+				moveDisplayColumn(draft.definition, order.indexOf(from), order.indexOf(to))
+			);
 		}
 	});
+
+	/** The live-reflow translation for the column at display position `pos`,
+	 * applied ONLY while a drag is live: a permanent `transform` (even an
+	 * identity one) makes every cell a stacking context and a containing
+	 * block for `position: fixed` descendants, which is how popups rendered
+	 * inside a cell ended up clipped and painted under later cells. */
+	function dragTransform(pos: number): string | undefined {
+		return hdrDrag.dragging ? `translateX(${hdrDrag.offsetOf(pos)}px)` : undefined;
+	}
 
 	// The header cell's own pointerdown starts the reorder drag, EXCEPT when the
 	// press originates on the sort/edit buttons or the resize handle — those own
@@ -338,16 +377,23 @@
 	onscroll={onScroll}
 	class="relative h-full overflow-auto"
 >
+	<!-- `min-w-max`: the strip is a block-level flex, so without it its box
+	     — and its background — is only ever as wide as the scroll container,
+	     while the header CELLS run as wide as the rows. Past the container's
+	     width the cells overflowed a background-less strip, and the rows
+	     scrolled straight through the column names. Each cell paints its own
+	     `bg-card` too, so a cell mid-drag (translated out of the strip) stays
+	     opaque as well. -->
 	<div
 		data-testid="table-header"
 		role="row"
-		class="sticky top-0 z-10 flex border-b border-border bg-card text-xs font-medium text-muted-foreground"
+		class="sticky top-0 z-10 flex min-w-max border-b border-border bg-card text-xs font-medium text-muted-foreground"
 	>
 		{#if showRowNumbers}
 			<div
 				role="columnheader"
 				data-testid="row-number-header"
-				class="flex w-12 shrink-0 items-center justify-end border-r border-border px-2 py-1.5 tabular-nums text-muted-foreground/70"
+				class="flex w-12 shrink-0 items-center justify-end border-r border-border bg-card px-2 py-1.5 tabular-nums text-muted-foreground/70"
 			>
 				#
 			</div>
@@ -356,15 +402,15 @@
 			<div
 				role="columnheader"
 				tabindex="-1"
-				class="relative flex shrink-0 cursor-grab items-center gap-1 border-r border-border px-2 py-1.5 touch-none select-none"
-				style="width:{widthFor(v.col, v.i)}px; transform:translateX({hdrDrag.offsetOf(v.i)}px)"
-				data-col-hdr-drop={v.i}
+				class="relative flex shrink-0 cursor-grab items-center gap-1 border-r border-border bg-card px-2 py-1.5 touch-none select-none"
+				style="width:{widthFor(v.col, v.i)}px"
+				style:transform={dragTransform(v.pos)}
+				data-col-hdr-drop={v.pos}
+				data-col-index={v.i}
 				class:transition-transform={hdrDrag.dragging}
 				class:duration-150={hdrDrag.dragging}
-				class:ring-1={hdrDrag.over === v.i && hdrDrag.from !== null && !hdrDrag.valid}
-				class:ring-destructive={hdrDrag.over === v.i && hdrDrag.from !== null && !hdrDrag.valid}
-				class:opacity-50={hdrDrag.from === v.i}
-				onpointerdown={(e) => onHeaderPointerDown(e, v.i)}
+				class:opacity-50={hdrDrag.from === v.pos}
+				onpointerdown={(e) => onHeaderPointerDown(e, v.pos)}
 				onpointermove={(e) => hdrDrag.onPointerMove(e)}
 				onpointerup={(e) => hdrDrag.onPointerUp(e)}
 				onpointercancel={(e) => hdrDrag.onPointerCancel(e)}
@@ -379,16 +425,43 @@
 					{#if sort?.column === v.i}{sort.direction === 'asc' ? '▲' : '▼'}{:else}↕{/if}
 				</button>
 				{#if onEditColumn}
-					<button
-						type="button"
-						data-testid="header-edit-{v.i}"
-						aria-label="Edit column {v.col.header || columnKindLabel(v.col.kind)}"
-						title="Edit this column's settings"
-						class="shrink-0 text-muted-foreground/50 transition-colors hover:text-foreground"
-						onclick={() => onEditColumn?.(v.i)}
-					>
-						<Pencil class="size-3" />
-					</button>
+					<!-- One menu per header: edit this column, or insert a fresh one
+					     of any kind right before/after it — the grid-side twin of the
+					     Columns panel's per-card insert menu. -->
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger
+							data-testid="header-edit-{v.i}"
+							aria-label="Edit column {v.col.header || columnKindLabel(v.col.kind)}"
+							title="Edit this column, or insert a column beside it"
+							class="shrink-0 text-muted-foreground/50 transition-colors hover:text-foreground"
+						>
+							<Pencil class="size-3" />
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content align="start">
+							<DropdownMenu.Item
+								data-testid="header-edit-column-{v.i}"
+								onSelect={() => onEditColumn?.(v.i)}
+							>
+								Edit column…
+							</DropdownMenu.Item>
+							{#if onInsertColumn}
+								{#each INSERT_PLACES as { place, label } (place)}
+									<DropdownMenu.Separator />
+									<DropdownMenu.Group>
+										<DropdownMenu.GroupHeading>{label}</DropdownMenu.GroupHeading>
+										{#each ADDABLE_KINDS as k (k.kind)}
+											<DropdownMenu.Item
+												data-testid="header-insert-{place}-{k.kind}-{v.i}"
+												onSelect={() => onInsertColumn?.(v.i, place, k.kind)}
+											>
+												+ {k.label}
+											</DropdownMenu.Item>
+										{/each}
+									</DropdownMenu.Group>
+								{/each}
+							{/if}
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
 				{/if}
 				<div
 					role="separator"
@@ -494,12 +567,11 @@
 									: lock.state === 'theirs'
 										? `Locked by ${lock.holder}`
 										: undefined}
-								style="width:{widthFor(v.col, v.i)}px; transform:translateX({hdrDrag.offsetOf(
-									v.i
-								)}px)"
+								style="width:{widthFor(v.col, v.i)}px"
+								style:transform={dragTransform(v.pos)}
 								class:transition-transform={hdrDrag.dragging}
 								class:duration-150={hdrDrag.dragging}
-								class:opacity-50={hdrDrag.from === v.i}
+								class:opacity-50={hdrDrag.from === v.pos}
 							>
 								{#if cell.kind === 'element'}
 									<div class="flex h-7 max-w-full min-w-0 items-center">
@@ -533,9 +605,8 @@
 								class="shrink-0 border-r border-border/40 px-2"
 								class:transition-transform={hdrDrag.dragging}
 								class:duration-150={hdrDrag.dragging}
-								style="width:{widthFor(v.col, v.i)}px; transform:translateX({hdrDrag.offsetOf(
-									v.i
-								)}px)"
+								style="width:{widthFor(v.col, v.i)}px"
+								style:transform={dragTransform(v.pos)}
 							></div>
 						{/if}
 					{/each}
@@ -562,9 +633,8 @@
 							class="flex shrink-0 items-center border-r border-border/40 px-2"
 							class:transition-transform={hdrDrag.dragging}
 							class:duration-150={hdrDrag.dragging}
-							style="width:{widthFor(v.col, v.i)}px; transform:translateX({hdrDrag.offsetOf(
-								v.i
-							)}px)"
+							style="width:{widthFor(v.col, v.i)}px"
+							style:transform={dragTransform(v.pos)}
 						>
 							<div class="h-3 w-3/5 animate-pulse rounded bg-muted"></div>
 						</div>
@@ -588,15 +658,17 @@
 		<!-- A brand-new table: never evaluated (see ensureTableDraft — the untyped
 		     default scope would show EVERY element, so it opens empty instead). -->
 		<p data-testid="table-empty-hint" class="p-4 text-xs text-muted-foreground/70">
-			This table is empty. Open <span class="font-medium">Settings</span> to choose its scope — the elements
+			This table is empty. Open <span class="font-medium">Columns</span> to choose its scope — the elements
 			(or navigation) its rows come from.
 		</p>
 	{/if}
 	{#if hdrDrag.dragging && hdrDrag.ghost && hdrDrag.ghost.w > 0 && hdrDrag.from !== null}
-		{@const dragCol = getTableDraft(tabId)?.definition.columns[hdrDrag.from]}
+		{@const dragCol = visibleCols[hdrDrag.from]?.col}
 		<!-- Detached drag ghost: a copy of the grabbed header cell following the
-		     pointer (position:fixed so the scroll container doesn't clip it). -->
+		     pointer. Portaled to <body> (position:fixed alone is not enough: a
+		     transformed ancestor would make it scroll and clip with the grid). -->
 		<div
+			use:portal
 			data-testid="header-drag-ghost"
 			class="pointer-events-none fixed z-50 flex items-center rounded border border-primary/40 bg-card px-2 py-1.5 text-xs font-medium text-foreground opacity-90 shadow-lg"
 			style="left:{hdrDrag.ghost.x}px; top:{hdrDrag.ghost.y}px; width:{hdrDrag.ghost

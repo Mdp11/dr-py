@@ -37,7 +37,8 @@ function baseDefinition(): TableDefinition {
 		],
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
-		export_order: []
+		export_order: [],
+		display_order: []
 	} as TableDefinition;
 }
 

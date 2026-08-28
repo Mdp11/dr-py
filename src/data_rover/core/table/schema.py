@@ -323,6 +323,13 @@ class TableDefinition(BaseModel):
     #: a stale list left behind by a column insert or remove must degrade to a
     #: sensible order, not 422 the whole export.
     export_order: list[int] = Field(default_factory=list)
+    #: The GRID's column order, as definition column indices. `[]` = definition
+    #: order. Like `export_order` it is presentation only and normalized on
+    #: read (`export_layout.normalized_display_order`), never validated: the
+    #: definition order stays the computation order (backward-only `ColumnRef`,
+    #: positional expand slots) and this permutes what the user SEES. An export
+    #: with no explicit `export_order` follows it.
+    display_order: list[int] = Field(default_factory=list)
     export_row_number: RowNumberExportOptions | None = None
     #: JSON-export split settings; `None` = single-document export (today's
     #: behavior, and the no-migration guarantee for existing payloads).

@@ -499,6 +499,7 @@ export {
 	setTableSort,
 	suspendTableEvaluation,
 	updateTableDefinition,
+	updateTableDisplayOrder,
 	updateTableExportSettings,
 	type ExportProgress,
 	type TableData,

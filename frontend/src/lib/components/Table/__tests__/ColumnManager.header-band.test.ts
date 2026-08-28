@@ -63,6 +63,7 @@ async function seed(columns: Column[]): Promise<void> {
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
 		export_order: [],
+		display_order: [],
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns
 	};
