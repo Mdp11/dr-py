@@ -18,7 +18,7 @@ from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.schema import NavigationDefinition
 from data_rover.core.script.schema import SNIPPET_MAX_CODE_BYTES
 from data_rover.core.script.warnings import ScriptWarning
-from data_rover.core.table.exporter import ExporterDefinition, ExportFormat
+from data_rover.core.table.exporter import ExporterDefinition, ExporterEntry, ExportFormat
 from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.validation.rules.schema import RULES_MAX_YAML_BYTES
@@ -1438,6 +1438,32 @@ class RunExportIn(BaseModel):
     #: Stands in for the artifact name on a draft run: feeds the zip-stem
     #: fallback and the manifest's `artifact_name`; "" -> "export".
     name: str = ""
+
+
+class TransformPreviewIn(BaseModel):
+    """`POST /exports/preview-transform`: the exporter entry AS DRAFTED —
+    inline transform code that was never saved works, which is the point of
+    a test button. Validated by the same `ExporterEntry` schema the artifact
+    payload uses."""
+
+    entry: ExporterEntry
+
+
+class TransformPreviewOut(BaseModel):
+    """One dry `transform(doc)` call over a bounded sample of the entry's
+    table. `input`/`output` are pretty-printed JSON TEXT (rendered
+    server-side, so the panes never disagree with the export's document
+    shape). `output` is None iff `error` is set. `truncated` means the sample
+    covers only the head of the table; `split_file` names the previewed
+    partition when the entry splits (the transform runs once per file)."""
+
+    input: str
+    output: str | None
+    stdout: str
+    error: SnippetErrorOut | None
+    truncated: bool
+    split_file: str | None
+    duration_ms: int
 
 
 class JsonPreviewOut(BaseModel):

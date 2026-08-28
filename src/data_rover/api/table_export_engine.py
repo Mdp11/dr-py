@@ -24,9 +24,11 @@ from datetime import UTC, datetime
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
+from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import (
     RunLimits,
     ScriptBudget,
+    ScriptError,
     ScriptRunner,
     SnippetSession,
 )
@@ -109,6 +111,24 @@ class TransformUnavailableError(Exception):
         self.busy = busy
 
 
+@dataclass(frozen=True)
+class TransformOutcome:
+    """One `transform(doc)` call, structured: `value` is the replacement
+    document (meaningful only when `error` is None), `stdout` what the call
+    printed, `error` the snippet's own failure (boot, raise, timeout,
+    unserializable return). Host-side size caps are NOT an `error` — those
+    raise ValueError from `apply_ex` too, since they are the run's limits,
+    not something the snippet author can see in a traceback."""
+
+    value: object
+    stdout: str
+    error: ScriptError | None
+    duration_ms: int
+    #: True when `error` is the session's boot error (the module itself
+    #: failed to exec) rather than the `transform(doc)` call's.
+    boot: bool = False
+
+
 class TransformHost:
     """One export run's transform executor: up to `_TRANSFORM_SESSION_CACHE_MAX`
     warm SnippetSessions, one per DISTINCT transform code and shared across
@@ -142,6 +162,21 @@ class TransformHost:
         unserializable return, or a size breach raises ValueError naming
         `name` — the routes' existing ValueError -> 422 mapping carries it,
         so a machine consumer never receives a half-transformed 200."""
+        out = self.apply_ex(code, doc, name)
+        if out.error is not None:
+            if out.boot:
+                raise ValueError(
+                    f"{name}: transform failed to load: {out.error.message}"
+                )
+            raise ValueError(
+                f"{name}: transform failed ({out.error.kind}): {out.error.message}"
+            )
+        return out.value
+
+    def apply_ex(self, code: str, doc: object, name: str) -> TransformOutcome:
+        """`apply` with the snippet's failure returned, not raised — for the
+        transform preview, which renders a traceback the way the snippet
+        console does. The size caps still raise (see `TransformOutcome`)."""
         blob = json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
         if len(blob.encode("utf-8")) > self._max_bytes:
             raise ValueError(
@@ -170,13 +205,13 @@ class TransformHost:
             )
             self._sessions[code] = session
         if session.boot_error is not None:
-            raise ValueError(
-                f"{name}: transform failed to load: {session.boot_error.message}"
+            return TransformOutcome(
+                value=None, stdout="", error=session.boot_error, duration_ms=0, boot=True
             )
         res = session.call("transform", [], doc=doc)
         if res.error is not None:
-            raise ValueError(
-                f"{name}: transform failed ({res.error.kind}): {res.error.message}"
+            return TransformOutcome(
+                value=None, stdout=res.stdout, error=res.error, duration_ms=res.duration_ms
             )
         assert res.value is not None  # decode contract: value xor error
         out = res.value["value"]
@@ -186,7 +221,9 @@ class TransformHost:
                 f"{name}: transform result exceeds "
                 f"snippet_transform_max_bytes ({self._max_bytes})"
             )
-        return out
+        return TransformOutcome(
+            value=out, stdout=res.stdout, error=None, duration_ms=res.duration_ms
+        )
 
     def close(self) -> None:
         if self._released:
@@ -221,6 +258,129 @@ def open_transform_host(
         run_limits_from_settings(settings),
         ScriptBudget.start(settings.snippet_eval_budget_s),
         settings.snippet_transform_max_bytes,
+    )
+
+
+def json_key_column(
+    format: ExportFormat,
+    json_doc: JsonDocumentOptions | None,
+    defn: TableDefinition,
+    name: str,
+) -> int | None:
+    """The object-shape key column, validated: json only (jsonl ignores shape
+    with tolerance). Checked BEFORE rendering — the range half is knowable
+    now, and `render_json_ex` re-checks it anyway. ValueError -> 422."""
+    if format != "json" or json_doc is None or json_doc.shape != "object":
+        return None
+    if json_doc.key_column is None:
+        raise ValueError(f"{name}: json_doc.shape 'object' requires key_column")
+    if not 0 <= json_doc.key_column < len(defn.columns):
+        raise ValueError(
+            f"{name}: json_doc.key_column {json_doc.key_column} out "
+            f"of range (table has {len(defn.columns)} columns)"
+        )
+    return json_doc.key_column
+
+
+def shape_json_docs(
+    format: ExportFormat,
+    docs: list[dict[str, object]],
+    doc_keys: list[str] | None,
+) -> object:
+    """The document `transform(doc)` receives and the serializer writes:
+    jsonl is always the row list; json is the keyed object when the render
+    produced keys (object shape), the row list otherwise."""
+    if format == "jsonl":
+        return docs
+    return dict(zip(doc_keys, docs, strict=True)) if doc_keys is not None else docs
+
+
+@dataclass(frozen=True)
+class JsonSample:
+    """A bounded render of one JSON-family export: `doc` is exactly what the
+    export would hand to `transform(doc)` (or serialize) for the sampled
+    rows. `split_file` names the previewed partition's file when the entry
+    splits — a split export transforms once PER FILE, so the sample is the
+    first partition's document, never the unsplit whole."""
+
+    doc: object
+    truncated: bool
+    split_file: str | None
+
+
+def render_json_sample(
+    *,
+    metamodel: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    render_defn: TableDefinition,
+    format: ExportFormat,
+    json_doc: JsonDocumentOptions | None,
+    name: str,
+    template_vars: Mapping[str, str],
+    script_ctx: ScriptEvalContext | None,
+    max_rows: int,
+) -> JsonSample:
+    """The transform preview's input: the first `max_rows` rows of `defn`,
+    rendered and shaped exactly like `run_table_export`'s JSON branch (same
+    layout, `export_definition`, key column, split partitioning) but bounded
+    and never 202 — `script_ctx` is expected to be cache-only, so an
+    uncomputed script cell renders its `$error` marker, as
+    `/tables/json-preview` does. `json_doc.on_error` is deliberately not
+    applied: the preview is about the transform, and a cache-only render
+    would trip `fail` on cells the real export waits for."""
+    if format not in JSON_FAMILY:
+        raise ValueError(
+            f"{name}: transform is only supported for JSON-family formats, "
+            f"not {format!r}"
+        )
+    limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
+    build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
+    ordered = order_rows(metamodel, model, defn, build.keys, None, limits, script=script_ctx)
+    window = ordered[:max_rows]
+    truncated = len(ordered) > len(window)
+    layout = export_layout(render_defn)
+    eff = export_definition(render_defn)
+    rn = (
+        (layout.row_number_pos, layout.row_number_key)
+        if layout.row_number_pos is not None
+        else None
+    )
+    key_col = json_key_column(format, json_doc, defn, name)
+    rows = iter_export_rows(metamodel, model, defn, window, limits, script=script_ctx)
+    split = render_defn.json_split
+    split_file: str | None = None
+    if split is not None and split.enabled:
+        validate_template(split.filename_template)
+        validate_tokens(split.filename_template, SPLIT_TOKENS)
+        parts = split_partitions(window, rows)
+        if parts:
+            binding, pairs = parts[0]
+            stem = render_filenames(
+                split.filename_template,
+                [partition_label(model, binding)],
+                extra=template_vars,
+            )[0]
+            split_file = f"{stem}.{format}"
+            window = [rk for rk, _ in pairs]
+            rows = iter(cells for _, cells in pairs)
+            truncated = truncated or len(parts) > 1
+        else:
+            rows = iter([])
+    docs, doc_keys = render_json_ex(
+        model,
+        eff,
+        window,
+        rows,
+        build.base_slots,
+        order=layout.rank,
+        row_number=rn,
+        key_column=key_col,
+    )
+    return JsonSample(
+        doc=shape_json_docs(format, docs, doc_keys),
+        truncated=truncated,
+        split_file=split_file,
     )
 
 
@@ -641,21 +801,7 @@ def run_table_export(
                 if layout.row_number_pos is not None
                 else None
             )
-            # Object-shape key column: json only (jsonl ignores shape with
-            # tolerance). Checked BEFORE rendering — the range half
-            # is knowable now, and `render_json_ex` re-checks it anyway.
-            key_col: int | None = None
-            if format == "json" and json_doc is not None and json_doc.shape == "object":
-                if json_doc.key_column is None:
-                    raise ValueError(
-                        f"{name}: json_doc.shape 'object' requires key_column"
-                    )
-                if not 0 <= json_doc.key_column < len(defn.columns):
-                    raise ValueError(
-                        f"{name}: json_doc.key_column {json_doc.key_column} out "
-                        f"of range (table has {len(defn.columns)} columns)"
-                    )
-                key_col = json_doc.key_column
+            key_col = json_key_column(format, json_doc, defn, name)
 
             def _check_on_error(docs: list[dict[str, object]]) -> None:
                 # Under "fail" a machine consumer gets a clean
@@ -674,13 +820,7 @@ def run_table_export(
             def _shape(
                 docs: list[dict[str, object]], doc_keys: list[str] | None
             ) -> object:
-                if format == "jsonl":
-                    return docs
-                return (
-                    dict(zip(doc_keys, docs, strict=True))
-                    if doc_keys is not None
-                    else docs
-                )
+                return shape_json_docs(format, docs, doc_keys)
 
             def _transformed(payload: object) -> object:
                 if transform_code is None:

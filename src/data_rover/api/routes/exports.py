@@ -6,6 +6,7 @@ to the artifact's DEFINITION go through POST /commits.
 
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -28,6 +29,7 @@ from data_rover.core.table.naming import (
     substitute,
     validate_tokens,
 )
+from data_rover.core.table.resolve import table_has_script
 from data_rover.core.table.split import sanitize_stem, validate_template
 
 from .. import content
@@ -40,7 +42,15 @@ from ..export_manifest import (
     build_manifest,
     inline_transform_marker,
 )
-from ..schemas import EvaluateTableIn, RunExportIn, ScriptStatusOut
+from ..schemas import (
+    EvaluateTableIn,
+    RunExportIn,
+    ScriptStatusOut,
+    SnippetErrorOut,
+    TransformPreviewIn,
+    TransformPreviewOut,
+)
+from ..script_eval import close_script_context, open_script_context
 from ..script_runner import get_runner
 from ..settings import Settings, get_settings
 from ..table_export_engine import (
@@ -51,9 +61,10 @@ from ..table_export_engine import (
     build_zip,
     export_context_vars,
     open_transform_host,
+    render_json_sample,
     run_table_export,
 )
-from .tables import _resolve_table, _resolve_transform_source
+from .tables import PREVIEW_MAX_ROWS, _resolve_table, _resolve_transform_source
 
 router = APIRouter()
 
@@ -570,3 +581,124 @@ def _execute_export(
         # poll opens its own host).
         if transform_host is not None:
             transform_host.close()
+
+
+@router.post("/exports/preview-transform")
+def preview_transform(
+    payload: TransformPreviewIn,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    runner: ScriptRunner | None = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
+) -> TransformPreviewOut:
+    """The exporter entry's Test button: render the entry's table the way
+    the export would (bounded to `PREVIEW_MAX_ROWS`, cache-only, never 202 —
+    `/tables/json-preview`'s stance), run its `transform(doc)` ONCE, and
+    return both documents plus what the snippet printed.
+
+    Read-only (viewer-callable; listed in `authz._READ_ONLY_POST_SUFFIXES`).
+    The entry's own problems are 422s naming it, exactly as `/exports/run`
+    would report them (missing table, non-JSON format, unconfigured or
+    unresolvable transform, bad split template, over-cap document); the
+    snippet's own failure is NOT a 422 — it comes back as `error` with a
+    traceback, since seeing it is what the button is for. 503/429 keep
+    `/exports/run`'s meaning (no runner / no interactive slot).
+    """
+    metamodel, model = require_model(session)
+    entry = payload.entry
+    label = entry.name or entry.source.ref
+    if entry.format not in JSON_FAMILY:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label}: transform is only supported for JSON-family "
+            f"formats, not {entry.format!r}",
+        )
+    if entry.transform is None or entry.transform.is_empty:
+        raise HTTPException(
+            status_code=422, detail=f"{label}: no transform configured"
+        )
+    try:
+        code = _resolve_transform_source(db, project_id, entry.transform, label)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    assert code is not None  # a non-empty source resolves or raises
+    t = content.get_artifact(db, entry.source.ref)
+    if t is None or t.project_id != project_id or t.kind is not ArtifactKind.table:
+        raise HTTPException(
+            status_code=422, detail=f"missing table(s) for entries: {label}"
+        )
+    script_ctx = None
+    acquired = False
+    transform_host = None
+    try:
+        defn = _resolve_table(
+            EvaluateTableIn(artifact_id=t.id, offset=0, limit=100), project_id, db
+        )
+        script_ctx, acquired = open_script_context(
+            runner,
+            model,
+            settings,
+            needs_script=table_has_script(defn),
+            cell_cache=session.script_cell_cache,
+            rev=session.model_rev,
+        )
+        if script_ctx is not None:
+            script_ctx.cache_only = True
+        sample = render_json_sample(
+            metamodel=metamodel,
+            model=model,
+            defn=defn,
+            render_defn=overridden_table(defn, entry),
+            format=entry.format,
+            json_doc=entry.json_doc,
+            name=label,
+            template_vars=export_context_vars(session, project_id),
+            script_ctx=script_ctx,
+            max_rows=PREVIEW_MAX_ROWS,
+        )
+        # The script context's interactive slot is released BEFORE the
+        # transform's is taken: the two are never needed at once here, and
+        # holding both would let a lone preview exhaust `snippet_concurrency`.
+        close_script_context(script_ctx, acquired)
+        script_ctx, acquired = None, False
+        transform_host = open_transform_host(runner, model, settings)
+        out = transform_host.apply_ex(code, sample.doc, label)
+        error: SnippetErrorOut | None = None
+        if out.error is not None:
+            error = SnippetErrorOut(
+                kind=out.error.kind,
+                message=out.error.message,
+                traceback=out.error.traceback,
+            )
+        elif entry.format == "jsonl" and not isinstance(out.value, list):
+            error = SnippetErrorOut(
+                kind="runtime",
+                message=f"transform must return a list for jsonl; "
+                f"got {type(out.value).__name__}",
+            )
+        return TransformPreviewOut(
+            input=_pretty(sample.doc),
+            output=None if error is not None else _pretty(out.value),
+            stdout=out.stdout,
+            error=error,
+            truncated=sample.truncated,
+            split_file=sample.split_file,
+            duration_ms=out.duration_ms,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
+    except (NavigationResolveError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except TransformUnavailableError as exc:
+        raise HTTPException(
+            status_code=429 if exc.busy else 503, detail=str(exc)
+        ) from exc
+    finally:
+        close_script_context(script_ctx, acquired)
+        if transform_host is not None:
+            transform_host.close()
+
+
+def _pretty(doc: object) -> str:
+    return json.dumps(doc, ensure_ascii=False, indent=2)

@@ -38,9 +38,17 @@
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
 	import AddTablePicker from './AddTablePicker.svelte';
 	import TransformSourceEditor from './TransformSourceEditor.svelte';
+	import TransformTestPanel from './TransformTestPanel.svelte';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
+
+	// Per-entry handles so Mod-Enter in an entry's inline transform editor
+	// runs THAT entry's test panel, and a traceback frame in the panel jumps
+	// THAT entry's editor. Keyed by entry index like every other per-row
+	// element in this tab (`#each ... as entry, i`).
+	let transformEditors: Record<number, TransformSourceEditor | undefined> = $state({});
+	let transformTests: Record<number, TransformTestPanel | undefined> = $state({});
 
 	$effect(() => {
 		void ensureExporterDraft(tabId);
@@ -416,13 +424,26 @@
 								<span class="shrink-0 pt-0.5 text-muted-foreground">Transform</span>
 								<div class="min-w-0 flex-1">
 									<TransformSourceEditor
+										bind:this={transformEditors[i]}
 										value={entry.transform ?? null}
 										disabled={disabledEntry}
 										collapseKey={`${tabId}::entry:${i}::transform`}
 										onChange={(next) => updateExporterEntry(tabId, i, { transform: next })}
+										onRun={() => void transformTests[i]?.requestRun()}
 									/>
 								</div>
 							</div>
+							{#if entry.transform != null}
+								<!-- Same full-width last-child rule as the editor above: the
+								     panel's height stays inside the drop element. -->
+								<div class="w-full pl-[4.5rem]">
+									<TransformTestPanel
+										bind:this={transformTests[i]}
+										{entry}
+										onGoToLine={(l) => transformEditors[i]?.goToLine(l)}
+									/>
+								</div>
+							{/if}
 						{:else if !isEmptySnippetSource(entry.transform)}
 							<!-- A transform left behind by a format flip: the server 422s it at
 							     run time, so surface it rather than hiding the state. Never

@@ -1123,6 +1123,20 @@ export const OutputOptionsSchema = z.object({
 });
 export type OutputOptions = z.infer<typeof OutputOptionsSchema>;
 
+/** `POST /exports/preview-transform` — mirror of api/schemas.py
+ *  TransformPreviewOut. `input`/`output` are pretty-printed JSON TEXT rendered
+ *  server-side (never re-serialized here); `output` is null iff `error` is set. */
+export const TransformPreviewOutSchema = z.object({
+	input: z.string(),
+	output: z.string().nullable(),
+	stdout: z.string(),
+	error: SnippetErrorSchema.nullable(),
+	truncated: z.boolean(),
+	split_file: z.string().nullable(),
+	duration_ms: z.number()
+});
+export type TransformPreviewOut = z.infer<typeof TransformPreviewOutSchema>;
+
 export const ExporterDefinitionSchema = z.object({
 	schema_version: z.number().default(1),
 	output: OutputOptionsSchema.default({ mode: 'zip', filename: '', manifest: true }),

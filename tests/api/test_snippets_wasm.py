@@ -416,6 +416,23 @@ def test_wasm_session_repeated_calls_and_state(wasm_runner: WasmScriptRunner, sm
     sess.close()  # idempotent
 
 
+def test_wasm_session_call_stdout_is_per_call(wasm_runner: WasmScriptRunner, small_model) -> None:
+    """Prints inside an entry point ride on THAT call's `CallResult.stdout`;
+    module-level prints are folded into the first call's only."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    sess = wasm_runner.open_session(
+        small_model,
+        "print('boot')\ndef transform(doc):\n    print('doc', doc)\n    return doc",
+        RunLimits(),
+        budget=ScriptBudget.start(60),
+    )
+    assert sess.boot_error is None
+    assert sess.call("transform", [], doc=1).stdout == "boot\ndoc 1\n"
+    assert sess.call("transform", [], doc=2).stdout == "doc 2\n"
+    sess.close()
+
+
 def test_wasm_session_boot_error(wasm_runner: WasmScriptRunner, small_model) -> None:
     """A module-level exception during boot exec is captured as `boot_error`
     (kind="runtime") rather than raised."""

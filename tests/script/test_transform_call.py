@@ -70,3 +70,25 @@ def test_decode_transform_accepts_any_json_value():
         assert msg is None and decoded == {"kind": "json", "value": v}
     decoded, msg = decode_call_payload("transform", {"nodes": []})
     assert decoded is None
+
+
+def test_call_stdout_is_per_call_and_carries_boot_prints_once(model):
+    # Module-level prints are captured at boot and ride on the FIRST call's
+    # stdout only; every later call reports just its own prints.
+    s = _session(
+        model,
+        "print('booting')\n"
+        "def transform(doc):\n    print('seen', doc)\n    return doc\n",
+    )
+    first = s.call("transform", [], doc=1)
+    assert first.error is None
+    assert first.stdout == "booting\nseen 1\n"
+    second = s.call("transform", [], doc=2)
+    assert second.stdout == "seen 2\n"
+
+
+def test_call_stdout_survives_a_raise(model):
+    s = _session(model, "def transform(doc):\n    print('before')\n    raise ValueError('x')\n")
+    r = s.call("transform", [], doc={})
+    assert r.error is not None and r.error.kind == "runtime"
+    assert r.stdout == "before\n"

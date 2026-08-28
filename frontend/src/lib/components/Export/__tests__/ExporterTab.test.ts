@@ -790,6 +790,17 @@ describe('ExporterTab', () => {
 		expect(draft.dirty).toBe(true);
 	});
 
+	it('mounts the Test panel beside a configured transform, inside the drop element', async () => {
+		await renderJsonEntry();
+		expect(document.querySelector('[data-testid="transform-test-panel"]')).toBeNull();
+		pickSavedTransform('snip-1');
+		const panel = document.querySelector('[data-testid="transform-test-panel"]');
+		expect(panel).not.toBeNull();
+		expect(document.querySelector('[data-export-entry-drop="0"]')!.contains(panel)).toBe(true);
+		click('[data-testid="transform-remove"]');
+		expect(document.querySelector('[data-testid="transform-test-panel"]')).toBeNull();
+	});
+
 	// createColumnDrag's reorder snapshots real element rects, so the editor's
 	// extra height must live INSIDE the row's own drop element.
 	it('renders the transform editor inside the entry row drop element', async () => {

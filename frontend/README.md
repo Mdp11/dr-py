@@ -273,6 +273,25 @@ follows a pessimistic **check-out → stage → commit** loop:
      console run, ref or inline alike, so it is excluded from
      `SnippetRunBody`/`SnippetTestPanel`/`ElementContextRow` regardless of
      source form.
+   - **Testing a transform.** Its test surface is the entry's own
+     `Export/TransformTestPanel.svelte` (mounted by `ExporterTab` under the
+     transform editor whenever `entry.transform != null`), not the shared
+     `SnippetTestPanel`: the document a transform receives only exists in
+     the context of an entry, so the panel posts the WHOLE entry as drafted
+     (unsaved inline code included) to `POST /exports/preview-transform`
+     (`previewTransform` in `api/exports.ts`) and renders prints, then
+     before | after panes of the server-rendered JSON text — never
+     re-serialized client-side. The server answers 200 even when the
+     snippet fails (`error` block with a go-to-line traceback, no after-pane);
+     a 422 (missing table, non-JSON format, unresolvable ref…) shows the
+     server's own sentence as the notice, 429/503 use `SnippetTestPanel`'s
+     wording. Run state is component-local with the same generation guard
+     as `SnippetTestPanel`. Mod-Enter in the inline editor reaches the panel
+     through `SnippetSourceEditor`'s `onRun` prop (honored only for
+     `entry="transform"`, where no `SnippetTestPanel` claims the shortcut),
+     forwarded by `TransformSourceEditor`; a traceback frame jumps the editor
+     through the mirror-image `goToLine` exports. `ExporterTab` keeps both
+     handles per entry index (`transformEditors`/`transformTests`).
    - **No already-added filter on the add-table picker — deliberate.**
      `ExporterTab.svelte`'s `availableTables` lists every table, so the same
      table can be added more than once — e.g. once as a wide `.xlsx` and

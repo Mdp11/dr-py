@@ -78,6 +78,7 @@ _READ_ONLY_POST_SUFFIXES = (
     "/artifacts/export",
     "/artifacts/export/preview",
     "/exports/run",
+    "/exports/preview-transform",
 )
 
 

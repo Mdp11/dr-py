@@ -217,6 +217,11 @@ class CallResult:
     error: ScriptError | None
     duration_ms: int
     reads: frozenset[ReadKey] | None = None
+    #: What the entry point printed during THIS call (size-capped like
+    #: ``RunResult.stdout``), also carried on an errored call. Module-level
+    #: prints made at boot ride on the FIRST call's stdout only, so a caller
+    #: that reports stdout per call never loses them and never repeats them.
+    stdout: str = ""
 
 
 class SnippetSession(Protocol):
@@ -235,6 +240,10 @@ class SnippetSession(Protocol):
 
     ``inputs`` is a ``value`` call's named column inputs; ignored for
     ``step``/``transform``.
+
+    Each ``call`` captures the guest's stdout for that call alone (see
+    :attr:`CallResult.stdout`); the embedded consumers ignore it, the
+    transform preview surfaces it.
     """
 
     boot_error: ScriptError | None

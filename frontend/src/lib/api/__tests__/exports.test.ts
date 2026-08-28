@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { runExporter, runExporterDraft } from '../exports';
+import { previewTransform, runExporter, runExporterDraft } from '../exports';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -77,5 +77,38 @@ describe('runExporterDraft', () => {
 		await runExporterDraft(definition, 'x', cfg);
 		expect(seen).toEqual({ definition, name: 'x' });
 		expect(seen).not.toHaveProperty('artifact_id');
+	});
+});
+
+describe('previewTransform', () => {
+	it('posts the entry and parses the preview body', async () => {
+		let seen: unknown = null;
+		server.use(
+			http.post(`${BASE}/exports/preview-transform`, async ({ request }) => {
+				seen = await request.json();
+				return HttpResponse.json({
+					input: '[]',
+					output: '{}',
+					stdout: '',
+					error: null,
+					truncated: false,
+					split_file: null,
+					duration_ms: 1
+				});
+			})
+		);
+		const entry = {
+			source: { ref: 'tbl-1' },
+			name: '',
+			format: 'json' as const,
+			folder: '',
+			columns: [],
+			export_order: [],
+			show_row_numbers: false,
+			transform: { ref: 'snip-1' }
+		};
+		const out = await previewTransform(entry, cfg);
+		expect(seen).toEqual({ entry });
+		expect(out.output).toBe('{}');
 	});
 });

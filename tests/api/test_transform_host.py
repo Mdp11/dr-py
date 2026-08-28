@@ -271,3 +271,56 @@ def test_evicted_session_close_raising_does_not_break_apply(model):
         host.close()
     assert concurrency_guard.try_acquire_global(global_limit=1)
     concurrency_guard.release_global()
+
+
+def test_apply_ex_returns_value_and_stdout_without_raising(model):
+    host = open_transform_host(TrustedRunner(), model, _settings())
+    try:
+        out = host.apply_ex(
+            "def transform(doc):\n    print('hi', doc)\n    return {'n': doc}\n",
+            1,
+            "e",
+        )
+        assert out.error is None
+        assert out.value == {"n": 1}
+        assert out.stdout == "hi 1\n"
+    finally:
+        host.close()
+
+
+def test_apply_ex_reports_a_raise_as_a_typed_error_with_stdout(model):
+    host = open_transform_host(TrustedRunner(), model, _settings())
+    try:
+        out = host.apply_ex(
+            "def transform(doc):\n    print('x')\n    raise ValueError('boom')\n",
+            {},
+            "e",
+        )
+        assert out.error is not None
+        assert out.error.kind == "runtime" and "boom" in out.error.message
+        assert out.error.traceback and "<snippet>" in out.error.traceback
+        assert out.stdout == "x\n"
+        assert out.value is None
+    finally:
+        host.close()
+
+
+def test_apply_ex_reports_a_boot_error(model):
+    host = open_transform_host(TrustedRunner(), model, _settings())
+    try:
+        out = host.apply_ex("def transform(doc:\n", {}, "e")
+        assert out.error is not None and out.error.kind == "syntax"
+    finally:
+        host.close()
+
+
+def test_apply_ex_result_over_cap_is_a_value_error(model):
+    # Size caps are the HOST's limits, not the snippet's failure: still raised.
+    host = open_transform_host(
+        TrustedRunner(), model, _settings(snippet_transform_max_bytes=16)
+    )
+    try:
+        with pytest.raises(ValueError, match="e: transform result exceeds"):
+            host.apply_ex("def transform(doc):\n    return 'x' * 100\n", 1, "e")
+    finally:
+        host.close()

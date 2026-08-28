@@ -1,6 +1,11 @@
-import { apiFetchRaw, type ClientConfig } from './client';
+import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
 import { parseAttachmentFilename, type ExportResult } from './tables';
-import type { ExporterDefinition } from './types';
+import {
+	TransformPreviewOutSchema,
+	type ExporterDefinition,
+	type ExporterEntry,
+	type TransformPreviewOut
+} from './types';
 
 async function handleRunResponse(res: Response): Promise<ExportResult> {
 	if (res.status === 202) {
@@ -53,4 +58,24 @@ export async function runExporterDraft(
 		cfg
 	);
 	return handleRunResponse(res);
+}
+
+/**
+ * Dry-run ONE exporter entry's `transform(doc)` over a bounded sample of its
+ * table (`POST /exports/preview-transform`) — the entry's Test button. The
+ * entry travels AS DRAFTED (unsaved inline code included); the server
+ * renders the sample the way the export would and answers 200 even when the
+ * snippet itself fails (that failure is `error` in the body). 422/429/503
+ * keep `POST /exports/run`'s meaning: a problem with the entry, no free
+ * interactive slot, no runner.
+ */
+export function previewTransform(
+	entry: ExporterEntry,
+	cfg?: ClientConfig
+): Promise<TransformPreviewOut> {
+	return apiFetch(
+		'/exports/preview-transform',
+		{ method: 'POST', body: { entry }, schema: TransformPreviewOutSchema },
+		cfg
+	);
 }

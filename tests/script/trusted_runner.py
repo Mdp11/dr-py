@@ -231,6 +231,8 @@ class _TrustedSession:
                     message=f"{sys.exc_info()[0].__name__}: {sys.exc_info()[1]}",  # type: ignore[union-attr]
                     traceback=_format_guest_traceback(),
                 )
+        # Module-level prints ride on the first call's stdout (guest parity).
+        self._carry = stdout.getvalue()
 
     def call(
         self,
@@ -260,6 +262,7 @@ class _TrustedSession:
             else []
         )
         stdout = _CappedStdout(self._limits.stdout_bytes)
+        carry, self._carry = self._carry, ""
         with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
             try:
                 res = self._namespace["_dr_call_entry"](
@@ -274,6 +277,7 @@ class _TrustedSession:
                         traceback=_format_guest_traceback(),
                     ),
                     duration_ms=int((time.monotonic() - start) * 1000),
+                    stdout=carry + stdout.getvalue(),
                 )
         decoded, msg = decode_call_payload(entry, res["payload"])
         duration_ms = int((time.monotonic() - start) * 1000)
@@ -282,12 +286,14 @@ class _TrustedSession:
                 value=None,
                 error=ScriptError(kind="runtime", message=msg or "malformed payload"),
                 duration_ms=duration_ms,
+                stdout=carry + stdout.getvalue(),
             )
         return CallResult(
             value=decoded,
             error=None,
             duration_ms=duration_ms,
             reads=decode_reads(res["reads"]),
+            stdout=carry + stdout.getvalue(),
         )
 
     def close(self) -> None:

@@ -30,7 +30,8 @@
 		onChange,
 		collapseKey,
 		disabled = false,
-		withInputs = false
+		withInputs = false,
+		onRun
 	}: {
 		snippet: SnippetSource;
 		entry: BoundEntry;
@@ -65,7 +66,19 @@
 		 * `value(elements, inputs)` signature instead of the one-arg default —
 		 * for a script column that has named inputs configured. */
 		withInputs?: boolean;
+		/** Where Mod-Enter in the inline editor goes when NO `SnippetTestPanel`
+		 * is mounted here — i.e. for `entry="transform"`, whose test surface is
+		 * the host's (the exporter entry's `TransformTestPanel`, which needs
+		 * the whole entry, not just the snippet). Ignored for the other entries,
+		 * where the panel below owns the shortcut. */
+		onRun?: () => void;
 	} = $props();
+
+	/** Cursor jump for a host-owned result view (a transform traceback
+	 * frame); a no-op while the editor is collapsed or in ref mode. */
+	export function goToLine(line: number): void {
+		editor?.goToLine(line);
+	}
 
 	const inline = $derived(snippet.definition != null);
 
@@ -272,7 +285,7 @@
 						{diagnostics}
 						readonly={disabled}
 						onChange={handleCodeChange}
-						onRun={() => void testPanel?.requestRun()}
+						onRun={() => (entry === 'transform' ? onRun?.() : void testPanel?.requestRun())}
 					/>
 				</div>
 				<ResizeHandle
@@ -292,9 +305,10 @@
 			{/if}
 		{/if}
 
-		<!-- There is no console run for transform: RunRequest.entry excludes it
-		     server-side, and there is no document to bind a run against outside
-		     an actual export. -->
+		<!-- No console run for transform: RunRequest.entry excludes it
+		     server-side, and the document it needs only exists in the context
+		     of an export entry — that host mounts its own TransformTestPanel
+		     (POST /exports/preview-transform) and receives Mod-Enter via `onRun`. -->
 		{#if entry !== 'transform'}
 			<!-- In ref mode there is no lint response to ask, so `[entry]` stands in
 			     as "the ref covers it" — EXCEPT when `refMissing` is true: the ref

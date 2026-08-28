@@ -414,6 +414,8 @@ def _run_embedded(start):
     _emit({"boot": True, "error": err})
     if err is not None:
         return
+    # Module-level prints belong to no call; hand them to the first one.
+    carry = stdout.getvalue()
     while True:
         line = sys.stdin.readline()
         if not line:
@@ -432,6 +434,7 @@ def _run_embedded(start):
         cerr = None
         payload = None
         reads = None
+        stdout = _CappedStdout(start["stdout_bytes"])
         sys.stdout = stdout
         try:
             res = namespace["_dr_call_entry"](entry, element_ids, elements, doc, inputs)
@@ -448,7 +451,9 @@ def _run_embedded(start):
             }
         finally:
             sys.stdout = _real_stdout
-        _emit({"call_result": {"payload": payload, "error": cerr, "reads": reads}})
+        out = carry + stdout.getvalue()
+        carry = ""
+        _emit({"call_result": {"payload": payload, "error": cerr, "reads": reads, "stdout": out}})
 
 
 def _main():
@@ -1301,6 +1306,13 @@ class _WasmSnippetSession:
             )
         self._idle()
         cr = msg["call_result"]
+        # Defensive host-side cap, like the run path's: the guest caps too,
+        # but the bytes crossed an untrusted boundary.
+        stdout = cr.get("stdout", "")
+        if not isinstance(stdout, str):
+            stdout = ""
+        elif len(stdout) > self._limits.stdout_bytes:
+            stdout = stdout[: self._limits.stdout_bytes] + "..."
         err = cr.get("error")
         if err is not None:
             return CallResult(
@@ -1311,6 +1323,7 @@ class _WasmSnippetSession:
                     traceback=err.get("traceback"),
                 ),
                 duration_ms=duration_ms,
+                stdout=stdout,
             )
         decoded, dmsg = decode_call_payload(entry, cr.get("payload"))
         if decoded is None:
@@ -1318,12 +1331,14 @@ class _WasmSnippetSession:
                 value=None,
                 error=ScriptError(kind="runtime", message=dmsg or "malformed payload"),
                 duration_ms=duration_ms,
+                stdout=stdout,
             )
         return CallResult(
             value=decoded,
             error=None,
             duration_ms=duration_ms,
             reads=decode_reads(cr.get("reads")),
+            stdout=stdout,
         )
 
     def close(self) -> None:

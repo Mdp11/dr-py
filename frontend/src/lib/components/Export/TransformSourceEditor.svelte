@@ -18,7 +18,8 @@
 		value,
 		disabled = false,
 		collapseKey,
-		onChange
+		onChange,
+		onRun
 	}: {
 		value: SnippetSource | null;
 		/** Gates the add/× affordances here and, forwarded, editability inside
@@ -28,7 +29,17 @@
 		disabled?: boolean;
 		collapseKey?: string;
 		onChange: (next: SnippetSource | null) => void;
+		/** Mod-Enter in the inline editor — forwarded to the shared editor's
+		 * `onRun`, which the host points at its `TransformTestPanel`. */
+		onRun?: () => void;
 	} = $props();
+
+	let inner: SnippetSourceEditor | undefined = $state();
+
+	/** Forwarded cursor jump (a traceback frame in the host's test panel). */
+	export function goToLine(line: number): void {
+		inner?.goToLine(line);
+	}
 </script>
 
 {#if value == null}
@@ -45,10 +56,12 @@
 	<div data-testid="transform-source-editor" class="flex items-start gap-1.5">
 		<div class="min-w-0 flex-1">
 			<SnippetSourceEditor
+				bind:this={inner}
 				snippet={value}
 				entry="transform"
 				{collapseKey}
 				{disabled}
+				{onRun}
 				onChange={(next) => onChange(next)}
 			/>
 		</div>
