@@ -22,12 +22,16 @@
 	let {
 		entry,
 		elements,
+		label = null,
 		onAdd,
 		onRemove,
 		onClear
 	}: {
 		entry: ConsoleEntry;
 		elements: SnippetBoundElement[];
+		/** Overrides the leading "Element(s):" caption — the Test panel's
+		 * named-input rows label themselves with the input's name. */
+		label?: string | null;
 		onAdd: (id: string, label: string) => void;
 		onRemove: (id: string) => void;
 		onClear: () => void;
@@ -88,7 +92,9 @@
 </script>
 
 <div class="relative flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs">
-	<span class="text-muted-foreground">{entry === 'step' ? 'Element:' : 'Elements:'}</span>
+	<span class="text-muted-foreground">
+		{label ?? (entry === 'step' ? 'Element:' : 'Elements:')}
+	</span>
 	{#if elements.length === 0}
 		<span class="font-mono text-foreground/90">no element bound</span>
 	{/if}

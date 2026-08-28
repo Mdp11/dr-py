@@ -23,19 +23,27 @@
 	import { getModelRev, type SnippetBoundElement, type SnippetRunPhase } from '$lib/state';
 	import { isResultStale } from '$lib/snippet/console-view';
 	import { entryAvailable, type ConsoleEntry } from '$lib/snippet/entry-stubs';
+	import { toWireInputs, type DeclaredInput, type InputBinding } from '$lib/snippet/run-inputs';
 	import type { SnippetSource } from '$lib/api/types';
 	import ElementContextRow from './ElementContextRow.svelte';
+	import SnippetInputBindings from './SnippetInputBindings.svelte';
 	import SnippetResultView from './SnippetResultView.svelte';
 
 	let {
 		snippet,
 		entry,
 		entryPoints,
+		declaredInputs = [],
 		onGoToLine = () => {}
 	}: {
 		snippet: SnippetSource;
 		entry: ConsoleEntry;
 		entryPoints: string[];
+		/** The named inputs the hosting script column declares. Non-empty means
+		 * `value` takes two arguments here, so the panel offers a binding row
+		 * per input — the grid resolves them from the referenced column's cell,
+		 * a console run has no row to resolve from. */
+		declaredInputs?: DeclaredInput[];
 		onGoToLine?: (line: number) => void;
 	} = $props();
 
@@ -47,6 +55,7 @@
 
 	let open = $state(false);
 	let elements = $state<SnippetBoundElement[]>([]);
+	let inputBindings = $state<Record<string, InputBinding>>({});
 	let phase = $state<SnippetRunPhase>('idle');
 	let result = $state<SnippetRunOut | null>(null);
 	let notice = $state<string | null>(null);
@@ -84,6 +93,7 @@
 	);
 	const entryOk = $derived(entryAvailable(entry, entryPoints));
 	const countOk = $derived(entry === 'step' ? elements.length === 1 : elements.length >= 1);
+	const withInputs = $derived(entry === 'value' && declaredInputs.length > 0);
 	const runDisabled = $derived(phase !== 'idle' || !configured || !entryOk || !countOk);
 	const stale = $derived(result ? isResultStale(result, getModelRev()) : false);
 
@@ -129,6 +139,7 @@
 			run_id: crypto.randomUUID(),
 			entry,
 			element_ids: elements.map((e) => e.id),
+			...(withInputs ? { inputs: toWireInputs(declaredInputs, inputBindings) } : {}),
 			...(snippet.definition
 				? { code: snippet.definition.code }
 				: { artifact_id: snippet.ref ?? undefined })
@@ -174,6 +185,13 @@
 				onRemove={(id) => (elements = elements.filter((e) => e.id !== id))}
 				onClear={() => (elements = [])}
 			/>
+			{#if withInputs}
+				<SnippetInputBindings
+					declared={declaredInputs}
+					bindings={inputBindings}
+					onChange={(next) => (inputBindings = next)}
+				/>
+			{/if}
 			<div class="flex items-center gap-2 px-1.5 py-1">
 				<button
 					type="button"
@@ -185,7 +203,11 @@
 					Run
 				</button>
 				<span class="text-muted-foreground/70">
-					{entry === 'step' ? 'runs step(el)' : 'runs value(elements)'}
+					{entry === 'step'
+						? 'runs step(el)'
+						: withInputs
+							? 'runs value(elements, inputs)'
+							: 'runs value(elements)'}
 				</span>
 			</div>
 			<div class="max-h-56 overflow-y-auto border-t border-border/60">

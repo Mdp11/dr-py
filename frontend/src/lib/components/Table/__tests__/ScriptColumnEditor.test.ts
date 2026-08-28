@@ -209,4 +209,38 @@ describe('ScriptColumnEditor', () => {
 			unmount(c);
 		}
 	});
+	it('offers the Test panel a binding row per declared input, keyed by the referenced column kind', () => {
+		const c = render(
+			scriptColumn({
+				inputs: [
+					{ name: 'owners', ref: { kind: 'column', index: 0, step_index: null } },
+					{ name: 'qty', ref: { kind: 'column', index: 0, step_index: null } }
+				],
+				snippet: {
+					definition: {
+						schema_version: 1,
+						language: 'python',
+						code: 'def value(elements, inputs):\n    return 1',
+						entry_points: ['value']
+					}
+				}
+			}),
+			vi.fn()
+		);
+		try {
+			expandSnippet();
+			click(document.querySelector('[data-testid="snippet-test-toggle"]'));
+			// Column 0 is an `element` column, so both rows start on the element
+			// picker (the hint) rather than the values textarea.
+			for (const name of ['owners', 'qty']) {
+				const sel = document.querySelector(
+					`[aria-label="Binding kind for ${name}"]`
+				) as HTMLSelectElement;
+				expect(sel).not.toBeNull();
+				expect(sel.value).toBe('elements');
+			}
+		} finally {
+			unmount(c);
+		}
+	});
 });

@@ -150,11 +150,19 @@ class RunRequest:
             ``"script"`` ignores them. Count constraints (``value`` >= 1,
             ``step`` == 1) are enforced at the API route, not here — the
             runner layer stays lenient so tests can exercise edge shapes.
+        inputs: Named inputs for a two-argument ``value``, in the same wire
+            form a script column's resolved inputs take. A one-shot run has
+            no table row to resolve them from, so the caller binds them
+            explicitly; the guest binds by the entry function's own arity,
+            so a two-argument ``value`` always receives a dict (empty when
+            this is ``None``) instead of a missing-argument TypeError.
+            Ignored for ``script``/``step``.
     """
 
     code: str
     entry: Literal["script", "value", "step"] = "script"
     element_ids: list[str] = field(default_factory=list)
+    inputs: WireInputs | None = None
 
 
 @dataclass

@@ -315,10 +315,35 @@ def _format_guest_traceback():
     return "".join(lines)
 
 
+def _wants_inputs(fn):
+    # A console run has no table row, so binding is decided by the entry
+    # function's OWN arity rather than by whether the caller sent inputs: a
+    # two-argument value() always gets a dict (empty when nothing was bound)
+    # instead of a missing-argument TypeError. The embedded path decides the
+    # other way round (facade_src._dr_call_entry branches on `inputs`), and
+    # must: there the column's declared inputs are the contract, and an
+    # arity mismatch is a real definition error the cell reports.
+    code = getattr(fn, "__code__", None)
+    return code is not None and code.co_argcount >= 2
+
+
+def _bind_inputs(namespace, inputs):
+    # Same shape as facade_src._dr_call_entry's bind: element inputs become
+    # handles, scalar inputs stay values.
+    bound = {}
+    for name, spec in (inputs or {}).items():
+        if spec.get("kind") == "elements":
+            bound[name] = [namespace["dr"].element(i) for i in spec["ids"]]
+        else:
+            bound[name] = list(spec["values"])
+    return bound
+
+
 def _run_once(start):
     code = start["code"]
     entry = start["entry"]
     element_ids = start["element_ids"]
+    inputs = start.get("inputs")
     facade_source = start["facade_source"]
     stdout_cap = start["stdout_bytes"]
     result_repr_cap = start["result_repr_bytes"]
@@ -351,7 +376,10 @@ def _run_once(start):
                 if fn is None or not callable(fn):
                     raise NameError("entry function " + repr(entry) + " is not defined")
                 els = [namespace["dr"].element(i) for i in element_ids]
-                value = fn(els if entry == "value" else (els[0] if els else None))
+                if entry == "value" and _wants_inputs(fn):
+                    value = fn(els, _bind_inputs(namespace, inputs))
+                else:
+                    value = fn(els if entry == "value" else (els[0] if els else None))
                 have_value = True
         except MemoryError:
             # Propagate to the CPython top level: a store memory-limiter breach
@@ -929,6 +957,7 @@ class WasmScriptRunner:
                 "code": req.code,
                 "entry": req.entry,
                 "element_ids": req.element_ids,
+                "inputs": req.inputs,
                 "facade_source": FACADE_SOURCE,
                 "stdout_bytes": limits.stdout_bytes,
                 "result_repr_bytes": limits.result_repr_bytes,

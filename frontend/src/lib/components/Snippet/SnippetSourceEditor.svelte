@@ -20,6 +20,7 @@
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import { INLINE_MAX_H, INLINE_MIN_H } from '$lib/editor/editor-size';
 	import { entryAvailable, withStub, type BoundEntry } from '$lib/snippet/entry-stubs';
+	import type { DeclaredInput } from '$lib/snippet/run-inputs';
 	import type { SnippetDiagnostic, SnippetSource } from '$lib/api/types';
 	import CodeEditor from './CodeEditor.svelte';
 	import SnippetTestPanel from './SnippetTestPanel.svelte';
@@ -30,7 +31,7 @@
 		onChange,
 		collapseKey,
 		disabled = false,
-		withInputs = false,
+		declaredInputs = [],
 		onRun
 	}: {
 		snippet: SnippetSource;
@@ -62,10 +63,11 @@
 		 * is exactly what a locked-out caller (a viewer, a peer-locked resource)
 		 * needs to do. */
 		disabled?: boolean;
-		/** Seeds a freshly-switched-to-inline `value` stub with the two-arg
-		 * `value(elements, inputs)` signature instead of the one-arg default —
-		 * for a script column that has named inputs configured. */
-		withInputs?: boolean;
+		/** The named inputs the hosting script column declares. Non-empty seeds
+		 * a freshly-switched-to-inline `value` stub with the two-arg
+		 * `value(elements, inputs)` signature instead of the one-arg default,
+		 * and gives the Test panel a binding row per input. */
+		declaredInputs?: DeclaredInput[];
 		/** Where Mod-Enter in the inline editor goes when NO `SnippetTestPanel`
 		 * is mounted here — i.e. for `entry="transform"`, whose test surface is
 		 * the host's (the exporter entry's `TransformTestPanel`, which needs
@@ -189,7 +191,7 @@
 			definition: {
 				schema_version: 1,
 				language: 'python',
-				code: code ?? withStub('', entry, { inputs: withInputs }),
+				code: code ?? withStub('', entry, { inputs: declaredInputs.length > 0 }),
 				entry_points: []
 			}
 		});
@@ -320,6 +322,7 @@
 				{snippet}
 				{entry}
 				entryPoints={inline ? entryPoints : refMissing ? [] : [entry]}
+				{declaredInputs}
 				onGoToLine={(l) => editor?.goToLine(l)}
 			/>
 		{/if}

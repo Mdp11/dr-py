@@ -52,6 +52,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from collections.abc import Callable
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import ValidationError
@@ -59,7 +60,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.script.docs import get_facade_docs
 from data_rover.core.script.lint import derive_entry_points, lint_code
-from data_rover.core.script.runner import RunRequest, ScriptRunner
+from data_rover.core.script.runner import RunRequest, ScriptRunner, WireInput, WireInputs
 
 from .. import content
 from ..artifact_ops import split_ops
@@ -80,6 +81,7 @@ from ..schemas import (
     SnippetLimitsOut,
     SnippetLintIn,
     SnippetLintOut,
+    SnippetInputIn,
     SnippetRunIn,
     SnippetRunOut,
 )
@@ -265,6 +267,15 @@ def _resolve_code(payload: SnippetRunIn, project_id: str, db: DbSession) -> str:
     return payload.code
 
 
+def _wire_inputs(inputs: dict[str, SnippetInputIn] | None) -> WireInputs | None:
+    """Validated request models -> the runner's plain-dict wire form."""
+    if inputs is None:
+        return None
+    return {
+        name: cast(WireInput, spec.model_dump()) for name, spec in inputs.items()
+    }
+
+
 @router.post("/snippets/run")
 def run_snippet(
     payload: SnippetRunIn,
@@ -307,7 +318,12 @@ def run_snippet(
         token = _register_run(project_id, payload.run_id, user.id, _noop_cancel)
         res = runner.run(
             model,
-            RunRequest(code=code, entry=payload.entry, element_ids=payload.element_ids),
+            RunRequest(
+                code=code,
+                entry=payload.entry,
+                element_ids=payload.element_ids,
+                inputs=_wire_inputs(payload.inputs),
+            ),
             run_limits_from_settings(settings),
             record_ops=(payload.entry == "script"),
             rev=start_rev,

@@ -10,6 +10,7 @@ import { server } from '../../../api/__tests__/server';
 import * as modelRead from '$lib/api/model-read';
 import type { SnippetSource } from '$lib/api/types';
 import SnippetTestPanel from '../SnippetTestPanel.svelte';
+import type { DeclaredInput } from '$lib/snippet/run-inputs';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 beforeEach(() => vi.useFakeTimers()); // the element picker debounces 250 ms
@@ -51,7 +52,12 @@ function inline(code: string): SnippetSource {
 	return { definition: { schema_version: 1, language: 'python', code, entry_points: [] } };
 }
 
-function render(props: { snippet: SnippetSource; entry: 'value' | 'step'; entryPoints: string[] }) {
+function render(props: {
+	snippet: SnippetSource;
+	entry: 'value' | 'step';
+	entryPoints: string[];
+	declaredInputs?: DeclaredInput[];
+}) {
 	const c = mount(SnippetTestPanel, {
 		target: document.body,
 		props: { onGoToLine: () => {}, ...props }
@@ -271,6 +277,132 @@ it('lists recorded ops with the read-only warning and no Stage button', async ()
 		await vi.waitFor(() => expect(testid('snippet-ops')).not.toBeNull());
 		expect(testid('snippet-stage')).toBeNull();
 		expect(testid('snippet-test-ops-readonly')?.textContent).toContain('discarded');
+	} finally {
+		unmount(c);
+	}
+});
+
+// ---- named inputs for a two-argument value() --------------------------------
+
+const TWO_ARG = inline('def value(elements, inputs): return 1\n');
+
+it('sends no inputs key when the host declares none', async () => {
+	const cap = captureRun();
+	const c = render({ snippet: TWO_ARG, entry: 'value', entryPoints: ['value'] });
+	try {
+		expand();
+		await bindElement('a', 'Alpha');
+		click(testid('snippet-test-run'));
+		await vi.waitFor(() => expect(cap.body()).not.toBeNull());
+		expect(cap.body()).not.toHaveProperty('inputs');
+	} finally {
+		unmount(c);
+	}
+});
+
+it('binds a declared value input from the textarea', async () => {
+	const cap = captureRun();
+	const c = render({
+		snippet: TWO_ARG,
+		entry: 'value',
+		entryPoints: ['value'],
+		declaredInputs: [{ name: 'qty', kind: 'scalars' }]
+	});
+	try {
+		expand();
+		await bindElement('a', 'Alpha');
+		const box = document.querySelector('[aria-label="Values for qty"]') as HTMLTextAreaElement;
+		box.value = '7\nBuilding One';
+		box.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		click(testid('snippet-test-run'));
+		await vi.waitFor(() => expect(cap.body()).not.toBeNull());
+		expect(cap.body()?.inputs).toEqual({
+			qty: { kind: 'scalars', values: [7, 'Building One'] }
+		});
+	} finally {
+		unmount(c);
+	}
+});
+
+it('ships an unbound declared input as an empty list', async () => {
+	const cap = captureRun();
+	const c = render({
+		snippet: TWO_ARG,
+		entry: 'value',
+		entryPoints: ['value'],
+		declaredInputs: [{ name: 'owners', kind: 'elements' }]
+	});
+	try {
+		expand();
+		await bindElement('a', 'Alpha');
+		click(testid('snippet-test-run'));
+		await vi.waitFor(() => expect(cap.body()).not.toBeNull());
+		expect(cap.body()?.inputs).toEqual({ owners: { kind: 'elements', ids: [] } });
+	} finally {
+		unmount(c);
+	}
+});
+
+it('binds a declared element input through its own picker', async () => {
+	const cap = captureRun();
+	const c = render({
+		snippet: TWO_ARG,
+		entry: 'value',
+		entryPoints: ['value'],
+		declaredInputs: [{ name: 'owners', kind: 'elements' }]
+	});
+	try {
+		expand();
+		await bindElement('a', 'Alpha'); // the run's own bound elements
+		// The input's picker is the SECOND search box on the page — the panel's
+		// own ElementContextRow renders first.
+		const searches = document.querySelectorAll('[data-testid="snippet-element-search"]');
+		expect(searches).toHaveLength(2);
+		vi.spyOn(modelRead, 'listElementsPage').mockResolvedValue({
+			items: [{ id: 'b2', type_name: 'Block', properties: { name: 'Beta' }, rev: 1 }],
+			total: 1
+		});
+		const search = searches[1] as HTMLInputElement;
+		search.value = 'Beta';
+		search.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		await vi.advanceTimersByTimeAsync(300);
+		flushSync();
+		const option = [...document.querySelectorAll('button')].find((b) =>
+			b.textContent?.includes('Beta')
+		);
+		click(option ?? null);
+		click(testid('snippet-test-run'));
+		await vi.waitFor(() => expect(cap.body()).not.toBeNull());
+		expect(cap.body()?.inputs).toEqual({ owners: { kind: 'elements', ids: ['b2'] } });
+		// ...and the run's own element binding is untouched by the input's.
+		expect(cap.body()?.element_ids).toEqual(['a']);
+	} finally {
+		unmount(c);
+	}
+});
+
+it('switching an input to values drops the elements it had bound', async () => {
+	const cap = captureRun();
+	const c = render({
+		snippet: TWO_ARG,
+		entry: 'value',
+		entryPoints: ['value'],
+		declaredInputs: [{ name: 'owners', kind: 'elements' }]
+	});
+	try {
+		expand();
+		await bindElement('a', 'Alpha');
+		const select = document.querySelector(
+			'[aria-label="Binding kind for owners"]'
+		) as HTMLSelectElement;
+		select.value = 'scalars';
+		select.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		click(testid('snippet-test-run'));
+		await vi.waitFor(() => expect(cap.body()).not.toBeNull());
+		expect(cap.body()?.inputs).toEqual({ owners: { kind: 'scalars', values: [] } });
 	} finally {
 		unmount(c);
 	}

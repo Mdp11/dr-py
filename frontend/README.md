@@ -820,6 +820,21 @@ toggle`), a collapsed disclosure that expands to the shared
   `value()`/`step()` evaluation is read-only, so the panel says so
   (`snippet-test-ops-readonly`) instead of offering a Stage button. There is
   no Stop button: cancel is a server-side no-op and the wall timeout is 10s.
+- **Named-input bindings.** A script column that declares `inputs` passes them
+  down as `declaredInputs` (`SnippetSourceEditor` → `SnippetTestPanel`), which
+  is also what seeds a freshly-inlined snippet with the two-arg
+  `value(elements, inputs)` stub. The grid resolves each input from the
+  referenced column's cell for the row it is computing; a console run has no
+  row, so `SnippetInputBindings.svelte` gives each declared input a row —
+  an `elements`/`values` selector plus either its own `ElementContextRow`
+  picker or a one-value-per-line textarea — and `snippet/run-inputs.ts` turns
+  those into the run body's `inputs` map. Every declared name is always sent
+  (an unbound one as an empty list), so `inputs[name]` is present-and-empty
+  rather than a `KeyError`. A line that parses as JSON binds as JSON (`3`,
+  `true`, `"a, b"`); anything else binds as the plain string. The kind
+  selector starts on `elements` for an element/navigation source column and on
+  `values` otherwise — a hint only, since a nav projection or a script column
+  can hold either.
 - **Error cells.** A script column's `value()` call failing server-side
   (`core/script/embed.py`'s `ScriptEvalContext` — degraded, not failed: a
   missing runner, a full concurrency slot, or a snippet exception) renders

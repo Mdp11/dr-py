@@ -19,12 +19,21 @@ import type { z } from 'zod';
  * outright (CLAUDE.md), so a dry-run batch can only ever hold model ops. */
 export type SnippetRunOut = Omit<z.infer<typeof SnippetRunOutSchema>, 'ops'> & { ops: ModelOp[] };
 
+/** One named input for a two-argument `value(elements, inputs)` run — the
+ * same wire shape a script column's resolved inputs take server-side
+ * (`core/script/runner.py`'s `WireInput`). */
+export type SnippetRunInput =
+	| { kind: 'elements'; ids: string[] }
+	| { kind: 'scalars'; values: unknown[] };
+
 export interface SnippetRunBody {
 	run_id: string;
 	code?: string;
 	artifact_id?: string;
 	entry?: 'script' | 'value' | 'step';
 	element_ids?: string[];
+	/** Only meaningful for `entry: 'value'` — the route 422s it otherwise. */
+	inputs?: Record<string, SnippetRunInput>;
 }
 
 export function runSnippet(body: SnippetRunBody, cfg?: ClientConfig): Promise<SnippetRunOut> {

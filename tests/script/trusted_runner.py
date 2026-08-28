@@ -102,6 +102,24 @@ def _format_guest_traceback() -> str:
     return "".join(lines)
 
 
+def _wants_inputs(fn: object) -> bool:
+    """Mirrors the WASM guest's `_wants_inputs`: a console run binds by the
+    entry function's own arity, never by whether inputs were sent."""
+    code = getattr(fn, "__code__", None)
+    return code is not None and code.co_argcount >= 2
+
+
+def _bind_inputs(namespace: dict, inputs: WireInputs | None) -> dict[str, object]:
+    """Mirrors the WASM guest's `_bind_inputs`."""
+    bound: dict[str, object] = {}
+    for name, spec in (inputs or {}).items():
+        if spec["kind"] == "elements":
+            bound[name] = [namespace["dr"].element(i) for i in spec["ids"]]
+        else:
+            bound[name] = list(spec["values"])
+    return bound
+
+
 class TrustedRunner:
     """In-process `ScriptRunner`. See the module docstring: test-only, no
     sandboxing. Implements the `ScriptRunner` protocol from `runner.py`."""
@@ -152,7 +170,12 @@ class TrustedRunner:
                         if fn is None or not callable(fn):
                             raise NameError(f"entry function {req.entry!r} is not defined")
                         els = [namespace["dr"].element(i) for i in req.element_ids]
-                        value = fn(els if req.entry == "value" else (els[0] if els else None))
+                        if req.entry == "value" and _wants_inputs(fn):
+                            value = fn(els, _bind_inputs(namespace, req.inputs))
+                        else:
+                            value = fn(
+                                els if req.entry == "value" else (els[0] if els else None)
+                            )
                         have_value = True
                 except Exception:
                     error = ScriptError(

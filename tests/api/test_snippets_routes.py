@@ -671,3 +671,75 @@ def test_run_refuses_a_guest_recorded_artifact_op(
     assert r.status_code == 500, r.text
     # ...and nothing artifact-shaped reached the client for staging
     assert "update_artifact" not in r.text
+
+
+def test_run_value_with_element_inputs(client: TestClient) -> None:
+    """A two-arg `value` gets its named inputs bound to Element handles."""
+    _seed_model(client)
+    r = client.post(
+        papi("/snippets/run"),
+        json={
+            "run_id": "ri1",
+            "code": "def value(elements, inputs):\n    return [e.id for e in inputs['owners']]\n",
+            "entry": "value",
+            "element_ids": ["b1"],
+            "inputs": {"owners": {"kind": "elements", "ids": ["b2", "b1"]}},
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["error"] is None
+    assert body["result_repr"] == "['b2', 'b1']"
+
+
+def test_run_value_with_scalar_inputs(client: TestClient) -> None:
+    _seed_model(client)
+    r = client.post(
+        papi("/snippets/run"),
+        json={
+            "run_id": "ri2",
+            "code": "def value(elements, inputs):\n    return inputs['qty']\n",
+            "entry": "value",
+            "element_ids": ["b1"],
+            "inputs": {"qty": {"kind": "scalars", "values": [1, "a", None]}},
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["error"] is None
+    assert body["result_repr"] == "[1, 'a', None]"
+
+
+def test_run_two_arg_value_without_inputs_binds_an_empty_dict(client: TestClient) -> None:
+    """No TypeError: the console binds by the function's own arity, so an
+    unbound two-arg `value` sees `{}` and fails (if at all) on the key it
+    actually wanted."""
+    _seed_model(client)
+    r = client.post(
+        papi("/snippets/run"),
+        json={
+            "run_id": "ri3",
+            "code": "def value(elements, inputs):\n    return inputs\n",
+            "entry": "value",
+            "element_ids": ["b1"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["error"] is None
+    assert body["result_repr"] == "{}"
+
+
+def test_run_inputs_on_a_non_value_entry_422(client: TestClient) -> None:
+    _seed_model(client)
+    r = client.post(
+        papi("/snippets/run"),
+        json={
+            "run_id": "ri4",
+            "code": "def step(el):\n    return el.id\n",
+            "entry": "step",
+            "element_ids": ["b1"],
+            "inputs": {"qty": {"kind": "scalars", "values": [1]}},
+        },
+    )
+    assert r.status_code == 422, r.text

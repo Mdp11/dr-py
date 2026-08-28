@@ -7,6 +7,7 @@
 	// a whole new column via `onChange`. Unlike PropertyColumnEditor, split
 	// has no metamodel-derived disable — a script's value shape is not
 	// statically knowable, so the toggle is always enabled.
+	import { initialInputKind, type DeclaredInput } from '$lib/snippet/run-inputs';
 	import type { Column, RowSource } from '$lib/api/types';
 	import ColumnSourceEditor from './ColumnSourceEditor.svelte';
 	import ScriptInputsEditor from './ScriptInputsEditor.svelte';
@@ -29,6 +30,16 @@
 		tabId: string;
 		onChange: (next: ScriptColumn) => void;
 	} = $props();
+
+	// What the Test panel needs to offer a binding row per input: the name the
+	// snippet reads, plus which control that row starts on (a hint from the
+	// referenced column's kind — the row's own selector always wins).
+	const declaredInputs = $derived<DeclaredInput[]>(
+		column.inputs.map((inp) => ({
+			name: inp.name,
+			kind: initialInputKind(columns[inp.ref.index])
+		}))
+	);
 
 	function setSplit(e: Event): void {
 		const checked = (e.currentTarget as HTMLInputElement).checked;
@@ -67,7 +78,7 @@
 		snippet={column.snippet}
 		entry="value"
 		collapseKey={`${tabId}::col:${columnIndex}`}
-		withInputs={column.inputs.length > 0}
+		{declaredInputs}
 		onChange={(s) => onChange({ ...column, snippet: s })}
 	/>
 	<div class="flex flex-wrap items-center gap-2">

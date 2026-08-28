@@ -145,7 +145,21 @@ declares `inputs` calls `value(elements, inputs)` instead — `inputs` is a
 `dict[str, list]`, one key per declared input, each value the `Element`
 handles or scalars the named column holds for the row (`[]` for an empty
 cell). Lint accepts a `value` of arity 1 or 2; `step`/`transform` stay
-one-arg. This is the same calling convention an embedded session (see
+one-arg.
+
+A **console run has no table row to resolve those inputs from**, so
+`RunRequest.inputs` (`SnippetRunIn.inputs` on the wire, `value`-only —
+422 otherwise) carries them bound by hand in the same
+`{"kind": "elements"|"scalars", ...}` shape, and the two one-shot runners
+bind by the entry function's **own arity**: a two-argument `value` always
+receives a dict — empty when the caller sent none — rather than a
+missing-argument `TypeError`. The embedded path decides the other way round
+(`facade_src._dr_call_entry` branches on whether inputs were passed, gated
+by `table/script_inputs.evaluate_script_column`'s arity check) and must:
+there the column's declared inputs are the contract, and an arity mismatch
+is a real definition error the cell reports.
+
+This is the same calling convention an embedded session (see
 "Evaluation sessions" below) uses for its `value`/`step` calls — the only difference is that a console run boots a fresh guest per
 call, while a session boots once and serves many calls off the same warm
 instance.

@@ -1176,6 +1176,27 @@ class ArtifactUpdateIn(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ElementsInputIn(BaseModel):
+    """A named run input carrying elements — mirrors
+    `core.script.runner.ElementsInput`."""
+
+    kind: Literal["elements"]
+    ids: list[str] = Field(default_factory=list)
+
+
+class ScalarsInputIn(BaseModel):
+    """A named run input carrying scalar values — mirrors
+    `core.script.runner.ScalarsInput`."""
+
+    kind: Literal["scalars"]
+    values: list[Any] = Field(default_factory=list)
+
+
+SnippetInputIn = Annotated[
+    ElementsInputIn | ScalarsInputIn, Field(discriminator="kind")
+]
+
+
 class SnippetRunIn(BaseModel):
     """Body for POST /snippets/run. Exactly one of `code` (inline) /
     `artifact_id` (a saved `code_snippet` artifact) must be supplied — mirrors
@@ -1186,6 +1207,10 @@ class SnippetRunIn(BaseModel):
     artifact_id: str | None = None
     entry: Literal["script", "value", "step"] = "script"
     element_ids: list[str] = Field(default_factory=list)
+    #: Named inputs for a two-argument `value` — what a script column's
+    #: `inputs` resolve to for one row, bound by hand because a console run
+    #: has no row to resolve them from.
+    inputs: dict[str, SnippetInputIn] | None = None
 
     @model_validator(mode="after")
     def _exactly_one(self) -> SnippetRunIn:
@@ -1202,6 +1227,8 @@ class SnippetRunIn(BaseModel):
             raise ValueError("entry 'value' requires at least one element id")
         if self.entry == "step" and len(self.element_ids) != 1:
             raise ValueError("entry 'step' requires exactly one element id")
+        if self.inputs is not None and self.entry != "value":
+            raise ValueError("`inputs` is only meaningful for entry 'value'")
         return self
 
 

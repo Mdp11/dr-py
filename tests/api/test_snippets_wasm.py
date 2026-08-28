@@ -116,6 +116,51 @@ def test_wasm_value_entry(wasm_runner: WasmScriptRunner) -> None:
     assert res.result_repr == "['Building Two', 'Building One']"
 
 
+def test_wasm_value_entry_with_inputs(wasm_runner: WasmScriptRunner) -> None:
+    """A two-argument `value` gets its bound inputs — element specs as
+    handles, scalar specs as values — and an unbound one gets `{}` rather
+    than a missing-argument TypeError."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    code = (
+        "def value(elements, inputs):\n"
+        "    return [e['name'] for e in inputs['owners']] + inputs['qty']\n"
+    )
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(
+            code=code,
+            entry="value",
+            element_ids=["b1"],
+            inputs={
+                "owners": {"kind": "elements", "ids": ["b2"]},
+                "qty": {"kind": "scalars", "values": [7]},
+            },
+        ),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert res.error is None, res.error
+    assert res.result_repr == "['Building Two', 7]"
+
+    unbound = wasm_runner.run(
+        tiny_model(),
+        RunRequest(
+            code="def value(elements, inputs):\n    return inputs\n",
+            entry="value",
+            element_ids=["b1"],
+        ),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert unbound.error is None, unbound.error
+    assert unbound.result_repr == "{}"
+
+
 def test_wasm_step_entry(wasm_runner: WasmScriptRunner) -> None:
     """`entry="step"` calls `step(el)` with the single element for the one id
     in `element_ids` — the guest bootstrap's non-list branch (parity with
