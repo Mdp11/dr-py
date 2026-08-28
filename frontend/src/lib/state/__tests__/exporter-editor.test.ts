@@ -343,7 +343,11 @@ describe('saving an exporter draft', () => {
 				payload: {
 					schema_version: 1,
 					output: { mode: 'zip', filename: '', manifest: true },
-					entries: EXPORTER_ARTIFACT.payload.entries.map((e) => ({ ...e, folder: '' }))
+					entries: EXPORTER_ARTIFACT.payload.entries.map((e) => ({
+						...e,
+						folder: '',
+						split_folder: true
+					}))
 				}
 			}
 		]);

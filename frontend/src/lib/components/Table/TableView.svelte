@@ -25,6 +25,7 @@
 		hasSuspendedTableEdits,
 		reloadTableDraft,
 		remapTableSortForInsert,
+		remapTableSortForRemove,
 		requestScriptErrors,
 		requestScrollToCell,
 		resumeTableEvaluation,
@@ -48,7 +49,9 @@
 		insertColumn,
 		newNavigationColumn,
 		newPropertyColumn,
-		newScriptColumn
+		newScriptColumn,
+		removeColumn,
+		replaceColumn
 	} from '$lib/table/columns';
 	import {
 		SETTINGS_MIN_H,
@@ -449,6 +452,33 @@
 		openSettings(at);
 	}
 
+	// The header menu's "Delete column"/"Hide column": direct edits, no dialog.
+	// Delete pairs `removeColumn` with the sort remap exactly like
+	// ColumnManager's `onRemove`; a ColumnInUseError (a later column still
+	// references this one) surfaces in the same slot as a save failure and
+	// leaves definition and sort untouched.
+	let columnError = $state<string | null>(null);
+	function removeColumnFromHeader(index: number): void {
+		const d = getTableDraft(tabId);
+		if (!d) return;
+		columnError = null;
+		try {
+			const next = removeColumn(d.definition, index);
+			remapTableSortForRemove(tabId, index);
+			updateTableDefinition(tabId, next);
+		} catch (e) {
+			columnError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function hideColumnFromHeader(index: number): void {
+		const d = getTableDraft(tabId);
+		const col = d?.definition.columns[index];
+		if (!d || !col) return;
+		columnError = null;
+		updateTableDefinition(tabId, replaceColumn(d.definition, index, { ...col, hidden: true }));
+	}
+
 	/** The Reorder dialog (display order only) — modal, and independent of
 	 * the Columns panel: it edits nothing the grid needs re-evaluated. */
 	let reorderOpen = $state(false);
@@ -834,12 +864,19 @@
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
 		{/if}
+		{#if columnError}
+			<p class="px-3 py-1 text-xs text-destructive" data-testid="table-column-error">
+				{columnError}
+			</p>
+		{/if}
 		<div class="min-h-0 flex-1" data-testid="table-grid-host" inert={locked}>
 			<TableGrid
 				{tabId}
 				onEditColumn={editable ? editColumn : undefined}
 				onAddColumn={editable ? addColumnFromHeader : undefined}
 				onInsertColumn={editable ? insertColumnFromHeader : undefined}
+				onRemoveColumn={editable ? removeColumnFromHeader : undefined}
+				onHideColumn={editable ? hideColumnFromHeader : undefined}
 			/>
 		</div>
 	</div>

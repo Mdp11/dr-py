@@ -92,6 +92,9 @@ class ExporterEntry(BaseModel):
     name: str = ""
     #: Folder path template inside the zip; "" = archive root. Multi-segment.
     folder: str = ""
+    #: Split entries only: nest the per-element files under a folder named
+    #: by the entry (`{folder}/{name}/`) or land them directly in `folder`.
+    split_folder: bool = True
     format: ExportFormat = "xlsx"
     columns: list[ColumnOverride] = Field(default_factory=list)
     export_order: list[int] = Field(default_factory=list)

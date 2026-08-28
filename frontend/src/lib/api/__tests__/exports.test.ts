@@ -102,6 +102,7 @@ describe('previewTransform', () => {
 			name: '',
 			format: 'json' as const,
 			folder: '',
+			split_folder: true,
 			columns: [],
 			export_order: [],
 			show_row_numbers: false,

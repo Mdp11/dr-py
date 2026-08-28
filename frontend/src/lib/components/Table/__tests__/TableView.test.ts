@@ -6,7 +6,7 @@
 // mount/flushSync/unmount Svelte-5 render convention (see TableGrid.test.ts)
 // rather than @testing-library/svelte.
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScriptWarning } from '$lib/api/types';
 // The export dialog's JSON preview talks to `POST /tables/json-preview`
@@ -55,6 +55,7 @@ const h = vi.hoisted(() => ({
 	revertSuspendedTableEdits: vi.fn(),
 	resumeTableEvaluation: vi.fn(),
 	remapTableSortForInsert: vi.fn(),
+	remapTableSortForRemove: vi.fn(),
 	updateTableDisplayOrder: vi.fn(),
 	/** Mirrors `hasSuspendedTableEdits`: did the definition change since the
 	 * settings dialog opened? Drives the discard-confirmation gate. */
@@ -128,10 +129,10 @@ vi.mock('$lib/state', () => ({
 	// ColumnManager's own reorder/clone dependencies — needed once a test opens
 	// the dialog and ColumnManager mounts for real.
 	remapTableSortForInsert: h.remapTableSortForInsert,
+	remapTableSortForRemove: h.remapTableSortForRemove,
 	remapTableSortForMove: vi.fn(),
 	// The Reorder dialog's (and the header drag's) reload-free write.
 	updateTableDisplayOrder: h.updateTableDisplayOrder,
-	remapTableSortForRemove: vi.fn(),
 	// RowSourceEditor's dependencies (mounted once the settings dialog opens
 	// unfocused — the "shows every column" path renders it for real).
 	closeDraft: vi.fn(),
@@ -1656,6 +1657,96 @@ describe('TableView header insert menu', () => {
 			// the mocked store never updates h.draft, so the dialog focuses on
 			// the requested index over the (unchanged) two-column draft
 			expect(document.body.textContent).toContain('Column settings');
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('TableView header delete / hide', () => {
+	const TWO_COLS = {
+		schema_version: 1,
+		default_cell_mode: 'collapse',
+		show_row_numbers: false,
+		export_order: [],
+		display_order: [],
+		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+		columns: [
+			{
+				kind: 'element',
+				source: { kind: 'row', chain_index: 0 },
+				header: '',
+				width_px: null,
+				hidden: false
+			},
+			{
+				kind: 'property',
+				source: { kind: 'row', chain_index: 0 },
+				name: 'mass',
+				mode: 'collapse',
+				keep_empty: true,
+				header: '',
+				width_px: null,
+				hidden: false
+			}
+		]
+	};
+
+	beforeEach(() => {
+		h.page = {
+			columns: [
+				{ kind: 'element', header: 'Scope', width_px: null },
+				{ kind: 'property', header: 'Mass', width_px: null }
+			],
+			rows: [],
+			total: 0,
+			truncated: false,
+			offset: 0,
+			model_rev: 1
+		};
+		(h.draft as { definition: unknown }).definition = structuredClone(TWO_COLS);
+	});
+
+	afterEach(() => {
+		h.page = undefined;
+		h.remapTableSortForRemove.mockClear();
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', scope: {} },
+			columns: []
+		};
+	});
+
+	it('"Delete column" removes the column and remaps the sort, like the Columns panel', () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="header-edit-1"]') as HTMLElement).click();
+			flushSync();
+			(document.querySelector('[data-testid="header-delete-column-1"]') as HTMLElement).click();
+			flushSync();
+			expect(updateTableDefinition).toHaveBeenCalledTimes(1);
+			const defn = (updateTableDefinition as unknown as { mock: { calls: unknown[][] } }).mock
+				.calls[0][1] as { columns: { kind: string }[] };
+			expect(defn.columns.map((col) => col.kind)).toEqual(['element']);
+			expect(h.remapTableSortForRemove).toHaveBeenCalledWith('tbl:draft:1', 1);
+			// No dialog: the header action is a direct edit.
+			expect(document.body.textContent).not.toContain('Column settings');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('"Hide column" flips hidden on just that column', () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="header-edit-1"]') as HTMLElement).click();
+			flushSync();
+			(document.querySelector('[data-testid="header-hide-column-1"]') as HTMLElement).click();
+			flushSync();
+			expect(updateTableDefinition).toHaveBeenCalledTimes(1);
+			const defn = (updateTableDefinition as unknown as { mock: { calls: unknown[][] } }).mock
+				.calls[0][1] as { columns: { hidden: boolean }[] };
+			expect(defn.columns.map((col) => col.hidden)).toEqual([false, true]);
+			expect(h.remapTableSortForRemove).not.toHaveBeenCalled();
 		} finally {
 			unmount(c);
 		}

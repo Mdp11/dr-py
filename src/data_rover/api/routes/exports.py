@@ -453,7 +453,19 @@ def _execute_export(
             # (`_dedupe_path` keys on the FULL member path), so two entries
             # landing in different folders never force a suffix on each other.
             prefix = "/".join(segments) + "/" if segments else ""
-            if res.archive:
+            if res.archive and not entry.split_folder:
+                # The entry opted out of its own folder: every partition is a
+                # plain member of `prefix` and dedupes there one by one, in
+                # row order, against siblings AND its own earlier partitions.
+                entry_paths = []
+                for fn, _blob in res.files:
+                    stem, dot, ext = fn.rpartition(".")
+                    deduped = _dedupe_path(prefix, sanitize_stem(stem) or "export", taken)
+                    entry_paths.append(f"{prefix}{deduped}{dot}{ext}")
+                files.extend(
+                    zip(entry_paths, (blob for _fn, blob in res.files), strict=True)
+                )
+            elif res.archive:
                 # A split entry keeps its per-element files together under one
                 # folder named by the entry, now nested BENEATH the user
                 # folder; root-name collisions within that folder dedupe `_2`.

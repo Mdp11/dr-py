@@ -1098,6 +1098,9 @@ export const ExporterEntrySchema = z.object({
 	name: z.string().default(''),
 	format: z.enum(EXPORT_FORMATS).default('xlsx'),
 	folder: z.string().default(''),
+	// Split entries only: nest the per-element files under `{folder}/{name}/`
+	// (true) or land them directly in `folder` (false).
+	split_folder: z.boolean().default(true),
 	columns: z.array(ColumnOverrideSchema).default([]),
 	export_order: z.array(z.number().int()).default([]),
 	show_row_numbers: z.boolean().default(false),

@@ -142,6 +142,65 @@ def test_split_entry_lands_in_a_folder(client):
     assert names and all(n.startswith("per-el/") and n.endswith(".json") for n in names)
 
 
+def test_split_entry_without_split_folder_lands_directly_in_the_entry_folder(client):
+    """`split_folder: false` drops the per-entry folder: the partitions land
+    straight under the entry's own `folder` (here `grp/`), not `grp/per-el/`."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "gamma")
+    art = _mk_export(
+        client,
+        [{
+            "source": {"ref": t}, "name": "per-el", "format": "json",
+            "folder": "grp", "split_folder": False,
+            "json_split": {"enabled": True, "filename_template": "${name}"},
+        }],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    names = _names(r)
+    assert names
+    assert all(n.startswith("grp/") and n.endswith(".json") for n in names)
+    assert not any(n.startswith("grp/per-el/") for n in names)
+    assert all(n.count("/") == 1 for n in names)
+
+
+def test_split_entry_without_split_folder_dedupes_against_siblings(client):
+    """With the folder gone, a split file shares the entry folder's dedupe
+    namespace: a plain sibling that renders to the same member path is
+    suffixed rather than silently overwriting the split member."""
+    _bootstrap_model(client)
+    scoped_payload = {
+        "row_source": {
+            "kind": "scope", "types": ["Block"],
+            "criteria": [{"type": "name_id", "field": "name", "op": "equals", "value": "root"}],
+        },
+        "columns": [{"kind": "element", "source": {"kind": "row"}, "header": "Block"}],
+    }
+    r = client.post(
+        papi("/artifacts"),
+        json={"kind": "table", "name": "solo", "payload": scoped_payload},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 201
+    t = r.json()["id"]
+    art = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t}, "name": "per-el", "folder": "grp",
+                "format": "json", "split_folder": False,
+                "json_split": {"enabled": True, "filename_template": "${name}"},
+            },
+            {"source": {"ref": t}, "name": "root", "folder": "grp", "format": "json"},
+        ],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    names = _names(r)
+    assert len(names) == len(set(names))
+    assert set(names) == {"grp/root.json", "grp/root_2.json"}
+
+
 def test_entry_name_falls_back_to_the_table_name(client):
     _bootstrap_model(client)
     t = _mk_table(client, "delta")

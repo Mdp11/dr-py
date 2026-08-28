@@ -216,8 +216,8 @@
 	/** Per-kind accent for the header band's kind badge, so ELEMENT /
 	 * PROPERTY / NAVIGATION / SCRIPT are distinguishable at a glance in a long
 	 * column list. All four tokens are defined per-theme in app.css, and the
-	 * DARK theme passes WCAG AA (roughly 5.6-6.4:1 against the band's `bg-
-	 * muted/50`) — but the LIGHT variants measured against that same
+	 * DARK theme passes WCAG AA (roughly 5.6-6.4:1 against the band's
+	 * `bg-muted`) — but the LIGHT variants measured against that same
 	 * background come in under AA (roughly 2.7:1 for warning, 3.6:1 for
 	 * success, 3.8:1 for info, all below the 4.5:1 threshold). That is a real
 	 * gap, not a hypothetical one — it just has no user impact TODAY because
@@ -305,19 +305,21 @@
 					>
 						<!-- The header band: the column's identity (kind + name) set off
 						     from the editor body below it, which is otherwise a wall of
-						     controls in the same visual register. `rounded-t` (not just
+						     controls in the same visual register — opaque `bg-muted`
+						     (a half-transparent tint over `bg-card` read as the same
+						     surface) plus a solid bottom rule. `rounded-t` (not just
 						     `border-b`) matches the card's own `rounded` corners since
 						     the card does not clip to them via `overflow-hidden` — see
 						     the why-comment on the card above. An `element` column has no
 						     editor body (the guard below never renders one), so the band
 						     IS the whole card for that kind: it also picks up `rounded-b`
 						     to match the card's bottom corners (otherwise a few square px
-						     of `bg-muted/50` poked past them), and drops `border-b`, which
+						     of `bg-muted` poked past them), and drops `border-b`, which
 						     would otherwise draw a hairline across the bottom of a card
 						     with nothing beneath it. -->
 						<div
 							data-testid="column-header-band-{i}"
-							class="flex flex-wrap items-center gap-1.5 rounded-t border-border/70 bg-muted/50 p-1.5"
+							class="flex flex-wrap items-center gap-1.5 rounded-t border-border bg-muted p-1.5"
 							class:border-b={col.kind !== 'element'}
 							class:rounded-b={col.kind === 'element'}
 							class:opacity-60={col.hidden}
@@ -482,12 +484,10 @@
 			     against the panel (its `Dialog.Content` is transformed), so the
 			     ghost scrolled along with the list on a wheel scroll and stayed
 			     behind while the pointer went on without it.
-			     Opaque background, unlike the header band's `bg-muted/50`: the
-			     band sits on the (opaque) card, but this ghost floats over the
-			     column list itself, and `bg-muted/50` stacked with `opacity-90`
-			     below works out to ~45% alpha — the list showed through and the
-			     ghost's own label got hard to read. The badge tint below still
-			     mirrors the band's per-kind colours. -->
+			     `bg-card`, not the band's `bg-muted`: this ghost floats over the
+			     column list itself under `opacity-90`, and a lighter surface
+			     there made the list show through and the label hard to read.
+			     The badge tint below still mirrors the band's per-kind colours. -->
 			<div
 				use:portal
 				data-testid="column-drag-ghost"

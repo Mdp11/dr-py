@@ -34,6 +34,7 @@ function entry(overrides: Partial<ExporterEntry> = {}): ExporterEntry {
 		name: 'doc',
 		format: 'json',
 		folder: '',
+		split_folder: true,
 		columns: [],
 		export_order: [],
 		show_row_numbers: false,

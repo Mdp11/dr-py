@@ -118,6 +118,11 @@ def test_output_options_default_and_roundtrip():
     )
     assert d2.output.mode == "bare"
     assert d2.entries[0].folder == "a/b"
+    assert d2.entries[0].split_folder is True
+    d3 = EXPORTER_ADAPTER.validate_python(
+        {"entries": [{"source": {"ref": "t1"}, "split_folder": False}]}
+    )
+    assert d3.entries[0].split_folder is False
     dumped = d2.model_dump()
     assert EXPORTER_ADAPTER.validate_python(dumped) == d2
 

@@ -236,18 +236,20 @@ describe('ExporterTab', () => {
 		await vi.waitFor(() =>
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
-		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
-		name.value = 'Renamed';
-		name.dispatchEvent(new Event('input', { bubbles: true }));
+		const folder = document.querySelector<HTMLInputElement>(
+			'[data-testid="export-entry-0-folder"]'
+		)!;
+		folder.value = 'moved';
+		folder.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		document.querySelector<HTMLButtonElement>('[data-testid="exporter-save"]')!.click();
 		flushSync();
-		// `{kind: 'update_artifact'}` alone would pass even if the name input
+		// `{kind: 'update_artifact'}` alone would pass even if the folder input
 		// were never wired to `updateExporterEntry` (saveExporterDraft stages
 		// unconditionally) — assert the payload actually carries the edit.
 		expect(getStagedArtifactOps()[0]).toMatchObject({
 			kind: 'update_artifact',
-			payload: { entries: [{ name: 'Renamed' }] }
+			payload: { entries: [{ folder: 'moved' }] }
 		});
 		unmount(host);
 	});
@@ -329,9 +331,15 @@ describe('ExporterTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		expect(document.body.textContent).toContain('Checked out by peer@x');
-		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
-		expect(name.disabled).toBe(true);
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Checked out by peer@x'));
+		const folder = document.querySelector<HTMLInputElement>(
+			'[data-testid="export-entry-0-folder"]'
+		)!;
+		expect(folder.disabled).toBe(true);
+		const toggle = document.querySelector<HTMLInputElement>(
+			'[data-testid="export-entry-0-split-folder"]'
+		)!;
+		expect(toggle.disabled).toBe(true);
 	});
 
 	it('keeps the export button disabled for a saved-but-uncommitted (temp-id) draft with no entries', async () => {
@@ -466,6 +474,44 @@ describe('ExporterTab', () => {
 		expect(getExporterDraft('exp:art-1')!.entries[0].folder).toBe('nested/path');
 	});
 
+	// The entry's name is the picked table's name and is not editable in
+	// place: clearing it had no visible effect (the server falls back to the
+	// table name anyway), which read as a bug.
+	it('renders the entry name read-only', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+
+		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0-name"]')!;
+		expect(name).not.toBeNull();
+		expect(name.readOnly).toBe(true);
+	});
+
+	it('renders a split-folder toggle right of the folder input and stages it', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+
+		const folder = document.querySelector<HTMLInputElement>(
+			'[data-testid="export-entry-0-folder"]'
+		)!;
+		const toggle = document.querySelector<HTMLInputElement>(
+			'[data-testid="export-entry-0-split-folder"]'
+		)!;
+		expect(toggle).not.toBeNull();
+		expect(toggle.checked).toBe(true);
+		// Immediately to the right: the toggle's label is the folder input's next sibling.
+		expect(folder.nextElementSibling?.contains(toggle)).toBe(true);
+
+		toggle.click();
+		flushSync();
+		expect(getExporterDraft('exp:art-1')!.entries[0].split_folder).toBe(false);
+	});
+
 	// A disabled input swallows clicks with no event and no console output —
 	// exactly the "Add table… does not work" report against a project with no
 	// committed tables. The empty picker must SAY why it is dead, and
@@ -563,9 +609,11 @@ describe('ExporterTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
-		name.value = 'Renamed';
-		name.dispatchEvent(new Event('input', { bubbles: true }));
+		const folder = document.querySelector<HTMLInputElement>(
+			'[data-testid="export-entry-0-folder"]'
+		)!;
+		folder.value = 'renamed';
+		folder.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		expect(getExporterDraft('exp:art-1')!.dirty).toBe(true);
 
@@ -590,9 +638,9 @@ describe('ExporterTab', () => {
 		expect(draftSpy).toHaveBeenCalledTimes(1);
 		const [definitionArg, nameArg] = draftSpy.mock.calls[0];
 		expect(definitionArg.entries.length).toBe(1);
-		// The whole point of the draft path: the uncommitted rename actually
+		// The whole point of the draft path: the uncommitted edit actually
 		// travels in the sent definition, not just the entry count.
-		expect(definitionArg.entries[0].name).toBe('Renamed');
+		expect(definitionArg.entries[0].folder).toBe('renamed');
 		expect(nameArg).toBe(getExporterDraft('exp:art-1')!.name);
 	});
 

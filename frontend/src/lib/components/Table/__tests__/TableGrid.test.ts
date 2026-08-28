@@ -756,6 +756,71 @@ describe('TableGrid display order', () => {
 		}
 	});
 
+	it('the header menu offers Delete/Hide right after Edit and reports the definition index', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
+		const onRemoveColumn = vi.fn();
+		const onHideColumn = vi.fn();
+		const c = mount(TableGrid, {
+			target: document.body,
+			props: {
+				tabId: 'tbl:draft:delhide',
+				onEditColumn: vi.fn(),
+				onInsertColumn: vi.fn(),
+				onRemoveColumn,
+				onHideColumn
+			}
+		});
+		flushSync();
+		try {
+			(document.querySelector('[data-testid="header-edit-1"]') as HTMLElement).click();
+			flushSync();
+			const edit = document.querySelector('[data-testid="header-edit-column-1"]') as HTMLElement;
+			const del = document.querySelector('[data-testid="header-delete-column-1"]') as HTMLElement;
+			const hide = document.querySelector('[data-testid="header-hide-column-1"]') as HTMLElement;
+			expect(del).not.toBeNull();
+			expect(hide).not.toBeNull();
+			// Ordering: Edit, Delete, Hide, then the insert groups.
+			expect(edit.nextElementSibling).toBe(del);
+			expect(del.nextElementSibling).toBe(hide);
+			hide.click();
+			flushSync();
+			expect(onHideColumn).toHaveBeenCalledWith(1);
+			(document.querySelector('[data-testid="header-edit-1"]') as HTMLElement).click();
+			flushSync();
+			(document.querySelector('[data-testid="header-delete-column-1"]') as HTMLElement).click();
+			flushSync();
+			expect(onRemoveColumn).toHaveBeenCalledWith(1);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the header menu disables Delete on the last element column, like the Columns panel', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
+		const onRemoveColumn = vi.fn();
+		const c = mount(TableGrid, {
+			target: document.body,
+			props: { tabId: 'tbl:draft:delguard', onEditColumn: vi.fn(), onRemoveColumn }
+		});
+		flushSync();
+		try {
+			(document.querySelector('[data-testid="header-edit-0"]') as HTMLElement).click();
+			flushSync();
+			const del = document.querySelector('[data-testid="header-delete-column-0"]') as HTMLElement;
+			expect(del).not.toBeNull();
+			expect(del.getAttribute('aria-disabled')).toBe('true');
+			del.click();
+			flushSync();
+			expect(onRemoveColumn).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('the header menu offers insert-before/after per kind and reports the definition index', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);

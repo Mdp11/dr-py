@@ -38,7 +38,9 @@
 		tabId,
 		onEditColumn,
 		onAddColumn,
-		onInsertColumn
+		onInsertColumn,
+		onRemoveColumn,
+		onHideColumn
 	}: {
 		tabId: string;
 		onEditColumn?: (index: number) => void;
@@ -46,7 +48,20 @@
 		/** Insert a fresh column of `kind` before/after DEFINITION column
 		 * `index` (the header menu's "Insert before/after"). */
 		onInsertColumn?: (index: number, place: 'before' | 'after', kind: ColumnKind) => void;
+		/** Remove / hide DEFINITION column `index` — the header-menu twins of
+		 * the Columns panel's "remove" and eye buttons. */
+		onRemoveColumn?: (index: number) => void;
+		onHideColumn?: (index: number) => void;
 	} = $props();
+
+	// Same guard as the Columns panel's remove button: the last element column
+	// is the row's own binding and must stay.
+	const elementColumnCount = $derived(
+		getTableDraft(tabId)?.definition.columns.filter((c) => c.kind === 'element').length ?? 0
+	);
+	function removeDisabled(kind: string): boolean {
+		return kind === 'element' && elementColumnCount <= 1;
+	}
 
 	type ColumnKind = 'property' | 'navigation' | 'script';
 	const ADDABLE_KINDS: { kind: ColumnKind; label: string }[] = [
@@ -444,6 +459,27 @@
 							>
 								Edit column…
 							</DropdownMenu.Item>
+							{#if onRemoveColumn}
+								<DropdownMenu.Item
+									data-testid="header-delete-column-{v.i}"
+									disabled={removeDisabled(v.col.kind)}
+									title={removeDisabled(v.col.kind)
+										? 'The scope column cannot be removed'
+										: 'Remove this column'}
+									onSelect={() => onRemoveColumn?.(v.i)}
+								>
+									Delete column
+								</DropdownMenu.Item>
+							{/if}
+							{#if onHideColumn}
+								<DropdownMenu.Item
+									data-testid="header-hide-column-{v.i}"
+									title="Hide from the table and exports"
+									onSelect={() => onHideColumn?.(v.i)}
+								>
+									Hide column
+								</DropdownMenu.Item>
+							{/if}
 							{#if onInsertColumn}
 								{#each INSERT_PLACES as { place, label } (place)}
 									<DropdownMenu.Separator />

@@ -364,12 +364,16 @@
 							onpointerup={(e) => drag.onPointerUp(e)}
 							onpointercancel={(e) => drag.onPointerCancel(e)}>⠿</span
 						>
+						<!-- Read-only: the output name is the picked table's name. Clearing
+						     it had no visible effect (the server falls back to the table
+						     name), which read as a bug. -->
 						<input
-							class="min-w-40 flex-1 rounded border border-input bg-card px-2 py-1"
-							placeholder={tableName(entry.source.ref)}
-							value={entry.name}
-							disabled={disabledEntry}
-							oninput={(e) => updateExporterEntry(tabId, i, { name: e.currentTarget.value })}
+							data-testid="export-entry-{i}-name"
+							class="min-w-40 flex-1 rounded border border-input bg-muted/40 px-2 py-1 text-foreground/80"
+							value={entry.name || tableName(entry.source.ref)}
+							readonly
+							tabindex="-1"
+							title={entry.source.ref}
 						/>
 						<input
 							data-testid="export-entry-{i}-folder"
@@ -379,9 +383,20 @@
 							disabled={disabledEntry}
 							oninput={(e) => updateExporterEntry(tabId, i, { folder: e.currentTarget.value })}
 						/>
-						<span class="shrink-0 truncate text-muted-foreground" title={entry.source.ref}>
-							{tableName(entry.source.ref)}
-						</span>
+						<label
+							class="flex shrink-0 items-center gap-1 text-muted-foreground"
+							title="Split exports only: nest the per-element files under a folder named after the table, or put them directly under the folder path"
+						>
+							<input
+								type="checkbox"
+								data-testid="export-entry-{i}-split-folder"
+								checked={entry.split_folder}
+								disabled={disabledEntry}
+								onchange={(e) =>
+									updateExporterEntry(tabId, i, { split_folder: e.currentTarget.checked })}
+							/>
+							table folder
+						</label>
 						<div class="flex shrink-0 items-center gap-1">
 							{#each EXPORT_FORMATS as fmt (fmt)}
 								<button

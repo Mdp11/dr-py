@@ -83,6 +83,7 @@ export function entryForTable(tableId: string, defn: TableDefinition, name: stri
 		name,
 		format: 'xlsx',
 		folder: '',
+		split_folder: true,
 		// Deliberately NOT copied from the table at add time: a transform is a
 		// functional contract, not cosmetic presentation, and entry `null`
 		// means "no transform" (no-bleed).
