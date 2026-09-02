@@ -605,9 +605,10 @@ def preview_transform(
     settings: Settings = Depends(get_settings),
 ) -> TransformPreviewOut:
     """The exporter entry's Test button: render the entry's table the way
-    the export would (bounded to `PREVIEW_MAX_ROWS`, cache-only, never 202 —
-    `/tables/json-preview`'s stance), run its `transform(doc)` ONCE, and
-    return both documents plus what the snippet printed.
+    the export would (bounded to `PREVIEW_MAX_ROWS`, the sampled window
+    evaluated live, never 202 — `/tables/json-preview`'s stance), run its
+    `transform(doc)` ONCE, and return both documents plus what the snippet
+    printed.
 
     Read-only (viewer-callable; listed in `authz._READ_ONLY_POST_SUFFIXES`).
     The entry's own problems are 422s naming it, exactly as `/exports/run`
@@ -655,8 +656,6 @@ def preview_transform(
             cell_cache=session.script_cell_cache,
             rev=session.model_rev,
         )
-        if script_ctx is not None:
-            script_ctx.cache_only = True
         sample = render_json_sample(
             metamodel=metamodel,
             model=model,

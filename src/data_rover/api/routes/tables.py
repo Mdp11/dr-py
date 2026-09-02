@@ -714,6 +714,10 @@ def json_preview(
             cell_cache=session.script_cell_cache,
             rev=session.model_rev,
         )
+        # Whole-table passes are cache-only; the bounded sample below is
+        # evaluated LIVE like the grid's visible window, so a cold cache
+        # shows values rather than a pane full of `$error` markers for an
+        # export that will succeed once the sweep fills in.
         if script_ctx is not None:
             script_ctx.cache_only = True
         build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
@@ -721,6 +725,8 @@ def json_preview(
         ordered = order_rows(
             metamodel, model, defn, keys, sort, limits, script=script_ctx
         )
+        if script_ctx is not None:
+            script_ctx.cache_only = False
         window = ordered[:PREVIEW_MAX_ROWS]
         truncated = len(ordered) > len(window)
         layout = export_layout(defn)

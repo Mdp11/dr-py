@@ -135,10 +135,15 @@ def _element_json(model: Model, eid: str, mode: str) -> object:
 def render_cell(model: Model, cell: Cell, mode: str, *, single: bool = False) -> object:
     """One evaluated cell as a JSON-serializable value.
 
-    `single` collapses an `ElementsCell` to ONE value: empty -> `None`, one
-    element -> that element rendered per `mode`, more -> `ValueError` (the
-    routes' 422 mapping) — the caller prefixes the column name. Every other
-    cell kind ignores it, the way `mode` is ignored by a property column.
+    `single` collapses an ARRAY cell to ONE value: empty -> `None`, one item
+    -> that item (an element rendered per `mode`, a value as is), more ->
+    `ValueError` (the routes' 422 mapping) — the caller prefixes the column
+    name. Both array kinds collapse, `ElementsCell` AND `ValuesCell`: a
+    navigation column yields one or the other PER ROW (a scalar property step
+    reaches values on one row and nothing on the next), and a consumer sees
+    an array either way, so collapsing only the element kind would ship
+    `[5]` and `null` under the same setting. The scalar kinds (`ValueCell`,
+    `ElementCell`) ignore it, the way `mode` is ignored by a property column.
 
     Both "the type does not declare this property" and "declared but unset"
     render `null`: JSON has one absence, and the distinction the grid draws
@@ -152,6 +157,13 @@ def render_cell(model: Model, cell: Cell, mode: str, *, single: bool = False) ->
     if isinstance(cell, ValueCell):
         return None if not cell.present else cell.value
     if isinstance(cell, ValuesCell):
+        if single:
+            if len(cell.values) > 1:
+                raise ValueError(
+                    f"json_export.single: cell holds {len(cell.values)} "
+                    "values, expected at most one"
+                )
+            return cell.values[0] if cell.values else None
         # Always a list, length 1 included: a consumer must not have to
         # branch on arity to read a multi-source column.
         return list(cell.values)
@@ -221,6 +233,20 @@ def _render_column_cell(model: Model, col: Column, key: str, cell: Cell) -> obje
         return render_cell(model, cell, _mode_of(col), single=single)
     except ValueError as exc:
         raise ValueError(f"column {key!r}: {exc}") from None
+
+
+def _render_key_cell(model: Model, col: Column, cell: Cell) -> object:
+    """The document key read off `col`'s cell: `render_cell` with `single`
+    FORCED on, whatever the column's own setting says. A key is a scalar by
+    contract, so a navigation/script cell holding exactly one element or
+    value keys the document by it — an author must not have to flag the key
+    column `single` (it is data, not presentation of the member list, which
+    keeps rendering per its own settings). More than one is the key's own
+    error, worded for the key setting rather than for `single`."""
+    try:
+        return render_cell(model, cell, _mode_of(col), single=True)
+    except ValueError as exc:
+        raise ValueError(f"json_doc.key_column: {exc}") from None
 
 
 @dataclass(frozen=True)
@@ -411,11 +437,10 @@ def render_json_ex(
                 f"(table has {len(defn.columns)} columns)"
             )
         key_col = defn.columns[key_column]
-        key_name = keys.level[key_column] or f"#{key_column}"
         doc_keys = []
         seen: set[str] = set()
         for b in buckets:
-            rendered = _render_column_cell(model, key_col, key_name, b[0][1][key_column])
+            rendered = _render_key_cell(model, key_col, b[0][1][key_column])
             if (
                 rendered is None
                 or rendered == ""

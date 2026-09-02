@@ -227,3 +227,54 @@ def test_viewer_can_preview(client):
         headers={"x-user-id": "viewer-1", "x-user-email": "v@example.com"},
     )
     assert r.status_code == 200, r.text
+
+
+# A script column whose value differs per row, so it can key an object-shaped
+# document. Nothing here is cached before the first call: the preview must
+# evaluate its bounded sample LIVE (the grid's visible-window stance), not
+# cache-only, or a cold cache renders the key as `{"$error": ...}` and the
+# Test button 422s on an entry whose export succeeds (the export waits for
+# the sweep; the preview never does).
+KEYED_SCRIPT_TABLE = {
+    "row_source": {"kind": "scope", "types": ["Block"]},
+    "columns": [
+        {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+        {
+            "kind": "script",
+            "snippet": {
+                "definition": {
+                    "code": "def value(elements):\n    return elements[0].name\n"
+                }
+            },
+            "header": "Key",
+        },
+    ],
+}
+
+
+def test_preview_evaluates_a_script_key_column_live_on_a_cold_cache(client):
+    _bootstrap_model(client)
+    r = client.post(
+        papi("/artifacts"),
+        json={"kind": "table", "name": "keyed", "payload": KEYED_SCRIPT_TABLE},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 201
+    t = r.json()["id"]
+    r = _preview(
+        client,
+        {
+            "source": {"ref": t},
+            "name": "doc",
+            "format": "json",
+            "json_doc": {"shape": "object", "key_column": 1},
+            "transform": _inline("def transform(doc):\n    return sorted(doc)\n"),
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["error"] is None
+    import json
+
+    assert set(json.loads(body["input"])) == {"root", "p1", "p2"}
+    assert json.loads(body["output"]) == ["p1", "p2", "root"]

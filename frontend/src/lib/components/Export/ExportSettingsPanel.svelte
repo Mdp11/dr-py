@@ -346,7 +346,7 @@
 					</label>
 					<label
 						class="flex items-center gap-1 text-muted-foreground"
-						title="Render one value instead of an array; the export fails if any cell holds more than one element"
+						title="Render one value instead of an array; the export fails if any cell holds more than one item"
 					>
 						<input
 							type="checkbox"

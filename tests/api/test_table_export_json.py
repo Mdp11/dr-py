@@ -430,3 +430,40 @@ def test_json_preview_reports_the_single_violation(client):
     r = client.post(papi("/tables/json-preview"), json=body, headers=AUTH_HEADERS)
     assert r.status_code == 422, r.text
     assert "'Part'" in r.json()["detail"]
+
+
+def test_json_preview_evaluates_its_sample_live_when_a_runner_exists():
+    """The settings pane's sample is bounded (PREVIEW_MAX_ROWS), so its rows
+    are evaluated live like the grid's visible window — a cold cache must
+    show the value, not `{"$error": "not computed"}`, or the pane lies about
+    an export that will succeed. Whole-table build/order passes stay
+    cache-only; only the sampled window's render goes live."""
+    from data_rover.api.script_runner import get_runner
+
+    from tests.script.trusted_runner import TrustedRunner
+
+    seed_default_project()
+    app = create_app()
+    app.dependency_overrides[get_runner] = lambda: TrustedRunner()
+    try:
+        c = TestClient(app)
+        c.headers.update(AUTH_HEADERS)
+        _bootstrap_model(c)
+        body = _body(
+            [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+                {
+                    "kind": "script",
+                    "snippet": {
+                        "definition": {"code": "def value(elements):\n    return 1\n"}
+                    },
+                    "header": "Computed",
+                },
+            ]
+        )
+        r = c.post(papi("/tables/json-preview"), json=body, headers=AUTH_HEADERS)
+        assert r.status_code == 200, r.text
+        docs = json.loads(r.json()["sample"])
+        assert [d["Computed"] for d in docs] == [1, 1, 1]
+    finally:
+        app.dependency_overrides.clear()

@@ -1589,17 +1589,14 @@ def test_single_raises_on_more_than_one_element():
         _render_single(model, cell)
 
 
-def test_single_is_ignored_on_cells_that_are_never_arrays_of_elements():
+def test_single_is_ignored_on_cells_that_are_never_arrays():
     """Same tolerance as `value` on a property column: the flag means
-    nothing there and must not change the output."""
+    nothing on a scalar cell and must not change the output."""
     model, eid = _one_element_model()
     assert _render_single(model, ElementCell(element_id=eid)) == "Root"
     assert _render_single(
         model, ValueCell(present=True, value=7, element_id=None, editable=False)
     ) == 7
-    assert _render_single(
-        model, ValuesCell(present=True, values=["a"], total=1, truncated=False)
-    ) == ["a"]
 
 
 def _single_nav_doc() -> dict:
@@ -1646,3 +1643,102 @@ def test_single_is_off_by_default_so_a_one_element_cell_stays_a_list():
     docs = _render(mm, model, doc)
     root = next(d for d in docs if d["Name"] == "Root")
     assert root["Component"] == ["Part 1", "Part 2"]
+
+
+def test_single_collapses_a_values_cell_like_an_elements_cell():
+    """A value-projected navigation (a scalar property step) renders a
+    `ValuesCell`; to the consumer that is an array exactly like an
+    `ElementsCell`, so `single` collapses it the same way — otherwise the
+    same column ships `[5]` on a row that reached a value and `null` on a
+    row that reached nothing."""
+    model, _ = _one_element_model()
+    assert (
+        _render_single(
+            model, ValuesCell(present=True, values=["a"], total=1, truncated=False)
+        )
+        == "a"
+    )
+    assert (
+        _render_single(
+            model, ValuesCell(present=True, values=[], total=0, truncated=False)
+        )
+        is None
+    )
+    with pytest.raises(ValueError, match="2 values"):
+        _render_single(
+            model, ValuesCell(present=True, values=[1, 2], total=2, truncated=False)
+        )
+
+
+def _single_value_nav_doc() -> dict:
+    doc = _single_nav_doc()
+    doc["columns"][1]["navigation"]["definition"]["steps"].append(
+        {"kind": "property", "property_name": "mass"}
+    )
+    return doc
+
+
+def test_single_through_render_json_collapses_a_value_projected_navigation():
+    mm = _parts_mm()
+    model = Model(mm)
+    root = model.create_element("Block")
+    model.set_property(root, "name", "Root")
+    part = model.create_element("Block")
+    model.set_property(part, "name", "Only Part")
+    model.set_property(part, "mass", 5)
+    model.connect("BlockHasPart", root.id, part.id)
+    docs = _render(mm, model, _single_value_nav_doc())
+    by_name = {d["Name"]: d["Component"] for d in docs}
+    assert by_name == {"Root": 5, "Only Part": None}
+
+
+def test_single_through_render_json_names_the_column_on_a_multi_value_row():
+    mm = _parts_mm()
+    model = _parts_model(mm)  # Root reaches TWO masses
+    with pytest.raises(ValueError, match="'Component'.*2 values"):
+        _render(mm, model, _single_value_nav_doc())
+
+
+# ---- doc keys read through a one-element navigation cell ------------------
+
+
+def _nav_keys_doc() -> dict:
+    return {
+        "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+        "columns": [
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "name",
+                "header": "Name",
+            },
+            _hop_nav("collapse", group=False),
+        ],
+    }
+
+
+def test_doc_key_collapses_a_one_element_navigation_cell():
+    """A key must be a scalar, so a navigation cell holding exactly one
+    element keys the document by that element — the `single` collapse
+    applied implicitly, without the author having to flag the column."""
+    mm = _parts_mm()
+    model = Model(mm)
+    root = model.create_element("Block")
+    model.set_property(root, "name", "Root")
+    part = model.create_element("Block")
+    model.set_property(part, "name", "Only Part")
+    model.connect("BlockHasPart", root.id, part.id)
+    doc = _nav_keys_doc()
+    doc["row_source"]["criteria"] = [
+        {"type": "property", "name": "name", "op": "equals", "value": "Root"}
+    ]
+    docs, keys = _render_ex(mm, model, doc, key_column=1)
+    assert keys == ["Only Part"]
+    assert docs[0]["Component"] == ["Only Part"]  # the member list is untouched
+
+
+def test_doc_key_multi_element_navigation_cell_raises_naming_the_key():
+    mm = _parts_mm()
+    model = _parts_model(mm)  # Root has TWO parts
+    with pytest.raises(ValueError, match="key_column.*2 elements"):
+        _render_ex(mm, model, _nav_keys_doc(), key_column=1)

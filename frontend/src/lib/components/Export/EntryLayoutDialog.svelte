@@ -175,17 +175,21 @@
 						Pretty-print
 					</label>
 				{/if}
-				<label class="flex items-center gap-1">
-					On error cells
-					<select
+				<!-- `on_error` is a two-value enum on the wire, but "emit" is just the
+				     default degraded-not-failed stance every format shares, so the only
+				     real choice is whether an error cell should fail the run: one checkbox,
+				     not a select naming a mode nobody picks. -->
+				<label
+					class="flex items-center gap-1"
+					title="Unchecked: a failed or uncomputed cell ships as an in-band {'{'}&quot;$error&quot;: …{'}'} marker"
+				>
+					<input
+						type="checkbox"
 						data-testid="entry-json-doc-on-error"
-						class="rounded border border-input bg-card px-1.5 py-0.5"
-						value={jsonDoc?.on_error ?? 'emit'}
-						onchange={(e) => patchDoc({ on_error: e.currentTarget.value as 'emit' | 'fail' })}
-					>
-						<option value="emit">Emit markers</option>
-						<option value="fail">Fail the export</option>
-					</select>
+						checked={(jsonDoc?.on_error ?? 'emit') === 'fail'}
+						onchange={(e) => patchDoc({ on_error: e.currentTarget.checked ? 'fail' : 'emit' })}
+					/>
+					Fail the export if any cell errored
 				</label>
 				{#if (jsonDoc?.shape ?? 'array') === 'object' && jsonDoc?.key_column == null}
 					<span class="text-muted-foreground/70"

@@ -273,3 +273,28 @@ describe('EntryLayoutDialog', () => {
 		expect(document.querySelector('[data-testid="entry-json-doc-on-error"]')).not.toBeNull();
 	});
 });
+
+describe('on_error checkbox', () => {
+	it('is unchecked for emit, and checking it saves on_error fail', () => {
+		let saved: Partial<ExporterEntry> | null = null;
+		render({
+			tableDefinition: baseDefinition(),
+			entry: { ...entryOverridingColumn1(), format: 'json' },
+			onSave: (p) => {
+				saved = p;
+			},
+			onClose: () => {}
+		});
+		const box = document.querySelector<HTMLInputElement>(
+			'[data-testid="entry-json-doc-on-error"]'
+		)!;
+		expect(box.type).toBe('checkbox');
+		expect(box.checked).toBe(false);
+		box.click();
+		flushSync();
+		expect(box.checked).toBe(true);
+		document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-save"]')!.click();
+		flushSync();
+		expect(saved!.json_doc?.on_error).toBe('fail');
+	});
+});

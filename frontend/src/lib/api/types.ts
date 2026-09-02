@@ -910,8 +910,9 @@ export const JsonColumnOptionsSchema = z.object({
 	item_key: z.string().default(''),
 	value: z.enum(['name', 'id', 'object']).default('name'),
 	group: z.boolean().default(false),
-	/** One value instead of an array: empty -> null, one element -> that
-	 *  element per `value`, more -> the export 422s naming the column. */
+	/** One value instead of an array: empty -> null, one item -> that item
+	 *  (an element per `value`, a value as is), more -> the export 422s
+	 *  naming the column. */
 	single: z.boolean().default(false)
 });
 export type JsonColumnOptions = z.infer<typeof JsonColumnOptionsSchema>;
