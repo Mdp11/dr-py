@@ -118,7 +118,10 @@ describe('isProjectQuiet', () => {
 
 	it('is not quiet with only staged VIEW ops', () => {
 		expect(isProjectQuiet()).toBe(true);
-		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'New name' }, 'Rename folder');
+		stageViewOp(
+			{ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'New name' },
+			'Rename folder'
+		);
 		expect(isProjectQuiet()).toBe(false);
 	});
 

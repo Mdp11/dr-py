@@ -12,6 +12,7 @@ import {
 	VIEW_ROOT_ID
 } from '../ops';
 import type { ArtifactOp, ModelOp, Op, ViewOp } from '../ops';
+import { folderLeaseResource, isViewResource, viewResource, VIEW_RESOURCE_PREFIX } from '../ops';
 
 describe('createTempId', () => {
 	it('returns a string that starts with the temp prefix', () => {
@@ -76,8 +77,21 @@ describe('folder lock namespace', () => {
 		expect(isFolderResource('f1')).toBe(false);
 	});
 	it('view ops are assignable to Op', () => {
-		const op: ViewOp = { kind: 'rename_folder', id: 'f1', name: 'B' };
+		const op: ViewOp = { kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'B' };
 		const asOp: Op = op; // compile-time check
 		expect(asOp.kind).toBe('rename_folder');
+	});
+});
+
+describe('view lock namespace', () => {
+	it('prefixes view ids with view:', () => {
+		expect(viewResource('v1')).toBe('view:v1');
+		expect(VIEW_RESOURCE_PREFIX).toBe('view:');
+		expect(isViewResource('view:v1')).toBe(true);
+		expect(isViewResource('folder:v1')).toBe(false);
+	});
+	it("folderLeaseResource maps the root to the view's lease and a folder to folder:", () => {
+		expect(folderLeaseResource(VIEW_ROOT_ID, 'v1')).toBe('view:v1');
+		expect(folderLeaseResource('f1', 'v1')).toBe('folder:f1');
 	});
 });

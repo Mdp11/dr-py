@@ -414,13 +414,14 @@ def test_diff_unknown_rev_404(client: TestClient) -> None:
 
 
 def test_view_commit_diff_renders_ops_with_prior_names(client) -> None:
-    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
+    setup = create_folder_via_commit(client, "A")
+    vid, fid = setup["view_id"], setup["id_map"]["tmp_setup"]
     token = _folder_lease(client, fid)
     base = _rev(client)
     ops = [
-        {"kind": "rename_folder", "id": fid, "name": "A2"},
-        {"kind": "create_folder", "temp_id": "tmp_c", "parent_id": fid, "name": "C"},
-        {"kind": "place_element", "element_id": "e1", "folder_id": "tmp_c"},
+        {"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"},
+        {"kind": "create_folder", "view_id": vid, "temp_id": "tmp_c", "parent_id": fid, "name": "C"},
+        {"kind": "place_element", "view_id": vid, "element_id": "e1", "folder_id": "tmp_c"},
     ]
     r = client.post(
         papi("/commits"),
@@ -435,6 +436,7 @@ def test_view_commit_diff_renders_ops_with_prior_names(client) -> None:
     assert out["scope"] == ["view"]
     entries = out["view"]
     assert [e["kind"] for e in entries] == ["rename_folder", "create_folder", "place_element"]
+    assert {e["view_id"] for e in entries} == {vid}
     assert entries[0] == {
         **entries[0],
         "folder_id": fid,
@@ -448,14 +450,15 @@ def test_view_commit_diff_renders_ops_with_prior_names(client) -> None:
 
 
 def test_delete_folder_diff_carries_prior_name(client) -> None:
-    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
+    setup = create_folder_via_commit(client, "A")
+    vid, fid = setup["view_id"], setup["id_map"]["tmp_setup"]
     token = _folder_lease(client, fid, intent="delete")
     base = _rev(client)
     r = client.post(
         papi("/commits"),
         json={
             "base_rev": base,
-            "ops": [{"kind": "delete_folder", "id": fid}],
+            "ops": [{"kind": "delete_folder", "view_id": vid, "id": fid}],
             "message": "m",
             "lock_tokens": [token],
         },
@@ -467,7 +470,8 @@ def test_delete_folder_diff_carries_prior_name(client) -> None:
 
 
 def test_mixed_commit_scope_lists_both(client) -> None:
-    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
+    setup = create_folder_via_commit(client, "A")
+    vid, fid = setup["view_id"], setup["id_map"]["tmp_setup"]
     token = _folder_lease(client, fid)
     base = _rev(client)
     r = client.post(
@@ -476,7 +480,7 @@ def test_mixed_commit_scope_lists_both(client) -> None:
             "base_rev": base,
             "ops": [
                 {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node"},
-                {"kind": "rename_folder", "id": fid, "name": "A2"},
+                {"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"},
             ],
             "message": "m",
             "lock_tokens": [token],
@@ -493,7 +497,8 @@ def test_three_family_commit_renders_all_sections_without_leakage(
     """A single batch touching model, artifact, AND view content at once: the
     scope union lists all three families, and each section renders exactly
     its own family's change — nothing from one section leaks into another."""
-    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
+    setup = create_folder_via_commit(client, "A")
+    vid, fid = setup["view_id"], setup["id_map"]["tmp_setup"]
     token = _folder_lease(client, fid)
     base = _rev(client)
     r = client.post(
@@ -514,7 +519,7 @@ def test_three_family_commit_renders_all_sections_without_leakage(
                     "name": "s1",
                     "payload": SNIP,
                 },
-                {"kind": "rename_folder", "id": fid, "name": "A2"},
+                {"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"},
             ],
             "message": "m",
             "lock_tokens": [token],
@@ -542,6 +547,7 @@ def test_three_family_commit_renders_all_sections_without_leakage(
 
     # view half: exactly the rename, unaffected by the model/artifact creates
     assert [v["kind"] for v in body["view"]] == ["rename_folder"]
+    assert body["view"][0]["view_id"] == vid
     assert body["view"][0] == {
         **body["view"][0],
         "folder_id": fid,
@@ -560,8 +566,9 @@ def test_view_diff_covers_move_remove_and_placement_op_kinds(
     below, and RemoveElementOp/RemoveArtifactOp are the ops that exercise
     ``_view_diffs``'s ``getattr(op, "index"/"artifact_kind", None)``
     fallbacks (those op models carry neither field)."""
-    fa = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
-    fb = create_folder_via_commit(client, "B")["id_map"]["tmp_setup"]
+    setup = create_folder_via_commit(client, "A")
+    vid, fa = setup["view_id"], setup["id_map"]["tmp_setup"]
+    fb = create_folder_via_commit(client, "B", view_id=vid)["id_map"]["tmp_setup"]
 
     r = client.post(
         papi("/commits"),
@@ -592,9 +599,10 @@ def test_view_diff_covers_move_remove_and_placement_op_kinds(
         json={
             "base_rev": base,
             "ops": [
-                {"kind": "place_element", "element_id": eid, "folder_id": fa},
+                {"kind": "place_element", "view_id": vid, "element_id": eid, "folder_id": fa},
                 {
                     "kind": "place_artifact",
+                    "view_id": vid,
                     "artifact_id": aid,
                     "artifact_kind": "code_snippet",
                     "folder_id": fa,
@@ -622,16 +630,16 @@ def test_view_diff_covers_move_remove_and_placement_op_kinds(
     # one batch — moving B out of the root requires a root lease too.
     tok_fa = _folder_lease(client, fa)
     tok_fb = _folder_lease(client, fb)
-    tok_root = _folder_lease(client, "root")
+    tok_root = _lock(client, vid, rtype="view")
     base = _rev(client)
     r = client.post(
         papi("/commits"),
         json={
             "base_rev": base,
             "ops": [
-                {"kind": "move_folder", "id": fb, "to_parent_id": fa, "index": 0},
-                {"kind": "remove_element", "element_id": eid, "folder_id": fa},
-                {"kind": "remove_artifact", "artifact_id": aid, "folder_id": fa},
+                {"kind": "move_folder", "view_id": vid, "id": fb, "to_parent_id": fa, "index": 0},
+                {"kind": "remove_element", "view_id": vid, "element_id": eid, "folder_id": fa},
+                {"kind": "remove_artifact", "view_id": vid, "artifact_id": aid, "folder_id": fa},
             ],
             "message": "m",
             "lock_tokens": [tok_fa, tok_fb, tok_root],
@@ -664,9 +672,10 @@ def test_view_diff_covers_move_remove_and_placement_op_kinds(
         json={
             "base_rev": _rev(client),
             "ops": [
-                {"kind": "place_element", "element_id": eid, "folder_id": fb},
+                {"kind": "place_element", "view_id": vid, "element_id": eid, "folder_id": fb},
                 {
                     "kind": "place_artifact",
+                    "view_id": vid,
                     "artifact_id": aid,
                     "artifact_kind": "code_snippet",
                     "folder_id": fb,
@@ -687,12 +696,14 @@ def test_view_diff_covers_move_remove_and_placement_op_kinds(
             "ops": [
                 {
                     "kind": "move_element",
+                    "view_id": vid,
                     "element_id": eid,
                     "from_folder_id": fb,
                     "to_folder_id": fa,
                 },
                 {
                     "kind": "move_artifact",
+                    "view_id": vid,
                     "artifact_id": aid,
                     "from_folder_id": fb,
                     "to_folder_id": fa,

@@ -177,10 +177,15 @@ class ModelRow(Base):
 
 
 class ViewRow(Base):
-    """A user-defined folder overlay. ``blob`` is the view JSON
-    (``View.model_dump_json``). N per project (the frontend uses one)."""
+    """A named user-defined folder overlay. ``blob`` is the view JSON
+    (``View.model_dump_json``). N per project; ``name`` is the row's
+    authoritative name (the blob's ``name`` is kept equal to it on create)
+    and is unique per project."""
 
     __tablename__ = "views"
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_views_project_name"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/artifacts';
 import * as checkoutApi from '$lib/api/checkout';
-import * as viewApi from '$lib/api/view';
+import * as viewApi from '$lib/api/views';
 import * as editGate from '../edit-gate';
 import type { ArtifactHeader, View } from '$lib/api/types';
 import {
@@ -24,6 +24,7 @@ import {
 import { getStagedViewOps } from '../view-edits.svelte';
 import { resetCheckout, setProjectInfo } from '../checkout.svelte';
 import { clearViewState, getView, refreshView } from '../view.svelte';
+import { setActiveViewId } from '../active-view.svelte';
 import { VIEW_ROOT_ID } from '../ops';
 
 const HEADER = {
@@ -79,7 +80,8 @@ function mockAcquireConflict() {
 /** Seed the view store from a fixture, the way a real project open does
  * (mock the GET /view that the staged-op rewrite reads through). */
 async function seedView(view: View): Promise<void> {
-	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [] });
+	setActiveViewId('v1');
+	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [], view_rev: 0 });
 	await refreshView();
 }
 
@@ -306,8 +308,8 @@ describe('removeArtifact', () => {
 		// The delete's own batch scrubs every placement — F (parent) then G
 		// (nested) — so no dangling ref survives past this commit.
 		expect(getStagedViewOps()).toEqual([
-			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'F' },
-			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'G' }
+			{ kind: 'remove_artifact', view_id: 'v1', artifact_id: 'a1', folder_id: 'F' },
+			{ kind: 'remove_artifact', view_id: 'v1', artifact_id: 'a1', folder_id: 'G' }
 		]);
 		expect(getView()!.folders[0].artifacts).toEqual([]);
 		expect(getView()!.folders[0].folders[0].artifacts).toEqual([]);
@@ -332,8 +334,8 @@ describe('removeArtifact', () => {
 		expect(folderLock.mock.calls[0][0]).toEqual([VIEW_ROOT_ID, 'fa']);
 		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
 		expect(getStagedViewOps()).toEqual([
-			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: VIEW_ROOT_ID },
-			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'fa' }
+			{ kind: 'remove_artifact', view_id: 'v1', artifact_id: 'a1', folder_id: VIEW_ROOT_ID },
+			{ kind: 'remove_artifact', view_id: 'v1', artifact_id: 'a1', folder_id: 'fa' }
 		]);
 	});
 

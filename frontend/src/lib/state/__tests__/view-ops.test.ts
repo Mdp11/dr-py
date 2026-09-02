@@ -51,18 +51,26 @@ describe('applyViewOp', () => {
 	it('creates a folder under root and under a parent', () => {
 		let v = applyViewOp(view(), {
 			kind: 'create_folder',
+			view_id: 'v1',
 			temp_id: 'tmp_x',
 			parent_id: VIEW_ROOT_ID,
 			name: 'N'
 		});
 		expect(v.folders.map((f) => f.id)).toContain('tmp_x');
-		v = applyViewOp(v, { kind: 'create_folder', temp_id: 'tmp_y', parent_id: 'tmp_x', name: 'M' });
+		v = applyViewOp(v, {
+			kind: 'create_folder',
+			view_id: 'v1',
+			temp_id: 'tmp_y',
+			parent_id: 'tmp_x',
+			name: 'M'
+		});
 		expect(findFolderById(v, 'tmp_y')).not.toBeNull();
 	});
 	it('rejects sibling name clashes like the backend', () => {
 		expect(() =>
 			applyViewOp(view(), {
 				kind: 'create_folder',
+				view_id: 'v1',
 				temp_id: 'tmp_x',
 				parent_id: VIEW_ROOT_ID,
 				name: 'A'
@@ -71,16 +79,27 @@ describe('applyViewOp', () => {
 	});
 	it('place_element refuses placed elements and the root', () => {
 		expect(() =>
-			applyViewOp(view(), { kind: 'place_element', element_id: 'e1', folder_id: 'fc' })
+			applyViewOp(view(), {
+				kind: 'place_element',
+				view_id: 'v1',
+				element_id: 'e1',
+				folder_id: 'fc'
+			})
 		).toThrow(/already placed/);
 		expect(() =>
-			applyViewOp(view(), { kind: 'place_element', element_id: 'ex', folder_id: VIEW_ROOT_ID })
+			applyViewOp(view(), {
+				kind: 'place_element',
+				view_id: 'v1',
+				element_id: 'ex',
+				folder_id: VIEW_ROOT_ID
+			})
 		).toThrow(/root/);
 	});
 	it('move_element reorders within a folder with post-pop index math', () => {
 		// e1 at 0, e2 at 1: moving e1 below e2 means index 1 AFTER the pop.
 		const v = applyViewOp(view(), {
 			kind: 'move_element',
+			view_id: 'v1',
 			element_id: 'e1',
 			from_folder_id: 'fa',
 			to_folder_id: 'fa',
@@ -89,18 +108,23 @@ describe('applyViewOp', () => {
 		expect(findFolderById(v, 'fa')?.elements).toEqual(['e2', 'e1']);
 	});
 	it('delete_folder drops the whole subtree', () => {
-		const v = applyViewOp(view(), { kind: 'delete_folder', id: 'fa' });
+		const v = applyViewOp(view(), { kind: 'delete_folder', view_id: 'v1', id: 'fa' });
 		expect(findFolderById(v, 'fb')).toBeNull();
 		expect(v.folders.map((f) => f.id)).toEqual(['fc']);
 	});
 	it('move_folder rejects cycles', () => {
 		expect(() =>
-			applyViewOp(view(), { kind: 'move_folder', id: 'fa', to_parent_id: 'fb' })
+			applyViewOp(view(), { kind: 'move_folder', view_id: 'v1', id: 'fa', to_parent_id: 'fb' })
 		).toThrow(/descendant/);
 	});
 	it('move_folder reparents and preserves subtree/elements', () => {
 		// Reparent 'fa' (which contains 'fb') under 'fc'
-		const v = applyViewOp(view(), { kind: 'move_folder', id: 'fa', to_parent_id: 'fc' });
+		const v = applyViewOp(view(), {
+			kind: 'move_folder',
+			view_id: 'v1',
+			id: 'fa',
+			to_parent_id: 'fc'
+		});
 		const movedFolder = findFolderById(v, 'fa');
 		expect(movedFolder).not.toBeNull();
 		expect(movedFolder?.elements).toEqual(['e1', 'e2']);
@@ -111,7 +135,12 @@ describe('applyViewOp', () => {
 		expect(findFolderContainer(v, 'fa')?.parentId).toBe('fc');
 	});
 	it('move_folder moves nested folder to top level (VIEW_ROOT_ID)', () => {
-		const v = applyViewOp(view(), { kind: 'move_folder', id: 'fb', to_parent_id: VIEW_ROOT_ID });
+		const v = applyViewOp(view(), {
+			kind: 'move_folder',
+			view_id: 'v1',
+			id: 'fb',
+			to_parent_id: VIEW_ROOT_ID
+		});
 		expect(v.folders.map((f) => f.id)).toContain('fb');
 		expect(findFolderContainer(v, 'fb')?.parentId).toBe(VIEW_ROOT_ID);
 		// Original parent should no longer contain it
@@ -121,22 +150,24 @@ describe('applyViewOp', () => {
 		// Try to move 'fb' to root, but 'fc' already exists at root with the same structure
 		const v = applyViewOp(view(), {
 			kind: 'create_folder',
+			view_id: 'v1',
 			temp_id: 'tmp_fb',
 			parent_id: VIEW_ROOT_ID,
 			name: 'B'
 		});
 		expect(() =>
-			applyViewOp(v, { kind: 'move_folder', id: 'fb', to_parent_id: VIEW_ROOT_ID })
+			applyViewOp(v, { kind: 'move_folder', view_id: 'v1', id: 'fb', to_parent_id: VIEW_ROOT_ID })
 		).toThrow(/already exists/);
 	});
 	it('move_folder rejects source not found', () => {
 		expect(() =>
-			applyViewOp(view(), { kind: 'move_folder', id: 'nope', to_parent_id: 'fc' })
+			applyViewOp(view(), { kind: 'move_folder', view_id: 'v1', id: 'nope', to_parent_id: 'fc' })
 		).toThrow(/Folder not found/);
 	});
 	it('artifact ops treat root as a real container', () => {
 		const v = applyViewOp(view(), {
 			kind: 'move_artifact',
+			view_id: 'v1',
 			artifact_id: 'art2',
 			from_folder_id: VIEW_ROOT_ID,
 			to_folder_id: 'fc'
@@ -152,6 +183,7 @@ describe('applyViewOp', () => {
 		let v = view();
 		v = applyViewOp(v, {
 			kind: 'place_artifact',
+			view_id: 'v1',
 			artifact_id: 'art3',
 			artifact_kind: 'table',
 			folder_id: VIEW_ROOT_ID
@@ -159,6 +191,7 @@ describe('applyViewOp', () => {
 		expect(v.artifacts.map((a) => a.id)).toEqual(['art2', 'art3']);
 		v = applyViewOp(v, {
 			kind: 'move_artifact',
+			view_id: 'v1',
 			artifact_id: 'art2',
 			from_folder_id: VIEW_ROOT_ID,
 			to_folder_id: VIEW_ROOT_ID,
@@ -169,7 +202,7 @@ describe('applyViewOp', () => {
 	it('does not mutate its input', () => {
 		const before = view();
 		const snapshot = JSON.stringify(before);
-		applyViewOp(before, { kind: 'rename_folder', id: 'fa', name: 'Z' });
+		applyViewOp(before, { kind: 'rename_folder', view_id: 'v1', id: 'fa', name: 'Z' });
 		expect(JSON.stringify(before)).toBe(snapshot);
 	});
 
@@ -179,6 +212,7 @@ describe('applyViewOp', () => {
 			// Place art1 (currently in fa) into the root too
 			v = applyViewOp(v, {
 				kind: 'place_artifact',
+				view_id: 'v1',
 				artifact_id: 'art1',
 				artifact_kind: 'table',
 				folder_id: VIEW_ROOT_ID
@@ -192,6 +226,7 @@ describe('applyViewOp', () => {
 			// Start with art1 in fa, add it to root too
 			let v = applyViewOp(view(), {
 				kind: 'place_artifact',
+				view_id: 'v1',
 				artifact_id: 'art1',
 				artifact_kind: 'table',
 				folder_id: VIEW_ROOT_ID
@@ -202,6 +237,7 @@ describe('applyViewOp', () => {
 			// Move art1 from root to fc
 			v = applyViewOp(v, {
 				kind: 'move_artifact',
+				view_id: 'v1',
 				artifact_id: 'art1',
 				from_folder_id: VIEW_ROOT_ID,
 				to_folder_id: 'fc'
@@ -217,6 +253,7 @@ describe('applyViewOp', () => {
 			// Start with art1 in fa, add it to root too
 			let v = applyViewOp(view(), {
 				kind: 'place_artifact',
+				view_id: 'v1',
 				artifact_id: 'art1',
 				artifact_kind: 'table',
 				folder_id: VIEW_ROOT_ID
@@ -225,6 +262,7 @@ describe('applyViewOp', () => {
 			// Remove art1 from root only
 			v = applyViewOp(v, {
 				kind: 'remove_artifact',
+				view_id: 'v1',
 				artifact_id: 'art1',
 				folder_id: VIEW_ROOT_ID
 			});
@@ -240,6 +278,7 @@ describe('applyViewOp', () => {
 			expect(() =>
 				applyViewOp(v, {
 					kind: 'place_artifact',
+					view_id: 'v1',
 					artifact_id: 'art1',
 					artifact_kind: 'table',
 					folder_id: 'fa'

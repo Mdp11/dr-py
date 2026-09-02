@@ -28,6 +28,7 @@ import {
 	handleFeedEvent,
 	hasModelLocks,
 	onCommitEvent,
+	onViewEvent,
 	resetRealtime,
 	startRealtime,
 	stopRealtime
@@ -334,5 +335,25 @@ describe('feed termination state', () => {
 		expect(getFeedTermination()).toEqual({ code: 4404 });
 		resetRealtime();
 		expect(getFeedTermination()).toBeNull();
+	});
+});
+
+describe('view feed events', () => {
+	beforeEach(() => resetRealtime());
+
+	it('fires the view taps with the event', () => {
+		const seen: unknown[] = [];
+		onViewEvent((e) => seen.push(e));
+		handleFeedEvent({ type: 'view', action: 'created', view: { id: 'v2', name: 'Ops' } });
+		expect(seen).toEqual([{ type: 'view', action: 'created', view: { id: 'v2', name: 'Ops' } }]);
+	});
+
+	it('hasModelLocks ignores view: leases (view-scope, like folder:)', () => {
+		handleFeedEvent({
+			type: 'lock',
+			action: 'acquired',
+			leases: [{ resource_id: 'view:v1', mode: 'exclusive', holder_id: 'u1' }]
+		});
+		expect(hasModelLocks()).toBe(false);
 	});
 });

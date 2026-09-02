@@ -200,9 +200,10 @@ export async function listContainmentRootsPaged(
 	return { items, total };
 }
 
-/** GET /model/containment/roots/excluded — roots not placed in the active view. */
+/** GET /model/containment/roots/excluded — roots not placed in view
+ * `viewId` (every root when omitted: no view places anything). */
 export function listExcludedRoots(
-	opts?: { limit?: number; offset?: number },
+	opts?: { limit?: number; offset?: number; viewId?: string },
 	cfg?: ClientConfig
 ): Promise<TreeItemPage> {
 	return apiFetch(
@@ -210,7 +211,7 @@ export function listExcludedRoots(
 		{
 			method: 'GET',
 			schema: TreeItemPageSchema,
-			query: { limit: opts?.limit, offset: opts?.offset }
+			query: { limit: opts?.limit, offset: opts?.offset, view_id: opts?.viewId }
 		},
 		cfg
 	);
@@ -222,13 +223,18 @@ export function listExcludedRoots(
 export async function listExcludedRootsPaged(
 	limit: number,
 	cfg?: ClientConfig,
-	offset = 0
+	offset = 0,
+	viewId?: string
 ): Promise<TreeItemPage> {
 	const items: TreeItemPage['items'] = [];
 	let total = 0;
 	while (items.length < limit) {
 		const page = await listExcludedRoots(
-			{ limit: Math.min(READ_PAGE_LIMIT, limit - items.length), offset: offset + items.length },
+			{
+				limit: Math.min(READ_PAGE_LIMIT, limit - items.length),
+				offset: offset + items.length,
+				viewId
+			},
 			cfg
 		);
 		items.push(...page.items);

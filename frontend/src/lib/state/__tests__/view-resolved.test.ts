@@ -3,6 +3,7 @@ import { http, HttpResponse, delay } from 'msw';
 import { server } from '../../api/__tests__/server';
 import { setActiveBaseUrl } from '$lib/api/client';
 import { isViewResolved, markViewUnresolved, refreshView } from '../view.svelte';
+import { setActiveViewId } from '../active-view.svelte';
 
 const BASE = 'http://api.test/api/v1';
 
@@ -13,12 +14,13 @@ afterAll(() => server.close());
 describe('view resolution gate', () => {
 	beforeEach(() => {
 		setActiveBaseUrl(BASE);
+		setActiveViewId('v1');
 		markViewUnresolved();
 	});
 
 	it('is unresolved until a delayed refreshView completes', async () => {
 		server.use(
-			http.get(`${BASE}/view`, async () => {
+			http.get(`${BASE}/views/v1`, async () => {
 				await delay(20);
 				return HttpResponse.json({ view: null, warnings: [] });
 			})
@@ -31,7 +33,9 @@ describe('view resolution gate', () => {
 	});
 
 	it('resolves even when the view fetch fails', async () => {
-		server.use(http.get(`${BASE}/view`, () => HttpResponse.json({ error: 'x' }, { status: 500 })));
+		server.use(
+			http.get(`${BASE}/views/v1`, () => HttpResponse.json({ error: 'x' }, { status: 500 }))
+		);
 		await refreshView();
 		expect(isViewResolved()).toBe(true); // "no view" is an answer
 	});

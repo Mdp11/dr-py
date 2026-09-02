@@ -215,20 +215,20 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
             content.commits_after(s, project_id, snap.rev) if snap is not None else []
         )
         snap_key = snap.key if snap is not None else None
-        view_row = content.get_single_view(s, project_id)
-        view: View | None = None
-        if view_row is not None:
+        views: dict[str, View] = {}
+        for view_row in content.list_views(s, project_id):
             view = View.model_validate_json(view_row.blob)
             if ensure_folder_ids(view):
                 # heal-and-persist: a blob missing folder ids gets them exactly
                 # once. bump_rev=False — normalization is not an edit.
-                content.upsert_single_view(
+                content.upsert_view(
                     s,
                     project_id,
-                    name=view.name,
+                    view_row.id,
                     blob=view.model_dump_json(),
                     bump_rev=False,
                 )
+            views[view_row.id] = view
         # read here: compilation needs the metamodel built below, and the
         # sweep it feeds runs with no DB session of its own
         rule_sources = rules.rule_sources(s, project_id)
@@ -261,7 +261,7 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
     session.model_rev = model_rev
     progress.phase = "replay"
     replay_commits_into(session, tail)
-    session.view = view
+    session.views = views
     session.validation = ValidationState()
     session.strict_mode = strict_mode
     session.compiled_rules = rules.compile_sources(rule_sources, metamodel)

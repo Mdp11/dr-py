@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { View } from '$lib/api/types';
-import * as viewApi from '$lib/api/view';
+import * as viewApi from '$lib/api/views';
 import * as editGate from '../edit-gate';
 
 // Module-scope commit taps (view.svelte.ts registers one at import time) —
@@ -8,6 +8,9 @@ import * as editGate from '../edit-gate';
 // tests can fire it directly, mirroring the module-scope-tap idiom this
 // store itself follows (table-editor.svelte.ts:1689).
 const commitTaps: Array<(info: { scope: string[] }) => void> = [];
+const viewTaps: Array<
+	(e: { type: 'view'; action: 'created' | 'deleted'; view: { id: string; name: string } }) => void
+> = [];
 vi.mock('../realtime.svelte', () => ({
 	onCommitEvent: (cb: (info: { scope: string[] }) => void) => {
 		commitTaps.push(cb);
@@ -15,14 +18,27 @@ vi.mock('../realtime.svelte', () => ({
 			const i = commitTaps.indexOf(cb);
 			if (i !== -1) commitTaps.splice(i, 1);
 		};
+	},
+	onViewEvent: (cb: (typeof viewTaps)[number]) => {
+		viewTaps.push(cb);
+		return () => {
+			const i = viewTaps.indexOf(cb);
+			if (i !== -1) viewTaps.splice(i, 1);
+		};
 	}
 }));
 
 const {
+	addView,
 	clearViewState,
 	discardViewChanges,
+	getActiveViewId,
 	getView,
+	getViews,
+	loadViews,
 	refreshView,
+	removeView,
+	selectView,
 	stageClearView,
 	stageCreateFolder,
 	stageDeleteFolder,
@@ -39,9 +55,16 @@ const checkoutStore = await import('../checkout.svelte');
 const { getLockNotice, setLockNotice } = await import('../lock-notice.svelte');
 const { getViewDiscardNotice, clearViewDiscardNotice } =
 	await import('../view-discard-notice.svelte');
+const { setActiveViewId, recallActiveViewId, rememberActiveViewId } =
+	await import('../active-view.svelte');
+const { setActiveProject } = await import('../active-project.svelte');
+const { answerConfirm, getPendingConfirm, resetConfirm } = await import('../confirm.svelte');
 
+/** Seed the ACTIVE view (`v1`) the way boot does: an id chosen, then its
+ * content fetched. Every staged op the tests below inspect carries this id. */
 function seedView(view: View): void {
-	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [] });
+	setActiveViewId('v1');
+	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [], view_rev: 0 });
 }
 
 const baseView = (): View => ({
@@ -81,7 +104,12 @@ describe('stageCreateFolder', () => {
 		expect(ok).toBe(true);
 		const ops = getStagedViewOps();
 		expect(ops).toHaveLength(1);
-		expect(ops[0]).toMatchObject({ kind: 'create_folder', parent_id: 'root', name: 'New Folder' });
+		expect(ops[0]).toMatchObject({
+			kind: 'create_folder',
+			view_id: 'v1',
+			parent_id: 'root',
+			name: 'New Folder'
+		});
 		expect(ops[0].kind === 'create_folder' && ops[0].temp_id.startsWith('tmp_')).toBe(true);
 		expect(getView()!.folders.map((f) => f.name)).toContain('New Folder');
 	});
@@ -130,7 +158,9 @@ describe('stageRenameFolder', () => {
 		const ok = await stageRenameFolder('f1', 'Renamed');
 
 		expect(ok).toBe(true);
-		expect(getStagedViewOps()).toEqual([{ kind: 'rename_folder', id: 'f1', name: 'Renamed' }]);
+		expect(getStagedViewOps()).toEqual([
+			{ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'Renamed' }
+		]);
 		expect(getView()!.folders[0].name).toBe('Renamed');
 		expect(getStagedViewEntries()[0].label).toBe('Renamed folder "Folder 1" → "Renamed"');
 	});
@@ -146,7 +176,7 @@ describe('stageDeleteFolder', () => {
 
 		expect(ok).toBe(true);
 		expect(lock).toHaveBeenCalledWith(['f1', 'f1a']);
-		expect(getStagedViewOps()).toEqual([{ kind: 'delete_folder', id: 'f1' }]);
+		expect(getStagedViewOps()).toEqual([{ kind: 'delete_folder', view_id: 'v1', id: 'f1' }]);
 		expect(getView()!.folders.map((f) => f.id)).toEqual(['f2']);
 	});
 
@@ -219,7 +249,9 @@ describe('stageMoveFolder', () => {
 
 		expect(ok).toBe(true);
 		expect(lock).toHaveBeenCalledWith(['f1', 'f2']);
-		expect(getStagedViewOps()).toEqual([{ kind: 'move_folder', id: 'f1a', to_parent_id: 'f2' }]);
+		expect(getStagedViewOps()).toEqual([
+			{ kind: 'move_folder', view_id: 'v1', id: 'f1a', to_parent_id: 'f2' }
+		]);
 		expect(getView()!.folders[1].folders.map((f) => f.id)).toEqual(['f1a']);
 	});
 });
@@ -241,6 +273,7 @@ describe('stagePlaceElementsAt — index math', () => {
 		expect(getStagedViewOps()).toEqual([
 			{
 				kind: 'move_element',
+				view_id: 'v1',
 				element_id: 'e1',
 				from_folder_id: 'f1',
 				to_folder_id: 'f1',
@@ -270,6 +303,7 @@ describe('stagePlaceElementsAt — index math', () => {
 		expect(getStagedViewOps()).toEqual([
 			{
 				kind: 'move_element',
+				view_id: 'v1',
 				element_id: 'e1',
 				from_folder_id: 'f1',
 				to_folder_id: 'f2',
@@ -277,6 +311,7 @@ describe('stagePlaceElementsAt — index math', () => {
 			},
 			{
 				kind: 'move_element',
+				view_id: 'v1',
 				element_id: 'e2',
 				from_folder_id: 'f1',
 				to_folder_id: 'f2',
@@ -300,6 +335,7 @@ describe('stagePlaceElementsAt — index math', () => {
 		expect(placed).toBe(true);
 		expect(getStagedViewOps().at(-1)).toEqual({
 			kind: 'place_element',
+			view_id: 'v1',
 			element_id: 'e9',
 			folder_id: 'f1',
 			index: 5
@@ -309,6 +345,7 @@ describe('stagePlaceElementsAt — index math', () => {
 		expect(removed).toBe(true);
 		expect(getStagedViewOps().at(-1)).toEqual({
 			kind: 'remove_element',
+			view_id: 'v1',
 			element_id: 'e1',
 			folder_id: 'f1'
 		});
@@ -347,7 +384,7 @@ describe('stageRemoveElement', () => {
 
 		expect(ok).toBe(true);
 		expect(getStagedViewOps()).toEqual([
-			{ kind: 'remove_element', element_id: 'e1', folder_id: 'f1' }
+			{ kind: 'remove_element', view_id: 'v1', element_id: 'e1', folder_id: 'f1' }
 		]);
 		// Excluded-pool injection payload: a remove_element entry carries its
 		// own target id.
@@ -379,6 +416,7 @@ describe('artifact placement mutators', () => {
 		expect(getStagedViewOps()).toEqual([
 			{
 				kind: 'place_artifact',
+				view_id: 'v1',
 				artifact_id: 'art1',
 				artifact_kind: 'navigation',
 				folder_id: 'f2'
@@ -410,6 +448,7 @@ describe('artifact placement mutators', () => {
 		expect(getStagedViewOps()).toEqual([
 			{
 				kind: 'move_artifact',
+				view_id: 'v1',
 				artifact_id: 'art1',
 				from_folder_id: 'f1',
 				to_folder_id: 'f2'
@@ -426,7 +465,7 @@ describe('artifact placement mutators', () => {
 
 		expect(ok).toBe(true);
 		expect(getStagedViewOps()).toEqual([
-			{ kind: 'remove_artifact', artifact_id: 'art1', folder_id: 'f1' }
+			{ kind: 'remove_artifact', view_id: 'v1', artifact_id: 'art1', folder_id: 'f1' }
 		]);
 	});
 
@@ -451,9 +490,9 @@ describe('stageClearView', () => {
 		expect(ok).toBe(true);
 		expect(lock).toHaveBeenCalledWith(['root', 'f1', 'f1a', 'f2']);
 		expect(getStagedViewOps()).toEqual([
-			{ kind: 'delete_folder', id: 'f1' },
-			{ kind: 'delete_folder', id: 'f2' },
-			{ kind: 'remove_artifact', artifact_id: 'root-art', folder_id: 'root' }
+			{ kind: 'delete_folder', view_id: 'v1', id: 'f1' },
+			{ kind: 'delete_folder', view_id: 'v1', id: 'f2' },
+			{ kind: 'remove_artifact', view_id: 'v1', artifact_id: 'root-art', folder_id: 'root' }
 		]);
 		expect(getView()).toEqual({ name: 'v', folders: [], artifacts: [] });
 		// Excluded-pool injection payload: each delete_folder entry carries its
@@ -489,7 +528,8 @@ describe('post-commit / peer-commit refetch', () => {
 		await refreshView();
 		const getSpy = vi.spyOn(viewApi, 'getView').mockResolvedValue({
 			view: { name: 'v', folders: [], artifacts: [] },
-			warnings: []
+			warnings: [],
+			view_rev: 0
 		});
 
 		expect(commitTaps.length).toBeGreaterThan(0);
@@ -525,7 +565,8 @@ describe('discardViewChanges', () => {
 			.mockResolvedValue(undefined);
 		const getSpy = vi.spyOn(viewApi, 'getView').mockResolvedValue({
 			view: baseView(),
-			warnings: []
+			warnings: [],
+			view_rev: 0
 		});
 
 		await discardViewChanges();
@@ -557,9 +598,23 @@ describe('stagePlaceElementsAt — cursor advance on a same-folder multi-select'
 		expect(ok).toBe(true);
 		expect(getStagedViewOps()).toEqual([
 			// a sat at 0, BELOW the cursor: post-pop index 1, and the cursor holds…
-			{ kind: 'move_element', element_id: 'a', from_folder_id: 'f1', to_folder_id: 'f1', index: 1 },
+			{
+				kind: 'move_element',
+				view_id: 'v1',
+				element_id: 'a',
+				from_folder_id: 'f1',
+				to_folder_id: 'f1',
+				index: 1
+			},
 			// …so d (now at 3, above the cursor) still targets slot 2, not 3.
-			{ kind: 'move_element', element_id: 'd', from_folder_id: 'f1', to_folder_id: 'f1', index: 2 }
+			{
+				kind: 'move_element',
+				view_id: 'v1',
+				element_id: 'd',
+				from_folder_id: 'f1',
+				to_folder_id: 'f1',
+				index: 2
+			}
 		]);
 		expect(getView()!.folders[0].elements).toEqual(['b', 'a', 'd', 'c']);
 	});
@@ -573,8 +628,22 @@ describe('stagePlaceElementsAt — cursor advance on a same-folder multi-select'
 
 		expect(ok).toBe(true);
 		expect(getStagedViewOps()).toEqual([
-			{ kind: 'move_element', element_id: 'c', from_folder_id: 'f1', to_folder_id: 'f1', index: 0 },
-			{ kind: 'move_element', element_id: 'd', from_folder_id: 'f1', to_folder_id: 'f1', index: 1 }
+			{
+				kind: 'move_element',
+				view_id: 'v1',
+				element_id: 'c',
+				from_folder_id: 'f1',
+				to_folder_id: 'f1',
+				index: 0
+			},
+			{
+				kind: 'move_element',
+				view_id: 'v1',
+				element_id: 'd',
+				from_folder_id: 'f1',
+				to_folder_id: 'f1',
+				index: 1
+			}
 		]);
 		expect(getView()!.folders[0].elements).toEqual(['c', 'd', 'a', 'b']);
 	});
@@ -588,7 +657,12 @@ describe('stagePlaceElementsAt — cursor advance on a same-folder multi-select'
 
 		expect(ok).toBe(true);
 		const op = getStagedViewOps()[0];
-		expect(op).toMatchObject({ kind: 'place_element', element_id: 'x', folder_id: 'f1' });
+		expect(op).toMatchObject({
+			kind: 'place_element',
+			view_id: 'v1',
+			element_id: 'x',
+			folder_id: 'f1'
+		});
 		// the append sentinel is an ABSENT index, never a huge literal
 		expect(JSON.parse(JSON.stringify(op))).not.toHaveProperty('index');
 		expect(getView()!.folders[0].elements).toEqual(['a', 'b', 'c', 'd', 'x']);
@@ -674,5 +748,220 @@ describe('refreshView re-applies the staged journal on top of server truth', () 
 		expect(await editGate.folderEditLock(['f2'])).toBe(true);
 		expect(getLockNotice()).toBeNull(); // transient channel: cleared, as always
 		expect(getViewDiscardNotice()).toMatch(/view changed/i); // durable banner: untouched
+	});
+});
+
+describe('named views — list, selection, persistence', () => {
+	const summaries = () => [
+		{ id: 'v2', name: 'Zeta', view_rev: 0 },
+		{ id: 'v1', name: 'Alpha', view_rev: 0 }
+	];
+
+	beforeEach(() => {
+		setActiveProject('p1');
+		rememberActiveViewId('p1', null);
+		resetConfirm();
+		clearViewDiscardNotice();
+	});
+
+	it('loadViews sorts by name and, with nothing remembered, activates the first', async () => {
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue(summaries());
+		expect(await loadViews()).toBe(true);
+		expect(getViews().map((v) => v.name)).toEqual(['Alpha', 'Zeta']);
+		expect(getActiveViewId()).toBe('v1');
+	});
+
+	it('loadViews prefers the id remembered for the project when it still exists', async () => {
+		rememberActiveViewId('p1', 'v2');
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue(summaries());
+		await loadViews();
+		expect(getActiveViewId()).toBe('v2');
+	});
+
+	it('loadViews falls back to the first when the remembered id is gone, and to null on an empty list', async () => {
+		rememberActiveViewId('p1', 'gone');
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue(summaries());
+		await loadViews();
+		expect(getActiveViewId()).toBe('v1');
+
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue([]);
+		expect(await loadViews()).toBe(true);
+		expect(getActiveViewId()).toBeNull();
+	});
+
+	it('loadViews keeps the current active id when it still exists', async () => {
+		setActiveViewId('v2');
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue(summaries());
+		expect(await loadViews()).toBe(false);
+		expect(getActiveViewId()).toBe('v2');
+	});
+
+	it('refreshView with no active view resolves to "no view" without a fetch', async () => {
+		const getSpy = vi.spyOn(viewApi, 'getView');
+		setActiveViewId(null);
+		await refreshView();
+		expect(getSpy).not.toHaveBeenCalled();
+		expect(getView()).toBeNull();
+	});
+
+	it('selectView remembers the choice per project and refetches that view', async () => {
+		seedView(baseView());
+		await refreshView();
+		const getSpy = vi.spyOn(viewApi, 'getView').mockResolvedValue({
+			view: { name: 'Zeta', folders: [], artifacts: [] },
+			warnings: [],
+			view_rev: 0
+		});
+
+		expect(await selectView('v2')).toBe(true);
+
+		expect(getSpy).toHaveBeenCalledWith('v2');
+		expect(getActiveViewId()).toBe('v2');
+		expect(recallActiveViewId('p1')).toBe('v2');
+		expect(getView()?.name).toBe('Zeta');
+	});
+
+	it('selectView with staged edits asks first and keeps them on cancel', async () => {
+		seedView(baseView());
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stageRenameFolder('f1', 'Renamed');
+
+		const pending = selectView('v2');
+		expect(getPendingConfirm()?.title).toMatch(/switch view/i);
+		answerConfirm(false);
+		expect(await pending).toBe(false);
+
+		expect(getActiveViewId()).toBe('v1');
+		expect(getStagedViewOps()).toHaveLength(1);
+	});
+
+	it('selectView with staged edits discards them (releasing their leases) on confirm', async () => {
+		seedView(baseView());
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stageRenameFolder('f1', 'Renamed');
+		const release = vi
+			.spyOn(checkoutStore, 'releaseFolderLeaseIfUnneeded')
+			.mockResolvedValue(undefined);
+
+		const pending = selectView('v2');
+		answerConfirm(true);
+		expect(await pending).toBe(true);
+
+		expect(release).toHaveBeenCalledWith('f1');
+		expect(getStagedViewOps()).toHaveLength(0);
+		expect(getActiveViewId()).toBe('v2');
+	});
+
+	it('every staged op carries the active view id', async () => {
+		seedView(baseView());
+		await refreshView();
+		vi.spyOn(editGate, 'folderCreateLock').mockResolvedValue(true);
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stageCreateFolder('root', 'New');
+		await stagePlaceElementsAt('f2', ['e9']);
+		expect(getStagedViewOps().map((op) => op.view_id)).toEqual(['v1', 'v1']);
+	});
+
+	it('addView creates, refreshes the list and activates the new view', async () => {
+		const create = vi
+			.spyOn(viewApi, 'createView')
+			.mockResolvedValue({ id: 'v3', name: 'New', view_rev: 0 });
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue([
+			...summaries(),
+			{ id: 'v3', name: 'New', view_rev: 0 }
+		]);
+		vi.spyOn(viewApi, 'getView').mockResolvedValue({
+			view: { name: 'New', folders: [], artifacts: [] },
+			warnings: [],
+			view_rev: 0
+		});
+
+		await addView('New', { folders: [] });
+
+		expect(create).toHaveBeenCalledWith({ name: 'New', view: { folders: [] } });
+		expect(getViews().map((v) => v.id)).toContain('v3');
+		expect(getActiveViewId()).toBe('v3');
+		expect(getView()?.name).toBe('New');
+	});
+
+	it('removeView of the active view falls back to the next one and posts a notice', async () => {
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue(summaries());
+		await loadViews();
+		seedView(baseView());
+		await refreshView();
+		const del = vi.spyOn(viewApi, 'deleteView').mockResolvedValue(undefined);
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue([{ id: 'v2', name: 'Zeta', view_rev: 0 }]);
+		vi.spyOn(viewApi, 'getView').mockResolvedValue({
+			view: { name: 'Zeta', folders: [], artifacts: [] },
+			warnings: [],
+			view_rev: 0
+		});
+
+		await removeView('v1');
+
+		expect(del).toHaveBeenCalledWith('v1');
+		expect(getActiveViewId()).toBe('v2');
+		expect(getView()?.name).toBe('Zeta');
+		expect(getViewDiscardNotice()).toMatch(/"Alpha" was deleted/);
+	});
+});
+
+describe('named views — feed reconciliation', () => {
+	beforeEach(() => new Promise((r) => setTimeout(r, 0))); // taps register past a macrotask
+	beforeEach(() => {
+		setActiveProject('p1');
+		rememberActiveViewId('p1', null);
+		clearViewDiscardNotice();
+	});
+
+	async function settle(): Promise<void> {
+		for (let i = 0; i < 6; i++) await Promise.resolve();
+	}
+
+	it('a peer deleting the active view drops the journal, releases leases and falls back to "no view"', async () => {
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue([{ id: 'v1', name: 'Alpha', view_rev: 0 }]);
+		await loadViews();
+		seedView(baseView());
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stageRenameFolder('f1', 'Renamed');
+		const release = vi
+			.spyOn(checkoutStore, 'releaseFolderLeaseIfUnneeded')
+			.mockResolvedValue(undefined);
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue([]);
+
+		expect(viewTaps.length).toBeGreaterThan(0);
+		for (const tap of viewTaps)
+			tap({ type: 'view', action: 'deleted', view: { id: 'v1', name: 'Alpha' } });
+		await settle();
+
+		expect(getActiveViewId()).toBeNull();
+		expect(getView()).toBeNull();
+		expect(getStagedViewOps()).toHaveLength(0);
+		expect(release).toHaveBeenCalledWith('f1');
+		expect(getViewDiscardNotice()).toMatch(/"Alpha" was deleted — no view is active/);
+	});
+
+	it('a peer adding a view only refreshes the list', async () => {
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue([{ id: 'v1', name: 'Alpha', view_rev: 0 }]);
+		await loadViews();
+		seedView(baseView());
+		await refreshView();
+		const getSpy = vi.spyOn(viewApi, 'getView');
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue([
+			{ id: 'v1', name: 'Alpha', view_rev: 0 },
+			{ id: 'v9', name: 'Other', view_rev: 0 }
+		]);
+
+		for (const tap of viewTaps)
+			tap({ type: 'view', action: 'created', view: { id: 'v9', name: 'Other' } });
+		await settle();
+
+		expect(getViews().map((v) => v.id)).toEqual(['v1', 'v9']);
+		expect(getActiveViewId()).toBe('v1');
+		expect(getSpy).not.toHaveBeenCalled();
+		expect(getViewDiscardNotice()).toBeNull();
 	});
 });

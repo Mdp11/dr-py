@@ -24,7 +24,7 @@ from data_rover.api.view_ops import (
     apply_view_ops_atomic,
     rollback_view,
     validate_view_ops,
-    view_op_folder_ids,
+    view_op_resources,
 )
 from data_rover.core.view.ids import ensure_folder_ids, find_folder
 from data_rover.core.view.schema import ArtifactRef, Folder, View
@@ -252,14 +252,9 @@ def test_validate_view_ops_is_dry() -> None:
     assert v.model_dump_json() == before
     with pytest.raises(HTTPException):
         validate_view_ops(v, [RenameFolderOp(kind="rename_folder", id="missing", name="x")])
-    # None view validates against an empty view (the auto-create commit path)
-    validate_view_ops(
-        None,
-        [CreateFolderOp(kind="create_folder", temp_id="tmp_x", parent_id="root", name="F")],
-    )
 
 
-def test_view_op_folder_ids() -> None:
+def test_view_op_resources() -> None:
     ops = [
         MoveElementOp(
             kind="move_element", element_id="e", from_folder_id="f1", to_folder_id="f2"
@@ -268,22 +263,26 @@ def test_view_op_folder_ids() -> None:
     ]
     # `view` is only consulted by the delete_folder/move_folder branches
     # below; None is fine for op kinds that never need it.
-    assert view_op_folder_ids(None, ops) == {"f1", "f2", "f3", "tmp_c"}
+    assert view_op_resources("v", None, ops) == {
+        "folder:f1",
+        "folder:f2",
+        "folder:f3",
+        "folder:tmp_c",
+    }
 
 
-def test_view_op_folder_ids_delete_folder_expands_subtree() -> None:
+def test_view_op_resources_delete_folder_expands_subtree() -> None:
     """A ``delete_folder`` op only NAMES its own id, but deleting it removes
     its whole subtree — the undo route's peer-lease guard must see every
     descendant too, or a peer's lease on a CHILD folder goes unenforced."""
     v = _view()
     f = _ids(v)
-    assert view_op_folder_ids(v, [DeleteFolderOp(kind="delete_folder", id=f["A"])]) == {
-        f["A"],
-        f["A1"],
-    }
+    assert view_op_resources(
+        "v", v, [DeleteFolderOp(kind="delete_folder", id=f["A"])]
+    ) == {f"folder:{f['A']}", f"folder:{f['A1']}"}
 
 
-def test_view_op_folder_ids_move_folder_resolves_current_parent() -> None:
+def test_view_op_resources_move_folder_resolves_current_parent() -> None:
     """``move_folder`` only names its DESTINATION parent in the op itself —
     the folder's CURRENT
     parent (resolved by walking ``view``, exactly like ``required_locks``
@@ -291,17 +290,18 @@ def test_view_op_folder_ids_move_folder_resolves_current_parent() -> None:
     container goes unenforced."""
     v = _view()
     f = _ids(v)
-    ids = view_op_folder_ids(
-        v, [MoveFolderOp(kind="move_folder", id=f["A1"], to_parent_id="root")]
+    ids = view_op_resources(
+        "v", v, [MoveFolderOp(kind="move_folder", id=f["A1"], to_parent_id="root")]
     )
-    assert ids == {f["A1"], "root", f["A"]}  # f["A"] is A1's CURRENT parent
+    # f["A"] is A1's CURRENT parent; the root is addressed by the view's lease
+    assert ids == {f"folder:{f['A1']}", "view:v", f"folder:{f['A']}"}
 
 
-def test_view_op_folder_ids_delete_folder_falls_back_without_view() -> None:
+def test_view_op_resources_delete_folder_falls_back_without_view() -> None:
     """``folder_subtree`` degrades to a single-resource id when ``view`` is
     None or the id is unknown (mirrors ``required_locks``'s own total-ness
     guarantee) rather than raising — lock/guard derivation must never crash
     on a stale or malformed op."""
-    assert view_op_folder_ids(None, [DeleteFolderOp(kind="delete_folder", id="x")]) == {
-        "x"
-    }
+    assert view_op_resources(
+        "v", None, [DeleteFolderOp(kind="delete_folder", id="x")]
+    ) == {"folder:x"}

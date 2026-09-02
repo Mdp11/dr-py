@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from data_rover.core.metamodel.loader import load_metamodel_str
@@ -133,6 +133,7 @@ def import_project(
     metamodel_yaml: str,
     model_json: str,
     view_json: str | None = None,
+    view_jsons: Sequence[str] = (),
     artifact_bundle: str | None = None,
     trust_artifacts: bool = False,
 ) -> list[SkippedEntry]:
@@ -187,18 +188,25 @@ def import_project(
                     artifact_id=artifact_id_map[art.id],
                 )
 
-        if view_json is not None:
-            view = View.model_validate_json(view_json)
+        # ``view_json`` is the one-file convenience (CLI / wizard); ``view_jsons``
+        # carries a clone's whole set. Each view is named from its document
+        # (``"Default"`` when blank); a clash inside one import is suffixed
+        # rather than refused, since a baseline import has no user to answer.
+        for doc in ([view_json] if view_json is not None else []) + list(view_jsons):
+            view = View.model_validate_json(doc)
             ensure_folder_ids(view)
             if artifact_id_map:
                 _remap_view_artifact_refs(view, artifact_id_map)
-            content.upsert_single_view(
-                s,
-                project_id,
-                name=view.name,
-                blob=view.model_dump_json(),
-                bump_rev=False,  # a baseline import starts at rev 0, like model_rev
-            )
+            base = view.name.strip() or "Default"
+            for n in range(1, 1000):
+                view.name = base if n == 1 else f"{base} ({n})"
+                try:
+                    content.create_view(
+                        s, project_id, name=view.name, blob=view.model_dump_json()
+                    )
+                    break
+                except content.DuplicateViewNameError:
+                    continue
 
     # build the model + write the rev-0 snapshot (outside the txn above; the
     # commit/model rows are already durable and the snapshot row is its own).

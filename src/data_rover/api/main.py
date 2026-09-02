@@ -41,7 +41,7 @@ from .routes import (
     snippets,
     tables,
     validation,
-    view,
+    views,
 )
 from .script_runner import build_runner_from_settings, get_runner, set_runner
 from .session import get_registry, install_persistent_registry
@@ -316,7 +316,7 @@ def create_app() -> FastAPI:
     app.include_router(relationships.router, prefix=proj, tags=["relationships"])
     app.include_router(validation.router, prefix=proj, tags=["validation"])
     app.include_router(rules.router, prefix=proj, tags=["rules"])
-    app.include_router(view.router, prefix=proj, tags=["view"])
+    app.include_router(views.router, prefix=proj, tags=["views"])
     app.include_router(locks.router, prefix=proj, tags=["locks"])
     app.include_router(commits.router, prefix=proj, tags=["commits"])
     app.include_router(artifacts.router, prefix=proj, tags=["artifacts"])

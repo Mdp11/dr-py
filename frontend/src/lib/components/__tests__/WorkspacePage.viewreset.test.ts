@@ -80,7 +80,10 @@ import { getStagedViewDepth, resetViewEdits, stageViewOp } from '$lib/state/view
 import { setModelError } from '$lib/state/model.svelte';
 
 function stageOne(): void {
-	stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'Renamed' }, 'Renamed folder');
+	stageViewOp(
+		{ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'Renamed' },
+		'Renamed folder'
+	);
 }
 
 beforeEach(() => {

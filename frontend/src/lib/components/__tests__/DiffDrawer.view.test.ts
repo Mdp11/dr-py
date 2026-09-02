@@ -106,12 +106,18 @@ describe('DiffDrawer view changes', () => {
 	it('renders staged view entries as label rows, in journal order', async () => {
 		viewEntries = [
 			{
-				op: { kind: 'create_folder', temp_id: 'tmp_1', parent_id: 'root', name: 'Pumps' },
+				op: {
+					kind: 'create_folder',
+					view_id: 'v1',
+					temp_id: 'tmp_1',
+					parent_id: 'root',
+					name: 'Pumps'
+				},
 				label: 'Created folder "Pumps"',
 				unplacedElementIds: []
 			},
 			{
-				op: { kind: 'rename_folder', id: 'f1', name: 'Valves' },
+				op: { kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'Valves' },
 				label: 'Renamed folder "Old" → "Valves"',
 				unplacedElementIds: []
 			}
@@ -135,7 +141,7 @@ describe('DiffDrawer view changes', () => {
 	it("counts staged view entries into the commit gate's total", async () => {
 		viewEntries = [
 			{
-				op: { kind: 'delete_folder', id: 'f1' },
+				op: { kind: 'delete_folder', view_id: 'v1', id: 'f1' },
 				label: 'Deleted folder "Pumps"',
 				unplacedElementIds: []
 			}
@@ -154,7 +160,7 @@ describe('DiffDrawer view changes', () => {
 	it('a view-only staged batch enables Commit', async () => {
 		viewEntries = [
 			{
-				op: { kind: 'delete_folder', id: 'f1' },
+				op: { kind: 'delete_folder', view_id: 'v1', id: 'f1' },
 				label: 'Deleted folder "Pumps"',
 				unplacedElementIds: []
 			}
@@ -175,12 +181,12 @@ describe('DiffDrawer view changes', () => {
 	it('shows a pointer to the View tab on the Model tab for a view-only batch, and keeps Commit enabled', async () => {
 		viewEntries = [
 			{
-				op: { kind: 'delete_folder', id: 'f1' },
+				op: { kind: 'delete_folder', view_id: 'v1', id: 'f1' },
 				label: 'Deleted folder "Pumps"',
 				unplacedElementIds: []
 			},
 			{
-				op: { kind: 'rename_folder', id: 'f2', name: 'Valves' },
+				op: { kind: 'rename_folder', view_id: 'v1', id: 'f2', name: 'Valves' },
 				label: 'Renamed folder "Old" → "Valves"',
 				unplacedElementIds: []
 			}
@@ -202,7 +208,7 @@ describe('DiffDrawer view changes', () => {
 	it('calls discardViewChanges exactly once from the single discard button', async () => {
 		viewEntries = [
 			{
-				op: { kind: 'delete_folder', id: 'f1' },
+				op: { kind: 'delete_folder', view_id: 'v1', id: 'f1' },
 				label: 'Deleted folder "Pumps"',
 				unplacedElementIds: []
 			}

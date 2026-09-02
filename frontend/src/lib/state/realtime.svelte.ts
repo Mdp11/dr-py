@@ -25,7 +25,7 @@ import {
 	refreshSummary
 } from './model.svelte';
 import { handleArtifactFeedEvent } from './artifacts.svelte';
-import { isArtifactResource, isFolderResource } from './ops';
+import { isArtifactResource, isFolderResource, isViewResource } from './ops';
 import type { OpsResponse } from '$lib/api/types';
 
 let _connected = $state(false);
@@ -67,6 +67,20 @@ export function onCommitEvent(cb: CommitTap): () => void {
 	return () => _commitTaps.delete(cb);
 }
 
+/** What a view tap is told: the `view` feed event itself (a view was added
+ * or removed by SOME client — including this one, via the feed echo). */
+type ViewTap = (e: Extract<FeedEvent, { type: 'view' }>) => void;
+
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _viewTaps = new Set<ViewTap>();
+
+/** Register a tap fired on every `view` feed event (the view store uses it to
+ * refresh the view list and to notice its active view vanishing). */
+export function onViewEvent(cb: ViewTap): () => void {
+	_viewTaps.add(cb);
+	return () => _viewTaps.delete(cb);
+}
+
 export function getFeedConnected(): boolean {
 	return _connected;
 }
@@ -93,7 +107,7 @@ export function getLockState(): SvelteMap<string, LeaseLite> {
  * and metamodel rebind are model-scope by construction — the backend's
  * `/commits/revert` 409s on any range containing artifact OR view ops anyway
  * — so an `art:`/`folder:` lease is orthogonal to them and must not count.
- * A `folder:` lease is VIEW-scope for the identical reason `art:` is
+ * A `folder:`/`view:` lease is VIEW-scope for the identical reason `art:` is
  * artifact-scope: every sidebar drag/rename/create-child gesture takes one,
  * so counting it would let one user's sidebar drag disable model revert for
  * everyone. `mm` is excluded too — see the comment on its check below.
@@ -109,7 +123,14 @@ export function hasModelLocks(): boolean {
 		// own 409-with-email from the metamodel writer, independent of this
 		// predicate), and counting it here would make the metamodel editor's
 		// own `mm` lease disable its own Rebind button the moment it opens.
-		if (rid !== 'mm' && !isArtifactResource(rid) && !isFolderResource(rid)) return true;
+		if (
+			rid !== 'mm' &&
+			!isArtifactResource(rid) &&
+			!isFolderResource(rid) &&
+			!isViewResource(rid)
+		) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -228,6 +249,9 @@ export function handleFeedEvent(e: FeedEvent): void {
 		case 'artifact':
 			handleArtifactFeedEvent();
 			break;
+		case 'view':
+			for (const tap of _viewTaps) tap(e);
+			break;
 	}
 }
 
@@ -267,5 +291,6 @@ export function resetRealtime(): void {
 	_lockState.clear();
 	_lockTaps.clear();
 	_commitTaps.clear();
+	_viewTaps.clear();
 	_pendingRebind = null;
 }

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import * as viewApi from '$lib/api/view';
+import * as viewApi from '$lib/api/views';
 import * as editGate from '$lib/state/edit-gate';
 import type { View } from '$lib/api/types';
 import { clearViewState, getView, indexIssues, refreshView, resetArtifacts } from '$lib/state';
+import { setActiveViewId } from '$lib/state/active-view.svelte';
 import TreeRow from '../Sidebar/TreeRow.svelte';
 import {
 	artifactKey,
@@ -116,7 +117,8 @@ describe('TreeRow — dangling artifact refs', () => {
 			],
 			artifacts: []
 		};
-		vi.spyOn(viewApi, 'getView').mockResolvedValue({ view: seedView, warnings: [] });
+		setActiveViewId('v1');
+		vi.spyOn(viewApi, 'getView').mockResolvedValue({ view: seedView, warnings: [], view_rev: 0 });
 		await refreshView();
 		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
 

@@ -42,7 +42,7 @@ def test_set_property_needs_exclusive_on_element() -> None:
     m = _model()
     e = m.create_element("Node")
     reqs = required_locks(
-        m, None, [UpdateElementOp(kind="update_element", id=e.id, properties_patch={})]
+        m, {}, [UpdateElementOp(kind="update_element", id=e.id, properties_patch={})]
     )
     assert reqs == [
         __import__("data_rover.api.locking", fromlist=["RequiredLock"]).RequiredLock(
@@ -57,7 +57,7 @@ def test_connect_needs_exclusive_source_and_shared_target() -> None:
     b = m.create_element("Node")
     reqs = required_locks(
         m,
-        None,
+        {},
         [
             CreateRelationshipOp(
                 kind="create_relationship",
@@ -79,7 +79,7 @@ def test_connect_skips_temp_endpoints() -> None:
     a = m.create_element("Node")
     reqs = required_locks(
         m,
-        None,
+        {},
         [
             CreateRelationshipOp(
                 kind="create_relationship",
@@ -102,7 +102,7 @@ def test_delete_expands_to_containment_subtree() -> None:
     grand = m.create_element("Node")
     m.connect("Contains", root.id, child.id)
     m.connect("Contains", child.id, grand.id)
-    reqs = required_locks(m, None, [DeleteElementOp(kind="delete_element", id=root.id)])
+    reqs = required_locks(m, {}, [DeleteElementOp(kind="delete_element", id=root.id)])
     assert {r.resource_id for r in reqs} == {root.id, child.id, grand.id}
     assert all(r.mode is LockMode.EXCLUSIVE and r.intent is LockIntent.DELETE for r in reqs)
 
@@ -112,7 +112,7 @@ def test_expand_targets_delete_intent_walks_subtree() -> None:
     root = m.create_element("Node")
     child = m.create_element("Node")
     m.connect("Contains", root.id, child.id)
-    reqs = expand_targets(m, None, [(root.id, LockMode.EXCLUSIVE)], LockIntent.DELETE)
+    reqs = expand_targets(m, {}, [(root.id, LockMode.EXCLUSIVE)], LockIntent.DELETE)
     assert {r.resource_id for r in reqs} == {root.id, child.id}
 
 
@@ -131,26 +131,28 @@ def test_required_locks_folder_ops() -> None:
     a, a1, b = v.folders[0], v.folders[0].folders[0], v.folders[1]
     ops = OPS_ADAPTER.validate_python(
         [
-            {"kind": "create_folder", "temp_id": "tmp_c", "parent_id": b.id, "name": "C"},
-            {"kind": "rename_folder", "id": b.id, "name": "B2"},
-            {"kind": "delete_folder", "id": a.id},
+            {"kind": "create_folder", "view_id": "v1", "temp_id": "tmp_c", "parent_id": b.id, "name": "C"},
+            {"kind": "rename_folder", "view_id": "v1", "id": b.id, "name": "B2"},
+            {"kind": "delete_folder", "view_id": "v1", "id": a.id},
             {
                 "kind": "move_folder",
+                "view_id": "v1",
                 "id": a1.id,
                 "to_parent_id": "root",
             },
-            {"kind": "place_element", "element_id": "e1", "folder_id": "tmp_c"},
+            {"kind": "place_element", "view_id": "v1", "element_id": "e1", "folder_id": "tmp_c"},
         ]
     )
-    reqs = {(r.resource_id, r.mode, r.intent) for r in required_locks(m, v, ops)}
+    reqs = {(r.resource_id, r.mode, r.intent) for r in required_locks(m, {"v1": v}, ops)}
     assert (f"folder:{b.id}", LockMode.EXCLUSIVE, LockIntent.CREATE_CHILD) in reqs
     assert (f"folder:{b.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
     # delete expands over the subtree
     assert (f"folder:{a.id}", LockMode.EXCLUSIVE, LockIntent.DELETE) in reqs
     assert (f"folder:{a1.id}", LockMode.EXCLUSIVE, LockIntent.DELETE) in reqs
-    # move locks source parent (A — resolved from the view) and destination (root)
+    # move locks source parent (A — resolved from the view) and destination
+    # (the root, addressed by the VIEW's lease)
     assert (f"folder:{a.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
-    assert ("folder:root", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
+    assert ("view:v1", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
     # placement into the same-batch-created folder needs no lease
     assert not any(rid == "folder:tmp_c" for rid, _, _ in reqs)
 
@@ -174,10 +176,11 @@ def test_required_locks_element_and_artifact_placement_ops() -> None:
     f1, f2, f3, f4, f5, f6, f7 = v.folders
     ops = OPS_ADAPTER.validate_python(
         [
-            {"kind": "place_element", "element_id": "e1", "folder_id": f1.id},
-            {"kind": "remove_element", "element_id": "e2", "folder_id": f2.id},
+            {"kind": "place_element", "view_id": "v2", "element_id": "e1", "folder_id": f1.id},
+            {"kind": "remove_element", "view_id": "v2", "element_id": "e2", "folder_id": f2.id},
             {
                 "kind": "move_element",
+                "view_id": "v2",
                 "element_id": "e3",
                 "from_folder_id": f3.id,
                 "to_folder_id": f4.id,
@@ -186,27 +189,29 @@ def test_required_locks_element_and_artifact_placement_ops() -> None:
             # lease target, not just an "unplaced" no-op like element root.
             {
                 "kind": "place_artifact",
+                "view_id": "v2",
                 "artifact_id": "art1",
                 "artifact_kind": "table",
                 "folder_id": "root",
             },
-            {"kind": "remove_artifact", "artifact_id": "art2", "folder_id": f5.id},
+            {"kind": "remove_artifact", "view_id": "v2", "artifact_id": "art2", "folder_id": f5.id},
             {
                 "kind": "move_artifact",
+                "view_id": "v2",
                 "artifact_id": "art3",
                 "from_folder_id": f6.id,
                 "to_folder_id": f7.id,
             },
         ]
     )
-    reqs = {(r.resource_id, r.mode, r.intent) for r in required_locks(m, v, ops)}
+    reqs = {(r.resource_id, r.mode, r.intent) for r in required_locks(m, {"v2": v}, ops)}
     assert (f"folder:{f1.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs  # place_element
     assert (f"folder:{f2.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs  # remove_element
     # move_element locks BOTH endpoints
     assert (f"folder:{f3.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
     assert (f"folder:{f4.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
-    # place_artifact into the root list locks folder:root, same as a real folder
-    assert ("folder:root", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
+    # place_artifact into the root list locks the VIEW, the root's lease
+    assert ("view:v2", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
     assert (f"folder:{f5.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs  # remove_artifact
     # move_artifact locks BOTH endpoints
     assert (f"folder:{f6.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
@@ -217,7 +222,7 @@ def test_required_locks_element_and_artifact_placement_ops() -> None:
         (f"folder:{f2.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
         (f"folder:{f3.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
         (f"folder:{f4.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
-        ("folder:root", LockMode.EXCLUSIVE, LockIntent.EDIT),
+        ("view:v2", LockMode.EXCLUSIVE, LockIntent.EDIT),
         (f"folder:{f5.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
         (f"folder:{f6.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
         (f"folder:{f7.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
@@ -228,14 +233,41 @@ def test_expand_targets_folder_delete_subtree() -> None:
     m = _model()
     v = _v()
     a = v.folders[0]
+    # two views: the subtree is expanded against the one OWNING the folder
     reqs = expand_targets(
         m,
-        v,
+        {"other": View(name="o", folders=[Folder(id="zz", name="Z")]), "v1": v},
         [(f"folder:{a.id}", LockMode.EXCLUSIVE)],
         LockIntent.DELETE,
     )
     ids = {r.resource_id for r in reqs}
     assert ids == {f"folder:{a.id}", f"folder:{a.folders[0].id}"}
+
+
+def test_required_locks_delete_folder_uses_the_ops_view() -> None:
+    """Two views may both be loaded; a delete_folder expands against the
+    view its ``view_id`` names, and a root-parented create locks THAT view."""
+    m = _model()
+    v1, v2 = _v(), _v()
+    a2 = v2.folders[0]
+    ops = OPS_ADAPTER.validate_python(
+        [
+            {"kind": "delete_folder", "id": a2.id, "view_id": "v2"},
+            {
+                "kind": "create_folder",
+                "temp_id": "tmp_n",
+                "parent_id": "root",
+                "name": "N",
+                "view_id": "v1",
+            },
+        ]
+    )
+    reqs = {(r.resource_id, r.intent) for r in required_locks(m, {"v1": v1, "v2": v2}, ops)}
+    assert reqs == {
+        (f"folder:{a2.id}", LockIntent.DELETE),
+        (f"folder:{a2.folders[0].id}", LockIntent.DELETE),
+        ("view:v1", LockIntent.CREATE_CHILD),
+    }
 
 
 def test_metamodel_ops_require_the_mm_exclusive_lease() -> None:
@@ -247,7 +279,7 @@ def test_metamodel_ops_require_the_mm_exclusive_lease() -> None:
     model = Model(load_metamodel_str("elements:\n  - name: A\n"))
     reqs = required_locks(
         model,
-        None,
+        {},
         [
             RebindMetamodelOp(kind="metamodel.rebind", blob="x: 1\n"),
             MoveMetamodelNodeOp(kind="metamodel.move_node", node="el:A", pos=None),

@@ -44,6 +44,14 @@ export type FeedEvent =
 			type: 'artifact';
 			action: 'created' | 'updated' | 'deleted';
 			artifact: { id: string; kind: string; name: string; artifact_rev: number };
+	  }
+	| {
+			/** a view was added to / removed from the project (direct actions,
+			 * never a commit — folder edits inside a view ride `commit` with
+			 * scope "view") */
+			type: 'view';
+			action: 'created' | 'deleted';
+			view: { id: string; name: string };
 	  };
 
 export interface WebSocketLike {

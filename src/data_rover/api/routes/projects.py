@@ -184,7 +184,7 @@ def clone_project(
     mm_row = content.get_metamodel_row(db, model_row.metamodel_id)
     if mm_row is None:
         raise HTTPException(status_code=409, detail="project metamodel missing")
-    view_row = content.get_single_view(db, project_id)
+    view_rows = content.list_views(db, project_id)
 
     # Materialize the source's CURRENT model as save-file JSON from the live
     # session (hydrates on cache-miss); iter_model_json streams entity-by-entity.
@@ -217,7 +217,7 @@ def clone_project(
         owner_id=user.id,
         metamodel_yaml=mm_row.blob,
         model_json=model_json,
-        view_json=view_row.blob if view_row is not None else None,
+        view_jsons=[r.blob for r in view_rows],
         artifact_bundle=artifact_bundle,
         # the ONE trusted caller: this bundle was built from rows two
         # statements ago, so validating it could only reject data a clone is

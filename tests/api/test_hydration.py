@@ -19,7 +19,13 @@ from data_rover.api.storage import (
 from data_rover.api.session import Session
 from data_rover.core.metamodel.loader import load_metamodel_str
 
-from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    create_folder_via_commit,
+    create_view,
+    papi,
+    seed_default_project,
+)
 
 MM_YAML = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 
@@ -122,19 +128,18 @@ def test_hydration_heals_missing_folder_ids(client: TestClient) -> None:
     gen = db.get_db()
     s = next(gen)
     try:
-        content.upsert_single_view(
+        vid = content.create_view(
             s,
             DEFAULT_PROJECT_ID,
             name="v",
             blob='{"name": "v", "folders": [{"name": "A"}], "artifacts": []}',
-            bump_rev=False,
-        )
+        ).id
         s.commit()
     finally:
         gen.close()
 
     get_registry().evict(DEFAULT_PROJECT_ID)
-    r = client.get(papi("/view"))
+    r = client.get(papi(f"/views/{vid}"))
     assert r.status_code == 200
     assert len(r.json()["view"]["folders"][0]["id"]) == 32
     assert r.json()["view_rev"] == 0
@@ -142,29 +147,45 @@ def test_hydration_heals_missing_folder_ids(client: TestClient) -> None:
     gen = db.get_db()
     s = next(gen)
     try:
-        row = content.get_single_view(s, DEFAULT_PROJECT_ID)
+        row = content.get_view(s, DEFAULT_PROJECT_ID, vid)
         assert row is not None and '"id"' in row.blob and row.view_rev == 0
     finally:
         gen.close()
 
 
+def test_hydration_loads_every_view(client: TestClient) -> None:
+    """A cold session hydrates ALL of the project's views into
+    ``session.views`` — the commit path relies on the dict being complete."""
+    from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+
+    a = create_view(client, "A", {"folders": [{"name": "FA"}]})
+    b = create_view(client, "B", {"folders": [{"name": "FB"}]})
+    get_registry().evict(DEFAULT_PROJECT_ID)
+    session = get_registry().get(DEFAULT_PROJECT_ID)
+    assert {vid: v.folders[0].name for vid, v in session.views.items()} == {
+        a: "FA",
+        b: "FB",
+    }
+    assert [v["name"] for v in client.get(papi("/views")).json()] == ["A", "B"]
+
+
 def test_view_op_commit_survives_eviction(client: TestClient) -> None:
     """Catches a "wrong blob staged" bug: ``POST /commits``' view-op step 'e' stages the
-    resulting ``session.view`` blob on the SAME DB transaction as the
+    resulting view blob on the SAME DB transaction as the
     ``Commit`` row (see its docstring's atomicity note), but nothing else in
     the suite proves that staged blob is what a COLD session actually reads
     back. Commit a view batch, evict the session (dropping the in-memory
     cache entirely — ``get_registry().evict`` mirrors
     ``test_commits_revert.py::test_revert_survives_eviction`` and this
     module's own folder-id-healing harness above), then re-read via
-    ``GET /view`` and assert it matches: hydration reads the durable
+    ``GET /views/{id}`` and assert it matches: hydration reads the durable
     ``ViewRow`` directly (a materialized head, never replayed from the op
     journal — view ops are explicitly SKIPPED on model replay), so this path
     is the one thing that would catch a commit that staged the wrong blob."""
     from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
 
     setup = create_folder_via_commit(client, "A")
-    fid = setup["id_map"]["tmp_setup"]
+    vid, fid = setup["view_id"], setup["id_map"]["tmp_setup"]
 
     r = client.post(
         papi("/locks"),
@@ -180,20 +201,20 @@ def test_view_op_commit_survives_eviction(client: TestClient) -> None:
         papi("/commits"),
         json={
             "base_rev": base,
-            "ops": [{"kind": "rename_folder", "id": fid, "name": "A2"}],
+            "ops": [{"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"}],
             "message": "m",
             "lock_tokens": [token],
         },
     )
     assert r.status_code == 200, r.text
-    expected_view_rev = r.json()["view_rev"]
+    expected_view_rev = r.json()["view_revs"][vid]
 
-    before = client.get(papi("/view")).json()
+    before = client.get(papi(f"/views/{vid}")).json()
     assert before["view"]["folders"][0]["name"] == "A2"
 
     get_registry().evict(DEFAULT_PROJECT_ID)  # snapshot-then-drop
 
-    after = client.get(papi("/view")).json()  # re-hydrate from the durable row
+    after = client.get(papi(f"/views/{vid}")).json()  # re-hydrate from the durable row
     assert after == before
     assert after["view"]["folders"][0]["name"] == "A2"
     assert after["view_rev"] == expected_view_rev

@@ -54,6 +54,10 @@ ARTIFACT_PREFIX = "art:"
 #: accept `type: "folder"`, `folder_resource` mints the wire id, and
 #: `expand_targets`/`required_locks` both derive folder leases (see below).
 FOLDER_PREFIX = "folder:"
+#: a view's ROOT membership (its top-level folder/artifact list) — the
+#: `folder:` namespace is per real folder (uuid, unique across views), and
+#: the root has no id of its own, so it is addressed by the view instead.
+VIEW_PREFIX = "view:"
 METAMODEL_RESOURCE = "mm"  # singleton — one metamodel binding per project
 
 
@@ -63,6 +67,10 @@ def artifact_resource(artifact_id: str) -> str:
 
 def folder_resource(folder_id: str) -> str:
     return FOLDER_PREFIX + folder_id
+
+
+def view_resource(view_id: str) -> str:
+    return VIEW_PREFIX + view_id
 
 
 def is_model_resource(resource_id: str) -> bool:
@@ -299,9 +307,10 @@ class LockTable:
 # locate_folder are called at RUNTIME (folder delete-expansion, move-folder's
 # source-parent resolution), so they are real imports, not TYPE_CHECKING-only;
 # Folder/VIEW_ROOT_ID are likewise needed at runtime by `_locate_container_id`.
+from collections.abc import Mapping  # noqa: E402
 from typing import TYPE_CHECKING  # noqa: E402
 
-from data_rover.core.view.ids import folder_subtree, locate_folder  # noqa: E402
+from data_rover.core.view.ids import find_folder, folder_subtree, locate_folder  # noqa: E402
 from data_rover.core.view.schema import VIEW_ROOT_ID, Folder  # noqa: E402
 
 from .schemas import (  # noqa: E402
@@ -336,6 +345,15 @@ if TYPE_CHECKING:
     from .schemas import OpIn
 
 
+def container_resource(view_id: str, folder_id: str) -> str:
+    """The lease a membership edit inside ``folder_id`` of view ``view_id``
+    needs: the folder's own `folder:` lease, or the view's `view:` lease when
+    the container is the reserved root id."""
+    if folder_id == VIEW_ROOT_ID:
+        return view_resource(view_id)
+    return folder_resource(folder_id)
+
+
 def containment_subtree(model: Model, root_id: str) -> list[str]:
     """``root_id`` + all transitive containment descendants (DFS, dedup)."""
     out: list[str] = []
@@ -352,9 +370,18 @@ def containment_subtree(model: Model, root_id: str) -> list[str]:
     return out
 
 
+def owning_view(views: Mapping[str, View], folder_id: str) -> View | None:
+    """The view holding ``folder_id`` (folder ids are uuids, unique across a
+    project's views); None when no view does."""
+    for view in views.values():
+        if find_folder(view, folder_id) is not None:
+            return view
+    return None
+
+
 def expand_targets(
     model: Model,
-    view: View | None,
+    views: Mapping[str, View],
     targets: list[tuple[str, LockMode]],
     intent: LockIntent,
 ) -> list[RequiredLock]:
@@ -362,12 +389,12 @@ def expand_targets(
 
     A DELETE-intent exclusive target additionally locks its whole subtree:
     containment descendants for a model resource (via `containment_subtree`),
-    or nested folders for a `folder:` resource (via `folder_subtree`)
-    — so the cascade can't delete/reparent something another editor holds.
-    `view` is consulted ONLY for the folder arm; a model-resource or
-    artifact/metamodel target ignores it entirely (and a folder delete against
-    a None/stale view degrades to a single-resource lock — `folder_subtree`
-    is total, never raises)."""
+    or nested folders for a `folder:` resource (via `folder_subtree` on the
+    view that owns the folder) — so the cascade can't delete/reparent
+    something another editor holds. `views` is consulted ONLY for the folder
+    arm; a model-resource or artifact/metamodel/view target ignores it
+    entirely (and a folder delete no view knows degrades to a
+    single-resource lock — `folder_subtree` is total, never raises)."""
     reqs: list[RequiredLock] = []
     seen: set[tuple[str, LockMode]] = set()
 
@@ -383,7 +410,7 @@ def expand_targets(
                     add(member, LockMode.EXCLUSIVE)
             elif rid.startswith(FOLDER_PREFIX):
                 bare = rid.removeprefix(FOLDER_PREFIX)
-                for member in folder_subtree(view, bare):
+                for member in folder_subtree(owning_view(views, bare), bare):
                     add(folder_resource(member), LockMode.EXCLUSIVE)
             else:
                 add(rid, mode)
@@ -403,10 +430,10 @@ def _locate_container_id(node: View | Folder) -> str:
 
 
 def required_locks(
-    model: Model, view: View | None, ops: list[OpIn]
+    model: Model, views: Mapping[str, View], ops: list[OpIn]
 ) -> list[RequiredLock]:
     """The locks an op batch needs, computed against the PRE-apply model
-    (and, for folder ops, the pre-apply view).
+    (and, for folder ops, the pre-apply view each op names by ``view_id``).
 
     Ids created earlier in the same batch (temp ids) are not yet shared, so
     they require no lock; relationships are locked via their source element.
@@ -419,7 +446,8 @@ def required_locks(
     move-artifact lock BOTH endpoints (EDIT) since the op moves membership
     between them. `move_folder`'s SOURCE parent is not named by the op at
     all — only the destination is — so it is resolved by walking the CURRENT
-    `view` via `locate_folder`. A missing view or unknown folder id skips
+    view via `locate_folder`. A root container is addressed by the VIEW's
+    lease (`container_resource`). A missing view or unknown folder id skips
     that half silently rather than raising: the op will 422 at apply time
     regardless (the applier re-derives the same thing against the same
     view), and lock derivation must stay total so a stale/malformed op can
@@ -478,35 +506,47 @@ def required_locks(
         elif isinstance(op, CreateFolderOp):
             created.add(folder_resource(op.temp_id))
             add(
-                folder_resource(op.parent_id),
+                container_resource(op.view_id, op.parent_id),
                 LockMode.EXCLUSIVE,
                 LockIntent.CREATE_CHILD,
             )
         elif isinstance(op, RenameFolderOp):
             add(folder_resource(op.id), LockMode.EXCLUSIVE, LockIntent.EDIT)
         elif isinstance(op, MoveFolderOp):
+            view = views.get(op.view_id)
             if view is not None:
                 located = locate_folder(view, op.id)
                 if located is not None:
                     add(
-                        folder_resource(_locate_container_id(located[0])),
+                        container_resource(
+                            op.view_id, _locate_container_id(located[0])
+                        ),
                         LockMode.EXCLUSIVE,
                         LockIntent.EDIT,
                     )
-            add(folder_resource(op.to_parent_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
+            add(
+                container_resource(op.view_id, op.to_parent_id),
+                LockMode.EXCLUSIVE,
+                LockIntent.EDIT,
+            )
         elif isinstance(op, DeleteFolderOp):
-            for member in folder_subtree(view, op.id):
+            for member in folder_subtree(views.get(op.view_id), op.id):
                 add(folder_resource(member), LockMode.EXCLUSIVE, LockIntent.DELETE)
-        elif isinstance(op, (PlaceElementOp, RemoveElementOp)):
-            add(folder_resource(op.folder_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
-        elif isinstance(op, MoveElementOp):
-            add(folder_resource(op.from_folder_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
-            add(folder_resource(op.to_folder_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
-        elif isinstance(op, (PlaceArtifactOp, RemoveArtifactOp)):
-            add(folder_resource(op.folder_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
-        elif isinstance(op, MoveArtifactOp):
-            add(folder_resource(op.from_folder_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
-            add(folder_resource(op.to_folder_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
+        elif isinstance(
+            op, (PlaceElementOp, RemoveElementOp, PlaceArtifactOp, RemoveArtifactOp)
+        ):
+            add(
+                container_resource(op.view_id, op.folder_id),
+                LockMode.EXCLUSIVE,
+                LockIntent.EDIT,
+            )
+        elif isinstance(op, (MoveElementOp, MoveArtifactOp)):
+            for fid in (op.from_folder_id, op.to_folder_id):
+                add(
+                    container_resource(op.view_id, fid),
+                    LockMode.EXCLUSIVE,
+                    LockIntent.EDIT,
+                )
         elif isinstance(op, (RebindMetamodelOp, MoveMetamodelNodeOp)):
             # The whole family serializes on the singleton `mm` lease: a
             # rebind rewrites what every node/key MEANS, so per-node layout

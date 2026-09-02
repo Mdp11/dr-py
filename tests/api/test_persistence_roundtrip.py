@@ -37,9 +37,9 @@ def test_view_persists_across_eviction() -> None:
     c = TestClient(create_app())
     c.post(papi("/metamodel"), content=MM, headers=AUTH_HEADERS)
     c.post(papi("/model/upload"), content=MODEL.encode(), headers=AUTH_HEADERS)
-    create_folder_via_commit(c, "My Folder")
+    vid = create_folder_via_commit(c, "My Folder")["view_id"]
 
     get_registry().evict("default")
 
-    v = c.get(papi("/view"), headers=AUTH_HEADERS).json()
+    v = c.get(papi(f"/views/{vid}"), headers=AUTH_HEADERS).json()
     assert v["view"]["folders"][0]["name"] == "My Folder"

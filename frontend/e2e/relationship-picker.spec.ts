@@ -69,21 +69,11 @@ test('relationship picker filters by metamodel and reveals all via escape hatch'
 	await page.keyboard.press('Escape');
 
 	// --- Select element Alpha (type A) in the containment tree ---
-	// `loadFiles` gave no `view:`, but the project ALWAYS carries a view now
-	// (its no-view branch empties the existing view rather than nulling it —
-	// there is no supported API path back to `session.view === null` once a
-	// project has ever committed one; see `helpers/load.ts`'s `seedView`).
-	// So Alpha and Bravo, unplaced in any folder, render in the collapsed
-	// "Not in view" pool rather than as direct rows in the main tree — expand
-	// it first (same pattern as view.spec.ts's `expandPool`).
-	const treeEl = page.getByRole('tree', { name: /containment tree/i });
-	await expect(treeEl).toBeVisible({ timeout: 15_000 });
-
-	const poolHeader = page.getByRole('button', { name: /not in view/i });
-	await expect(poolHeader).toBeVisible({ timeout: 15_000 });
-	await poolHeader.click();
-	const pool = page.getByRole('tree', { name: /excluded elements/i });
-	await expect(pool).toBeVisible({ timeout: 10_000 });
+	// `loadFiles` gave no `view:`, so the project has NO view: Alpha and Bravo
+	// are direct root rows of the plain containment tree (no "Not in view"
+	// pool — that is the complement of an ACTIVE view).
+	const pool = page.getByRole('tree', { name: /containment tree/i });
+	await expect(pool).toBeVisible({ timeout: 15_000 });
 
 	// Wait for at least one element row pick button to appear.
 	await expect(pool.locator('button.flex-1').first()).toBeVisible({ timeout: 15_000 });

@@ -35,12 +35,13 @@ def test_import_creates_project_baseline_and_hydrates() -> None:
             assert snap is not None and snap.rev == 0
         sess = hydration.hydrate_session("proj")
         assert sess.model is not None and len(sess.model.elements) > 0
-        assert sess.view is not None
+        (view,) = sess.views.values()  # one view, named from the document
+        assert view.name == "Operational"
         # the fixture's folders carry no ids at all (an un-migrated blob
         # shape); the importer's ensure_folder_ids call heals them at import
         # time, one of its two entry points alongside hydration
         # (tests/api/test_hydration.py::test_hydration_heals_missing_folder_ids).
-        assert all(len(f.id) == 32 for f in sess.view.folders)
+        assert all(len(f.id) == 32 for f in view.folders)
     finally:
         set_snapshot_store(None)
 
@@ -107,8 +108,8 @@ def test_trusted_import_lands_artifact_bundle_verbatim_with_remap() -> None:
             # nav payload ref remapped to the snippet's NEW id
             assert by_name["n"].payload["operands"][0]["ref"] == by_name["s"].id
             # view blob refs remapped too; unknown ref left dangling (tolerant)
-            view_row = content.get_single_view(s, "pz")
-            assert view_row is not None
+            (view_row,) = content.list_views(s, "pz")
+            assert view_row.name == "V"
             view = json.loads(view_row.blob)
             assert view["folders"][0]["artifacts"][0]["id"] == by_name["n"].id
             assert view["artifacts"][0]["id"] == by_name["s"].id

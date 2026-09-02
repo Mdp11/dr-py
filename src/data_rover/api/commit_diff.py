@@ -361,6 +361,7 @@ def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
             out.append(
                 ViewDiffEntryOut(
                     kind=op.kind,
+                    view_id=op.view_id,
                     folder_id=op.temp_id,  # canonical ops carry the real id
                     name=op.name,
                     parent_id=op.parent_id,
@@ -371,6 +372,7 @@ def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
             out.append(
                 ViewDiffEntryOut(
                     kind=op.kind,
+                    view_id=op.view_id,
                     folder_id=op.id,
                     name=op.name,
                     name_before=names_before.get(op.id),
@@ -380,6 +382,7 @@ def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
             out.append(
                 ViewDiffEntryOut(
                     kind=op.kind,
+                    view_id=op.view_id,
                     folder_id=op.id,
                     to_folder_id=op.to_parent_id,
                     index=op.index,
@@ -389,13 +392,17 @@ def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
         elif isinstance(op, DeleteFolderOp):
             out.append(
                 ViewDiffEntryOut(
-                    kind=op.kind, folder_id=op.id, name_before=names_before.get(op.id)
+                    kind=op.kind,
+                    view_id=op.view_id,
+                    folder_id=op.id,
+                    name_before=names_before.get(op.id),
                 )
             )
         elif isinstance(op, (PlaceElementOp, RemoveElementOp)):
             out.append(
                 ViewDiffEntryOut(
                     kind=op.kind,
+                    view_id=op.view_id,
                     folder_id=op.folder_id,
                     element_id=op.element_id,
                     index=getattr(op, "index", None),
@@ -405,6 +412,7 @@ def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
             out.append(
                 ViewDiffEntryOut(
                     kind=op.kind,
+                    view_id=op.view_id,
                     element_id=op.element_id,
                     from_folder_id=op.from_folder_id,
                     to_folder_id=op.to_folder_id,
@@ -415,6 +423,7 @@ def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
             out.append(
                 ViewDiffEntryOut(
                     kind=op.kind,
+                    view_id=op.view_id,
                     folder_id=op.folder_id,
                     artifact_id=op.artifact_id,
                     artifact_kind=getattr(op, "artifact_kind", None),
@@ -425,6 +434,7 @@ def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
             out.append(
                 ViewDiffEntryOut(
                     kind=op.kind,
+                    view_id=op.view_id,
                     artifact_id=op.artifact_id,
                     from_folder_id=op.from_folder_id,
                     to_folder_id=op.to_folder_id,

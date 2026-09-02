@@ -4,7 +4,14 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from data_rover.core.metamodel.diff import MetamodelStructuralDiff
 from data_rover.core.model.change_request import (
@@ -18,7 +25,11 @@ from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.schema import NavigationDefinition
 from data_rover.core.script.schema import SNIPPET_MAX_CODE_BYTES
 from data_rover.core.script.warnings import ScriptWarning
-from data_rover.core.table.exporter import ExporterDefinition, ExporterEntry, ExportFormat
+from data_rover.core.table.exporter import (
+    ExporterDefinition,
+    ExporterEntry,
+    ExportFormat,
+)
 from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.validation.rules.schema import RULES_MAX_YAML_BYTES
@@ -296,11 +307,31 @@ class ViewOut(BaseModel):
 
 
 class ViewStateResponse(BaseModel):
-    view: ViewOut | None = None
+    id: str
+    view: ViewOut
     warnings: list[IssueOut] = Field(default_factory=list)
-    #: None when no ``ViewRow`` exists for the project (nothing has ever been
-    #: saved); an int (possibly 0, pre-any-edit) once one does.
-    view_rev: int | None = None
+    view_rev: int = 0
+
+
+class ViewSummaryOut(BaseModel):
+    id: str
+    name: str
+    view_rev: int = 0
+
+
+class CreateViewIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    #: the view document (``View`` shape); its own ``name`` is overwritten by
+    #: ``name`` above, the row's authoritative one.
+    view: dict[str, Any]
+
+    @field_validator("name")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("name must not be blank")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +458,10 @@ ArtifactOpIn = CreateArtifactOp | UpdateArtifactOp | DeleteArtifactOp
 
 class CreateFolderOp(BaseModel):
     kind: Literal["create_folder"]
+    #: the view this op edits (every view op carries one). The empty default
+    #: exists ONLY so journal rows written before named views still parse;
+    #: commit/preview 422 on it, undo resolves it to the project's sole view.
+    view_id: str = ""
     temp_id: str
     parent_id: str
     name: str
@@ -437,12 +472,14 @@ class CreateFolderOp(BaseModel):
 
 class RenameFolderOp(BaseModel):
     kind: Literal["rename_folder"]
+    view_id: str = ""
     id: str
     name: str
 
 
 class MoveFolderOp(BaseModel):
     kind: Literal["move_folder"]
+    view_id: str = ""
     id: str
     to_parent_id: str
     index: int | None = None
@@ -450,11 +487,13 @@ class MoveFolderOp(BaseModel):
 
 class DeleteFolderOp(BaseModel):
     kind: Literal["delete_folder"]
+    view_id: str = ""
     id: str
 
 
 class PlaceElementOp(BaseModel):
     kind: Literal["place_element"]
+    view_id: str = ""
     element_id: str
     #: must be a real folder id, never VIEW_ROOT_ID — an unplaced element
     #: already renders at the root (enforced by the applier).
@@ -464,12 +503,14 @@ class PlaceElementOp(BaseModel):
 
 class RemoveElementOp(BaseModel):
     kind: Literal["remove_element"]
+    view_id: str = ""
     element_id: str
     folder_id: str
 
 
 class MoveElementOp(BaseModel):
     kind: Literal["move_element"]
+    view_id: str = ""
     element_id: str
     from_folder_id: str
     to_folder_id: str
@@ -478,6 +519,7 @@ class MoveElementOp(BaseModel):
 
 class PlaceArtifactOp(BaseModel):
     kind: Literal["place_artifact"]
+    view_id: str = ""
     artifact_id: str
     #: plain str, NOT the artifact Literal — view refs are tolerant danglers;
     #: a ref must outlive kind-registry evolution.
@@ -488,12 +530,14 @@ class PlaceArtifactOp(BaseModel):
 
 class RemoveArtifactOp(BaseModel):
     kind: Literal["remove_artifact"]
+    view_id: str = ""
     artifact_id: str
     folder_id: str
 
 
 class MoveArtifactOp(BaseModel):
     kind: Literal["move_artifact"]
+    view_id: str = ""
     artifact_id: str
     from_folder_id: str
     to_folder_id: str
@@ -848,9 +892,10 @@ class LockTargetIn(BaseModel):
     mode: Literal["exclusive", "shared"]
     #: what the id names; the route canonicalizes to the internal namespace
     #: ("element" -> bare id, "artifact" -> "art:<id>", "metamodel" -> "mm",
-    #: "folder" -> "folder:<id>"). Defaults to "element" so pre-existing
-    #: clients are untouched.
-    type: Literal["element", "artifact", "metamodel", "folder"] = "element"
+    #: "folder" -> "folder:<id>", "view" -> "view:<id>" — a view's root
+    #: membership). Defaults to "element" so pre-existing clients are
+    #: untouched.
+    type: Literal["element", "artifact", "metamodel", "folder", "view"] = "element"
 
 
 class LockRequest(BaseModel):
@@ -944,9 +989,10 @@ class CommitResponse(OpsResponse):
     #: being required: every pre-artifact client keeps parsing the response.
     changed_artifacts: list[ArtifactHeaderOut] = Field(default_factory=list)
     deleted_artifact_ids: list[str] = Field(default_factory=list)
-    #: post-commit ViewRow.view_rev; None when the batch touched no view
-    #: content. Secondary/informational — see ViewRow.view_rev.
-    view_rev: int | None = None
+    #: post-commit ViewRow.view_rev per view the batch edited (keyed by view
+    #: id); empty when it touched no view content. Secondary/informational —
+    #: see ViewRow.view_rev.
+    view_revs: dict[str, int] = Field(default_factory=dict)
     #: True when this commit carried a metamodel.rebind: the client must
     #: refetch the metamodel + issues (there is no applyable schema delta).
     rebound: bool = False
@@ -1056,6 +1102,7 @@ class ViewDiffEntryOut(BaseModel):
     view and degrades to the bare id for folders deleted since."""
 
     kind: str
+    view_id: str = ""
     folder_id: str | None = None
     name: str | None = None
     name_before: str | None = None

@@ -551,20 +551,22 @@ def _placed_element_ids(view: View) -> set[str]:
 def list_excluded_roots(
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
+    view_id: str | None = Query(None),
     session: Session = Depends(get_request_session),
 ) -> TreeItemPage:
-    """Containment roots NOT placed in the active view (the 'excluded pool').
-    Sorted by display name then id, like ``list_containment_roots`` (so the
-    paged pool grows by appending, never reshuffling). With no active view,
-    every root is excluded (returns all roots). Rows are the lite
-    :class:`TreeItem` projection.
+    """Containment roots NOT placed in view ``view_id`` (the 'excluded
+    pool'). Sorted by display name then id, like ``list_containment_roots``
+    (so the paged pool grows by appending, never reshuffling). With no
+    ``view_id`` (or an unknown one), every root is excluded (returns all
+    roots). Rows are the lite :class:`TreeItem` projection.
 
     Walks the maintained roots order filtering view-placed ids — O(roots)
     worst case but with no display-name computation or sort, which were the
     dominant cost."""
     _, model = require_model(session)
     idx = model.indexes
-    placed = _placed_element_ids(session.view) if session.view is not None else set()
+    view = session.views.get(view_id) if view_id else None
+    placed = _placed_element_ids(view) if view is not None else set()
     items: list[TreeItem] = []
     total = 0
     for eid in idx.iter_roots():

@@ -81,21 +81,38 @@ export type ArtifactOp =
 /**
  * View-content ops — mirror of the backend's
  * ViewOpIn (api/schemas.py). Applied by POST /commits to the session view
- * blob (api/view_ops.py), never to the model; /model/ops rejects them.
+ * blob named by `view_id` (api/view_ops.py), never to the model; /model/ops
+ * rejects them. Every op carries `view_id`: a project holds N named views and
+ * each client edits its own active one, so the batch — not the session —
+ * says which view an op addresses (an unknown id is a 422 at commit).
  * No `view_rev` precondition exists on any of these BY DECISION: the
- * folder: lease is the concurrency control, exactly as `update_artifact`
+ * folder:/view: lease is the concurrency control, exactly as `update_artifact`
  * never sends `artifact_rev` (CLAUDE.md "Lease rule").
  * `index` omitted = append (the server clamps + canonicalizes it).
  */
 export type ViewOp =
-	| { kind: 'create_folder'; temp_id: string; parent_id: string; name: string; index?: number }
-	| { kind: 'rename_folder'; id: string; name: string }
-	| { kind: 'move_folder'; id: string; to_parent_id: string; index?: number }
-	| { kind: 'delete_folder'; id: string }
-	| { kind: 'place_element'; element_id: string; folder_id: string; index?: number }
-	| { kind: 'remove_element'; element_id: string; folder_id: string }
+	| {
+			kind: 'create_folder';
+			view_id: string;
+			temp_id: string;
+			parent_id: string;
+			name: string;
+			index?: number;
+	  }
+	| { kind: 'rename_folder'; view_id: string; id: string; name: string }
+	| { kind: 'move_folder'; view_id: string; id: string; to_parent_id: string; index?: number }
+	| { kind: 'delete_folder'; view_id: string; id: string }
+	| {
+			kind: 'place_element';
+			view_id: string;
+			element_id: string;
+			folder_id: string;
+			index?: number;
+	  }
+	| { kind: 'remove_element'; view_id: string; element_id: string; folder_id: string }
 	| {
 			kind: 'move_element';
+			view_id: string;
 			element_id: string;
 			from_folder_id: string;
 			to_folder_id: string;
@@ -103,14 +120,16 @@ export type ViewOp =
 	  }
 	| {
 			kind: 'place_artifact';
+			view_id: string;
 			artifact_id: string;
 			artifact_kind: string;
 			folder_id: string;
 			index?: number;
 	  }
-	| { kind: 'remove_artifact'; artifact_id: string; folder_id: string }
+	| { kind: 'remove_artifact'; view_id: string; artifact_id: string; folder_id: string }
 	| {
 			kind: 'move_artifact';
+			view_id: string;
 			artifact_id: string;
 			from_folder_id: string;
 			to_folder_id: string;
@@ -194,8 +213,32 @@ export function isFolderResource(resourceId: string): boolean {
  * back under this same id, so no canonicalization is involved either. */
 export const METAMODEL_RESOURCE = 'mm';
 
+/** Client mirror of api/locking.py's VIEW_PREFIX: a view's ROOT-membership
+ * lease (top-level folders and root-level artifact refs). Folder ids are
+ * uuids, unique across a project's views, so `folder:<id>` needs no view
+ * scoping — only the root, which every view has, does. Requested as
+ * `{resource_id: <view id>, type: 'view'}`, granted back canonicalized. */
+export const VIEW_RESOURCE_PREFIX = 'view:';
+
+export function viewResource(viewId: string): string {
+	return VIEW_RESOURCE_PREFIX + viewId;
+}
+
+export function isViewResource(resourceId: string): boolean {
+	return resourceId.startsWith(VIEW_RESOURCE_PREFIX);
+}
+
 /** The view root's fixed folder id (backend core/view/ids.VIEW_ROOT_ID).
  * Element ops may NEVER name it (an unplaced element already renders at the
  * root — "move to root" is remove_element); artifact ops MAY (the root has a
- * real artifacts list). `folder:root` is a genuine lease target. */
+ * real artifacts list). It is NOT a lease target itself: locking the root of
+ * view V is the `view:V` lease — see {@link folderLeaseResource}. */
 export const VIEW_ROOT_ID = 'root';
+
+/** The canonical lease resource a folder op's container maps to: the view's
+ * own `view:` lease for {@link VIEW_ROOT_ID}, `folder:<id>` otherwise. The ONE
+ * place this mapping lives — lock targets (edit-gate's `folderTargets`), the
+ * commit-time needed-set and the folder release path all go through it. */
+export function folderLeaseResource(folderId: string, viewId: string): string {
+	return folderId === VIEW_ROOT_ID ? viewResource(viewId) : folderResource(folderId);
+}

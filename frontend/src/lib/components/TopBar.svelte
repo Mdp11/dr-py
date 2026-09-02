@@ -51,10 +51,12 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import ModelChangeDialog from './ModelChangeDialog.svelte';
 	import ArtifactsMenu from './ArtifactsMenu.svelte';
+	import ViewMenu from './ViewMenu.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
 
 	// Shared trigger style for every flat left-nav control, kept as one
-	// constant so the six controls stay visually identical.
+	// constant so the controls stay visually identical (ViewMenu/ArtifactsMenu
+	// repeat it inline for their triggers).
 	const barBtn =
 		'flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50';
 
@@ -196,10 +198,6 @@
 			>
 				<Shapes class="h-3.5 w-3.5" /> Metamodel
 			</button>
-			<button type="button" class={barBtn} onclick={() => openIssuesTab()}>
-				<ListChecks class="h-3.5 w-3.5" /> Issues
-			</button>
-			<ArtifactsMenu />
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger data-testid="model-menu-trigger" class={barBtn}>
 					<Database class="h-3.5 w-3.5" />
@@ -221,6 +219,11 @@
 					</DropdownMenu.Item>
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>
+			<ViewMenu />
+			<button type="button" class={barBtn} onclick={() => openIssuesTab()}>
+				<ListChecks class="h-3.5 w-3.5" /> Issues
+			</button>
+			<ArtifactsMenu />
 			<button type="button" class={barBtn} onclick={() => (settingsOpen = true)}>
 				<Settings class="h-3.5 w-3.5" /> Settings
 			</button>

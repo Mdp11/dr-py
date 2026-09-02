@@ -161,7 +161,10 @@ describe('hasUnsavedWork', () => {
 		// so without the view-depth term a view-ONLY batch would walk out of the
 		// workspace past the unload guard while a model or artifact batch of the
 		// same size is caught.
-		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'Renamed' }, 'Renamed folder');
+		stageViewOp(
+			{ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'Renamed' },
+			'Renamed folder'
+		);
 		expect(hasUnsavedWork()).toBe(true);
 
 		resetViewEdits();

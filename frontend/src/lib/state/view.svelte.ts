@@ -20,8 +20,9 @@
  * commit). A mutator returns `Promise<boolean>`: `true` means staged (or a
  * legitimate no-op), `false` means the gate refused and nothing changed.
  */
-import * as viewApi from '$lib/api/view';
-import type { ArtifactRef, Folder, Issue, View } from '$lib/api/types';
+import * as viewsApi from '$lib/api/views';
+import { NotFoundError } from '$lib/api/errors';
+import type { ArtifactRef, Folder, Issue, View, ViewSummary } from '$lib/api/types';
 import {
 	applyViewOp,
 	artifactPlacementFolderIds,
@@ -36,6 +37,7 @@ import { folderCreateLock, folderDeleteLock, folderEditLock } from './edit-gate'
 import { releaseFolderLeaseIfUnneeded } from './checkout.svelte';
 import {
 	discardStagedView,
+	getStagedViewDepth,
 	getStagedViewOps,
 	onViewCommitted,
 	onViewDiscarded,
@@ -43,14 +45,27 @@ import {
 	stageViewOp
 } from './view-edits.svelte';
 import { setViewDiscardNotice } from './view-discard-notice.svelte';
-import { onCommitEvent } from './realtime.svelte';
+import { onCommitEvent, onViewEvent } from './realtime.svelte';
 import { getCachedElements } from './model.svelte';
+import { getActiveProjectId } from './active-project.svelte';
+import {
+	getActiveViewId,
+	recallActiveViewId,
+	rememberActiveViewId,
+	setActiveViewId
+} from './active-view.svelte';
+import { confirm } from './confirm.svelte';
 import { elementDisplayName } from '$lib/util/element-name';
 
 export { cloneView } from './view-ops';
+export { getActiveViewId } from './active-view.svelte';
 
 let _view: View | null = $state(null);
 let _warnings: Issue[] = $state([]);
+/** The project's named views (`GET /views`), refreshed by {@link loadViews}
+ * on boot and on every `view` feed event. Content lives in `_view` for the
+ * ACTIVE one only. */
+let _views: ViewSummary[] = $state([]);
 
 /**
  * Whether the active project's view question has been ANSWERED this session
@@ -77,6 +92,18 @@ export function getViewWarnings(): readonly Issue[] {
 	return _warnings;
 }
 
+export function getViews(): readonly ViewSummary[] {
+	return _views;
+}
+
+/** The active view's id, or a throw — every stage mutator stamps it on the op
+ * it emits, and none can run without a loaded `_view`, which implies one. */
+function requireActiveViewId(): string {
+	const id = getActiveViewId();
+	if (id === null) throw new Error('No active view');
+	return id;
+}
+
 function setState(view: View | null, warnings: Issue[]): void {
 	_view = view;
 	_warnings = warnings;
@@ -84,7 +111,45 @@ function setState(view: View | null, warnings: Issue[]): void {
 
 export function clearViewState(): void {
 	setState(null, []);
+	_views = [];
+	setActiveViewId(null); // in-memory only: the per-project localStorage choice survives
 	resetViewEdits();
+}
+
+/** Sort the way the server lists: by name, then id (a stable tiebreak). */
+function sortViews(views: ViewSummary[]): ViewSummary[] {
+	return [...views].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+/**
+ * Refresh the view list and reconcile the ACTIVE id against it: keep the
+ * current one if it still exists, else the id remembered for this project,
+ * else the first by name, else null ("no view"). Boot's order — nothing has
+ * been chosen yet — is therefore remembered -> first -> null.
+ *
+ * Returns whether the active id changed, so a caller can decide whether the
+ * content needs refetching. Swallows a failed list into an empty one: a
+ * project whose views cannot be listed renders as "no view", the same answer
+ * `refreshView`'s own failure path gives.
+ */
+export async function loadViews(): Promise<boolean> {
+	let views: ViewSummary[];
+	try {
+		views = sortViews(await viewsApi.listViews());
+	} catch {
+		views = [];
+	}
+	_views = views;
+	const projectId = getActiveProjectId();
+	const prior = getActiveViewId();
+	const has = (id: string | null): id is string => id !== null && views.some((v) => v.id === id);
+	let next: string | null = prior;
+	if (!has(next)) {
+		const remembered = projectId === null ? null : recallActiveViewId(projectId);
+		next = has(remembered) ? remembered : (views[0]?.id ?? null);
+	}
+	setActiveViewId(next);
+	return next !== prior;
 }
 
 /**
@@ -119,7 +184,22 @@ export function clearViewState(): void {
  */
 export async function refreshView(): Promise<void> {
 	try {
-		const res = await viewApi.getView();
+		const activeId = getActiveViewId();
+		let res: { view: View | null; warnings: Issue[] };
+		if (activeId === null) {
+			res = { view: null, warnings: [] };
+		} else {
+			try {
+				res = await viewsApi.getView(activeId);
+			} catch (err) {
+				// The active view vanished under us (deleted by a peer before its
+				// feed event reached this client, or a stale remembered id): treat
+				// it as "no view" rather than a failed load — `loadViews` picks
+				// the replacement when the event lands.
+				if (!(err instanceof NotFoundError)) throw err;
+				res = { view: null, warnings: [] };
+			}
+		}
 		const staged = getStagedViewOps();
 		let next = res.view;
 		// A null `res.view` (the project has no view at all) with a non-empty
@@ -176,6 +256,83 @@ async function dropConflictedJournal(): Promise<void> {
 	setViewDiscardNotice(
 		'The view changed while you were editing it — your unsaved folder changes were discarded.'
 	);
+}
+
+/**
+ * Make `id` (null = no view) the active view. A staged journal belongs to the
+ * view it was staged against, so switching with unsaved folder edits asks
+ * first and discards them (all-or-nothing, like every other view discard —
+ * `discardViewChanges` hands the journal's leases back). Returns false when
+ * the user kept their edits and nothing changed.
+ *
+ * The tree's resolved gate is dropped for the refetch so the switch paints as
+ * a reload rather than a flash of the old view's folders over the new one.
+ */
+export async function selectView(id: string | null): Promise<boolean> {
+	if (id === getActiveViewId()) return true;
+	if (getStagedViewDepth() > 0) {
+		const ok = await confirm({
+			title: 'Switch view?',
+			description: `Your ${getStagedViewDepth()} unsaved view ${getStagedViewDepth() === 1 ? 'change' : 'changes'} will be discarded.`,
+			confirmLabel: 'Discard and switch',
+			variant: 'destructive'
+		});
+		if (!ok) return false;
+		await discardViewChanges();
+	}
+	setActiveViewId(id);
+	const projectId = getActiveProjectId();
+	if (projectId !== null) rememberActiveViewId(projectId, id);
+	_viewResolved = false;
+	await refreshView();
+	return true;
+}
+
+/** `POST /views` then make the new view active (refreshing the list first so
+ * the selector shows it even if the feed echo is slow). Errors propagate —
+ * the dialog renders them (409 duplicate name, 422 malformed document). */
+export async function addView(name: string, doc: Record<string, unknown>): Promise<ViewSummary> {
+	const created = await viewsApi.createView({ name, view: doc });
+	await loadViews();
+	await selectView(created.id);
+	return created;
+}
+
+/** `DELETE /views/{id}` then reconcile: the list refresh picks the
+ * replacement when the deleted view was the active one. A journal staged
+ * against it is unsalvageable and is dropped silently — the dialog warned. */
+export async function removeView(id: string): Promise<void> {
+	await viewsApi.deleteView(id);
+	await reconcileAfterViewEvent();
+}
+
+/**
+ * Shared tail of a `view` feed event and of {@link removeView}: refresh the
+ * list, and if the active view is gone, drop its journal (its folders no
+ * longer exist anywhere), release the leases, fall back per `loadViews` and
+ * refetch. A created view only needs the list refreshed.
+ */
+async function reconcileAfterViewEvent(): Promise<void> {
+	const prior = getActiveViewId();
+	const priorName = _views.find((v) => v.id === prior)?.name ?? null;
+	const changed = await loadViews();
+	if (!changed) return;
+	if (getStagedViewDepth() > 0) {
+		const rids = stagedFolderLeaseIds();
+		resetViewEdits();
+		for (const fid of rids) await releaseFolderLeaseIfUnneeded(fid);
+	}
+	if (prior !== null) {
+		const projectId = getActiveProjectId();
+		if (projectId !== null) rememberActiveViewId(projectId, getActiveViewId());
+		setViewDiscardNotice(
+			priorName === null
+				? 'The active view was deleted.'
+				: `The view "${priorName}" was deleted${getActiveViewId() === null ? ' — no view is active' : ''}.`
+		);
+	}
+	_viewResolved = false;
+	await refreshView();
 }
 
 // ----- id-addressed helpers shared by the mutators below -----
@@ -237,7 +394,13 @@ export async function stageCreateFolder(parentId: string, name: string): Promise
 	if (!(await folderCreateLock(parentId))) return false; // gate showed the notice
 	const tempId = createTempId();
 	const label = `Created folder "${name}"`;
-	const op: ViewOp = { kind: 'create_folder', temp_id: tempId, parent_id: parentId, name };
+	const op: ViewOp = {
+		kind: 'create_folder',
+		view_id: requireActiveViewId(),
+		temp_id: tempId,
+		parent_id: parentId,
+		name
+	};
 	_view = applyViewOp(_view, op); // optimistic; applyViewOp re-checks and throws on drift
 	stageViewOp(op, label);
 	return true;
@@ -254,7 +417,7 @@ export async function stageRenameFolder(id: string, name: string): Promise<boole
 	}
 	if (!(await folderEditLock([id]))) return false; // gate showed the notice
 	const label = `Renamed folder "${folder.name}" → "${name}"`;
-	const op: ViewOp = { kind: 'rename_folder', id, name };
+	const op: ViewOp = { kind: 'rename_folder', view_id: requireActiveViewId(), id, name };
 	_view = applyViewOp(_view, op); // optimistic; applyViewOp re-checks and throws on drift
 	stageViewOp(op, label);
 	return true;
@@ -268,7 +431,7 @@ export async function stageDeleteFolder(id: string): Promise<boolean> {
 	if (!(await folderDeleteLock(subtreeIds))) return false; // gate showed the notice
 	const label = `Deleted folder "${folder.name}"`;
 	const unplacedElementIds = subtreeElementIds(folder); // capture BEFORE the pop — see docstring
-	const op: ViewOp = { kind: 'delete_folder', id };
+	const op: ViewOp = { kind: 'delete_folder', view_id: requireActiveViewId(), id };
 	_view = applyViewOp(_view, op);
 	stageViewOp(op, label, unplacedElementIds);
 	return true;
@@ -298,7 +461,12 @@ export async function stageMoveFolder(id: string, toParentId: string): Promise<b
 	}
 	if (!(await folderEditLock([located.parentId, toParentId]))) return false; // gate showed the notice
 	const label = `Moved folder "${folder.name}" to "${folderDisplayName(_view, toParentId)}"`;
-	const op: ViewOp = { kind: 'move_folder', id, to_parent_id: toParentId };
+	const op: ViewOp = {
+		kind: 'move_folder',
+		view_id: requireActiveViewId(),
+		id,
+		to_parent_id: toParentId
+	};
 	_view = applyViewOp(_view, op);
 	stageViewOp(op, label);
 	return true;
@@ -359,6 +527,7 @@ export async function stagePlaceElementsAt(
 	if (folderId === null && targets.size === 0) return true; // nothing placed to remove
 	if (!(await folderEditLock([...targets]))) return false; // gate showed the notice
 
+	const viewId = requireActiveViewId();
 	const destName = folderId === null ? null : folderDisplayName(_view, folderId);
 	let at = index; // undefined = append; stays undefined for the whole batch
 	for (const id of selection) {
@@ -368,14 +537,25 @@ export async function stagePlaceElementsAt(
 		let cursorHeld = false;
 		if (folderId === null) {
 			if (home === null) continue; // already unplaced: no-op for this id
-			const op: ViewOp = { kind: 'remove_element', element_id: id, folder_id: home };
+			const op: ViewOp = {
+				kind: 'remove_element',
+				view_id: viewId,
+				element_id: id,
+				folder_id: home
+			};
 			const label = `Removed ${elLabel(id)} from "${folderDisplayName(_view, home)}"`;
 			_view = applyViewOp(_view, op);
 			stageViewOp(op, label, [id]); // excluded-pool injection payload
 			continue;
 		}
 		if (home === null) {
-			const op: ViewOp = { kind: 'place_element', element_id: id, folder_id: folderId, index: at };
+			const op: ViewOp = {
+				kind: 'place_element',
+				view_id: viewId,
+				element_id: id,
+				folder_id: folderId,
+				index: at
+			};
 			_view = applyViewOp(_view, op);
 			stageViewOp(op, `Placed ${elLabel(id)} in "${destName}"`);
 		} else {
@@ -389,6 +569,7 @@ export async function stagePlaceElementsAt(
 			}
 			const op: ViewOp = {
 				kind: 'move_element',
+				view_id: viewId,
 				element_id: id,
 				from_folder_id: home,
 				to_folder_id: folderId,
@@ -423,6 +604,7 @@ export async function stagePlaceArtifact(folderId: string, ref: ArtifactRef): Pr
 	const label = `Placed artifact "${ref.id}" in "${folderDisplayName(_view, folderId)}"`;
 	const op: ViewOp = {
 		kind: 'place_artifact',
+		view_id: requireActiveViewId(),
 		artifact_id: ref.id,
 		artifact_kind: ref.kind,
 		folder_id: folderId
@@ -448,6 +630,7 @@ export async function stageMoveArtifact(
 	const label = `Moved artifact "${ref.id}" to "${folderDisplayName(_view, toFolderId)}"`;
 	const op: ViewOp = {
 		kind: 'move_artifact',
+		view_id: requireActiveViewId(),
 		artifact_id: ref.id,
 		from_folder_id: fromFolderId,
 		to_folder_id: toFolderId
@@ -482,7 +665,12 @@ export async function stageRemoveArtifactRef(
 	}
 	if (!(await folderEditLock([folderId]))) return false; // gate showed the notice
 	const label = `Removed placement of "${displayName ?? artifactId}" from "${folderDisplayName(_view, folderId)}"`;
-	const op: ViewOp = { kind: 'remove_artifact', artifact_id: artifactId, folder_id: folderId };
+	const op: ViewOp = {
+		kind: 'remove_artifact',
+		view_id: requireActiveViewId(),
+		artifact_id: artifactId,
+		folder_id: folderId
+	};
 	_view = applyViewOp(_view, op);
 	stageViewOp(op, label);
 	return true;
@@ -501,14 +689,20 @@ export async function stageClearView(): Promise<boolean> {
 	const allIds: string[] = [VIEW_ROOT_ID];
 	for (const f of _view.folders) allIds.push(...folderSubtreeIds(_view, f.id));
 	if (!(await folderDeleteLock(allIds))) return false; // gate showed the notice
+	const viewId = requireActiveViewId();
 	for (const f of [..._view.folders]) {
-		const op: ViewOp = { kind: 'delete_folder', id: f.id };
+		const op: ViewOp = { kind: 'delete_folder', view_id: viewId, id: f.id };
 		const unplacedElementIds = subtreeElementIds(f); // capture BEFORE the pop
 		_view = applyViewOp(_view, op);
 		stageViewOp(op, `Deleted folder "${f.name}"`, unplacedElementIds);
 	}
 	for (const ref of [..._view.artifacts]) {
-		const op: ViewOp = { kind: 'remove_artifact', artifact_id: ref.id, folder_id: VIEW_ROOT_ID };
+		const op: ViewOp = {
+			kind: 'remove_artifact',
+			view_id: viewId,
+			artifact_id: ref.id,
+			folder_id: VIEW_ROOT_ID
+		};
 		_view = applyViewOp(_view, op);
 		stageViewOp(op, `Removed artifact "${ref.id}" from "the top level"`);
 	}
@@ -621,4 +815,7 @@ setTimeout(() => {
 	onCommitEvent(({ scope }) => {
 		if (scope.includes('view')) void refreshView();
 	});
+	// A view added/removed by ANY client (own actions echo too — a second
+	// list fetch of a tiny payload, same tolerance as the commit taps above).
+	onViewEvent(() => void reconcileAfterViewEvent());
 }, 0);

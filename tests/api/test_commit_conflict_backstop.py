@@ -16,7 +16,16 @@ from fastapi.testclient import TestClient
 from data_rover.api.main import create_app
 from data_rover.api.session import get_session
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    container_lock_target,
+    create_view,
+    papi,
+    seed_default_project,
+)
+
+#: the view every view op in this module edits — set by ``_seed_view``
+_VIEW_ID = ""
 
 _MM = """
 elements:
@@ -75,10 +84,7 @@ def _lock(c: TestClient, resource_id: str, *, type_: str = "element") -> str:
 def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:
     r = client.post(
         papi("/locks"),
-        json={
-            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
-            "intent": intent,
-        },
+        json={"targets": [container_lock_target(_VIEW_ID, fid)], "intent": intent},
     )
     assert r.status_code == 200, r.text
     token: str = r.json()["token"]
@@ -91,7 +97,7 @@ def _commit_rename(client: TestClient, fid: str, name: str) -> None:
         papi("/commits"),
         json={
             "base_rev": _rev(client),
-            "ops": [{"kind": "rename_folder", "id": fid, "name": name}],
+            "ops": [{"kind": "rename_folder", "view_id": _VIEW_ID, "id": fid, "name": name}],
             "message": "m",
             "lock_tokens": [token],
         },
@@ -104,8 +110,11 @@ def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
     seed named folders with ids. *folders* is
     ``[{"name": ..., "folders": [...]}, ...]``. Returns a flat {name: id} map
     (names are unique per test, so a flat map is unambiguous even for
-    nested folders). A single ``root`` lease covers the whole batch — ids
-    created earlier in the same batch need no lock to be referenced later."""
+    nested folders). A single lease on the view (its root) covers the whole
+    batch — ids created earlier in the same batch need no lock to be
+    referenced later."""
+    global _VIEW_ID
+    _VIEW_ID = create_view(client)
     ops: list[dict] = []
     counter = 0
 
@@ -116,6 +125,7 @@ def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
         ops.append(
             {
                 "kind": "create_folder",
+                "view_id": _VIEW_ID,
                 "temp_id": temp_id,
                 "parent_id": parent_id,
                 "name": spec["name"],
@@ -450,7 +460,7 @@ def test_stale_view_batch_overlapping_tail_409s(client) -> None:
         papi("/commits"),
         json={
             "base_rev": stale_base,
-            "ops": [{"kind": "rename_folder", "id": fa, "name": "A3"}],
+            "ops": [{"kind": "rename_folder", "view_id": _VIEW_ID, "id": fa, "name": "A3"}],
             "message": "m",
             "lock_tokens": [token],
         },
@@ -470,7 +480,7 @@ def test_stale_view_batch_disjoint_from_tail_lands(client) -> None:
         papi("/commits"),
         json={
             "base_rev": stale_base,
-            "ops": [{"kind": "rename_folder", "id": fb, "name": "B2"}],
+            "ops": [{"kind": "rename_folder", "view_id": _VIEW_ID, "id": fb, "name": "B2"}],
             "message": "m",
             "lock_tokens": [token],
         },
@@ -494,7 +504,7 @@ def test_stale_batch_renaming_delete_folder_subtree_child_409s(client) -> None:
         papi("/commits"),
         json={
             "base_rev": stale_base,
-            "ops": [{"kind": "delete_folder", "id": d_id}],
+            "ops": [{"kind": "delete_folder", "view_id": _VIEW_ID, "id": d_id}],
             "message": "m",
             "lock_tokens": [delete_token],
         },
@@ -506,7 +516,7 @@ def test_stale_batch_renaming_delete_folder_subtree_child_409s(client) -> None:
         papi("/commits"),
         json={
             "base_rev": stale_base,
-            "ops": [{"kind": "rename_folder", "id": c_id, "name": "C2"}],
+            "ops": [{"kind": "rename_folder", "view_id": _VIEW_ID, "id": c_id, "name": "C2"}],
             "message": "m",
             "lock_tokens": [rename_token],
         },
@@ -536,7 +546,7 @@ def test_stale_batch_creating_under_move_folders_old_parent_409s(client) -> None
         papi("/commits"),
         json={
             "base_rev": stale_base,
-            "ops": [{"kind": "move_folder", "id": f_id, "to_parent_id": b_id}],
+            "ops": [{"kind": "move_folder", "view_id": _VIEW_ID, "id": f_id, "to_parent_id": b_id}],
             "message": "m",
             "lock_tokens": [move_token, move_token2],
         },
@@ -551,6 +561,7 @@ def test_stale_batch_creating_under_move_folders_old_parent_409s(client) -> None
             "ops": [
                 {
                     "kind": "create_folder",
+                    "view_id": _VIEW_ID,
                     "temp_id": "tmp_new",
                     "parent_id": a_id,
                     "name": "New",
@@ -564,51 +575,28 @@ def test_stale_batch_creating_under_move_folders_old_parent_409s(client) -> None
     assert r.json()["detail"] == "conflicting concurrent commits"
 
 
-def test_stale_delete_folder_batch_hydrates_view_for_overlap_check(client) -> None:
+def test_stale_delete_folder_batch_overlaps_tail_via_subtree(client) -> None:
     """The pre-mutex overlap check (``_batch_touched_ids``, inside the
-    ``base_rev < model_rev`` staleness block) resolves its OWN local view —
-    never assigned to ``session.view``, since this whole block runs before
-    ``session.write_mutex`` — so a stale batch's own
-    ``delete_folder``/``move_folder`` ops are expanded against the REAL
-    durable tree, not an unhydrated ``None``.
-
-    The caller's lock is deliberately acquired while the cache is still WARM
-    so ``expand_targets`` correctly grants a token covering the FULL {D, C}
-    subtree — this isolates the pre-mutex overlap check as the ONLY thing
-    that could catch the conflict: the in-mutex
-    ``required_locks``/``verify_held`` check would find the caller's broad
-    token sufficient regardless, so without the local hydration, this batch
-    would silently narrow its touched-set to ``{folder:D}`` alone, miss the
-    overlap with the tail's rename of child C, sail through the lock check
-    too, and land at 200 — not a differently-worded 409, but a genuine lost
-    update."""
+    ``base_rev < model_rev`` staleness block) expands a stale batch's own
+    ``delete_folder`` over the REAL subtree of the view the op names, so a
+    tail commit that only touched child C still conflicts with a stale
+    delete of parent D. The caller's DELETE lease covers {D, C} (acquired
+    before the tail landed; folder ids survive the rename), which isolates
+    the overlap check as the ONLY thing that can catch it: ``verify_held``
+    would find that token sufficient regardless."""
     ids = _seed_view(client, [{"name": "D", "folders": [{"name": "C"}]}])
     d_id = ids["D"]
     c_id = ids["C"]
     stale_base = _rev(client)
 
-    _commit_rename(client, c_id, "C2")  # tail commit touching folder:c only
-
-    # Acquire the caller's DELETE lock on D while session.view is STILL
-    # warm (untouched since the setup above) — expand_targets correctly
-    # expands over the real subtree here, granting a token covering BOTH
-    # D and C (folder ids survive the rename). Even a properly broad lock
-    # cannot save a stale batch from landing if the PRE-mutex overlap check
-    # itself fails to consult the real tree.
     d_token = _folder_lease(client, d_id, intent="delete")
-
-    # NOW the cache goes cold; the durable row (D -> C2) is untouched. Setting
-    # session.view directly clears ONLY the in-memory cache, leaving ViewRow
-    # intact, without going through full-session eviction, which the live
-    # d_token lease held above would refuse (evict-with-live-locks guard).
-    get_session().view = None
-    assert client.get(papi("/view")).json()["view"] is None
+    _commit_rename(client, c_id, "C2")  # tail commit touching folder:c only
 
     r = client.post(
         papi("/commits"),
         json={
             "base_rev": stale_base,
-            "ops": [{"kind": "delete_folder", "id": d_id}],
+            "ops": [{"kind": "delete_folder", "view_id": _VIEW_ID, "id": d_id}],
             "message": "m",
             "lock_tokens": [d_token],
         },
@@ -630,7 +618,7 @@ def test_placement_subject_overlap_conflicts_across_folders(client) -> None:
         papi("/commits"),
         json={
             "base_rev": _rev(client),
-            "ops": [{"kind": "place_element", "element_id": "e1", "folder_id": fa}],
+            "ops": [{"kind": "place_element", "view_id": _VIEW_ID, "element_id": "e1", "folder_id": fa}],
             "message": "m",
             "lock_tokens": [tok],
         },
@@ -643,7 +631,7 @@ def test_placement_subject_overlap_conflicts_across_folders(client) -> None:
         papi("/commits"),
         json={
             "base_rev": stale_base,
-            "ops": [{"kind": "remove_element", "element_id": "e1", "folder_id": fa}],
+            "ops": [{"kind": "remove_element", "view_id": _VIEW_ID, "element_id": "e1", "folder_id": fa}],
             "message": "m",
             "lock_tokens": [tok],
         },
@@ -656,7 +644,7 @@ def test_placement_subject_overlap_conflicts_across_folders(client) -> None:
         papi("/commits"),
         json={
             "base_rev": stale_base,
-            "ops": [{"kind": "place_element", "element_id": "e1", "folder_id": fc}],
+            "ops": [{"kind": "place_element", "view_id": _VIEW_ID, "element_id": "e1", "folder_id": fc}],
             "message": "m",
             "lock_tokens": [tok],
         },

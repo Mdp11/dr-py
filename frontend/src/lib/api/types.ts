@@ -229,9 +229,21 @@ export type View = z.infer<typeof ViewSchema>;
 
 export const ViewStateResponseSchema = z.object({
 	view: ViewSchema.nullable().default(null),
-	warnings: z.array(IssueSchema).default([])
+	warnings: z.array(IssueSchema).default([]),
+	// informational only — no view op carries a `view_rev` precondition (the
+	// folder:/view: lease is the concurrency control)
+	view_rev: z.number().int().nullable().default(null)
 });
 export type ViewStateResponse = z.infer<typeof ViewStateResponseSchema>;
+
+/** One row of `GET /views` — a project's named views; content is fetched per
+ * view through `GET /views/{id}`. */
+export const ViewSummarySchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	view_rev: z.number().int().default(0)
+});
+export type ViewSummary = z.infer<typeof ViewSummarySchema>;
 
 export const ConflictSchema = z.object({
 	kind: z.enum(['id_exists', 'missing', 'before_mismatch']),
@@ -290,9 +302,10 @@ export const LockTargetInSchema = z.object({
 	resource_id: z.string(),
 	mode: z.enum(['exclusive', 'shared']),
 	// what the id names; the backend canonicalizes ("artifact" -> "art:<id>",
-	// "metamodel" -> "mm", "folder" -> "folder:<id>"). Optional: absent means
-	// "element", so every pre-existing element call site is untouched.
-	type: z.enum(['element', 'artifact', 'metamodel', 'folder']).optional()
+	// "metamodel" -> "mm", "folder" -> "folder:<id>", "view" -> "view:<id>" —
+	// the root-membership lease of a view). Optional: absent means "element",
+	// so every pre-existing element call site is untouched.
+	type: z.enum(['element', 'artifact', 'metamodel', 'folder', 'view']).optional()
 });
 export type LockTargetIn = z.infer<typeof LockTargetInSchema>;
 
@@ -416,7 +429,11 @@ export const CommitResponseSchema = OpsResponseSchema.extend({
 	// defaulted so a fixture that omits them stays distinguishable from one
 	// that says "no rebind" — every reader treats absent as false/null.
 	rebound: z.boolean().optional(),
-	to_metamodel_id: z.string().nullable().optional()
+	to_metamodel_id: z.string().nullable().optional(),
+	// view half: the new `view_rev` of every view the batch touched, keyed by
+	// view id. Informational (see ViewStateResponseSchema.view_rev); optional
+	// so pre-existing fixtures keep parsing — readers treat absent as {}.
+	view_revs: z.record(z.string(), z.number().int()).optional()
 });
 export type CommitResponse = z.infer<typeof CommitResponseSchema>;
 

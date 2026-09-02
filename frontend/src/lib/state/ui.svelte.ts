@@ -77,3 +77,32 @@ export function setImportArtifactsOpen(open: boolean): void {
 export function openImportArtifacts(): void {
 	_importArtifactsOpen = true;
 }
+
+// Add/Delete view dialogs — mounted once in ViewMenu, which owns the flags'
+// lifecycle exactly as ArtifactsMenu owns the artifact dialogs' (see above).
+let _addViewOpen: boolean = $state(false);
+let _deleteViewOpen: boolean = $state(false);
+
+export function getAddViewOpen(): boolean {
+	return _addViewOpen;
+}
+
+export function setAddViewOpen(open: boolean): void {
+	_addViewOpen = open;
+}
+
+export function openAddView(): void {
+	_addViewOpen = true;
+}
+
+export function getDeleteViewOpen(): boolean {
+	return _deleteViewOpen;
+}
+
+export function setDeleteViewOpen(open: boolean): void {
+	_deleteViewOpen = open;
+}
+
+export function openDeleteView(): void {
+	_deleteViewOpen = true;
+}

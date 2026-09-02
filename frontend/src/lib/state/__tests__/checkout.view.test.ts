@@ -27,7 +27,8 @@ import {
 	stageViewOp
 } from '../index';
 import * as api from '$lib/api/checkout';
-import * as viewApi from '$lib/api/view';
+import * as viewApi from '$lib/api/views';
+import { setActiveViewId } from '../active-view.svelte';
 import * as editGate from '../edit-gate';
 import type { CommitResponse, View } from '$lib/api/types';
 import type { ViewOp } from '../ops';
@@ -123,7 +124,7 @@ describe('three-buffer commit ordering', () => {
 		await checkoutAndEditElement();
 		stageArtifactUpdate('a9', { name: 'renamed' });
 		await checkoutFolder('f1');
-		const viewOp: ViewOp = { kind: 'rename_folder', id: 'f1', name: 'New name' };
+		const viewOp: ViewOp = { kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'New name' };
 		stageViewOp(viewOp, 'Rename folder');
 
 		const preview = vi.spyOn(api, 'previewCommit').mockResolvedValue({
@@ -136,7 +137,7 @@ describe('three-buffer commit ordering', () => {
 		expect(preview.mock.calls[0][1]).toEqual([
 			expect.objectContaining({ kind: 'update_element', id: 'e1' }),
 			expect.objectContaining({ kind: 'update_artifact', id: 'a9', name: 'renamed' }),
-			expect.objectContaining({ kind: 'rename_folder', id: 'f1', name: 'New name' })
+			expect.objectContaining({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'New name' })
 		]);
 
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
@@ -149,7 +150,7 @@ describe('three-buffer commit ordering', () => {
 		expect(commit.mock.calls[0][0].ops).toEqual([
 			expect.objectContaining({ kind: 'update_element', id: 'e1' }),
 			expect.objectContaining({ kind: 'update_artifact', id: 'a9', name: 'renamed' }),
-			expect.objectContaining({ kind: 'rename_folder', id: 'f1', name: 'New name' })
+			expect.objectContaining({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'New name' })
 		]);
 		// clearStagedView ran: the journal is empty post-commit.
 		expect(getStagedViewOps()).toEqual([]);
@@ -199,7 +200,7 @@ describe('releaseFolderLeaseIfUnneeded', () => {
 	it('keeps the lease while a staged view op still needs it, releases once the journal clears', async () => {
 		mockAcquire();
 		await checkoutFolder('f1');
-		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'New' }, 'Rename folder');
+		stageViewOp({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'New' }, 'Rename folder');
 		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
 
 		await releaseFolderLeaseIfUnneeded('f1');
@@ -223,34 +224,55 @@ describe('lockedResourcesNeededBy covers the view op family', () => {
 	const cases: [string, ViewOp][] = [
 		[
 			'create_folder names its parent',
-			{ kind: 'create_folder', temp_id: 'tmp_f2', parent_id: 'f1', name: 'x' }
+			{ kind: 'create_folder', view_id: 'v1', temp_id: 'tmp_f2', parent_id: 'f1', name: 'x' }
 		],
-		['rename_folder names itself', { kind: 'rename_folder', id: 'f1', name: 'x' }],
-		['delete_folder names itself', { kind: 'delete_folder', id: 'f1' }],
-		['move_folder names its destination', { kind: 'move_folder', id: 'f9', to_parent_id: 'f1' }],
+		['rename_folder names itself', { kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'x' }],
+		['delete_folder names itself', { kind: 'delete_folder', view_id: 'v1', id: 'f1' }],
+		[
+			'move_folder names its destination',
+			{ kind: 'move_folder', view_id: 'v1', id: 'f9', to_parent_id: 'f1' }
+		],
 		[
 			'place_element names its folder',
-			{ kind: 'place_element', element_id: 'e1', folder_id: 'f1' }
+			{ kind: 'place_element', view_id: 'v1', element_id: 'e1', folder_id: 'f1' }
 		],
 		[
 			'remove_element names its folder',
-			{ kind: 'remove_element', element_id: 'e1', folder_id: 'f1' }
+			{ kind: 'remove_element', view_id: 'v1', element_id: 'e1', folder_id: 'f1' }
 		],
 		[
 			'move_element names its destination folder',
-			{ kind: 'move_element', element_id: 'e1', from_folder_id: 'f9', to_folder_id: 'f1' }
+			{
+				kind: 'move_element',
+				view_id: 'v1',
+				element_id: 'e1',
+				from_folder_id: 'f9',
+				to_folder_id: 'f1'
+			}
 		],
 		[
 			'place_artifact names its folder',
-			{ kind: 'place_artifact', artifact_id: 'a1', artifact_kind: 'table', folder_id: 'f1' }
+			{
+				kind: 'place_artifact',
+				view_id: 'v1',
+				artifact_id: 'a1',
+				artifact_kind: 'table',
+				folder_id: 'f1'
+			}
 		],
 		[
 			'remove_artifact names its folder',
-			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'f1' }
+			{ kind: 'remove_artifact', view_id: 'v1', artifact_id: 'a1', folder_id: 'f1' }
 		],
 		[
 			'move_artifact names its destination folder',
-			{ kind: 'move_artifact', artifact_id: 'a1', from_folder_id: 'f9', to_folder_id: 'f1' }
+			{
+				kind: 'move_artifact',
+				view_id: 'v1',
+				artifact_id: 'a1',
+				from_folder_id: 'f9',
+				to_folder_id: 'f1'
+			}
 		]
 	];
 
@@ -269,7 +291,7 @@ describe('lockedResourcesNeededBy covers the view op family', () => {
 	it("move_folder's SOURCE container is not named by the op (token-granularity covers it)", async () => {
 		mockAcquire();
 		await checkoutFolder('f9'); // the source container of the move below
-		stageViewOp({ kind: 'move_folder', id: 'f1', to_parent_id: 'f2' }, 'move');
+		stageViewOp({ kind: 'move_folder', view_id: 'v1', id: 'f1', to_parent_id: 'f2' }, 'move');
 		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
 
 		// f9 (the source) is not named by lockedResourcesNeededBy for this op, so
@@ -284,7 +306,7 @@ describe('discardAll wipes the view journal', () => {
 	it('clears staged view ops', async () => {
 		mockAcquire();
 		await checkoutFolder('f1');
-		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'x' }, 'Rename folder');
+		stageViewOp({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'x' }, 'Rename folder');
 		vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
 
 		await discardAll();
@@ -295,7 +317,7 @@ describe('discardAll wipes the view journal', () => {
 	it('folder leases are never kept open (dialogs are transient)', async () => {
 		mockAcquire();
 		await checkoutFolder('f1');
-		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'x' }, 'Rename folder');
+		stageViewOp({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'x' }, 'Rename folder');
 		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
 
 		await discardAll();
@@ -319,7 +341,10 @@ describe('discardAll wipes the view journal', () => {
 			folders: [{ id: 'f1', name: 'Original', folders: [], elements: [], artifacts: [] }],
 			artifacts: []
 		};
-		const getSpy = vi.spyOn(viewApi, 'getView').mockResolvedValue({ view: server, warnings: [] });
+		setActiveViewId('v1');
+		const getSpy = vi
+			.spyOn(viewApi, 'getView')
+			.mockResolvedValue({ view: server, warnings: [], view_rev: 0 });
 		await refreshView();
 		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
 		await stageRenameFolder('f1', 'Optimistic');
@@ -372,7 +397,7 @@ describe('releaseArtifactIfUnneeded / discardArtifact honor the three-buffer uni
 			],
 			'edit'
 		);
-		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'x' }, 'Rename folder');
+		stageViewOp({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'x' }, 'Rename folder');
 		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
 
 		await releaseArtifactIfUnneeded('a9');
@@ -392,7 +417,7 @@ describe('releaseArtifactIfUnneeded / discardArtifact honor the three-buffer uni
 			'edit'
 		);
 		stageArtifactUpdate('a9', { name: 'renamed' });
-		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'x' }, 'Rename folder');
+		stageViewOp({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'x' }, 'Rename folder');
 		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
 
 		await discardArtifact('a9');

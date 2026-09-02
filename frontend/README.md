@@ -556,20 +556,40 @@ a button:
   Preview is gated on `canEdit()` too, since it goes through
   `POST /model/apply-cr`, which is deliberately treated as a write.
 
+### Named views and the active view
+
+A project holds many named views (`GET /views` → `{id, name, view_rev}[]`).
+The choice of which one this client works in is **per client**: the id
+lives in the leaf store `lib/state/active-view.svelte.ts` (`getActiveViewId`)
+and is remembered per project in localStorage (`dr:view:<projectId>`). Boot
+(`loadViews()` in the workspace page, before `refreshView()`) keeps the
+remembered id when it still exists, else falls back to the first view by
+name, else to **no view** (the sidebar strip reads "No view" and folder
+editing is disabled). The top bar's **View** menu (`ViewMenu.svelte`, the
+`ArtifactsMenu` pattern) is a radio list of loaded views plus, for editors,
+**Add view…** (`AddViewDialog`: a required name + a `.json` document drop,
+name prefilled from the document's own `name`; a duplicate name is the
+server's 409 shown inline) and **Delete view…** (`DeleteViewDialog`). Add and
+delete are DIRECT `POST /views` / `DELETE /views/{id}` actions — never
+staged, never in History. Switching views with staged view edits prompts to
+discard them first (they belong to the other view). A `view` feed event
+refreshes the list, and a peer deleting THIS client's active view drops it
+to "no view" through the view-discard notice banner.
+
 ### View editing state (staged `view.*` ops)
 
-`lib/state/view.svelte.ts` holds `_view`: the LOCAL working copy — server
-truth as of the last `refreshView()`, with every staged `view.*` op already
-applied optimistically on top. **There is no direct PUT path.** Every
-structural change the app drives (folder create/rename/move/delete, element
-and artifact placement, drag-and-drop, the sidebar's Clear-view action) goes
-out as a `ViewOp` and reaches the server only via `POST /commits`, the same
-endpoint model and artifact edits commit through; `GET /view` is the only
-other view route the backend exposes.
-(The e2e test harness's fixture-loading helper, which talks to the
-API directly to seed a project's starting content, seeds the view the same
-way the client does: a `view.*` op batch through `POST /commits`, under a
-`folder:root` lease.)
+`lib/state/view.svelte.ts` holds `_view`: the LOCAL working copy of the
+ACTIVE view — server truth as of the last `refreshView()` (`GET
+/views/{id}`), with every staged `view.*` op already applied optimistically
+on top. **There is no direct PUT path.** Every structural change the app
+drives (folder create/rename/move/delete, element and artifact placement,
+drag-and-drop, the sidebar's Clear-view action) goes out as a `ViewOp`
+stamped with the active `view_id` and reaches the server only via `POST
+/commits`, the same endpoint model and artifact edits commit through. Root
+membership is leased on the VIEW itself (`{type: 'view', resource_id}` →
+`view:<id>`, `edit-gate.ts`'s `folderTargets`); real folders keep their
+`folder:<uuid>` leases. (The e2e test harness's fixture-loading helper seeds
+a project's view through `POST /views` after deleting whatever views exist.)
 
 - **Three staged buffers, three different shapes — and that difference is
   load-bearing, not incidental.** The model buffer (`lib/state/ops.ts`'s
@@ -623,7 +643,7 @@ way the client does: a `view.*` op batch through `POST /commits`, under a
   (there is no such thing as an open folder editor) and is unconditionally
   sent for release, same as an element token.
 - **A commit that carried view ops triggers exactly one post-commit
-  `GET /view` refetch.** Folder ids get no client-side `id_map` remap the way
+  `GET /views/{id}` refetch.** Folder ids get no client-side `id_map` remap the way
   element/artifact ids do — the refetch is what concretizes a freshly
   created folder's `tmp_` id into its server-assigned one. Two independent
   subscriptions call `refreshView()`: the committing client's own listener
@@ -631,7 +651,7 @@ way the client does: a `view.*` op batch through `POST /commits`, under a
   `getStagedViewOps().length > 0`) and a peer's commit observed over the
   realtime feed (`onCommitEvent`, gated on `scope.includes('view')`). An
   own-commit can fire both (the feed echoes back), which is harmless — just
-  two small `GET /view` calls instead of one.
+  two small `GET /views/{id}` calls instead of one.
 - **`refreshView()` rebuilds `_view` as `server truth + staged journal`, on
   EVERY refetch path.** This is what makes the peer-commit refetch above safe:
   `folder:` leases are per folder, so two users editing DIFFERENT folders

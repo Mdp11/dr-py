@@ -70,7 +70,10 @@ class AppliedBatch:
 class Session:
     metamodel: Metamodel | None = None
     model: Model | None = None
-    view: View | None = None
+    #: every view of the project by row id — complete after hydration (a
+    #: cold session hydrates ALL rows), mutated only by POST/DELETE /views
+    #: and the view half of the commit/undo paths, all under write_mutex.
+    views: dict[str, View] = field(default_factory=dict)
     #: issue store seeded by the last FULL validation of `model`; incremental
     #: paths delta from it via ValidationState.replace
     validation: ValidationState | None = None

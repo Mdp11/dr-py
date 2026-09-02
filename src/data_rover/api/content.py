@@ -237,42 +237,76 @@ def clear_history(db: Session, project_id: str) -> None:
     db.execute(delete(Snapshot).where(Snapshot.project_id == project_id))
 
 
-def upsert_single_view(
-    db: Session, project_id: str, *, name: str, blob: str, bump_rev: bool = True
-) -> ViewRow:
-    """Create-or-update the project's one view row.
+class DuplicateViewNameError(Exception):
+    """``create_view`` refused: the project already has a view of that name."""
 
-    ``bump_rev`` distinguishes a real edit (the view half of
-    ``POST /commits``) from a NORMALIZATION write (lazy folder-id healing at
-    hydration/import): healing must not look like an edit, so it passes
-    ``bump_rev=False`` and ``view_rev`` is left untouched.
-    """
-    row = get_single_view(db, project_id)
-    if row is None:
-        row = ViewRow(
-            id=uuid.uuid4().hex,
-            project_id=project_id,
-            name=name,
-            blob=blob,
-            view_rev=1 if bump_rev else 0,
+    def __init__(self, name: str) -> None:
+        super().__init__(f"a view named {name!r} already exists")
+        self.name = name
+
+
+def list_views(db: Session, project_id: str) -> list[ViewRow]:
+    """Every view of the project, ordered by name then id."""
+    return list(
+        db.execute(
+            select(ViewRow)
+            .where(ViewRow.project_id == project_id)
+            .order_by(ViewRow.name, ViewRow.id)
         )
-        db.add(row)
-    else:
-        row.name, row.blob = name, blob
-        if bump_rev:
-            row.view_rev += 1
+        .scalars()
+        .all()
+    )
+
+
+def get_view(db: Session, project_id: str, view_id: str) -> ViewRow | None:
+    row = db.get(ViewRow, view_id)
+    return row if row is not None and row.project_id == project_id else None
+
+
+def create_view(db: Session, project_id: str, *, name: str, blob: str) -> ViewRow:
+    """New view at ``view_rev`` 0. The name check here is what turns a
+    duplicate into a 409; the DB unique constraint is the backstop."""
+    dup = db.execute(
+        select(ViewRow.id).where(ViewRow.project_id == project_id, ViewRow.name == name)
+    ).first()
+    if dup is not None:
+        raise DuplicateViewNameError(name)
+    row = ViewRow(
+        id=uuid.uuid4().hex, project_id=project_id, name=name, blob=blob, view_rev=0
+    )
+    db.add(row)
     db.flush()
     return row
 
 
-def get_single_view(db: Session, project_id: str) -> ViewRow | None:
-    return (
-        db.execute(
-            select(ViewRow).where(ViewRow.project_id == project_id).order_by(ViewRow.id)
-        )
-        .scalars()
-        .first()
-    )
+def delete_view(db: Session, project_id: str, view_id: str) -> bool:
+    row = get_view(db, project_id, view_id)
+    if row is None:
+        return False
+    db.delete(row)
+    db.flush()
+    return True
+
+
+def upsert_view(
+    db: Session, project_id: str, view_id: str, *, blob: str, bump_rev: bool = True
+) -> ViewRow:
+    """Replace an existing view's blob.
+
+    ``bump_rev`` distinguishes a real edit (the view half of
+    ``POST /commits``) from a NORMALIZATION write (lazy folder-id healing at
+    hydration): healing must not look like an edit, so it passes
+    ``bump_rev=False`` and ``view_rev`` is left untouched. Raises ``KeyError``
+    for an unknown view — callers resolve the view from ``session.views``
+    first, so a miss here is a bug, not a client error."""
+    row = get_view(db, project_id, view_id)
+    if row is None:
+        raise KeyError(view_id)
+    row.blob = blob
+    if bump_rev:
+        row.view_rev += 1
+    db.flush()
+    return row
 
 
 class StaleArtifactError(Exception):

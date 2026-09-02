@@ -1,6 +1,6 @@
 """View-op plumbing.
 
-The view is a materialized head (``session.view`` in memory, ``ViewRow.blob``
+A view is a materialized head (``session.views[id]`` in memory, ``ViewRow.blob``
 durable), so view ops must never reach the model applier. This module is the
 in-memory twin of ``artifact_ops``: ``apply_view_ops`` mutates a core ``View``
 in place while collecting EXACT inverses — apply-then-inverse restores a
@@ -9,12 +9,13 @@ API lean on. ``routes/commits.py`` is the write caller (apply under the write
 mutex, persist the blob on the commit's DB transaction); ``routes/ops.py``'s
 undo replays inverses in restore mode; ``/commits/preview`` validates dry.
 
-Unlike the artifact applier there is almost no DB here: rollback is
+Unlike the artifact applier there is no DB here: rollback is
 ``rollback_view`` (apply the collected inverse units in reverse), the same
-in-place shape as ``routes/ops.py::_rollback``. The one exception is
-``load_or_create_view``, a single read shared by both write callers' "session
-has no view cached" fallback (see its own docstring for why that state does
-NOT mean "no durable view exists").
+in-place shape as ``routes/ops.py::_rollback``. Every op names its view by
+``view_id``; ``group_by_view`` splits a batch so each group is applied to its
+own ``View``, and ``resolve_view`` turns an id into that view or a 422 —
+``session.views`` is complete after hydration, so a miss is a client error,
+never a cold-cache artefact.
 
 Tolerance stance (mirrors ``validate_view``): ids that merely DANGLE (an
 element not in the model, an artifact with no row) are legal — the view never
@@ -39,14 +40,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import assert_never
 
+from collections.abc import Mapping
+
 from fastapi import HTTPException
-from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.view.ids import find_folder, folder_subtree, locate_folder
 from data_rover.core.view.schema import VIEW_ROOT_ID, ArtifactRef, Folder, View
 
-from . import content
-from .locking import folder_resource
+from .locking import container_resource
 from .schemas import (
     TEMP_ID_PREFIX,
     CreateFolderOp,
@@ -79,28 +80,26 @@ class ViewBatchResult:
         return [op for unit in reversed(self.inverse_units) for op in unit]
 
 
-def load_or_create_view(db: DbSession, project_id: str) -> View:
-    """Resolve the view a write path should mutate when ``session.view`` is
-    ``None`` — the shared body of ``routes/commits.py``'s auto-create (b3) and
-    ``routes/ops.py::undo``'s evicted-resurrection fallback.
+def resolve_view(views: Mapping[str, View], view_id: str) -> View:
+    """The view an op batch names, or a 422 — an empty id is the legacy
+    (pre-named-views) journal shape and is refused here just like an unknown
+    one; only ``routes/ops.py``'s undo has a resolution rule for it."""
+    if not view_id:
+        raise _422("view op without view_id")
+    view = views.get(view_id)
+    if view is None:
+        raise _422(f"unknown view {view_id!r}")
+    return view
 
-    ``session.view is None`` does NOT mean "this project never had a view":
-    a cold/evicted session reaches this ``None`` state on a cache miss,
-    never touching ``ViewRow`` — the durable blob — which can still hold a
-    populated tree. A ``ViewRow``
-    that exists on disk IS the view regardless of why the cache reads empty,
-    exactly the read ``hydration.hydrate_session`` already performs at
-    session start; only a project that has genuinely never committed a view
-    gets a fresh empty one.
 
-    Getting this backwards is silent data loss: the two
-    write callers apply the incoming batch to whatever this returns and then
-    unconditionally OVERWRITE ``ViewRow`` with the result — so materializing
-    an empty ``View`` here when a populated row exists doesn't just mis-render
-    once, it destroys every pre-existing folder the next time that (now
-    empty-based) state is persisted."""
-    row = content.get_single_view(db, project_id)
-    return View.model_validate_json(row.blob) if row is not None else View(name="view")
+def group_by_view(ops: Sequence[ViewOpIn]) -> dict[str, list[ViewOpIn]]:
+    """Split a batch by ``view_id``, preserving op order within each group
+    and first-seen order of the groups. An empty id stays a key of its own
+    so the caller decides what it means."""
+    groups: dict[str, list[ViewOpIn]] = {}
+    for op in ops:
+        groups.setdefault(op.view_id, []).append(op)
+    return groups
 
 
 def _422(detail: str) -> HTTPException:
@@ -227,6 +226,13 @@ def apply_view_ops(
     recover from a failed direct call.
     """
     res = ViewBatchResult(id_map=dict(id_map or {}))
+    # One view per call: the commit/undo callers split a batch with
+    # ``group_by_view`` first, and every canonical/inverse op minted below is
+    # stamped with that group's ``view_id`` at the end (the constructors are
+    # view-agnostic on purpose — the journal is what needs the id).
+    view_ids = {op.view_id for op in ops}
+    assert len(view_ids) <= 1, "apply_view_ops takes a single-view batch"
+    view_id = next(iter(view_ids), "")
 
     def rid(v: str) -> str:
         return res.id_map.get(v, v)
@@ -514,6 +520,11 @@ def apply_view_ops(
             )
         else:
             assert_never(op)
+    for c in res.canonical_ops:
+        c.view_id = view_id
+    for unit in res.inverse_units:
+        for inv in unit:
+            inv.view_id = view_id
     return res
 
 
@@ -557,19 +568,19 @@ def rollback_view(view: View, inverse_units: list[list[ViewOpIn]]) -> None:
         apply_view_ops(view, list(unit), restore=True)
 
 
-def validate_view_ops(view: View | None, ops: list[ViewOpIn]) -> None:
+def validate_view_ops(view: View, ops: list[ViewOpIn]) -> None:
     """Dry preview validation: apply against a deep copy and discard. Views
     are small (user-curated trees), so the copy is cheap; sharing the real
     applier means preview and commit can never disagree on a batch's
-    validity. ``None`` validates against an empty view — the same auto-create
-    a real commit performs (see routes/commits.py)."""
-    base = view.model_copy(deep=True) if view is not None else View(name="view")
-    apply_view_ops(base, ops, restore=False)
+    validity."""
+    apply_view_ops(view.model_copy(deep=True), ops, restore=False)
 
 
-def view_op_folder_ids(view: View | None, ops: Sequence[ViewOpIn]) -> set[str]:
-    """Every folder id (bare, un-namespaced) a batch references — the undo
-    route's peer-lease guard input.
+def view_op_resources(
+    view_id: str, view: View | None, ops: Sequence[ViewOpIn]
+) -> set[str]:
+    """Every container lease (`folder:`/`view:` namespaced) a batch against
+    ``view_id`` references — the undo route's peer-lease guard input.
 
     Mostly over-reports on purpose (a create's temp/parent id, both ends of a
     move): a spurious id can only produce a conservative 409, never hide a
@@ -621,46 +632,61 @@ def view_op_folder_ids(view: View | None, ops: Sequence[ViewOpIn]) -> set[str]:
             ids |= {op.from_folder_id, op.to_folder_id}
         else:
             assert_never(op)
-    return ids
+    return {container_resource(view_id, fid) for fid in ids}
 
 
 #: Placement-subject namespaces for the conflict backstop ONLY (no lease ever
 #: carries them): two batches fighting over the same element's/artifact-ref's
-#: placement must conflict even when the folders they name are disjoint —
-#: folder leases cannot see that collision, the overlap check can.
+#: placement IN THE SAME VIEW must conflict even when the folders they name
+#: are disjoint — folder leases cannot see that collision, the overlap check
+#: can. Scoped by view id: the same element placed in two views is no
+#: conflict.
 VIEW_ELEMENT_MARKER = "viewel:"
 VIEW_ARTIFACT_MARKER = "viewart:"
 
 
+def _element_marker(op_view_id: str, element_id: str) -> str:
+    return f"{VIEW_ELEMENT_MARKER}{op_view_id}:{element_id}"
+
+
+def _artifact_marker(op_view_id: str, artifact_id: str) -> str:
+    return f"{VIEW_ARTIFACT_MARKER}{op_view_id}:{artifact_id}"
+
+
 def view_touched_resources(op: ViewOpIn) -> set[str]:
-    """The backstop resources one view op touches: every folder it names in
-    the ``folder:`` lease namespace (so the set compares directly against
-    lease ids and the tail's), plus a subject marker per placement. Folder
-    ids here may be temp ids in a CLIENT batch — the caller strips those; in
-    CANONICAL journal ops they are always real (the applier rewrote them)."""
+    """The backstop resources one view op touches: every container it names
+    in the ``folder:``/``view:`` lease namespaces (so the set compares
+    directly against lease ids and the tail's), plus a subject marker per
+    placement. Folder ids here may be temp ids in a CLIENT batch — the caller
+    strips those; in CANONICAL journal ops they are always real (the applier
+    rewrote them)."""
+    c = op.view_id
     if isinstance(op, CreateFolderOp):
-        return {folder_resource(op.temp_id), folder_resource(op.parent_id)}
+        return {container_resource(c, op.temp_id), container_resource(c, op.parent_id)}
     if isinstance(op, (RenameFolderOp, DeleteFolderOp)):
         # a delete's subtree victims surface via the INVERSE unit's create
         # ops when _affected_ids scans both halves (same cascade rationale
         # as delete_element).
-        return {folder_resource(op.id)}
+        return {container_resource(c, op.id)}
     if isinstance(op, MoveFolderOp):
-        return {folder_resource(op.id), folder_resource(op.to_parent_id)}
+        return {container_resource(c, op.id), container_resource(c, op.to_parent_id)}
     if isinstance(op, (PlaceElementOp, RemoveElementOp)):
-        return {folder_resource(op.folder_id), VIEW_ELEMENT_MARKER + op.element_id}
+        return {container_resource(c, op.folder_id), _element_marker(c, op.element_id)}
     if isinstance(op, MoveElementOp):
         return {
-            folder_resource(op.from_folder_id),
-            folder_resource(op.to_folder_id),
-            VIEW_ELEMENT_MARKER + op.element_id,
+            container_resource(c, op.from_folder_id),
+            container_resource(c, op.to_folder_id),
+            _element_marker(c, op.element_id),
         }
     if isinstance(op, (PlaceArtifactOp, RemoveArtifactOp)):
-        return {folder_resource(op.folder_id), VIEW_ARTIFACT_MARKER + op.artifact_id}
+        return {
+            container_resource(c, op.folder_id),
+            _artifact_marker(c, op.artifact_id),
+        }
     if isinstance(op, MoveArtifactOp):
         return {
-            folder_resource(op.from_folder_id),
-            folder_resource(op.to_folder_id),
-            VIEW_ARTIFACT_MARKER + op.artifact_id,
+            container_resource(c, op.from_folder_id),
+            container_resource(c, op.to_folder_id),
+            _artifact_marker(c, op.artifact_id),
         }
     assert_never(op)

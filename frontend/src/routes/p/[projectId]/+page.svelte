@@ -48,6 +48,7 @@
 		loadArtifacts,
 		loadProjectInfo,
 		markEditorLockDenied,
+		loadViews,
 		markViewUnresolved,
 		onLockEvent,
 		refetchIssues,
@@ -190,6 +191,9 @@
 				cancelJourney(); // and tear the progress bar down
 				return;
 			}
+			// List the project's views and pick the active one (remembered ->
+			// first -> none) BEFORE fetching its content.
+			await loadViews();
 			await refreshView();
 			try {
 				await refreshSummary();

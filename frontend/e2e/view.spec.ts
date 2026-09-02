@@ -238,19 +238,19 @@ test('view curation: include a pooled element into a folder, commit with a messa
 	await expect(t.getByText('Beta')).toBeVisible();
 
 	// Commit with a message. This is the only path that reaches the server: a
-	// commit that carries view ops makes the client refetch `GET /view` once
-	// the batch lands, concretizing the change against server truth.
+	// commit that carries view ops makes the client refetch `GET /views/{id}`
+	// once the batch lands, concretizing the change against server truth.
 	const commitMessage = `e2e view commit ${Date.now()}`;
 	await commitStaged(page, commitMessage);
 	await expect(badge).toContainText('0 change');
 
 	// Persistence: reload from scratch and assert the freshly loaded snapshot
-	// (GET /view) places Beta in Grouped. A visible Beta after reload alone
-	// would NOT be proof (a pooled Beta renders too) — read the actual
+	// (GET /views/{id}) places Beta in Grouped. A visible Beta after reload
+	// alone would NOT be proof (a pooled Beta renders too) — read the actual
 	// response, mirroring the durability check the old whole-doc-PUT version
 	// of this test made, now against the commit path instead.
 	const reloaded = page.waitForResponse(
-		(r) => new URL(r.url()).pathname.endsWith('/view') && r.request().method() === 'GET'
+		(r) => /\/views\/[^/]+$/.test(new URL(r.url()).pathname) && r.request().method() === 'GET'
 	);
 	await page.reload();
 	const loaded = (await (await reloaded).json()) as {
@@ -430,4 +430,90 @@ test('excluded pool: collapsed by default (no fetch), expands, and state persist
 	await page.reload();
 	await expect(poolHeader(page)).toBeVisible();
 	await expect(pool(page)).toHaveCount(0);
+});
+
+// --------------------------------------------------------------------------
+// View management: the top bar's View menu adds (JSON upload + name), switches
+// between and deletes the project's named views. Add/delete are direct
+// routes, so no commit is involved; the sidebar strip reflects the active one.
+// --------------------------------------------------------------------------
+
+function activeViewStrip(page: Page): Locator {
+	return page.getByLabel('Active view');
+}
+
+async function openViewMenu(page: Page): Promise<void> {
+	await page.getByTestId('view-menu-trigger').click();
+}
+
+test('view menu: add a view from a JSON file, switch between views, delete one', async ({
+	page
+}) => {
+	test.setTimeout(120_000);
+	await loadView(page);
+	await expect(activeViewStrip(page).getByText('Operational')).toBeVisible();
+
+	// Add: the name is prefilled from the document's own `name`; the new view
+	// becomes active and renders its folder.
+	await openViewMenu(page);
+	await page.getByRole('menuitem', { name: 'Add view…' }).click();
+	const dialog = page.getByRole('dialog', { name: /add view/i });
+	await expect(dialog).toBeVisible();
+	await dialog.getByTestId('add-view-file').setInputFiles({
+		name: 'second.view.json',
+		mimeType: 'application/json',
+		buffer: Buffer.from(
+			JSON.stringify({
+				name: 'Second',
+				folders: [{ name: 'Other', folders: [], elements: [BLOCK_TWO_ID] }]
+			})
+		)
+	});
+	await expect(dialog.getByTestId('add-view-name')).toHaveValue('Second');
+	await dialog.getByTestId('add-view-submit').click();
+	await expect(dialog).toHaveCount(0);
+	await expect(activeViewStrip(page).getByText('Second')).toBeVisible();
+	await expect(tree(page).getByText('Other')).toBeVisible();
+	await expect(tree(page).getByText('Grouped')).toHaveCount(0);
+
+	// A duplicate name is refused by the server and shown inline.
+	await openViewMenu(page);
+	await page.getByRole('menuitem', { name: 'Add view…' }).click();
+	await dialog.getByTestId('add-view-file').setInputFiles({
+		name: 'dup.view.json',
+		mimeType: 'application/json',
+		buffer: Buffer.from(JSON.stringify({ name: 'Second', folders: [] }))
+	});
+	await dialog.getByTestId('add-view-submit').click();
+	await expect(dialog.getByTestId('add-view-error')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+	// Switch back: the radio list names both views; picking one refetches it.
+	await openViewMenu(page);
+	await page.getByRole('menuitemradio', { name: 'Operational' }).click();
+	await expect(activeViewStrip(page).getByText('Operational')).toBeVisible();
+	await expect(tree(page).getByText('Grouped')).toBeVisible();
+
+	// The choice survives a reload (remembered per project).
+	await page.reload();
+	await expect(activeViewStrip(page).getByText('Operational')).toBeVisible();
+
+	// Delete the other view; the active one is untouched.
+	await openViewMenu(page);
+	await page.getByRole('menuitem', { name: 'Delete view…' }).click();
+	const del = page.getByRole('dialog', { name: /delete view/i });
+	await del.getByTestId('delete-view-select').selectOption({ label: 'Second' });
+	await del.getByTestId('delete-view-submit').click();
+	await expect(del).toHaveCount(0);
+	await openViewMenu(page);
+	await expect(page.getByRole('menuitemradio', { name: 'Second' })).toHaveCount(0);
+	await expect(page.getByRole('menuitemradio', { name: 'Operational' })).toBeVisible();
+	await page.keyboard.press('Escape');
+
+	// Deleting the last view leaves the project with "No view".
+	await openViewMenu(page);
+	await page.getByRole('menuitem', { name: 'Delete view…' }).click();
+	await del.getByTestId('delete-view-submit').click();
+	await expect(del).toHaveCount(0);
+	await expect(activeViewStrip(page).getByText('No view')).toBeVisible();
 });

@@ -8,7 +8,7 @@ export * as elements from './elements';
 export * as relationships from './relationships';
 export * as settings from './settings';
 export * as validation from './validation';
-export * as view from './view';
+export * as views from './views';
 export * from './errors';
 export * from './types';
 export type { ClientConfig, ApiFetchInit } from './client';

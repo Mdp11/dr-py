@@ -333,14 +333,14 @@ def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:
     return token
 
 
-def _commit_rename(client: TestClient, fid: str, name: str) -> None:
+def _commit_rename(client: TestClient, vid: str, fid: str, name: str) -> None:
     token = _folder_lease(client, fid)
     r = client.post(
         papi("/commits"),
         headers=AUTH_HEADERS,
         json={
             "base_rev": model_rev(client),
-            "ops": [{"kind": "rename_folder", "id": fid, "name": name}],
+            "ops": [{"kind": "rename_folder", "view_id": vid, "id": fid, "name": name}],
             "message": "m",
             "lock_tokens": [token],
         },
@@ -350,9 +350,10 @@ def _commit_rename(client: TestClient, fid: str, name: str) -> None:
 
 def test_revert_refuses_range_with_view_ops(client: TestClient) -> None:
     # helpers as in test_undo_view_ops.py (_folder_lease/_rev/_commit_rename)
-    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
+    setup = create_folder_via_commit(client, "A")
+    vid, fid = setup["view_id"], setup["id_map"]["tmp_setup"]
     target = model_rev(client)
-    _commit_rename(client, fid, "A2")
+    _commit_rename(client, vid, fid, "A2")
     view_commit_rev = model_rev(client)
     r = client.post(
         papi("/commits/revert"),

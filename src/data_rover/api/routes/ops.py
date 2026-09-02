@@ -76,6 +76,7 @@ from data_rover.core.model.relationship import Relationship
 from data_rover.core.validation.dirty import DirtyCollector, containment_closure
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
+from data_rover.core.view.schema import View
 
 from .. import content
 from ..artifact_ops import (
@@ -92,7 +93,7 @@ from ..deps import Session, get_request_session, require_model
 from ..hydration import serialize_ops
 from ..identity import get_current_user
 from ..invalidation import touched_keys
-from ..locking import METAMODEL_RESOURCE, artifact_resource, folder_resource
+from ..locking import METAMODEL_RESOURCE, artifact_resource
 from ..metamodel_ops import MetamodelBatchResult, apply_metamodel_ops
 from ..rules import (
     applies_population,
@@ -106,26 +107,27 @@ from ..snapshot_job import schedule_periodic_snapshot
 from ..view_ops import (
     ViewBatchResult,
     apply_view_ops_atomic,
-    load_or_create_view,
+    group_by_view,
     rollback_view,
-    view_op_folder_ids,
+    view_op_resources,
 )
 from ..schemas import (
-    TEMP_ID_PREFIX,
     CreateElementOp,
     CreateRelationshipOp,
     DeleteElementOp,
     DeleteRelationshipOp,
     ElementOut,
+    is_reserved_id,
     IssueOut,
     ModelOpIn,
     OpIn,
     OpsRequest,
     OpsResponse,
     RelationshipOut,
+    TEMP_ID_PREFIX,
     UpdateElementOp,
     UpdateRelationshipOp,
-    is_reserved_id,
+    ViewOpIn,
 )
 from ..session import AppliedBatch
 
@@ -682,6 +684,17 @@ def _persist_undo_commit(
     return True
 
 
+def _resolve_undo_view_id(session: Session, view_id: str) -> str | None:
+    """The live view an inverse group targets. An empty id is the journal
+    shape from before named views: it resolves to the project's sole view,
+    the only reading that cannot be wrong. None means push back (409)."""
+    if view_id:
+        return view_id if view_id in session.views else None
+    if len(session.views) == 1:
+        return next(iter(session.views))
+    return None
+
+
 def _maybe_periodic_snapshot(
     db: DbSession, project_id: str, session: Session, rev: int
 ) -> None:
@@ -806,9 +819,9 @@ def undo(
         # A batch recorded by POST /commits can span all three content
         # families, so the undo replays each half through its own applier:
         # the model half in place, the artifact half staged on this request's
-        # DB transaction, the view half in place on session.view (also staged
-        # on this request's DB transaction once accepted — see the persist
-        # step below).
+        # DB transaction, the view half in place on the views it names (also
+        # staged on this request's DB transaction once accepted — see the
+        # persist step below).
         model_inv, artifact_inv, view_inv, metamodel_inv = split_ops(batch.inverse_ops)
         if any(op.kind == "metamodel.rebind" for op in metamodel_inv):
             # Restore-mode model inverses are schema-checked at the core
@@ -830,41 +843,28 @@ def undo(
                     "model_rev": session.model_rev,
                 },
             )
-        # True iff THIS request is the one that flipped session.view from
-        # None to non-None via load_or_create_view — tracked exactly like
-        # create_commit's own ``created_view`` so every failure/rejection path
-        # below can restore it to None rather than leaving a never-persisted
-        # materialization behind. A failed OR REJECTED request must be
-        # externally invisible: before this undo attempt GET /view reported
-        # whatever it reported, and any early return out of this block must
-        # leave it reporting that again — for the genuinely-empty case, not a
-        # materialized empty view with no ViewRow / view_rev to back it —
-        # mirrors create_commit's own created_view guard, which exists for
-        # the identical reason on the auto-create path.
-        created_view = False
-        # Resolve the view ONCE, before the peer-lease guard below reads it:
-        # ``view_op_folder_ids`` degrades its delete_folder/move_folder
-        # subtree-and-current-parent expansion to a bare single-resource id
-        # when ``view`` is None (mirroring ``required_locks``'s own
-        # None-view degradation) — so undoing while session.view is COLD
-        # (e.g. a cold/evicted session's cache miss, which leaves
-        # ``ViewRow`` intact — see ``load_or_create_view``'s docstring)
-        # would derive the guard's resource set against an ABSENT tree while
-        # the applier below goes on to mutate the REAL, hydrated one,
-        # letting a peer's lease on a child go unnoticed for the case where
-        # session.view was already warm. Guarded on
-        # `view_inv` (an inverse batch with no view ops needs no view at
-        # all) and wrapped so a raise here — DB error, e.g. — re-pushes the
-        # JUST-POPPED batch before propagating: nothing else in this request
-        # has touched anything yet, but the pop above already has, and an
-        # unre-pushed pop is a silently lost undo slot.
-        if view_inv and session.view is None:
-            try:
-                session.view = load_or_create_view(db, project_id)
-            except Exception:
+        # Resolve every view the inverse batch names ONCE, before the
+        # peer-lease guard reads them: an unknown id (the view was deleted
+        # since) or a legacy empty id on a project that no longer has exactly
+        # one view is a push-back 409, not a half-applied undo. The batch is
+        # re-pushed on every refusal so a refusal never eats undo history.
+        view_groups: dict[str, list[ViewOpIn]] = {}
+        for vid, group in group_by_view(view_inv).items():
+            resolved = _resolve_undo_view_id(session, vid)
+            if resolved is None:
                 session.op_log.append(batch)
-                raise
-            created_view = True
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "undo needs a view this project no longer has "
+                        "(or, for a change that predates named views, exactly "
+                        "one view)",
+                        "model_rev": session.model_rev,
+                    },
+                )
+            for op in group:
+                op.view_id = resolved
+            view_groups.setdefault(resolved, []).extend(group)
         # The MODEL half of this route stays deliberately unlocked (the
         # documented migration-window stance until the frontend moves to
         # check-out/commit). The ARTIFACT, VIEW and (layout-only, by this
@@ -875,18 +875,18 @@ def undo(
         # peer's checked-out resource would void, from this side, exactly the
         # guarantee POST /commits and the legacy artifact CRUD routes enforce
         # on theirs. Refuse instead, and push the batch BACK so a refusal
-        # never eats undo history. ``view_op_folder_ids`` mostly over-reports
+        # never eats undo history. ``view_op_resources`` mostly over-reports
         # on purpose (a create's temp/parent id, both ends of a move) — a
         # spurious id can only produce a conservative 409, never hide a held
-        # lease — but delete_folder/move_folder need ``session.view`` (the
-        # CURRENT, pre-undo-application, just-resolved-above state) to
-        # resolve the subtree/current-parent ids the op itself doesn't name
-        # (see its docstring).
+        # lease — but delete_folder/move_folder need the CURRENT (pre-undo-
+        # application) view to resolve the subtree/current-parent ids the op
+        # itself doesn't name (see its docstring).
         peer_resources = (
             [artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)]
             + [
-                folder_resource(fid)
-                for fid in view_op_folder_ids(session.view, view_inv)
+                rid
+                for vid, group in view_groups.items()
+                for rid in view_op_resources(vid, session.views[vid], group)
             ]
             # metamodel_inv here is layout-only (a rebind-carrying batch was
             # already refused above) — the ``mm`` lease is the layout's only
@@ -898,11 +898,6 @@ def undo(
         )
         if peer_held:
             session.op_log.append(batch)
-            if created_view:
-                # this request's own hydration must not leak into a REJECTED
-                # (409) response's visible state — see created_view's
-                # docstring above.
-                session.view = None
             return JSONResponse(
                 status_code=409,
                 content={
@@ -922,8 +917,6 @@ def undo(
             res = _apply_batch(model, model_inv, restore=True)
         except Exception:
             session.op_log.append(batch)  # _apply_batch already rolled back
-            if created_view:
-                session.view = None  # see created_view's docstring above
             raise
         try:
             # restore mode on all three halves: exact ids are reinstated and
@@ -940,28 +933,17 @@ def undo(
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place
             session.op_log.append(batch)
-            if created_view:
-                session.view = None  # see created_view's docstring above
             db.rollback()  # discard staged artifact rows
             raise
-        view_res: ViewBatchResult | None = None
         # Every view writer (POST /commits) is lock-verified and journaled,
         # so the exception handling below is a general backstop: it should
         # never see a silently-wrong inverse applied over a view the caller
         # has since replaced.
-        if view_inv:
-            if session.view is None:
-                # Defensive fallback only: the resolve-view block near the
-                # top of this function already hydrated/auto-created
-                # session.view whenever view_inv is non-empty, so this branch
-                # is dead in the ordinary single-request case; nothing else
-                # can null session.view mid-request. Same load_or_create_view
-                # call, same rationale (a ViewRow that exists IS the view —
-                # see its docstring).
-                session.view = load_or_create_view(db, project_id)
-                created_view = True
+        view_results: list[tuple[str, View, ViewBatchResult]] = []
+        for vid, group in view_groups.items():
+            target = session.views[vid]
             try:
-                view_res = apply_view_ops_atomic(session.view, view_inv, restore=True)
+                vres = apply_view_ops_atomic(target, group, restore=True)
             except Exception:
                 # mirror the artifact branch's stance: never leave the model
                 # or artifact halves applied. apply_view_ops_atomic already
@@ -971,11 +953,13 @@ def undo(
                 # persist-failure branch below).
                 _rollback(model, res.inverse_units)
                 session.invalidate_derived_caches()
-                if created_view:
-                    session.view = None  # unwind the auto-create too — see above
+                for _vid, done_view, done_res in reversed(view_results):
+                    rollback_view(done_view, done_res.inverse_units)
                 session.op_log.append(batch)
                 db.rollback()  # discard staged artifact rows
                 raise
+            view_results.append((vid, target, vres))
+        all_view_res = [vres for _vid, _view, vres in view_results]
         # Apply the metamodel half LAST, after the view half — layout-only by
         # construction here (the rebind arm is unreachable: the 409 above
         # already filtered any batch whose metamodel_inv carries a rebind, so
@@ -997,11 +981,8 @@ def undo(
             except Exception:
                 _rollback(model, res.inverse_units)
                 session.invalidate_derived_caches()
-                if view_res is not None:
-                    assert session.view is not None
-                    rollback_view(session.view, view_res.inverse_units)
-                if created_view:
-                    session.view = None
+                for _vid, done_view, done_res in reversed(view_results):
+                    rollback_view(done_view, done_res.inverse_units)
                 session.op_log.append(batch)
                 db.rollback()
                 raise
@@ -1027,39 +1008,33 @@ def undo(
         canonical_ops: list[OpIn] = [
             *res.canonical_ops,
             *art_res.canonical_ops,
-            *(view_res.canonical_ops if view_res else []),
+            *(op for vres in all_view_res for op in vres.canonical_ops),
             *(mm_res.canonical_ops if mm_res else []),
         ]
         inverse_ops: list[OpIn] = [
             *res.inverse_ops(),
             *art_res.inverse_ops(),
-            *(view_res.inverse_ops() if view_res else []),
+            *(op for vres in reversed(all_view_res) for op in vres.inverse_ops()),
             *(mm_res.inverse_ops() if mm_res else []),
         ]
         # mm_res contributes no id_map: layout ops mint no ids (mirrors
         # create_commit's merged_id_map comment).
-        merged_id_map = {
-            **res.id_map,
-            **art_res.id_map,
-            **(view_res.id_map if view_res else {}),
-        }
+        merged_id_map = {**res.id_map, **art_res.id_map}
+        for vres in all_view_res:
+            merged_id_map.update(vres.id_map)
         try:
             # The view blob (when touched) is staged INSIDE this same try, on
             # the same DB transaction _persist_undo_commit's own db.commit()
             # will flush — so the view row and the compensating Commit row
             # land or roll back together. It MUST be inside the try: staging
-            # is a db.flush() (content.upsert_single_view), which can raise on
-            # its own (FK/constraint/connection error) — the same failure
-            # class this try/except exists to catch (mirrors create_commit's
-            # step e).
-            if view_res is not None and view_res.canonical_ops:
-                assert session.view is not None
-                content.upsert_single_view(
-                    db,
-                    project_id,
-                    name=session.view.name,
-                    blob=session.view.model_dump_json(),
-                )
+            # is a db.flush() (content.upsert_view), which can raise on its
+            # own (FK/constraint/connection error) — the same failure class
+            # this try/except exists to catch (mirrors create_commit's step e).
+            for vid, target, vres in view_results:
+                if vres.canonical_ops:
+                    content.upsert_view(
+                        db, project_id, vid, blob=target.model_dump_json()
+                    )
             persisted = _persist_undo_commit(
                 db,
                 project_id,
@@ -1074,11 +1049,8 @@ def undo(
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
             session.model_rev -= 1
             session.invalidate_derived_caches()  # rev moved BACK; see apply_ops
-            if view_res is not None:
-                assert session.view is not None
-                rollback_view(session.view, view_res.inverse_units)
-            if created_view:
-                session.view = None  # unwind the auto-create too — see above
+            for _vid, done_view, done_res in reversed(view_results):
+                rollback_view(done_view, done_res.inverse_units)
             session.op_log.append(batch)  # re-push the batch so undo history is intact
             db.rollback()  # also discards the staged artifact + view + layout rows
             raise HTTPException(

@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import { stageClearView, getView, getViewWarnings } from '$lib/state';
+	import { stageClearView, getView, getViewWarnings, isViewResolved } from '$lib/state';
 	import { confirm } from '$lib/state/confirm.svelte';
 	import { AlertTriangle, X } from '@lucide/svelte';
 
 	const view = $derived(getView());
 	const warnings = $derived(getViewWarnings());
+	// "No view" is an ANSWER, not a loading state: shown only once the view
+	// question is resolved, so boot does not flash it before the fetch lands.
+	const resolved = $derived(isViewResolved());
 
 	async function onClear(): Promise<void> {
 		if (view === null) return;
@@ -48,5 +51,13 @@
 			<X class="h-3 w-3" />
 			Clear
 		</Button>
+	</div>
+{:else if resolved}
+	<div
+		class="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs"
+		aria-label="Active view"
+	>
+		<span class="microlabel">View</span>
+		<span class="text-muted-foreground" title="Pick or add a view from the View menu">No view</span>
 	</div>
 {/if}

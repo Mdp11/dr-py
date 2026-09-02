@@ -9,123 +9,31 @@ function bodyOf(file: FileArg): Buffer {
 }
 
 // --------------------------------------------------------------------------
-// View seeding — only `GET /view` reads view content directly (see CLAUDE.md's
-// "View ops" section); the client reaches view content exclusively through
-// the lock-verified `POST /commits` flow, so this harness drives the same
-// path. Shapes below mirror the wire types in `src/data_rover/api/schemas.py`
-// (`FolderOut`/`ViewOut`/`ArtifactRefOut`) closely enough for this file's own
-// purposes; they are not meant to be a general client model of the view.
+// View seeding — views are named, project-level objects managed through the
+// direct `GET/POST/DELETE /views` routes (a whole-view add/remove is not a
+// commit; folder edits INSIDE a view are, via `view.*` ops in POST /commits).
+// The harness replaces the project's whole view set through those routes.
 // --------------------------------------------------------------------------
 
-type ArtifactRefIn = { id: string; kind: string };
-
-/** One folder in a `*.view.json` fixture (or an inline object a spec builds
- * itself) — the nested shape `_seed_view` in
- * `tests/api/test_commits_view_ops.py` uses for the same purpose. */
-type ViewFolderFixture = {
-	name: string;
-	folders?: ViewFolderFixture[];
-	elements?: string[];
-	artifacts?: ArtifactRefIn[];
-};
-
-/** A `*.view.json` fixture's top-level shape. `name` is deliberately NOT
- * carried through by `seedView` below: the ten-op `view.*` family has no
- * rename-the-view op (only `rename_folder`), so a view's name is fixed at
- * whatever it was auto-created/imported with and this harness cannot change
- * it — every fixture this suite loads happens to already agree with the
- * "Smart City" project's seeded name ("Operational"), which is what
- * `seed.setup.ts`'s wizard import gave it. */
+/** A `*.view.json` fixture's top-level shape — posted verbatim as the
+ * document of `POST /views`; `name` doubles as the view's project-unique
+ * name (`Operational` when absent, matching the seeded Smart City view). */
 type ViewFixture = {
 	name?: string;
-	folders?: ViewFolderFixture[];
-	artifacts?: ArtifactRefIn[];
+	folders?: unknown[];
+	artifacts?: unknown[];
 };
 
-/** `GET /view`'s folder/view shapes — only the fields `seedView` needs. */
-type CurrentFolder = { id: string };
-type CurrentView = { folders: CurrentFolder[]; artifacts: ArtifactRefIn[] } | null;
-
-/** One raw `view.*` op dict, keyed exactly like `src/data_rover/api/schemas.py`'s
- * `ViewOpIn` discriminated union (`kind` is the discriminator). Built as plain
- * objects rather than importing generated types: this harness talks to the
- * API the same way `page.request` does everywhere else in this file. */
-type ViewOp = Record<string, unknown>;
-
-/** `delete_folder` for every TOP-level folder currently in *view*, plus
- * `remove_artifact` for every root-level artifact ref. A `delete_folder` op
- * cascades its whole subtree server-side (`required_locks`/`expand_targets`
- * in `api/locking.py` walk it via `folder_subtree`), so only the top level
- * needs an op each — the same reason only the top level needs a lease below. */
-function clearOps(view: CurrentView): ViewOp[] {
-	if (view === null) return [];
-	return [
-		...view.folders.map((f) => ({ kind: 'delete_folder', id: f.id })),
-		...view.artifacts.map((a) => ({
-			kind: 'remove_artifact',
-			artifact_id: a.id,
-			folder_id: 'root'
-		}))
-	];
-}
-
-/** `create_folder` (+ `place_element`/`place_artifact` for its contents) for
- * every folder in *fixture*, recreated under fresh temp ids, plus
- * `place_artifact` for its root-level artifact refs. Elements are never
- * placed at "root" (`PlaceElementOp.folder_id` must be a real folder id —
- * unplaced elements already render at the root pool); artifacts may be,
- * since `View.artifacts` is a real root list. */
-function buildOps(fixture: ViewFixture): ViewOp[] {
-	const ops: ViewOp[] = [];
-	let counter = 0;
-
-	function walk(folder: ViewFolderFixture, parentId: string): void {
-		counter += 1;
-		const tempId = `tmp_${counter}`;
-		ops.push({ kind: 'create_folder', temp_id: tempId, parent_id: parentId, name: folder.name });
-		for (const elementId of folder.elements ?? []) {
-			ops.push({ kind: 'place_element', element_id: elementId, folder_id: tempId });
-		}
-		for (const ref of folder.artifacts ?? []) {
-			ops.push({
-				kind: 'place_artifact',
-				artifact_id: ref.id,
-				artifact_kind: ref.kind,
-				folder_id: tempId
-			});
-		}
-		for (const child of folder.folders ?? []) walk(child, tempId);
-	}
-
-	for (const folder of fixture.folders ?? []) walk(folder, 'root');
-	for (const ref of fixture.artifacts ?? []) {
-		ops.push({
-			kind: 'place_artifact',
-			artifact_id: ref.id,
-			artifact_kind: ref.kind,
-			folder_id: 'root'
-		});
-	}
-	return ops;
-}
+type ViewSummary = { id: string; name: string };
 
 /**
- * Replace the OPEN project's view with *fixture* (`undefined` clears it to
- * empty) through `POST /commits`, driving the exact path the real client
- * uses (see CLAUDE.md's "View ops" section) rather than a test-only
- * shortcut.
- *
- * Reads the CURRENT view, diffs it away (`clearOps`), then — when *fixture*
- * is given — rebuilds it from scratch (`buildOps`), and posts both as ONE
- * batch. A single `folder:root` + one-lease-per-existing-top-folder
- * acquisition covers the whole thing: `delete_folder`'s lock requirement
- * subtree-expands from each top-level id server-side, so locking just the
- * top level (never the full recursive listing) already covers everything
- * nested under it, and ids created earlier in the SAME batch (the freshly
- * `create_folder`'d temp ids) need no lock to be placed into. Skips the
- * lock+commit round trip entirely when there is nothing to do — an empty
- * `POST /commits` would orphan the caller's leases until TTL expiry (see
- * `routes/commits.py`'s empty-batch early return).
+ * Replace the OPEN project's views with *fixture* (`undefined` leaves the
+ * project with no view at all): every existing view is deleted, then the
+ * fixture — when given — is added under its own `name`. Deleting 409s while
+ * a peer holds a lease inside a view; the e2e fixtures start lease-free.
+ * The client's remembered choice (localStorage) can only name a view that
+ * no longer exists after this, and `loadViews` then falls back to the first
+ * view by name — the freshly added one.
  */
 async function seedView(
 	page: Page,
@@ -133,41 +41,21 @@ async function seedView(
 	headers: Record<string, string>,
 	fixture: ViewFixture | undefined
 ): Promise<void> {
-	const current = await page.request.get(`${base}/view`);
+	const current = await page.request.get(`${base}/views`);
 	expect(current.ok(), await current.text()).toBeTruthy();
-	const currentView = ((await current.json()) as { view: CurrentView }).view;
-
-	const ops = [...clearOps(currentView), ...(fixture !== undefined ? buildOps(fixture) : [])];
-	if (ops.length === 0) return;
-
-	const targets = [
-		{ resource_id: 'root', mode: 'exclusive', type: 'folder' },
-		...(currentView?.folders.map((f) => ({
-			resource_id: f.id,
-			mode: 'exclusive',
-			type: 'folder'
-		})) ?? [])
-	];
-	const lock = await page.request.post(`${base}/locks`, {
+	for (const v of (await current.json()) as ViewSummary[]) {
+		const del = await page.request.delete(`${base}/views/${encodeURIComponent(v.id)}`, {
+			headers
+		});
+		expect(del.ok(), await del.text()).toBeTruthy();
+	}
+	if (fixture === undefined) return;
+	const created = await page.request.post(`${base}/views`, {
 		headers,
-		data: { targets, intent: 'delete' }
-	});
-	expect(lock.ok(), await lock.text()).toBeTruthy();
-	const { token } = (await lock.json()) as { token: string };
-
-	const open = await page.request.get(`${base}/open`);
-	expect(open.ok(), await open.text()).toBeTruthy();
-	const { model_rev: baseRev } = (await open.json()) as { model_rev: number };
-
-	// POST /commits releases every token it is sent on success, so there is
-	// no separate /locks/release call here (mirrors the client's own
-	// checkout.svelte.ts flow).
-	const commit = await page.request.post(`${base}/commits`, {
-		headers,
-		data: { base_rev: baseRev, ops, message: 'e2e fixture seed', lock_tokens: [token] },
+		data: { name: fixture.name ?? 'Operational', view: fixture },
 		timeout: 60_000
 	});
-	expect(commit.ok(), await commit.text()).toBeTruthy();
+	expect(created.ok(), await created.text()).toBeTruthy();
 }
 
 /**
@@ -225,10 +113,8 @@ export async function loadFiles(
 	expect(model.ok(), await model.text()).toBeTruthy();
 
 	// 3. view (optional) — validated against the freshly-loaded model. Without
-	// one, clear any view carried over from the previous content (the seeded
-	// Smart City view would dangle against the new model), mirroring the old
-	// dialog's clear-view-state behavior — but now via `seedView`'s commit
-	// batch rather than a blind DELETE, since that route is gone.
+	// one, drop every view carried over from the previous content (the seeded
+	// Smart City view would dangle against the new model).
 	await seedView(
 		page,
 		base,

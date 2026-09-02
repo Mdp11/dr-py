@@ -23,11 +23,16 @@ import { getMetamodel } from '$lib/api/metamodel';
 import type { Op } from './ops';
 import {
 	artifactResource,
+	folderLeaseResource,
 	folderResource,
 	isArtifactResource,
 	isTempId,
-	METAMODEL_RESOURCE
+	METAMODEL_RESOURCE,
+	viewResource
 } from './ops';
+// Leaf store (see its header): the folder-release path maps a root folder id
+// to the active view's `view:` lease exactly as edit-gate's targets do.
+import { getActiveViewId } from './active-view.svelte';
 import {
 	applyDelta,
 	clearStaged,
@@ -177,6 +182,7 @@ export function _dropToken(token: string): void {
 function canonicalResource(t: LockTargetIn): string {
 	if (t.type === 'artifact') return artifactResource(t.resource_id);
 	if (t.type === 'folder') return folderResource(t.resource_id);
+	if (t.type === 'view') return viewResource(t.resource_id);
 	if (t.type === 'metamodel') return METAMODEL_RESOURCE;
 	return t.resource_id;
 }
@@ -532,7 +538,10 @@ export async function releaseArtifactIfUnneeded(artifactId: string): Promise<voi
  * function needs to ask; only "is it still staged" is.
  */
 export async function releaseFolderLeaseIfUnneeded(folderId: string): Promise<void> {
-	const rid = folderResource(folderId);
+	// The root maps to the ACTIVE view's lease: a staged journal is discarded
+	// before the active view can change (`selectView`), so at every release
+	// the journal's ops and the active id agree.
+	const rid = folderLeaseResource(folderId, getActiveViewId() ?? '');
 	const token = _registry.get(rid)?.token;
 	if (token === undefined) return;
 	const stillNeeded = lockedResourcesNeededBy([
@@ -763,30 +772,30 @@ function lockedResourcesNeededBy(ops: Op[]): Set<string> {
 				needed.add(artifactResource(op.id));
 				break;
 			case 'create_folder':
-				needed.add(folderResource(op.parent_id));
+				needed.add(folderLeaseResource(op.parent_id, op.view_id));
 				break;
 			case 'rename_folder':
 			case 'delete_folder':
 				needed.add(folderResource(op.id));
 				break;
 			case 'move_folder':
-				needed.add(folderResource(op.to_parent_id));
+				needed.add(folderLeaseResource(op.to_parent_id, op.view_id));
 				break;
 			case 'place_element':
 			case 'remove_element':
-				needed.add(folderResource(op.folder_id));
+				needed.add(folderLeaseResource(op.folder_id, op.view_id));
 				break;
 			case 'move_element':
-				needed.add(folderResource(op.from_folder_id));
-				needed.add(folderResource(op.to_folder_id));
+				needed.add(folderLeaseResource(op.from_folder_id, op.view_id));
+				needed.add(folderLeaseResource(op.to_folder_id, op.view_id));
 				break;
 			case 'place_artifact':
 			case 'remove_artifact':
-				needed.add(folderResource(op.folder_id));
+				needed.add(folderLeaseResource(op.folder_id, op.view_id));
 				break;
 			case 'move_artifact':
-				needed.add(folderResource(op.from_folder_id));
-				needed.add(folderResource(op.to_folder_id));
+				needed.add(folderLeaseResource(op.from_folder_id, op.view_id));
+				needed.add(folderLeaseResource(op.to_folder_id, op.view_id));
 				break;
 			case 'metamodel.rebind':
 			case 'metamodel.move_node':

@@ -28,6 +28,7 @@
 		getStructureRev,
 		getSelection,
 		getTypeFilter,
+		getActiveViewId,
 		getView,
 		getViewWarnings,
 		indexIssues,
@@ -297,10 +298,11 @@
 		limit: number,
 		rev: number,
 		gen: number,
-		v: View | null
+		v: View | null,
+		viewId: string
 	): Promise<void> {
 		try {
-			const page = await listExcludedRootsPaged(limit);
+			const page = await listExcludedRootsPaged(limit, undefined, 0, viewId);
 			if (seq !== excludedSeq) return;
 			seedTreeItems(page.items);
 			excludedRoots = page.items;
@@ -314,11 +316,11 @@
 	}
 
 	/** Append-only growth for the excluded pool (mirrors {@link growRoots}). */
-	async function growExcluded(seq: number, limit: number): Promise<void> {
+	async function growExcluded(seq: number, limit: number, viewId: string): Promise<void> {
 		const have = excludedRoots.length;
 		if (have >= limit || have >= excludedTotal) return;
 		try {
-			const page = await listExcludedRootsPaged(limit - have, undefined, have);
+			const page = await listExcludedRootsPaged(limit - have, undefined, have, viewId);
 			if (seq !== excludedSeq) return;
 			if (page.items.length > 0) {
 				seedTreeItems(page.items);
@@ -397,10 +399,13 @@
 		const gen = getModelGeneration();
 		const loaded = hasModel;
 		const v = view;
+		// The pool is the complement of the ACTIVE view's placements; a loaded
+		// `_view` always has an id behind it (see requireActiveViewId).
+		const viewId = getActiveViewId();
 		const exLimit = excludedLimit; // tracked: pool scroll auto-load growth
 		const collapsed = poolCollapsed; // tracked: expand triggers the fetch
 		const seq = ++excludedSeq;
-		if (!loaded || v === null || collapsed) {
+		if (!loaded || v === null || viewId === null || collapsed) {
 			untrack(() => {
 				excludedRoots = [];
 				excludedTotal = 0;
@@ -415,8 +420,8 @@
 		}
 		const fresh =
 			excludedFetchedRev === rev && excludedFetchedGen === gen && excludedFetchedView === v;
-		if (fresh) untrack(() => void growExcluded(seq, exLimit));
-		else void refreshExcluded(seq, exLimit, rev, gen, v);
+		if (fresh) untrack(() => void growExcluded(seq, exLimit, viewId));
+		else void refreshExcluded(seq, exLimit, rev, gen, v, viewId);
 	});
 
 	// Child levels are not refetched by the roots effect (expanding a row must

@@ -25,6 +25,7 @@ from ..locking import (
     artifact_resource,
     expand_targets,
     folder_resource,
+    view_resource,
 )
 from ..schemas import (
     LeaseOut,
@@ -80,10 +81,12 @@ def acquire_locks(
             return METAMODEL_RESOURCE
         if t.type == "folder":
             return folder_resource(t.resource_id)
+        if t.type == "view":
+            return view_resource(t.resource_id)
         return t.resource_id
 
     targets = [(_canonical(t), LockMode(t.mode)) for t in payload.targets]
-    reqs = expand_targets(model, session.view, targets, LockIntent(payload.intent))
+    reqs = expand_targets(model, session.views, targets, LockIntent(payload.intent))
     now = time.monotonic()
     ttl = float(get_settings().lock_ttl_seconds)
     with session.write_mutex:

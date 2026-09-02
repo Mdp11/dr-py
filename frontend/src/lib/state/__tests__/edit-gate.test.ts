@@ -15,6 +15,7 @@ import {
 import { setProjectInfo, resetCheckout } from '../index';
 import { getLockNotice, setLockNotice } from '../lock-notice.svelte';
 import * as api from '$lib/api/checkout';
+import { setActiveViewId } from '../active-view.svelte';
 
 beforeEach(() => {
 	resetCheckout();
@@ -220,6 +221,25 @@ describe('folderTargets', () => {
 			{ resource_id: 'f1', mode: 'exclusive', type: 'folder' },
 			{ resource_id: 'f2', mode: 'exclusive', type: 'folder' }
 		]);
+	});
+
+	// The root is the one folder every view has, so its lease is the ACTIVE
+	// view's own `view:` lease rather than a shared `folder:root`.
+	it("maps the root to the active view's type:view target", () => {
+		setActiveViewId('v1');
+		try {
+			expect(folderTargets(['root', 'f1'])).toEqual([
+				{ resource_id: 'v1', mode: 'exclusive', type: 'view' },
+				{ resource_id: 'f1', mode: 'exclusive', type: 'folder' }
+			]);
+		} finally {
+			setActiveViewId(null);
+		}
+	});
+
+	it('refuses a root target with no active view', () => {
+		setActiveViewId(null);
+		expect(() => folderTargets(['root'])).toThrow(/no active view/i);
 	});
 });
 

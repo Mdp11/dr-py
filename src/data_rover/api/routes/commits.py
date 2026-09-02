@@ -24,8 +24,8 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, assert_never, get_args
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -84,7 +84,8 @@ from ..settings import get_settings
 from ..view_ops import (
     ViewBatchResult,
     apply_view_ops_atomic,
-    load_or_create_view,
+    group_by_view,
+    resolve_view,
     rollback_view,
     validate_view_ops,
     view_touched_resources,
@@ -240,7 +241,9 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
     return ids
 
 
-def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[str]:
+def _batch_touched_ids(
+    model: Model, views: Mapping[str, View], ops: list[OpIn]
+) -> set[str]:
     """Conservative touched-set for the conflict backstop: a batch conflicts
     with the commit tail iff their touched-id sets overlap.
 
@@ -253,7 +256,7 @@ def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[
     relationship) must still register as touching it. A create's temp id
     never appears in `_affected_ids` (canonical ops carry the assigned id),
     so temp ids are filtered out at the end rather than tracked specially.
-    ``view`` is threaded straight through to ``required_locks`` so
+    ``views`` is threaded straight through to ``required_locks`` so
     folder-op lease derivation resolves correctly; the view ops themselves
     additionally run through ``view_ops.view_touched_resources`` below, which
     contributes the placement-subject markers (``viewel:``/``viewart:``) no
@@ -271,7 +274,7 @@ def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[
     type error here rather than a silent hole (same discipline
     ``_apply_one``'s ``assert_never`` gives the applier).
     """
-    ids = {r.resource_id for r in required_locks(model, view, ops)}
+    ids = {r.resource_id for r in required_locks(model, views, ops)}
     for op in ops:
         if isinstance(
             op,
@@ -364,8 +367,8 @@ class _CommitUnwind:
 
     The ledger tracks this by having each stage REGISTER what
     went live, at the moment it goes live and NEVER LATER (``model_res``
-    after the model apply, ``created_view`` when this request materializes
-    ``session.view`` from ``None``, ``view_res`` after the view apply,
+    after the model apply, one ``view_results`` entry per view group after
+    its apply,
     ``rev_bumped`` after the rev bump + ``record_batch``; ``db_staged``
     BEFORE the first call that stages rows, and ``prior_metamodel`` DURING
     ``apply_metamodel_ops`` via its ``on_swap`` callback — those last two
@@ -406,13 +409,9 @@ class _CommitUnwind:
       against). Order-free — a single reassignment — but it sits beside the
       metamodel step, whose swap is one of the two things that triggers the
       recompile.
-    - ``view_res`` rollback needs ``session.view`` non-None: the view half
-      only ever applies to a resolved view, and nothing can null it
-      mid-request (see the defensive-fallback comment at the b3 site).
-    - ``created_view`` reset LAST among the view steps: a rejected request
-      must be externally invisible, so the auto-create unwinds to the
-      genuinely-empty ``None``, not a materialized empty view with no
-      ViewRow behind it.
+    - ``view_results`` roll back newest group first; each entry pairs the
+      live ``View`` object with its batch result, so the unwind never has
+      to re-resolve a view id.
     - ``op_log.pop()`` and the ``session.validation`` null only when
       ``rev_bumped``: the batch enters the op log — and the issue store gets
       its irreversible splice — at the same instant the rev bumps (step d),
@@ -431,8 +430,7 @@ class _CommitUnwind:
     db: DbSession
     model: Model
     model_res: _BatchResult | None = None
-    view_res: ViewBatchResult | None = None
-    created_view: bool = False
+    view_results: list[tuple[View, ViewBatchResult]] = field(default_factory=list)
     #: the metamodel this request swapped OUT. Registered from
     #: ``apply_metamodel_ops``' ``on_swap`` callback — i.e. at the instant the
     #: swap happens, NOT from the applier's return value, because everything
@@ -483,11 +481,8 @@ class _CommitUnwind:
             # live after restoring the prior metamodel would serve
             # schema-mismatched rows.
             self.session.invalidate_derived_caches()
-        if self.view_res is not None:
-            assert self.session.view is not None
-            rollback_view(self.session.view, self.view_res.inverse_units)
-        if self.created_view:
-            self.session.view = None
+        for view, vres in reversed(self.view_results):
+            rollback_view(view, vres.inverse_units)
         if self.rev_bumped:
             self.session.op_log.pop()
         if self.db_staged:
@@ -560,31 +555,10 @@ def preview_commit(
         # View ops are validated DRY against a deep copy (views are small):
         # nothing to roll back, and sharing the real applier means preview and
         # commit cannot disagree. Inside the mutex because a concurrent commit
-        # mutates session.view in place. Guarded on view_ops: an EMPTY batch
-        # would still deep-copy session.view (validate_view_ops' None-view
-        # short-circuit only helps a project with no view at all) on every
-        # model-only preview, which is the common case — pure overhead with
-        # nothing to validate.
-        if view_ops:
-            # Resolve the SAME durable-vs-cached view create_commit's own
-            # pre-mutex resolve uses: a None session.view does NOT mean
-            # "no durable view" — it can
-            # mean a cold/evicted session's cache miss while ViewRow
-            # survives (see load_or_create_view's docstring) — so
-            # validating against validate_view_ops' own None-view fallback
-            # (a FRESH EMPTY view) here would let preview 422 "unknown
-            # folder" on a batch the real commit, which hydrates the durable
-            # blob, actually accepts. Resolved into a LOCAL, never assigned
-            # to session.view: preview must stay side-effect-free (no
-            # persist, no rev bump, no cache mutation) — only create_commit
-            # is allowed to materialize the auto-create/hydrate into the
-            # session itself.
-            preview_view = (
-                session.view
-                if session.view is not None
-                else load_or_create_view(db, project_id)
-            )
-            validate_view_ops(preview_view, view_ops)
+        # mutates the session's views in place. Grouped per view exactly like
+        # the commit path; an empty/unknown view_id is the same 422 there.
+        for vid, group in group_by_view(view_ops).items():
+            validate_view_ops(resolve_view(session.views, vid), group)
         prior_mm = session.metamodel
         if candidate is not None:
             # In-memory ONLY (no DB writes — preview must stay side-effect
@@ -851,8 +825,8 @@ def create_commit(
     A batch can span all four content families, and each lives in a
     different place: model ops mutate the in-memory model IN PLACE, artifact
     ops stage row changes on this request's DB transaction, view ops
-    mutate ``session.view`` IN PLACE plus (once accepted) stage a blob row on
-    the same DB transaction as the artifact rows, and metamodel ops do BOTH at
+    mutate ``session.views[view_id]`` IN PLACE plus (once accepted) stage
+    that view's blob row on the same DB transaction as the artifact rows, and metamodel ops do BOTH at
     once (a rebind swaps ``session.metamodel``/``model.metamodel`` in place AND
     stages a new ``MetamodelRow`` + repointed ``ModelRow``; layout moves stage
     the ``metamodel_layouts`` blob only). So every failure path after
@@ -860,8 +834,7 @@ def create_commit(
     is ``_CommitUnwind``'s job, not each site's: every stage registers what
     it just made live on the ledger, and each failure path calls
     ``unwind()`` once. See that class's docstring for the field-order
-    invariants (rev decrement before cache invalidation, the auto-created
-    view unwinding to ``None`` last, and so on).
+    invariants (rev decrement before cache invalidation, and so on).
 
     What makes the ledger's field semantics correct: ``apply_artifact_ops``
     deliberately has no internal rollback path (it only flushes), so that
@@ -869,8 +842,9 @@ def create_commit(
     hence ``db_staged`` is registered BEFORE that call, not after it;
     ``apply_view_ops_atomic`` DOES roll its own prefix back on failure (see
     its docstring), so a failure raised BY it never needs an explicit
-    ``rollback_view`` call — hence ``view_res`` is registered only AFTER it
-    returns, and only failures raised after that point roll the view back;
+    ``rollback_view`` call — hence a ``view_results`` entry is registered
+    only AFTER it returns, and only failures raised after that point roll
+    that view back;
     ``apply_metamodel_ops`` follows the ARTIFACT stance (no internal rollback
     at all — see its module docstring), so ``db_staged`` is likewise
     registered BEFORE the call — but ``prior_metamodel`` is registered from
@@ -901,32 +875,10 @@ def create_commit(
             status_code=403, detail="metamodel changes require the owner role"
         )
     # The unwind ledger every failure path below shares — see _CommitUnwind.
-    # Its ``created_view`` flag is the subtle one: it is True iff THIS request
-    # is the one that flipped session.view from None to non-None via
-    # load_or_create_view, so a rejected request restores it to None rather
-    # than leaving a never-committed materialization behind. A REJECTED
-    # (409/422/500) request must be externally invisible: before this request
-    # GET /view reported whatever it reported, and any return out of this
-    # function must leave it reporting that again — for the genuinely-empty
-    # case, not a materialized empty view with no ViewRow / view_rev to back
-    # it. The same guard applies to the resolve-view call site inside the
-    # mutex below.
-    #
-    # INVARIANT: every ASSIGNMENT to session.view in
-    # this function happens under session.write_mutex — the single point is
-    # just inside the mutex below, right before required_locks; every ledger
-    # unwind() that resets it runs later inside that same mutex block. A
-    # pre-mutex READ into a LOCAL (the overlap check just below needs one)
-    # is fine and does NOT
-    # violate this — only writing session.view itself, or resetting it, must
-    # wait for the mutex. Two concurrent view-op commits assigning
-    # session.view outside the mutex could otherwise race a check-then-set
-    # (a lost update: A reads ViewRow, is descheduled while B hydrates,
-    # commits and persists, then A assigns its now-stale View over B's,
-    # silently overwriting B's folders at A's own persist step) or have
-    # one request's pre-mutex reset (on a rejected/failed early return) null
-    # session.view out from under a DIFFERENT request already inside the
-    # mutex, tripping its own `assert session.view is not None` mid-flight.
+    # INVARIANT: every MUTATION of a view in this function happens under
+    # session.write_mutex; the pre-mutex overlap check below only READS
+    # ``session.views`` (a dict complete since hydration — a view id that
+    # resolves to nothing is a client error, never a cold-cache miss).
     unwind = _CommitUnwind(session, db, model)
     if payload.base_rev > session.model_rev:
         return _conflict_response(session.model_rev, "stale base_rev")
@@ -972,26 +924,10 @@ def create_commit(
             return _conflict_response(session.model_rev, "stale base_rev")
         # Resolve a LOCAL view for the overlap check ONLY, immediately
         # before the one check in this block that needs it — not any
-        # earlier, so the three fail-closed
-        # checks above (which never consult view content at all) can never
-        # trigger an unnecessary hydration on their own return paths.
-        # _batch_touched_ids -> required_locks' folder_subtree/locate_folder
-        # expansion degrades to a bare single-resource id against a
-        # ``None`` view, exactly like the applier itself would under-derive
-        # a lock against an unresolved tree — so without resolving first, a
-        # stale delete_folder/move_folder batch's conflict/touched-set here
-        # would be computed against the WRONG (empty/absent) tree relative
-        # to what the real, hydrated one actually contains. NEVER assigned
-        # to session.view here: this whole block runs BEFORE the mutex, so a
-        # write here would be the exact race the invariant note above
-        # create_commit's mutex forbids — mirrors preview_commit's own
-        # local, read-only resolve.
-        conflict_view = (
-            session.view
-            if session.view is not None
-            else load_or_create_view(db, project_id)
-        )
-        if _affected_ids(tail) & _batch_touched_ids(model, conflict_view, payload.ops):
+        # earlier, so the three fail-closed checks above (which never
+        # consult view content at all) can never pay for the derivation on
+        # their own return paths.
+        if _affected_ids(tail) & _batch_touched_ids(model, session.views, payload.ops):
             return _conflict_response(
                 session.model_rev, "conflicting concurrent commits"
             )
@@ -1022,34 +958,22 @@ def create_commit(
             validation_error_count=0,
         )
     with session.write_mutex:
-        # Resolve/auto-create session.view HERE — the ONLY place this
-        # function ever ASSIGNS to it, now that the
-        # pre-mutex overlap check above uses its own read-only local
-        # instead. required_locks just below needs it resolved for the same
-        # reason that local did: against a ``None`` view, folder_subtree/
-        # locate_folder degrade to a bare single-resource id, under-
-        # deriving a delete_folder/move_folder's lock requirement relative
-        # to the real, hydrated tree the applier goes on to mutate. No
-        # try/except needed: this is still the first thing that could
-        # mutate anything once the mutex is held (mirrors the reasoning in
-        # the ledger's comment above — contrast undo's version of this
-        # hoist, which runs after a batch has already been popped).
-        if view_ops and session.view is None:
-            session.view = load_or_create_view(db, project_id)
-            unwind.created_view = True
+        # Resolve every view the batch names FIRST: a 422 here costs nothing
+        # (no half is live yet), whereas discovering it at b3 would apply and
+        # roll back the model half for a batch that could never land.
+        # required_locks below needs the same mapping so folder_subtree/
+        # locate_folder expand against the real trees.
+        for vid in group_by_view(view_ops):
+            resolve_view(session.views, vid)
         # a. verify the caller still holds every required lock. `payload.ops`
         #    (not `model_ops`) so the `art:`-namespaced leases artifact ops
         #    need are derived and checked too.
-        reqs = required_locks(model, session.view, payload.ops)
+        reqs = required_locks(model, session.views, payload.ops)
         missing = session.lock_table.verify_held(
             user.id, payload.lock_tokens, reqs, now=time.monotonic()
         )
         if missing:
-            # undo every live half — here that is at most this request's own
-            # hydration, which must not leak into a REJECTED (409) response's
-            # visible state (see _CommitUnwind). Safe to reset here: still
-            # inside the mutex, so no concurrent request can be mid-flight on
-            # the SAME session.view object.
+            # nothing is live yet — unwind is a no-op kept for uniformity
             unwind.unwind()
             return JSONResponse(
                 status_code=409,
@@ -1113,13 +1037,12 @@ def create_commit(
                 raise
         # b. apply the model half against the (possibly just-swapped) schema.
         #    _apply_batch already rolled ITSELF back on a mutation-boundary
-        #    error, but the ledger still has to run: created_view may be True
-        #    (the resolve near the top) and the metamodel half may already
-        #    be live in memory AND staged in the transaction (a3).
+        #    error, but the ledger still has to run: the metamodel half may
+        #    already be live in memory AND staged in the transaction (a3).
         try:
             res = _apply_batch(model, model_ops, restore=False)
         except Exception:
-            unwind.unwind()  # created_view may already be set (resolve above)
+            unwind.unwind()
             raise
         unwind.model_res = res
         # b2. apply the artifact half, staged on this request's DB transaction.
@@ -1146,42 +1069,32 @@ def create_commit(
             # model half-mutated. Undo both halves, then let it propagate.
             unwind.unwind()  # undo every live half — see _CommitUnwind
             raise
-        # b3. apply the view half to session.view IN PLACE, all-or-nothing
-        #     (session.view was already resolved near the top of this SAME
-        #     mutex block whenever view_ops is non-empty; created_view was
-        #     set there too). Seeded with both prior id_maps so a placement
-        #     may reference an element or artifact created earlier in the
-        #     SAME batch.
-        view_res: ViewBatchResult | None = None
-        if view_ops:
-            if session.view is None:
-                # Defensive fallback only: the resolve near the top of this
-                # SAME mutex block already hydrated/auto-created
-                # session.view whenever view_ops is non-empty, so this
-                # branch is dead in the ordinary case. Nothing else can null
-                # session.view mid-request (every other assignment is this
-                # SAME request unwinding its own auto-create on a later
-                # failure) — this branch survives purely as a cheap,
-                # harmless backstop.
-                session.view = load_or_create_view(db, project_id)
-                unwind.created_view = True
+        # b3. apply the view half IN PLACE, one all-or-nothing group per view
+        #     (every view id was resolved near the top of this SAME mutex
+        #     block, so the lookups below cannot miss). Seeded with both prior
+        #     id_maps so a placement may reference an element or artifact
+        #     created earlier in the SAME batch; the map accumulates across
+        #     groups so a later group sees an earlier group's folder ids.
+        view_results: list[tuple[str, View, ViewBatchResult]] = []
+        view_id_map = {**res.id_map, **art_res.id_map}
+        for vid, group in group_by_view(view_ops).items():
+            target = session.views[vid]
             try:
-                view_res = apply_view_ops_atomic(
-                    session.view,
-                    view_ops,
-                    id_map={**res.id_map, **art_res.id_map},
-                    restore=False,
+                vres = apply_view_ops_atomic(
+                    target, group, id_map=view_id_map, restore=False
                 )
             except Exception:
                 # mirror b2's stance: never leave the model half applied.
                 # apply_view_ops_atomic already rolled its own applied prefix
-                # back (to the empty View this request may have created),
-                # which is exactly why view_res is still unregistered on the
-                # ledger here — but the auto-create itself must still unwind:
-                # the pre-batch state for THIS project was None, not "".
+                # back, which is exactly why this group is still unregistered
+                # on the ledger here — earlier groups ARE registered and roll
+                # back with everything else.
                 unwind.unwind()  # undo every live half — see _CommitUnwind
                 raise
-            unwind.view_res = view_res
+            unwind.view_results.append((target, vres))
+            view_results.append((vid, target, vres))
+            view_id_map.update(vres.id_map)
+        all_view_res = [vres for _vid, _view, vres in view_results]
         # b4. recompile the user rule sets when this batch invalidated them:
         #     it created/changed/deleted a rules artifact (read back off the
         #     rows b2 staged on this transaction), or it swapped the schema
@@ -1319,25 +1232,25 @@ def create_commit(
         # all (hydration skips the family, revert 409s across it), so its
         # position there is inert today — but do not "tidy" the inverse list
         # to match some other order.
-        # The view id_map is seeded with the model+artifact maps (see b3), so
-        # view_res.id_map is already a superset — merging it last is correct
-        # and the other two spreads are redundant but harmless, kept for
-        # symmetry with undo. The metamodel family mints no ids at all.
-        merged_id_map = {
-            **res.id_map,
-            **art_res.id_map,
-            **(view_res.id_map if view_res else {}),
-        }
+        # The view id_maps are seeded with the model+artifact maps (see b3),
+        # so the last group's is already a superset — merging them last is
+        # correct and the other two spreads are redundant but harmless, kept
+        # for symmetry with undo. The metamodel family mints no ids at all.
+        # View groups are independent (one view each), so their relative
+        # order in the journal is free; inverses go newest group first.
+        merged_id_map = {**res.id_map, **art_res.id_map}
+        for vres in all_view_res:
+            merged_id_map.update(vres.id_map)
         canonical_ops: list[OpIn] = [
             *res.canonical_ops,
             *art_res.canonical_ops,
-            *(view_res.canonical_ops if view_res else []),
+            *(op for vres in all_view_res for op in vres.canonical_ops),
             *(mm_res.canonical_ops if mm_res else []),
         ]
         inverse_ops: list[OpIn] = [
             *res.inverse_ops(),
             *art_res.inverse_ops(),
-            *(view_res.inverse_ops() if view_res else []),
+            *(op for vres in reversed(all_view_res) for op in vres.inverse_ops()),
             *(mm_res.inverse_ops() if mm_res else []),
         ]
         session.record_batch(
@@ -1353,24 +1266,21 @@ def create_commit(
         #    try, on the same DB transaction _persist_commit's own
         #    db.commit() will flush — so the view row and the Commit row
         #    land or roll back together. It MUST be inside the try: staging
-        #    is a db.flush() (content.upsert_single_view), which can raise
+        #    is a db.flush() (content.upsert_view), which can raise
         #    on its own (FK/constraint/connection error) — the same failure
         #    class this try/except exists to catch. Staging it outside would
         #    let that exception escape every rollback below with model_rev
         #    already bumped and the batch already in op_log.
         commit_id = uuid.uuid4().hex
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
-        new_view_rev: int | None = None
+        new_view_revs: dict[str, int] = {}
         try:
-            if view_res is not None and view_res.canonical_ops:
-                assert session.view is not None
-                view_row = content.upsert_single_view(
-                    db,
-                    project_id,
-                    name=session.view.name,
-                    blob=session.view.model_dump_json(),
-                )
-                new_view_rev = view_row.view_rev
+            for vid, target, vres in view_results:
+                if vres.canonical_ops:
+                    view_row = content.upsert_view(
+                        db, project_id, vid, blob=target.model_dump_json()
+                    )
+                    new_view_revs[vid] = view_row.view_rev
             persisted = _persist_commit(
                 db,
                 project_id,
@@ -1549,7 +1459,7 @@ def create_commit(
         validation_error_count=len(conformance),
         changed_artifacts=changed_artifact_headers,
         deleted_artifact_ids=[d["id"] for d in art_res.deleted],
-        view_rev=new_view_rev,
+        view_revs=new_view_revs,
         rebound=rebound,
         to_metamodel_id=mm_res.to_metamodel_id if mm_res else None,
     )
@@ -1705,7 +1615,7 @@ def revert_commit(
         res = _apply_batch(model, combined, restore=True)
         # Same ledger create_commit uses (see _CommitUnwind), narrowed to the
         # model-only subset: revert refuses artifact/view batches above, so
-        # view_res/created_view stay at their defaults and are never touched.
+        # view_results stays empty and is never touched.
         unwind = _CommitUnwind(session, db, model, model_res=res)
         # Model-only by construction (artifact/view/metamodel ops 409 above),
         # so the compiled rules cannot have changed — widen the dirty scope

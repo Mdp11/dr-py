@@ -183,6 +183,14 @@ def rebind_event(
     }
 
 
+def view_event(action: str, view: dict[str, Any]) -> dict[str, Any]:
+    """A view was added or removed (action: created|deleted). Carries
+    ``{id, name}``: clients refresh their view list, and one whose ACTIVE
+    view was deleted falls back to no view. Folder edits inside a view are
+    NOT this — they ride ``commit_event`` under the ``view`` scope."""
+    return {"type": "view", "action": action, "view": view}
+
+
 def artifact_event(action: str, artifact: dict[str, Any]) -> dict[str, Any]:
     """Artifact library change (action: created|updated|deleted). Carries the
     HEADER only (no payload): clients refresh their artifact list; an open

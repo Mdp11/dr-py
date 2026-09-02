@@ -161,29 +161,65 @@ def commit_create(c: TestClient, label: str | None = None) -> str:
     return r.json()["id_map"]["tmp_n"]
 
 
+def create_view(
+    c: TestClient,
+    name: str = "Default",
+    doc: dict | None = None,
+    *,
+    headers: dict | None = None,
+) -> str:
+    """Add a named view via ``POST /views``; returns its id."""
+    hdrs = headers if headers is not None else AUTH_HEADERS
+    r = c.post(
+        papi("/views"),
+        json={"name": name, "view": doc if doc is not None else {"name": name}},
+        headers=hdrs,
+    )
+    assert r.status_code == 201, r.text
+    view_id: str = r.json()["id"]
+    return view_id
+
+
+def default_view_id(c: TestClient, *, headers: dict | None = None) -> str:
+    """The project's first view by name, created as ``"Default"`` when the
+    project has none — the one-view setup most view tests want."""
+    hdrs = headers if headers is not None else AUTH_HEADERS
+    views = c.get(papi("/views"), headers=hdrs).json()
+    if views:
+        first: str = views[0]["id"]
+        return first
+    return create_view(c, headers=hdrs)
+
+
+def container_lock_target(view_id: str, folder_id: str) -> dict:
+    """The lock target for editing inside *folder_id* of *view_id*: the
+    folder's own `folder:` lease, or the VIEW's lease for the root."""
+    if folder_id == "root":
+        return {"resource_id": view_id, "mode": "exclusive", "type": "view"}
+    return {"resource_id": folder_id, "mode": "exclusive", "type": "folder"}
+
+
 def create_folder_via_commit(
     c: TestClient,
     name: str,
     *,
+    view_id: str | None = None,
     parent_id: str = "root",
     headers: dict | None = None,
 ) -> dict:
     """Create one folder via ``POST /commits`` and return the full commit
-    response body (``id_map``, ``view_rev``, etc).
+    response body (``id_map``, ``view_revs``, etc).
 
     Used by view-op tests purely to seed an initial named folder with an id.
-    Acquires (and lets the commit release) its own lease on *parent_id* —
-    ``"root"`` by default.
+    ``view_id`` defaults to :func:`default_view_id`. Acquires (and lets the
+    commit release) its own lease on *parent_id* — the view itself for
+    ``"root"`` (the default).
     """
     hdrs = headers if headers is not None else AUTH_HEADERS
+    vid = view_id if view_id is not None else default_view_id(c, headers=hdrs)
     lease = c.post(
         papi("/locks"),
-        json={
-            "targets": [
-                {"resource_id": parent_id, "mode": "exclusive", "type": "folder"}
-            ],
-            "intent": "edit",
-        },
+        json={"targets": [container_lock_target(vid, parent_id)], "intent": "edit"},
         headers=hdrs,
     )
     assert lease.status_code == 200, lease.text
@@ -196,6 +232,7 @@ def create_folder_via_commit(
             "ops": [
                 {
                     "kind": "create_folder",
+                    "view_id": vid,
                     "temp_id": "tmp_setup",
                     "parent_id": parent_id,
                     "name": name,
@@ -207,7 +244,9 @@ def create_folder_via_commit(
         headers=hdrs,
     )
     assert r.status_code == 200, r.text
-    return r.json()
+    body: dict = r.json()
+    body["view_id"] = vid
+    return body
 
 
 def feed_url(user: str = TEST_USER_ID) -> str:

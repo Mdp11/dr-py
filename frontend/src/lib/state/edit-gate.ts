@@ -2,6 +2,8 @@ import { ensureCheckout, lockHolderLabel } from './checkout.svelte';
 import { setLockNotice } from './lock-notice.svelte';
 import type { CheckoutResult } from './checkout.svelte';
 import type { LockTargetIn, LockIntent } from '$lib/api/types';
+import { getActiveViewId } from './active-view.svelte';
+import { VIEW_ROOT_ID } from './ops';
 
 /** Re-exported from checkout.svelte.ts, which owns the single definition
  * (`reacquireOpenArtifactLeases` needs it, and importing it from here would
@@ -86,13 +88,20 @@ export async function artifactDeleteLock(artifactId: string): Promise<boolean> {
 }
 
 /** Folder lock targets: EXCLUSIVE, `type: "folder"`, deduped — a move whose
- * source container IS the destination parent sends one target, not two. */
+ * source container IS the destination parent sends one target, not two.
+ * {@link VIEW_ROOT_ID} maps to the ACTIVE view's own `type: "view"` target
+ * (its root-membership lease — `folderLeaseResource` in ops.ts is the
+ * canonical mirror): the root is the one folder every view has, so its lease
+ * must be scoped per view where `folder:<uuid>` needs no scoping. */
 export function folderTargets(folderIds: string[]): LockTargetIn[] {
-	return [...new Set(folderIds)].map((id) => ({
-		resource_id: id,
-		mode: 'exclusive' as const,
-		type: 'folder' as const
-	}));
+	return [...new Set(folderIds)].map((id) => {
+		if (id === VIEW_ROOT_ID) {
+			const viewId = getActiveViewId();
+			if (viewId === null) throw new Error('No active view');
+			return { resource_id: viewId, mode: 'exclusive' as const, type: 'view' as const };
+		}
+		return { resource_id: id, mode: 'exclusive' as const, type: 'folder' as const };
+	});
 }
 
 /** Folder gates: notice-based like the element gates — the sidebar

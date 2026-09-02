@@ -21,7 +21,12 @@ from data_rover.api.schemas import ChangeRequestIn, ElementOut, ModelOut, Relati
 from data_rover.api.session import get_session
 from data_rover.core.model.change_request import apply_change_request
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    container_lock_target,
+    create_view,
+    seed_default_project,
+)
 
 READ_MM = """
 elements:
@@ -1101,12 +1106,13 @@ def test_tree_items_endpoint_rejects_oversized_batch(client: TestClient) -> None
 # ---------------------------------------------------------------------------
 
 
-def _seed_view(client: TestClient, folders: list[dict]) -> None:
+def _seed_view(client: TestClient, folders: list[dict]) -> str:
     """Build a view via POST /commits using a nested folder-dict shape: each
     dict is ``{"name": ..., "folders": [...], "elements": [...]}``. Folders
     created
     within the batch need no lock to be referenced by later ops in the SAME
     batch, so a single ``root`` lease covers the whole tree."""
+    vid = create_view(client)
     ops: list[dict] = []
     counter = 0
 
@@ -1117,6 +1123,7 @@ def _seed_view(client: TestClient, folders: list[dict]) -> None:
         ops.append(
             {
                 "kind": "create_folder",
+                "view_id": vid,
                 "temp_id": temp_id,
                 "parent_id": parent_id,
                 "name": spec["name"],
@@ -1124,7 +1131,7 @@ def _seed_view(client: TestClient, folders: list[dict]) -> None:
         )
         for eid in spec.get("elements", []):
             ops.append(
-                {"kind": "place_element", "element_id": eid, "folder_id": temp_id}
+                {"kind": "place_element", "view_id": vid, "element_id": eid, "folder_id": temp_id}
             )
         for child in spec.get("folders", []):
             walk(child, temp_id)
@@ -1135,7 +1142,7 @@ def _seed_view(client: TestClient, folders: list[dict]) -> None:
     lease = client.post(
         f"{API}/locks",
         json={
-            "targets": [{"resource_id": "root", "mode": "exclusive", "type": "folder"}],
+            "targets": [container_lock_target(vid, "root")],
             "intent": "edit",
         },
     )
@@ -1147,12 +1154,13 @@ def _seed_view(client: TestClient, folders: list[dict]) -> None:
         json={"base_rev": base, "ops": ops, "message": "setup", "lock_tokens": [token]},
     )
     assert res.status_code == 200, res.text
+    return vid
 
 
 def test_excluded_roots_omits_placed(client: TestClient) -> None:
     _load_model(client, [_item("a", "A"), _item("b", "B"), _item("c", "C")], [])
-    _seed_view(client, [{"name": "F", "folders": [], "elements": ["b"]}])
-    res = client.get(f"{API}/model/containment/roots/excluded")
+    vid = _seed_view(client, [{"name": "F", "folders": [], "elements": ["b"]}])
+    res = client.get(f"{API}/model/containment/roots/excluded", params={"view_id": vid})
     assert res.status_code == 200, res.text
     body = res.json()
     assert [i["id"] for i in body["items"]] == ["a", "c"]
@@ -1161,7 +1169,7 @@ def test_excluded_roots_omits_placed(client: TestClient) -> None:
 
 def test_excluded_roots_nested_folder_placement(client: TestClient) -> None:
     _load_model(client, [_item("a", "A"), _item("b", "B")], [])
-    _seed_view(
+    vid = _seed_view(
         client,
         [
             {
@@ -1171,15 +1179,18 @@ def test_excluded_roots_nested_folder_placement(client: TestClient) -> None:
             }
         ],
     )
-    res = client.get(f"{API}/model/containment/roots/excluded")
+    res = client.get(f"{API}/model/containment/roots/excluded", params={"view_id": vid})
     assert [i["id"] for i in res.json()["items"]] == ["b"]
 
 
 def test_excluded_roots_no_view_returns_all_roots(client: TestClient) -> None:
+    """No ``view_id`` (or an unknown one) means every root is excluded."""
     _load_model(client, [_item("a", "A"), _item("b", "B")], [])
-    res = client.get(f"{API}/model/containment/roots/excluded")
-    assert [i["id"] for i in res.json()["items"]] == ["a", "b"]
-    assert res.json()["total"] == 2
+    _seed_view(client, [{"name": "F", "folders": [], "elements": ["a"]}])
+    for params in ({}, {"view_id": "nope"}):
+        res = client.get(f"{API}/model/containment/roots/excluded", params=params)
+        assert [i["id"] for i in res.json()["items"]] == ["a", "b"]
+        assert res.json()["total"] == 2
 
 
 def test_excluded_roots_paging(client: TestClient) -> None:
@@ -1196,9 +1207,10 @@ def test_excluded_roots_paging_over_filtered_subset(client: TestClient) -> None:
     # Placed ids must be subtracted BEFORE paging: with i0 and i2 in the view,
     # the excluded pool is [i1, i3, i4], so limit=2/offset=1 -> [i3, i4].
     _load_model(client, [_item(f"i{n}", f"n{n}") for n in range(5)], [])
-    _seed_view(client, [{"name": "F", "folders": [], "elements": ["i0", "i2"]}])
+    vid = _seed_view(client, [{"name": "F", "folders": [], "elements": ["i0", "i2"]}])
     res = client.get(
-        f"{API}/model/containment/roots/excluded", params={"limit": 2, "offset": 1}
+        f"{API}/model/containment/roots/excluded",
+        params={"limit": 2, "offset": 1, "view_id": vid},
     )
     body = res.json()
     assert [i["id"] for i in body["items"]] == ["i3", "i4"]

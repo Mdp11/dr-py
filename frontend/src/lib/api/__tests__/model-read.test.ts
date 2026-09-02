@@ -119,8 +119,9 @@ describe('listExcludedRoots', () => {
 				return HttpResponse.json({ items: [item('a')], total: 3 });
 			})
 		);
-		const page = await listExcludedRoots({ limit: 1, offset: 0 }, cfg);
+		const page = await listExcludedRoots({ limit: 1, offset: 0, viewId: 'v1' }, cfg);
 		expect(url?.searchParams.get('limit')).toBe('1');
+		expect(url?.searchParams.get('view_id')).toBe('v1');
 		expect(page.total).toBe(3);
 		expect(page.items[0].id).toBe('a');
 	});

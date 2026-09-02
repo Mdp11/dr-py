@@ -193,15 +193,15 @@ describe('TopBar', () => {
 		});
 	});
 
-	// Five left-nav controls in a fixed order, with Compare/Apply CR/Export/History folded into the Model dropdown.
+	// Six left-nav controls in a fixed order, with Compare/Apply CR/Export/History folded into the Model dropdown.
 	describe('top bar layout', () => {
-		it('renders Metamodel · Issues · Artifacts · Model · Settings, in order', () => {
+		it('renders Metamodel · Model · View · Issues · Artifacts · Settings, in order', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
 
 			const nav = document.querySelector('nav[aria-label="Toolbar"]')!;
 			const labels = [...nav.querySelectorAll('button, a')].map((n) => n.textContent?.trim());
-			expect(labels).toEqual(['Metamodel', 'Issues', 'Artifacts', 'Model', 'Settings']);
+			expect(labels).toEqual(['Metamodel', 'Model', 'View', 'Issues', 'Artifacts', 'Settings']);
 			expect(document.querySelector('[aria-label="More actions"]')).toBeNull();
 			expect(document.querySelector('[title="Command palette"]')).toBeNull();
 

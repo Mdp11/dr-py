@@ -1,9 +1,11 @@
 """View ops through the lock-verified commit flow: lease enforcement,
-journaling, view_rev lockstep, auto-created views, mixed-batch atomicity
-(the view half rolls back when the model half hard-fails), preview dryness,
-and the feed scope."""
+journaling, per-view ``view_revs`` lockstep, view_id resolution, mixed-batch
+atomicity (the view half rolls back when the model half hard-fails), preview
+dryness, and the feed scope."""
 
 from __future__ import annotations
+
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,7 +14,14 @@ from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 from data_rover.api.session import get_session
 
-from .conftest import AUTH_HEADERS, feed_url, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    container_lock_target,
+    create_view,
+    feed_url,
+    papi,
+    seed_default_project,
+)
 
 OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
 
@@ -35,6 +44,7 @@ def _seed_second_member(user_id: str, email: str) -> None:
     finally:
         gen.close()
 
+
 #: Node + a containment relationship type, matching the pattern
 #: test_incremental_invalidation.py's CONTAINMENT_MM uses to provoke a
 #: STRUCTURAL "two containment parents" blocker (dangling endpoints would
@@ -49,6 +59,40 @@ relationships:
       - source: Node
         target: Node
 """
+
+#: three Nodes whose two Contains relationships below form a structural
+#: "two containment parents" blocker
+_TWO_PARENTS_MODEL = {
+    "elements": [
+        {"id": "p1", "type_name": "Node", "properties": {}},
+        {"id": "p2", "type_name": "Node", "properties": {}},
+        {"id": "child", "type_name": "Node", "properties": {}},
+    ],
+    "relationships": [],
+}
+_TWO_PARENTS_OPS = [
+    {
+        "kind": "create_relationship",
+        "temp_id": "tmp_r1",
+        "type_name": "Contains",
+        "source_id": "p1",
+        "target_id": "child",
+        "properties": {},
+    },
+    {
+        "kind": "create_relationship",
+        "temp_id": "tmp_r2",
+        "type_name": "Contains",
+        "source_id": "p2",
+        "target_id": "child",
+        "properties": {},
+    },
+]
+_TWO_PARENTS_TARGETS = [
+    {"resource_id": "p1", "mode": "exclusive"},
+    {"resource_id": "p2", "mode": "exclusive"},
+    {"resource_id": "child", "mode": "shared"},
+]
 
 
 @pytest.fixture
@@ -66,17 +110,21 @@ def client() -> TestClient:
     return c
 
 
-def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:
-    r = client.post(
-        papi("/locks"),
-        json={
-            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
-            "intent": intent,
-        },
-    )
+def _lease(client: TestClient, targets: list[dict], intent: str = "edit") -> str:
+    r = client.post(papi("/locks"), json={"targets": targets, "intent": intent})
     assert r.status_code == 200, r.text
     token: str = r.json()["token"]
     return token
+
+
+def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:
+    return _lease(
+        client, [{"resource_id": fid, "mode": "exclusive", "type": "folder"}], intent
+    )
+
+
+def _view_lease(client: TestClient, vid: str, intent: str = "edit") -> str:
+    return _lease(client, [container_lock_target(vid, "root")], intent)
 
 
 def _rev(client: TestClient) -> int:
@@ -85,13 +133,23 @@ def _rev(client: TestClient) -> int:
     return rev
 
 
-def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
-    """Build a (possibly nested) folder tree via ``POST /commits`` purely to
-    seed named folders with ids. *folders* is
-    ``[{"name": ..., "folders": [...]}, ...]``. Returns a flat {name: id} map
-    (names are unique per test). A single ``root`` lease covers the whole
-    batch — ids created earlier in the same batch need no lock to be
-    referenced later in it."""
+def _get_view(client: TestClient, vid: str) -> dict:
+    r = client.get(papi(f"/views/{vid}"))
+    assert r.status_code == 200, r.text
+    body: dict = r.json()
+    return body
+
+
+def _seed_view(
+    client: TestClient, folders: list[dict], *, name: str = "Default"
+) -> tuple[str, dict[str, str]]:
+    """Add a view named *name* and build a (possibly nested) folder tree in
+    it via ``POST /commits`` purely to seed named folders with ids. *folders*
+    is ``[{"name": ..., "folders": [...]}, ...]``. Returns the view id and a
+    flat {name: id} map (names are unique per test). A single lease on the
+    view (its root) covers the whole batch — ids created earlier in the same
+    batch need no lock to be referenced later in it."""
+    vid = create_view(client, name)
     ops: list[dict] = []
     counter = 0
 
@@ -102,6 +160,7 @@ def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
         ops.append(
             {
                 "kind": "create_folder",
+                "view_id": vid,
                 "temp_id": temp_id,
                 "parent_id": parent_id,
                 "name": spec["name"],
@@ -113,19 +172,20 @@ def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
     for f in folders:
         walk(f, "root")
 
-    token = _folder_lease(client, "root")
+    token = _view_lease(client, vid)
     r = client.post(
         papi("/commits"),
         json={"base_rev": _rev(client), "ops": ops, "message": "setup", "lock_tokens": [token]},
     )
     assert r.status_code == 200, r.text
     id_map = r.json()["id_map"]
-    return {op["name"]: id_map[op["temp_id"]] for op in ops}
+    return vid, {op["name"]: id_map[op["temp_id"]] for op in ops}
 
 
 def test_commit_requires_folder_lease(client: TestClient) -> None:
-    fid = _seed_view(client, [{"name": "A"}])["A"]
-    ops = [{"kind": "rename_folder", "id": fid, "name": "A2"}]
+    vid, ids = _seed_view(client, [{"name": "A"}])
+    fid = ids["A"]
+    ops = [{"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"}]
     r = client.post(
         papi("/commits"),
         json={"base_rev": _rev(client), "ops": ops, "message": "m", "lock_tokens": []},
@@ -135,13 +195,20 @@ def test_commit_requires_folder_lease(client: TestClient) -> None:
 
 
 def test_commit_applies_persists_and_journals(client: TestClient) -> None:
-    fid = _seed_view(client, [{"name": "A"}])["A"]
-    setup_view_rev = client.get(papi("/view")).json()["view_rev"]
+    vid, ids = _seed_view(client, [{"name": "A"}])
+    fid = ids["A"]
+    setup_view_rev = _get_view(client, vid)["view_rev"]
     token = _folder_lease(client, fid)
     base = _rev(client)
     ops = [
-        {"kind": "rename_folder", "id": fid, "name": "A2"},
-        {"kind": "create_folder", "temp_id": "tmp_c", "parent_id": fid, "name": "C"},
+        {"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"},
+        {
+            "kind": "create_folder",
+            "view_id": vid,
+            "temp_id": "tmp_c",
+            "parent_id": fid,
+            "name": "C",
+        },
     ]
     r = client.post(
         papi("/commits"),
@@ -150,12 +217,11 @@ def test_commit_applies_persists_and_journals(client: TestClient) -> None:
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["model_rev"] == base + 1  # any commit bumps the project rev
-    assert out["view_rev"] == setup_view_rev + 1  # lockstep with the setup commit
+    assert out["view_revs"] == {vid: setup_view_rev + 1}  # lockstep with setup
     assert "tmp_c" in out["id_map"]
 
     # the view head reflects it
-    r = client.get(papi("/view"))
-    v = r.json()["view"]
+    v = _get_view(client, vid)["view"]
     assert v["folders"][0]["name"] == "A2"
     assert v["folders"][0]["folders"][0]["id"] == out["id_map"]["tmp_c"]
 
@@ -168,118 +234,91 @@ def test_commit_applies_persists_and_journals(client: TestClient) -> None:
     assert r.json()["leases"] == []
 
 
-def test_commit_view_ops_without_existing_view_autocreates(client: TestClient) -> None:
+def test_commit_rejects_missing_or_unknown_view_id(client: TestClient) -> None:
+    """A view op must name a view that exists: there is no auto-create, and
+    the resolution happens before lock verification, so a bad id is a 422
+    regardless of what the caller holds."""
     base = _rev(client)
-    ops = [{"kind": "create_folder", "temp_id": "tmp_c", "parent_id": "root", "name": "A"}]
-    # create_folder under root needs the root-membership lease
-    token = _folder_lease(client, "root", intent="edit")
-    r = client.post(
-        papi("/commits"),
-        json={"base_rev": base, "ops": ops, "message": "m", "lock_tokens": [token]},
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["view_rev"] == 1
-    r = client.get(papi("/view"))
-    assert r.json()["view"]["folders"][0]["name"] == "A"
+    for view_id in ("", "nope"):
+        op = {
+            "kind": "create_folder",
+            "temp_id": "tmp_c",
+            "parent_id": "root",
+            "name": "A",
+        }
+        if view_id:
+            op["view_id"] = view_id
+        r = client.post(
+            papi("/commits"),
+            json={"base_rev": base, "ops": [op], "message": "m", "lock_tokens": []},
+        )
+        assert r.status_code == 422, r.text
+        assert "view" in r.json()["detail"]
+    assert client.get(papi("/views")).json() == []
+    assert _rev(client) == base
 
 
-def test_commit_after_view_cleared_hydrates_durable_view_not_an_empty_one(
-    client: TestClient,
-) -> None:
-    """``session.view is None`` does NOT mean "this project never had a
-    view" — clearing ONLY the in-memory cache (below) leaves ``ViewRow``
-    untouched, and ``create_commit`` must hydrate from that still-live row
-    rather than auto-creating an EMPTY view and durably overwriting the
-    pre-existing folders."""
-    _seed_view(client, [{"name": "A"}, {"name": "B"}])
-    prior_view_rev = client.get(papi("/view")).json()["view_rev"]
-    get_session().view = None  # clear ONLY the in-memory cache
-    assert client.get(papi("/view")).json()["view"] is None
-
-    base = _rev(client)
-    token = _folder_lease(client, "root", intent="edit")
+def test_commit_two_views_persist_independently(client: TestClient) -> None:
+    """One batch may edit several views; each touched view gets its own blob
+    write + ``view_rev`` bump, and an untouched view's rev stays put."""
+    a = create_view(client, "A")
+    b = create_view(client, "B")
+    token = _lease(client, [container_lock_target(a, "root"), container_lock_target(b, "root")])
     r = client.post(
         papi("/commits"),
         json={
-            "base_rev": base,
+            "base_rev": _rev(client),
             "ops": [
-                {
-                    "kind": "create_folder",
-                    "temp_id": "tmp_c",
-                    "parent_id": "root",
-                    "name": "C",
-                }
+                {"kind": "create_folder", "view_id": a, "temp_id": "tmp_a", "parent_id": "root", "name": "FA"},
+                {"kind": "create_folder", "view_id": b, "temp_id": "tmp_b", "parent_id": "root", "name": "FB"},
             ],
             "message": "m",
             "lock_tokens": [token],
         },
     )
     assert r.status_code == 200, r.text
-    # view_rev advances from the PRIOR durable value either way —
-    # upsert_single_view finds the row by project_id alone and bumps
-    # whatever it finds, so an empty auto-create would ALSO report
-    # prior_view_rev + 1 here, just with the wrong CONTENT. The real
-    # differentiator is the folder set asserted below.
-    assert r.json()["view_rev"] == prior_view_rev + 1
+    assert r.json()["view_revs"] == {a: 1, b: 1}
+    assert [f["name"] for f in _get_view(client, a)["view"]["folders"]] == ["FA"]
+    assert [f["name"] for f in _get_view(client, b)["view"]["folders"]] == ["FB"]
 
-    out = client.get(papi("/view")).json()
-    names = {f["name"] for f in out["view"]["folders"]}
-    assert names == {"A", "B", "C"}  # A and B DURABLY survived the round trip
-    assert out["view_rev"] == prior_view_rev + 1
+    token = _view_lease(client, a)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {"kind": "create_folder", "view_id": a, "temp_id": "tmp_a2", "parent_id": "root", "name": "FA2"},
+            ],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["view_revs"] == {a: 2}
+    assert {v["name"]: v["view_rev"] for v in client.get(papi("/views")).json()} == {
+        "A": 2,
+        "B": 1,
+    }
 
 
 def test_mixed_batch_atomicity_view_rolls_back_with_model(client: TestClient) -> None:
     """A structural model blocker rolls back the ALREADY-APPLIED view half."""
-    fid = _seed_view(client, [{"name": "A"}])["A"]
-    view_before = client.get(papi("/view")).json()
+    vid, ids = _seed_view(client, [{"name": "A"}])
+    fid = ids["A"]
+    view_before = _get_view(client, vid)
     # two containment-parent elements + a child, so the relationship pair
     # below is a STRUCTURAL "two containment parents" blocker (not a mutation-
     # boundary 422), which is what actually exercises the rollback.
-    r = client.post(
-        papi("/model"),
-        json={
-            "elements": [
-                {"id": "p1", "type_name": "Node", "properties": {}},
-                {"id": "p2", "type_name": "Node", "properties": {}},
-                {"id": "child", "type_name": "Node", "properties": {}},
-            ],
-            "relationships": [],
-        },
-    )
+    r = client.post(papi("/model"), json=_TWO_PARENTS_MODEL)
     assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/locks"),
-        json={
-            "targets": [
-                {"resource_id": fid, "mode": "exclusive", "type": "folder"},
-                {"resource_id": "p1", "mode": "exclusive"},
-                {"resource_id": "p2", "mode": "exclusive"},
-                {"resource_id": "child", "mode": "shared"},
-            ],
-            "intent": "edit",
-        },
+    token = _lease(
+        client,
+        [{"resource_id": fid, "mode": "exclusive", "type": "folder"}, *_TWO_PARENTS_TARGETS],
     )
-    assert r.status_code == 200, r.text
-    token = r.json()["token"]
     base = _rev(client)
     ops = [
-        {"kind": "rename_folder", "id": fid, "name": "A2"},
-        {
-            "kind": "create_relationship",
-            "temp_id": "tmp_r1",
-            "type_name": "Contains",
-            "source_id": "p1",
-            "target_id": "child",
-            "properties": {},
-        },
-        {
-            "kind": "create_relationship",
-            "temp_id": "tmp_r2",
-            "type_name": "Contains",
-            "source_id": "p2",
-            "target_id": "child",
-            "properties": {},
-        },
+        {"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"},
+        *_TWO_PARENTS_OPS,
     ]
     r = client.post(
         papi("/commits"),
@@ -287,65 +326,31 @@ def test_mixed_batch_atomicity_view_rolls_back_with_model(client: TestClient) ->
     )
     assert r.status_code == 422, r.text
     assert r.json()["structural_blockers"]
-    assert client.get(papi("/view")).json() == view_before
+    assert _get_view(client, vid) == view_before
     assert _rev(client) == base
 
 
-def test_failed_commit_with_no_prior_view_leaves_view_null(client: TestClient) -> None:
-    """A batch that auto-creates an empty view (project had none) and then
-    hard-fails on its MODEL half must not leave that auto-created empty view
-    behind — GET /view still reports
-    ``view: null``, exactly as it did before the request, not a materialized
-    empty view with no ViewRow / view_rev to back it."""
-    assert client.get(papi("/view")).json()["view"] is None
-    r = client.post(
-        papi("/model"),
-        json={
-            "elements": [
-                {"id": "p1", "type_name": "Node", "properties": {}},
-                {"id": "p2", "type_name": "Node", "properties": {}},
-                {"id": "child", "type_name": "Node", "properties": {}},
-            ],
-            "relationships": [],
-        },
-    )
+def test_failed_commit_leaves_every_view_untouched(client: TestClient) -> None:
+    """A batch editing TWO views that then hard-fails on its model half
+    rolls both view groups back — the unwind ledger holds one entry per
+    applied group, newest first."""
+    a = create_view(client, "A")
+    b = create_view(client, "B")
+    r = client.post(papi("/model"), json=_TWO_PARENTS_MODEL)
     assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/locks"),
-        json={
-            "targets": [
-                {"resource_id": "root", "mode": "exclusive", "type": "folder"},
-                {"resource_id": "p1", "mode": "exclusive"},
-                {"resource_id": "p2", "mode": "exclusive"},
-                {"resource_id": "child", "mode": "shared"},
-            ],
-            "intent": "edit",
-        },
+    token = _lease(
+        client,
+        [
+            container_lock_target(a, "root"),
+            container_lock_target(b, "root"),
+            *_TWO_PARENTS_TARGETS,
+        ],
     )
-    assert r.status_code == 200, r.text
-    token = r.json()["token"]
     base = _rev(client)
     ops = [
-        # this leg auto-creates the view (there is none yet)...
-        {"kind": "create_folder", "temp_id": "tmp_c", "parent_id": "root", "name": "A"},
-        # ...and this leg is a STRUCTURAL "two containment parents" blocker,
-        # which fails the batch AFTER the view half already applied.
-        {
-            "kind": "create_relationship",
-            "temp_id": "tmp_r1",
-            "type_name": "Contains",
-            "source_id": "p1",
-            "target_id": "child",
-            "properties": {},
-        },
-        {
-            "kind": "create_relationship",
-            "temp_id": "tmp_r2",
-            "type_name": "Contains",
-            "source_id": "p2",
-            "target_id": "child",
-            "properties": {},
-        },
+        {"kind": "create_folder", "view_id": a, "temp_id": "tmp_a", "parent_id": "root", "name": "FA"},
+        {"kind": "create_folder", "view_id": b, "temp_id": "tmp_b", "parent_id": "root", "name": "FB"},
+        *_TWO_PARENTS_OPS,
     ]
     r = client.post(
         papi("/commits"),
@@ -353,38 +358,42 @@ def test_failed_commit_with_no_prior_view_leaves_view_null(client: TestClient) -
     )
     assert r.status_code == 422, r.text
     assert r.json()["structural_blockers"]
-    assert client.get(papi("/view")).json()["view"] is None
+    for vid in (a, b):
+        out = _get_view(client, vid)
+        assert out["view"]["folders"] == [] and out["view_rev"] == 0
     assert _rev(client) == base
 
 
 def test_preview_validates_view_ops_dry(client: TestClient) -> None:
-    fid = _seed_view(client, [{"name": "A"}])["A"]
-    view_before = client.get(papi("/view")).json()
+    vid, ids = _seed_view(client, [{"name": "A"}])
+    fid = ids["A"]
+    view_before = _get_view(client, vid)
     r = client.post(
         papi("/commits/preview"),
         json={
             "base_rev": _rev(client),
-            "ops": [{"kind": "rename_folder", "id": fid, "name": "A2"}],
+            "ops": [{"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"}],
         },
     )
     assert r.status_code == 200
-    assert client.get(papi("/view")).json() == view_before
-    # an impossible view op fails preview with 422
-    r = client.post(
-        papi("/commits/preview"),
-        json={
-            "base_rev": _rev(client),
-            "ops": [{"kind": "rename_folder", "id": "missing", "name": "x"}],
-        },
-    )
-    assert r.status_code == 422
+    assert _get_view(client, vid) == view_before
+    # an impossible view op fails preview with 422 — so does an unknown view
+    for op in (
+        {"kind": "rename_folder", "view_id": vid, "id": "missing", "name": "x"},
+        {"kind": "rename_folder", "view_id": "nope", "id": fid, "name": "x"},
+    ):
+        r = client.post(
+            papi("/commits/preview"), json={"base_rev": _rev(client), "ops": [op]}
+        )
+        assert r.status_code == 422, r.text
 
 
 def test_commit_event_scope_includes_view(client: TestClient) -> None:
     """View-only batch -> scope == ["view"]; a mixed model+view batch ->
     scope == ["model", "view"]. Mirrors test_commits_artifact_ops.py's
     test_commit_feed_reports_artifact_scope harness."""
-    fid = _seed_view(client, [{"name": "A"}])["A"]
+    vid, ids = _seed_view(client, [{"name": "A"}])
+    fid = ids["A"]
     token = _folder_lease(client, fid)
     with client.websocket_connect(feed_url()) as ws:
         assert ws.receive_json()["type"] == "snapshot"
@@ -392,7 +401,7 @@ def test_commit_event_scope_includes_view(client: TestClient) -> None:
             papi("/commits"),
             json={
                 "base_rev": _rev(client),
-                "ops": [{"kind": "rename_folder", "id": fid, "name": "A2"}],
+                "ops": [{"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A2"}],
                 "lock_tokens": [token],
             },
         )
@@ -416,7 +425,7 @@ def test_commit_event_scope_includes_view(client: TestClient) -> None:
                         "type_name": "Node",
                         "properties": {},
                     },
-                    {"kind": "rename_folder", "id": fid, "name": "A3"},
+                    {"kind": "rename_folder", "view_id": vid, "id": fid, "name": "A3"},
                 ],
                 "lock_tokens": [token2],
             },
@@ -428,27 +437,15 @@ def test_commit_event_scope_includes_view(client: TestClient) -> None:
         assert commit2["scope"] == ["model", "view"]
 
 
-def test_delete_folder_commit_requires_lease_on_subtree_child_after_view_cleared(
+def test_delete_folder_commit_requires_lease_on_subtree_child(
     client: TestClient,
 ) -> None:
-    """create_commit must resolve the hydrated view BEFORE its pre-mutex
-    staleness/conflict derivations and lock-verification step run — otherwise
-    a delete_folder op's lock requirement (required_locks -> folder_subtree)
-    degrades to the named folder alone whenever session.view starts COLD,
-    e.g. right after clearing only the in-memory cache, while leaving the
-    durable ViewRow (and D's real child C) fully intact.
-
-    Repro: P leases folder:C (child of D); the caller's view cache is
-    cleared; the caller's own POST /locks request for a DELETE lease on
-    folder:D ALSO degrades — a separate blind spot in routes/locks.py's
-    expand_targets, which sees the same None view at that point — and is
-    granted covering ONLY D, never C. create_commit must independently
-    resolve the hydrated view, re-derive the FULL {D, C} requirement, find
-    C's lease missing from what the caller holds, and 409 instead — leaving
-    D and C durably untouched."""
-    ids = _seed_view(client, [{"name": "D", "folders": [{"name": "C"}]}])
-    d_id = ids["D"]
-    c_id = ids["C"]
+    """A ``delete_folder``'s lock requirement expands over the whole subtree
+    (required_locks -> folder_subtree against the view the op names): a
+    caller holding only the parent is refused with the child listed as
+    missing, and nothing is applied or persisted."""
+    vid, ids = _seed_view(client, [{"name": "D", "folders": [{"name": "C"}]}])
+    d_id, c_id = ids["D"], ids["C"]
 
     # P checks out C for editing.
     _seed_second_member("user-2", "user2@example.com")
@@ -462,17 +459,8 @@ def test_delete_folder_commit_requires_lease_on_subtree_child_after_view_cleared
     )
     assert r.status_code == 200, r.text
 
-    # The caller's cache goes cold; the durable row (D -> C) is untouched.
-    # Setting session.view directly clears ONLY the in-memory cache without
-    # going through full-session eviction, which P's live lease on C would
-    # refuse (evict-with-live-locks guard).
-    get_session().view = None
-    assert client.get(papi("/view")).json()["view"] is None
-
-    # The caller's own lock request degrades too (session.view is None at
-    # this point in routes/locks.py as well — a separate, out-of-scope blind
-    # spot) and is granted covering ONLY D, not C. This call succeeding is
-    # part of the repro setup, not the thing under test.
+    # A DELETE-intent lock request on D expands to C at /locks too and is
+    # refused outright by P's lease.
     r = client.post(
         papi("/locks"),
         json={
@@ -480,14 +468,16 @@ def test_delete_folder_commit_requires_lease_on_subtree_child_after_view_cleared
             "intent": "delete",
         },
     )
-    assert r.status_code == 200, r.text
-    d_token = r.json()["token"]
+    assert r.status_code == 409, r.text
 
+    # An EDIT lease on D alone is granted (no expansion) — and is not enough
+    # for the commit, whose own derivation expands to {D, C}.
+    d_token = _folder_lease(client, d_id)
     r = client.post(
         papi("/commits"),
         json={
             "base_rev": _rev(client),
-            "ops": [{"kind": "delete_folder", "id": d_id}],
+            "ops": [{"kind": "delete_folder", "view_id": vid, "id": d_id}],
             "message": "m",
             "lock_tokens": [d_token],
         },
@@ -497,20 +487,16 @@ def test_delete_folder_commit_requires_lease_on_subtree_child_after_view_cleared
     assert f"folder:{c_id}" in [m["resource_id"] for m in r.json()["missing"]]
 
     # nothing was applied: the lock check is the FIRST thing inside the
-    # mutex, so nothing ever got a chance to mutate OR persist before it
-    # failed. Read the durable row directly (not via evict-then-refetch:
-    # both peers still hold live leases at this point, and eviction is a
-    # no-op while any lease is live — see SessionRegistry.evict) to prove
-    # the ViewRow itself still shows D -> C.
-    import json
-
+    # mutex. Read the durable row directly (eviction is a no-op while any
+    # lease is live — see SessionRegistry.evict) to prove it still shows
+    # D -> C.
     from data_rover.api import content, db
     from data_rover.api.session import DEFAULT_PROJECT_ID
 
     gen = db.get_db()
     s = next(gen)
     try:
-        row = content.get_single_view(s, DEFAULT_PROJECT_ID)
+        row = content.get_view(s, DEFAULT_PROJECT_ID, vid)
         assert row is not None
         blob = json.loads(row.blob)
     finally:
@@ -524,23 +510,15 @@ def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
 ) -> None:
     """Characterization pin for create_commit's persist-failure (500) unwind —
     the richest failure block: model rollback, rev decrement, view rollback,
-    auto-create unwind (project had no view), op_log pop, db rollback — and
-    the caller's leases must NOT be released (release is step g, strictly
-    after a durable commit). Mirrors test_apply_ops_rolls_back_in_memory_
-    on_persist_failure (tests/api/test_ops_persistence.py), which pins the
-    same seam for /model/ops."""
+    op_log pop, db rollback — and the caller's leases must NOT be released
+    (release is step g, strictly after a durable commit). Mirrors
+    test_apply_ops_rolls_back_in_memory_on_persist_failure
+    (tests/api/test_ops_persistence.py), which pins the same seam for
+    /model/ops."""
     from data_rover.api import content as _content
 
-    assert client.get(papi("/view")).json()["view"] is None
-    r = client.post(
-        papi("/locks"),
-        json={
-            "targets": [{"resource_id": "root", "mode": "exclusive", "type": "folder"}],
-            "intent": "edit",
-        },
-    )
-    assert r.status_code == 200, r.text
-    token = r.json()["token"]
+    vid = create_view(client, "V")
+    token = _view_lease(client, vid)
     base = _rev(client)
     session = get_session()
     op_log_before = len(session.op_log)
@@ -551,13 +529,12 @@ def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
 
     monkeypatch.setattr(_content, "append_commit", _boom)
     ops = [
-        # model half (a create needs no lock) + view half (auto-creates the
-        # view — there is none yet), so BOTH in-place halves are live when
-        # the persist step blows up.
+        # model half (a create needs no lock) + view half, so BOTH in-place
+        # halves are live when the persist step blows up.
         {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
          "properties": {}},
-        {"kind": "create_folder", "temp_id": "tmp_c", "parent_id": "root",
-         "name": "A"},
+        {"kind": "create_folder", "view_id": vid, "temp_id": "tmp_c",
+         "parent_id": "root", "name": "A"},
     ]
     r = client.post(
         papi("/commits"),
@@ -565,16 +542,16 @@ def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
     )
     assert r.status_code == 500
 
-    # rev + undo history rolled back in-memory
+    # rev + undo history rolled back in-memory; the view group unwound
     assert session.model_rev == base
     assert len(session.op_log) == op_log_before
-    # the auto-created view unwound to None, not a materialized empty view
-    assert session.view is None
+    assert session.views[vid].folders == []
 
     monkeypatch.undo()  # restore append_commit so the probe requests work
-    assert client.get(papi("/view")).json()["view"] is None
+    out = _get_view(client, vid)
+    assert out["view"]["folders"] == [] and out["view_rev"] == 0
     assert client.get(papi("/model/elements")).json()["total"] == elems_before
     assert _rev(client) == base
     # leases survive a failed commit — release only follows a durable commit
     held = {le["resource_id"] for le in client.get(papi("/locks")).json()["leases"]}
-    assert "folder:root" in held
+    assert f"view:{vid}" in held
