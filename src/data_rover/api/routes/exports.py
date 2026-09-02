@@ -7,6 +7,7 @@ to the artifact's DEFINITION go through POST /commits.
 from __future__ import annotations
 
 import json
+import time
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -47,6 +48,7 @@ from ..schemas import (
     RunExportIn,
     ScriptStatusOut,
     SnippetErrorOut,
+    TransformPreviewFileOut,
     TransformPreviewIn,
     TransformPreviewOut,
 )
@@ -595,6 +597,15 @@ def _execute_export(
             transform_host.close()
 
 
+#: Hard cap on the files a split preview transforms. The split run is the
+#: FULL run (every partition, like the export), and each file is one guest
+#: call plus two pretty-printed documents on the wire, so a table with
+#: thousands of base elements is bounded here rather than by the eval budget
+#: alone; `truncated` reports the cut. Read as a module global at call time
+#: (never captured in a default argument) so a test can lower it.
+PREVIEW_MAX_FILES = 200
+
+
 @router.post("/exports/preview-transform")
 def preview_transform(
     payload: TransformPreviewIn,
@@ -605,10 +616,12 @@ def preview_transform(
     settings: Settings = Depends(get_settings),
 ) -> TransformPreviewOut:
     """The exporter entry's Test button: render the entry's table the way
-    the export would (bounded to `PREVIEW_MAX_ROWS`, the sampled window
-    evaluated live, never 202 — `/tables/json-preview`'s stance), run its
-    `transform(doc)` ONCE, and return both documents plus what the snippet
-    printed.
+    the export would (never 202 — `/tables/json-preview`'s stance), run its
+    `transform(doc)` once per file the export would write, and return each
+    file's documents plus what the snippet printed. Unsplit that is one file
+    from a `PREVIEW_MAX_ROWS` sample; split it is the full run, every
+    partition (capped at `PREVIEW_MAX_FILES`), continuing past a file whose
+    transform fails so every file reports its own outcome.
 
     Read-only (viewer-callable; listed in `authz._READ_ONLY_POST_SUFFIXES`).
     The entry's own problems are 422s naming it, exactly as `/exports/run`
@@ -644,6 +657,7 @@ def preview_transform(
     script_ctx = None
     acquired = False
     transform_host = None
+    started = time.monotonic()
     try:
         defn = _resolve_table(
             EvaluateTableIn(artifact_id=t.id, offset=0, limit=100), project_id, db
@@ -667,6 +681,7 @@ def preview_transform(
             template_vars=export_context_vars(session, project_id),
             script_ctx=script_ctx,
             max_rows=PREVIEW_MAX_ROWS,
+            max_files=PREVIEW_MAX_FILES,
         )
         # The script context's interactive slot is released BEFORE the
         # transform's is taken: the two are never needed at once here, and
@@ -674,28 +689,37 @@ def preview_transform(
         close_script_context(script_ctx, acquired)
         script_ctx, acquired = None, False
         transform_host = open_transform_host(runner, model, settings)
-        out = transform_host.apply_ex(code, sample.doc, label)
-        error: SnippetErrorOut | None = None
-        if out.error is not None:
-            error = SnippetErrorOut(
-                kind=out.error.kind,
-                message=out.error.message,
-                traceback=out.error.traceback,
-            )
-        elif entry.format == "jsonl" and not isinstance(out.value, list):
-            error = SnippetErrorOut(
-                kind="runtime",
-                message=f"transform must return a list for jsonl; "
-                f"got {type(out.value).__name__}",
+        files: list[TransformPreviewFileOut] = []
+        for f in sample.files:
+            out = transform_host.apply_ex(code, f.doc, label)
+            error: SnippetErrorOut | None = None
+            if out.error is not None:
+                error = SnippetErrorOut(
+                    kind=out.error.kind,
+                    message=out.error.message,
+                    traceback=out.error.traceback,
+                )
+            elif entry.format == "jsonl" and not isinstance(out.value, list):
+                error = SnippetErrorOut(
+                    kind="runtime",
+                    message=f"transform must return a list for jsonl; "
+                    f"got {type(out.value).__name__}",
+                )
+            files.append(
+                TransformPreviewFileOut(
+                    filename=f.filename,
+                    input=_pretty(f.doc),
+                    output=None if error is not None else _pretty(out.value),
+                    stdout=out.stdout,
+                    error=error,
+                    duration_ms=out.duration_ms,
+                )
             )
         return TransformPreviewOut(
-            input=_pretty(sample.doc),
-            output=None if error is not None else _pretty(out.value),
-            stdout=out.stdout,
-            error=error,
+            files=files,
+            split=sample.split,
             truncated=sample.truncated,
-            split_file=sample.split_file,
-            duration_ms=out.duration_ms,
+            duration_ms=int((time.monotonic() - started) * 1000),
         )
     except LookupError as exc:
         raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc

@@ -34,6 +34,7 @@ from data_rover.core.script.runner import (
 )
 from data_rover.core.table.cells import Cell
 from data_rover.core.table.evaluate import (
+    RowKey,
     SortSpec,
     TableLimits,
     build_rows_ex,
@@ -296,16 +297,28 @@ def shape_json_docs(
 
 
 @dataclass(frozen=True)
-class JsonSample:
-    """A bounded render of one JSON-family export: `doc` is exactly what the
-    export would hand to `transform(doc)` (or serialize) for the sampled
-    rows. `split_file` names the previewed partition's file when the entry
-    splits — a split export transforms once PER FILE, so the sample is the
-    first partition's document, never the unsplit whole."""
+class JsonSampleFile:
+    """One file of a JSON-family export as `transform(doc)` would receive it
+    (or the serializer would write it): `filename` is the member name the
+    export uses, `doc` the shaped document."""
 
+    filename: str
     doc: object
+
+
+@dataclass(frozen=True)
+class JsonSampleSet:
+    """`render_json_sample`'s result. Unsplit: one file from the bounded row
+    sample, `truncated` when the table has more rows than the sample. Split:
+    the FULL partitioning (every row, like the export), `truncated` when more
+    partitions exist than `max_files` allowed through — the files kept are
+    the first in row order, named exactly as the export would name them
+    (dedup runs over the whole set, so a kept name never differs from the
+    export's)."""
+
+    files: list[JsonSampleFile]
+    split: bool
     truncated: bool
-    split_file: str | None
 
 
 def render_json_sample(
@@ -320,15 +333,17 @@ def render_json_sample(
     template_vars: Mapping[str, str],
     script_ctx: ScriptEvalContext | None,
     max_rows: int,
-) -> JsonSample:
-    """The transform preview's input: the first `max_rows` rows of `defn`,
-    rendered and shaped exactly like `run_table_export`'s JSON branch (same
-    layout, `export_definition`, key column, split partitioning) but bounded
-    and never 202 — `script_ctx` is expected to be cache-only, so an
-    uncomputed script cell renders its `$error` marker, as
-    `/tables/json-preview` does. `json_doc.on_error` is deliberately not
-    applied: the preview is about the transform, and a cache-only render
-    would trip `fail` on cells the real export waits for."""
+    max_files: int,
+) -> JsonSampleSet:
+    """The transform preview's input, rendered and shaped exactly like
+    `run_table_export`'s JSON branch (same layout, `export_definition`, key
+    column, split partitioning) but never 202: an uncomputed script cell
+    renders its `$error` marker. Unsplit, the render is bounded to the first
+    `max_rows` rows; split, it covers the WHOLE table — a split export
+    transforms once per file, and debugging one file per base element needs
+    every file — bounded by `max_files` instead. `json_doc.on_error` is
+    deliberately not applied: the preview is about the transform, and a
+    cold cache would trip `fail` on cells the real export waits for."""
     if format not in JSON_FAMILY:
         raise ValueError(
             f"{name}: transform is only supported for JSON-family formats, "
@@ -337,8 +352,6 @@ def render_json_sample(
     limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
     build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
     ordered = order_rows(metamodel, model, defn, build.keys, None, limits, script=script_ctx)
-    window = ordered[:max_rows]
-    truncated = len(ordered) > len(window)
     layout = export_layout(render_defn)
     eff = export_definition(render_defn)
     rn = (
@@ -347,40 +360,45 @@ def render_json_sample(
         else None
     )
     key_col = json_key_column(format, json_doc, defn, name)
-    rows = iter_export_rows(metamodel, model, defn, window, limits, script=script_ctx)
+
+    def _render(window: list[RowKey], rows: Iterator[list[Cell]]) -> object:
+        docs, doc_keys = render_json_ex(
+            model,
+            eff,
+            window,
+            rows,
+            build.base_slots,
+            order=layout.rank,
+            row_number=rn,
+            key_column=key_col,
+        )
+        return shape_json_docs(format, docs, doc_keys)
+
     split = render_defn.json_split
-    split_file: str | None = None
     if split is not None and split.enabled:
         validate_template(split.filename_template)
         validate_tokens(split.filename_template, SPLIT_TOKENS)
-        parts = split_partitions(window, rows)
-        if parts:
-            binding, pairs = parts[0]
-            stem = render_filenames(
-                split.filename_template,
-                [partition_label(model, binding)],
-                extra=template_vars,
-            )[0]
-            split_file = f"{stem}.{format}"
-            window = [rk for rk, _ in pairs]
-            rows = iter(cells for _, cells in pairs)
-            truncated = truncated or len(parts) > 1
-        else:
-            rows = iter([])
-    docs, doc_keys = render_json_ex(
-        model,
-        eff,
-        window,
-        rows,
-        build.base_slots,
-        order=layout.rank,
-        row_number=rn,
-        key_column=key_col,
-    )
-    return JsonSample(
-        doc=shape_json_docs(format, docs, doc_keys),
-        truncated=truncated,
-        split_file=split_file,
+        rows = iter_export_rows(metamodel, model, defn, ordered, limits, script=script_ctx)
+        parts = split_partitions(ordered, rows)
+        stems = render_filenames(
+            split.filename_template,
+            [partition_label(model, b) for b, _ in parts],
+            extra=template_vars,
+        )
+        files = [
+            JsonSampleFile(
+                filename=f"{stem}.{format}",
+                doc=_render([rk for rk, _ in pairs], iter(cells for _, cells in pairs)),
+            )
+            for stem, (_, pairs) in list(zip(stems, parts, strict=True))[:max_files]
+        ]
+        return JsonSampleSet(files=files, split=True, truncated=len(parts) > max_files)
+    window = ordered[:max_rows]
+    rows = iter_export_rows(metamodel, model, defn, window, limits, script=script_ctx)
+    return JsonSampleSet(
+        files=[JsonSampleFile(filename=f"{name}.{format}", doc=_render(window, rows))],
+        split=False,
+        truncated=len(ordered) > len(window),
     )
 
 

@@ -1523,20 +1523,35 @@ class TransformPreviewIn(BaseModel):
     entry: ExporterEntry
 
 
-class TransformPreviewOut(BaseModel):
-    """One dry `transform(doc)` call over a bounded sample of the entry's
-    table. `input`/`output` are pretty-printed JSON TEXT (rendered
-    server-side, so the panes never disagree with the export's document
-    shape). `output` is None iff `error` is set. `truncated` means the sample
-    covers only the head of the table; `split_file` names the previewed
-    partition when the entry splits (the transform runs once per file)."""
+class TransformPreviewFileOut(BaseModel):
+    """One dry `transform(doc)` call: the document of ONE file the export
+    would write. `filename` is the member name the export would use (the
+    deduplicated split stem, or `<entry>.<format>` unsplit). `input`/`output`
+    are pretty-printed JSON TEXT (rendered server-side, so the panes never
+    disagree with the export's document shape). `output` is None iff `error`
+    is set."""
 
+    filename: str
     input: str
     output: str | None
     stdout: str
     error: SnippetErrorOut | None
+    duration_ms: int
+
+
+class TransformPreviewOut(BaseModel):
+    """The entry's transform run over its table: one `TransformPreviewFileOut`
+    per file. Unsplit, that is a single file rendered from a bounded sample
+    (`truncated` = the sample covers only the head of the table). Split
+    (`split` True), it is the FULL run — every partition of every row, each
+    transformed like the export does — bounded only by a file cap
+    (`truncated` = more files exist than were transformed). A file whose
+    transform failed carries its own `error`; the run continues past it.
+    `duration_ms` is the whole run's wall time."""
+
+    files: list[TransformPreviewFileOut]
+    split: bool
     truncated: bool
-    split_file: str | None
     duration_ms: int
 
 

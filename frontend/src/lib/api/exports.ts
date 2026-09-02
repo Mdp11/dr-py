@@ -61,11 +61,12 @@ export async function runExporterDraft(
 }
 
 /**
- * Dry-run ONE exporter entry's `transform(doc)` over a bounded sample of its
- * table (`POST /exports/preview-transform`) — the entry's Test button. The
- * entry travels AS DRAFTED (unsaved inline code included); the server
- * renders the sample the way the export would and answers 200 even when the
- * snippet itself fails (that failure is `error` in the body). 422/429/503
+ * Dry-run ONE exporter entry's `transform(doc)` (`POST /exports/preview-transform`)
+ * — the entry's Test button. Unsplit, over a bounded sample of its table;
+ * split, the full run, one call per file the export would write. The entry
+ * travels AS DRAFTED (unsaved inline code included); the server renders the
+ * documents the way the export would and answers 200 even when the snippet
+ * itself fails (that failure is each file's `error` in the body). 422/429/503
  * keep `POST /exports/run`'s meaning: a problem with the entry, no free
  * interactive slot, no runner.
  */

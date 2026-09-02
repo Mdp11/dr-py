@@ -1145,15 +1145,25 @@ export const OutputOptionsSchema = z.object({
 export type OutputOptions = z.infer<typeof OutputOptionsSchema>;
 
 /** `POST /exports/preview-transform` — mirror of api/schemas.py
- *  TransformPreviewOut. `input`/`output` are pretty-printed JSON TEXT rendered
- *  server-side (never re-serialized here); `output` is null iff `error` is set. */
-export const TransformPreviewOutSchema = z.object({
+ *  TransformPreviewFileOut/TransformPreviewOut. One entry per file the export
+ *  would write: `filename` is the export's member name; `input`/`output` are
+ *  pretty-printed JSON TEXT rendered server-side (never re-serialized here);
+ *  `output` is null iff `error` is set. Unsplit there is exactly one file
+ *  (`truncated` = sample covers only the head of the table); `split` is the
+ *  full run, one file per partition (`truncated` = more files than the cap). */
+export const TransformPreviewFileOutSchema = z.object({
+	filename: z.string(),
 	input: z.string(),
 	output: z.string().nullable(),
 	stdout: z.string(),
 	error: SnippetErrorSchema.nullable(),
+	duration_ms: z.number()
+});
+export type TransformPreviewFileOut = z.infer<typeof TransformPreviewFileOutSchema>;
+export const TransformPreviewOutSchema = z.object({
+	files: z.array(TransformPreviewFileOutSchema),
+	split: z.boolean(),
 	truncated: z.boolean(),
-	split_file: z.string().nullable(),
 	duration_ms: z.number()
 });
 export type TransformPreviewOut = z.infer<typeof TransformPreviewOutSchema>;

@@ -1,7 +1,8 @@
 """POST /exports/preview-transform: the exporter entry's Test button. A
-bounded, cache-only render of the entry's table, one transform(doc) call,
-both documents + stdout back; snippet failures are data, entry problems
-are 422s with /exports/run's wording."""
+bounded render of the entry's table, one transform(doc) call per file the
+export would produce (one file unsplit; every partition when the entry
+splits), both documents + stdout back per file; snippet failures are data,
+entry problems are 422s with /exports/run's wording."""
 
 import pytest
 from fastapi import FastAPI
@@ -62,15 +63,18 @@ def test_inline_transform_returns_both_documents_and_stdout(client):
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["error"] is None
-    assert body["stdout"] == "rows: 3\n"
-    assert body["truncated"] is False and body["split_file"] is None
+    assert body["split"] is False and body["truncated"] is False
+    assert len(body["files"]) == 1
+    f = body["files"][0]
+    assert f["filename"] == "doc.json"
+    assert f["error"] is None
+    assert f["stdout"] == "rows: 3\n"
     import json
 
-    assert isinstance(json.loads(body["input"]), list)
-    assert len(json.loads(body["input"])) == 3
-    assert json.loads(body["output"])["count"] == 3
-    assert body["input"].startswith("[\n  {")  # pretty-printed text
+    assert isinstance(json.loads(f["input"]), list)
+    assert len(json.loads(f["input"])) == 3
+    assert json.loads(f["output"])["count"] == 3
+    assert f["input"].startswith("[\n  {")  # pretty-printed text
 
 
 def test_ref_transform_resolves_the_saved_snippet(client):
@@ -81,7 +85,7 @@ def test_ref_transform_resolves_the_saved_snippet(client):
         client, {"source": {"ref": t}, "format": "json", "transform": {"ref": snip}}
     )
     assert r.status_code == 200, r.text
-    assert r.json()["error"] is None
+    assert r.json()["files"][0]["error"] is None
 
 
 def test_snippet_raise_is_data_not_a_422(client):
@@ -92,12 +96,12 @@ def test_snippet_raise_is_data_not_a_422(client):
         client, {"source": {"ref": t}, "format": "json", "transform": _inline(code)}
     )
     assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["output"] is None
-    assert body["error"]["kind"] == "runtime" and "boom" in body["error"]["message"]
-    assert "<snippet>" in body["error"]["traceback"]
-    assert body["stdout"] == "before\n"
-    assert body["input"]  # the pre-transform document is still shown
+    (f,) = r.json()["files"]
+    assert f["output"] is None
+    assert f["error"]["kind"] == "runtime" and "boom" in f["error"]["message"]
+    assert "<snippet>" in f["error"]["traceback"]
+    assert f["stdout"] == "before\n"
+    assert f["input"]  # the pre-transform document is still shown
 
 
 def test_module_level_failure_is_reported_as_the_error(client):
@@ -108,7 +112,7 @@ def test_module_level_failure_is_reported_as_the_error(client):
         client, {"source": {"ref": t}, "format": "json", "transform": _inline(code)}
     )
     assert r.status_code == 200, r.text
-    assert "at import" in r.json()["error"]["message"]
+    assert "at import" in r.json()["files"][0]["error"]["message"]
 
 
 def test_jsonl_non_list_return_is_reported_as_the_error(client):
@@ -119,8 +123,8 @@ def test_jsonl_non_list_return_is_reported_as_the_error(client):
         client, {"source": {"ref": t}, "format": "jsonl", "transform": _inline(code)}
     )
     assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["output"] is None and "list" in body["error"]["message"]
+    (f,) = r.json()["files"]
+    assert f["output"] is None and "list" in f["error"]["message"]
 
 
 def test_non_json_format_is_422_naming_the_entry(client):
@@ -166,22 +170,94 @@ def test_missing_table_is_422_naming_the_entry(client):
     assert "orphan" in r.json()["detail"]
 
 
-def test_split_entry_previews_the_first_partition(client):
+SPLIT = {"enabled": True, "filename_template": "${name}"}
+
+
+def test_split_entry_transforms_every_file(client):
+    """Split = the FULL run, like the export: one transform call per
+    partition, each reported under the filename the export would write."""
     _bootstrap_model(client)
     t = _mk_table(client, "iota")
     r = _preview(
         client,
-        {"source": {"ref": t}, "format": "json",
-         "json_split": {"enabled": True, "filename_template": "${name}"},
+        {"source": {"ref": t}, "format": "json", "json_split": SPLIT,
          "transform": _inline(WRAP)},
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["split_file"] is not None and body["split_file"].endswith(".json")
-    assert body["truncated"] is True  # three partitions exist; one is shown
+    assert body["split"] is True and body["truncated"] is False
     import json
 
-    assert len(json.loads(body["input"])) == 1
+    names = [f["filename"] for f in body["files"]]
+    assert sorted(names) == ["p1.json", "p2.json", "root.json"]
+    for f in body["files"]:
+        assert f["error"] is None
+        assert len(json.loads(f["input"])) == 1
+        assert json.loads(f["output"])["count"] == 1
+        assert f["stdout"] == "rows: 1\n"
+    assert body["duration_ms"] >= max(f["duration_ms"] for f in body["files"])
+
+
+def test_split_file_failure_does_not_stop_the_others(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "iota2")
+    code = (
+        "def transform(doc):\n"
+        "    if doc[0]['Block'] == 'p1':\n"
+        "        raise ValueError('boom')\n"
+        "    return doc\n"
+    )
+    r = _preview(
+        client,
+        {"source": {"ref": t}, "format": "json", "json_split": SPLIT,
+         "transform": _inline(code)},
+    )
+    assert r.status_code == 200, r.text
+    by_name = {f["filename"]: f for f in r.json()["files"]}
+    assert set(by_name) == {"p1.json", "p2.json", "root.json"}
+    assert "boom" in by_name["p1.json"]["error"]["message"]
+    assert by_name["p1.json"]["output"] is None
+    assert by_name["p2.json"]["error"] is None and by_name["p2.json"]["output"]
+    assert by_name["root.json"]["error"] is None
+
+
+def test_split_file_cap_truncates(client, monkeypatch):
+    from data_rover.api.routes import exports as exports_route
+
+    monkeypatch.setattr(exports_route, "PREVIEW_MAX_FILES", 2)
+    _bootstrap_model(client)
+    t = _mk_table(client, "iota3")
+    r = _preview(
+        client,
+        {"source": {"ref": t}, "format": "json", "json_split": SPLIT,
+         "transform": _inline(WRAP)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["files"]) == 2 and body["truncated"] is True
+
+
+def test_split_filenames_are_deduplicated_like_the_export(client):
+    """Three base elements sharing a display name collide on `${name}`; the
+    export suffixes `_2`, `_3` in row order, and the preview must name the
+    files the same way."""
+    _bootstrap_model(client)
+    for _ in range(3):
+        r = client.post(
+            papi("/model/elements"),
+            json={"type": "Block", "properties": {"name": "twin", "mass": 1.0}},
+        )
+        assert r.status_code in (200, 201), r.text
+    t = _mk_table(client, "iota4")
+    r = _preview(
+        client,
+        {"source": {"ref": t}, "format": "json", "json_split": SPLIT,
+         "transform": _inline(WRAP)},
+    )
+    assert r.status_code == 200, r.text
+    names = [f["filename"] for f in r.json()["files"]]
+    assert len(names) == 6 and len(set(names)) == 6
+    assert {"twin.json", "twin_2.json", "twin_3.json"} <= set(names)
 
 
 def test_object_shape_feeds_the_keyed_object(client):
@@ -197,8 +273,9 @@ def test_object_shape_feeds_the_keyed_object(client):
     assert r.status_code == 200, r.text
     import json
 
-    assert isinstance(json.loads(r.json()["input"]), dict)
-    assert len(json.loads(r.json()["output"])) == 3
+    (f,) = r.json()["files"]
+    assert isinstance(json.loads(f["input"]), dict)
+    assert len(json.loads(f["output"])) == 3
 
 
 def test_no_runner_is_503(app, client):
@@ -272,9 +349,9 @@ def test_preview_evaluates_a_script_key_column_live_on_a_cold_cache(client):
         },
     )
     assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["error"] is None
+    (f,) = r.json()["files"]
+    assert f["error"] is None
     import json
 
-    assert set(json.loads(body["input"])) == {"root", "p1", "p2"}
-    assert json.loads(body["output"]) == ["p1", "p2", "root"]
+    assert set(json.loads(f["input"])) == {"root", "p1", "p2"}
+    assert json.loads(f["output"]) == ["p1", "p2", "root"]

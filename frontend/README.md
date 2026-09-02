@@ -279,9 +279,15 @@ follows a pessimistic **check-out → stage → commit** loop:
      `SnippetTestPanel`: the document a transform receives only exists in
      the context of an entry, so the panel posts the WHOLE entry as drafted
      (unsaved inline code included) to `POST /exports/preview-transform`
-     (`previewTransform` in `api/exports.ts`) and renders prints, then
+     (`previewTransform` in `api/exports.ts`) and renders, per file the
+     export would write (`TransformPreviewOut.files[]`), prints, then
      before | after panes of the server-rendered JSON text — never
-     re-serialized client-side. The server answers 200 even when the
+     re-serialized client-side (`Export/TransformTestFile.svelte` is that
+     per-file body). An unsplit entry yields one file, rendered flat; a
+     split entry is the export's full run, one file per partition, rendered
+     as one collapsible per file — all collapsed, headed by the filename and
+     a `failed` badge when that file's transform raised — so a failing
+     partition is found by name. The server answers 200 even when the
      snippet fails (`error` block with a go-to-line traceback, no after-pane);
      a 422 (missing table, non-JSON format, unresolvable ref…) shows the
      server's own sentence as the notice, 429/503 use `SnippetTestPanel`'s

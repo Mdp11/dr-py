@@ -1,23 +1,30 @@
 <script lang="ts">
 	// The exporter entry's Test panel: render the entry's table the way the
-	// export would, run `transform(doc)` once, show what it printed and the
-	// document before/after. The sibling of Snippet/SnippetTestPanel — same
-	// disclosure, same component-local run state and generation guard (see
-	// that file's header for why the state is NOT store-keyed) — minus the
-	// element binding: the document IS the input, and the server builds it
-	// (`POST /exports/preview-transform`), so there is nothing to bind.
+	// export would, run `transform(doc)` once per file the export would write,
+	// show what each call printed and its document before/after. The sibling
+	// of Snippet/SnippetTestPanel — same disclosure, same component-local run
+	// state and generation guard (see that file's header for why the state is
+	// NOT store-keyed) — minus the element binding: the document IS the input,
+	// and the server builds it (`POST /exports/preview-transform`), so there is
+	// nothing to bind.
 	//
 	// The whole ENTRY is the request, not just the snippet: the sample is
 	// rendered under the entry's column overrides, `json_doc` shaping and
 	// split, so the before-pane is exactly what the export would hand the
 	// transform — which is why this panel lives beside the entry row rather
 	// than inside the shared SnippetSourceEditor.
+	//
+	// Unsplit, the single file renders flat. Split, the run is the export's
+	// full run and each file gets its own collapsible (all collapsed at first,
+	// headed by the filename the export would write), so a failing partition
+	// can be found by name rather than by scrolling one long pane.
 	import { onDestroy } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { previewTransform } from '$lib/api/exports';
 	import { ApiError } from '$lib/api/errors';
 	import type { ExporterEntry, TransformPreviewOut } from '$lib/api/types';
-	import { errorKindLabel, tracebackLines } from '$lib/snippet/console-view';
 	import { isEmptySnippetSource } from '$lib/snippet/source';
+	import TransformTestFile from './TransformTestFile.svelte';
 
 	let {
 		entry,
@@ -33,7 +40,9 @@
 	let running = $state(false);
 	let result = $state<TransformPreviewOut | null>(null);
 	let notice = $state<string | null>(null);
-	let tracebackOpen = $state(false);
+	/** Indices of the expanded files of a split result; reset per run so a
+	 * fresh run always starts fully collapsed. */
+	const expanded = new SvelteSet<number>();
 
 	let runSeq = 0;
 	onDestroy(() => {
@@ -49,6 +58,7 @@
 			(entry.transform?.definition ? entry.transform.definition.code.trim() !== '' : true)
 	);
 	const runDisabled = $derived(running || !configured);
+	const failedCount = $derived(result?.files.filter((f) => f.error !== null).length ?? 0);
 
 	/** Also reachable from the inline CodeEditor's Mod-Enter (through
 	 * TransformSourceEditor's `onRun`), so the gate lives here, not only on
@@ -67,12 +77,17 @@
 			if (seq !== runSeq) return;
 			running = false;
 			result = out;
-			tracebackOpen = false;
+			expanded.clear();
 		} catch (err) {
 			if (seq !== runSeq) return;
 			running = false;
 			notice = describeFailure(err);
 		}
+	}
+
+	function toggleFile(i: number): void {
+		if (expanded.has(i)) expanded.delete(i);
+		else expanded.add(i);
 	}
 
 	/** 422 carries the server's own sentence naming the entry's problem
@@ -114,7 +129,13 @@
 				>
 					Run
 				</button>
-				<span class="text-muted-foreground/70">renders the table, then runs transform(doc)</span>
+				<span class="text-muted-foreground/70">
+					{#if entry.json_split?.enabled}
+						renders every file, then runs transform(doc) on each
+					{:else}
+						renders the table, then runs transform(doc)
+					{/if}
+				</span>
 			</div>
 			<div class="flex flex-col gap-2 border-t border-border/60 p-2 text-xs">
 				{#if running}
@@ -132,13 +153,12 @@
 
 				{#if result}
 					<div class="flex flex-wrap items-center gap-2 text-muted-foreground/70">
-						{#if result.split_file !== null}
-							<span
-								data-testid="transform-test-split"
-								class="rounded bg-muted px-1 text-[10px]"
-								title="A split export runs the transform once per file; this is the first one."
-							>
-								first split file: {result.split_file}
+						{#if result.split}
+							<span data-testid="transform-test-split" class="rounded bg-muted px-1 text-[10px]">
+								{result.files.length}
+								{result.files.length === 1 ? 'file' : 'files'}{failedCount > 0
+									? `, ${failedCount} failed`
+									: ''}
 							</span>
 						{/if}
 						{#if result.truncated}
@@ -146,83 +166,57 @@
 								data-testid="transform-test-truncated"
 								class="rounded bg-muted px-1 text-[10px]"
 							>
-								sample covers only the head of the table
+								{#if result.split}
+									more files exist than were transformed; only the first are shown
+								{:else}
+									sample covers only the head of the table
+								{/if}
 							</span>
 						{/if}
 						<span>{result.duration_ms} ms</span>
 					</div>
 
-					{#if result.stdout}
-						<pre
-							data-testid="transform-test-stdout"
-							class="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-[11px]">{result.stdout}</pre>
-					{/if}
-
-					{#if result.error}
-						{@const error = result.error}
-						<div
-							data-testid="transform-test-error"
-							class="rounded border border-destructive/30 bg-destructive/10 p-2"
-						>
-							<div class="flex items-center gap-2">
-								<span class="rounded bg-destructive/20 px-1 text-[10px] text-destructive">
-									{errorKindLabel(error.kind)}
-								</span>
-								<span class="text-destructive">{error.message}</span>
-							</div>
-							{#if error.traceback}
+					{#if result.split}
+						{#each result.files as file, i (file.filename)}
+							{@const fileOpen = expanded.has(i)}
+							{@const fileId = `${contentId}:file:${i}`}
+							<div
+								data-testid="transform-test-file"
+								data-filename={file.filename}
+								class="rounded border border-border/60"
+							>
 								<button
 									type="button"
-									class="mt-1 text-[11px] underline"
-									onclick={() => (tracebackOpen = !tracebackOpen)}
+									data-testid="transform-test-file-toggle"
+									class="flex w-full items-center gap-2 px-1.5 py-1 text-left transition-colors hover:bg-muted/50"
+									aria-expanded={fileOpen}
+									aria-controls={fileId}
+									onclick={() => toggleFile(i)}
 								>
-									{tracebackOpen ? 'Hide' : 'Show'} traceback
+									<span class="font-mono text-muted-foreground">{fileOpen ? '▾' : '▸'}</span>
+									<span class="truncate font-mono">{file.filename}</span>
+									{#if file.error}
+										<span
+											data-testid="transform-test-file-failed"
+											class="rounded bg-destructive/20 px-1 text-[10px] text-destructive"
+										>
+											failed
+										</span>
+									{/if}
+									<span class="ml-auto text-[10px] text-muted-foreground/70">
+										{file.duration_ms} ms
+									</span>
 								</button>
-								{#if tracebackOpen}
-									<div class="mt-1 flex flex-col font-mono text-[11px]">
-										{#each tracebackLines(error.traceback) as tl, i (i)}
-											{#if tl.line !== null}
-												<button
-													type="button"
-													class="whitespace-pre text-left text-info/90 underline decoration-dotted hover:text-info"
-													onclick={() => onGoToLine(tl.line as number)}
-												>
-													{tl.text}
-												</button>
-											{:else}
-												<span class="whitespace-pre">{tl.text}</span>
-											{/if}
-										{/each}
+								{#if fileOpen}
+									<div id={fileId} class="border-t border-border/60 p-2">
+										<TransformTestFile {file} {onGoToLine} />
 									</div>
 								{/if}
-							{/if}
-						</div>
+							</div>
+						{/each}
+					{:else if result.files.length > 0}
+						<TransformTestFile file={result.files[0]} {onGoToLine} />
 					{/if}
-
-					<div class="grid grid-cols-1 gap-2 md:grid-cols-2">
-						<div class="flex min-w-0 flex-col gap-1">
-							<span class="text-[10px] uppercase tracking-wide text-muted-foreground/70"
-								>before transform</span
-							>
-							<pre
-								data-testid="transform-test-input"
-								class="max-h-72 overflow-auto rounded bg-muted p-2 font-mono text-[11px]">{result.input}</pre>
-						</div>
-						<div class="flex min-w-0 flex-col gap-1">
-							<span class="text-[10px] uppercase tracking-wide text-muted-foreground/70"
-								>after transform</span
-							>
-							{#if result.output !== null}
-								<pre
-									data-testid="transform-test-output"
-									class="max-h-72 overflow-auto rounded bg-muted p-2 font-mono text-[11px]">{result.output}</pre>
-							{:else}
-								<p data-testid="transform-test-no-output" class="text-muted-foreground/70">
-									no output — the transform failed
-								</p>
-							{/if}
-						</div>
-					</div>
 				{/if}
 			</div>
 		</div>

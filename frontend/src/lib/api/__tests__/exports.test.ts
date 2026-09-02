@@ -87,13 +87,19 @@ describe('previewTransform', () => {
 			http.post(`${BASE}/exports/preview-transform`, async ({ request }) => {
 				seen = await request.json();
 				return HttpResponse.json({
-					input: '[]',
-					output: '{}',
-					stdout: '',
-					error: null,
+					files: [
+						{
+							filename: 'doc.json',
+							input: '[]',
+							output: '{}',
+							stdout: '',
+							error: null,
+							duration_ms: 1
+						}
+					],
+					split: false,
 					truncated: false,
-					split_file: null,
-					duration_ms: 1
+					duration_ms: 2
 				});
 			})
 		);
@@ -110,6 +116,7 @@ describe('previewTransform', () => {
 		};
 		const out = await previewTransform(entry, cfg);
 		expect(seen).toEqual({ entry });
-		expect(out.output).toBe('{}');
+		expect(out.files[0].output).toBe('{}');
+		expect(out.split).toBe(false);
 	});
 });
