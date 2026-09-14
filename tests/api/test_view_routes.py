@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 from data_rover.api.session import get_session
 
@@ -205,3 +206,93 @@ def test_excluded_roots_take_a_view_id(client: TestClient) -> None:
     assert {i["id"] for i in all_roots["items"]} == {a_id, b_id}
     scoped = client.get(papi(f"/model/containment/roots/excluded?view_id={vid}")).json()
     assert {i["id"] for i in scoped["items"]} == {b_id}
+
+
+def test_put_replaces_document_and_bumps_rev(client: TestClient) -> None:
+    a_id, b_id = _bootstrap(client)
+    vid = create_view(client, "Ops", {"folders": [{"name": "F", "elements": [a_id]}]})
+    fid = client.get(papi(f"/views/{vid}")).json()["view"]["folders"][0]["id"]
+
+    doc = {
+        "name": "Ops",
+        "folders": [
+            {"id": fid, "name": "F2", "elements": [b_id], "folders": [{"name": "Sub"}]}
+        ],
+    }
+    r = client.put(papi(f"/views/{vid}"), json={"view": doc, "base_view_rev": 0})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"id": vid, "name": "Ops", "view_rev": 1}
+
+    got = client.get(papi(f"/views/{vid}")).json()
+    top = got["view"]["folders"][0]
+    assert top["id"] == fid and top["name"] == "F2" and top["elements"] == [b_id]
+    assert top["folders"][0]["id"]  # healed
+    assert get_session().views[vid].folders[0].name == "F2"
+
+    # a stale base rev is refused
+    r = client.put(papi(f"/views/{vid}"), json={"view": doc, "base_view_rev": 0})
+    assert r.status_code == 409
+
+
+def test_put_renames_and_refuses_duplicates_and_bad_input(client: TestClient) -> None:
+    _bootstrap(client)
+    vid = create_view(client, "Ops")
+    create_view(client, "Arch")
+    r = client.put(papi(f"/views/{vid}"), json={"view": {"name": "Arch"}})
+    assert r.status_code == 409
+    r = client.put(papi(f"/views/{vid}"), json={"view": {"name": " Renamed "}})
+    assert r.status_code == 200 and r.json()["name"] == "Renamed"
+    assert sorted(v["name"] for v in client.get(papi("/views")).json()) == [
+        "Arch",
+        "Renamed",
+    ]
+    assert client.put(papi(f"/views/{vid}"), json={"view": {"name": " "}}).status_code == 422
+    r = client.put(papi(f"/views/{vid}"), json={"view": {"name": "X", "folders": "no"}})
+    assert r.status_code == 422
+    assert client.put(papi("/views/nope"), json={"view": {"name": "X"}}).status_code == 404
+
+
+def test_put_reassigns_folder_ids_claimed_by_another_view(client: TestClient) -> None:
+    _bootstrap(client)
+    v1 = create_view(client, "One", {"folders": [{"name": "F"}]})
+    v2 = create_view(client, "Two")
+    fid = client.get(papi(f"/views/{v1}")).json()["view"]["folders"][0]["id"]
+    r = client.put(
+        papi(f"/views/{v2}"), json={"view": {"name": "Two", "folders": [{"id": fid, "name": "G"}]}}
+    )
+    assert r.status_code == 200, r.text
+    assert client.get(papi(f"/views/{v2}")).json()["view"]["folders"][0]["id"] != fid
+
+
+def test_put_viewer_forbidden_and_peer_lease_blocks(client: TestClient) -> None:
+    _bootstrap(client)
+    _seed_member("viewer-1", "viewer@example.com", "viewer")
+    _seed_member("peer-1", "peer@example.com", "editor")
+    vid = create_view(client, "Ops")
+    body = {"view": {"name": "Ops"}}
+    assert client.put(papi(f"/views/{vid}"), json=body, headers=VIEWER).status_code == 403
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": vid, "mode": "exclusive", "type": "view"}],
+            "intent": "edit",
+        },
+        headers=PEER,
+    )
+    assert r.status_code == 200, r.text
+    assert client.put(papi(f"/views/{vid}"), json=body).status_code == 409
+    client.post(papi("/locks/release"), json={"token": r.json()["token"]}, headers=PEER)
+    assert client.put(papi(f"/views/{vid}"), json=body).status_code == 200
+
+
+def test_put_broadcasts_updated_event(client: TestClient) -> None:
+    reset_loop()  # each TestClient creates its own event loop; clear the cached one
+    _bootstrap(client)
+    vid = create_view(client, "Ops")
+    with client.websocket_connect(feed_url()) as ws:
+        assert ws.receive_json()["type"] == "snapshot"
+        assert client.put(papi(f"/views/{vid}"), json={"view": {"name": "Ops"}}).status_code == 200
+        ev = ws.receive_json()
+        while ev["type"] != "view":
+            ev = ws.receive_json()
+        assert ev == {"type": "view", "action": "updated", "view": {"id": vid, "name": "Ops"}}

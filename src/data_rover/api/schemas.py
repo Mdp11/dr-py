@@ -319,6 +319,14 @@ class ViewSummaryOut(BaseModel):
     view_rev: int = 0
 
 
+class UpdateViewIn(BaseModel):
+    #: the whole replacement document (``View`` shape); a ``name`` differing
+    #: from the row's renames the view (409 on a duplicate).
+    view: dict[str, Any]
+    #: optimistic-concurrency precondition: 409 when the view moved past it.
+    base_view_rev: int | None = None
+
+
 class CreateViewIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     #: the view document (``View`` shape); its own ``name`` is overwritten by

@@ -184,10 +184,11 @@ def rebind_event(
 
 
 def view_event(action: str, view: dict[str, Any]) -> dict[str, Any]:
-    """A view was added or removed (action: created|deleted). Carries
-    ``{id, name}``: clients refresh their view list, and one whose ACTIVE
-    view was deleted falls back to no view. Folder edits inside a view are
-    NOT this — they ride ``commit_event`` under the ``view`` scope."""
+    """A view was added, replaced or removed (action: created|updated|deleted).
+    Carries ``{id, name}``: clients refresh their view list, one whose ACTIVE
+    view was updated refetches it, and one whose ACTIVE view was deleted falls
+    back to no view. Folder edits inside a view are NOT this — they ride
+    ``commit_event`` under the ``view`` scope."""
     return {"type": "view", "action": action, "view": view}
 
 

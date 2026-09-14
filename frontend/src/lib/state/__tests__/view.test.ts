@@ -9,7 +9,11 @@ import * as editGate from '../edit-gate';
 // store itself follows (table-editor.svelte.ts:1689).
 const commitTaps: Array<(info: { scope: string[] }) => void> = [];
 const viewTaps: Array<
-	(e: { type: 'view'; action: 'created' | 'deleted'; view: { id: string; name: string } }) => void
+	(e: {
+		type: 'view';
+		action: 'created' | 'updated' | 'deleted';
+		view: { id: string; name: string };
+	}) => void
 > = [];
 vi.mock('../realtime.svelte', () => ({
 	onCommitEvent: (cb: (info: { scope: string[] }) => void) => {
@@ -942,6 +946,31 @@ describe('named views — feed reconciliation', () => {
 		expect(getStagedViewOps()).toHaveLength(0);
 		expect(release).toHaveBeenCalledWith('f1');
 		expect(getViewDiscardNotice()).toMatch(/"Alpha" was deleted — no view is active/);
+	});
+
+	it('an updated active view refetches its content; another view only refreshes the list', async () => {
+		vi.spyOn(viewApi, 'listViews').mockResolvedValue([
+			{ id: 'v1', name: 'Alpha', view_rev: 1 },
+			{ id: 'v9', name: 'Other', view_rev: 0 }
+		]);
+		await loadViews();
+		seedView(baseView());
+		await refreshView();
+		const replaced = { ...baseView(), folders: [] };
+		const getSpy = vi
+			.spyOn(viewApi, 'getView')
+			.mockResolvedValue({ view: replaced, warnings: [], view_rev: 1 });
+
+		for (const tap of viewTaps)
+			tap({ type: 'view', action: 'updated', view: { id: 'v9', name: 'Other' } });
+		await settle();
+		expect(getSpy).not.toHaveBeenCalled();
+
+		for (const tap of viewTaps)
+			tap({ type: 'view', action: 'updated', view: { id: 'v1', name: 'Alpha' } });
+		await settle();
+		expect(getSpy).toHaveBeenCalledWith('v1');
+		expect(getView()!.folders).toEqual([]);
 	});
 
 	it('a peer adding a view only refreshes the list', async () => {

@@ -263,13 +263,19 @@ def get_view(db: Session, project_id: str, view_id: str) -> ViewRow | None:
     return row if row is not None and row.project_id == project_id else None
 
 
+def view_name_taken(
+    db: Session, project_id: str, name: str, *, exclude_id: str | None = None
+) -> bool:
+    stmt = select(ViewRow.id).where(ViewRow.project_id == project_id, ViewRow.name == name)
+    if exclude_id is not None:
+        stmt = stmt.where(ViewRow.id != exclude_id)
+    return db.execute(stmt).first() is not None
+
+
 def create_view(db: Session, project_id: str, *, name: str, blob: str) -> ViewRow:
     """New view at ``view_rev`` 0. The name check here is what turns a
     duplicate into a 409; the DB unique constraint is the backstop."""
-    dup = db.execute(
-        select(ViewRow.id).where(ViewRow.project_id == project_id, ViewRow.name == name)
-    ).first()
-    if dup is not None:
+    if view_name_taken(db, project_id, name):
         raise DuplicateViewNameError(name)
     row = ViewRow(
         id=uuid.uuid4().hex, project_id=project_id, name=name, blob=blob, view_rev=0

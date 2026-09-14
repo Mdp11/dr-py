@@ -6,6 +6,7 @@
 		getActiveViewId,
 		getViews,
 		openAddView,
+		openViewJsonTab,
 		openDeleteView,
 		selectView,
 		setAddViewOpen,
@@ -17,6 +18,7 @@
 	const editable = $derived(canEdit());
 	const views = $derived(getViews());
 	const activeId = $derived(getActiveViewId());
+	const activeView = $derived(views.find((v) => v.id === activeId) ?? null);
 
 	// This menu is the ONLY place the add/delete dialogs mount, but their
 	// open flags are module state — so this component owns the flags'
@@ -63,6 +65,15 @@
 		{/if}
 		{#if editable}
 			<DropdownMenu.Separator />
+			<DropdownMenu.Item
+				data-testid="view-menu-edit"
+				disabled={activeView === null}
+				onclick={() => {
+					if (activeView !== null) openViewJsonTab(activeView.id, activeView.name);
+				}}
+			>
+				Edit…
+			</DropdownMenu.Item>
 			<DropdownMenu.Item onclick={() => openAddView()}>Add view…</DropdownMenu.Item>
 			<DropdownMenu.Item disabled={views.length === 0} onclick={() => openDeleteView()}>
 				Delete view…

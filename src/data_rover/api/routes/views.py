@@ -1,6 +1,6 @@
-"""Named views: list / read / add / delete.
+"""Named views: list / read / add / replace / delete.
 
-Add and delete are DIRECT actions (the ``POST /metamodel`` stance): applied
+Add, replace and delete are DIRECT actions (the ``POST /metamodel`` stance): applied
 under ``write_mutex`` to ``session.views`` and the ``views`` table on the
 request's transaction, never journaled, never undoable, broadcast as a
 ``view`` feed event. Folder edits INSIDE a view stay on the check-out/commit
@@ -31,6 +31,7 @@ from ..schemas import (
     IssueOut,
     ViewOut,
     ViewStateResponse,
+    UpdateViewIn,
     ViewSummaryOut,
 )
 
@@ -104,6 +105,73 @@ def create_view(
         db.commit()
         session.views[row.id] = view
         session.hub.broadcast(view_event("created", {"id": row.id, "name": row.name}))
+    return ViewSummaryOut(id=row.id, name=row.name, view_rev=row.view_rev)
+
+
+@router.put("/views/{view_id}")
+def update_view(
+    project_id: str,
+    view_id: str,
+    payload: UpdateViewIn,
+    session: Session = Depends(get_request_session),
+    user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> ViewSummaryOut:
+    """Replace a view's whole document (the JSON editor's Save).
+
+    A direct action like add/delete: never journaled, so staged ``view.*``
+    ops a client holds against the old document replay onto the new one at
+    its next refetch (and drop on conflict)."""
+    try:
+        view = View.model_validate(payload.view)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        loc = ".".join(str(p) for p in first["loc"])
+        raise HTTPException(
+            status_code=422, detail=f"invalid view document: {loc}: {first['msg']}"
+        ) from exc
+    name = view.name.strip()
+    if not name or len(name) > 120:
+        raise HTTPException(
+            status_code=422, detail="view name must be 1-120 non-blank characters"
+        )
+    view.name = name
+    with session.write_mutex:
+        current = session.views.get(view_id)
+        row = content.get_view(db, project_id, view_id)
+        if current is None or row is None:
+            raise HTTPException(status_code=404, detail="view not found")
+        if payload.base_view_rev is not None and payload.base_view_rev != row.view_rev:
+            raise HTTPException(
+                status_code=409,
+                detail=f"view changed since it was loaded (now at rev {row.view_rev})",
+            )
+        # Same lease stance as delete: the replacement rewrites the root and
+        # every folder, so any peer lease inside the view blocks it.
+        resources = [view_resource(view_id)] + [
+            folder_resource(f.id) for f in iter_folders(current)
+        ]
+        if session.lock_table.peer_leases(resources, user.id, now=time.monotonic()):
+            raise HTTPException(
+                status_code=409, detail="view is checked out by someone else"
+            )
+        taken = {
+            f.id
+            for vid, other in session.views.items()
+            if vid != view_id
+            for f in iter_folders(other)
+        }
+        ensure_folder_ids(view, taken)
+        if name != row.name:
+            if content.view_name_taken(db, project_id, name, exclude_id=view_id):
+                raise HTTPException(
+                    status_code=409, detail=str(content.DuplicateViewNameError(name))
+                )
+            row.name = name
+        row = content.upsert_view(db, project_id, view_id, blob=view.model_dump_json())
+        db.commit()
+        session.views[view_id] = view
+        session.hub.broadcast(view_event("updated", {"id": row.id, "name": row.name}))
     return ViewSummaryOut(id=row.id, name=row.name, view_rev=row.view_rev)
 
 

@@ -298,6 +298,13 @@ export async function addView(name: string, doc: Record<string, unknown>): Promi
 	return created;
 }
 
+/** After `PUT /views/{id}` landed: refresh the list (a rename) and, when
+ * `id` is the active view, the displayed tree — without waiting for the feed
+ * echo, which repeats this harmlessly. */
+export async function adoptSavedView(id: string): Promise<void> {
+	await reconcileAfterViewEvent(id);
+}
+
 /** `DELETE /views/{id}` then reconcile: the list refresh picks the
  * replacement when the deleted view was the active one. A journal staged
  * against it is unsalvageable and is dropped silently — the dialog warned. */
@@ -307,16 +314,22 @@ export async function removeView(id: string): Promise<void> {
 }
 
 /**
- * Shared tail of a `view` feed event and of {@link removeView}: refresh the
- * list, and if the active view is gone, drop its journal (its folders no
+ * Shared tail of a `view` feed event, {@link removeView} and
+ * {@link adoptSavedView}: refresh the list, refetch the active view when
+ * `updatedId` names it, and if the active view is gone, drop its journal (its folders no
  * longer exist anywhere), release the leases, fall back per `loadViews` and
  * refetch. A created view only needs the list refreshed.
  */
-async function reconcileAfterViewEvent(): Promise<void> {
+async function reconcileAfterViewEvent(updatedId: string | null = null): Promise<void> {
 	const prior = getActiveViewId();
 	const priorName = _views.find((v) => v.id === prior)?.name ?? null;
 	const changed = await loadViews();
-	if (!changed) return;
+	if (!changed) {
+		// A replaced document (the JSON editor's Save): refetch the active one.
+		// `refreshView` replays any staged journal onto it and drops it on conflict.
+		if (updatedId !== null && updatedId === getActiveViewId()) await refreshView();
+		return;
+	}
 	if (getStagedViewDepth() > 0) {
 		const rids = stagedFolderLeaseIds();
 		resetViewEdits();
@@ -815,7 +828,7 @@ setTimeout(() => {
 	onCommitEvent(({ scope }) => {
 		if (scope.includes('view')) void refreshView();
 	});
-	// A view added/removed by ANY client (own actions echo too — a second
+	// A view added/replaced/removed by ANY client (own actions echo too — a second
 	// list fetch of a tiny payload, same tolerance as the commit taps above).
-	onViewEvent(() => void reconcileAfterViewEvent());
+	onViewEvent((e) => void reconcileAfterViewEvent(e.action === 'updated' ? e.view.id : null));
 }, 0);

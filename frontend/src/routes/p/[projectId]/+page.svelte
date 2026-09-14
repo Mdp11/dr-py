@@ -58,6 +58,7 @@
 		resetCheckout,
 		resetInspectionHistory,
 		resetMetamodelEditor,
+		resetViewJsonEditor,
 		resetModelStore,
 		resetSnippetEditors,
 		resetSnippetDocs,
@@ -168,6 +169,9 @@
 			// no family resets its tokens here, and a cross-project release would send
 			// A's token at B's URL.
 			resetMetamodelEditor();
+			// The view JSON editor is the same kind of module-scope singleton bound
+			// to project A's view; its draft survives in localStorage.
+			resetViewJsonEditor();
 			// Same class of leak, issue side: the Validate overlay is a module-scope
 			// singleton that WINS over the live issue map in every consumer, and boot
 			// deliberately does not call resetModelStore(). Project A's origin-tagged

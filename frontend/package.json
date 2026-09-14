@@ -58,6 +58,7 @@
 		"vitest": "^3.2.4"
 	},
 	"dependencies": {
+		"@codemirror/lang-json": "^6.0.2",
 		"@tailwindcss/vite": "^4.3.0",
 		"@tanstack/svelte-query": "^6.1.33",
 		"@xyflow/svelte": "^1.5.2",

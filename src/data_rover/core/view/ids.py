@@ -25,17 +25,19 @@ def iter_folders(view: View) -> Iterator[Folder]:
         stack.extend(reversed(f.folders))
 
 
-def ensure_folder_ids(view: View) -> bool:
+def ensure_folder_ids(view: View, taken: set[str] | None = None) -> bool:
     """Assign a uuid4-hex id to every folder lacking a usable one.
 
-    "Usable" excludes three shapes: empty (an un-migrated blob), a duplicate
+    "Usable" excludes four shapes: empty (an un-migrated blob), a duplicate
     of an id already seen this walk (first occurrence wins — ops addressed at
-    the survivor keep working), and the reserved ``VIEW_ROOT_ID`` (a folder
+    the survivor keep working), an id in *taken* (folder ids are unique
+    across a project's views, so a hand-edited document must not claim a
+    sibling view's folder), and the reserved ``VIEW_ROOT_ID`` (a folder
     claiming the root's address would shadow root placements). Returns True
     if anything was (re)assigned so callers know to persist the blob back.
     """
     changed = False
-    seen: set[str] = set()
+    seen: set[str] = set(taken) if taken else set()
     for f in iter_folders(view):
         if not f.id or f.id == VIEW_ROOT_ID or f.id in seen:
             f.id = uuid.uuid4().hex

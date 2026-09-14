@@ -1,7 +1,7 @@
 /**
  * Named views. A project holds N views; every client picks its own active one
  * (`lib/state/active-view.svelte.ts`) and edits it through `view.*` ops in
- * `POST /commits`. Add and delete are DIRECT actions (not journaled, not
+ * `POST /commits`. Add, replace and delete are DIRECT actions (not journaled, not
  * undoable — the metamodel-upload stance), so they live here rather than in
  * the commit flow.
  */
@@ -38,6 +38,22 @@ export function createView(
 	cfg?: ClientConfig
 ): Promise<ViewSummary> {
 	return apiFetch('/views', { method: 'POST', body, schema: ViewSummarySchema }, cfg);
+}
+
+/** PUT /views/{id} — replace the whole document (the JSON editor's Save). A
+ * `name` differing from the current one renames the view. 409 (ConflictError)
+ * on a stale `base_view_rev`, a duplicate name, or a peer lease inside the
+ * view; 422 (ValidationError) on a malformed document. */
+export function updateView(
+	viewId: string,
+	body: { view: Record<string, unknown>; base_view_rev?: number | null },
+	cfg?: ClientConfig
+): Promise<ViewSummary> {
+	return apiFetch(
+		`/views/${encodeURIComponent(viewId)}`,
+		{ method: 'PUT', body, schema: ViewSummarySchema },
+		cfg
+	);
 }
 
 /** DELETE /views/{id} — 409 (ConflictError) while a peer holds a lease on the

@@ -4,6 +4,7 @@
 	import { EditorView } from '@codemirror/view';
 	import { Annotation, Compartment, EditorState } from '@codemirror/state';
 	import { yaml } from '@codemirror/lang-yaml';
+	import { json } from '@codemirror/lang-json';
 	import { lintGutter, setDiagnostics } from '@codemirror/lint';
 	import { toCmDiagnostics } from '$lib/editor/lint-map';
 	import { editorLuxuryTheme } from '$lib/editor/theme';
@@ -15,6 +16,7 @@
 		errors = [],
 		readOnly = false,
 		testid = 'metamodel-editor',
+		language = 'yaml',
 		onChange
 	}: {
 		code: string;
@@ -22,6 +24,8 @@
 		readOnly?: boolean;
 		/** Host `data-testid`, so a reusing tab can address its own editor. */
 		testid?: string;
+		/** Fixed at mount: the syntax mode (a reusing tab edits JSON). */
+		language?: 'yaml' | 'json';
 		onChange: (code: string) => void;
 	} = $props();
 
@@ -49,7 +53,7 @@
 					doc: code,
 					extensions: [
 						basicSetup,
-						yaml(),
+						language === 'json' ? json() : yaml(),
 						editorLuxuryTheme,
 						luxurySearch,
 						lintGutter(),

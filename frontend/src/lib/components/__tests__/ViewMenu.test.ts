@@ -55,7 +55,7 @@ describe('ViewMenu', () => {
 	it('lists the views with the active one checked, plus Add/Delete for an editor', () => {
 		setActiveViewId('v2');
 		openMenu('editor');
-		expect(items()).toEqual(['Alpha', 'Zeta', 'Add view…', 'Delete view…']);
+		expect(items()).toEqual(['Alpha', 'Zeta', 'Edit…', 'Add view…', 'Delete view…']);
 		const checked = [...document.body.querySelectorAll('[role="menuitemradio"]')].filter(
 			(n) => n.getAttribute('aria-checked') === 'true'
 		);
@@ -71,7 +71,7 @@ describe('ViewMenu', () => {
 		vi.spyOn(viewsApi, 'listViews').mockResolvedValue([]);
 		await loadViews();
 		openMenu('editor');
-		expect(items()).toEqual(['No views', 'Add view…', 'Delete view…']);
+		expect(items()).toEqual(['No views', 'Edit…', 'Add view…', 'Delete view…']);
 	});
 
 	it('picking a view selects it', async () => {

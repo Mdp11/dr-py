@@ -9,6 +9,7 @@
 		closeSnippetDraft,
 		closeTab,
 		closeTableDraft,
+		closeViewJsonEditor,
 		getActiveTab,
 		getDynamicTabs,
 		isTabDirty,
@@ -21,6 +22,7 @@
 	import MetamodelTab from './Metamodel/MetamodelTab.svelte';
 	import ExporterTab from './Export/ExporterTab.svelte';
 	import RulesTab from './Rules/RulesTab.svelte';
+	import ViewJsonTab from './ViewJson/ViewJsonTab.svelte';
 
 	const activeTab = $derived(getActiveTab());
 	const dynamicTabs = $derived(getDynamicTabs());
@@ -67,6 +69,8 @@
 							else if (tab.kind === 'metamodel') closeMetamodelEditor();
 							else if (tab.kind === 'exporter') closeExporterDraft(tab.id);
 							else if (tab.kind === 'rules') closeRulesDraft(tab.id);
+							// Also run by ViewJsonTab's unmount teardown; idempotent.
+							else if (tab.kind === 'view') closeViewJsonEditor();
 							else if (tab.kind === 'navigation') closeDraft(tab.id);
 							closeTab(tab.id);
 						}}
@@ -92,6 +96,8 @@
 					<NavigationBuilder tabId={tab.id} />
 				{:else if tab.kind === 'issues'}
 					<IssuesPanel />
+				{:else if tab.kind === 'view' && tab.viewId}
+					<ViewJsonTab viewId={tab.viewId} />
 				{/if}
 			</Tabs.Content>
 		{/each}

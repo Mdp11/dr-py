@@ -16,9 +16,11 @@ export type WorkspaceTab = string;
 
 export interface DynamicTab {
 	id: string;
-	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'exporter' | 'rules' | 'issues';
+	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'exporter' | 'rules' | 'issues' | 'view';
 	artifactId: string | null;
 	title: string;
+	/** The named view a `view` (JSON editor) tab is bound to. */
+	viewId?: string;
 }
 
 const PREFIX = {
@@ -28,7 +30,8 @@ const PREFIX = {
 	metamodel: 'mm',
 	exporter: 'exp',
 	rules: 'rules',
-	issues: 'issues'
+	issues: 'issues',
+	view: 'viewjson'
 } as const;
 
 let _activeTab: string | null = $state(null);
@@ -89,6 +92,22 @@ export function openMetamodelTab(): string {
 	_activeTab = METAMODEL_TAB_ID;
 	persist();
 	return METAMODEL_TAB_ID;
+}
+
+const VIEW_JSON_TAB_ID = 'viewjson:editor';
+
+/** Open (or focus) the singleton view JSON editor tab, (re)bound to `viewId`.
+ * Dedupe is by KIND, mirroring openMetamodelTab: one view is edited at a time. */
+export function openViewJsonTab(viewId: string, name: string): string {
+	const title = `View: ${name}`;
+	if (_tabs.some((t) => t.kind === 'view')) {
+		_tabs = _tabs.map((t) => (t.kind === 'view' ? { ...t, viewId, title } : t));
+	} else {
+		_tabs = [..._tabs, { id: VIEW_JSON_TAB_ID, kind: 'view', artifactId: null, title, viewId }];
+	}
+	_activeTab = VIEW_JSON_TAB_ID;
+	persist();
+	return VIEW_JSON_TAB_ID;
 }
 
 const ISSUES_TAB_ID = 'issues:panel';
@@ -168,6 +187,7 @@ function persistable(t: DynamicTab): boolean {
 	// — restoring them is cheap (the metamodel draft persists independently
 	// via ui.metamodel.draft.*; the issues tab has no draft of its own).
 	if (t.kind === 'metamodel' || t.kind === 'issues') return true;
+	if (t.kind === 'view') return typeof t.viewId === 'string';
 	return t.artifactId !== null && !isTempId(t.artifactId);
 }
 

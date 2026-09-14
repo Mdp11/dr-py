@@ -138,6 +138,7 @@ export {
 	openIssuesTab,
 	openMetamodelTab,
 	openNavigationTab,
+	openViewJsonTab,
 	repointTabArtifact,
 	resetWorkspaceTabs,
 	retitleTab,
@@ -340,7 +341,24 @@ export {
 	isFolderIdAncestor
 } from './view-ops';
 export {
+	closeViewJsonEditor,
+	discardViewJsonDraft,
+	editViewJsonBuffer,
+	getViewJsonEditor,
+	getViewJsonEditorViewId,
+	initViewJsonEditor,
+	isViewJsonEditorDirty,
+	noteViewJsonServerChanged,
+	parseViewJson,
+	resetViewJsonEditor,
+	saveViewJson,
+	VIEW_JSON_DRAFT_DEBOUNCE_MS,
+	VIEW_JSON_PARSE_DEBOUNCE_MS,
+	type ViewJsonEditorView
+} from './view-json-editor.svelte';
+export {
 	addView,
+	adoptSavedView,
 	clearViewState,
 	cloneView,
 	discardViewChanges,
