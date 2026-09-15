@@ -1585,7 +1585,10 @@ class TableCellOut(BaseModel):
     kind: Literal["element", "value", "values", "elements", "error", "pending"]
     # element
     item: TreeItem | None = None
-    # value
+    #: element: the type an editable reference cell's picker offers
+    ref_type: str | None = None
+    # value — and element, where `element_id` is the OWNER of the reference
+    # (the patch target) and `editable` mirrors the value cell's flag
     present: bool | None = None
     value: object | None = None
     element_id: str | None = None

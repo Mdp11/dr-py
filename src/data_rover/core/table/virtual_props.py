@@ -30,6 +30,25 @@ def property_declared(mm: Metamodel, type_name: str, name: str) -> bool:
     return any(pd.name == name for pd in mm.effective_element_properties(type_name))
 
 
+def property_datatype(mm: Metamodel, type_name: str, name: str) -> str | None:
+    """The datatype `type_name` declares for `name`; `None` when undeclared
+    or virtual."""
+    if is_virtual_property(name):
+        return None
+    return next(
+        (pd.datatype for pd in mm.effective_element_properties(type_name) if pd.name == name),
+        None,
+    )
+
+
+def property_is_element_typed(mm: Metamodel, type_name: str, name: str) -> bool:
+    """Whether `type_name` declares `name` with an ELEMENT datatype — the
+    values are element ids, and a property column reading it produces
+    elements. A virtual or undeclared property is never element-typed."""
+    dt = property_datatype(mm, type_name, name)
+    return dt is not None and mm.is_element_type(dt)
+
+
 def raw_property(el: Element, name: str) -> Any:
     """The stored value of `name` on `el` (`None` when unset), or the virtual
     property's derived value. Does NOT check declaration — pair it with

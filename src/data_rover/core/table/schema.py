@@ -430,8 +430,8 @@ class TableDefinition(BaseModel):
 
         A row slot is always element-producing and single. A ColumnRef inherits
         from the referenced column: element/expand columns are single-binding
-        elements; a collapse navigation column is multi-binding elements; a
-        property column is not element-producing.
+        elements; a collapse navigation, script or property column is
+        multi-binding and element-capable.
         """
         if isinstance(src, RowSlot):
             return True, True
@@ -450,8 +450,11 @@ class TableDefinition(BaseModel):
             # column, collapse is multi-binding, expand promotes one binding
             # per row.
             return True, ref.mode == "expand"
-        # property column
-        return False, ref.mode == "expand"
+        # Property column: element-capable at RUNTIME — whether its values are
+        # element ids depends on the property's datatype, which only the
+        # metamodel knows. Like a script column, a scalar property referenced
+        # as a source simply binds nothing (tolerant).
+        return True, ref.mode == "expand"
 
 
 TABLE_ADAPTER: TypeAdapter[TableDefinition] = TypeAdapter(TableDefinition)

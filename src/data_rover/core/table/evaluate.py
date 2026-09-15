@@ -30,7 +30,7 @@ from data_rover.core.navigation.evaluate import (
 from data_rover.core.script.warnings import ScriptWarningCode
 
 from .nav_memo import MemoEntry, NavMemo
-from .virtual_props import is_virtual_property, raw_property
+from .virtual_props import is_virtual_property, property_is_element_typed, raw_property
 from .schema import (
     ChainRows,
     Column,
@@ -253,6 +253,18 @@ def resolve_source_elements(
         )
     if getattr(ref_col, "mode", "collapse") == "expand":
         b = key[_expand_slot_of(defn, base_slots, source.index)]
+        if ref_col.kind == "property":
+            # A property slot holds a RAW value — a scalar string is not an
+            # element id — so only an element-typed property's id binds.
+            if not (isinstance(b, str) and b in model.elements):
+                return []
+            return (
+                [b]
+                if _expanded_property_is_element_typed(
+                    mm, model, defn, key, ref_col, base_slots, limits, script, memo
+                )
+                else []
+            )
         return [b] if isinstance(b, str) else []
     if ref_col.kind == "element":
         return resolve_source_elements(
@@ -283,6 +295,23 @@ def resolve_source_elements(
         )
         # element-producing by contract: PropertyValue terminals contribute none
         return [n for n in reached if isinstance(n, str)]
+    if ref_col.kind == "property":
+        # Collapse property column as a source: the values of an ELEMENT-TYPED
+        # property are element ids and bind; a scalar property binds nothing
+        # (runtime-tolerant arity — see schema._source_arity). Expand property
+        # columns never reach here: the expand-slot read above returned.
+        owners = resolve_source_elements(
+            mm,
+            model,
+            defn,
+            key,
+            ref_col.source,
+            base_slots,
+            limits,
+            script=script,
+            memo=memo,
+        )
+        return _property_element_ids(mm, model, ref_col, owners)
     if ref_col.kind == "script":
         # Collapse script column as a source: evaluate (memoized) and bind the
         # returned ELEMENT ids; scalar results bind nothing (runtime-tolerant
@@ -731,7 +760,7 @@ def _expand_values(
     # elements, _expand_slot_of, ...), so a module-level import here would cycle.
     from .cells import expand_property_values
 
-    return expand_property_values(model, col, roots), False
+    return expand_property_values(mm, model, col, roots), False
 
 
 # ---- sorting -----------------------------------------------------------------
@@ -821,7 +850,8 @@ def _source_reaches_script_navigation(
         )
     if isinstance(ref_col, ScriptColumn):
         return False  # sweep-covered boundary (docstring); stop the walk
-    return False  # property columns are not element-producing
+    # A collapse property column re-resolves its own source.
+    return _source_reaches_script_navigation(defn, ref_col.source)
 
 
 def _sort_reaches_script_navigation(defn: TableDefinition, col: Column) -> bool:
@@ -930,6 +960,48 @@ def _script_sort_atom(model: Model, item: object) -> tuple[int, float, str]:
     return (1, 0.0, str(item).casefold())
 
 
+def _property_element_ids(
+    mm: Metamodel, model: Model, col: PropertyColumn, owners: list[str]
+) -> list[str]:
+    """The element ids an element-typed property column holds over `owners`:
+    every value of the property on an owner whose type declares it
+    element-typed that names a model element, de-duplicated in owner order.
+    Scalar-typed owners contribute nothing (mixed frontiers degrade)."""
+    out: dict[str, None] = {}
+    for eid in owners:
+        el = model.elements[eid]
+        if not property_is_element_typed(mm, el.type_name, col.name):
+            continue
+        raw = el.properties.get(col.name)
+        items = raw if isinstance(raw, (list, tuple)) else [raw]
+        for item in items:
+            if isinstance(item, str) and item in model.elements:
+                out[item] = None
+    return list(out)
+
+
+def _expanded_property_is_element_typed(
+    mm: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    key: RowKey,
+    col: PropertyColumn,
+    base_slots: int,
+    limits: TableLimits,
+    script: ScriptEvalContext | None,
+    memo: NavMemo | None,
+) -> bool:
+    """Whether an expand property column's promoted slot value is an element
+    reference: true when the property is element-typed on any of the row's
+    source elements (the slot itself holds a bare id either way)."""
+    owners = resolve_source_elements(
+        mm, model, defn, key, col.source, base_slots, limits, script=script, memo=memo
+    )
+    return any(
+        property_is_element_typed(mm, model.elements[e].type_name, col.name) for e in owners
+    )
+
+
 def _property_is_numeric(
     mm: Metamodel, defn: TableDefinition, col: PropertyColumn
 ) -> bool:
@@ -1003,6 +1075,10 @@ def _sort_value(
             v = key[_expand_slot_of(defn, base_slots, col_index)]
             if v is None:
                 return (1, ())
+            if isinstance(v, str) and v in model.elements and _expanded_property_is_element_typed(
+                mm, model, defn, key, col, base_slots, limits, script, memo
+            ):
+                return (0, (_display_name(model, v).casefold(), v))
             return (0, (float(v),)) if numeric else (0, (str(v).casefold(),))  # type: ignore[arg-type]
         els = resolve_source_elements(
             mm,
@@ -1015,6 +1091,13 @@ def _sort_value(
             script=script,
             memo=memo,
         )
+        if any(property_is_element_typed(mm, model.elements[e].type_name, col.name) for e in els):
+            # Element references order by the label the grid shows, like the
+            # element column — never by id.
+            ids = _property_element_ids(mm, model, col, els)
+            if not ids:
+                return (1, ())
+            return (0, tuple(sorted(_display_name(model, i).casefold() for i in ids)))
         vals: list[Binding] = []
         for eid in els:
             v = raw_property(model.elements[eid], col.name)

@@ -434,3 +434,55 @@ def test_evaluate_reports_base_total(client: TestClient) -> None:
         body = r.json()
         assert body["base_total"] == 3  # root, p1, p2
         assert body["total"] == 4  # root x 2 parts + p1/p2 keep-empty rows
+
+
+_REF_METAMODEL = """
+name: refs
+elements:
+  - name: Block
+    properties:
+      - {name: name, datatype: string, multiplicity: "1"}
+      - {name: owner, datatype: Block, multiplicity: "0..1"}
+relationships: []
+"""
+
+
+def test_element_typed_property_cell_carries_owner_and_target_type(client: TestClient) -> None:
+    client.post(
+        papi("/metamodel"),
+        content=_REF_METAMODEL,
+        headers={"content-type": "application/x-yaml", **AUTH_HEADERS},
+    )
+    client.post(papi("/model"), json={"elements": [], "relationships": []}, headers=AUTH_HEADERS)
+    a = client.post(
+        papi("/model/elements"),
+        json={"type": "Block", "properties": {"name": "a"}},
+        headers=AUTH_HEADERS,
+    ).json()["id"]
+    b = client.post(
+        papi("/model/elements"),
+        json={"type": "Block", "properties": {"name": "b", "owner": a}},
+        headers=AUTH_HEADERS,
+    ).json()["id"]
+    r = client.post(
+        papi("/tables/evaluate"),
+        json={
+            "definition": {
+                "row_source": {"kind": "scope", "types": ["Block"]},
+                "columns": [
+                    {"kind": "element", "source": {"kind": "row"}},
+                    {"kind": "property", "source": {"kind": "row"}, "name": "owner"},
+                ],
+            },
+            "offset": 0,
+            "limit": 50,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    cells = {row["key"][0]: row["cells"][1] for row in r.json()["rows"]}
+    assert cells[b]["kind"] == "element"
+    assert cells[b]["item"]["id"] == a
+    assert (cells[b]["element_id"], cells[b]["editable"], cells[b]["ref_type"]) == (b, True, "Block")
+    assert cells[a]["kind"] == "element" and cells[a]["item"] is None
+    assert (cells[a]["element_id"], cells[a]["editable"], cells[a]["ref_type"]) == (a, True, "Block")

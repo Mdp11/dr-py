@@ -37,17 +37,6 @@ def test_column_ref_must_point_backward():
         ])
 
 
-def test_navigation_column_source_must_be_element_producing():
-    # a property column produces values, not elements
-    with pytest.raises(ValidationError):
-        _table(columns=[
-            {"kind": "property", "source": {"kind": "row"}, "name": "mass"},
-            {"kind": "navigation", "source": {"kind": "column", "index": 0},
-             "navigation": {"definition": {"kind": "path",
-                             "start": {"kind": "row"}, "steps": []}}},
-        ])
-
-
 def test_element_column_source_must_be_single_binding():
     # sourcing an element column from a collapse navigation column (n elements)
     with pytest.raises(ValidationError):
@@ -62,19 +51,6 @@ def test_element_column_source_must_be_single_binding():
 def test_chain_index_nonzero_requires_chains_source():
     with pytest.raises(ValidationError):
         _table(columns=[{"kind": "element", "source": {"kind": "row", "chain_index": 2}}])
-
-
-def test_element_column_source_must_be_element_producing():
-    # A ColumnRef to an EXPAND property column is single-binding
-    # (one value per row) but does NOT produce elements — it produces the
-    # property's scalar value. An element column sourced from it must be
-    # rejected at schema validation, not crash at eval time.
-    with pytest.raises(ValidationError):
-        _table(columns=[
-            {"kind": "property", "source": {"kind": "row"}, "name": "mass",
-             "mode": "expand"},
-            {"kind": "element", "source": {"kind": "column", "index": 0}},
-        ])
 
 
 def test_expanded_property_accepts_multi_binding_source():
@@ -422,3 +398,26 @@ def test_display_order_is_never_validated_against_the_columns():
     # a stale list left by a column edit must not 422 the definition.
     t = _table(display_order=[5, -1, 0, 0])
     assert t.display_order == [5, -1, 0, 0]
+
+
+def test_property_column_is_an_element_capable_source():
+    # Element-typedness is only knowable with the metamodel, so the schema
+    # treats a property column like a script column: element-capable at
+    # runtime, single-binding only when expanded.
+    TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "property", "source": {"kind": "row"}, "name": "owner"},
+            {"kind": "navigation", "source": {"kind": "column", "index": 0}, "navigation": {}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "owner", "mode": "expand"},
+            {"kind": "element", "source": {"kind": "column", "index": 2}},
+        ],
+    })
+    with pytest.raises(ValueError, match="single-binding"):
+        TABLE_ADAPTER.validate_python({
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [
+                {"kind": "property", "source": {"kind": "row"}, "name": "owner"},
+                {"kind": "element", "source": {"kind": "column", "index": 0}},
+            ],
+        })

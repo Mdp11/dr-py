@@ -216,3 +216,39 @@ def test_sort_by_stereotype_orders_by_type_name():
     desc = order_rows(mm, model, defn, keys, SortSpec(column=1, direction="desc"))
     assert [k[0] for k in desc] == [w.id, b.id]
 
+
+def test_sort_by_element_typed_property_uses_display_names():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[
+                    PropertyDef(name="name", datatype="string"),
+                    PropertyDef(name="owner", datatype="Block", multiplicity="0..1"),
+                ],
+            ),
+        ],
+        relationships=[],
+    )
+    model = Model(mm)
+    zed = model.create_element("Block")
+    model.set_property(zed, "name", "Zed")
+    amy = model.create_element("Block")
+    model.set_property(amy, "name", "Amy")
+    first = model.create_element("Block")
+    model.set_property(first, "name", "First")
+    model.set_property(first, "owner", zed.id)
+    second = model.create_element("Block")
+    model.set_property(second, "name", "Second")
+    model.set_property(second, "owner", amy.id)
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "owner"},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    asc = order_rows(mm, model, defn, keys, SortSpec(column=1, direction="asc"))
+    # Amy < Zed by display name (not by id), owner-less rows last
+    assert [k[0] for k in asc][:2] == [second.id, first.id]

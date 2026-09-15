@@ -60,7 +60,13 @@ from .schema import (
     ScriptColumn,
     TableDefinition,
 )
-from .virtual_props import is_virtual_property, property_declared, raw_property
+from .virtual_props import (
+    is_virtual_property,
+    property_datatype,
+    property_declared,
+    property_is_element_typed,
+    raw_property,
+)
 from .script_inputs import (
     RUNNER_UNAVAILABLE_MESSAGE,
     dangling_ref_message,
@@ -73,6 +79,14 @@ from .script_inputs import (
 @dataclass
 class ElementCell:
     element_id: str | None
+    #: The element the reference belongs to, set only by an element-typed
+    #: PROPERTY column whose source is exactly one element — the patch target
+    #: of an in-table edit. `editable` mirrors `ValueCell.editable`.
+    owner_id: str | None = None
+    editable: bool = False
+    #: The element type the property references (its datatype) — what the
+    #: reference picker offers as candidates. Set with `owner_id`.
+    ref_type: str | None = None
 
 
 @dataclass
@@ -131,7 +145,7 @@ def _prop_present(mm: Metamodel, type_name: str, prop: str) -> bool:
 
 
 def expand_property_values(
-    model: Model, col: PropertyColumn, roots: list[str]
+    mm: Metamodel, model: Model, col: PropertyColumn, roots: list[str]
 ) -> list[Binding]:
     """Values an `expand` property column contributes for ONE row's roots:
     one binding per (element, value) pair, in root order with list values
@@ -147,10 +161,14 @@ def expand_property_values(
     """
     out: list[Binding] = []
     for eid in roots:
-        raw = raw_property(model.elements[eid], col.name)
+        el = model.elements[eid]
+        raw = raw_property(el, col.name)
         if raw is None:
             continue
-        if isinstance(raw, (list, tuple)):
+        if property_is_element_typed(mm, el.type_name, col.name):
+            # element references: a dangling id prunes, like a navigation hop
+            out.extend(_element_ids(model, raw))
+        elif isinstance(raw, (list, tuple)):
             out.extend(raw)
         else:
             out.append(raw)
@@ -189,6 +207,10 @@ def _property_cell(
     els = resolve_source_elements(
         mm, model, defn, key, col.source, base_slots, limits, script=script, memo=memo
     )
+    # An ELEMENT-TYPED property (its datatype names an element type) renders
+    # its ids as element cells — linkable, and editable through the reference
+    # picker — instead of as opaque strings. Ids naming no element drop.
+    element_typed = property_element_typed(mm, model, col, els)
     if col.mode == "expand":
         # The value already sits in this row's key slot (build_rows promoted
         # it); read it back rather than re-deriving it, so a `keep_empty` row
@@ -199,6 +221,9 @@ def _property_cell(
         # owner to attribute it to (two reached elements may share a value),
         # so `element_id` is set only when the source is exactly one element.
         eid = els[0] if len(els) == 1 else None
+        if element_typed:
+            ref = val if isinstance(val, str) and val in model.elements else None
+            return ElementCell(element_id=ref, owner_id=eid, editable=False)
         present = any(
             _prop_present(mm, model.elements[e].type_name, col.name) for e in els
         )
@@ -210,12 +235,45 @@ def _property_cell(
         el = model.elements[eid]
         present = _prop_present(mm, el.type_name, col.name)
         val = raw_property(el, col.name) if present else None
+        if element_typed and not isinstance(val, (list, tuple)):
+            ref = val if isinstance(val, str) and val in model.elements else None
+            return ElementCell(
+                element_id=ref,
+                owner_id=eid,
+                editable=True,
+                ref_type=property_datatype(mm, el.type_name, col.name),
+            )
+        if element_typed:
+            ids = _element_ids(model, val)
+            return ElementsCell(element_ids=ids, total=len(ids), truncated=False)
         editable = present and not is_virtual_property(col.name)
         return ValueCell(present=present, value=val, element_id=eid, editable=editable)
     # many-element collapse → joined read-only values (undeclared-on-some-types
     # elements simply contribute nothing, rather than failing the whole cell)
     vals = property_input_values(mm, model, col, els)
+    if element_typed:
+        ids = _element_ids(model, vals)
+        return ElementsCell(element_ids=ids, total=len(ids), truncated=False)
     return ValuesCell(present=True, values=vals, total=len(vals), truncated=False)
+
+
+def property_element_typed(
+    mm: Metamodel, model: Model, col: PropertyColumn, els: list[str]
+) -> bool:
+    """Whether `col` reads an element-typed property on ANY of `els`' types.
+    A mixed frontier (element-typed on one type, scalar on another) renders
+    as elements, dropping the scalars — the same degrade as the navigation
+    cell's mixed frontier."""
+    return any(
+        property_is_element_typed(mm, model.elements[e].type_name, col.name) for e in els
+    )
+
+
+def _element_ids(model: Model, raw: object) -> list[str]:
+    """The ids in a property value (scalar or list) that name model elements,
+    de-duplicated in value order."""
+    items = raw if isinstance(raw, (list, tuple)) else [raw]
+    return [i for i in dict.fromkeys(items) if isinstance(i, str) and i in model.elements]
 
 
 def _navigation_cell(

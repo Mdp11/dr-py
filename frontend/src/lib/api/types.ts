@@ -1182,7 +1182,18 @@ export const TableColumnSchema = z.object({
 	width_px: z.number().int().nullish()
 });
 export const TableCellSchema = z.discriminatedUnion('kind', [
-	z.object({ kind: z.literal('element'), item: TreeItemSchema.nullable() }),
+	z.object({
+		kind: z.literal('element'),
+		item: TreeItemSchema.nullable(),
+		// Set by an element-typed PROPERTY column: `element_id` is the OWNER
+		// of the reference (the patch target, as on a value cell), `editable`
+		// mirrors the value cell's flag, `ref_type` is what the picker offers.
+		// Optional (not defaulted) so a hand-written page literal without them
+		// still types as a TableCell; readers treat absence as null/false.
+		element_id: z.string().nullable().optional(),
+		editable: z.boolean().optional(),
+		ref_type: z.string().nullable().optional()
+	}),
 	z.object({
 		kind: z.literal('value'),
 		present: z.boolean(),

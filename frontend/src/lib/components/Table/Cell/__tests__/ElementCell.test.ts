@@ -5,7 +5,7 @@
 // staged-name overlay. Same render convention as ValueCell.test.ts
 // (mount/unmount/flushSync — @testing-library/svelte is not a dependency).
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { TableCell } from '$lib/api/types';
 import * as modelStore from '$lib/state/model.svelte';
@@ -105,6 +105,79 @@ describe('ElementsCell staged-name overlay', () => {
 			expect(document.body.textContent).not.toContain('Old name');
 		} finally {
 			unmount(c);
+		}
+	});
+});
+
+describe('ElementCell reference editing', () => {
+	// An element-typed PROPERTY column's cell: `element_id` is the OWNER (the
+	// patch target), `item` the referenced element. Editable cells render the
+	// Inspector's reference picker and stage the same `update_element` patch a
+	// value cell does.
+	function refCell(
+		overrides: Partial<Extract<TableCell, { kind: 'element' }>> = {}
+	): Extract<TableCell, { kind: 'element' }> {
+		return {
+			kind: 'element',
+			item: { id: 'e1', type_name: 'Block', display_name: 'Old name', child_count: 0 },
+			element_id: 'owner1',
+			editable: true,
+			ref_type: 'Block',
+			...overrides
+		};
+	}
+
+	it('renders a plain link, no picker, when the cell is not editable', () => {
+		const c = mount(ElementCell, {
+			target: document.body,
+			props: { cell: refCell({ editable: false }), columnName: 'owner' }
+		});
+		flushSync();
+		try {
+			expect(document.body.textContent).not.toContain('Browse');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('clearing the reference stages a null property patch on the owner', async () => {
+		const { setProjectInfo, resetCheckout } = await import('$lib/state');
+		const gate = await import('$lib/state/edit-gate');
+		resetCheckout();
+		setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
+		const ensureElement = vi
+			.spyOn(modelStore, 'ensureElement')
+			.mockResolvedValue({ id: 'owner1', type_name: 'Block', properties: {}, rev: 0 });
+		vi.spyOn(gate, 'editLock').mockResolvedValue(true);
+		const emit = vi.spyOn(modelStore, 'emit').mockImplementation(() => {});
+		// The picker resolves the referenced element's name cache-or-fetch;
+		// seed it so no request leaves the test.
+		modelStore.seedElements([
+			{ id: 'e1', type_name: 'Block', properties: { name: 'Old name' }, rev: 0 }
+		]);
+		const c = mount(ElementCell, {
+			target: document.body,
+			props: { cell: refCell(), columnName: 'owner' }
+		});
+		flushSync();
+		try {
+			expect(document.body.textContent).toContain('Browse');
+			const clear = document.body.querySelector('button[aria-label="Clear reference"]');
+			if (!clear) throw new Error('clear button not rendered');
+			(clear as HTMLButtonElement).click();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			flushSync();
+			expect(ensureElement).toHaveBeenCalledWith('owner1');
+			expect(gate.editLock).toHaveBeenCalledWith('owner1');
+			expect(emit).toHaveBeenCalledWith({
+				kind: 'update_element',
+				id: 'owner1',
+				properties_patch: { owner: null }
+			});
+		} finally {
+			unmount(c);
+			resetCheckout();
+			vi.restoreAllMocks();
 		}
 	});
 });

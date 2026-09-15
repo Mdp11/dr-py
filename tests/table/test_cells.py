@@ -648,3 +648,120 @@ def test_stereotype_property_as_script_input_values():
         "Widget",
     ]
 
+
+# ---- element-typed properties ------------------------------------------------
+
+
+def _ref_mm() -> Metamodel:
+    """Block.owner is a single Widget reference; Block.peers is many Blocks."""
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[
+                    PropertyDef(name="name", datatype="string"),
+                    PropertyDef(name="owner", datatype="Widget", multiplicity="0..1"),
+                    PropertyDef(name="peers", datatype="Block", multiplicity="0..*"),
+                ],
+            ),
+            ElementType(name="Widget", properties=[PropertyDef(name="name", datatype="string")]),
+        ],
+        relationships=[],
+    )
+
+
+def _ref_fixture(mm: Metamodel) -> tuple[Model, dict[str, str]]:
+    model = Model(mm)
+    ids: dict[str, str] = {}
+    for key, name in [("a", "A"), ("b", "B")]:
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+        ids[key] = el.id
+    w = model.create_element("Widget")
+    model.set_property(w, "name", "Gizmo")
+    ids["widget"] = w.id
+    model.set_property(model.elements[ids["a"]], "owner", ids["widget"])
+    model.set_property(model.elements[ids["a"]], "peers", [ids["b"], "no-such-id"])
+    return model, ids
+
+
+def test_element_typed_property_renders_editable_element_cell():
+    mm = _ref_mm()
+    model, ids = _ref_fixture(mm)
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "property", "source": {"kind": "row"}, "name": "owner"}],
+    })
+    by_id = {k[0]: cells[i][0] for i, k in enumerate(keys)}
+    a, b = by_id[ids["a"]], by_id[ids["b"]]
+    assert isinstance(a, ElementCell)
+    assert (a.element_id, a.owner_id, a.editable) == (ids["widget"], ids["a"], True)
+    assert isinstance(b, ElementCell)
+    assert (b.element_id, b.owner_id, b.editable) == (None, ids["b"], True)
+
+
+def test_many_valued_element_property_renders_elements_cell_dropping_dangling():
+    mm = _ref_mm()
+    model, ids = _ref_fixture(mm)
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "property", "source": {"kind": "row"}, "name": "peers"}],
+    })
+    a = cells[next(i for i, k in enumerate(keys) if k[0] == ids["a"])][0]
+    assert isinstance(a, ElementsCell)
+    assert (a.element_ids, a.total) == ([ids["b"]], 1)
+
+
+def test_expanded_element_property_promotes_element_cells():
+    mm = _ref_mm()
+    model, ids = _ref_fixture(mm)
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "property", "source": {"kind": "row"}, "name": "peers", "mode": "expand",
+             "keep_empty": False},
+        ],
+    })
+    assert [k[0] for k in keys] == [ids["a"]]
+    cell = cells[0][0]
+    assert isinstance(cell, ElementCell)
+    assert (cell.element_id, cell.editable) == (ids["b"], False)
+
+
+def test_element_property_column_is_a_source_for_later_columns():
+    mm = _ref_mm()
+    model, ids = _ref_fixture(mm)
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "property", "source": {"kind": "row"}, "name": "owner", "mode": "expand"},
+            {"kind": "element", "source": {"kind": "column", "index": 0}},
+            {"kind": "property", "source": {"kind": "column", "index": 0}, "name": "name"},
+            {"kind": "property", "source": {"kind": "row"}, "name": "peers"},
+            {"kind": "property", "source": {"kind": "column", "index": 3}, "name": "name"},
+        ],
+    })
+    a = cells[next(i for i, k in enumerate(keys) if k[0] == ids["a"])]
+    assert isinstance(a[1], ElementCell) and a[1].element_id == ids["widget"]
+    assert isinstance(a[2], ValueCell) and a[2].value == "Gizmo"
+    assert isinstance(a[4], ValueCell) and a[4].value == "B"
+
+
+def test_element_column_sourced_from_scalar_property_binds_nothing():
+    # A scalar property's expand slot holds a raw string, never an element id:
+    # the element column sourced from it renders empty rather than crashing.
+    mm = _mm()
+    model, ids = _fixture(mm)
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "property", "source": {"kind": "row"}, "name": "tags", "mode": "expand"},
+            {"kind": "element", "source": {"kind": "column", "index": 0}},
+        ],
+    })
+    root_rows = [i for i, k in enumerate(keys) if k[0] == ids["root"]]
+    assert len(root_rows) == 2
+    for i in root_rows:
+        cell = cells[i][1]
+        assert isinstance(cell, ElementCell)
+        assert cell.element_id is None

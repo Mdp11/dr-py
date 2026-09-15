@@ -188,6 +188,9 @@ def _cell_out(model: Model, cell: Cell) -> TableCellOut:
         return TableCellOut(
             kind="element",
             item=_tree_item(model, cell.element_id) if cell.element_id else None,
+            element_id=cell.owner_id,
+            editable=cell.editable,
+            ref_type=cell.ref_type,
         )
     if isinstance(cell, ValueCell):
         return TableCellOut(

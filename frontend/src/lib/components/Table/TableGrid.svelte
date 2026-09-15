@@ -318,9 +318,11 @@
 	// carry one; values/elements cells are aggregates with no single owner).
 	// 'mine' tints the cell orange, 'theirs' red — see the row markup.
 	function cellLockBadge(cell: TableCell): { state: 'none' | 'mine' | 'theirs'; holder?: string } {
+		// An element-typed property's cell is owned by `element_id` (the patch
+		// target), not by the element it points at.
 		const id =
 			cell.kind === 'element'
-				? (cell.item?.id ?? null)
+				? (cell.element_id ?? cell.item?.id ?? null)
 				: cell.kind === 'value'
 					? cell.element_id
 					: null;
@@ -611,7 +613,7 @@
 							>
 								{#if cell.kind === 'element'}
 									<div class="flex h-7 max-w-full min-w-0 items-center">
-										<ElementCell {cell} />
+										<ElementCell {cell} columnName={columnNameFor(v.i)} />
 									</div>
 								{:else if cell.kind === 'value'}
 									<div class="flex h-7 max-w-full min-w-0 items-center">
