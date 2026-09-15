@@ -307,3 +307,54 @@ def test_later_sort_keys_break_ties_of_earlier_ones():
     assert [k[0] for k in ordered] == [
         ids["c-light"], ids["b-heavy"], ids["a-none"], ids["a-heavy"]
     ]
+
+
+def test_property_sort_is_typed_regardless_of_row_source():
+    # A navigation row source has no fixed type set, and the old numeric test
+    # only looked at a scope's declared types — so 10 sorted before 2. The
+    # comparison must follow the VALUES' type, not the row source's shape.
+    mm = _mm()
+    model = Model(mm)
+    root = model.create_element("Block")
+    model.set_property(root, "name", "Root")
+    ids = {}
+    for name, mass in [("two", 2), ("ten", 10), ("three", 3)]:
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+        model.set_property(el, "mass", mass)
+        model.connect("BlockHasPart", root.id, el.id)
+        ids[name] = el.id
+    nav = {
+        "kind": "path",
+        "start": {"kind": "scope", "types": ["Block"],
+                  "criteria": [{"type": "name_id", "field": "name",
+                                "op": "equals", "value": "Root"}]},
+        "steps": [{"kind": "relationship", "relationship_type": "BlockHasPart",
+                   "direction": "out"}],
+    }
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "navigation", "navigation": {"definition": nav}},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "mass"},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    asc = order_rows(mm, model, defn, keys, [SortSpec(1, "asc")])
+    assert [k[0] for k in asc] == [ids["two"], ids["three"], ids["ten"]]
+    # the same property reached through an earlier column, and split into rows
+    defn2 = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"],
+                       "criteria": [{"type": "name_id", "field": "name",
+                                     "op": "equals", "value": "Root"}]},
+        "columns": [
+            {"kind": "navigation", "source": {"kind": "row"},
+             "navigation": {"definition": {**nav, "start": {"kind": "row"}}},
+             "mode": "expand"},
+            {"kind": "property", "source": {"kind": "column", "index": 0}, "name": "mass",
+             "mode": "expand"},
+        ],
+    })
+    keys2, _ = build_rows(mm, model, defn2)
+    desc = order_rows(mm, model, defn2, keys2, [SortSpec(1, "desc")])
+    assert [k[1] for k in desc] == [ids["ten"], ids["three"], ids["two"]]

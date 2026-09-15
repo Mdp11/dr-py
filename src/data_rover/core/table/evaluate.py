@@ -30,7 +30,7 @@ from data_rover.core.navigation.evaluate import (
 from data_rover.core.script.warnings import ScriptWarningCode
 
 from .nav_memo import MemoEntry, NavMemo
-from .virtual_props import is_virtual_property, property_is_element_typed, raw_property
+from .virtual_props import property_is_element_typed, raw_property
 from .schema import (
     ChainRows,
     Column,
@@ -1003,28 +1003,6 @@ def _expanded_property_is_element_typed(
     )
 
 
-def _property_is_numeric(
-    mm: Metamodel, defn: TableDefinition, col: PropertyColumn
-) -> bool:
-    """True only if EVERY scoped type declaring `col.name` gives it an
-    integer/float datatype — a single conflicting type falls back to casefold
-    string sort so mixed-type tables never silently misorder.
-
-    Only meaningful for a `scope` row source, where the candidate type set is
-    known upfront; a navigation/chain row source has no such fixed set (the
-    reached elements can be of any type), so property sort there is always
-    string."""
-    if defn.row_source.kind != "scope" or is_virtual_property(col.name):
-        return False
-    declaring = [
-        pd.datatype
-        for t in defn.row_source.types
-        for pd in mm.effective_element_properties(t)
-        if pd.name == col.name
-    ]
-    return bool(declaring) and all(dt in ("integer", "float") for dt in declaring)
-
-
 def _sort_value(
     mm: Metamodel,
     model: Model,
@@ -1071,7 +1049,11 @@ def _sort_value(
             return (1, "")
         return (0, (_display_name(model, els[0]).casefold(), els[0]))
     if isinstance(col, PropertyColumn):
-        numeric = _property_is_numeric(mm, defn, col)
+        # Scalar values compare by their OWN type through `_script_sort_atom`
+        # (numbers numerically, strings casefolded, uniform triples so a
+        # mixed column never raises) — never by the row source's declared
+        # types, which a navigation/chain row source or an earlier-column
+        # source does not even have.
         if col.mode == "expand":
             v = key[_expand_slot_of(defn, base_slots, col_index)]
             if v is None:
@@ -1080,7 +1062,7 @@ def _sort_value(
                 mm, model, defn, key, col, base_slots, limits, script, memo
             ):
                 return (0, (_display_name(model, v).casefold(), v))
-            return (0, (float(v),)) if numeric else (0, (str(v).casefold(),))  # type: ignore[arg-type]
+            return (0, (_script_sort_atom(model, v),))
         els = resolve_source_elements(
             mm,
             model,
@@ -1107,9 +1089,7 @@ def _sort_value(
             vals.extend(v if isinstance(v, list) else [v])
         if not vals:
             return (1, ())
-        if numeric:
-            return (0, tuple(float(v) for v in vals))  # type: ignore[arg-type]
-        return (0, tuple(str(v).casefold() for v in vals))
+        return (0, tuple(_script_sort_atom(model, v) for v in vals))
     if isinstance(col, ScriptColumn):
         if col.mode == "expand":
             b = key[_expand_slot_of(defn, base_slots, col_index)]
