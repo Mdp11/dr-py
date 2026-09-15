@@ -73,6 +73,7 @@ const TABLE_DEFN: TableDefinition = {
 	default_cell_mode: 'collapse',
 	show_row_numbers: false,
 	export_order: [],
+	display_order: [],
 	export_row_number: null,
 	json_split: null
 };

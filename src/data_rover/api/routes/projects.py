@@ -13,7 +13,6 @@ admin-sees-all, otherwise scoped to the caller's own projects.
 
 from __future__ import annotations
 
-import json
 import uuid
 
 from fastapi import (
@@ -36,7 +35,7 @@ from ..authz import require_admin, require_membership
 from ..db import get_db
 from ..db_models import Membership, Project, Role, User
 from ..identity import get_current_user
-from ..serialize import iter_model_json
+from ..serialize import iter_model_json, parse_model_json
 from ..session import get_registry
 from ._snapshot import build_model_from_dicts
 
@@ -108,7 +107,7 @@ def create_project(
     # a bad metamodel/model must 422 without leaving an orphan project.
     try:
         mm = load_metamodel_str(metamodel_yaml)
-        build_model_from_dicts(mm, json.loads(model_json))
+        build_model_from_dicts(mm, parse_model_json(model_json))
     except HTTPException:
         raise  # build_model_from_dicts already raises 422 with a precise detail
     except Exception as exc:

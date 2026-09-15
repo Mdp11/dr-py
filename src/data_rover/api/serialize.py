@@ -34,6 +34,27 @@ from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 
+def _nonfinite_literal(literal: str) -> str:
+    # ``json.loads`` accepts the bare ``Infinity``/``-Infinity``/``NaN``
+    # literals Python's own writer emits by default, yielding non-finite
+    # floats that no JSON writer here can emit (``allow_nan=False``) and that
+    # pydantic serializes as ``null``. Keeping the literal's text turns the
+    # two infinities into their canonical ``FLOAT_INFINITIES`` tokens; ``NaN``
+    # has no token and surfaces as a type-conformance issue instead.
+    return literal
+
+
+def parse_model_json(data: str | bytes) -> Any:
+    """Parse a model document the way every model-JSON reader must.
+
+    Identical to ``json.loads`` except that a bare infinity literal reads as
+    its canonical string token, so a file written by ``json.dumps`` with the
+    default ``allow_nan=True`` loads to the same in-memory value as one
+    carrying the tokens.
+    """
+    return json.loads(data, parse_constant=_nonfinite_literal)
+
+
 #: entities sit two levels deep ({ -> "elements": [ -> entity), so their
 #: json.dumps text (indent level 0) is shifted right by two indent steps
 _ENTITY_PAD = " " * 4

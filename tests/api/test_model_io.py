@@ -371,6 +371,32 @@ def test_upload_invalid_json_yields_422(client: TestClient) -> None:
     assert res.status_code == 422, res.text
 
 
+def test_upload_bare_infinity_literals_become_float_tokens(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A file carrying Python's bare ``Infinity``/``-Infinity`` literals loads
+    as the canonical string tokens, so the values read back (rather than as
+    ``null``) and the model stays saveable."""
+    _upload_metamodel(client)
+    body = (
+        b'{"elements": [{"id": "p1", "type_name": "PerformanceRequirement", '
+        b'"properties": {"title": "t", "priority": "must", "metric": "m", '
+        b'"target_value": Infinity, "latency_p99_ms": -Infinity, '
+        b'"throughput_rps": 1.5}}], "relationships": []}'
+    )
+    res = client.post(f"{API}/model/upload", content=body)
+    assert res.status_code == 200, res.text
+    got = client.get(f"{API}/model/elements/p1").json()["properties"]
+    assert got["target_value"] == "Infinity"
+    assert got["latency_p99_ms"] == "-Infinity"
+    assert got["throughput_rps"] == 1.5
+    # the tokens are what the writer emits, so the file round-trips
+    res = client.post(f"{API}/model/save", json={"path": str(tmp_path / "m.json")})
+    assert res.status_code == 200, res.text
+    saved = json.loads((tmp_path / "m.json").read_text(encoding="utf-8"))
+    assert saved["elements"][0]["properties"]["target_value"] == "Infinity"
+
+
 # ---------------------------------------------------------------------------
 # POST /model/save + GET /model/download
 # ---------------------------------------------------------------------------

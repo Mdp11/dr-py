@@ -9,7 +9,6 @@ project's durable rev-0 baseline. Reused by the dev-seed and runnable as a CLI:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
@@ -26,6 +25,7 @@ from .db import db_session, init_engine
 from .db_models import ArtifactKind, Membership, Project, Role
 from .hydration import write_snapshot
 from .routes._snapshot import build_model_from_dicts
+from .serialize import parse_model_json
 from .session import Session
 from .settings import get_settings
 
@@ -211,7 +211,7 @@ def import_project(
     # build the model + write the rev-0 snapshot (outside the txn above; the
     # commit/model rows are already durable and the snapshot row is its own).
     metamodel = load_metamodel_str(metamodel_yaml)
-    model = build_model_from_dicts(metamodel, json.loads(model_json))
+    model = build_model_from_dicts(metamodel, parse_model_json(model_json))
     sess = Session(metamodel=metamodel, model=model)
     sess.model_rev = 0
     write_snapshot(project_id, sess, 0)

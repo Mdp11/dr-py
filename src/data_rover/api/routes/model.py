@@ -40,7 +40,7 @@ from ..schemas import (
     SnapshotIn,
 )
 from ..search_index_build import start_search_index_build
-from ..serialize import iter_buffered, iter_model_json
+from ..serialize import iter_buffered, iter_model_json, parse_model_json
 from ..session import get_registry
 from ..validation_sweep import start_validation_sweep
 from ._snapshot import _build_model_from_payload, build_model_from_dicts
@@ -238,8 +238,7 @@ def load_model(
             detail=f"Not a readable file: {payload.path!r}",
         )
     try:
-        with path.open(encoding="utf-8") as f:
-            raw = json.load(f)
+        raw = parse_model_json(path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -279,7 +278,7 @@ async def upload_model_body(
     metamodel = require_metamodel(session)
     body = await read_capped_body(request)
     try:
-        raw = json.loads(body)
+        raw = parse_model_json(body)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(
             status_code=422,

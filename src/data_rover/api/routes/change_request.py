@@ -59,6 +59,7 @@ from ..schemas import (
     ProposeCrResponse,
     RelationshipOut,
 )
+from ..serialize import parse_model_json
 from ._snapshot import build_model_from_dicts
 from .read import _now_iso
 
@@ -233,7 +234,7 @@ async def compare_model(
     metamodel, base = require_model(session)
     body = await read_capped_body(request)
     try:
-        raw = json.loads(body)
+        raw = parse_model_json(body)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(
             status_code=422, detail=f"Request body is not valid JSON: {exc}"

@@ -2,6 +2,7 @@
 	import type { PropertyDef } from '$lib/api/types';
 	import { parseMultiplicity } from '$lib/metamodel/helpers';
 	import { getMetamodel } from '$lib/state';
+	import { floatInputText, parseFloatInput } from '$lib/util/float-input';
 	import { Plus, Trash2 } from '@lucide/svelte';
 	import ElementRefPicker from './ElementRefPicker.svelte';
 
@@ -104,15 +105,35 @@
 		const v = (e.target as HTMLInputElement | HTMLTextAreaElement).value;
 		emitScalar(v);
 	}
-	function onNumberInput(e: Event): void {
+	function onIntegerInput(e: Event): void {
 		const raw = (e.target as HTMLInputElement).value;
 		if (raw === '') {
 			onChange(null);
 			return;
 		}
-		const n = kind === 'integer' ? Number.parseInt(raw, 10) : Number.parseFloat(raw);
+		const n = Number.parseInt(raw, 10);
 		if (Number.isFinite(n)) onChange(n);
 	}
+	// Float fields are text inputs (a number input cannot hold an infinity
+	// token); text that parses to nothing keeps the stored value and shows a
+	// warning keyed by slot (-1 = the scalar field, else the array index).
+	const FLOAT_PLACEHOLDER = 'number, Infinity or -Infinity';
+	let floatInvalid = $state<Record<number, boolean>>({});
+	function onFloatInput(slot: number, raw: string): void {
+		const parsed = parseFloatInput(raw);
+		floatInvalid = { ...floatInvalid, [slot]: parsed === undefined };
+		if (parsed === undefined) return;
+		if (slot < 0) onChange(parsed);
+		else updateAt(slot, parsed);
+	}
+	const floatWarning = $derived.by((): string | null => {
+		if (kind !== 'float') return null;
+		const slots = Object.keys(floatInvalid)
+			.map(Number)
+			.filter((i) => floatInvalid[i]);
+		if (slots.length === 0) return null;
+		return slots[0] < 0 ? 'not a float' : `[${slots[0]}] not a float`;
+	});
 	function onBooleanChange(e: Event): void {
 		const next = (e.target as HTMLInputElement).checked;
 		// Avoid emitting a useless op when the boolean is already (effectively) false.
@@ -142,6 +163,7 @@
 	function removeAt(i: number): void {
 		const next = arrayValue.slice();
 		next.splice(i, 1);
+		floatInvalid = {};
 		emitArray(next);
 	}
 	function defaultForKind(): unknown {
@@ -164,6 +186,7 @@
 		}
 	}
 	function addOne(): void {
+		floatInvalid = {};
 		emitArray([...arrayValue, defaultForKind()]);
 	}
 
@@ -216,15 +239,16 @@
 				step="1"
 				class={inputCls}
 				value={typeof value === 'number' ? value : ''}
-				oninput={onNumberInput}
+				oninput={onIntegerInput}
 			/>
 		{:else if kind === 'float'}
 			<input
-				type="number"
-				step="any"
+				type="text"
+				inputmode="decimal"
 				class={inputCls}
-				value={typeof value === 'number' ? value : ''}
-				oninput={onNumberInput}
+				placeholder={FLOAT_PLACEHOLDER}
+				value={floatInputText(value)}
+				oninput={(e) => onFloatInput(-1, (e.target as HTMLInputElement).value)}
 			/>
 		{:else if kind === 'boolean'}
 			<label class="flex items-center gap-2 text-xs text-foreground/80">
@@ -299,18 +323,12 @@
 								/>
 							{:else if kind === 'float'}
 								<input
-									type="number"
-									step="any"
+									type="text"
+									inputmode="decimal"
 									class={inputCls}
-									value={typeof item === 'number' ? item : ''}
-									oninput={(e) => {
-										const raw = (e.target as HTMLInputElement).value;
-										if (raw === '') updateAt(i, null);
-										else {
-											const n = Number.parseFloat(raw);
-											if (Number.isFinite(n)) updateAt(i, n);
-										}
-									}}
+									placeholder={FLOAT_PLACEHOLDER}
+									value={floatInputText(item)}
+									oninput={(e) => onFloatInput(i, (e.target as HTMLInputElement).value)}
 								/>
 							{:else if kind === 'boolean'}
 								<label class="flex items-center gap-2 text-xs text-foreground/80">
@@ -362,5 +380,8 @@
 	{/if}
 	{#if facetWarning !== null}
 		<span class="text-[10px] text-destructive">{facetWarning}</span>
+	{/if}
+	{#if floatWarning !== null}
+		<span class="text-[10px] text-destructive">{floatWarning}</span>
 	{/if}
 </div>

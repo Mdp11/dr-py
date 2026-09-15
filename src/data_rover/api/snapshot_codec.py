@@ -11,14 +11,13 @@ test that puts plain JSON under a ``.json.gz`` key loads too.
 from __future__ import annotations
 
 import gzip
-import json
 import zlib
 from collections.abc import Iterator
 from typing import Any
 
 from data_rover.core.model.model import Model
 
-from .serialize import iter_buffered, iter_model_json_compact
+from .serialize import iter_buffered, iter_model_json_compact, parse_model_json
 
 #: deflate level. 3 is the knee on the compact document: level 6 doubles the
 #: encode time for ~15 % fewer bytes, level 1 saves ~10 % time for ~15 % more.
@@ -54,4 +53,4 @@ def decode_snapshot(blob: bytes) -> Any:
     """Parse a stored snapshot blob, compressed or plain, into the document."""
     if is_gzip(blob):
         blob = gzip.decompress(blob)
-    return json.loads(blob)
+    return parse_model_json(blob)
