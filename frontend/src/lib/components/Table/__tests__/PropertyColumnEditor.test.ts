@@ -101,6 +101,24 @@ describe('PropertyColumnEditor', () => {
 		}
 	});
 
+	it('offers the virtual _Stereotype property first, before the declared ones', () => {
+		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
+		const onChange = vi.fn();
+		const c = render(propColumn(), { kind: 'scope', types: ['Block'], criteria: [] }, onChange);
+		try {
+			focusNameInput();
+			const list = document.querySelector('[data-testid="property-suggestions"]') as HTMLElement;
+			const first = list.querySelector('li button') as HTMLButtonElement;
+			expect(first.textContent).toContain('_Stereotype');
+			expect(first.textContent).toContain('virtual');
+			first.click();
+			flushSync();
+			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ name: '_Stereotype' }));
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('falls back to all properties when the source types are unknowable', () => {
 		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
 		const onChange = vi.fn();

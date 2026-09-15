@@ -30,6 +30,7 @@ from data_rover.core.navigation.evaluate import (
 from data_rover.core.script.warnings import ScriptWarningCode
 
 from .nav_memo import MemoEntry, NavMemo
+from .virtual_props import is_virtual_property, raw_property
 from .schema import (
     ChainRows,
     Column,
@@ -662,7 +663,7 @@ def _collapse_has_value(
         )
         return bool(reached), truncated
     for eid in roots:
-        raw = model.elements[eid].properties.get(col.name)
+        raw = raw_property(model.elements[eid], col.name)
         if raw is None:
             continue
         if isinstance(raw, (list, tuple)):
@@ -940,7 +941,7 @@ def _property_is_numeric(
     known upfront; a navigation/chain row source has no such fixed set (the
     reached elements can be of any type), so property sort there is always
     string."""
-    if defn.row_source.kind != "scope":
+    if defn.row_source.kind != "scope" or is_virtual_property(col.name):
         return False
     declaring = [
         pd.datatype
@@ -1016,7 +1017,7 @@ def _sort_value(
         )
         vals: list[Binding] = []
         for eid in els:
-            v = model.elements[eid].properties.get(col.name)
+            v = raw_property(model.elements[eid], col.name)
             if v is None:
                 continue
             vals.extend(v if isinstance(v, list) else [v])

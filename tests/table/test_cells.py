@@ -578,3 +578,73 @@ def test_export_limits_ignore_per_column_cell_cap():
     assert isinstance(cell, ElementsCell)
     assert len(cell.element_ids) == 2  # BOTH parts, despite cell_cap=1
     assert cell.truncated is False
+
+
+# ---- `_Stereotype` virtual property ------------------------------------------
+
+
+def test_stereotype_property_reads_type_name_read_only():
+    mm = _mm()
+    model, ids = _fixture(mm)
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block", "Widget"]},
+        "columns": [{"kind": "property", "source": {"kind": "row"}, "name": "_Stereotype"}],
+    })
+    by_id = {k[0]: cells[i][0] for i, k in enumerate(keys)}
+    block = by_id[ids["root"]]
+    widget = by_id[ids["widget"]]
+    assert isinstance(block, ValueCell) and isinstance(widget, ValueCell)
+    assert (block.present, block.value, block.editable) == (True, "Block", False)
+    assert (widget.present, widget.value, widget.editable) == (True, "Widget", False)
+
+
+def test_stereotype_property_expand_promotes_type_name():
+    mm = _mm()
+    model, ids = _fixture(mm)
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Widget"]},
+        "columns": [
+            {"kind": "property", "source": {"kind": "row"}, "name": "_Stereotype", "mode": "expand"}
+        ],
+    })
+    assert keys == [(ids["widget"], "Widget")]
+    cell = cells[0][0]
+    assert isinstance(cell, ValueCell)
+    assert (cell.present, cell.value, cell.editable) == (True, "Widget", False)
+
+
+def test_stereotype_property_over_many_elements_joins_type_names():
+    mm = _mm()
+    model, ids = _fixture(mm)
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "navigation", "source": {"kind": "row"},
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                "steps": [{"kind": "relationship",
+                           "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+            {"kind": "property", "source": {"kind": "column", "index": 0}, "name": "_Stereotype"},
+        ],
+    })
+    root_row = next(i for i, k in enumerate(keys) if k[0] == ids["root"])
+    cell = cells[root_row][1]
+    assert isinstance(cell, ValuesCell)
+    assert cell.values == ["Block", "Block"]
+
+
+def test_stereotype_property_as_script_input_values():
+    from data_rover.core.table.script_inputs import property_input_values
+
+    mm = _mm()
+    model, ids = _fixture(mm)
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "property", "source": {"kind": "row"}, "name": "_Stereotype"}],
+    })
+    col = defn.columns[0]
+    assert col.kind == "property"
+    assert property_input_values(mm, model, col, [ids["root"], ids["widget"]]) == [
+        "Block",
+        "Widget",
+    ]
+

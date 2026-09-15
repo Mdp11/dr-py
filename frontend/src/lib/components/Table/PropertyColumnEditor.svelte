@@ -13,6 +13,7 @@
 	} from '$lib/metamodel/helpers';
 	import type { Column, RowSource } from '$lib/api/types';
 	import type { PropertyItem } from '$lib/search/property-ops';
+	import { STEREOTYPE_PROPERTY } from '$lib/table/columns';
 	import ColumnSourceEditor from './ColumnSourceEditor.svelte';
 
 	type PropColumn = Extract<Column, { kind: 'property' }>;
@@ -40,14 +41,17 @@
 	const sourceTypes = $derived(
 		column.source.kind === 'row' && rowSource.kind === 'scope' ? rowSource.types : []
 	);
-	const items = $derived<PropertyItem[]>(
-		mm
+	// The virtual `_Stereotype` leads the list: it applies to every type, so
+	// it is never filtered out by the scope.
+	const items = $derived<PropertyItem[]>([
+		{ name: STEREOTYPE_PROPERTY, datatype: 'virtual' },
+		...(mm
 			? effectivePropertiesForTypes(mm, sourceTypes).map((p) => ({
 					name: p.name,
 					datatype: p.datatype
 				}))
-			: []
-	);
+			: [])
+	]);
 
 	// The name field is a COMBOBOX: the input's text is the column's name, and
 	// focusing/typing opens a suggestion list filtered by that text. Picking a
@@ -87,6 +91,7 @@
 	// checked stale config also stays enabled so the user can still uncheck it.
 	const splitDisabled = $derived.by(() => {
 		if (column.mode === 'expand') return false;
+		if (column.name.trim() === STEREOTYPE_PROPERTY) return true; // single-valued by definition
 		if (mm === null) return false;
 		if (column.source.kind !== 'row' || rowSource.kind !== 'scope') return false;
 		const name = column.name.trim();

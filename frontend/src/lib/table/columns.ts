@@ -410,6 +410,15 @@ export function navigationAsTableDefinition({
 	};
 }
 
+/**
+ * The virtual property a property column may name besides the metamodel's
+ * own: an element's type name. The leading underscore keeps it out of the
+ * namespace a metamodel author can declare. Mirrors
+ * `core/table/virtual_props.py`, which is where it is read; single-valued and
+ * read-only there, so the editor's split toggle greys out for it.
+ */
+export const STEREOTYPE_PROPERTY = '_Stereotype';
+
 export function columnLabel(col: Column): string {
 	if (col.header) return col.header;
 	if (col.kind === 'property') return col.name;

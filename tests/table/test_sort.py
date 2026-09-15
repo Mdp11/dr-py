@@ -190,3 +190,29 @@ def test_sort_none_returns_input_order_unchanged():
     result = order_rows(mm, model, defn, keys, None)
     assert result == keys
     assert result is not keys
+
+
+def test_sort_by_stereotype_orders_by_type_name():
+    mm = Metamodel(
+        elements=[
+            ElementType(name="Block", properties=[PropertyDef(name="name", datatype="string")]),
+            ElementType(name="Widget", properties=[PropertyDef(name="name", datatype="string")]),
+        ],
+        relationships=[],
+    )
+    model = Model(mm)
+    w = model.create_element("Widget")
+    b = model.create_element("Block")
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block", "Widget"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "_Stereotype"},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    asc = order_rows(mm, model, defn, keys, SortSpec(column=1, direction="asc"))
+    assert [k[0] for k in asc] == [b.id, w.id]
+    desc = order_rows(mm, model, defn, keys, SortSpec(column=1, direction="desc"))
+    assert [k[0] for k in desc] == [w.id, b.id]
+

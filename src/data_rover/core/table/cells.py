@@ -60,6 +60,7 @@ from .schema import (
     ScriptColumn,
     TableDefinition,
 )
+from .virtual_props import is_virtual_property, property_declared, raw_property
 from .script_inputs import (
     RUNNER_UNAVAILABLE_MESSAGE,
     dangling_ref_message,
@@ -126,7 +127,7 @@ Cell = ElementCell | ValueCell | ValuesCell | ElementsCell | ErrorCell | Pending
 
 
 def _prop_present(mm: Metamodel, type_name: str, prop: str) -> bool:
-    return any(pd.name == prop for pd in mm.effective_element_properties(type_name))
+    return property_declared(mm, type_name, prop)
 
 
 def expand_property_values(
@@ -146,7 +147,7 @@ def expand_property_values(
     """
     out: list[Binding] = []
     for eid in roots:
-        raw = model.elements[eid].properties.get(col.name)
+        raw = raw_property(model.elements[eid], col.name)
         if raw is None:
             continue
         if isinstance(raw, (list, tuple)):
@@ -208,8 +209,9 @@ def _property_cell(
         eid = els[0]
         el = model.elements[eid]
         present = _prop_present(mm, el.type_name, col.name)
-        val = el.properties.get(col.name) if present else None
-        return ValueCell(present=present, value=val, element_id=eid, editable=present)
+        val = raw_property(el, col.name) if present else None
+        editable = present and not is_virtual_property(col.name)
+        return ValueCell(present=present, value=val, element_id=eid, editable=editable)
     # many-element collapse → joined read-only values (undeclared-on-some-types
     # elements simply contribute nothing, rather than failing the whole cell)
     vals = property_input_values(mm, model, col, els)

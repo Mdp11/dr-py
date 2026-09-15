@@ -40,6 +40,7 @@ from .evaluate import (
     resolve_source_elements,
 )
 from .nav_memo import NavMemo
+from .virtual_props import property_declared, raw_property
 from .schema import Column, PropertyColumn, ScriptColumn, ScriptInput, TableDefinition
 
 if TYPE_CHECKING:
@@ -100,11 +101,9 @@ def property_input_values(
     vals: list[object] = []
     for eid in els:
         el = model.elements[eid]
-        if not any(
-            pd.name == col.name for pd in mm.effective_element_properties(el.type_name)
-        ):
+        if not property_declared(mm, el.type_name, col.name):
             continue
-        v = el.properties.get(col.name)
+        v = raw_property(el, col.name)
         if isinstance(v, (list, tuple)):
             vals.extend(v)
         elif v is not None:
