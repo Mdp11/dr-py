@@ -363,15 +363,16 @@ describe('fetchScriptErrors', () => {
 	// `offset`/`limit` are IGNORED by the route (the recap is always
 	// whole-table) but `sort` is load-bearing: `row_index` is only a valid grid
 	// address for the (definition, sort, model_rev) the page was rendered with.
-	it('forwards the sort the grid is showing', async () => {
-		let body: unknown;
+	it('sends the table address only — the definition carries the sort', async () => {
+		let body: Record<string, unknown> = {};
 		server.use(
 			http.post(`${BASE}/tables/script-errors`, async ({ request }) => {
-				body = await request.json();
+				body = (await request.json()) as Record<string, unknown>;
 				return HttpResponse.json({ state: 'ready', errors: [], total_errors: 0, truncated: false });
 			})
 		);
-		await fetchScriptErrors({ artifactId: 'a1', sort: { column: 1, direction: 'asc' } }, cfg);
-		expect(body).toMatchObject({ artifact_id: 'a1', sort: { column: 1, direction: 'asc' } });
+		await fetchScriptErrors({ artifactId: 'a1' }, cfg);
+		expect(body).toMatchObject({ artifact_id: 'a1' });
+		expect('sort' in body).toBe(false);
 	});
 });

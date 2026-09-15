@@ -876,11 +876,11 @@ def _sort_reaches_script_navigation(defn: TableDefinition, col: Column) -> bool:
 
 
 def sort_falls_back_to_build_order(
-    defn: TableDefinition, sort: SortSpec | None
+    defn: TableDefinition, sort: Sequence[SortSpec]
 ) -> bool:
-    """Would a CACHE-ONLY `order_rows(defn, ..., sort)` degrade to build order
-    (and emit `ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV`) rather than sort? See
-    `_sort_script`.
+    """Would a CACHE-ONLY `order_rows(defn, ..., sort)` degrade ANY of its keys
+    to build order (and emit `ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV`) rather
+    than sort by it? See `_sort_script`.
 
     Public because the decision is O(definition) and depends on NOTHING else —
     not the cell cache, not the model, not the context. That is what lets the
@@ -890,9 +890,10 @@ def sort_falls_back_to_build_order(
     itself is the one that happened to build the order. Every later reload, tab
     reopen, and second viewer would get a table they asked to sort, unsorted,
     with no explanation anywhere."""
-    if sort is None:
-        return False
-    return _sort_reaches_script_navigation(defn, defn.columns[sort.column])
+    return any(
+        _sort_reaches_script_navigation(defn, defn.columns[spec.column])
+        for spec in sort
+    )
 
 
 def _sort_script(
@@ -1195,20 +1196,42 @@ def _sort_value(
     return (0, tuple(sorted(label.casefold() for label in labels)))
 
 
+def sort_keys(defn: TableDefinition) -> tuple[SortSpec, ...]:
+    """`defn.sort` made safe: out-of-range and duplicate column keys dropped
+    (first occurrence wins), order kept. `()` is build order."""
+    n = len(defn.columns)
+    seen: set[int] = set()
+    out: list[SortSpec] = []
+    for key in defn.sort:
+        if not (0 <= key.column < n) or key.column in seen:
+            continue
+        seen.add(key.column)
+        out.append(SortSpec(column=key.column, direction=key.direction))
+    return tuple(out)
+
+
 def order_rows(
     mm: Metamodel,
     model: Model,
     defn: TableDefinition,
     keys: list[RowKey],
-    sort: SortSpec | None,
+    sort: Sequence[SortSpec],
     limits: TableLimits = TableLimits(),
     script: ScriptEvalContext | None = None,
 ) -> list[RowKey]:
-    """Stable-sort `keys` by one column; `sort=None` returns a new list in the
-    input order. Missing/empty values sort last in BOTH directions (see the
-    module docstring above `_sort_value`). Ties fall back to `build_rows`' own
+    """Stable-sort `keys` by `sort` (normally `sort_keys(defn)`): the first key
+    is primary, each later key breaks the ties of the one before; an empty
+    `sort` returns a new list in the input order. Missing/empty values sort
+    last in BOTH directions, per key (see the module docstring above
+    `_sort_value`). Ties under every key fall back to `build_rows`' own
     deterministic order, since Python's sort is stable — giving a total order
     without needing every value to be independently unique.
+
+    The keys are applied LAST TO FIRST, one stable pass each: a later pass
+    only reorders rows that tie under its key, so the pass for the first key
+    ends up primary and the previous passes' order survives inside its ties.
+    That reuses the single-key empties-last partition unchanged, at
+    O(k · n log n).
 
     `base_slots` is derived from the FULL key set exactly as in
     `evaluate_cells`: `keys` here is always the complete, already-built row set
@@ -1217,44 +1240,49 @@ def order_rows(
 
     A fresh `NavMemo` is created here and dies with the call: nothing this
     pass evaluates under `script.cache_only` can be served to a later pass."""
-    if sort is None:
+    if not sort:
         return list(keys)
-    col = defn.columns[sort.column]
-    # Taken ONCE, here, rather than inside `_sort_value`: it depends only on
-    # (defn, col, script.cache_only), so per-row evaluation was pure repetition
-    # — and skipped the warning entirely on an empty key set. Nothing between
-    # here and the decorate loop mutates what it reads (`cache_only` is a phase
-    # flag the caller flips around whole passes, never mid-pass).
-    script = _sort_script(defn, col, script)
     memo = NavMemo()
     expand_count = sum(
         1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
     )
     base_slots = (len(keys[0]) - expand_count) if keys else 1
-    decorated: list[tuple[int, Any, RowKey]] = [
-        (
-            *_sort_value(
-                mm,
-                model,
-                defn,
+    ordered = list(keys)
+    for spec in reversed(sort):
+        col = defn.columns[spec.column]
+        # Taken ONCE per key, here, rather than inside `_sort_value`: it
+        # depends only on (defn, col, script.cache_only), so per-row
+        # evaluation was pure repetition — and skipped the warning entirely
+        # on an empty key set. Nothing between here and the decorate loop
+        # mutates what it reads (`cache_only` is a phase flag the caller
+        # flips around whole passes, never mid-pass).
+        key_script = _sort_script(defn, col, script)
+        decorated: list[tuple[int, Any, RowKey]] = [
+            (
+                *_sort_value(
+                    mm,
+                    model,
+                    defn,
+                    k,
+                    col,
+                    spec.column,
+                    base_slots,
+                    limits,
+                    script=key_script,
+                    memo=memo,
+                ),
                 k,
-                col,
-                sort.column,
-                base_slots,
-                limits,
-                script=script,
-                memo=memo,
-            ),
-            k,
-        )
-        for k in keys
-    ]
-    # empties always last, in BOTH directions: partition first, sort (with
-    # `reverse=`) only the non-empty half, then append the empty half untouched.
-    non_empty = [d for d in decorated if d[0] == 0]
-    empty = [d for d in decorated if d[0] == 1]
-    non_empty.sort(key=lambda d: d[1], reverse=(sort.direction == "desc"))
-    return [d[2] for d in non_empty] + [d[2] for d in empty]
+            )
+            for k in ordered
+        ]
+        # empties always last, in BOTH directions: partition first, sort (with
+        # `reverse=`) only the non-empty half, then append the empty half
+        # untouched.
+        non_empty = [d for d in decorated if d[0] == 0]
+        empty = [d for d in decorated if d[0] == 1]
+        non_empty.sort(key=lambda d: d[1], reverse=(spec.direction == "desc"))
+        ordered = [d[2] for d in non_empty] + [d[2] for d in empty]
+    return ordered
 
 
 # ---- export -------------------------------------------------------------------

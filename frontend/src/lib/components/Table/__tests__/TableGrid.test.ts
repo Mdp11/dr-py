@@ -241,41 +241,6 @@ describe('TableGrid', () => {
 		}
 	});
 
-	it('a press-release on the sort button with no move past threshold still sorts (the header drag never arms)', () => {
-		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
-		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
-		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
-		const update = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
-		const setSort = vi.spyOn(store, 'setTableSort').mockImplementation(() => {});
-		const c = render('tbl:draft:hdrsort');
-		try {
-			const btn = document.querySelector('[aria-label^="Sort by"]') as HTMLElement;
-			expect(btn).not.toBeNull();
-			btn.dispatchEvent(
-				new PointerEvent('pointerdown', {
-					bubbles: true,
-					button: 0,
-					pointerId: 1,
-					clientX: 5,
-					clientY: 5
-				})
-			);
-			flushSync();
-			btn.dispatchEvent(
-				new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 5, clientY: 5 })
-			);
-			flushSync();
-			// No drag was ever armed by the press/release on the button.
-			expect(update).not.toHaveBeenCalled();
-
-			btn.click();
-			flushSync();
-			expect(setSort).toHaveBeenCalledWith('tbl:draft:hdrsort', { column: 0, direction: 'asc' });
-		} finally {
-			unmount(c);
-		}
-	});
-
 	it('gives a row one line per value in its tallest cell', () => {
 		const page: TablePage = {
 			...PAGE,

@@ -24,8 +24,6 @@
 		getUncomputedScriptCellReason,
 		hasSuspendedTableEdits,
 		reloadTableDraft,
-		remapTableSortForInsert,
-		remapTableSortForRemove,
 		requestScriptErrors,
 		requestScrollToCell,
 		resumeTableEvaluation,
@@ -40,7 +38,15 @@
 		type ExportProgress
 	} from '$lib/state';
 	import type { ExportFormat } from '$lib/api/types';
-	import { AlertTriangle, Check, Columns3, ListOrdered, Search, X } from '@lucide/svelte';
+	import {
+		AlertTriangle,
+		ArrowDownUp,
+		Check,
+		Columns3,
+		ListOrdered,
+		Search,
+		X
+	} from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
@@ -65,6 +71,7 @@
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 	import ColumnManager from './ColumnManager.svelte';
 	import ColumnReorderDialog from './ColumnReorderDialog.svelte';
+	import ColumnSortDialog from './ColumnSortDialog.svelte';
 	import ExportDialog from './ExportDialog.svelte';
 	import ScriptErrorsPanel from './ScriptErrorsPanel.svelte';
 	import ScriptWarningsPanel from './ScriptWarningsPanel.svelte';
@@ -428,9 +435,8 @@
 
 	// The header menu's "Insert before/after": same staging as
 	// `addColumnFromHeader`, but the column lands at a definition index in the
-	// middle, so every later ColumnRef and the active sort shift up one
-	// (`insertColumn` + `remapTableSortForInsert`, paired like ColumnManager's
-	// own insert handler), and the dialog focuses on that index.
+	// middle, so every later ColumnRef (and sort key) shifts up one inside
+	// `insertColumn`, and the dialog focuses on that index.
 	function insertColumnFromHeader(
 		index: number,
 		place: 'before' | 'after',
@@ -447,25 +453,20 @@
 		const at = place === 'before' ? index : index + 1;
 		suspendTableEvaluation(tabId);
 		if (kind === 'script') seedSnippetExpanded(`${tabId}::col:${at}`);
-		remapTableSortForInsert(tabId, at);
 		updateTableDefinition(tabId, insertColumn(d.definition, at, column, place));
 		openSettings(at);
 	}
 
 	// The header menu's "Delete column"/"Hide column": direct edits, no dialog.
-	// Delete pairs `removeColumn` with the sort remap exactly like
-	// ColumnManager's `onRemove`; a ColumnInUseError (a later column still
-	// references this one) surfaces in the same slot as a save failure and
-	// leaves definition and sort untouched.
+	// A ColumnInUseError (a later column still references this one) surfaces
+	// in the same slot as a save failure and leaves the definition untouched.
 	let columnError = $state<string | null>(null);
 	function removeColumnFromHeader(index: number): void {
 		const d = getTableDraft(tabId);
 		if (!d) return;
 		columnError = null;
 		try {
-			const next = removeColumn(d.definition, index);
-			remapTableSortForRemove(tabId, index);
-			updateTableDefinition(tabId, next);
+			updateTableDefinition(tabId, removeColumn(d.definition, index));
 		} catch (e) {
 			columnError = e instanceof Error ? e.message : String(e);
 		}
@@ -482,6 +483,9 @@
 	/** The Reorder dialog (display order only) — modal, and independent of
 	 * the Columns panel: it edits nothing the grid needs re-evaluated. */
 	let reorderOpen = $state(false);
+	/** The Sorting dialog: edits the definition's `sort`, so it goes through
+	 * `updateTableDefinition` and re-evaluates like any column edit. */
+	let sortOpen = $state(false);
 
 	async function save(): Promise<void> {
 		saveError = null;
@@ -604,6 +608,15 @@
 						onclick={() => (reorderOpen = true)}
 					>
 						<ListOrdered class="h-3.5 w-3.5" /> Reorder
+					</button>
+					<button
+						type="button"
+						data-testid="table-sort-button"
+						title="Which columns order the rows, and in what priority"
+						class="flex items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+						onclick={() => (sortOpen = true)}
+					>
+						<ArrowDownUp class="h-3.5 w-3.5" /> Sorting
 					</button>
 				{/if}
 				<DropdownMenu.Root>
@@ -883,6 +896,7 @@
 
 	{#if editable}
 		<ColumnReorderDialog {tabId} bind:open={reorderOpen} />
+		<ColumnSortDialog {tabId} bind:open={sortOpen} />
 	{/if}
 
 	<!-- Outside the `editable` gate, like the Export ▾ trigger that opens it: a

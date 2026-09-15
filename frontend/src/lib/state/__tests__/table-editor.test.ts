@@ -14,19 +14,15 @@ import {
 	getTableLoading,
 	getTableLockHolder,
 	getTablePage,
-	getTableSort,
 	getTableWarnings,
 	handleTableModelRevChanged,
 	loadTablePage,
 	reloadTableDraft,
-	remapTableSortForMove,
-	remapTableSortForRemove,
 	resetTableEditors,
 	retryTableLock,
 	saveAsTableDraft,
 	saveTableDraft,
 	setTableName,
-	setTableSort,
 	updateTableDefinition
 } from '../table-editor.svelte';
 import { getDynamicTabs, openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
@@ -47,7 +43,7 @@ import { handleFeedEvent } from '../realtime.svelte';
 import { isTempId } from '../ops';
 
 /** Flush the microtask/macrotask queue so a fire-and-forget `loadTablePage`
- * call (triggered by `updateTableDefinition`/`setTableSort`) has settled. */
+ * call (triggered by `updateTableDefinition`) has settled. */
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
 const EMPTY_PAGE = {
@@ -200,65 +196,19 @@ describe('table-editor', () => {
 		expect(draft.artifactId).toBeNull();
 	});
 
-	it('setTableSort resets the loaded page offset', async () => {
+	it('a sort edit on the definition re-requests page 0 with it', async () => {
 		const spy = vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		await ensureTableDraft('tbl:draft:2');
-		setTableSort('tbl:draft:2', { column: 0, direction: 'asc' });
-		// the store re-requests page 0 with the sort
+		const draft = await ensureTableDraft('tbl:draft:2');
+		updateTableDefinition('tbl:draft:2', {
+			...draft.definition,
+			sort: [{ column: 0, direction: 'asc' }]
+		});
+		// the store re-requests page 0 with the definition (sort included)
 		await Promise.resolve();
 		expect(spy).toHaveBeenCalled();
 		const lastCall = spy.mock.calls.at(-1)![0];
 		expect(lastCall.offset ?? 0).toBe(0);
-		expect(lastCall.sort).toEqual({ column: 0, direction: 'asc' });
-	});
-
-	/** Widen a fresh draft to `n` element columns so a sort on a later column
-	 * survives `_sortFor`'s out-of-range net during these remap tests. */
-	function widenDraft(tabId: string, n: number): void {
-		const d = getTableDraft(tabId)!;
-		const col = d.definition.columns[0];
-		updateTableDefinition(tabId, {
-			...d.definition,
-			columns: Array.from({ length: n }, () => ({ ...col }))
-		});
-	}
-
-	it('remapTableSortForRemove clears a sort on the removed column and shifts later ones', async () => {
-		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		await ensureTableDraft('tbl:draft:sortrm');
-		widenDraft('tbl:draft:sortrm', 4);
-		setTableSort('tbl:draft:sortrm', { column: 2, direction: 'asc' });
-		remapTableSortForRemove('tbl:draft:sortrm', 1); // earlier column removed → shift down
-		expect(getTableSort('tbl:draft:sortrm')).toEqual({ column: 1, direction: 'asc' });
-		remapTableSortForRemove('tbl:draft:sortrm', 1); // the sorted column itself → cleared
-		expect(getTableSort('tbl:draft:sortrm')).toBeUndefined();
-	});
-
-	it('remapTableSortForMove follows the sorted column across a reorder', async () => {
-		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		await ensureTableDraft('tbl:draft:sortmv');
-		widenDraft('tbl:draft:sortmv', 4);
-		setTableSort('tbl:draft:sortmv', { column: 1, direction: 'desc' });
-		remapTableSortForMove('tbl:draft:sortmv', 1, 3); // the sorted column moved
-		expect(getTableSort('tbl:draft:sortmv')).toEqual({ column: 3, direction: 'desc' });
-		remapTableSortForMove('tbl:draft:sortmv', 0, 3); // another column hopped over it
-		expect(getTableSort('tbl:draft:sortmv')).toEqual({ column: 2, direction: 'desc' });
-		remapTableSortForMove('tbl:draft:sortmv', 3, 0); // and hopped back
-		expect(getTableSort('tbl:draft:sortmv')).toEqual({ column: 3, direction: 'desc' });
-	});
-
-	it('drops an out-of-range sort instead of sending it (defensive net)', async () => {
-		const spy = vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		await ensureTableDraft('tbl:draft:sortoor');
-		const d = getTableDraft('tbl:draft:sortoor')!;
-		// the empty draft has ONE column; a sort on column 5 must never reach the
-		// backend (it would 422 every request for the whole tab)
-		setTableSort('tbl:draft:sortoor', { column: 5, direction: 'asc' });
-		await flush();
-		const lastCall = spy.mock.calls.at(-1)![0];
-		expect(lastCall.sort).toBeUndefined();
-		expect(getTableSort('tbl:draft:sortoor')).toBeUndefined();
-		expect(d.definition.columns.length).toBe(1);
+		expect(lastCall.definition?.sort).toEqual([{ column: 0, direction: 'asc' }]);
 	});
 
 	it('loads a saved artifact payload and its first page', async () => {
@@ -582,13 +532,11 @@ describe('table-editor', () => {
 	it('closeTableDraft removes all per-tab state', async () => {
 		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 		await ensureTableDraft('tbl:draft:7');
-		setTableSort('tbl:draft:7', { column: 0, direction: 'asc' });
 		await flush();
 		closeTableDraft('tbl:draft:7');
 		// closeTableDraft touches every per-tab map — all of them must be cleared.
 		expect(getTableDraft('tbl:draft:7')).toBeUndefined();
 		expect(getTablePage('tbl:draft:7')).toBeUndefined();
-		expect(getTableSort('tbl:draft:7')).toBeUndefined();
 		expect(getTableLoading('tbl:draft:7')).toBe(false);
 		expect(getTableError('tbl:draft:7')).toBeUndefined();
 		expect(getTableLockHolder('tbl:draft:7')).toBeNull();
@@ -1017,7 +965,6 @@ describe('saveAsTableDraft', () => {
 		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
 		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
 		await ensureTableDraft('tbl:a1');
-		setTableSort('tbl:a1', { column: 0, direction: 'asc' });
 		await flush();
 		expect(getTablePage('tbl:a1')?.total).toBe(250);
 
@@ -1025,10 +972,8 @@ describe('saveAsTableDraft', () => {
 
 		const forkTab = `tbl:${stagedTempId()}`;
 		expect(getTablePage(forkTab)?.total).toBe(250);
-		expect(getTableSort(forkTab)).toEqual({ column: 0, direction: 'asc' });
 		// The retired key keeps nothing (or a reopened original would inherit it).
 		expect(getTablePage('tbl:a1')).toBeUndefined();
-		expect(getTableSort('tbl:a1')).toBeUndefined();
 	});
 
 	it('records the POST-re-key tab as the staged create’s source', async () => {
@@ -1077,8 +1022,6 @@ describe('staged-artifact listeners', () => {
 		const draft = await ensureTableDraft(tabId);
 		updateTableDefinition(tabId, { ...draft.definition });
 		await flush();
-		setTableSort(tabId, { column: 0, direction: 'asc' });
-		await flush();
 		setTableName(tabId, 'Mine');
 		await saveTableDraft(tabId);
 		const tempId = getTableDraft(tabId)!.artifactId!;
@@ -1097,7 +1040,6 @@ describe('staged-artifact listeners', () => {
 		expect(getDynamicTabs()[0].artifactId).toBe('a9');
 		// Per-tab state follows the rebind, same as it does on first save.
 		expect(getTablePage('tbl:a9')?.total).toBe(250);
-		expect(getTableSort('tbl:a9')).toEqual({ column: 0, direction: 'asc' });
 		expect(getTablePage(tabId)).toBeUndefined();
 	});
 

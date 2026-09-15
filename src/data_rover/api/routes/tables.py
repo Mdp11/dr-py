@@ -38,12 +38,12 @@ from data_rover.core.table.cells import (
 )
 from data_rover.core.table.evaluate import (
     RowKey,
-    SortSpec,
     TableLimits,
     build_rows_ex,
     iter_export_rows,
     order_rows,
     sort_falls_back_to_build_order,
+    sort_keys,
 )
 from data_rover.core.table.export_layout import (
     export_definition,
@@ -271,27 +271,13 @@ def evaluate_table(
     metamodel, model = require_model(session)
     try:
         defn = _resolve_table(payload, project_id, db)
-        sort = (
-            SortSpec(column=payload.sort.column, direction=payload.sort.direction)
-            if payload.sort is not None
-            else None
-        )
-        # `TableSortIn` only enforces `column >= 0`; guard the upper bound here
-        # (against the RESOLVED column count) so an out-of-range index raises a
-        # clear ValueError->422 rather than an IndexError inside `order_rows`
-        # that the LookupError clause below would mislabel "unknown artifact".
-        if sort is not None and not (0 <= sort.column < len(defn.columns)):
-            raise ValueError(
-                f"sort column {sort.column} out of range "
-                f"(table has {len(defn.columns)} columns)"
-            )
+        sort = sort_keys(defn)
         limits = TableLimits()
         # Fingerprint the RESOLVED definition (not the raw request body): two
         # requests that reach the same resolved shape via different refs (or
         # via an inline copy) share a cache entry, and editing a REFERENCED
         # navigation artifact changes this fingerprint on the next request.
-        fp = table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode(), sort)
-        sort_key = "none" if sort is None else f"{sort.column}:{sort.direction}"
+        fp = table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode())
         # Sample the rev ONCE and reuse it for the cache probe, the store, and
         # the response. Re-reading `session.model_rev` after the (unlocked)
         # build+sort would let a commit that lands mid-computation store rows
@@ -307,7 +293,7 @@ def evaluate_table(
             rev=rev,
         )
         try:
-            cached = session.table_order_cache.get(fp, sort_key, rev)
+            cached = session.table_order_cache.get(fp, rev)
             if cached is not None:
                 cached_rows, truncated, base_total = cached
                 ordered = list(cached_rows)
@@ -377,7 +363,7 @@ def evaluate_table(
                 )
             ):
                 session.table_order_cache.put(
-                    fp, sort_key, rev, tuple(ordered), truncated, base_total
+                    fp, rev, tuple(ordered), truncated, base_total
                 )
             # Status is finalized HERE, after the window pass, so that EVERY
             # branch — including an order-cache HIT — observes the final
@@ -543,7 +529,7 @@ def export_table(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
-    Thin route: resolves the table/sort, names the file from the artifact
+    Thin route: resolves the table, names the file from the artifact
     (falling back to `"table"`), and delegates the actual export to
     `table_export_engine.run_table_export` — see that function's docstring
     for the evaluation/pending/degradation mechanics shared with
@@ -565,16 +551,6 @@ def export_table(
     transform_host = None
     try:
         defn = _resolve_table(payload, project_id, db)
-        sort = (
-            SortSpec(column=payload.sort.column, direction=payload.sort.direction)
-            if payload.sort is not None
-            else None
-        )
-        if sort is not None and not (0 <= sort.column < len(defn.columns)):
-            raise ValueError(
-                f"sort column {sort.column} out of range "
-                f"(table has {len(defn.columns)} columns)"
-            )
         name = "table"
         if payload.artifact_id is not None:
             row = content.get_artifact(db, payload.artifact_id)
@@ -613,7 +589,6 @@ def export_table(
             render_defn=defn,
             name=name,
             format=payload.format,
-            sort=sort,
             template_vars=export_context_vars(session, project_id),
             transform_code=transform_code,
             transform_host=transform_host,
@@ -696,16 +671,7 @@ def json_preview(
     acquired = False
     try:
         defn = _resolve_table(payload, project_id, db)
-        sort = (
-            SortSpec(column=payload.sort.column, direction=payload.sort.direction)
-            if payload.sort is not None
-            else None
-        )
-        if sort is not None and not (0 <= sort.column < len(defn.columns)):
-            raise ValueError(
-                f"sort column {sort.column} out of range "
-                f"(table has {len(defn.columns)} columns)"
-            )
+        sort = sort_keys(defn)
         # Same uncapped cell limits as the export: a preview whose navigation
         # arrays were capped at 20 would not be a preview of the export.
         limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
@@ -850,7 +816,7 @@ def table_script_errors(
     computed") at 200: failed-job memory hands the same dead job back at this
     rev forever, so another 202 would loop the client until the next commit.
 
-    ORDER: `payload.sort` is forwarded and the whole degrade decision of
+    ORDER: the definition's own sort applies and the whole degrade decision of
     `/tables/evaluate` is reproduced verbatim (order-cache hit first, else
     build+sort, else — if anything went pending — collapse back to build
     order). `row_index` is a GRID ADDRESS: if the recap's order and the page's
@@ -882,16 +848,7 @@ def table_script_errors(
     acquired = False
     try:
         defn = _resolve_table(payload, project_id, db)
-        sort = (
-            SortSpec(column=payload.sort.column, direction=payload.sort.direction)
-            if payload.sort is not None
-            else None
-        )
-        if sort is not None and not (0 <= sort.column < len(defn.columns)):
-            raise ValueError(
-                f"sort column {sort.column} out of range "
-                f"(table has {len(defn.columns)} columns)"
-            )
+        sort = sort_keys(defn)
         limits = TableLimits()
         rev = session.model_rev
         script_ctx, acquired = open_script_context(
@@ -925,9 +882,8 @@ def table_script_errors(
         # stores, and this route has no window pass, so `script_ctx.errored`
         # settles later here than it does there — the cache-poisoning guard
         # would be reading a different thing under the same name.
-        fp = table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode(), sort)
-        sort_key = "none" if sort is None else f"{sort.column}:{sort.direction}"
-        cached = session.table_order_cache.get(fp, sort_key, rev)
+        fp = table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode())
+        cached = session.table_order_cache.get(fp, rev)
         if cached is not None:
             ordered = list(cached[0])
         else:

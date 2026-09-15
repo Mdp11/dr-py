@@ -327,8 +327,10 @@ def test_sort_by_nav_script_step_column_settles_instead_of_failing(
     row's step cell is never computed by anything — the permanently-`failed`
     shape a real (50 000-row) table always has."""
     payload = {
-        "definition": _nav_column_table(ROTATE_CODE),
-        "sort": {"column": 1, "direction": "asc"},
+        "definition": {
+            **_nav_column_table(ROTATE_CODE),
+            "sort": [{"column": 1, "direction": "asc"}],
+        },
         "limit": 2,
     }
     r = client.post(papi("/tables/evaluate"), json=payload)
@@ -402,8 +404,10 @@ def test_sort_by_script_column_over_nav_script_step_converges(
     rather than one that converges next poll.
     """
     payload = {
-        "definition": _nav_then_script_column_table(ROTATE_CODE, REACHED_NAME_CODE),
-        "sort": {"column": 2, "direction": "asc"},
+        "definition": {
+            **_nav_then_script_column_table(ROTATE_CODE, REACHED_NAME_CODE),
+            "sort": [{"column": 2, "direction": "asc"}],
+        },
         "limit": 2,
     }
     r = client.post(papi("/tables/evaluate"), json=payload)

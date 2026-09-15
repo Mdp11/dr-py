@@ -35,11 +35,11 @@ from data_rover.core.script.runner import (
 from data_rover.core.table.cells import Cell
 from data_rover.core.table.evaluate import (
     RowKey,
-    SortSpec,
     TableLimits,
     build_rows_ex,
     iter_export_rows,
     order_rows,
+    sort_keys,
 )
 from data_rover.core.table.csv_export import render_csv
 from data_rover.core.table.export_layout import (
@@ -351,7 +351,9 @@ def render_json_sample(
         )
     limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
     build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
-    ordered = order_rows(metamodel, model, defn, build.keys, None, limits, script=script_ctx)
+    ordered = order_rows(
+        metamodel, model, defn, build.keys, sort_keys(defn), limits, script=script_ctx
+    )
     layout = export_layout(render_defn)
     eff = export_definition(render_defn)
     rn = (
@@ -497,14 +499,13 @@ def run_table_export(
     render_defn: TableDefinition,  # presentation — same object for /tables/export
     name: str,
     format: ExportFormat,
-    sort: SortSpec | None,
     template_vars: Mapping[str, str] | None = None,
     json_doc: JsonDocumentOptions | None = None,
     transform_code: str | None = None,  # resolved snippet code (never a ref)
     transform_host: TransformHost | None = None,  # run-owned; NOT closed here
 ) -> ExportPending | ExportFiles:
     """Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
-    honoring `max_rows` and the requested sort) — unlike `/tables/evaluate`,
+    honoring `max_rows` and the definition's own sort) — unlike `/tables/evaluate`,
     there is no `offset`/`limit` windowing here. `format` picks the shape:
     `"xlsx"` ships a single-sheet
     `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
@@ -620,7 +621,7 @@ def run_table_export(
         build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
         keys, truncated = build.keys, build.truncated
         ordered = order_rows(
-            metamodel, model, defn, keys, sort, limits, script=script_ctx
+            metamodel, model, defn, keys, sort_keys(defn), limits, script=script_ctx
         )
         if script_ctx is not None:
             # COMPLETENESS PROBE — do not "optimize" this pass away.

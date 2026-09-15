@@ -25,7 +25,12 @@ import {
 	templateIsValid,
 	insertColumn,
 	moveDisplayColumn,
-	resetDisplayOrder
+	resetDisplayOrder,
+	sortKeys,
+	toggleSortColumn,
+	setSortDirection,
+	moveSortKey,
+	resetSort
 } from '$lib/table/columns';
 import { ROW_NUMBER_SLOT } from '$lib/table/export-layout';
 import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
@@ -1054,5 +1059,50 @@ describe('insertColumn placement in a reordered grid', () => {
 		const next = insertColumn(d, 0, prop('x'), 'after');
 		expect(next.columns.map((c) => c.header)).toEqual(['x', '', 'a']);
 		expect(next.display_order).toEqual([2, 1, 0]);
+	});
+});
+
+// `sort` is a third index list over the definition (definition column +
+// direction per key), so the structural mutators keep it in step like the
+// two order lists — a stale key would silently sort by a different column.
+describe('sort bookkeeping', () => {
+	const asc = (column: number) => ({ column, direction: 'asc' as const });
+	const desc = (column: number) => ({ column, direction: 'desc' as const });
+
+	it('sortKeys drops out-of-range and duplicate keys, first occurrence wins', () => {
+		const d = { ...defn(el(), el()), sort: [desc(1), asc(7), asc(1), asc(0)] };
+		expect(sortKeys(d)).toEqual([desc(1), asc(0)]);
+		expect(sortKeys(defn(el()))).toEqual([]);
+	});
+
+	it('removeColumn drops the key on the removed column and shifts later ones', () => {
+		const d = { ...defn(el(), el(), el()), sort: [desc(2), asc(0), asc(1)] };
+		expect(removeColumn(d, 1).sort).toEqual([desc(1), asc(0)]);
+	});
+
+	it('moveColumn follows the sorted column across a reorder', () => {
+		const d = { ...defn(el(), el(), el()), sort: [asc(1), desc(0)] };
+		expect(moveColumn(d, 1, 2).sort).toEqual([asc(2), desc(0)]);
+	});
+
+	it('insertColumn and cloneColumn shift keys at or past the insertion point', () => {
+		const d = { ...defn(el(), el()), sort: [asc(1), desc(0)] };
+		expect(insertColumn(d, 1, newPropertyColumn(), 'before').sort).toEqual([asc(2), desc(0)]);
+		expect(cloneColumn(d, 0).sort).toEqual([asc(2), desc(0)]);
+	});
+
+	it('toggleSortColumn appends an ascending key, or drops the existing one', () => {
+		const d = defn(el(), el(), el());
+		const on = toggleSortColumn(d, 2);
+		expect(on.sort).toEqual([asc(2)]);
+		expect(toggleSortColumn(on, 0).sort).toEqual([asc(2), asc(0)]);
+		expect(toggleSortColumn(on, 2).sort).toEqual([]);
+	});
+
+	it('setSortDirection flips one key in place; moveSortKey reorders the priority', () => {
+		const d = { ...defn(el(), el(), el()), sort: [asc(2), asc(0), asc(1)] };
+		expect(setSortDirection(d, 0, 'desc').sort).toEqual([asc(2), desc(0), asc(1)]);
+		expect(moveSortKey(d, 2, 0).sort).toEqual([asc(1), asc(2), asc(0)]);
+		expect(resetSort(d).sort).toEqual([]);
 	});
 });

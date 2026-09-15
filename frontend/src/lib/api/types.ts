@@ -1050,6 +1050,12 @@ export type JsonSplitOptions = z.infer<typeof JsonSplitOptionsSchema>;
 export const TableRefSchema = z.object({ ref: z.string() });
 export type TableRef = z.infer<typeof TableRefSchema>;
 
+export const SortKeySchema = z.object({
+	column: z.number().int().nonnegative(),
+	direction: z.enum(['asc', 'desc']).default('asc')
+});
+export type SortKey = z.infer<typeof SortKeySchema>;
+
 export const TableDefinitionSchema = z.object({
 	schema_version: z.number().int().default(1),
 	row_source: RowSourceSchema,
@@ -1062,6 +1068,13 @@ export const TableDefinitionSchema = z.object({
 	// `lib/table/export-layout.ts::displayOrder`. An export with no explicit
 	// `export_order` follows it.
 	display_order: z.array(z.number().int()).default([]),
+	// The row order: definition column indices with a direction each, the
+	// first key primary and each later one breaking the ties of the one
+	// before; absent/`[]` = build order. Normalized on read like
+	// `display_order` (`lib/table/columns.ts::sortKeys`), never validated.
+	// Optional rather than defaulted so every definition literal written
+	// before it (tests included) still types as a TableDefinition.
+	sort: z.array(SortKeySchema).optional(),
 	export_row_number: RowNumberExportOptionsSchema.nullish(),
 	json_split: JsonSplitOptionsSchema.nullish(),
 	// JSON-family only (json/jsonl); strict at export time (422/503/429 from
@@ -1253,16 +1266,15 @@ export type TablePage = z.infer<typeof TablePageSchema>;
 export type TableCell = z.infer<typeof TableCellSchema>;
 export type TableColumn = z.infer<typeof TableColumnSchema>;
 export type TableRow = z.infer<typeof TableRowSchema>;
-export type TableSort = { column: number; direction: 'asc' | 'desc' };
 
 /**
  * One failing script cell in a table's whole-table error recap
  * (`POST /tables/script-errors`, api/schemas.py's `ScriptErrorItemOut`).
  *
  * `row_index` is a GRID ADDRESS — the row's position in the very order the
- * page route would render for the same `(definition, sort, model_rev)`, which
+ * page route would render for the same `(definition, model_rev)`, which
  * is what makes jump-to-cell land on the right row. It is only valid for that
- * triple: send the sort the grid is showing, and re-fetch when the rev moves.
+ * pair: send the definition the grid is showing, and re-fetch when the rev moves.
  * `column_index` indexes the DEFINITION's columns (hidden columns are not
  * filtered out), so it lines up with `TablePage.columns` / `TableRow.cells`.
  *

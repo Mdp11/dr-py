@@ -139,7 +139,10 @@ def settings_sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
 def _evaluate(client: TestClient, *, sort: bool = False, limit: int = 100) -> dict:
     body: dict = {"definition": TABLE_DEFN, "limit": limit}
     if sort:
-        body["sort"] = {"column": SCRIPT_COL_INDEX, "direction": "asc"}
+        body["definition"] = {
+            **TABLE_DEFN,
+            "sort": [{"column": SCRIPT_COL_INDEX, "direction": "asc"}],
+        }
     r = client.post(papi("/tables/evaluate"), json=body, headers=AUTH_HEADERS)
     assert r.status_code == 200, r.text
     return r.json()
@@ -164,7 +167,10 @@ def _recap(
 ) -> httpx.Response:
     body: dict = {"definition": TABLE_DEFN}
     if sort:
-        body["sort"] = {"column": SCRIPT_COL_INDEX, "direction": "asc"}
+        body["definition"] = {
+            **TABLE_DEFN,
+            "sort": [{"column": SCRIPT_COL_INDEX, "direction": "asc"}],
+        }
     return client.post(
         papi("/tables/script-errors"), json=body, headers=headers or AUTH_HEADERS
     )

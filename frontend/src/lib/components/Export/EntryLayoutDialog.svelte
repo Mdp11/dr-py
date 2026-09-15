@@ -181,7 +181,7 @@
 				     not a select naming a mode nobody picks. -->
 				<label
 					class="flex items-center gap-1"
-					title="Unchecked: a failed or uncomputed cell ships as an in-band {'{'}&quot;$error&quot;: …{'}'} marker"
+					title="Unchecked: a failed or uncomputed cell ships as an in-band {'{'}&quot;$error&quot;: …} marker"
 				>
 					<input
 						type="checkbox"

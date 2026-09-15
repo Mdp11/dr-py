@@ -40,16 +40,14 @@
 		isJsonFamily,
 		type Column,
 		type ExportFormat,
-		type TableDefinition,
-		type TableSort
+		type TableDefinition
 	} from '$lib/api/types';
 
 	let {
 		definition,
 		format,
 		onChange,
-		previewDefinition,
-		sort
+		previewDefinition
 	}: {
 		definition: TableDefinition;
 		// Every branch below only distinguishes the json FAMILY (json + jsonl,
@@ -61,12 +59,6 @@
 		 *  `definition` itself — unused by every host today (both preview the
 		 *  definition they edit), kept for parity with the host contract. */
 		previewDefinition?: TableDefinition;
-		/** The active grid sort, folded into the preview request so grouped
-		 *  output matches the download exactly (see the preview effect below).
-		 *  `EntryLayoutDialog` has no live grid sort to offer and leaves this
-		 *  unset — an exporter entry's preview is sort-less, same as its
-		 *  download. */
-		sort?: TableSort;
 	} = $props();
 
 	// Every entry, INCLUDED OR NOT — the excluded ones are exactly what the user
@@ -175,14 +167,11 @@
 		onChange(next);
 	}
 
-	// Preview follows the definition AND the active grid sort (when the host
-	// supplies one) — `downloadTable` always sends the sort (`_sortFor` in
-	// table-editor.svelte.ts), and since grouping rolls same-key rows into
-	// arrays, a different row ORDER can produce a different grouped SHAPE, not
-	// just reordered output. Omitting the sort here would let the pane disagree
-	// with the download precisely where this route exists to prevent that (see
-	// the file header). Debounced so typing a key does not fire a whole-table
-	// build per keystroke; the last write wins via the token guard.
+	// Preview follows the definition — sort included, since the definition
+	// carries it, and grouping rolls same-key rows into arrays, so a different
+	// row ORDER can produce a different grouped SHAPE, not just reordered
+	// output. Debounced so typing a key does not fire a whole-table build per
+	// keystroke; the last write wins via the token guard.
 	//
 	// Gated on JSON mode only: an xlsx export must never pay for a whole-table
 	// JSON build. There is no `open` gate here — the host is responsible for
@@ -196,10 +185,9 @@
 	$effect(() => {
 		if (!jsonFamily) return;
 		const d = previewDefinition ?? definition;
-		const s = sort;
 		const mine = ++token;
 		const timer = setTimeout(() => {
-			void previewTableJson({ definition: d, sort: s })
+			void previewTableJson({ definition: d })
 				.then((r) => {
 					if (mine !== token) return; // a newer edit is in flight
 					sample = r.sample;

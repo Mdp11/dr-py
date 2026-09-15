@@ -28,7 +28,6 @@ import {
 	loadArtifacts,
 	resetArtifacts,
 	resetSnippetCollapse,
-	setTableSort,
 	updateTableDefinition
 } from '$lib/state';
 import { setColumnJsonOptions } from '$lib/table/columns';
@@ -544,40 +543,47 @@ describe('ExportDialog', () => {
 		expect(byTestId(document, 'json-preview-truncated')).toBeNull();
 	});
 
-	// `downloadTable` always sends the active grid sort (`_sortFor` in
-	// table-editor.svelte.ts), and grouping rolls same-key rows into arrays — a
-	// different row ORDER can therefore produce a different grouped SHAPE, not
-	// just reordered output. The preview must send the same sort or it can
-	// honestly disagree with the download, which is the one thing
-	// `POST /tables/json-preview` exists to prevent.
-	it('includes the active grid sort in the preview request', async () => {
+	// The download sends the definition, whose `sort` orders the rows, and
+	// grouping rolls same-key rows into arrays — a different row ORDER can
+	// therefore produce a different grouped SHAPE, not just reordered output.
+	// The preview must send the same definition or it can honestly disagree
+	// with the download, which is the one thing `POST /tables/json-preview`
+	// exists to prevent.
+	it('sends the definition, sort included, in the preview request', async () => {
 		await ensureTableDraft(TAB_ID);
-		updateTableDefinition(TAB_ID, defn());
-		setTableSort(TAB_ID, { column: 1, direction: 'asc' });
+		updateTableDefinition(TAB_ID, { ...defn(), sort: [{ column: 1, direction: 'asc' }] });
 		flushSync();
 		mountDialog('json');
 		await waitFor(() => previewSpy.mock.calls.length > 0);
 		expect(previewSpy).toHaveBeenCalledWith(
-			expect.objectContaining({ sort: { column: 1, direction: 'asc' } })
+			expect.objectContaining({
+				definition: expect.objectContaining({ sort: [{ column: 1, direction: 'asc' }] })
+			})
 		);
 	});
 
 	// The regression half: changing the sort AFTER the dialog is open must
-	// refresh the preview too — the effect reads `getTableSort` on every run,
-	// not just once at mount.
+	// refresh the preview too — the effect reads the draft on every run, not
+	// just once at mount.
 	it('re-fetches the preview when the sort changes while the dialog is open', async () => {
 		await open('json');
 		await waitFor(() => previewSpy.mock.calls.length > 0);
-		expect(previewSpy).toHaveBeenLastCalledWith(expect.objectContaining({ sort: undefined }));
+		expect(previewSpy.mock.calls.at(-1)?.[0]?.definition?.sort ?? []).toEqual([]);
 
-		setTableSort(TAB_ID, { column: 0, direction: 'desc' });
+		updateTableDefinition(TAB_ID, {
+			...getTableDraft(TAB_ID)!.definition,
+			sort: [{ column: 0, direction: 'desc' }]
+		});
 		flushSync();
 		await waitFor(
 			() =>
-				previewSpy.mock.calls.at(-1)?.[0]?.sort !== undefined && previewSpy.mock.calls.length > 1
+				(previewSpy.mock.calls.at(-1)?.[0]?.definition?.sort?.length ?? 0) > 0 &&
+				previewSpy.mock.calls.length > 1
 		);
 		expect(previewSpy).toHaveBeenLastCalledWith(
-			expect.objectContaining({ sort: { column: 0, direction: 'desc' } })
+			expect.objectContaining({
+				definition: expect.objectContaining({ sort: [{ column: 0, direction: 'desc' }] })
+			})
 		);
 	});
 

@@ -1023,6 +1023,21 @@ displayOrder` normalizes it like `export_order`: `[]` = computation order,
   and `insertColumn(defn, at, col, place)` — the "Insert before/after" in both
   the Columns panel's per-card menu and the grid header's pencil menu — places
   the new column next to its anchor in BOTH lists, in the anchor's own slot.
+- **Sorting lives on the definition.** `TableDefinition.sort` is a priority
+  list of `{column, direction}` keys — the first orders the rows, each later
+  one breaks the ties of the one before; absent/`[]` = build order —
+  persisted with the table and honored by every consumer (grid pages,
+  exports, exporter entries, the JSON preview) because the definition carries
+  it: there is no request-level sort and no per-tab sort state. The
+  **Sorting** button's `ColumnSortDialog` (sorting columns first in priority
+  order with a direction toggle, drag + ↑/↓; the rest below with a checkbox
+  to join as the last ascending key; "Clear sorting") edits it through
+  `updateTableDefinition`, so a change re-evaluates like any column edit —
+  the grid header carries no sort controls. `lib/table/columns.ts::sortKeys`
+  normalizes it like `display_order` (mirroring
+  `core/table/evaluate.py::sort_keys`), and `remapOrders` keeps the keys in
+  step with the column indices on move/insert/remove/clone: a removed
+  column's key is dropped with it.
 - **The Columns dialog (`table-settings-button`, title "Columns") is a NON-MODAL floating panel.** The point of editing
   a column is usually to look something up in the model, so the sidebar
   (tree, search, view) and the inspector stay fully usable while it is open:
@@ -1118,8 +1133,7 @@ the entry's overrides re-applied onto the table's CURRENT definition
 snapshot from when it was added — and saving diffs the edited result back
 against the table's definition (`overridesFromDefinition`) to produce the
 entry's patch: the entry stores DRIFT from the table, never the table's
-settings themselves. It passes no `sort` to the panel — an exporter entry
-has no live grid to inherit a sort from, and its download is sort-less too.
+settings themselves. Row order is the table's own `sort` on both surfaces.
 Its own addition beyond the panel is a `json_doc` control group — `shape` +
 `key_column` + `pretty` shown only for `json` (mirroring the backend's
 tolerant-ignore of shape/pretty on `jsonl`), `on_error` shown for the whole
@@ -1163,12 +1177,12 @@ export-time 422 is the entire contract.
   fixed tooltips relative.
 - **`export_order` bookkeeping** lives with the column mutators in
   `lib/table/columns.ts` (the backend normalizes defensively on read, but the
-  client remaps precisely on move/insert/remove/clone, like
-  `remapTableSortFor*`).
+  client remaps precisely on move/insert/remove/clone, `sort` keys
+  included).
 - **`defaultJsonKeys`** mirrors the backend's key derivation, but ONLY to fill
-  input placeholders — the sample pane fetches `POST /tables/json-preview`, with
-  the active grid sort, so the grouping algorithm is never reimplemented in
-  TypeScript and the pane cannot disagree with the download.
+  input placeholders — the sample pane fetches `POST /tables/json-preview` with
+  the definition (its `sort` included), so the grouping algorithm is never
+  reimplemented in TypeScript and the pane cannot disagree with the download.
 
 ### Settings dialog + strict-mode toggle
 

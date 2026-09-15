@@ -412,7 +412,7 @@ def test_sort_by_script_column_with_inputs():
         model,
         defn,
         build.keys,
-        SortSpec(column=2, direction="asc"),
+        [SortSpec(column=2, direction="asc")],
         script=ctx,
     )
     # A has values, B is empty → empties last

@@ -26,10 +26,10 @@ from data_rover.api.script_sweep import (
     ScriptSweepRegistry,
     SweepJob,
     kick_or_join_sweep,
+    sweep_fingerprint,
 )
 from data_rover.api.session import Session, SessionRegistry
 from data_rover.api.settings import Settings, get_settings
-from data_rover.api.table_cache import table_fingerprint
 from data_rover.api.validation_sweep import SweepProgress
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
 from data_rover.core.model.model import Model
@@ -151,7 +151,7 @@ def test_sweep_fills_cache_and_completes(settings_sync_sweep: Settings) -> None:
         model,
         defn,
         built.keys,
-        SortSpec(column=1, direction="asc"),
+        [SortSpec(column=1, direction="asc")],
         script=ctx,
     )
     assert ctx.pending_misses == 0
@@ -320,7 +320,7 @@ def test_run_lock_is_public() -> None:
 def _fingerprint(defn: TableDefinition) -> str:
     """The sweep's job key: the definition dumped with a None sort (the job
     key deliberately excludes the sort — see the module docstring)."""
-    return table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode(), None)
+    return sweep_fingerprint(defn)
 
 
 def test_cancelled_job_reaches_a_terminal_state(

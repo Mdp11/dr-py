@@ -14,12 +14,7 @@
 	// `updateTableExportSettings`, which writes the draft and stops there.
 	// Suspension exists to defer a reload that IS needed; here there is none
 	// to defer.
-	import {
-		getTableDraft,
-		getTableSort,
-		restoreTableExportSettings,
-		updateTableExportSettings
-	} from '$lib/state';
+	import { getTableDraft, restoreTableExportSettings, updateTableExportSettings } from '$lib/state';
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { isEmptySnippetSource } from '$lib/snippet/source';
@@ -60,7 +55,6 @@
 
 	const draft = $derived(getTableDraft(tabId));
 	const defn = $derived(draft?.definition);
-	const sort = $derived(getTableSort(tabId));
 
 	// The Cancel snapshot. A plain `let`, not `$state`: nothing renders it, and
 	// it must not re-trigger the effect that fills it. Taken the first time the
@@ -74,7 +68,7 @@
 	// unsaved-ness the edit created, or a table that was saved when the dialog
 	// opened stays marked unsaved forever; for a viewer, who has no Save
 	// button, forever is literal. This mirrors `_suspendedSnapshot`'s
-	// `{ definition, dirty, sort }`, minus the sort this dialog never touches.
+	// `{ definition, dirty }`.
 	let snapshot: { definition: TableDefinition; dirty: boolean } | null = null;
 	$effect(() => {
 		if (!open) {
@@ -219,7 +213,6 @@
 				<ExportSettingsPanel
 					definition={defn}
 					{format}
-					{sort}
 					onChange={(next) => updateTableExportSettings(tabId, next)}
 				/>
 			</div>

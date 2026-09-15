@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The read-only table body: a sticky header row (labels, sort carets,
+	// The read-only table body: a sticky header row (labels,
 	// drag-resize handles) plus a windowed body over the store's SPARSE row
 	// cache. The body is sized for the table's full `total`, so the scrollbar
 	// reflects the whole result set; rows the cache hasn't fetched yet render
@@ -14,9 +14,7 @@
 		getTableError,
 		getTableLoading,
 		getTablePage,
-		getTableSort,
 		lockBadgeFor,
-		setTableSort,
 		updateTableDefinition,
 		updateTableDisplayOrder
 	} from '$lib/state';
@@ -92,7 +90,6 @@
 
 	const page = $derived(getTablePage(tabId));
 	const loading = $derived(getTableLoading(tabId));
-	const sort = $derived(getTableSort(tabId));
 	const error = $derived(getTableError(tabId));
 	const rows = $derived(page?.rows ?? []);
 
@@ -329,11 +326,6 @@
 		return id === null ? { state: 'none' } : lockBadgeFor(id);
 	}
 
-	function toggleSort(index: number): void {
-		const direction = sort?.column === index && sort.direction === 'asc' ? 'desc' : 'asc';
-		setTableSort(tabId, { column: index, direction });
-	}
-
 	// The evaluate response's column-out (`page.columns[i]`) carries no
 	// property name — only the definition's `property` column does. The two
 	// arrays align 1:1 in definition order, so index across into the draft's
@@ -379,7 +371,7 @@
 	}
 
 	// The header cell's own pointerdown starts the reorder drag, EXCEPT when the
-	// press originates on the sort/edit buttons or the resize handle — those own
+	// press originates on the edit button or the resize handle — those own
 	// their own pointer gestures and must not also arm a column drag.
 	function onHeaderPointerDown(e: PointerEvent, index: number): void {
 		const t = e.target as HTMLElement;
@@ -433,14 +425,6 @@
 				onpointercancel={(e) => hdrDrag.onPointerCancel(e)}
 			>
 				<span class="truncate">{v.col.header || columnKindLabel(v.col.kind)}</span>
-				<button
-					type="button"
-					class="ml-auto shrink-0 text-[10px] text-muted-foreground/70 transition-colors hover:text-foreground"
-					aria-label="Sort by {v.col.header || columnKindLabel(v.col.kind)}"
-					onclick={() => toggleSort(v.i)}
-				>
-					{#if sort?.column === v.i}{sort.direction === 'asc' ? '▲' : '▼'}{:else}↕{/if}
-				</button>
 				{#if onEditColumn}
 					<!-- One menu per header: edit this column, or insert a fresh one
 					     of any kind right before/after it — the grid-side twin of the

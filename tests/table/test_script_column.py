@@ -309,7 +309,7 @@ def test_sort_by_script_column_mixed_kinds_and_errors() -> None:
     ctx = _script_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     ordered = order_rows(
-        mm, model, defn, build.keys, SortSpec(column=0, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=0, direction="asc")],
         TableLimits(), script=ctx,
     )
     names = [
@@ -556,7 +556,7 @@ def test_sort_by_collapse_nav_script_step_column_uses_reached_labels() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]  # build order == id order
     ordered = order_rows(
-        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
         TableLimits(), script=ctx,
     )
     assert ordered == [(ids[1],), (ids[2],), (ids[0],)]
@@ -611,7 +611,7 @@ def test_sort_by_property_column_sourced_from_nav_script_step_column() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]  # build order == id order
     ordered = order_rows(
-        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
         TableLimits(), script=ctx,
     )
     # row0 -> "C", row1 -> "A", row2 -> "B"; ascending -> row1, row2, row0
@@ -683,7 +683,7 @@ def test_cache_only_sort_by_nav_script_step_degrades_with_warning() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]
     ordered = order_rows(
-        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
         TableLimits(), script=ctx,
     )
     # Degraded: build order, not the live sort's [ids[1], ids[2], ids[0]].
@@ -732,7 +732,7 @@ def test_cache_only_sort_via_column_ref_to_nav_script_step_degrades() -> None:
     )
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     ordered = order_rows(
-        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
         TableLimits(), script=ctx,
     )
     assert ordered == build.keys
@@ -764,7 +764,7 @@ def test_cache_only_sort_by_script_column_still_pends() -> None:
     )
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     order_rows(
-        mm, model, defn, build.keys, SortSpec(column=0, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=0, direction="asc")],
         TableLimits(), script=ctx,
     )
     assert ctx.pending_misses > 0
@@ -806,7 +806,7 @@ def test_cache_only_sort_by_script_free_navigation_is_untouched() -> None:
     )
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     ordered = order_rows(
-        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
         TableLimits(), script=ctx,
     )
     # The property step reaches the row's own name: "A" < "B" < "C".
@@ -867,7 +867,7 @@ def test_cache_only_sort_by_script_column_over_nav_script_still_pends() -> None:
     ctx = _cache_only_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     order_rows(
-        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
         TableLimits(), script=ctx,
     )
     assert ctx.pending_misses > 0, "no pending miss => nothing ever kicks a sweep"
@@ -901,7 +901,7 @@ def test_cache_only_sort_by_unconfigured_script_column_does_not_warn() -> None:
     ctx = _cache_only_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     ordered = order_rows(
-        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
         TableLimits(), script=ctx,
     )
     assert ordered == build.keys  # every row ties, as it always did
@@ -932,7 +932,7 @@ def test_cache_only_sort_warning_is_emitted_per_sort_not_per_row() -> None:
     )
     ctx = _cache_only_ctx(model)
     assert order_rows(
-        mm, model, defn, [], SortSpec(column=1, direction="asc"),
+        mm, model, defn, [], [SortSpec(column=1, direction="asc")],
         TableLimits(), script=ctx,
     ) == []
     assert any(w.code == ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV for w in ctx.warnings)
@@ -962,13 +962,13 @@ def test_sort_falls_back_to_build_order_predicate() -> None:
             PropertyColumn(name="name", source=ColumnRef(index=1)),
         ],
     )
-    assert sort_falls_back_to_build_order(defn, None) is False
-    assert sort_falls_back_to_build_order(defn, SortSpec(0, "asc")) is False
-    assert sort_falls_back_to_build_order(defn, SortSpec(1, "asc")) is True
+    assert sort_falls_back_to_build_order(defn, []) is False
+    assert sort_falls_back_to_build_order(defn, [SortSpec(0, "asc")]) is False
+    assert sort_falls_back_to_build_order(defn, [SortSpec(1, "asc")]) is True
     # sweep-covered, so a real poll-again rather than a dead end
-    assert sort_falls_back_to_build_order(defn, SortSpec(2, "asc")) is False
+    assert sort_falls_back_to_build_order(defn, [SortSpec(2, "asc")]) is False
     # a property column has no such backstop
-    assert sort_falls_back_to_build_order(defn, SortSpec(3, "asc")) is True
+    assert sort_falls_back_to_build_order(defn, [SortSpec(3, "asc")]) is True
 
 
 def test_nav_script_step_value_terminal_renders_as_a_values_cell() -> None:

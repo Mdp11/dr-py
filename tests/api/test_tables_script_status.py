@@ -32,10 +32,9 @@ from openpyxl import load_workbook
 from data_rover.api.main import create_app
 from data_rover.api.routes.tables import _status_from_job
 from data_rover.api.script_runner import get_runner
-from data_rover.api.script_sweep import SweepJob
+from data_rover.api.script_sweep import SweepJob, sweep_fingerprint
 from data_rover.api.session import get_session
 from data_rover.api.settings import Settings, get_settings
-from data_rover.api.table_cache import table_fingerprint
 from data_rover.core.script.runner import CallResult
 from data_rover.core.table.schema import TABLE_ADAPTER
 
@@ -167,9 +166,9 @@ def _plain_table() -> dict:
 
 def _fingerprint(table: dict | None = None) -> str:
     """The sweep's job key for a table: the resolved definition dumped with a
-    None sort (the job key excludes the sort on purpose)."""
+    its sort stripped (the job key excludes the sort on purpose)."""
     defn = TABLE_ADAPTER.validate_python(table if table is not None else _script_table())
-    return table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode(), None)
+    return sweep_fingerprint(defn)
 
 
 def _descending_value(_i: int, ids: list[str]) -> CallResult:
@@ -184,7 +183,7 @@ def _evaluate(
 ) -> dict:
     body: dict = {"definition": table, "limit": limit}
     if sort:
-        body["sort"] = {"column": 1, "direction": "asc"}
+        body["definition"] = {**table, "sort": [{"column": 1, "direction": "asc"}]}
     r = client.post(papi("/tables/evaluate"), json=body, headers=AUTH_HEADERS)
     assert r.status_code == 200, r.text
     return r.json()
@@ -199,7 +198,7 @@ def _export(
 ) -> httpx.Response:
     body: dict = {"definition": table}
     if sort:
-        body["sort"] = {"column": 1, "direction": "asc"}
+        body["definition"] = {**table, "sort": [{"column": 1, "direction": "asc"}]}
     return client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
 
 
@@ -493,7 +492,7 @@ def test_order_cache_hit_with_evicted_cell_downgrades_to_computing(
     session = get_session()
     fp = _fingerprint(table)
     rev = session.model_rev
-    assert session.table_order_cache.get(fp, "none", rev) is not None
+    assert session.table_order_cache.get(fp, rev) is not None
     # Simulate the independent LRU evictions: drop the cell entries (keeping the
     # rev stamp, so writes still land) and forget the finished sweep job.
     session.script_cell_cache.clear_and_stamp(rev)
@@ -501,7 +500,7 @@ def test_order_cache_hit_with_evicted_cell_downgrades_to_computing(
     assert session.script_sweeps.get(fp, rev) is None
 
     page = _evaluate(client, table, sort=False)
-    assert session.table_order_cache.get(fp, "none", rev) is not None  # still a HIT
+    assert session.table_order_cache.get(fp, rev) is not None  # still a HIT
     assert [row["cells"][1]["kind"] for row in page["rows"]] == ["pending"] * 5
     assert page["script_status"]["state"] == "computing"  # NOT "ready"
     assert session.script_sweeps.get(fp, rev) is not None  # ...and a sweep was kicked

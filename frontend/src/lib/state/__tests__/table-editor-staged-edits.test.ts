@@ -9,19 +9,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tablesApi from '$lib/api/tables';
 import type { TableDefinition, TablePage } from '$lib/api/types';
+import { removeColumn } from '$lib/table/columns';
 import {
 	abandonTableEvaluationSuspension,
 	ensureTableDraft,
 	getTableDraft,
-	getTableSort,
 	hasSuspendedTableEdits,
 	loadTablePage,
-	remapTableSortForInsert,
-	remapTableSortForRemove,
 	resetTableEditors,
 	resumeTableEvaluation,
 	revertSuspendedTableEdits,
-	setTableSort,
 	suspendTableEvaluation,
 	updateTableDefinition
 } from '../table-editor.svelte';
@@ -167,18 +164,22 @@ describe('staged table definition edits', () => {
 		expect(spy).not.toHaveBeenCalled(); // definition matches the snapshot → no reload
 	});
 
-	it('revert restores a sort remapped during the dialog session', async () => {
-		setTableSort(TAB, { column: 0, direction: 'asc' });
+	it('revert restores a sort key dropped by a column removal during the dialog session', async () => {
+		widenDraft(TAB, 2);
+		updateTableDefinition(TAB, {
+			...getTableDraft(TAB)!.definition,
+			sort: [{ column: 0, direction: 'asc' }]
+		});
 		await vi.waitFor(() => expect(spy).toHaveBeenCalled());
 		spy.mockClear();
 
 		suspendTableEvaluation(TAB);
-		// simulate ColumnManager's remove flow: remap the sort alongside the edit
-		remapTableSortForRemove(TAB, 0); // sort on the removed column → cleared
-		expect(getTableSort(TAB)).toBeUndefined();
+		// ColumnManager's remove flow: the mutator drops the key with its column
+		updateTableDefinition(TAB, removeColumn(getTableDraft(TAB)!.definition, 0));
+		expect(getTableDraft(TAB)!.definition.sort).toEqual([]);
 
 		revertSuspendedTableEdits(TAB);
-		expect(getTableSort(TAB)).toEqual({ column: 0, direction: 'asc' });
+		expect(getTableDraft(TAB)!.definition.sort).toEqual([{ column: 0, direction: 'asc' }]);
 	});
 
 	it('revert before any edit leaves the draft untouched (no spurious dirty)', () => {
@@ -191,16 +192,6 @@ describe('staged table definition edits', () => {
 		updateTableDefinition(TAB, renamed('kept'));
 		revertSuspendedTableEdits(TAB);
 		expect(getTableDraft(TAB)!.definition.columns[0].header).toBe('kept');
-	});
-
-	it('remapTableSortForInsert shifts a sort at/past the insertion point', async () => {
-		widenDraft(TAB, 4);
-		setTableSort(TAB, { column: 1, direction: 'desc' });
-		await vi.waitFor(() => expect(spy).toHaveBeenCalled());
-		remapTableSortForInsert(TAB, 1);
-		expect(getTableSort(TAB)).toEqual({ column: 2, direction: 'desc' });
-		remapTableSortForInsert(TAB, 3); // past the sort → unchanged
-		expect(getTableSort(TAB)).toEqual({ column: 2, direction: 'desc' });
 	});
 });
 

@@ -54,8 +54,6 @@ const h = vi.hoisted(() => ({
 	jump: vi.fn(),
 	revertSuspendedTableEdits: vi.fn(),
 	resumeTableEvaluation: vi.fn(),
-	remapTableSortForInsert: vi.fn(),
-	remapTableSortForRemove: vi.fn(),
 	updateTableDisplayOrder: vi.fn(),
 	/** Mirrors `hasSuspendedTableEdits`: did the definition change since the
 	 * settings dialog opened? Drives the discard-confirmation gate. */
@@ -112,7 +110,6 @@ vi.mock('$lib/state', () => ({
 	// TableGrid's dependencies (always mounted below the chrome bar).
 	getTablePage: () => h.page,
 	getTableLoading: () => false,
-	getTableSort: () => undefined,
 	getTableScriptStatus: () => h.scriptStatus,
 	getScriptErrors: () => h.scriptErrors,
 	getScriptErrorsPhase: () => h.scriptErrorsPhase,
@@ -122,15 +119,9 @@ vi.mock('$lib/state', () => ({
 	requestScrollToCell: h.jump,
 	consumeScrollRequest: () => null,
 	getTableError: () => undefined,
-	setTableSort: vi.fn(),
 	updateTableDefinition: vi.fn(),
 	ensureTableRange: vi.fn(),
 	lockBadgeFor: () => ({ state: 'none' }),
-	// ColumnManager's own reorder/clone dependencies — needed once a test opens
-	// the dialog and ColumnManager mounts for real.
-	remapTableSortForInsert: h.remapTableSortForInsert,
-	remapTableSortForRemove: h.remapTableSortForRemove,
-	remapTableSortForMove: vi.fn(),
 	// The Reorder dialog's (and the header drag's) reload-free write.
 	updateTableDisplayOrder: h.updateTableDisplayOrder,
 	// RowSourceEditor's dependencies (mounted once the settings dialog opens
@@ -1595,7 +1586,6 @@ describe('TableView lock-denied banner', () => {
 describe('TableView header insert menu', () => {
 	afterEach(() => {
 		h.page = undefined;
-		h.remapTableSortForInsert.mockClear();
 		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
 			row_source: { kind: 'scope', scope: {} },
 			columns: []
@@ -1653,7 +1643,6 @@ describe('TableView header insert menu', () => {
 			const defn = (updateTableDefinition as unknown as { mock: { calls: unknown[][] } }).mock
 				.calls[0][1] as { columns: { kind: string }[] };
 			expect(defn.columns.map((col) => col.kind)).toEqual(['element', 'property', 'property']);
-			expect(h.remapTableSortForInsert).toHaveBeenCalledWith('tbl:draft:1', 1);
 			// the mocked store never updates h.draft, so the dialog focuses on
 			// the requested index over the (unchanged) two-column draft
 			expect(document.body.textContent).toContain('Column settings');
@@ -1709,14 +1698,13 @@ describe('TableView header delete / hide', () => {
 
 	afterEach(() => {
 		h.page = undefined;
-		h.remapTableSortForRemove.mockClear();
 		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
 			row_source: { kind: 'scope', scope: {} },
 			columns: []
 		};
 	});
 
-	it('"Delete column" removes the column and remaps the sort, like the Columns panel', () => {
+	it('"Delete column" removes the column, like the Columns panel', () => {
 		const c = render('tbl:draft:1');
 		try {
 			(document.querySelector('[data-testid="header-edit-1"]') as HTMLElement).click();
@@ -1727,7 +1715,6 @@ describe('TableView header delete / hide', () => {
 			const defn = (updateTableDefinition as unknown as { mock: { calls: unknown[][] } }).mock
 				.calls[0][1] as { columns: { kind: string }[] };
 			expect(defn.columns.map((col) => col.kind)).toEqual(['element']);
-			expect(h.remapTableSortForRemove).toHaveBeenCalledWith('tbl:draft:1', 1);
 			// No dialog: the header action is a direct edit.
 			expect(document.body.textContent).not.toContain('Column settings');
 		} finally {
@@ -1746,7 +1733,6 @@ describe('TableView header delete / hide', () => {
 			const defn = (updateTableDefinition as unknown as { mock: { calls: unknown[][] } }).mock
 				.calls[0][1] as { columns: { hidden: boolean }[] };
 			expect(defn.columns.map((col) => col.hidden)).toEqual([false, true]);
-			expect(h.remapTableSortForRemove).not.toHaveBeenCalled();
 		} finally {
 			unmount(c);
 		}
@@ -1773,6 +1759,32 @@ describe('TableView reorder dialog', () => {
 		const c = render('tbl:draft:1');
 		try {
 			expect(document.querySelector('[data-testid="table-reorder-button"]')).toBeNull();
+		} finally {
+			h.editable = true;
+			unmount(c);
+		}
+	});
+
+	it('the Sorting button opens the sort dialog; the header carries no sort controls', () => {
+		const c = render('tbl:draft:1');
+		try {
+			const btn = document.querySelector('[data-testid="table-sort-button"]') as HTMLElement;
+			expect(btn).not.toBeNull();
+			expect(document.querySelector('[aria-label^="Sort by"]')).toBeNull();
+			expect(document.querySelector('[data-testid="column-sort-dialog"]')).toBeNull();
+			btn.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="column-sort-dialog"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('hides the Sorting button for read-only users', () => {
+		h.editable = false;
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="table-sort-button"]')).toBeNull();
 		} finally {
 			h.editable = true;
 			unmount(c);

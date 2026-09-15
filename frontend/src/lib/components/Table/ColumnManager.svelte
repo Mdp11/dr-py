@@ -10,9 +10,6 @@
 	import {
 		getTableDraft,
 		getTablePage,
-		remapTableSortForInsert,
-		remapTableSortForMove,
-		remapTableSortForRemove,
 		seedSnippetExpanded,
 		updateTableDefinition
 	} from '$lib/state';
@@ -90,30 +87,20 @@
 	// `_suspended`), so a per-keystroke apply costs a draft object and
 	// nothing else.
 
-	// remove/move shift column indices, so the active sort must be remapped in
-	// the same breath (the remap runs only after the mutator succeeds — a
-	// ColumnInUseError/forward-ref throw leaves definition AND sort untouched).
+	// remove/move/clone shift column indices; the mutators keep every index
+	// list on the definition (orders and sort keys) in step themselves, and a
+	// ColumnInUseError/forward-ref throw leaves the definition untouched.
 	function onRemove(index: number): void {
 		if (!defn) return;
 		const current = defn;
-		tryApply(() => {
-			const next = removeColumn(current, index);
-			remapTableSortForRemove(tabId, index);
-			return next;
-		});
+		tryApply(() => removeColumn(current, index));
 	}
 
-	// Insert a deep copy right after the original. The sort is remapped in the
-	// same breath (a sort at/past the insertion point must follow its column),
-	// mirroring how onRemove/onMove pair their mutator with a sort remap.
+	// Insert a deep copy right after the original.
 	function onClone(index: number): void {
 		if (!defn) return;
 		const current = defn;
-		tryApply(() => {
-			const next = cloneColumn(current, index);
-			remapTableSortForInsert(tabId, index + 1);
-			return next;
-		});
+		tryApply(() => cloneColumn(current, index));
 	}
 
 	function onMove(index: number, dir: 'up' | 'down'): void {
@@ -121,11 +108,7 @@
 		const to = dir === 'up' ? index - 1 : index + 1;
 		if (to < 0 || to >= defn.columns.length) return;
 		const current = defn;
-		tryApply(() => {
-			const next = moveColumn(current, index, to);
-			remapTableSortForMove(tabId, index, to);
-			return next;
-		});
+		tryApply(() => moveColumn(current, index, to));
 	}
 
 	// Pointer-driven grip drag (mouse/touch/pen), alongside the ↑/↓ buttons kept
@@ -140,11 +123,7 @@
 		onDrop: (fromIdx, toIdx) => {
 			const current = defn;
 			if (!current) return;
-			tryApply(() => {
-				const next = moveColumn(current, fromIdx, toIdx);
-				remapTableSortForMove(tabId, fromIdx, toIdx);
-				return next;
-			});
+			tryApply(() => moveColumn(current, fromIdx, toIdx));
 		}
 	});
 
@@ -168,19 +147,16 @@
 	}
 
 	// Insert a fresh column right before/after card `index`. `insertColumn`
-	// shifts every later ColumnRef, so the sort is remapped in the same breath
-	// (same pairing as onClone); a script column is seeded expanded under its
-	// FINAL index, before the apply, since its editor reads the store on first
-	// render.
+	// shifts every later ColumnRef (and sort key); a script column is seeded
+	// expanded under its FINAL index, before the apply, since its editor reads
+	// the store on first render.
 	function onInsert(index: number, place: 'before' | 'after', kind: ColumnKind): void {
 		if (!defn) return;
 		const current = defn;
 		const at = place === 'before' ? index : index + 1;
 		tryApply(() => {
 			if (kind === 'script') seedSnippetExpanded(`${tabId}::col:${at}`);
-			const next = insertColumn(current, at, freshColumn(kind), place);
-			remapTableSortForInsert(tabId, at);
-			return next;
+			return insertColumn(current, at, freshColumn(kind), place);
 		});
 	}
 

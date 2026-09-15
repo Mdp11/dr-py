@@ -212,6 +212,15 @@ class JsonSplitOptions(BaseModel):
     filename_template: str = ""
 
 
+class SortKey(BaseModel):
+    """One key of the definition's multi-column sort: a definition column
+    index and a direction. Normalized on read, never validated — see
+    `evaluate.sort_keys`."""
+
+    column: int = Field(ge=0)
+    direction: Literal["asc", "desc"] = "asc"
+
+
 class TableRef(BaseModel):
     """Serialized as a dict under the literal key `"ref"` — the shape
     artifact_kinds.extract_refs's generic walk already understands, so the
@@ -338,6 +347,13 @@ class TableDefinition(BaseModel):
     #: positional expand slots) and this permutes what the user SEES. An export
     #: with no explicit `export_order` follows it.
     display_order: list[int] = Field(default_factory=list)
+    #: The row order, as definition column indices with a direction each:
+    #: the first key is the primary sort, every later one breaks the ties of
+    #: the one before. `[]` = build order. Like `display_order` it is
+    #: normalized on read (`evaluate.sort_keys` drops out-of-range and
+    #: duplicate keys), never validated: a stale key left behind by a column
+    #: removal must degrade, not 422 every evaluate of the table.
+    sort: list[SortKey] = Field(default_factory=list)
     export_row_number: RowNumberExportOptions | None = None
     #: JSON-export split settings; `None` = single-document export (today's
     #: behavior, and the no-migration guarantee for existing payloads).

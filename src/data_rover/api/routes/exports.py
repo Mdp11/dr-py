@@ -395,7 +395,6 @@ def _execute_export(
                             render_defn=overridden_table(defn, entry),
                             name=out_name,
                             format=entry.format,
-                            sort=None,
                             template_vars=ctx,
                             json_doc=entry.json_doc,
                             transform_code=code_,

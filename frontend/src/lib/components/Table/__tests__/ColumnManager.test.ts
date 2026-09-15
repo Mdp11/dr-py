@@ -7,13 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as tablesApi from '$lib/api/tables';
 import type { Column, TableDefinition } from '$lib/api/types';
-import {
-	ensureTableDraft,
-	getTableDraft,
-	getTableSort,
-	setTableSort,
-	updateTableDefinition
-} from '$lib/state';
+import { ensureTableDraft, getTableDraft, updateTableDefinition } from '$lib/state';
 import * as store from '$lib/state/table-editor.svelte';
 import ColumnManager from '../ColumnManager.svelte';
 
@@ -465,12 +459,10 @@ describe('ColumnManager', () => {
 		}
 	});
 
-	it('shifts a sort at/after the clone insertion point so it keeps naming the same column', async () => {
-		// C5 regression pin: onClone pairs cloneColumn with
-		// remapTableSortForInsert(tabId, index + 1) in the SAME breath, mirroring
-		// onRemove/onMove. A third column (index 2) sits after the clone target
-		// (index 1, "Mass"), so the insertion at index 2 must shift the sort's
-		// column from 2 to 3 to keep pointing at the same underlying column.
+	it('shifts a sort key at/after the clone insertion point so it keeps naming the same column', async () => {
+		// A third column (index 2) sits after the clone target (index 1,
+		// "Mass"), so the insertion at index 2 must shift the definition's sort
+		// key from 2 to 3 to keep pointing at the same underlying column.
 		await seedForClone([
 			{
 				kind: 'property',
@@ -486,9 +478,11 @@ describe('ColumnManager', () => {
 		const c = mount(ColumnManager, { target: document.body, props: { tabId: CLONE_TAB } });
 		flushSync();
 		try {
-			setTableSort(CLONE_TAB, { column: 2, direction: 'asc' });
+			updateTableDefinition(CLONE_TAB, {
+				...getTableDraft(CLONE_TAB)!.definition,
+				sort: [{ column: 2, direction: 'asc' }]
+			});
 			flushSync();
-			expect(getTableSort(CLONE_TAB)).toEqual({ column: 2, direction: 'asc' });
 
 			const clone = document.querySelector('[data-testid="clone-column-1"]') as HTMLButtonElement;
 			expect(clone).toBeTruthy();
@@ -499,9 +493,9 @@ describe('ColumnManager', () => {
 			expect(defn.columns).toHaveLength(4);
 			// The original column 2 ("Name") is now at index 3.
 			expect(defn.columns[3].header).toBe('Name');
-			// ...and the sort followed it there, rather than staying at 2 (which
+			// ...and the sort key followed it there, rather than staying at 2 (which
 			// after the insert names the CLONE, not "Name").
-			expect(getTableSort(CLONE_TAB)).toEqual({ column: 3, direction: 'asc' });
+			expect(defn.sort).toEqual([{ column: 3, direction: 'asc' }]);
 		} finally {
 			unmount(c);
 		}
@@ -549,9 +543,12 @@ describe('ColumnManager insert menu and card contrast', () => {
 		}
 	});
 
-	it('shifts a sort at/after the insertion point so it keeps naming the same column', async () => {
+	it('shifts a sort key at/after the insertion point so it keeps naming the same column', async () => {
 		await seedForClone();
-		setTableSort(CLONE_TAB, { column: 1, direction: 'asc' });
+		updateTableDefinition(CLONE_TAB, {
+			...getTableDraft(CLONE_TAB)!.definition,
+			sort: [{ column: 1, direction: 'asc' }]
+		});
 		const component = mount(ColumnManager, {
 			target: document.body,
 			props: { tabId: CLONE_TAB, focusIndex: null }
@@ -567,7 +564,7 @@ describe('ColumnManager insert menu and card contrast', () => {
 				'navigation',
 				'property'
 			]);
-			expect(getTableSort(CLONE_TAB)).toEqual({ column: 2, direction: 'asc' });
+			expect(getTableDraft(CLONE_TAB)!.definition.sort).toEqual([{ column: 2, direction: 'asc' }]);
 		} finally {
 			unmount(component);
 		}

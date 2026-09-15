@@ -7,7 +7,7 @@
  * Definitions are edited as plain JSON objects (the backend's
  * `TableDefinitionSchema` is the source of truth for validity; `columns.ts`
  * keeps definitions structurally correct by construction). Editing invalidates
- * the loaded rows: `updateTableDefinition` and `setTableSort` both reset to
+ * the loaded rows: `updateTableDefinition` (a sort edit included) resets to
  * offset 0 and re-request. There is no auto-run debounce — the caller (the
  * table editor UI) decides when to call `updateTableDefinition`.
  *
@@ -54,8 +54,7 @@ import {
 	type TableColumn,
 	type TableDefinition,
 	type TablePage,
-	type TableRow,
-	type TableSort
+	type TableRow
 } from '$lib/api/types';
 import { assertNoNameClash } from './artifacts.svelte';
 import {
@@ -154,8 +153,6 @@ export interface TableData {
 const _drafts = new SvelteMap<string, TableDraft>();
 /** tabId -> the sparse row cache. */
 const _pages = new SvelteMap<string, TableData>();
-/** tabId -> the active sort (undefined = no sort). */
-const _sorts = new SvelteMap<string, TableSort>();
 const _loading = new SvelteMap<string, boolean>();
 /** tabId -> the last load's error message (422/500). */
 const _errors = new SvelteMap<string, string>();
@@ -352,7 +349,7 @@ const _suspended = new Map<string, string>();
 const _suspendedStale = new Set<string>();
 
 /**
- * The draft (definition + dirty) and active sort as they stood when the
+ * The draft (definition + dirty) as it stood when the
  * settings dialog opened — what `revertSuspendedTableEdits` (the dialog's
  * Cancel) restores. Populated by `suspendTableEvaluation`, dropped by
  * resume/abandon, moved by `moveTabState`, exactly like `_suspended`. The
@@ -361,10 +358,7 @@ const _suspendedStale = new Set<string>();
  * needed). Control state, never read from templates.
  */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
-const _suspendedSnapshot = new Map<
-	string,
-	{ definition: TableDefinition; dirty: boolean; sort: TableSort | undefined }
->();
+const _suspendedSnapshot = new Map<string, { definition: TableDefinition; dirty: boolean }>();
 
 function definitionFingerprint(tabId: string): string {
 	return JSON.stringify(_drafts.get(tabId)?.definition ?? null);
@@ -388,8 +382,7 @@ export function suspendTableEvaluation(tabId: string): void {
 	if (draft) {
 		_suspendedSnapshot.set(tabId, {
 			definition: draft.definition,
-			dirty: draft.dirty,
-			sort: _sorts.get(tabId)
+			dirty: draft.dirty
 		});
 	}
 }
@@ -405,9 +398,7 @@ export function suspendTableEvaluation(tabId: string): void {
  *
  * `false` when the tab is not suspended (no dialog open, nothing staged).
  *
- * Sort remaps are not in the fingerprint, but they only ever happen alongside
- * a definition edit (remove/move/clone), so they cannot produce a false
- * negative. Object key order could in principle differ between two
+ * Object key order could in principle differ between two
  * structurally equal definitions — a false POSITIVE (one needless
  * confirmation), never a false negative that loses work.
  *
@@ -457,10 +448,9 @@ export function abandonTableEvaluationSuspension(tabId: string): void {
 }
 
 /**
- * The settings dialog's Cancel: restore the draft's definition, dirty flag
- * and the active sort to their values at suspend time, discarding everything
- * `updateTableDefinition` applied while the dialog was open (including sort
- * remaps from remove/move/clone edits). Call BEFORE `resumeTableEvaluation`:
+ * The settings dialog's Cancel: restore the draft's definition and dirty flag
+ * to their values at suspend time, discarding everything
+ * `updateTableDefinition` applied while the dialog was open. Call BEFORE `resumeTableEvaluation`:
  * the restored definition matches the suspend-time fingerprint, so the resume
  * skips the reload — cancelling an untouched-in-the-end dialog stays free.
  * No-op when the tab was never suspended (there is nothing to revert to).
@@ -473,8 +463,6 @@ export function revertSuspendedTableEdits(tabId: string): void {
 	if (draft.definition !== snap.definition || draft.dirty !== snap.dirty) {
 		_drafts.set(tabId, { ...draft, definition: snap.definition, dirty: snap.dirty });
 	}
-	if (snap.sort === undefined) _sorts.delete(tabId);
-	else _sorts.set(tabId, snap.sort);
 }
 
 function bumpGeneration(tabId: string): number {
@@ -565,8 +553,7 @@ function clearScriptErrors(tabId: string): void {
 async function _fetchScriptErrors(tabId: string, gen: number, key: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
-	const sort = _sortFor(tabId, draft);
-	const args = { ..._evaluateSource(draft), sort };
+	const args = _evaluateSource(draft);
 	try {
 		const result = await fetchScriptErrors(args);
 		// stale: edited/reloaded/closed, or a newer page state, mid-flight
@@ -765,7 +752,7 @@ export function requestScriptErrors(tabId: string): void {
 }
 
 /**
- * Move every per-tab entry (page, sort, loading, error, generation, view
+ * Move every per-tab entry (page, loading, error, generation, view
  * range) from `oldTab` to `newTab`. Used by the two re-key paths: the COMMIT
  * rebind, where a `tbl:draft:*` tab adopts the canonical `tbl:<id>` its create
  * was minted, and `saveAsTableDraft`'s fork, which moves to `tbl:<tempId>` at
@@ -786,10 +773,6 @@ function moveTabState(oldTab: string, newTab: string): void {
 	const page = _pages.get(oldTab);
 	_pages.delete(oldTab);
 	if (page !== undefined) _pages.set(newTab, page);
-
-	const sort = _sorts.get(oldTab);
-	_sorts.delete(oldTab);
-	if (sort !== undefined) _sorts.set(newTab, sort);
 
 	const loading = _loading.get(oldTab);
 	_loading.delete(oldTab);
@@ -872,9 +855,6 @@ export function getTableDraft(tabId: string): TableDraft | undefined {
 }
 export function getTablePage(tabId: string): TableData | undefined {
 	return _pages.get(tabId);
-}
-export function getTableSort(tabId: string): TableSort | undefined {
-	return _sorts.get(tabId);
 }
 export function getTableLoading(tabId: string): boolean {
 	return _loading.get(tabId) ?? false;
@@ -1163,58 +1143,6 @@ function _evaluateSource(
 	return { definition: draft.definition };
 }
 
-/**
- * The sort to send with a request, validated against the CURRENT definition.
- * `_sorts` outlives definition edits, so a sort can point past the last column
- * after an external definition swap (reload, rebind) — the backend hard-422s
- * an out-of-range sort on EVERY request, which would brick the whole tab. The
- * structural edits that shift indices (remove/move) remap the sort precisely
- * (see `remapTableSortForRemove`/`ForMove`); this is the belt-and-braces net
- * for any path that doesn't.
- */
-function _sortFor(tabId: string, draft: TableDraft): TableSort | undefined {
-	const sort = _sorts.get(tabId);
-	if (sort === undefined) return undefined;
-	if (sort.column >= draft.definition.columns.length) {
-		_sorts.delete(tabId);
-		return undefined;
-	}
-	return sort;
-}
-
-/**
- * Keep the active sort pointing at the SAME column across a column removal
- * (mirrors `removeColumn`'s ColumnRef shifting): sort on the removed column is
- * cleared; a sort past it shifts down one. Call before the definition edit is
- * applied so the reload it triggers already uses the remapped sort.
- */
-export function remapTableSortForRemove(tabId: string, index: number): void {
-	const sort = _sorts.get(tabId);
-	if (sort === undefined) return;
-	if (sort.column === index) _sorts.delete(tabId);
-	else if (sort.column > index) _sorts.set(tabId, { ...sort, column: sort.column - 1 });
-}
-
-/** Same contract as `remapTableSortForRemove`, for `moveColumn(from, to)`. */
-export function remapTableSortForMove(tabId: string, from: number, to: number): void {
-	const sort = _sorts.get(tabId);
-	if (sort === undefined) return;
-	let column = sort.column;
-	if (column === from) column = to;
-	else if (from < column && column <= to) column -= 1;
-	else if (to <= column && column < from) column += 1;
-	if (column !== sort.column) _sorts.set(tabId, { ...sort, column });
-}
-
-/** Same contract as `remapTableSortForRemove`, for a single-column INSERTION
- * at `index` (`cloneColumn` inserts at original+1): a sort at or past the
- * insertion point shifts up one so it keeps naming the same column. */
-export function remapTableSortForInsert(tabId: string, index: number): void {
-	const sort = _sorts.get(tabId);
-	if (sort === undefined) return;
-	if (sort.column >= index) _sorts.set(tabId, { ...sort, column: sort.column + 1 });
-}
-
 /** Install `page` as a FRESH sparse cache (drops any previously loaded rows). */
 function installPage(tabId: string, page: TablePage): void {
 	const rows: (TableRow | undefined)[] = new Array<TableRow | undefined>(page.total);
@@ -1290,14 +1218,14 @@ async function _loadTablePage(
 	// A re-evaluation is under way, so the tab has NO settled page state: drop
 	// the recap and its signature until one lands. Without this, a load that
 	// fails (or simply hasn't landed) would leave the previous recap askable at
-	// the NEW sort — `_fetchScriptErrors` reads the draft's current sort, while
-	// the grid is still showing the rows of the old one, and every `row_index`
-	// would address an order nobody is looking at.
+	// the NEW definition (a sort edit included) — `_fetchScriptErrors` reads
+	// the draft's current definition, while the grid is still showing the rows
+	// of the old one, and every `row_index` would address an order nobody is
+	// looking at.
 	clearScriptErrors(tabId);
 	_errors.delete(tabId);
 	_loading.set(tabId, true);
-	const sort = _sortFor(tabId, draft);
-	const args = { ..._evaluateSource(draft), offset, limit, sort };
+	const args = { ..._evaluateSource(draft), offset, limit };
 	try {
 		const page = await evaluateTable(args);
 		if (!isCurrent(tabId, gen)) return; // stale: edited/reloaded/closed mid-flight
@@ -1358,8 +1286,7 @@ export function ensureTableRange(tabId: string, start: number, end: number): voi
 async function fetchChunk(tabId: string, offset: number, gen: number): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
-	const sort = _sortFor(tabId, draft);
-	const args = { ..._evaluateSource(draft), offset, limit: PAGE, sort };
+	const args = { ..._evaluateSource(draft), offset, limit: PAGE };
 	try {
 		const page = await evaluateTable(args);
 		if (!isCurrent(tabId, gen)) return; // superseded by a reset/close mid-flight
@@ -1463,7 +1390,7 @@ export function updateTableDisplayOrder(tabId: string, defn: TableDefinition): v
  * Worse for a VIEWER, who can open the export dialog but has no Save button
  * to clean the draft with. This is the same three-field contract
  * `_suspendedSnapshot`/`revertSuspendedTableEdits` keep for the settings
- * dialog; the export dialog needs two of the three (it never touches sort).
+ * dialog; the export dialog needs the same two.
  */
 export function restoreTableExportSettings(
 	tabId: string,
@@ -1473,12 +1400,6 @@ export function restoreTableExportSettings(
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	_drafts.set(tabId, { ...draft, definition: defn, dirty });
-}
-
-export function setTableSort(tabId: string, sort: TableSort | undefined): void {
-	if (sort === undefined) _sorts.delete(tabId);
-	else _sorts.set(tabId, sort);
-	void loadTablePage(tabId, 0);
 }
 
 export function setTableName(tabId: string, name: string): void {
@@ -1542,7 +1463,7 @@ export async function saveTableDraft(tabId: string): Promise<void> {
  *
  * So the invariant is: a BOUND tab's key is always `tbl:<its own artifactId>`.
  * The fork moves to `tbl:<tempId>` now and to `tbl:<realId>` at commit.
- * `moveTabState` carries every tab-keyed map across (page cache, sort, loading,
+ * `moveTabState` carries every tab-keyed map across (page cache, loading,
  * error, generation, view range, suspension + its snapshot, script status and
  * poll budget, script-error recap) and re-issues an orphaned in-flight load,
  * exactly as the commit listener does.
@@ -1587,7 +1508,6 @@ export async function saveAsTableDraft(tabId: string, name: string): Promise<voi
 export async function reloadTableDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
 	_pages.delete(tabId);
-	_sorts.delete(tabId);
 	_loading.delete(tabId);
 	_errors.delete(tabId);
 	_viewRanges.delete(tabId);
@@ -1601,7 +1521,6 @@ export function closeTableDraft(tabId: string): void {
 	const draft = _drafts.get(tabId); // read BEFORE the delete: it owns the lease
 	_drafts.delete(tabId);
 	_pages.delete(tabId);
-	_sorts.delete(tabId);
 	_loading.delete(tabId);
 	_errors.delete(tabId);
 	_lockDenied.delete(tabId);
@@ -1643,8 +1562,7 @@ export async function downloadTable(
 ): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
-	const sort = _sortFor(tabId, draft);
-	const args = { ..._evaluateSource(draft), sort, format: opts?.format ?? 'xlsx' };
+	const args = { ..._evaluateSource(draft), format: opts?.format ?? 'xlsx' };
 	await retryAndDownload(() => exportTable(args), opts);
 }
 
@@ -1690,7 +1608,6 @@ onCommitEvent(({ scope }) => {
 export function resetTableEditors(): void {
 	_drafts.clear();
 	_pages.clear();
-	_sorts.clear();
 	_loading.clear();
 	_errors.clear();
 	_lockDenied.clear();
@@ -1726,7 +1643,7 @@ export function resetTableEditors(): void {
  *    authoritative backstop for any path that reaches commit without it;
  *  - a draft still on a TEMP id is rebound to the canonical id the `id_map`
  *    minted: the workspace tab is re-keyed (`bindTabToArtifact`) and every
- *    per-tab key — page cache, sort, loading/error, generation, view range,
+ *    per-tab key — page cache, loading/error, generation, view range,
  *    suspension, script status/recap — is carried across by `moveTabState`,
  *    which is why the new draft must be in `_drafts` before it is called.
  *

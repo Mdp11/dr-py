@@ -31,6 +31,7 @@ import type {
 	JsonSplitOptions,
 	NavigationDefinition,
 	RowNumberExportOptions,
+	SortKey,
 	TableDefinition
 } from '$lib/api/types';
 import { chainColumns } from '$lib/navigation/tree';
@@ -67,7 +68,8 @@ function remapOrder(order: number[], f: (i: number) => number | null): number[] 
 	return out;
 }
 
-/** Both index lists remapped through the same `f`. */
+/** Both index lists — and the sort's column keys — remapped through the
+ * same `f`. A key whose column `f` drops (a removal) is dropped with it. */
 function remapOrders(
 	next: TableDefinition,
 	defn: TableDefinition,
@@ -75,6 +77,65 @@ function remapOrders(
 ): void {
 	next.export_order = remapOrder(defn.export_order ?? [], f);
 	next.display_order = remapOrder(defn.display_order ?? [], f);
+	const sort: SortKey[] = [];
+	for (const key of defn.sort ?? []) {
+		const column = f(key.column);
+		if (column !== null) sort.push({ ...key, column });
+	}
+	next.sort = sort;
+}
+
+// ---- sort ------------------------------------------------------------------
+// `sort` mirrors `core/table/evaluate.py::sort_keys`: definition column
+// indices with a direction each, normalized on read, never validated.
+
+/** `sort` made safe: out-of-range and duplicate column keys dropped (first
+ * occurrence wins), order kept. `[]` is build order. */
+export function sortKeys(defn: TableDefinition): SortKey[] {
+	const n = defn.columns.length;
+	const seen = new Set<number>();
+	const out: SortKey[] = [];
+	for (const key of defn.sort ?? []) {
+		const i = key.column;
+		if (!Number.isInteger(i) || i < 0 || i >= n || seen.has(i)) continue;
+		seen.add(i);
+		out.push({ column: i, direction: key.direction ?? 'asc' });
+	}
+	return out;
+}
+
+/** Add column `index` as the LAST (lowest-priority) ascending key, or drop
+ * its key when it already sorts. */
+export function toggleSortColumn(defn: TableDefinition, index: number): TableDefinition {
+	const keys = sortKeys(defn);
+	const next = keys.some((k) => k.column === index)
+		? keys.filter((k) => k.column !== index)
+		: [...keys, { column: index, direction: 'asc' as const }];
+	return { ...clone(defn), sort: next };
+}
+
+export function setSortDirection(
+	defn: TableDefinition,
+	index: number,
+	direction: 'asc' | 'desc'
+): TableDefinition {
+	const sort = sortKeys(defn).map((k) => (k.column === index ? { ...k, direction } : k));
+	return { ...clone(defn), sort };
+}
+
+/** Move the key at priority position `from` to position `to`. */
+export function moveSortKey(defn: TableDefinition, from: number, to: number): TableDefinition {
+	const sort = sortKeys(defn);
+	if (from < 0 || from >= sort.length || to < 0 || to >= sort.length || from === to) {
+		return { ...clone(defn), sort };
+	}
+	const [key] = sort.splice(from, 1);
+	sort.splice(to, 0, key);
+	return { ...clone(defn), sort };
+}
+
+export function resetSort(defn: TableDefinition): TableDefinition {
+	return { ...clone(defn), sort: [] };
 }
 
 /** One `(index, why)` per ColumnRef a column carries: its source plus, for a
@@ -178,9 +239,8 @@ export function addColumn(defn: TableDefinition, col: Column): TableDefinition {
  * the one at `at - 1` when 'after' — in the anchor's own slot of that list,
  * which is what "before/after column X" means on a grid or export whose
  * order differs from the definition's (an empty list stays empty: it already
- * means definition order, where the new column IS at `at`). Callers with an
- * active sort must remap it with `remapTableSortForInsert(tabId, at)` in the
- * same breath.
+ * means definition order, where the new column IS at `at`). Sort keys at or
+ * past `at` shift up one with the columns they name.
  */
 export function insertColumn(
 	defn: TableDefinition,
@@ -252,8 +312,8 @@ export function removeColumn(defn: TableDefinition, index: number): TableDefinit
  * `ColumnRef.index` pointing PAST `index` shifts up one (its target moved).
  * Refs pointing AT `index` keep pointing at the original, and the clone's own
  * source ref — backward-only by schema invariant, so always `<= index` — is
- * untouched and stays valid. Callers with an active sort must remap it with
- * `remapTableSortForInsert(tabId, index + 1)` in the same breath.
+ * untouched and stays valid. Sort keys past `index` shift up one with the
+ * columns they name.
  */
 export function cloneColumn(defn: TableDefinition, index: number): TableDefinition {
 	const src = defn.columns[index];

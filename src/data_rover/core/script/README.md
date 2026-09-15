@@ -637,7 +637,8 @@ background half. One job computes every script cell of ONE resolved table
 definition at ONE model rev, writing into that session's `ScriptCellCache`.
 
 - **The job key excludes the sort.** The fingerprint is
-  `table_fingerprint(dumped_definition, None)` on purpose: `_sort_value` calls
+  `sweep_fingerprint(defn)` — the definition dumped with its `sort` stripped
+  — on purpose: `_sort_value` calls
   the same `(code, "value", ids)` keys that cell rendering does, so ONE sweep
   serves every sort order of that table, the `keep_empty` filter, cell
   rendering, and export. Adding the sort would multiply the guest work by the

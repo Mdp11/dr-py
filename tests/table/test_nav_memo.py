@@ -170,7 +170,7 @@ def test_sort_by_step_ref_navigates_once_per_root(monkeypatch):
     # (keep_empty=False drops the rest). One evaluate per scope element.
     assert len(built.keys) == N_ROOTS * FAN
     calls.clear()
-    ordered = order_rows(mm, model, defn, built.keys, SortSpec(column=1, direction="asc"))
+    ordered = order_rows(mm, model, defn, built.keys, [SortSpec(column=1, direction="asc")])
     assert len(calls) == N_ROOTS  # was N_ROOTS * FAN before the memo
     # Correctness: rows come out sorted by the step-1 part name, interleaving roots.
     names = []
@@ -188,7 +188,7 @@ def test_sort_by_step_ref_over_value_terminal_navigates_once_per_root(monkeypatc
     defn = _step_ref_table({"kind": "property", "property_name": "mass"})
     built = build_rows_ex(mm, model, defn)
     calls = _count_evaluate(monkeypatch)
-    order_rows(mm, model, defn, built.keys, SortSpec(column=1, direction="desc"))
+    order_rows(mm, model, defn, built.keys, [SortSpec(column=1, direction="desc")])
     assert len(calls) == N_ROOTS
 
 
@@ -229,7 +229,7 @@ def test_script_navigation_bypasses_memo(monkeypatch):
     # over memoization, not just a nonzero call count.
     assert len(built.keys) > len({key[0] for key in built.keys})
     calls = _count_evaluate(monkeypatch)
-    order_rows(mm, model, defn, built.keys, SortSpec(column=1, direction="asc"))
+    order_rows(mm, model, defn, built.keys, [SortSpec(column=1, direction="asc")])
     assert len(calls) == len(built.keys)
     assert len(calls) > len({key[0] for key in built.keys})
 
@@ -286,7 +286,7 @@ def test_cells_pass_never_reuses_an_earlier_pass_result():
         ],
     })
     built = build_rows_ex(mm, model, defn)
-    ordered = order_rows(mm, model, defn, built.keys, SortSpec(column=1, direction="asc"))
+    ordered = order_rows(mm, model, defn, built.keys, [SortSpec(column=1, direction="asc")])
     extra = model.create_element("Block")
     model.set_property(extra, "name", "ZZ-new")
     model.connect("BlockHasPart", roots[0], extra.id)

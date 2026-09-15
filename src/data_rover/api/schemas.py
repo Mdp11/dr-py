@@ -1468,19 +1468,14 @@ class ChainPageOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class TableSortIn(BaseModel):
-    column: int = Field(ge=0)
-    direction: Literal["asc", "desc"] = "asc"
-
-
 class EvaluateTableIn(BaseModel):
-    """Exactly one of `definition` (inline) / `artifact_id` (saved)."""
+    """Exactly one of `definition` (inline) / `artifact_id` (saved). The row
+    order is the definition's own `sort`."""
 
     definition: TableDefinition | None = None
     artifact_id: str | None = None
     offset: int = Field(0, ge=0)
     limit: int = Field(100, ge=1, le=500)
-    sort: TableSortIn | None = None
 
     @model_validator(mode="after")
     def _exactly_one(self) -> EvaluateTableIn:
@@ -1642,7 +1637,7 @@ class ScriptErrorItemOut(BaseModel):
     """One failed script cell, addressable by grid position.
 
     `row_index` is an index into the row order the CLIENT DISPLAYS for the same
-    `(definition, sort, model_rev)` — the recap route derives it exactly the way
+    `(definition, model_rev)` — the recap route derives it exactly the way
     `/tables/evaluate` derives its page, degrade rules included — so the panel
     can scroll straight to the offending cell. `column_index` indexes
     `defn.columns`, i.e. the same positions as `TablePageOut.columns` and each

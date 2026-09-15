@@ -84,8 +84,8 @@ def test_evaluate_inline_with_sort(client: TestClient) -> None:
                         "name": "mass",
                     },
                 ],
+                "sort": [{"column": 1, "direction": "asc"}],
             },
-            "sort": {"column": 1, "direction": "asc"},
         },
         headers=AUTH_HEADERS,
     )
@@ -127,8 +127,8 @@ def test_cache_hit_second_page(client: TestClient) -> None:
         "definition": {
             "row_source": {"kind": "scope", "types": ["Block"]},
             "columns": [{"kind": "element", "source": {"kind": "row"}}],
+            "sort": [{"column": 0, "direction": "asc"}],
         },
-        "sort": {"column": 0, "direction": "asc"},
     }
     r1 = client.post(
         papi("/tables/evaluate"),
@@ -204,9 +204,9 @@ def test_evaluate_requires_exactly_one_of_definition_or_artifact_id(
     assert r.status_code == 422
 
 
-def test_sort_column_out_of_range_422(client: TestClient) -> None:
-    """An out-of-range sort column is a clear ValueError->422, NOT an
-    IndexError inside order_rows mislabeled as an 'unknown artifact'."""
+def test_sort_column_out_of_range_is_normalized_away(client: TestClient) -> None:
+    """The sort is a presentation setting on the definition: a stale key left
+    behind by a column removal degrades to build order, never a 422."""
     _bootstrap_model(client)
     r = client.post(
         papi("/tables/evaluate"),
@@ -214,14 +214,13 @@ def test_sort_column_out_of_range_422(client: TestClient) -> None:
             "definition": {
                 "row_source": {"kind": "scope", "types": ["Block"]},
                 "columns": [{"kind": "element", "source": {"kind": "row"}}],
+                "sort": [{"column": 5, "direction": "asc"}],
             },
-            "sort": {"column": 5, "direction": "asc"},
         },
         headers=AUTH_HEADERS,
     )
-    assert r.status_code == 422
-    assert "unknown artifact" not in r.json()["detail"]
-    assert "out of range" in r.json()["detail"]
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 3
 
 
 def test_table_reflects_referenced_navigation_edit(client: TestClient) -> None:
@@ -360,12 +359,11 @@ def test_preview_rollback_invalidates_table_order_cache(client: TestClient) -> N
     assert r1.status_code == 200, r1.text
     rev = r1.json()["model_rev"]
 
-    # Same fingerprint/sort_key the route computes (routes/tables.py:149-150)
-    # for this inline, ref-free definition.
+    # Same fingerprint the route computes for this inline, ref-free definition.
     resolved = TABLE_ADAPTER.validate_python(definition)
-    fp = table_fingerprint(TABLE_ADAPTER.dump_json(resolved).decode(), None)
+    fp = table_fingerprint(TABLE_ADAPTER.dump_json(resolved).decode())
     session = get_session()
-    assert session.table_order_cache.get(fp, "none", rev) is not None  # primed
+    assert session.table_order_cache.get(fp, rev) is not None  # primed
 
     preview = client.post(
         papi("/commits/preview"),
@@ -391,7 +389,7 @@ def test_preview_rollback_invalidates_table_order_cache(client: TestClient) -> N
     # The bug: the entry cached at `rev` before the preview must be gone, or a
     # later evaluate at the same (still-unchanged) rev would HIT and could
     # serve rows computed mid-preview instead of recomputing.
-    assert session.table_order_cache.get(fp, "none", rev) is None
+    assert session.table_order_cache.get(fp, rev) is None
 
 
 def test_evaluate_reports_base_total(client: TestClient) -> None:

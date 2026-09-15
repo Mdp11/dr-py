@@ -162,6 +162,17 @@ class ScriptSweepRegistry:
             j.cancel.set()
 
 
+def sweep_fingerprint(defn: TableDefinition) -> str:
+    """The sweep's job key: the definition's fingerprint with its `sort`
+    stripped. `_sort_value` calls the same `(code, "value", ids)` keys cell
+    rendering does, so ONE sweep serves every sort order of a table — keying
+    on the sort would multiply the guest work by the number of orders a user
+    tries, for nothing."""
+    return table_fingerprint(
+        TABLE_ADAPTER.dump_json(defn.model_copy(update={"sort": []})).decode()
+    )
+
+
 def kick_or_join_sweep(
     session: Session,
     metamodel: Metamodel,
@@ -173,10 +184,11 @@ def kick_or_join_sweep(
 ) -> SweepJob:
     """Start (or join) the sweep for ``defn`` at ``rev`` on ``session``.
 
-    The fingerprint is computed with a None sort deliberately — see the module
-    docstring: one sweep serves every sort order of the same definition.
+    The fingerprint is computed over the definition with its `sort` stripped
+    deliberately — see the module docstring: one sweep serves every sort
+    order of the same definition.
     """
-    fp = table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode(), None)
+    fp = sweep_fingerprint(defn)
 
     def _start(job: SweepJob) -> None:
         if settings.snippet_sweep_sync:

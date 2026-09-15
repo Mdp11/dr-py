@@ -159,9 +159,8 @@ def _evaluate(client: TestClient, *, limit: int = 25) -> dict[str, Any]:
     r = client.post(
         papi("/tables/evaluate"),
         json={
-            "definition": _table(),
+            "definition": {**_table(), "sort": [{"column": 1, "direction": "asc"}]},
             "limit": limit,
-            "sort": {"column": 1, "direction": "asc"},
         },
         headers=AUTH_HEADERS,
     )

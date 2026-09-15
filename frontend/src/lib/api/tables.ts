@@ -4,8 +4,7 @@ import {
 	type ExportFormat,
 	type ScriptErrorsRecap,
 	type TableDefinition,
-	type TablePage,
-	type TableSort
+	type TablePage
 } from './types';
 
 interface EvaluateArgs {
@@ -13,7 +12,6 @@ interface EvaluateArgs {
 	artifactId?: string;
 	offset?: number;
 	limit?: number;
-	sort?: TableSort;
 }
 
 export function evaluateTable(args: EvaluateArgs, cfg?: ClientConfig): Promise<TablePage> {
@@ -21,8 +19,7 @@ export function evaluateTable(args: EvaluateArgs, cfg?: ClientConfig): Promise<T
 		definition: args.definition,
 		artifact_id: args.artifactId,
 		offset: args.offset ?? 0,
-		limit: args.limit ?? 100,
-		sort: args.sort
+		limit: args.limit ?? 100
 	};
 	return apiFetch('/tables/evaluate', { method: 'POST', body, schema: TablePageSchema }, cfg);
 }
@@ -61,7 +58,6 @@ export async function exportTable(
 	args: {
 		definition?: TableDefinition;
 		artifactId?: string;
-		sort?: TableSort;
 		format?: ExportFormat;
 	},
 	cfg?: ClientConfig
@@ -73,7 +69,6 @@ export async function exportTable(
 			body: {
 				definition: args.definition,
 				artifact_id: args.artifactId,
-				sort: args.sort,
 				format: args.format ?? 'xlsx'
 			}
 		},
@@ -99,14 +94,14 @@ export async function exportTable(
  * `truncated` means the sample covers only the head of the table.
  */
 export async function previewTableJson(
-	args: { definition?: TableDefinition; artifactId?: string; sort?: TableSort },
+	args: { definition?: TableDefinition; artifactId?: string },
 	cfg?: ClientConfig
 ): Promise<{ sample: string; truncated: boolean }> {
 	return apiFetch(
 		'/tables/json-preview',
 		{
 			method: 'POST',
-			body: { definition: args.definition, artifact_id: args.artifactId, sort: args.sort }
+			body: { definition: args.definition, artifact_id: args.artifactId }
 		},
 		cfg
 	);
@@ -117,10 +112,11 @@ export async function previewTableJson(
  * to (`POST /tables/script-errors`). The grid is virtualized, so the client
  * only ever holds a window of rows — this route is the only complete answer.
  *
- * `sort` is load-bearing and `offset`/`limit` are not: the recap is always
- * whole-table (the route ignores the window fields), but `row_index` is only a
- * valid grid address for the `(definition, sort, model_rev)` the page was
- * rendered with, so the caller must forward the sort the grid is showing.
+ * `offset`/`limit` are not load-bearing: the recap is always whole-table (the
+ * route ignores the window fields), but `row_index` is only a valid grid
+ * address for the `(definition, model_rev)` the page was rendered with — the
+ * definition carries the sort — so the caller must send the definition the
+ * grid is showing.
  *
  * THE STATUS CODE IS THE RETRY SIGNAL, exactly as for `exportTable`: while the
  * background sweep is still filling this table's script cells the route answers
@@ -137,7 +133,7 @@ export async function fetchScriptErrors(
 		'/tables/script-errors',
 		{
 			method: 'POST',
-			body: { definition: args.definition, artifact_id: args.artifactId, sort: args.sort }
+			body: { definition: args.definition, artifact_id: args.artifactId }
 		},
 		cfg
 	);

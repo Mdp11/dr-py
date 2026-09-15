@@ -43,7 +43,8 @@ import {
 	requestScriptErrors,
 	requestScrollToCell,
 	resetTableEditors,
-	setTableSort
+	getTableDraft,
+	updateTableDefinition
 } from '../table-editor.svelte';
 import { resetWorkspaceTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
@@ -263,14 +264,19 @@ describe('script-error recap fetch-on-demand', () => {
 		// sort (or a definition edit) invalidates the recap even though the
 		// model rev and the sweep status are both unchanged.
 		evalSpy.mockResolvedValue(pageWith({ state: 'ready', done: 10, total: 10 }, 1));
-		setTableSort(TAB, { column: 0, direction: 'asc' });
+		updateTableDefinition(TAB, {
+			...getTableDraft(TAB)!.definition,
+			sort: [{ column: 0, direction: 'asc' }]
+		});
 		await vi.advanceTimersByTimeAsync(0);
 		expect(getScriptErrors(TAB)).toBeNull();
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 
 		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(2);
-		expect(recapSpy.mock.calls[1][0]).toMatchObject({ sort: { column: 0, direction: 'asc' } });
+		expect(recapSpy.mock.calls[1][0]).toMatchObject({
+			definition: { sort: [{ column: 0, direction: 'asc' }] }
+		});
 	});
 
 	it('cannot be asked for while a re-evaluation is in flight — even one that fails', async () => {
@@ -286,7 +292,10 @@ describe('script-error recap fetch-on-demand', () => {
 		// order nobody is looking at. So the tab has no askable page state until
 		// one really lands, and the stale recap is gone either way.
 		evalSpy.mockRejectedValue(new Error('network'));
-		setTableSort(TAB, { column: 0, direction: 'asc' });
+		updateTableDefinition(TAB, {
+			...getTableDraft(TAB)!.definition,
+			sort: [{ column: 0, direction: 'asc' }]
+		});
 		await vi.advanceTimersByTimeAsync(0);
 
 		expect(getScriptErrors(TAB)).toBeNull();
@@ -516,7 +525,10 @@ describe('script-error recap askability', () => {
 					settle = res;
 				})
 		);
-		setTableSort(TAB, { column: 0, direction: 'asc' });
+		updateTableDefinition(TAB, {
+			...getTableDraft(TAB)!.definition,
+			sort: [{ column: 0, direction: 'asc' }]
+		});
 		expect(canRequestScriptErrors(TAB)).toBe(false);
 
 		settle(pageWith(READY));
