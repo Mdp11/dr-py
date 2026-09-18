@@ -1,22 +1,35 @@
 """Runs steps against a real ``Model`` and records what happened.
 
 A step is a JSON-ready dict: ``do`` names a method of the mutation boundary,
-the other keys are its arguments (property values tagged, see ``tagged.py``).
-After every step the recorder adds the outcome (``result`` or ``error``) and
+the other keys are its arguments (property values tagged, see ``tagged.py``);
+``batch`` runs an op batch through the server's applier and ``undo`` runs the
+inverse ops of an earlier batch in restore mode. After every step the recorder adds the outcome (``result`` or ``error``) and
 what the step left behind: the state digest and a fingerprint of the entity
 lines plus the index dump. Every ``full_every``-th step, and the last, carries
 the lines and the dump themselves, so a mismatch can be read, not just seen. A
 step that changed nothing says ``"unchanged": true`` instead. The engine's
 golden runner replays the same steps and compares all of it.
+
+A batch is applied to a deep copy of the model, and the copy is kept only when
+the batch lands. The applier's own rollback replays inverse ops, which leaves
+``rev`` counters bumped and restored entities at the end of their dict; the
+engine's contract is that a refused batch leaves no trace at all, so none of
+that may enter a fixture. The detail text of the refusal is still the oracle's.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Iterable
 from typing import Any
 
+from fastapi import HTTPException
+from pydantic import BaseModel, TypeAdapter
+
+from data_rover.api.routes.ops import _apply_batch, _BatchResult
+from data_rover.api.schemas import ElementOut, ModelOpIn, RelationshipOut
 from data_rover.api.serialize import iter_entity_lines
 from data_rover.api.state_digest import model_digest
 from data_rover.core.metamodel.schema import Metamodel
@@ -27,6 +40,16 @@ from data_rover.core.model.relationship import Relationship
 
 from .index_dump import dump_indexes
 from .tagged import tag
+
+
+_MODEL_OPS: TypeAdapter[list[ModelOpIn]] = TypeAdapter(list[ModelOpIn])
+
+
+def _line(doc: BaseModel) -> str:
+    """One op or entity as the compact JSON text the server writes."""
+    return json.dumps(
+        doc.model_dump(), separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
 
 
 def fingerprint(state: list[str], indexes: str) -> str:
@@ -64,6 +87,40 @@ def set_property(entity_id: str, prop: str, value: Any, **extra: Any) -> dict[st
     }
 
 
+def batch(ops: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+    """A ``batch`` step. The raw ops ride along under ``_ops``; the recorder
+    validates them as the ops route does and writes each as one line of text."""
+    return {"do": "batch", "_ops": ops, **extra}
+
+
+def _outcome(model: Model, res: _BatchResult) -> dict[str, Any]:
+    """What a landed batch reports, and the delta a replica would be sent."""
+    return {
+        "id_map": [[temp, real] for temp, real in res.id_map.items()],
+        "changed_element_ids": list(res.changed_element_ids),
+        "changed_relationship_ids": list(res.changed_relationship_ids),
+        "deleted_element_ids": list(res.deleted_element_ids),
+        "deleted_relationship_ids": list(res.deleted_relationship_ids),
+        "before_elements": [
+            [eid, None if before is None else _line(before)]
+            for eid, before in res.before_elements.items()
+        ],
+        "before_relationships": [
+            [rid, None if before is None else _line(before)]
+            for rid, before in res.before_relationships.items()
+        ],
+        "inverse_ops": [_line(op) for op in res.inverse_ops()],
+        "changed_elements": [
+            _line(ElementOut.from_core(model.elements[eid]))
+            for eid in res.changed_element_ids
+        ],
+        "changed_relationships": [
+            _line(RelationshipOut.from_core(model.relationships[rid]))
+            for rid in res.changed_relationship_ids
+        ],
+    }
+
+
 class Recorder:
     """One scenario in the making: a model with sequential ids, and its log."""
 
@@ -73,6 +130,7 @@ class Recorder:
         self._full_every = full_every
         self._steps: list[dict[str, Any]] = []
         self._last: dict[str, Any] | None = None
+        self._landed: dict[int, _BatchResult] = {}
 
     def _entity(self, step: dict[str, Any]) -> Element | Relationship:
         detached = step.get("detached")
@@ -88,9 +146,22 @@ class Recorder:
             raise AssertionError(f"scenario names an unknown entity {step['id']!r}")
         return entity
 
+    def _batch(self, ops: list[ModelOpIn], *, restore: bool) -> dict[str, Any]:
+        # The metamodel is immutable: share it instead of copying it.
+        trial = copy.deepcopy(self.model, {id(self.metamodel): self.metamodel})
+        res = _apply_batch(trial, ops, restore=restore)
+        self.model = trial
+        self._landed[len(self._steps)] = res
+        return _outcome(trial, res)
+
     def _apply(self, step: dict[str, Any]) -> Any:
         model = self.model
         match step["do"]:
+            case "batch":
+                ops = _MODEL_OPS.validate_python(step["_ops"])
+                return self._batch(ops, restore=bool(step.get("restore", False)))
+            case "undo":
+                return self._batch(self._landed[step["of"]].inverse_ops(), restore=True)
             case "create_element":
                 return model.create_element(step["type"]).id
             case "restore_element":
@@ -127,9 +198,13 @@ class Recorder:
 
     def run(self, step: dict[str, Any]) -> Any:
         """Apply one step, log it, and return its result (``None`` on an error)."""
-        entry = {key: item for key, item in step.items() if key != "_value"}
+        entry = {key: item for key, item in step.items() if not key.startswith("_")}
         if "_value" in step:
             entry["value"] = tag(step["_value"])
+        if "_ops" in step:
+            entry["ops"] = [
+                _line(op) for op in _MODEL_OPS.validate_python(step["_ops"])
+            ]
         try:
             entry["result"] = self._apply(step)
             entry["error"] = None
@@ -139,6 +214,9 @@ class Recorder:
                 "kind": "key" if isinstance(exc, KeyError) else "value",
                 "message": exc.args[0],
             }
+        except HTTPException as exc:
+            entry["result"] = None
+            entry["error"] = {"status": exc.status_code, "detail": exc.detail}
         seen = observe(self.model)
         if seen == self._last:
             entry["unchanged"] = True

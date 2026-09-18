@@ -1,0 +1,1677 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Thing",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "City",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [
+          {
+            "name": "population",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "area",
+            "datatype": "float",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "mayor",
+            "datatype": "Person",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "twins",
+            "datatype": "City",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "extra",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "District",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "Person",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Thing",
+        "target": "Thing",
+        "mappings": [
+          {
+            "source": "Thing",
+            "target": "Thing"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Knows",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Person",
+        "target": "Person",
+        "mappings": [
+          {
+            "source": "Person",
+            "target": "Person"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "since",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "via",
+            "datatype": "Person",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_rome\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"area\":1285.0},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_ann\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ann\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_bob\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"id\":null}",
+        "{\"kind\":\"update_element\",\"id\":\"tmp_rome\",\"properties_patch\":{\"mayor\":\"tmp_ann\",\"twins\":[\"tmp_rome\",\"tmp_nowhere\",[\"tmp_ann\"]],\"extra\":{\"who\":\"tmp_ann\"}}}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_owns\",\"type_name\":\"Owns\",\"source_id\":\"tmp_rome\",\"target_id\":\"tmp_ann\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_k\",\"type_name\":\"Knows\",\"source_id\":\"tmp_ann\",\"target_id\":\"tmp_bob\",\"properties\":{\"since\":2020,\"via\":\"tmp_bob\"},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_rome",
+            "id-1"
+          ],
+          [
+            "tmp_ann",
+            "id-2"
+          ],
+          [
+            "tmp_bob",
+            "id-3"
+          ],
+          [
+            "tmp_owns",
+            "id-4"
+          ],
+          [
+            "tmp_k",
+            "id-5"
+          ]
+        ],
+        "changed_element_ids": [
+          "id-1",
+          "id-2",
+          "id-3"
+        ],
+        "changed_relationship_ids": [
+          "id-4",
+          "id-5"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-1",
+            null
+          ],
+          [
+            "id-2",
+            null
+          ],
+          [
+            "id-3",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-4",
+            null
+          ],
+          [
+            "id-5",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-5\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-4\"}",
+          "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"mayor\":null,\"twins\":null,\"extra\":null}}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"area\":1285.0,\"mayor\":\"id-2\",\"twins\":[\"id-1\",\"tmp_nowhere\",[\"id-2\"]],\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":6}",
+          "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ann\"},\"rev\":1}",
+          "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":2020,\"via\":\"id-3\"},\"rev\":2}"
+        ]
+      },
+      "error": null,
+      "digest": "c4a9575a62df6eb9",
+      "fingerprint": "53a4a0376852bd06",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"area\":1285.0,\"mayor\":\"id-2\",\"twins\":[\"id-1\",\"tmp_nowhere\",[\"id-2\"]],\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":6}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ann\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":2020,\"via\":\"id-3\"},\"rev\":2}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"id-1\"]],[\"Person\",[\"id-2\",\"id-3\"]]],\"out\":[[\"id-1\",[\"id-4\"]],[\"id-2\",[\"id-5\"]]],\"in\":[[\"id-2\",[\"id-4\"]],[\"id-3\",[\"id-5\"]]],\"out_count\":[[\"id-1\",\"Owns\",1],[\"id-2\",\"Knows\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-3\",\"Knows\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-4\"]]],\"refs\":[[\"id-1\",[\"id-1\",\"id-2\",\"tmp_nowhere\"]],[\"id-5\",[\"id-3\"]]],\"referencers\":[[\"id-1\",[\"id-1\"]],[\"id-2\",[\"id-1\"]],[\"id-3\",[\"id-5\"]],[\"tmp_nowhere\",[\"id-1\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"]],\"duplicates\":[],\"roots\":[[\"Bob\",\"id-3\"],[\"Rome\",\"id-1\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"tmp_rome\",\"properties_patch\":{\"name\":\"x\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'tmp_rome"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"name\":\"Roma\",\"population\":2800000,\"area\":null,\"extra\":null}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-1",
+            "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"area\":1285.0,\"mayor\":\"id-2\",\"twins\":[\"id-1\",\"tmp_nowhere\",[\"id-2\"]],\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":6}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"name\":\"Rome\",\"population\":2800000,\"area\":1285.0,\"extra\":{\"who\":\"tmp_ann\"}}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Roma\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[\"id-1\",\"tmp_nowhere\",[\"id-2\"]]},\"rev\":10}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "4eb1679ba4768ac8",
+      "fingerprint": "12a2b4c8b60c019f"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":null}}",
+        "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":null}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-2"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-2",
+            "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ann\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":null}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":\"Ann\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":2}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "7de5b9d6e4c534ee",
+      "fingerprint": "e39c8f0907e8f9e0"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_relationship\",\"id\":\"id-5\",\"properties_patch\":{\"since\":null,\"via\":\"id-2\"}}",
+        "{\"kind\":\"update_relationship\",\"id\":\"id-5\",\"properties_patch\":{\"since\":1999}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-5"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-5",
+            "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":2020,\"via\":\"id-3\"},\"rev\":2}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_relationship\",\"id\":\"id-5\",\"properties_patch\":{\"since\":null}}",
+          "{\"kind\":\"update_relationship\",\"id\":\"id-5\",\"properties_patch\":{\"since\":2020,\"via\":\"id-3\"}}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":5}"
+        ]
+      },
+      "error": null,
+      "digest": "b226e2c79de3c258",
+      "fingerprint": "3e47fa10f0975ce0"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{}}",
+        "{\"kind\":\"update_relationship\",\"id\":\"id-5\",\"properties_patch\":{}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-3"
+        ],
+        "changed_relationship_ids": [
+          "id-5"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-3",
+            "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-5",
+            "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":5}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_relationship\",\"id\":\"id-5\",\"properties_patch\":{}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":5}"
+        ]
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [],
+        "inverse_ops": [],
+        "changed_elements": [],
+        "changed_relationships": []
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"population\":true}}",
+        "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"area\":-0.0}}",
+        "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"population\":1180591620717411303424,\"area\":1e+22}}",
+        "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}]}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-1",
+            "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Roma\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[\"id-1\",\"tmp_nowhere\",[\"id-2\"]]},\"rev\":10}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"twins\":[\"id-1\",\"tmp_nowhere\",[\"id-2\"]]}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"population\":true,\"area\":-0.0}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"area\":null}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"population\":2800000}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Roma\",\"population\":1180591620717411303424,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1e+22},\"rev\":15}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "71eff6891443ab8c",
+      "fingerprint": "9b6ec070ef8a2e3f"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"name\":\"Bobby\"}}",
+        "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":\"Annie\"}}",
+        "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"name\":\"Bob\"}}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d\",\"type_name\":\"District\",\"properties\":{\"name\":\"Centro\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_o\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"tmp_d\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"update_element\",\"id\":\"tmp_d\",\"properties_patch\":{\"name\":\"Centro storico\"}}",
+        "{\"kind\":\"delete_element\",\"id\":\"tmp_d\"}",
+        "{\"kind\":\"delete_relationship\",\"id\":\"id-5\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_d",
+            "id-6"
+          ],
+          [
+            "tmp_o",
+            "id-7"
+          ]
+        ],
+        "changed_element_ids": [
+          "id-3",
+          "id-2"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "id-6"
+        ],
+        "deleted_relationship_ids": [
+          "id-7",
+          "id-5"
+        ],
+        "before_elements": [
+          [
+            "id-3",
+            "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":1}"
+          ],
+          [
+            "id-2",
+            "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":2}"
+          ],
+          [
+            "id-6",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-7",
+            null
+          ],
+          [
+            "id-5",
+            "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":5}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-6\",\"type_name\":\"District\",\"properties\":{\"name\":\"Centro storico\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-7\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-6\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"update_element\",\"id\":\"id-6\",\"properties_patch\":{\"name\":\"Centro\"}}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-7\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-6\"}",
+          "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"name\":\"Bobby\"}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":null}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"name\":\"Bob\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":3}",
+          "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Annie\"},\"rev\":3}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "5dbd55b82936d98c",
+      "fingerprint": "e3945715be6e463f"
+    },
+    {
+      "do": "undo",
+      "of": 8,
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-3",
+          "id-2"
+        ],
+        "changed_relationship_ids": [
+          "id-5"
+        ],
+        "deleted_element_ids": [
+          "id-6"
+        ],
+        "deleted_relationship_ids": [
+          "id-7"
+        ],
+        "before_elements": [
+          [
+            "id-6",
+            null
+          ],
+          [
+            "id-3",
+            "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":3}"
+          ],
+          [
+            "id-2",
+            "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Annie\"},\"rev\":3}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-5",
+            null
+          ],
+          [
+            "id-7",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"name\":\"Bobby\"}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":\"Annie\"}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"name\":\"Bob\"}}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-6\",\"type_name\":\"District\",\"properties\":{\"name\":\"Centro\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-7\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-6\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"update_element\",\"id\":\"id-6\",\"properties_patch\":{\"name\":\"Centro storico\"}}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-7\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-6\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-5\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":5}",
+          "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":4}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":2}"
+        ]
+      },
+      "error": null,
+      "digest": "850d6d96a78dac6e",
+      "fingerprint": "0c58bb6597331c26"
+    },
+    {
+      "do": "undo",
+      "of": 2,
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-1",
+            "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Roma\",\"population\":1180591620717411303424,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1e+22},\"rev\":15}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"name\":\"Roma\",\"population\":1180591620717411303424,\"area\":1e+22,\"extra\":null}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1285.0,\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":19}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "3cc346e07ee17f13",
+      "fingerprint": "e1d7bcb322f02a46",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1285.0,\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":19}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":5}",
+        "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":2}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"id-1\"]],[\"Person\",[\"id-2\",\"id-3\"]]],\"out\":[[\"id-1\",[\"id-4\"]],[\"id-2\",[\"id-5\"]]],\"in\":[[\"id-2\",[\"id-4\"]],[\"id-3\",[\"id-5\"]]],\"out_count\":[[\"id-1\",\"Owns\",1],[\"id-2\",\"Knows\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-3\",\"Knows\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-4\"]]],\"refs\":[[\"id-1\",[\"id-1\",\"id-2\"]],[\"id-5\",[\"id-2\"]]],\"referencers\":[[\"id-1\",[\"id-1\"]],[\"id-2\",[\"id-1\",\"id-5\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"]],\"duplicates\":[],\"roots\":[[\"Bob\",\"id-3\"],[\"Rome\",\"id-1\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_m\",\"type_name\":\"City\",\"properties\":{\"name\":\"Milan\"},\"id\":\"city-milan\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_t\",\"type_name\":\"Owns\",\"source_id\":\"tmp_m\",\"target_id\":\"id-3\",\"properties\":{},\"id\":\"owns-milan-bob\"}",
+        "{\"kind\":\"update_element\",\"id\":\"tmp_m\",\"properties_patch\":{\"mayor\":\"tmp_t\"}}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_m",
+            "city-milan"
+          ],
+          [
+            "tmp_t",
+            "owns-milan-bob"
+          ]
+        ],
+        "changed_element_ids": [
+          "city-milan"
+        ],
+        "changed_relationship_ids": [
+          "owns-milan-bob"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "city-milan",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "owns-milan-bob",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"city-milan\",\"properties_patch\":{\"mayor\":null}}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"owns-milan-bob\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"city-milan\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"city-milan\",\"type_name\":\"City\",\"properties\":{\"name\":\"Milan\",\"mayor\":\"owns-milan-bob\"},\"rev\":2}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"owns-milan-bob\",\"type_name\":\"Owns\",\"source_id\":\"city-milan\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "d32082b885b97e5a",
+      "fingerprint": "62e5f3edbbf8cc35"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_x\",\"type_name\":\"City\",\"properties\":{},\"id\":\"city-milan\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Id 'city-milan' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_x\",\"type_name\":\"City\",\"properties\":{},\"id\":\"owns-milan-bob\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Id 'owns-milan-bob' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_x\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"id\":\"city-milan\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Id 'city-milan' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_x\",\"type_name\":\"City\",\"properties\":{},\"id\":\"tmp_taken\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "id hint 'tmp_taken' must not use the reserved 'tmp_' prefix"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_x\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"id\":\"tmp_taken\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "id hint 'tmp_taken' must not use the reserved 'tmp_' prefix"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"plain\",\"type_name\":\"City\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "create_element temp_id 'plain' must start with 'tmp_'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"plain\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "create_relationship temp_id 'plain' must start with 'tmp_'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "restore": true,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"plain\",\"type_name\":\"City\",\"properties\":{\"name\":\"Plain\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":1},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_still\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Minted\"},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_still",
+            "id-8"
+          ]
+        ],
+        "changed_element_ids": [
+          "plain",
+          "id-8"
+        ],
+        "changed_relationship_ids": [
+          "plain-knows"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "plain",
+            null
+          ],
+          [
+            "id-8",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "plain-knows",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"id-8\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"plain-knows\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"plain\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"plain\",\"type_name\":\"City\",\"properties\":{\"name\":\"Plain\"},\"rev\":1}",
+          "{\"id\":\"id-8\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Minted\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":1},\"rev\":1}"
+        ]
+      },
+      "error": null,
+      "digest": "299c26c1ce2a47b5",
+      "fingerprint": "54cf11c4c75686db"
+    },
+    {
+      "do": "batch",
+      "restore": true,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"plain\",\"type_name\":\"City\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Id 'plain' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d\",\"type_name\":\"District\",\"properties\":{\"name\":\"Trastevere\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_o1\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"tmp_d\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Eve\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_o2\",\"type_name\":\"Owns\",\"source_id\":\"tmp_d\",\"target_id\":\"tmp_p\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_self\",\"type_name\":\"Knows\",\"source_id\":\"tmp_p\",\"target_id\":\"tmp_p\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_in\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"tmp_p\",\"properties\":{\"since\":5},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_kid\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Kid\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_o3\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"tmp_kid\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"update_element\",\"id\":\"city-milan\",\"properties_patch\":{\"twins\":[\"id-1\"]}}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_d",
+            "id-9"
+          ],
+          [
+            "tmp_o1",
+            "id-10"
+          ],
+          [
+            "tmp_p",
+            "id-11"
+          ],
+          [
+            "tmp_o2",
+            "id-12"
+          ],
+          [
+            "tmp_self",
+            "id-13"
+          ],
+          [
+            "tmp_in",
+            "id-14"
+          ],
+          [
+            "tmp_kid",
+            "id-15"
+          ],
+          [
+            "tmp_o3",
+            "id-16"
+          ]
+        ],
+        "changed_element_ids": [
+          "id-9",
+          "id-11",
+          "id-15",
+          "city-milan"
+        ],
+        "changed_relationship_ids": [
+          "id-10",
+          "id-12",
+          "id-13",
+          "id-14",
+          "id-16"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-9",
+            null
+          ],
+          [
+            "id-11",
+            null
+          ],
+          [
+            "id-15",
+            null
+          ],
+          [
+            "city-milan",
+            "{\"id\":\"city-milan\",\"type_name\":\"City\",\"properties\":{\"name\":\"Milan\",\"mayor\":\"owns-milan-bob\"},\"rev\":2}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-10",
+            null
+          ],
+          [
+            "id-12",
+            null
+          ],
+          [
+            "id-13",
+            null
+          ],
+          [
+            "id-14",
+            null
+          ],
+          [
+            "id-16",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"city-milan\",\"properties_patch\":{\"twins\":null}}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-16\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-15\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-14\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-13\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-12\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-11\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-10\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-9\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-9\",\"type_name\":\"District\",\"properties\":{\"name\":\"Trastevere\"},\"rev\":1}",
+          "{\"id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Eve\"},\"rev\":1}",
+          "{\"id\":\"id-15\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Kid\"},\"rev\":1}",
+          "{\"id\":\"city-milan\",\"type_name\":\"City\",\"properties\":{\"name\":\"Milan\",\"mayor\":\"owns-milan-bob\",\"twins\":[\"id-1\"]},\"rev\":3}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-12\",\"type_name\":\"Owns\",\"source_id\":\"id-9\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-13\",\"type_name\":\"Knows\",\"source_id\":\"id-11\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-14\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{\"since\":5},\"rev\":1}",
+          "{\"id\":\"id-16\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "2b9afabf0c524c10",
+      "fingerprint": "099fdb40e08acc66"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"id-1\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "id-1",
+          "id-9",
+          "id-2",
+          "id-15",
+          "id-11"
+        ],
+        "deleted_relationship_ids": [
+          "id-10",
+          "id-4",
+          "id-12",
+          "id-16",
+          "id-5",
+          "plain-knows",
+          "id-13",
+          "id-14"
+        ],
+        "before_elements": [
+          [
+            "id-1",
+            "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1285.0,\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":19}"
+          ],
+          [
+            "id-9",
+            "{\"id\":\"id-9\",\"type_name\":\"District\",\"properties\":{\"name\":\"Trastevere\"},\"rev\":1}"
+          ],
+          [
+            "id-2",
+            "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":4}"
+          ],
+          [
+            "id-15",
+            "{\"id\":\"id-15\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Kid\"},\"rev\":1}"
+          ],
+          [
+            "id-11",
+            "{\"id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Eve\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-10",
+            "{\"id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-4",
+            "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-12",
+            "{\"id\":\"id-12\",\"type_name\":\"Owns\",\"source_id\":\"id-9\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-16",
+            "{\"id\":\"id-16\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-5",
+            "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":2}"
+          ],
+          [
+            "plain-knows",
+            "{\"id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":1},\"rev\":1}"
+          ],
+          [
+            "id-13",
+            "{\"id\":\"id-13\",\"type_name\":\"Knows\",\"source_id\":\"id-11\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-14",
+            "{\"id\":\"id-14\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{\"since\":5},\"rev\":1}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1285.0,\"extra\":{\"who\":\"tmp_ann\"}},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-9\",\"type_name\":\"District\",\"properties\":{\"name\":\"Trastevere\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-15\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Kid\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Eve\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-12\",\"type_name\":\"Owns\",\"source_id\":\"id-9\",\"target_id\":\"id-11\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-16\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-15\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":1},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-13\",\"type_name\":\"Knows\",\"source_id\":\"id-11\",\"target_id\":\"id-11\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-14\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{\"since\":5},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "0f9b450d8404ce1f",
+      "fingerprint": "7d4d3ba1ee51bead"
+    },
+    {
+      "do": "undo",
+      "of": 22,
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-1",
+          "id-9",
+          "id-2",
+          "id-15",
+          "id-11"
+        ],
+        "changed_relationship_ids": [
+          "id-10",
+          "id-4",
+          "id-12",
+          "id-16",
+          "id-5",
+          "plain-knows",
+          "id-13",
+          "id-14"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-1",
+            null
+          ],
+          [
+            "id-9",
+            null
+          ],
+          [
+            "id-2",
+            null
+          ],
+          [
+            "id-15",
+            null
+          ],
+          [
+            "id-11",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-10",
+            null
+          ],
+          [
+            "id-4",
+            null
+          ],
+          [
+            "id-12",
+            null
+          ],
+          [
+            "id-16",
+            null
+          ],
+          [
+            "id-5",
+            null
+          ],
+          [
+            "plain-knows",
+            null
+          ],
+          [
+            "id-13",
+            null
+          ],
+          [
+            "id-14",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-14\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-13\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"plain-knows\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-5\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-16\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-12\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-4\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-10\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-11\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-15\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-9\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1285.0,\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":6}",
+          "{\"id\":\"id-9\",\"type_name\":\"District\",\"properties\":{\"name\":\"Trastevere\"},\"rev\":1}",
+          "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-15\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Kid\"},\"rev\":1}",
+          "{\"id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Eve\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-12\",\"type_name\":\"Owns\",\"source_id\":\"id-9\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-16\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":2}",
+          "{\"id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":1},\"rev\":1}",
+          "{\"id\":\"id-13\",\"type_name\":\"Knows\",\"source_id\":\"id-11\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-14\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{\"since\":5},\"rev\":1}"
+        ]
+      },
+      "error": null,
+      "digest": "0a18aa68546ce191",
+      "fingerprint": "00bcbf31ee3613d9"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"plain-knows\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-2\",\"properties\":{\"since\":2},\"id\":\"plain-knows\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_r",
+            "plain-knows"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "plain-knows"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "plain-knows",
+            "{\"id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":1},\"rev\":1}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"plain-knows\"}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":1},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-2\",\"properties\":{\"since\":2},\"rev\":1}"
+        ]
+      },
+      "error": null,
+      "digest": "0a18aa68546ce191",
+      "fingerprint": "1797b7ffecf4b7b1"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"plain\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_r\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Plain\"},\"id\":\"plain\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_r",
+            "plain"
+          ]
+        ],
+        "changed_element_ids": [
+          "plain"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "plain",
+            "{\"id\":\"plain\",\"type_name\":\"City\",\"properties\":{\"name\":\"Plain\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"plain\"}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"plain\",\"type_name\":\"City\",\"properties\":{\"name\":\"Plain\"},\"id\":null}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"plain\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Plain\"},\"rev\":1}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "0a18aa68546ce191",
+      "fingerprint": "4fff4ca826cde453",
+      "state": [
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":5}",
+        "{\"id\":\"city-milan\",\"type_name\":\"City\",\"properties\":{\"name\":\"Milan\",\"mayor\":\"owns-milan-bob\",\"twins\":[\"id-1\"]},\"rev\":3}",
+        "{\"id\":\"id-8\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Minted\"},\"rev\":1}",
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1285.0,\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":6}",
+        "{\"id\":\"id-9\",\"type_name\":\"District\",\"properties\":{\"name\":\"Trastevere\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-15\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Kid\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Eve\"},\"rev\":1}",
+        "{\"id\":\"plain\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Plain\"},\"rev\":1}",
+        "{\"id\":\"owns-milan-bob\",\"type_name\":\"Owns\",\"source_id\":\"city-milan\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-12\",\"type_name\":\"Owns\",\"source_id\":\"id-9\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-16\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":2}",
+        "{\"id\":\"id-13\",\"type_name\":\"Knows\",\"source_id\":\"id-11\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-14\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{\"since\":5},\"rev\":1}",
+        "{\"id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-2\",\"properties\":{\"since\":2},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"city-milan\",\"id-1\"]],[\"District\",[\"id-9\"]],[\"Person\",[\"id-11\",\"id-15\",\"id-2\",\"id-3\",\"id-8\",\"plain\"]]],\"out\":[[\"city-milan\",[\"owns-milan-bob\"]],[\"id-1\",[\"id-10\",\"id-4\"]],[\"id-11\",[\"id-13\"]],[\"id-2\",[\"id-16\",\"id-5\"]],[\"id-3\",[\"id-14\",\"plain-knows\"]],[\"id-9\",[\"id-12\"]]],\"in\":[[\"id-11\",[\"id-12\",\"id-13\",\"id-14\"]],[\"id-15\",[\"id-16\"]],[\"id-2\",[\"id-4\",\"plain-knows\"]],[\"id-3\",[\"id-5\",\"owns-milan-bob\"]],[\"id-9\",[\"id-10\"]]],\"out_count\":[[\"city-milan\",\"Owns\",1],[\"id-1\",\"Owns\",2],[\"id-11\",\"Knows\",1],[\"id-2\",\"Knows\",1],[\"id-2\",\"Owns\",1],[\"id-3\",\"Knows\",2],[\"id-9\",\"Owns\",1]],\"in_count\":[[\"id-11\",\"Knows\",2],[\"id-11\",\"Owns\",1],[\"id-15\",\"Owns\",1],[\"id-2\",\"Knows\",1],[\"id-2\",\"Owns\",1],[\"id-3\",\"Knows\",1],[\"id-3\",\"Owns\",1],[\"id-9\",\"Owns\",1]],\"parents\":[[\"id-11\",[\"id-9\"],[\"id-12\"]],[\"id-15\",[\"id-2\"],[\"id-16\"]],[\"id-2\",[\"id-1\"],[\"id-4\"]],[\"id-3\",[\"city-milan\"],[\"owns-milan-bob\"]],[\"id-9\",[\"id-1\"],[\"id-10\"]]],\"refs\":[[\"city-milan\",[\"id-1\",\"owns-milan-bob\"]],[\"id-1\",[\"id-1\",\"id-2\"]],[\"id-5\",[\"id-2\"]]],\"referencers\":[[\"id-1\",[\"city-milan\",\"id-1\"]],[\"id-2\",[\"id-1\",\"id-5\"]],[\"owns-milan-bob\",[\"city-milan\"]]],\"uniq_groups\":[[\"city-milan\"],[\"id-1\"],[\"id-11\"],[\"id-15\"],[\"id-2\"],[\"id-3\"],[\"id-8\"],[\"id-9\"],[\"plain\"]],\"duplicates\":[],\"roots\":[[\"Milan\",\"city-milan\"],[\"Minted\",\"id-8\"],[\"Plain\",\"plain\"],[\"Rome\",\"id-1\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a\",\"type_name\":\"City\",\"properties\":{\"name\":\"a\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b\",\"type_name\":\"Nope\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Unknown element type 'Nope"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a\",\"type_name\":\"Thing\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Cannot instantiate abstract type 'Thing'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a\",\"type_name\":\"City\",\"properties\":{\"name\":\"a\",\"population\":1,\"nope\":2},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "City' has no property 'nope"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"name\":\"kept?\"}}",
+        "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"nope\":1}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Person' has no property 'nope"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"ghost\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"ghost\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No relationship with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_relationship\",\"id\":\"ghost\",\"properties_patch\":{}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No relationship with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_relationship\",\"id\":\"plain-knows\",\"properties_patch\":{\"nope\":1}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Knows' has no property 'nope"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"plain-knows\",\"properties_patch\":{}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'plain-knows"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"plain-knows\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'plain-knows"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"id-3\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No relationship with id 'id-3"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_x\",\"type_name\":\"Nope\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Unknown relationship type 'Nope"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_x\",\"type_name\":\"Knows\",\"source_id\":\"ghost\",\"target_id\":\"id-3\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No source element 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_x\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"ghost\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No target element 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_x\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":1,\"nope\":2},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Knows' has no property 'nope"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"it's\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id \"it\\'s"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"say \\\"hi\\\"\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id \\'say \"hi\"\\"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"it's \\\"both\\\"\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id \\'it\\\\\\'s \"both\"\\"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"'\"}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id \"\\"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "undo",
+      "of": 25,
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "plain"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "plain",
+            "{\"id\":\"plain\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Plain\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"plain\"}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"plain\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Plain\"},\"id\":null}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"plain\",\"type_name\":\"City\",\"properties\":{\"name\":\"Plain\"},\"rev\":1}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "0a18aa68546ce191",
+      "fingerprint": "099e12a528e2f55f"
+    },
+    {
+      "do": "undo",
+      "of": 21,
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "city-milan"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "id-15",
+          "id-11",
+          "id-9"
+        ],
+        "deleted_relationship_ids": [
+          "id-16",
+          "id-14",
+          "id-13",
+          "id-12",
+          "id-10"
+        ],
+        "before_elements": [
+          [
+            "city-milan",
+            "{\"id\":\"city-milan\",\"type_name\":\"City\",\"properties\":{\"name\":\"Milan\",\"mayor\":\"owns-milan-bob\",\"twins\":[\"id-1\"]},\"rev\":3}"
+          ],
+          [
+            "id-15",
+            "{\"id\":\"id-15\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Kid\"},\"rev\":1}"
+          ],
+          [
+            "id-11",
+            "{\"id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Eve\"},\"rev\":1}"
+          ],
+          [
+            "id-9",
+            "{\"id\":\"id-9\",\"type_name\":\"District\",\"properties\":{\"name\":\"Trastevere\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-16",
+            "{\"id\":\"id-16\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-14",
+            "{\"id\":\"id-14\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{\"since\":5},\"rev\":1}"
+          ],
+          [
+            "id-13",
+            "{\"id\":\"id-13\",\"type_name\":\"Knows\",\"source_id\":\"id-11\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-12",
+            "{\"id\":\"id-12\",\"type_name\":\"Owns\",\"source_id\":\"id-9\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-10",
+            "{\"id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-9\",\"type_name\":\"District\",\"properties\":{\"name\":\"Trastevere\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Eve\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-12\",\"type_name\":\"Owns\",\"source_id\":\"id-9\",\"target_id\":\"id-11\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-13\",\"type_name\":\"Knows\",\"source_id\":\"id-11\",\"target_id\":\"id-11\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-14\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{\"since\":5},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-15\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Kid\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-16\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-15\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"update_element\",\"id\":\"city-milan\",\"properties_patch\":{\"twins\":[\"id-1\"]}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"city-milan\",\"type_name\":\"City\",\"properties\":{\"name\":\"Milan\",\"mayor\":\"owns-milan-bob\"},\"rev\":4}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "d580fac6a615fddc",
+      "fingerprint": "bc2a0be780d72f10",
+      "state": [
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":5}",
+        "{\"id\":\"city-milan\",\"type_name\":\"City\",\"properties\":{\"name\":\"Milan\",\"mayor\":\"owns-milan-bob\"},\"rev\":4}",
+        "{\"id\":\"id-8\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Minted\"},\"rev\":1}",
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\",\"population\":2800000,\"mayor\":\"id-2\",\"twins\":[1,1.0,true,null,\"id-1\",{\"k\":[1.5]}],\"area\":1285.0,\"extra\":{\"who\":\"tmp_ann\"}},\"rev\":6}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"plain\",\"type_name\":\"City\",\"properties\":{\"name\":\"Plain\"},\"rev\":1}",
+        "{\"id\":\"owns-milan-bob\",\"type_name\":\"Owns\",\"source_id\":\"city-milan\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"via\":\"id-2\",\"since\":1999},\"rev\":2}",
+        "{\"id\":\"plain-knows\",\"type_name\":\"Knows\",\"source_id\":\"id-3\",\"target_id\":\"id-2\",\"properties\":{\"since\":2},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"city-milan\",\"id-1\",\"plain\"]],[\"Person\",[\"id-2\",\"id-3\",\"id-8\"]]],\"out\":[[\"city-milan\",[\"owns-milan-bob\"]],[\"id-1\",[\"id-4\"]],[\"id-2\",[\"id-5\"]],[\"id-3\",[\"plain-knows\"]]],\"in\":[[\"id-2\",[\"id-4\",\"plain-knows\"]],[\"id-3\",[\"id-5\",\"owns-milan-bob\"]]],\"out_count\":[[\"city-milan\",\"Owns\",1],[\"id-1\",\"Owns\",1],[\"id-2\",\"Knows\",1],[\"id-3\",\"Knows\",1]],\"in_count\":[[\"id-2\",\"Knows\",1],[\"id-2\",\"Owns\",1],[\"id-3\",\"Knows\",1],[\"id-3\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-4\"]],[\"id-3\",[\"city-milan\"],[\"owns-milan-bob\"]]],\"refs\":[[\"city-milan\",[\"owns-milan-bob\"]],[\"id-1\",[\"id-1\",\"id-2\"]],[\"id-5\",[\"id-2\"]]],\"referencers\":[[\"id-1\",[\"id-1\"]],[\"id-2\",[\"id-1\",\"id-5\"]],[\"owns-milan-bob\",[\"city-milan\"]]],\"uniq_groups\":[[\"city-milan\"],[\"id-1\"],[\"id-2\"],[\"id-3\"],[\"id-8\"],[\"plain\"]],\"duplicates\":[],\"roots\":[[\"Milan\",\"city-milan\"],[\"Minted\",\"id-8\"],[\"Plain\",\"plain\"],[\"Rome\",\"id-1\"]]}"
+    },
+    {
+      "do": "undo",
+      "of": 21,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No relationship with id 'id-16"
+      },
+      "unchanged": true
+    }
+  ]
+}
