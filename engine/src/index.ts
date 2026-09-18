@@ -1,3 +1,6 @@
+export { dumpIndexes, type IndexDump } from './debug/dump-indexes.ts';
+export { shuffleAdjacency } from './debug/shuffle-adjacency.ts';
+export { verifyConsistent } from './debug/verify-consistent.ts';
 export { parseKey, parseKeyEntry, type KeyRel, type KeySpec } from './metamodel/key.ts';
 export { Metamodel, type EndConstraint } from './metamodel/metamodel.ts';
 export { Multiplicity } from './metamodel/multiplicity.ts';
@@ -9,6 +12,9 @@ export type {
 	RelationshipType
 } from './metamodel/types.ts';
 export { ModelError, SnapshotError } from './model/errors.ts';
+export type { IndexSet } from './model/indexes.ts';
+export { elementLine, modelLines, relationshipLine } from './model/lines.ts';
+export { Model, type ModelOptions } from './model/model.ts';
 export { displayName, nameOf } from './model/naming.ts';
 export { ElementRec, RelRec, type Props } from './model/records.ts';
 export { cmpCodePoint } from './value/compare.ts';
