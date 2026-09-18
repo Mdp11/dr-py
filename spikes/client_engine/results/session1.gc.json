@@ -1,0 +1,124 @@
+{
+  "chromium": "148.0.7778.96",
+  "runs": [
+    {
+      "label": "gc",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.7778.96 Safari/537.36",
+      "thresholds": {
+        "open_s": 8,
+        "script_cells_s": 2,
+        "big_table_s": 10,
+        "heap_mb": 600
+      },
+      "csp_violations": [],
+      "python": {
+        "boot": {
+          "load_pyodide_ms": 2041,
+          "load_packages_ms": 287,
+          "fetch_unpack_core_ms": 208,
+          "import_core_ms": 880,
+          "cross_origin_isolated": true,
+          "boot_total_ms": 3416,
+          "heap_mb": 36
+        },
+        "boot_and_fetch_wall_ms": 3460,
+        "open": {
+          "fast": "gc",
+          "load_metamodel_ms": 95.6,
+          "json_bytes": 76978969,
+          "json_loads_ms": 1277.2,
+          "build_entities_ms": 541.9,
+          "rebuild_indexes_ms": 1394.3,
+          "gc_ms": 57.5,
+          "elements": 170340,
+          "relationships": 126820,
+          "python_open_total_ms": 3421,
+          "heap_mb": 454
+        },
+        "open_wall_ms": 6885,
+        "big_table": {
+          "build_rows_ms": 82.6,
+          "rows": 112200,
+          "sort_ms": 1571.8,
+          "page_200_cells_ms": 9.7,
+          "all_cells_ms": 6098.4,
+          "interactive_total_ms": 1664.1,
+          "export_total_ms": 7752.8,
+          "cells": 336600,
+          "heap_mb": 454
+        },
+        "script_table": {
+          "build_rows_ms": 4.3,
+          "script_cells_ms": 1009.9,
+          "rows": 1000,
+          "script_cells": 10000,
+          "error_cells": 0,
+          "us_per_cell": 101,
+          "sample_row": [
+            "ElementCell(element_id='e_060521', owner_id=None, editable=False, ref_type=None)",
+            "ValueCell(present=True, value='MICROSERVICE-001', element_id=None, editable=Fals",
+            "ValueCell(present=True, value=4, element_id=None, editable=False)",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)",
+            "ValueCell(present=True, value='SoftwareSystem-1361', element_id=None, editable=F",
+            "ValuesCell(present=True, values=['Database-001', 'Cache-001', 'Broker-001', 'End",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)",
+            "ValueCell(present=True, value='Proposed', element_id=None, editable=False)",
+            "ValueCell(present=True, value='batch-00, msvc', element_id=None, editable=False)",
+            "ValueCell(present=True, value='Microservice:e_060521', element_id=None, editable",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)"
+          ],
+          "heap_mb": 454
+        },
+        "search": {
+          "search_scan_ms": 68.3,
+          "hits": 1220,
+          "heap_mb": 454
+        },
+        "validate": {
+          "full_validation_ms": 7597.8,
+          "issues": 0,
+          "heap_mb": 454
+        },
+        "runaway": {
+          "interrupted": true,
+          "after_ms": 1506,
+          "error": "KeyboardInterrupt ",
+          "heap_mb": 454
+        },
+        "model_alive_after_interrupt": {
+          "elements": 170340,
+          "heap_mb": 454
+        }
+      },
+      "iframe_cross_origin_isolated": true,
+      "snapshot": {
+        "fetch_ms": 69,
+        "gz_mb": 5.83,
+        "shell_gunzip_ms": 319
+      },
+      "verdicts": {
+        "open": {
+          "value_s": 6.88,
+          "limit_s": 8,
+          "pass": true
+        },
+        "script_cells": {
+          "value_s": 1.01,
+          "limit_s": 2,
+          "pass": true
+        },
+        "big_table": {
+          "value_s": 7.75,
+          "limit_s": 10,
+          "pass": true
+        },
+        "heap": {
+          "value_mb": 454,
+          "limit_mb": 600,
+          "pass": true
+        }
+      }
+    }
+  ],
+  "js_replica_heap_mb": 85
+}

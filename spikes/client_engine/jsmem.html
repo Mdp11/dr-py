@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>js replica memory probe</title>
+<p>Loads the JS replica on the main thread and keeps it alive so the runner can read the heap over CDP.</p>
+<script type="module">
+  import { loadReplica } from "/js-replica.mjs";
+  const { replica, timings } = await loadReplica("/snapshot.json.gz");
+  window.__replica = replica;
+  window.__timings = timings;
+  window.__done = true;
+</script>

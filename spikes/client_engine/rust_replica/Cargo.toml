@@ -1,0 +1,20 @@
+# THROWAWAY SPIKE — minimal Rust replica of the model, built for wasm32-unknown-unknown.
+[package]
+name = "rust_replica"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

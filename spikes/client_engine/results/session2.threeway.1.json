@@ -1,0 +1,472 @@
+{
+  "chromium": "148.0.7778.96",
+  "runs": [
+    {
+      "label": "cold",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.7778.96 Safari/537.36",
+      "thresholds": {
+        "open_s": 8,
+        "script_cells_s": 2,
+        "big_table_s": 10,
+        "heap_mb": 600
+      },
+      "csp_violations": [],
+      "python": {
+        "boot": {
+          "load_pyodide_ms": 3311,
+          "load_packages_ms": 480,
+          "fetch_unpack_core_ms": 308,
+          "import_core_ms": 1411,
+          "cross_origin_isolated": true,
+          "boot_total_ms": 5511,
+          "heap_mb": 36
+        },
+        "boot_and_fetch_wall_ms": 5587,
+        "open": {
+          "js_gunzip_ms": 461,
+          "fast": "",
+          "load_metamodel_ms": 150.3,
+          "json_bytes": 76978969,
+          "json_loads_ms": 2115.5,
+          "build_entities_ms": 1331.7,
+          "rebuild_indexes_ms": 4064.8,
+          "gc_ms": 1082.6,
+          "elements": 170340,
+          "relationships": 126820,
+          "python_open_total_ms": 8822,
+          "heap_mb": 454
+        },
+        "open_wall_ms": 14873,
+        "big_table": {
+          "build_rows_ms": 191.3,
+          "rows": 112200,
+          "sort_ms": 2675.6,
+          "page_200_cells_ms": 16,
+          "all_cells_ms": 8487.9,
+          "interactive_total_ms": 2882.9,
+          "export_total_ms": 11354.8,
+          "cells": 336600,
+          "heap_mb": 454
+        },
+        "script_table": {
+          "build_rows_ms": 9.3,
+          "script_cells_ms": 2042.7,
+          "rows": 1000,
+          "script_cells": 10000,
+          "error_cells": 0,
+          "us_per_cell": 204.3,
+          "sample_row": [
+            "ElementCell(element_id='e_060521', owner_id=None, editable=False, ref_type=None)",
+            "ValueCell(present=True, value='MICROSERVICE-001', element_id=None, editable=Fals",
+            "ValueCell(present=True, value=4, element_id=None, editable=False)",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)",
+            "ValueCell(present=True, value='SoftwareSystem-1361', element_id=None, editable=F",
+            "ValuesCell(present=True, values=['Database-001', 'Cache-001', 'Broker-001', 'End",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)",
+            "ValueCell(present=True, value='Proposed', element_id=None, editable=False)",
+            "ValueCell(present=True, value='batch-00, msvc', element_id=None, editable=False)",
+            "ValueCell(present=True, value='Microservice:e_060521', element_id=None, editable",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)"
+          ],
+          "heap_mb": 454
+        },
+        "script_calls": {
+          "script_calls_ms": 1222,
+          "script_calls": 10000,
+          "us_per_call": 122.2,
+          "errors": 0,
+          "sample_row": [
+            "{'kind': 'scalar', 'value': 'MICROSERVICE-001'}",
+            "{'kind': 'scalar', 'value': 4}",
+            "{'kind': 'scalar', 'value': 1}",
+            "{'kind': 'scalar', 'value': 'SoftwareSystem-1361'}",
+            "{'kind': 'scalars', 'values': ['Database-001', 'Cache-001', ",
+            "{'kind': 'scalar', 'value': 1}",
+            "{'kind': 'scalar', 'value': 'Proposed'}",
+            "{'kind': 'scalar', 'value': 'batch-00, msvc'}",
+            "{'kind': 'scalar', 'value': 'Microservice:e_060521'}",
+            "{'kind': 'scalar', 'value': 1}"
+          ],
+          "heap_mb": 454
+        },
+        "search": {
+          "search_scan_ms": 115,
+          "hits": 1220,
+          "heap_mb": 454
+        },
+        "validate": {
+          "full_validation_ms": 10631.3,
+          "issues": 0,
+          "heap_mb": 454
+        },
+        "runaway": {
+          "interrupted": true,
+          "after_ms": 1510,
+          "error": "KeyboardInterrupt ",
+          "heap_mb": 454
+        },
+        "model_alive_after_interrupt": {
+          "elements": 170340,
+          "heap_mb": 454
+        }
+      },
+      "iframe_cross_origin_isolated": true,
+      "snapshot": {
+        "fetch_ms": 124,
+        "gz_mb": 5.83
+      },
+      "verdicts": {
+        "open": {
+          "value_s": 14.87,
+          "limit_s": 8,
+          "pass": false
+        },
+        "script_cells": {
+          "value_s": 2.04,
+          "limit_s": 2,
+          "pass": false
+        },
+        "big_table": {
+          "value_s": 11.35,
+          "limit_s": 10,
+          "pass": false
+        },
+        "heap": {
+          "value_mb": 454,
+          "limit_mb": 600,
+          "pass": true
+        }
+      },
+      "js_replica": {
+        "open": {
+          "fetch_ms": 62.6,
+          "gunzip_ms": 367.4,
+          "utf8_decode_ms": 64.4,
+          "json_parse_ms": 639,
+          "build_indexes_ms": 265.2,
+          "elements": 170340,
+          "relationships": 126820,
+          "open_total_ms": 1336
+        },
+        "big_table": {
+          "build_rows_ms": 13.3,
+          "rows": 112200,
+          "sort_ms": 35.5,
+          "all_cells_ms": 131.2,
+          "export_total_ms": 180,
+          "cells": 336600
+        },
+        "search": {
+          "search_scan_ms": 40.1,
+          "hits": 1220
+        },
+        "script_cells": {
+          "script_cells_ms": 12.5,
+          "script_cells": 10000,
+          "us_per_cell": 1.3,
+          "sample_row": [
+            "MICROSERVICE-001",
+            4,
+            1,
+            "SoftwareSystem-1361",
+            [
+              "Database-001",
+              "Cache-001",
+              "Broker-001",
+              "Endpoint-6801"
+            ],
+            1,
+            "Proposed",
+            "batch-00, msvc",
+            "Microservice:e_060521",
+            1
+          ]
+        }
+      }
+    },
+    {
+      "label": "gc",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.7778.96 Safari/537.36",
+      "thresholds": {
+        "open_s": 8,
+        "script_cells_s": 2,
+        "big_table_s": 10,
+        "heap_mb": 600
+      },
+      "csp_violations": [],
+      "python": {
+        "boot": {
+          "load_pyodide_ms": 3369,
+          "load_packages_ms": 485,
+          "fetch_unpack_core_ms": 312,
+          "import_core_ms": 1357,
+          "cross_origin_isolated": true,
+          "boot_total_ms": 5524,
+          "heap_mb": 36
+        },
+        "boot_and_fetch_wall_ms": 5587,
+        "open": {
+          "fast": "gc",
+          "load_metamodel_ms": 145.7,
+          "json_bytes": 76978969,
+          "json_loads_ms": 1883.8,
+          "build_entities_ms": 1039.2,
+          "rebuild_indexes_ms": 3214,
+          "gc_ms": 94.9,
+          "elements": 170340,
+          "relationships": 126820,
+          "python_open_total_ms": 6529,
+          "heap_mb": 454
+        },
+        "open_wall_ms": 12118,
+        "big_table": {
+          "build_rows_ms": 157.1,
+          "rows": 112200,
+          "sort_ms": 2285.1,
+          "page_200_cells_ms": 17.2,
+          "all_cells_ms": 8890.3,
+          "interactive_total_ms": 2459.4,
+          "export_total_ms": 11332.5,
+          "cells": 336600,
+          "heap_mb": 454
+        },
+        "script_table": {
+          "build_rows_ms": 7,
+          "script_cells_ms": 1643.3,
+          "rows": 1000,
+          "script_cells": 10000,
+          "error_cells": 0,
+          "us_per_cell": 164.3,
+          "sample_row": [
+            "ElementCell(element_id='e_060521', owner_id=None, editable=False, ref_type=None)",
+            "ValueCell(present=True, value='MICROSERVICE-001', element_id=None, editable=Fals",
+            "ValueCell(present=True, value=4, element_id=None, editable=False)",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)",
+            "ValueCell(present=True, value='SoftwareSystem-1361', element_id=None, editable=F",
+            "ValuesCell(present=True, values=['Database-001', 'Cache-001', 'Broker-001', 'End",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)",
+            "ValueCell(present=True, value='Proposed', element_id=None, editable=False)",
+            "ValueCell(present=True, value='batch-00, msvc', element_id=None, editable=False)",
+            "ValueCell(present=True, value='Microservice:e_060521', element_id=None, editable",
+            "ValueCell(present=True, value=1, element_id=None, editable=False)"
+          ],
+          "heap_mb": 454
+        },
+        "script_calls": {
+          "script_calls_ms": 1691.3,
+          "script_calls": 10000,
+          "us_per_call": 169.1,
+          "errors": 0,
+          "sample_row": [
+            "{'kind': 'scalar', 'value': 'MICROSERVICE-001'}",
+            "{'kind': 'scalar', 'value': 4}",
+            "{'kind': 'scalar', 'value': 1}",
+            "{'kind': 'scalar', 'value': 'SoftwareSystem-1361'}",
+            "{'kind': 'scalars', 'values': ['Database-001', 'Cache-001', ",
+            "{'kind': 'scalar', 'value': 1}",
+            "{'kind': 'scalar', 'value': 'Proposed'}",
+            "{'kind': 'scalar', 'value': 'batch-00, msvc'}",
+            "{'kind': 'scalar', 'value': 'Microservice:e_060521'}",
+            "{'kind': 'scalar', 'value': 1}"
+          ],
+          "heap_mb": 454
+        },
+        "search": {
+          "search_scan_ms": 105.2,
+          "hits": 1220,
+          "heap_mb": 454
+        },
+        "validate": {
+          "full_validation_ms": 11009.1,
+          "issues": 0,
+          "heap_mb": 454
+        },
+        "runaway": {
+          "interrupted": true,
+          "after_ms": 1511,
+          "error": "KeyboardInterrupt ",
+          "heap_mb": 454
+        },
+        "model_alive_after_interrupt": {
+          "elements": 170340,
+          "heap_mb": 454
+        }
+      },
+      "iframe_cross_origin_isolated": true,
+      "snapshot": {
+        "fetch_ms": 103,
+        "gz_mb": 5.83,
+        "shell_gunzip_ms": 417
+      },
+      "verdicts": {
+        "open": {
+          "value_s": 12.12,
+          "limit_s": 8,
+          "pass": false
+        },
+        "script_cells": {
+          "value_s": 1.64,
+          "limit_s": 2,
+          "pass": true
+        },
+        "big_table": {
+          "value_s": 11.33,
+          "limit_s": 10,
+          "pass": false
+        },
+        "heap": {
+          "value_mb": 454,
+          "limit_mb": 600,
+          "pass": true
+        }
+      }
+    },
+    {
+      "label": "stores",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.7778.96 Safari/537.36",
+      "thresholds": {
+        "open_s": 8,
+        "script_cells_s": 2,
+        "big_table_s": 10,
+        "heap_mb": 600
+      },
+      "csp_violations": [],
+      "stores": {
+        "boot": {
+          "boot_total_ms": 5378,
+          "cross_origin_isolated": true
+        },
+        "open": {
+          "js": {
+            "utf8_decode_ms": 123.5,
+            "json_parse_ms": 668.6,
+            "build_indexes_ms": 298.7,
+            "elements": 170340,
+            "relationships": 126820
+          },
+          "rust": {
+            "copy_into_wasm_ms": 109.8,
+            "open_call_ms": 790.2,
+            "build_indexes_ms": 105,
+            "elements": 170340,
+            "json_parse_ms": 683.6,
+            "relationships": 126820,
+            "wasm_memory_mb": 201,
+            "live_mb": 100
+          },
+          "heap_mb": 36
+        },
+        "js": {
+          "bench": {
+            "big_table": {
+              "build_rows_ms": 35.1,
+              "rows": 112200,
+              "sort_ms": 56.7,
+              "all_cells_ms": 141.7,
+              "export_total_ms": 233.5,
+              "cells": 336600
+            },
+            "search": {
+              "search_scan_ms": 51.1,
+              "hits": 1220
+            },
+            "native_cells": {
+              "script_cells_ms": 10.7,
+              "script_cells": 10000,
+              "us_per_cell": 1.1,
+              "sample_row": [
+                "MICROSERVICE-001",
+                4,
+                1,
+                "SoftwareSystem-1361",
+                [
+                  "Database-001",
+                  "Cache-001",
+                  "Broker-001",
+                  "Endpoint-6801"
+                ],
+                1,
+                "Proposed",
+                "batch-00, msvc",
+                "Microservice:e_060521",
+                1
+              ]
+            },
+            "heap_mb": 36
+          },
+          "script_calls": {
+            "script_calls_ms": 2726.5,
+            "script_calls": 10000,
+            "us_per_call": 272.6,
+            "errors": 0,
+            "sample_row": [
+              "{'kind': 'scalar', 'value': 'MICROSERVICE-001'}",
+              "{'kind': 'scalar', 'value': 4}",
+              "{'kind': 'scalar', 'value': 1}",
+              "{'kind': 'scalar', 'value': 'SoftwareSystem-1361'}",
+              "{'kind': 'scalars', 'values': ['Database-001', 'Cache-001', ",
+              "{'kind': 'scalar', 'value': 1}",
+              "{'kind': 'scalar', 'value': 'Proposed'}",
+              "{'kind': 'scalar', 'value': 'batch-00, msvc'}",
+              "{'kind': 'scalar', 'value': 'Microservice:e_060521'}",
+              "{'kind': 'scalar', 'value': 1}"
+            ],
+            "heap_mb": 62
+          }
+        },
+        "rust": {
+          "bench": {
+            "big_table": {
+              "all_cells_ms": 16.4,
+              "build_rows_ms": 10.2,
+              "cells": 336600,
+              "export_total_ms": 93.7,
+              "rows": 112200,
+              "sort_ms": 67.1
+            },
+            "search": {
+              "hits": 1220,
+              "search_scan_ms": 28.7
+            },
+            "native_cells": {
+              "script_cells": 10000,
+              "script_cells_ms": 3.1,
+              "us_per_cell": 0.3
+            },
+            "memory": {
+              "wasm_memory_mb": 201,
+              "live_mb": 100
+            },
+            "heap_mb": 62
+          },
+          "script_calls": {
+            "script_calls_ms": 2614,
+            "script_calls": 10000,
+            "us_per_call": 261.4,
+            "errors": 0,
+            "sample_row": [
+              "{'kind': 'scalar', 'value': 'MICROSERVICE-001'}",
+              "{'kind': 'scalar', 'value': 4}",
+              "{'kind': 'scalar', 'value': 1}",
+              "{'kind': 'scalar', 'value': 'SoftwareSystem-1361'}",
+              "{'kind': 'scalars', 'values': ['Database-001', 'Cache-001', ",
+              "{'kind': 'scalar', 'value': 1}",
+              "{'kind': 'scalar', 'value': 'Proposed'}",
+              "{'kind': 'scalar', 'value': 'batch-00, msvc'}",
+              "{'kind': 'scalar', 'value': 'Microservice:e_060521'}",
+              "{'kind': 'scalar', 'value': 1}"
+            ],
+            "heap_mb": 90
+          }
+        }
+      },
+      "iframe_cross_origin_isolated": true,
+      "snapshot": {
+        "fetch_ms": 95,
+        "gz_mb": 5.83,
+        "shell_gunzip_ms": 322
+      }
+    }
+  ],
+  "js_replica_heap_mb": 85
+}
