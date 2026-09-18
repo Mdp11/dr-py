@@ -113,6 +113,12 @@ description = "Run the pytest suite"
 cmd = "pytest"
 default-environment = "core-dev"
 
+[feature.core-dev.tasks.golden-fixtures]
+description = "Regenerate the engine's golden fixtures from the Python core"
+cmd = "python -m tests.golden"
+env = { PYTHONPATH = "src" }
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.core-lint]
 description = "Lint + typecheck the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
