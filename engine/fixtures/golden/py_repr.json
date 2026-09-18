@@ -1,0 +1,86 @@
+[
+  {
+    "s": "",
+    "repr": "''"
+  },
+  {
+    "s": "plain",
+    "repr": "'plain'"
+  },
+  {
+    "s": "it's",
+    "repr": "\"it's\""
+  },
+  {
+    "s": "say \"hi\"",
+    "repr": "'say \"hi\"'"
+  },
+  {
+    "s": "both ' and \"",
+    "repr": "'both \\' and \"'"
+  },
+  {
+    "s": "back\\slash",
+    "repr": "'back\\\\slash'"
+  },
+  {
+    "s": "tab\there",
+    "repr": "'tab\\there'"
+  },
+  {
+    "s": "line\nbreak",
+    "repr": "'line\\nbreak'"
+  },
+  {
+    "s": "cr\rhere",
+    "repr": "'cr\\rhere'"
+  },
+  {
+    "s": "nul\u0000",
+    "repr": "'nul\\x00'"
+  },
+  {
+    "s": "del",
+    "repr": "'del\\x7f'"
+  },
+  {
+    "s": "nbsp ",
+    "repr": "'nbsp\\xa0'"
+  },
+  {
+    "s": "café",
+    "repr": "'café'"
+  },
+  {
+    "s": "中文",
+    "repr": "'中文'"
+  },
+  {
+    "s": "zwj‍",
+    "repr": "'zwj\\u200d'"
+  },
+  {
+    "s": "line-sep ",
+    "repr": "'line-sep\\u2028'"
+  },
+  {
+    "s": "😀",
+    "repr": "'😀'"
+  },
+  {
+    "s": "space ok",
+    "repr": "'space ok'"
+  },
+  {
+    "s": "e_000001",
+    "repr": "'e_000001'"
+  },
+  {
+    "s": "tmp_abc",
+    "repr": "'tmp_abc'"
+  },
+  {
+    "s": "bell\u0007",
+    "repr": "'bell\\x07'"
+  }
+]
