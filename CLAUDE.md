@@ -41,6 +41,12 @@ pixi run frontend-test                   # vitest (happy-dom + MSW)
 pixi run frontend-test-e2e               # playwright (boots backend + dev server itself)
 pixi run frontend-check                  # svelte-check
 
+# Engine (TypeScript package in engine/; the tasks set cwd = "engine")
+pixi run engine-install                  # npm install — first time and after dependency changes
+pixi run engine-test                     # vitest, Node environment
+pixi run engine-check                    # tsc --noEmit for the sources and the tests
+pixi run golden-fixtures                 # regenerate engine/fixtures/golden from the Python core
+
 # Everything at once
 pixi run dr-test                         # core pytest + frontend vitest (e2e stays separate)
 ```
@@ -58,6 +64,14 @@ The runtime is **Python 3.14** (`pixi.toml`), and the toolchain targets it unifo
 - **`metamodel/schema.py` — `Metamodel` is immutable with lazily-built derived caches** (`_Caches`: ancestor chains, effective properties/keys, containment flags, end constraints). Treat it as frozen after load; uploads replace the whole object. If you ever add a mutation path, reset `_cache` to `None` (see `model_copy`). All subtype/effective-property/containment queries go through its cached lookup methods — never re-walk `extends` chains by hand.
 - **`model/model.py` — `Model` is the single mutation boundary.** Every create/connect/set_property/delete flows through its methods, which keep `self.indexes` (`IndexSet`, in/out relationship adjacency) in sync. Bulk loaders that populate the dicts directly must call `indexes.rebuild()`. `IndexSet.element_order` (element id → monotonic insertion sequence number; sorting ids by it reproduces `model.elements` order, and ONLY the order is meaningful — the numbers go sparse after churn, a restore re-inserts last) is maintained at that same boundary like `roots_order` and is how the uniqueness validator picks a duplicate group's insertion-first primary without enumerating the model; `verify_consistent` checks it as an order invariant, never by comparing numbers to a fresh rebuild. `set_property`/`delete_property` check the property name against `Metamodel.effective_*_property_names` (cached frozensets on `_Caches`, shared with `routes/ops.py::_check_patch_keys` — never a per-write list copy) and fire `IndexSet.on_property_changed(entity, prop, old_value)`, the single-property hook that diffs the search index from the changed value's text alone; `on_properties_changed(entity)` stays the whole-entity re-derivation for code that writes `entity.properties` directly. `delete_element` cascades through containment children. Property values are **replaced wholesale, never mutated in place** — the API op-log's inverse patches alias prior values by reference and depend on this.
 - **`validation/pipeline.py` — one sweep, many validators.** The pipeline iterates the model (or a `Scope` subset) once and hands each entity to every `Validator` (`type_conformance`, `multiplicity`, `facets`, `endpoint_typing`, `containment`, `uniqueness`). `default_validators()`/`default_pipeline()` stay these six and rule-free — core stays session-agnostic; `rules` is layered on top only by `api/rules.py` (see "Custom validation rules" below). Per-entity hooks must be O(entity) — use metamodel caches and `model.indexes`, not model scans. Whole-model checks go in `validate_global`. Validators carry mutable per-metamodel memo caches (`MetamodelMemo`, identity-keyed), so **construct one pipeline per request/thread**; never share across threads.
+
+### Engine package (`engine/`)
+
+The TypeScript engine of the target architecture (`architecture/`), built bottom-up. Today it holds the **value layer** only; nothing in the frontend or the server imports it yet.
+
+- **`src/` has no DOM and no Node dependency** (`lib: ["ES2023"]`, `types: []`), is erasable-syntax-only, and imports with `.ts` specifiers, so a worker, Node and vitest all run the sources unbuilt.
+- **`src/value/`** reproduces the Python core's view of JSON values. A `number` is always a Python `int`; every `float` is a `PyFloat`; integers past 2^53 are `bigint`. `parseJson`/`parseLines` route each line: a regex pre-scan sends lines holding a float, a 16-digit integer, a bare `Infinity`/`NaN` or `-0` to the exact parser and everything else to native `JSON.parse`. `pyDumps` is `json.dumps(ensure_ascii=False, allow_nan=False)` byte for byte; `pyFloatRepr`, `pyRepr`, `cmpCodePoint` and `pyKey` mirror `repr(float)`, `repr(str)`, `str` ordering and the uniqueness signature (`_frozen`).
+- **Golden fixtures** — `tests/golden/scenarios/*.py` run the real Python core and `pixi run golden-fixtures` writes `engine/fixtures/golden/*.json`; `engine/test/**/*.golden.test.ts` read them. `tests/golden/test_fixtures_current.py` (part of `core-test`) fails when a committed fixture differs from what the core produces now. The Python core is the oracle: fix the engine, never the fixture. Values a plain JSON reader cannot hold are tagged (`tests/golden/tagged.py` ↔ `engine/test/golden/load.ts`).
 
 ### Backend session & the delta protocol (`src/data_rover/api/`)
 

@@ -9,14 +9,14 @@ are promoted into this directory.
 | # | Sub-project | Status |
 |---|---|---|
 | — | Program design (this directory) | approved 2026-09-18 |
-| A | Engine foundation | not started |
+| A | Engine foundation | in progress — plan 1 of 4 landed (value layer, golden pipeline) |
 | B | Replica and frontend seam | not started |
 | C | Evaluation | not started |
 | D | Scripts in the browser | not started |
 | E | Headless host | not started |
 | F | Thin server and deploy | not started |
 
-`BACKLOG.md` gets one roadmap entry for the program in sub-project A's plan.
+`BACKLOG.md` tracks the program as `R-3`.
 
 ## Sub-projects
 

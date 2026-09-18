@@ -129,6 +129,14 @@ consuming `GET /commits/{rev}/diff`), which has been parked three times.
 Source: master spec §12; handoffs 2026-08-09 → 2026-08-11; 2026-08-16 metamodel commit-flow
 design. Size: large.
 
+### R-3 · Client-engine program · `in progress`
+Computation moves into the browser against a full model replica, with a thin server and a
+headless export host. Source of truth: `architecture/` — decisions `AD-n`, contracts `CT-n`,
+constraints `CN-n`, build order and status in `architecture/program.md`. Six sub-projects
+A → F. A (engine foundation) is built as four plans; the first — package, value layer,
+golden-fixture pipeline — has landed. The freeze rule (`MR-3`) covers `core/model`,
+`core/metamodel` and the model-op applier from the start of A's second plan. Size: very large.
+
 ---
 
 ## 2. Feature backlog — owner-requested
