@@ -41,7 +41,8 @@ function isArrayIndex(key: string): boolean {
 	return ARRAY_INDEX.test(key) && Number(key) < 4294967295;
 }
 
-function findArrayIndexKey(value: Value): string | null {
+/** The first key, at any depth of `value`, that a JavaScript object would list out of insertion order. */
+export function findArrayIndexKey(value: Value): string | null {
 	if (Array.isArray(value)) {
 		for (const item of value) {
 			const found = findArrayIndexKey(item);

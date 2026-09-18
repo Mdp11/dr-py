@@ -1,4 +1,4 @@
-import { Metamodel, type MetamodelDoc } from '../../src/index.ts';
+import { Metamodel, Model, type MetamodelDoc } from '../../src/index.ts';
 
 const prop = (name: string, datatype = 'string') => ({
 	name,
@@ -39,3 +39,18 @@ export const NODE_DOC: MetamodelDoc = {
 };
 
 export const nodeMetamodel = () => Metamodel.fromJSON(NODE_DOC);
+
+/**
+ * `a` contains `b` and refers to `c`; `b` contains `d`. Every id is the
+ * entity's own name, and every element is named by it in upper case.
+ */
+export function family(): Model {
+	const model = new Model(nodeMetamodel());
+	for (const id of ['a', 'b', 'c', 'd']) {
+		model.setProperty(model.createElement('Node', id), 'name', id.toUpperCase());
+	}
+	model.connect('Contains', 'a', 'b', 'a-b');
+	model.connect('Contains', 'b', 'd', 'b-d');
+	model.connect('Refers', 'a', 'c', 'a-c');
+	return model;
+}

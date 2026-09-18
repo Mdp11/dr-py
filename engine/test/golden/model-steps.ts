@@ -1,19 +1,29 @@
 import { createHash } from 'node:crypto';
 import { expect } from 'vitest';
 import {
+	applyBatch,
 	cmpCodePoint,
 	dumpIndexes,
+	elementLine,
 	ElementRec,
 	Metamodel,
 	Model,
 	ModelError,
 	modelLines,
+	OpError,
+	parseJson,
 	pyDumps,
+	relationshipLine,
 	RelRec,
 	shuffleAdjacency,
 	verifyConsistent,
+	type BatchResult,
+	type ElementImage,
 	type MetamodelDoc,
-	type ModelOptions
+	type ModelOp,
+	type ModelOptions,
+	type RelImage,
+	type Value
 } from '../../src/index.ts';
 import { stateDigest } from './digest.ts';
 import { untag, type Tagged } from './load.ts';
@@ -25,6 +35,26 @@ import { untag, type Tagged } from './load.ts';
  */
 export type Observed = { digest: string; fingerprint: string; state?: string[]; indexes?: string };
 
+/**
+ * What a landed batch reports: ops, images and entities as lines of the
+ * server's JSON text, and with them the delta a replica would be sent.
+ */
+export type BatchOutcome = {
+	id_map: [string, string][];
+	changed_element_ids: string[];
+	changed_relationship_ids: string[];
+	deleted_element_ids: string[];
+	deleted_relationship_ids: string[];
+	before_elements: [string, string | null][];
+	before_relationships: [string, string | null][];
+	inverse_ops: string[];
+	changed_elements: string[];
+	changed_relationships: string[];
+};
+
+export type StepError =
+	{ kind: 'key' | 'value'; message: string } | { status: number; detail: string };
+
 export type Step = Partial<Observed> & {
 	do: string;
 	id?: string;
@@ -34,8 +64,13 @@ export type Step = Partial<Observed> & {
 	target?: string;
 	value?: Tagged;
 	detached?: 'element' | 'relationship';
-	result: string | string[] | null;
-	error: { kind: 'key' | 'value'; message: string } | null;
+	/** `batch`: the ops, one line of JSON text each; `restore` reinstates exact ids. */
+	ops?: string[];
+	restore?: boolean;
+	/** `undo`: the index of the landed batch whose inverse ops to run. */
+	of?: number;
+	result: string | string[] | BatchOutcome | null;
+	error: StepError | null;
 	unchanged?: true;
 };
 
@@ -76,9 +111,70 @@ function entityOf(model: Model, step: Step): ElementRec | RelRec {
 	return model.findElement(step.id!) ?? model.getRelationship(step.id!);
 }
 
-/** `mint` stands in for the oracle's `SequentialIdGenerator`, which a failed call never advances. */
-function apply(model: Model, step: Step, mint: () => string): string | string[] | null {
+export const parseOps = (lines: readonly string[]) =>
+	lines.map((line) => parseJson(line) as unknown as ModelOp);
+
+const elementImageLine = (image: ElementImage) =>
+	pyDumps({ id: image.id, type_name: image.typeName, properties: image.props, rev: image.rev });
+
+const relImageLine = (image: RelImage) =>
+	pyDumps({
+		id: image.id,
+		type_name: image.typeName,
+		source_id: image.sourceId,
+		target_id: image.targetId,
+		properties: image.props,
+		rev: image.rev
+	});
+
+/** The engine's side of `BatchOutcome`, every line rendered by the engine's own serializer. */
+export function outcome(model: Model, res: BatchResult): BatchOutcome {
+	return {
+		id_map: [...res.idMap],
+		changed_element_ids: [...res.changedElementIds],
+		changed_relationship_ids: [...res.changedRelationshipIds],
+		deleted_element_ids: [...res.deletedElementIds],
+		deleted_relationship_ids: [...res.deletedRelationshipIds],
+		before_elements: [...res.beforeElements].map(([id, image]) => [
+			id,
+			image === null ? null : elementImageLine(image)
+		]),
+		before_relationships: [...res.beforeRelationships].map(([id, image]) => [
+			id,
+			image === null ? null : relImageLine(image)
+		]),
+		inverse_ops: res.inverseOps().map((op) => pyDumps(op as unknown as Value)),
+		changed_elements: [...res.changedElementIds].map((id) => elementLine(model.getElement(id))),
+		changed_relationships: [...res.changedRelationshipIds].map((id) =>
+			relationshipLine(model.getRelationship(id))
+		)
+	};
+}
+
+/** What a replay carries from step to step: the batches that landed, by step index. */
+type Landed = Map<number, BatchResult>;
+
+/**
+ * `mint` stands in for the oracle's `SequentialIdGenerator`. A failed call
+ * consumes no id, and neither does a refused batch: the oracle runs each on a
+ * copy of its model and drops the copy, generator included.
+ */
+function apply(
+	model: Model,
+	step: Step,
+	index: number,
+	mint: () => string,
+	landed: Landed
+): Step['result'] {
 	switch (step.do) {
+		case 'batch':
+		case 'undo': {
+			const ops = step.do === 'batch' ? parseOps(step.ops!) : landed.get(step.of!)!.inverseOps();
+			const restore = step.do === 'undo' || step.restore === true;
+			const res = applyBatch(model, ops, { restore, idFor: mint });
+			landed.set(index, res);
+			return outcome(model, res);
+		}
 		case 'create_element':
 			return model.createElement(step.type!, mint()).id;
 		case 'restore_element':
@@ -121,19 +217,22 @@ function apply(model: Model, step: Step, mint: () => string): string | string[] 
 export function replaySteps(fixture: StepsFixture, options: ModelOptions = {}): void {
 	const model = new Model(Metamodel.fromJSON(fixture.metamodel), options);
 	const random = seededRandom(20260918);
+	const landed: Landed = new Map();
 	let minted = 0;
 	let last = observe(model);
 	fixture.steps.forEach((step, index) => {
 		const label = `step ${index}: ${step.do}`;
 		shuffleAdjacency(model, random);
-		let result: string | string[] | null = null;
+		let result: Step['result'] = null;
 		let error: Step['error'] = null;
+		const mintedBefore = minted;
 		try {
-			result = apply(model, step, () => `id-${minted + 1}`);
-			if (step.do === 'create_element' || step.do === 'connect') minted += 1;
+			result = apply(model, step, index, () => `id-${++minted}`, landed);
 		} catch (caught) {
-			if (!(caught instanceof ModelError)) throw caught;
-			error = { kind: caught.kind, message: caught.message };
+			minted = mintedBefore;
+			if (caught instanceof ModelError) error = { kind: caught.kind, message: caught.message };
+			else if (caught instanceof OpError) error = { status: caught.status, detail: caught.detail };
+			else throw caught;
 		}
 		expect(error, label).toEqual(step.error);
 		expect(result, label).toEqual(step.result);

@@ -17,6 +17,19 @@ export { elementLine, modelLines, relationshipLine } from './model/lines.ts';
 export { Model, type ModelOptions } from './model/model.ts';
 export { displayName, nameOf } from './model/naming.ts';
 export { ElementRec, RelRec, type Props } from './model/records.ts';
+export { applyBatch, type ApplyOptions } from './ops/apply.ts';
+export { OpError } from './ops/errors.ts';
+export { BatchResult, type ElementImage, type RelImage } from './ops/result.ts';
+export { rewind } from './ops/rewind.ts';
+export type {
+	CreateElementOp,
+	CreateRelationshipOp,
+	DeleteElementOp,
+	DeleteRelationshipOp,
+	ModelOp,
+	UpdateElementOp,
+	UpdateRelationshipOp
+} from './ops/types.ts';
 export { cmpCodePoint } from './value/compare.ts';
 export { pyFloatRepr } from './value/float-repr.ts';
 export { pyKey } from './value/key.ts';
