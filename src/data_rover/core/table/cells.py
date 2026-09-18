@@ -265,7 +265,8 @@ def property_element_typed(
     as elements, dropping the scalars — the same degrade as the navigation
     cell's mixed frontier."""
     return any(
-        property_is_element_typed(mm, model.elements[e].type_name, col.name) for e in els
+        property_is_element_typed(mm, model.elements[e].type_name, col.name)
+        for e in els
     )
 
 
@@ -273,7 +274,9 @@ def _element_ids(model: Model, raw: object) -> list[str]:
     """The ids in a property value (scalar or list) that name model elements,
     de-duplicated in value order."""
     items = raw if isinstance(raw, (list, tuple)) else [raw]
-    return [i for i in dict.fromkeys(items) if isinstance(i, str) and i in model.elements]
+    return [
+        i for i in dict.fromkeys(items) if isinstance(i, str) and i in model.elements
+    ]
 
 
 def _navigation_cell(

@@ -999,7 +999,8 @@ def _expanded_property_is_element_typed(
         mm, model, defn, key, col.source, base_slots, limits, script=script, memo=memo
     )
     return any(
-        property_is_element_typed(mm, model.elements[e].type_name, col.name) for e in owners
+        property_is_element_typed(mm, model.elements[e].type_name, col.name)
+        for e in owners
     )
 
 
@@ -1058,8 +1059,12 @@ def _sort_value(
             v = key[_expand_slot_of(defn, base_slots, col_index)]
             if v is None:
                 return (1, ())
-            if isinstance(v, str) and v in model.elements and _expanded_property_is_element_typed(
-                mm, model, defn, key, col, base_slots, limits, script, memo
+            if (
+                isinstance(v, str)
+                and v in model.elements
+                and _expanded_property_is_element_typed(
+                    mm, model, defn, key, col, base_slots, limits, script, memo
+                )
             ):
                 return (0, (_display_name(model, v).casefold(), v))
             return (0, (_script_sort_atom(model, v),))
@@ -1074,7 +1079,10 @@ def _sort_value(
             script=script,
             memo=memo,
         )
-        if any(property_is_element_typed(mm, model.elements[e].type_name, col.name) for e in els):
+        if any(
+            property_is_element_typed(mm, model.elements[e].type_name, col.name)
+            for e in els
+        ):
             # Element references order by the label the grid shows, like the
             # element column — never by id.
             ids = _property_element_ids(mm, model, col, els)

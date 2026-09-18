@@ -207,12 +207,19 @@ class TransformHost:
             self._sessions[code] = session
         if session.boot_error is not None:
             return TransformOutcome(
-                value=None, stdout="", error=session.boot_error, duration_ms=0, boot=True
+                value=None,
+                stdout="",
+                error=session.boot_error,
+                duration_ms=0,
+                boot=True,
             )
         res = session.call("transform", [], doc=doc)
         if res.error is not None:
             return TransformOutcome(
-                value=None, stdout=res.stdout, error=res.error, duration_ms=res.duration_ms
+                value=None,
+                stdout=res.stdout,
+                error=res.error,
+                duration_ms=res.duration_ms,
             )
         assert res.value is not None  # decode contract: value xor error
         out = res.value["value"]
@@ -380,7 +387,9 @@ def render_json_sample(
     if split is not None and split.enabled:
         validate_template(split.filename_template)
         validate_tokens(split.filename_template, SPLIT_TOKENS)
-        rows = iter_export_rows(metamodel, model, defn, ordered, limits, script=script_ctx)
+        rows = iter_export_rows(
+            metamodel, model, defn, ordered, limits, script=script_ctx
+        )
         parts = split_partitions(ordered, rows)
         stems = render_filenames(
             split.filename_template,

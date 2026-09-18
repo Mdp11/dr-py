@@ -461,7 +461,9 @@ def _execute_export(
                 entry_paths = []
                 for fn, _blob in res.files:
                     stem, dot, ext = fn.rpartition(".")
-                    deduped = _dedupe_path(prefix, sanitize_stem(stem) or "export", taken)
+                    deduped = _dedupe_path(
+                        prefix, sanitize_stem(stem) or "export", taken
+                    )
                     entry_paths.append(f"{prefix}{deduped}{dot}{ext}")
                 files.extend(
                     zip(entry_paths, (blob for _fn, blob in res.files), strict=True)
@@ -640,9 +642,7 @@ def preview_transform(
             f"formats, not {entry.format!r}",
         )
     if entry.transform is None or entry.transform.is_empty:
-        raise HTTPException(
-            status_code=422, detail=f"{label}: no transform configured"
-        )
+        raise HTTPException(status_code=422, detail=f"{label}: no transform configured")
     try:
         code = _resolve_transform_source(db, project_id, entry.transform, label)
     except ValueError as exc:

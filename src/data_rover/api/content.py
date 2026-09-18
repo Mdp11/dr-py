@@ -266,7 +266,9 @@ def get_view(db: Session, project_id: str, view_id: str) -> ViewRow | None:
 def view_name_taken(
     db: Session, project_id: str, name: str, *, exclude_id: str | None = None
 ) -> bool:
-    stmt = select(ViewRow.id).where(ViewRow.project_id == project_id, ViewRow.name == name)
+    stmt = select(ViewRow.id).where(
+        ViewRow.project_id == project_id, ViewRow.name == name
+    )
     if exclude_id is not None:
         stmt = stmt.where(ViewRow.id != exclude_id)
     return db.execute(stmt).first() is not None

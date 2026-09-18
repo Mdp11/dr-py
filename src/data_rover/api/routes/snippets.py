@@ -60,7 +60,12 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.script.docs import get_facade_docs
 from data_rover.core.script.lint import derive_entry_points, lint_code
-from data_rover.core.script.runner import RunRequest, ScriptRunner, WireInput, WireInputs
+from data_rover.core.script.runner import (
+    RunRequest,
+    ScriptRunner,
+    WireInput,
+    WireInputs,
+)
 
 from .. import content
 from ..artifact_ops import split_ops
@@ -271,9 +276,7 @@ def _wire_inputs(inputs: dict[str, SnippetInputIn] | None) -> WireInputs | None:
     """Validated request models -> the runner's plain-dict wire form."""
     if inputs is None:
         return None
-    return {
-        name: cast(WireInput, spec.model_dump()) for name, spec in inputs.items()
-    }
+    return {name: cast(WireInput, spec.model_dump()) for name, spec in inputs.items()}
 
 
 @router.post("/snippets/run")

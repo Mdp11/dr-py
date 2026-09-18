@@ -34,6 +34,7 @@ from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 
+
 def _nonfinite_literal(literal: str) -> str:
     # ``json.loads`` accepts the bare ``Infinity``/``-Infinity``/``NaN``
     # literals Python's own writer emits by default, yielding non-finite

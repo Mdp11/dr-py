@@ -36,7 +36,11 @@ def property_datatype(mm: Metamodel, type_name: str, name: str) -> str | None:
     if is_virtual_property(name):
         return None
     return next(
-        (pd.datatype for pd in mm.effective_element_properties(type_name) if pd.name == name),
+        (
+            pd.datatype
+            for pd in mm.effective_element_properties(type_name)
+            if pd.name == name
+        ),
         None,
     )
 
