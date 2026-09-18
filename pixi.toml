@@ -119,6 +119,11 @@ cmd = "python -m tests.golden"
 env = { PYTHONPATH = "src" }
 default-environment = "core-dev"
 
+[feature.core-dev.tasks.engine-bench-data]
+description = "Write benchmarks/large.model.json as the v2 snapshot that engine-bench opens"
+cmd = "python scripts/snapshot_v2.py --model benchmarks/large.model.json --metamodel examples/smart-city.metamodel.yaml --out benchmarks/large.snapshot.v2"
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.core-lint]
 description = "Lint + typecheck the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
@@ -281,6 +286,11 @@ cwd = "engine"
 description = "Format the engine"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
+cwd = "engine"
+
+[feature.frontend.tasks.engine-bench]
+description = "Benchmark the engine at model M (run engine-bench-data once before)"
+cmd = "npm run bench"
 cwd = "engine"
 
 [feature.frontend.tasks.engine-tidy]
