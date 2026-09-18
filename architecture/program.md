@@ -9,7 +9,7 @@ are promoted into this directory.
 | # | Sub-project | Status |
 |---|---|---|
 | — | Program design (this directory) | approved 2026-09-18 |
-| A | Engine foundation | in progress — plans 1–3 of 4 landed (value layer, golden pipeline; Python snapshot v2 and digest, metamodel, store, indexes, mutation boundary; op applier, working copy) |
+| A | Engine foundation | done — every golden fixture passes in Node; at M the engine opens a snapshot in 2.3 s of CN-3's 3 s and one open replica holds 231 MB of heap *(measured, Node 22, `pixi run engine-bench`, 2026-09-18)* |
 | B | Replica and frontend seam | not started |
 | C | Evaluation | not started |
 | D | Scripts in the browser | not started |

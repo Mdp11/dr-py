@@ -84,7 +84,10 @@ disposable accelerator; losing it costs one download.
 stream from head rows. It is also what makes exact values (AD-21) affordable: only the lines
 that need the exact parser pay for it. At M, 18.5 % of lines do — line-routed parse 1.49 s,
 whole-document exact parse 2.50 s, whole-document native (inexact) parse 0.59 s *(measured,
-one pass, Node 22, 2026-09-18)*. Sub-project A MUST confirm open stays within CN-3.
+one pass, Node 22, 2026-09-18)*. Sub-project A confirmed that open stays within CN-3: from
+inflated bytes to indexed replica 2.30 s — 1.73 s to decode, split, parse and load, 0.52 s to
+index — against 3.14 s for the same model as one document, 2.26 s of it the exact parse
+*(measured, medians of 3 in one pass, Node 22, `pixi run engine-bench`, 2026-09-18)*.
 **Rejected.** One JSON document (needs the whole text and one blocking parse); a binary format
 (no evidence it is needed).
 

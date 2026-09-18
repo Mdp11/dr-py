@@ -133,10 +133,13 @@ design. Size: large.
 Computation moves into the browser against a full model replica, with a thin server and a
 headless export host. Source of truth: `architecture/` — decisions `AD-n`, contracts `CT-n`,
 constraints `CN-n`, build order and status in `architecture/program.md`. Six sub-projects
-A → F. A (engine foundation) is built as four plans; the first three — package, value layer
-and golden-fixture pipeline; Python snapshot v2 and state digest, metamodel, record-graph
-store, indexes and mutation boundary; op applier and working copy — have landed. The freeze rule (`MR-3`) covers `core/model`,
-`core/metamodel` and the model-op applier from the start of A's second plan. Size: very large.
+A → F. A (engine foundation) has landed: package, value layer and golden-fixture pipeline;
+Python snapshot v2 and state digest; metamodel, record-graph store, indexes and mutation
+boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
+the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
+and frontend seam) is next and inherits `K-30`, `K-31` and `K-32`. The freeze rule (`MR-3`)
+covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
+plan. Size: very large.
 
 ---
 
@@ -1211,6 +1214,18 @@ changed (fixture `ops_recreate`) the replica keeps X's place, and its entity ord
 from the server's until the next snapshot. The digest cannot see it: a re-created entity
 that ends at its old `rev` hashes to the same `(id, rev)` pair. Fix, in B: name such ids in
 both `deleted_*` and `changed_*`, or add a `recreated_*` list to the delta.
+
+### K-32 · Three engine operations run longer than one 16 ms chunk at model M · `open` · perf · *2026-09-18*
+`architecture/system.md` rule 4 has the engine yield to the event loop between chunks of at
+most 16 ms (CN-3). Measured at M by `pixi run engine-bench` (Node 22, medians of 3):
+`rebuildIndexes()` at the end of `openSnapshot` is one 0.52 s task; `verifyDigest()` hashes
+297,160 entities in 0.2 s; and the first ordered iteration after a rewind that put an entity
+back at an old `ord` re-sorts the whole entity map, 58 ms against 2 ms for a plain pass. None
+of it matters in Node. In the engine worker (sub-project B) the first two must run in slices
+— CT-3 already says the digest check runs in the background — and the third wants an insert
+in place, or a sort kept to the entities that moved. Everything else measured stays under
+50 ms: a 1,000-op batch stages in 44 ms and unstages in 39 ms, 100 staged batches rebase over
+a delta in 14 ms, a 149-entity delta applies in 8.9 ms.
 
 ---
 

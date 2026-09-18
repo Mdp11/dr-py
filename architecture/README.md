@@ -1,6 +1,6 @@
 # Architecture — source of truth
 
-**Status:** approved 2026-09-18 · nothing built yet.
+**Status:** approved 2026-09-18 · sub-project A built ([program.md](program.md)).
 
 These documents define the TARGET architecture of Data Rover — computation in the browser
 against a full model replica, a thin server, an on-demand headless host — and the rules for
