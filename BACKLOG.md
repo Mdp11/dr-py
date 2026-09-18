@@ -133,8 +133,9 @@ design. Size: large.
 Computation moves into the browser against a full model replica, with a thin server and a
 headless export host. Source of truth: `architecture/` — decisions `AD-n`, contracts `CT-n`,
 constraints `CN-n`, build order and status in `architecture/program.md`. Six sub-projects
-A → F. A (engine foundation) is built as four plans; the first — package, value layer,
-golden-fixture pipeline — has landed. The freeze rule (`MR-3`) covers `core/model`,
+A → F. A (engine foundation) is built as four plans; the first two — package, value layer and
+golden-fixture pipeline; Python snapshot v2 and state digest, metamodel, record-graph store,
+indexes and mutation boundary — have landed. The freeze rule (`MR-3`) covers `core/model`,
 `core/metamodel` and the model-op applier from the start of A's second plan. Size: very large.
 
 ---
@@ -1176,6 +1177,15 @@ written for a table column with inputs shows an enabled "Run as value" and fails
 targeted message ("this value() takes column inputs; run it from the table") or disabling the
 entry in the console for arity-2 snippets would save a support round-trip.
 
+### K-29 · The bulk loader accepts a relationship whose id an element already holds · `open` · *2026-09-18*
+`routes/_snapshot.py`'s guards keep one `seen_ids` set per kind, so `build_model_from_dicts`
+loads an element and a relationship sharing an id, while the mutation boundary
+(`restore_element` / `restore_relationship`) refuses exactly that and the state digest (CT-3)
+folds both kinds into one namespace — a same-`rev` pair cancels out of it. The engine's
+loader refuses such a snapshot (`Relationship id 'x' is already an element id`), so a project
+imported with one would open on the server and not in the browser. Fix: check the other
+kind's ids in `_guard_relationship`; the file is outside the MR-3 freeze.
+
 ---
 
 ## 7. Cleanups & dead code
@@ -1201,6 +1211,7 @@ entry in the console for arity-2 snippets would save a support round-trip.
 | C-17 | `done` (2026-08-28, feat/table-ux-batch) — `columnRefs` returns `{index, why}`; the error now reads `column N reads input "x" from column M` for a script input. | script-column-inputs final review, 2026-08-27 |
 | C-18 | `ScriptInputsEditor.svelte` calls `nameError(inp.name, i)` twice per row per render (the `{#if}` guard and the span body); a per-row `$derived` errors array is tidier. Imperceptible at ≤50 inputs. | script-column-inputs final review, 2026-08-27 |
 | C-19 | Mid-file imports appended by TDD steps in `tests/table/test_schema.py`, `tests/script/test_embed_cache.py`, `tests/api/test_script_sweep.py` (ruff E402 — invisible because no task lints `tests/`, see C-11); plus `core/script/README.md` ~§142 states the `step`/`transform` one-arg rule twice within four lines. | script-column-inputs final review, 2026-08-27 |
+| C-20 | `core/metamodel/schema.py::_effective_props`' comment says definitions by closer types win; the code keeps the FIRST name seen walking root → leaf, so on a redeclared property the ancestor's definition stays (fixture `metamodel_caches`, type `Mid`). The engine mirrors the code. Decide which was meant; frozen under MR-3 until the metamodel surface defaults to the engine. | 2026-09-18 |
 
 ---
 

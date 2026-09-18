@@ -9,7 +9,7 @@ are promoted into this directory.
 | # | Sub-project | Status |
 |---|---|---|
 | — | Program design (this directory) | approved 2026-09-18 |
-| A | Engine foundation | in progress — plan 1 of 4 landed (value layer, golden pipeline) |
+| A | Engine foundation | in progress — plans 1–2 of 4 landed (value layer, golden pipeline; Python snapshot v2 and digest, metamodel, store, indexes, mutation boundary) |
 | B | Replica and frontend seam | not started |
 | C | Evaluation | not started |
 | D | Scripts in the browser | not started |
