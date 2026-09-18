@@ -1,0 +1,122 @@
+# Decisions
+
+Each entry: the decision, why, what was rejected, and what follows from it. Evidence numbers
+are in [constraints.md](constraints.md). Do not reopen a decision without new evidence.
+
+## AD-1 · Computation runs in the browser; the server is thin
+**Why.** The server-heavy design holds ≈ 1.4 GB per hot 80 MB project *(measured)*, is pinned
+to one process by in-memory sessions and the GIL, and its cost exceeds the budget at 20 users
+and grows with every hot project (CN-6, CN-8). It also causes two user-facing defects:
+evaluation sees only committed state ("commit first"), and script sweeps exhaust the server's
+sandbox pool.
+**Rejected.** Scaling the current server up or sharding it by project.
+**Consequences.** The browser needs a full replica and a sync protocol (CT-1…CT-3); the server
+stops loading models (AD-7).
+
+## AD-2 · The engine is TypeScript
+**Why.** Engine language does not move the GCP bill (CN-8). JS and Rust replicas both clear
+every budget by ≈ 10× at 170k elements (CN-4). TypeScript shares types with the frontend,
+sits one hop from Pyodide, needs no third toolchain, and ports the dynamic Python core
+near-mechanically (≈ 1.5–2× less effort than Rust, *estimate*).
+**Rejected.** *Rust → wasm*: 1.2–3.8× faster and more compact, exact `i64`, code-point string
+order, bit-identical hosts — real advantages that nothing here needs yet. *Python core under
+Pyodide*: no headroom (CN-22).
+**Consequences.** CT-7 carries the fidelity work Rust would have eased. If models grow far past
+320k elements, hot kernels MAY move to wasm behind CT-4 without changing any contract.
+
+## AD-3 · One engine, two hosts
+**Decision.** The same engine package runs in a browser worker and in Node; the headless host
+is Node + Pyodide, the same Pyodide version as the browser.
+**Why.** CI exports (`GET /exports/run-by-name`) are essential and MUST equal the browser's
+bytes. Products that split client and server engines diverge.
+**Rejected.** A native or Python server-side engine; the wasmtime CPython-WASI sandbox for
+headless scripts (a second script bridge).
+
+## AD-4 · User scripts stay Python, in Pyodide; the facade is unchanged
+**Why.** Owner preference and existing snippets. JS-language scripts would be ≈ 250× faster
+(CN-4) and were declined knowingly.
+**Consequences.** Pyodide boot (≈ 5 s, ≈ 90 MB) is paid before the first script and SHOULD be
+prewarmed; the bridge needs batching (CT-6).
+
+## AD-5 · The engine lives in the sandbox origin; the shell does all networking
+**Why.** The facade needs a synchronous read. Blocking on shared memory is the only portable
+way, and shared memory cannot cross origins (CN-15). Proven in the spike: zero CSP violations,
+cross-origin isolated, runaway script interrupted with the model intact.
+**Rejected.** *Engine in the app origin*: needs a replica per script worker or JSPI (CN-16).
+*Engine and Pyodide in one worker*: a runaway script stalls every read, a Pyodide crash takes
+the replica, and user code shares the engine's realm.
+
+## AD-6 · Keep pessimistic locks, explicit commits, the journal, `model_rev` and the feed
+**Why.** They already form a correct sync protocol (server-ordered revisions plus deltas).
+**Rejected.** Zero, ElectricSQL, PowerSync, LiveStore, CRDTs: none fits leases plus explicit
+commits, and each adds an always-on service.
+**Consequences.** Op shapes and lock semantics do not change in this program.
+
+## AD-7 · The server never loads a model
+**Decision.** The commit check reads head rows for the batch only, runs the existing Python op
+applier on that partial model, and derives inverse ops and `entity_states` itself.
+**Why.** Undo, revert and per-commit diff depend on inverses and `entity_states`; they cannot
+be client-supplied (CN-19). Reusing the applier keeps one implementation of mutation rules
+on the server.
+**Consequences.** Head tables, `entity_refs`, set-based SQL checks for import and rebind
+([system.md](system.md)).
+
+## AD-8 · Conformance validation and strict mode are enforced by the client
+**Decision.** The server enforces structural integrity, declared types and property names,
+and leases. Conformance (type, multiplicity, facets, endpoints, uniqueness, rules) runs in the
+engine; in strict mode the client refuses to commit with errors. The validation count and
+issues stored on a `Commit` row are client-reported.
+**Why.** Members are authenticated colleagues; conformance is already non-blocking outside
+strict mode; server verification would reintroduce a loaded model.
+**Rejected.** Headless verification per commit (seconds of latency, or warm RAM per project).
+**Deferred, addable without contract change.** A periodic headless audit.
+
+## AD-9 · The server stays Python / FastAPI
+**Why.** Auth, tenancy, locks, feed, journal, artifact/view/metamodel persistence are kept
+as they are. A rewrite buys at most ≈ $25/month *(estimate)*.
+
+## AD-10 · No offline mode
+**Why.** Leases and explicit commits need the server. The IndexedDB snapshot cache is a
+disposable accelerator; losing it costs one download.
+
+## AD-11 · Snapshots are line-delimited (CT-1)
+**Why.** Parse while bytes arrive, bounded peak memory, progress, cancellation; natural to
+stream from head rows. Sub-project A MUST confirm it is no slower than the whole-document
+baseline (CN-4).
+**Rejected.** One JSON document (needs the whole text and one blocking parse); a binary format
+(no evidence it is needed).
+
+## AD-12 · Divergence is detected by digest and healed by re-bootstrap
+**Decision.** CT-3 digest plus `prev_rev` continuity; on any mismatch the replica is discarded.
+**Why.** Committed state always arrives whole from the server, so a replica can diverge only
+by missing or misordering deltas — which `(id, rev)` pairs fully detect. No repair protocol.
+**Rejected.** Hashing property values (needs byte-identical canonical JSON across Python and JS).
+
+## AD-13 · No client-side trigram index
+**Why.** A full name scan over 170k elements is 51 ms in JS *(measured)*. The server index
+costs ≈ 0.9 GB per project *(measured)* and is the dominant bulk-load cost.
+
+## AD-14 · The working copy is staged ops applied in place, with rewind and replay (CT-5)
+**Why.** One data structure serves every read; evaluation sees staged state with no overlay
+lookups; leases make replay conflicts rare.
+**Rejected.** A copy-on-write overlay consulted on every read.
+
+## AD-15 · In the headless host the container is the security boundary (CN-20)
+**Why.** Headless runs untrusted Python with no browser origin around it, and Pyodide is not
+a boundary (CN-18).
+
+## AD-16 · One dedicated engine worker per tab
+**Deferred.** A `SharedWorker` replica across tabs, only if multi-tab memory proves a problem.
+
+## AD-17 · No data migration
+**Decision.** At sub-project F the thin server replaces the current one and projects are
+re-imported from their JSON/YAML files.
+**Why.** No production data exists (owner, 2026-09-18).
+
+## AD-18 · Migration goes through `frontend/src/lib/api`; the current server is the oracle until F
+**Why.** Every server call already passes through `lib/api/client.ts`; no component builds a
+URL or calls `fetch`. Swapping a module's transport leaves its callers untouched.
+**Consequences.** Migration rules MR-1…MR-5 ([program.md](program.md)).
+
+## AD-19 · Baseline is evergreen desktop browsers
+**Decision.** No dependency on a Chromium-only API. Development and CI measure on Chromium.

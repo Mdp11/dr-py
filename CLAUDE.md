@@ -12,6 +12,10 @@ A reflective MBSE (Model-Based Systems Engineering) metamodel engine. Three data
 
 It ships as a Python core + FastAPI backend and a SvelteKit single-page frontend, with a one-shot CLI to migrate a legacy metamodel/model format into the new one. Example artifacts live in `examples/` (`smart-city.*`).
 
+## Target architecture
+
+`architecture/` is the source of truth for where the system is GOING — computation in the browser against a full model replica, a thin server, a headless export host — with its decisions (`AD-n`), shared contracts (`CT-n`), constraints (`CN-n`), build order and migration rules (`MR-n`), and repo conventions (`RC-n`). Start at `architecture/README.md` before designing or planning anything that touches the engine, sync, evaluation, scripts or deployment. This file keeps describing what the code does TODAY; `architecture/program.md` says which parts of the target exist yet.
+
 ## Toolchain & commands
 
 Everything runs through **pixi** (conda-based). There is no global `python` or `node` — always go through `pixi run`. Environments: `core` (runtime), `core-dev` (lint/test, includes api), `api` (backend runtime), `frontend` (Node 22).
