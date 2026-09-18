@@ -133,9 +133,9 @@ design. Size: large.
 Computation moves into the browser against a full model replica, with a thin server and a
 headless export host. Source of truth: `architecture/` — decisions `AD-n`, contracts `CT-n`,
 constraints `CN-n`, build order and status in `architecture/program.md`. Six sub-projects
-A → F. A (engine foundation) is built as four plans; the first two — package, value layer and
-golden-fixture pipeline; Python snapshot v2 and state digest, metamodel, record-graph store,
-indexes and mutation boundary — have landed. The freeze rule (`MR-3`) covers `core/model`,
+A → F. A (engine foundation) is built as four plans; the first three — package, value layer
+and golden-fixture pipeline; Python snapshot v2 and state digest, metamodel, record-graph
+store, indexes and mutation boundary; op applier and working copy — have landed. The freeze rule (`MR-3`) covers `core/model`,
 `core/metamodel` and the model-op applier from the start of A's second plan. Size: very large.
 
 ---
@@ -1185,6 +1185,32 @@ folds both kinds into one namespace — a same-`rev` pair cancels out of it. The
 loader refuses such a snapshot (`Relationship id 'x' is already an element id`), so a project
 imported with one would open on the server and not in the browser. Fix: check the other
 kind's ids in `_guard_relationship`; the file is outside the MR-3 freeze.
+
+### K-30 · The op applier's rollback is not exact: `rev` drifts and restored entities move last · `open` · *2026-09-18*
+`routes/ops.py::_rollback` replays inverse ops in restore mode, so a refused batch — and
+every `POST /commits/preview`, which rolls back the same way — leaves each updated entity's
+`rev` two higher and each deleted-then-restored entity at the end of its dict with `rev`
+counted again from zero. Observed on the core: `[update id-3, delete id-1, update ghost]` →
+422, `id-3` at `rev` 3 instead of 1, `id-1` and `id-2` behind it, state digest
+`d2499a403aeabae2` → `6b1333ccfa35d720`, no commit. Harmless while nothing reads `rev`; once
+the server serves the CT-3 digest and v2 snapshots (sub-project B) a single preview would make
+every replica report divergence at the next delta, and entity order (state, CT-1) would
+differ between the server and its replicas. The engine's applier restores before-images
+exactly, and the golden recorder runs each batch on a copy of the oracle's model so the
+drift never enters a fixture. Fix, in B: make the server's rollback exact (put `rev` and
+dict position back) or run previews on a copy; the applier is under the MR-3 freeze.
+
+### K-31 · A commit delta cannot say "deleted and created again under the same id" · `open` · *2026-09-18*
+Within one batch, `delete X` followed by a create with `id: X` moves X to the end of the
+server's dict, while the delta (CT-2) lists X only under `changed_*`.
+`change_request_ops.ops_for_change` emits exactly that for a relationship rewire, and any
+hand-written batch may do it for an element. The engine tells the case apart when the type
+or the ends changed and then removes and appends (fixture `ops_batches`, the rewire and the
+type-change steps, followed by `engine/test/working/replica.golden.test.ts`); when neither
+changed (fixture `ops_recreate`) the replica keeps X's place, and its entity order differs
+from the server's until the next snapshot. The digest cannot see it: a re-created entity
+that ends at its old `rev` hashes to the same `(id, rev)` pair. Fix, in B: name such ids in
+both `deleted_*` and `changed_*`, or add a `recreated_*` list to the delta.
 
 ---
 
