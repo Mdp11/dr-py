@@ -245,6 +245,45 @@ depends-on = [
     { task = "frontend-lint", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
+[feature.frontend.tasks.engine-install]
+description = "Install engine npm dependencies"
+cmd = "npm install"
+cwd = "engine"
+
+[feature.frontend.tasks.engine-test]
+description = "Run the engine vitest suite"
+cmd = "npm test"
+cwd = "engine"
+
+[feature.frontend.tasks.engine-check]
+description = "Type-check the engine sources and tests"
+cmd = "npm run check"
+cwd = "engine"
+
+[feature.frontend.tasks.engine-lint]
+description = "Lint + type-check the engine"
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = """
+npx eslint {% if check_only == 'false' %}--fix{% endif %} .
+npm run check
+"""
+cwd = "engine"
+
+[feature.frontend.tasks.engine-format]
+description = "Format the engine"
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
+cwd = "engine"
+
+[feature.frontend.tasks.engine-tidy]
+description = "Format + lint the engine"
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "true"
+depends-on = [
+    { task = "engine-format", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "engine-lint", args = [{ check_only = "{{ check_only }}" }]},
+]
+
 [environments]
 core = { features = ["core"] }
 core-dev = { features = ["core", "core-dev", "api"] }
