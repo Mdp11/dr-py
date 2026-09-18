@@ -52,11 +52,14 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
 
 - 64 bits, the XOR over every entity of `h(id, rev)`; hex on the wire. Order-independent and
   maintainable in O(batch) by XOR-ing out the old pair and XOR-ing in the new one.
-- `h` is fixed by sub-project B's spec. It MUST be synchronous and fast in both Python
-  (stdlib, C speed) and TypeScript (no WebCrypto), and defined over the UTF-8 of `id`, a NUL
-  byte and the decimal `rev`.
-- After applying a snapshot or a delta, the replica MUST compare digests. A mismatch discards
-  the replica (AD-12).
+- `h(id, rev)` is the first 8 bytes of SHA-256 over `utf8(id) ‖ 0x00 ‖ ascii(decimal rev)`.
+  Elements and relationships share one id namespace, so one XOR covers both. The engine
+  implements SHA-256 synchronously (WebCrypto is asynchronous); Python uses `hashlib`. A
+  linear checksum such as CRC32 MUST NOT be used: an XOR fold of it cannot see two
+  same-length ids exchanging `rev`s.
+- After applying a delta the replica MUST compare digests. After opening a snapshot it checks
+  the header's entity counts, adopts the header's digest, and MUST verify the digest by full
+  recomputation once `ready`, in the background. A mismatch discards the replica (AD-12).
 
 ## CT-4 · Engine interface
 
@@ -120,7 +123,7 @@ core is deleted.
 
 | Area | Rule |
 |---|---|
-| Numbers | The parser MUST keep Python's `int` / `float` distinction (`1` vs `1.0`: integer conformance is `isinstance(v, int)`) and integers beyond 2^53. One formatter reproduces Python's float `repr`. |
+| Numbers | The parser MUST keep Python's `int` / `float` distinction (`1` vs `1.0`: integer conformance is `isinstance(v, int)`) and integers beyond 2^53 (value model: AD-21). Bare `Infinity` / `-Infinity` / `NaN` literals load as those strings, as `parse_model_json` does. One formatter reproduces Python's float `repr`. Equality and uniqueness signatures follow Python equality (`True == 1 == 1.0`). |
 | JSON output | One serializer reproduces `json.dumps` for the settings each writer uses: `ensure_ascii=False`, `allow_nan=False`, compact separators or `indent=2`, insertion key order. |
 | Strings | Compare by code point, never UTF-16 code unit. `casefold` uses a table generated from Python's `str.casefold`. |
 | Regex | Patterns are Python `re` dialect: `re.fullmatch` for pattern facets, `re.search` for search criteria, an invalid pattern never matches. A translator converts them; a pattern outside its supported subset is a lint warning, never a silent difference. |

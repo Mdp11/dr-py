@@ -23,18 +23,22 @@ are promoted into this directory.
 Budgets are CN-3, at model M.
 
 ### A · Engine foundation
-**Scope.** The engine package: metamodel and its derived caches, model store and indexes, op
-applier with inverses, working copy (CT-5), snapshot open (CT-1), delta apply (CT-2), digest
-(CT-3). The golden-fixture harness (CT-7).
-**Replaces.** `core/model`, `core/metamodel`, `core/view` (≈ 3k lines of Python).
+**Scope.** The engine package: value model with exact JSON parse and serialize (AD-21),
+metamodel caches (AD-22), record-graph store and indexes (AD-20), op applier with inverses,
+working copy for the model family (CT-5), snapshot open (CT-1), delta apply (CT-2), digest
+(CT-3). The golden-fixture harness (CT-7). The Python snapshot v2 codec and digest.
+**Replaces.** `core/model` (without `change_request.py`) and the lookup half of
+`core/metamodel` (≈ 2.5k lines of Python), plus the model-op applier in `api/routes/ops.py`.
+**Built as four plans**, each leaving `main` green: (1) package, value layer and the
+golden-fixture pipeline; (2) Python snapshot v2 and digest, metamodel, store, indexes and
+mutation boundary; (3) op applier and working copy; (4) snapshot reader, digest, benchmarks.
 **Done when.** Fixtures for model, metamodel, ops, inverses and working copy pass in Node;
-open meets budget; the line-delimited format is no slower than the whole-document baseline
-(AD-11).
+open meets budget (CN-3).
 
 ### B · Replica and frontend seam
 **Scope.** Sandbox page and engine worker; shell (snapshot descriptor route, tail route, feed
-buffering, IndexedDB cache, re-bootstrap); `prev_rev` and digest on the current server;
-snapshot v2 in `snapshot_codec.py`; engine client behind `lib/api`; the read surfaces —
+buffering, IndexedDB cache, re-bootstrap); `prev_rev` and digest on the current server; the
+server's snapshot writers switch to v2; engine client behind `lib/api`; the read surfaces —
 element pages, tree, search, neighborhoods, summary. `frontend/src/lib/state/model.svelte.ts`
 becomes a view over the engine.
 **Depends on.** A.
@@ -45,8 +49,11 @@ budget; divergence recovery is exercised by a test.
 **Scope.** Navigation, search criteria, tables (evaluate, sort, layouts, JSON/CSV/JSONL/xlsx,
 split, naming, manifest), the six validators, custom rules and their reach analysis, issues,
 compare / apply-CR, save / download, metamodel diff and rebind preview (validate the working
-copy under a candidate metamodel), history Compare. Artifacts enter the working copy.
-**Replaces.** `core/table`, `core/validation`, `core/navigation`, `core/search` (≈ 7.7k lines).
+copy under a candidate metamodel), history Compare, view placement warnings
+(`validate_view`). Artifacts enter the working copy.
+**Replaces.** `core/table`, `core/validation`, `core/navigation`, `core/search`,
+`core/model/change_request.py`, `core/metamodel/diff.py`, `core/view/validation.py`
+(≈ 8.5k lines).
 **Depends on.** B.
 **Done when.** Evaluation sees staged edits and staged artifacts; the table budget is met;
 export fidelity per CT-7.

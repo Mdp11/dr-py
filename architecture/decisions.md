@@ -81,8 +81,10 @@ disposable accelerator; losing it costs one download.
 
 ## AD-11 · Snapshots are line-delimited (CT-1)
 **Why.** Parse while bytes arrive, bounded peak memory, progress, cancellation; natural to
-stream from head rows. Sub-project A MUST confirm it is no slower than the whole-document
-baseline (CN-4).
+stream from head rows. It is also what makes exact values (AD-21) affordable: only the lines
+that need the exact parser pay for it. At M, 18.5 % of lines do — line-routed parse 1.49 s,
+whole-document exact parse 2.50 s, whole-document native (inexact) parse 0.59 s *(measured,
+one pass, Node 22, 2026-09-18)*. Sub-project A MUST confirm open stays within CN-3.
 **Rejected.** One JSON document (needs the whole text and one blocking parse); a binary format
 (no evidence it is needed).
 
@@ -120,3 +122,36 @@ URL or calls `fetch`. Swapping a module's transport leaves its callers untouched
 
 ## AD-19 · Baseline is evergreen desktop browsers
 **Decision.** No dependency on a Chromium-only API. Development and CI measure on Chromium.
+
+## AD-20 · The store is a record graph
+**Decision.** One fixed-shape class instance per entity; adjacency and containment parents
+are arrays of direct record references on the record; global indexes exist only where a
+global lookup is needed (by id, by type, uniqueness, references, root order). The store sits
+behind an interface.
+**Why.** A field-by-field port of `IndexSet` (`Map<string, Set<string>>`) allocates hundreds
+of thousands of small collections — 300–450 MB at M *(estimate)* — and makes every hop a
+string lookup. The record graph is 150–250 MB *(estimate)* and hops are pointer chasing,
+while the port stays near-mechanical.
+**Rejected.** A columnar layout (typed arrays, interned strings, CSR): most compact, but
+in-place staged edits with rewind and replay fight it and properties are schemaless. It
+remains the escape hatch behind the store interface.
+**Consequences.** Adjacency order is unspecified, as in Python; anything observable MUST
+sort, and tests shuffle adjacency. Entity order is restored through a per-record insertion
+sequence (CT-1).
+
+## AD-21 · Values: `number` is a Python int, `PyFloat` is a Python float
+**Decision.** `int` within ±(2^53 − 1) → `number`; larger → `bigint`; every `float` →
+`PyFloat`, integral or not; the strings `"Infinity"`, `"-Infinity"`, `"NaN"` stay strings.
+Lines that can contain a float, a big integer or a bare non-finite literal go through an
+exact parser; all others through native `JSON.parse`.
+**Why.** Integer conformance, exports and uniqueness depend on the distinction, and JSON
+text is the only place it survives. Every float Python writes contains `.`, `e` or `E`, so a
+text pre-scan routes lines exactly while keeping native parse speed for the rest.
+**Rejected.** A reviver with source-text access on every value (slows the whole parse); a
+side table of float-typed keys (two sources of truth per value).
+
+## AD-22 · The engine takes a validated metamodel as JSON
+**Decision.** The engine consumes the `GET /metamodel` document and builds its caches from it.
+YAML parsing and `check_metamodel` stay on the server.
+**Why.** The server must validate a metamodel anyway before accepting it (AD-7); a second
+validator in the engine would be a second implementation to keep identical.

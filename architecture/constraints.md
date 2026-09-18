@@ -46,6 +46,9 @@ minimal replicas (bare loops), not engines. Raw data: `spikes/client_engine/`.
 | Same computations, engine-native | — | 11 ms | 2.9 ms |
 | Full six-validator sweep | 11.0 s | not ported | not ported |
 
+The replica rows parse with native `JSON.parse`, which cannot tell `1` from `1.0`; exact
+parsing costs more (AD-11 carries the measurement).
+
 The script-cell cost is Python-side JSON plus FFI (≈ 270 µs per bridge call vs ≈ 165 µs
 in-process); the store's language is irrelevant. Pyodide for user scripts adds ≈ 5.4 s boot
 and ≈ 90 MB whichever engine is used.
