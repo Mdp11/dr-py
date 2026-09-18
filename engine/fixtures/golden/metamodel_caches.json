@@ -1,0 +1,1384 @@
+{
+  "metamodel": {
+    "enums": {
+      "Color": [
+        "red",
+        "green"
+      ]
+    },
+    "elements": [
+      {
+        "name": "Base",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "shade",
+            "datatype": "Color",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": [
+          "name"
+        ]
+      },
+      {
+        "name": "Mid",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [
+          {
+            "name": "size",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": 0.0,
+            "max": 10.0,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "name",
+            "datatype": "integer",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Leaf",
+        "abstract": false,
+        "extends": "Mid",
+        "properties": [
+          {
+            "name": "buddy",
+            "datatype": "Leaf",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": [
+          "size",
+          "out:Links",
+          "in:Holds",
+          "out:"
+        ]
+      },
+      {
+        "name": "Keyless",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "note",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "EmptyKey",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [],
+        "key": []
+      },
+      {
+        "name": "Orphan",
+        "abstract": false,
+        "extends": "Missing",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "LoopA",
+        "abstract": false,
+        "extends": "LoopB",
+        "properties": [
+          {
+            "name": "a",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "LoopB",
+        "abstract": false,
+        "extends": "LoopA",
+        "properties": [
+          {
+            "name": "b",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Selfish",
+        "abstract": false,
+        "extends": "Selfish",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "Keyless",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "ignored",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Holds",
+        "abstract": true,
+        "extends": null,
+        "containment": true,
+        "source": null,
+        "target": null,
+        "mappings": [],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "since",
+            "datatype": "date",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      },
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": "Holds",
+        "containment": false,
+        "source": "Base",
+        "target": "Mid",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Mid"
+          }
+        ],
+        "source_multiplicity": "0..1",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Links",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Leaf",
+        "target": "Keyless",
+        "mappings": [
+          {
+            "source": "Leaf",
+            "target": "Keyless"
+          },
+          {
+            "source": "Keyless",
+            "target": "Leaf"
+          }
+        ],
+        "source_multiplicity": "1..*",
+        "target_multiplicity": "2",
+        "properties": [
+          {
+            "name": "weight",
+            "datatype": "float",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      },
+      {
+        "name": "Loose",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Base",
+        "target": "Base",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Base"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Broken",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Mid",
+        "target": "Mid",
+        "mappings": [
+          {
+            "source": "Mid",
+            "target": "Mid"
+          }
+        ],
+        "source_multiplicity": "many",
+        "target_multiplicity": "1..1",
+        "properties": []
+      },
+      {
+        "name": "Unmapped",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": null,
+        "target": null,
+        "mappings": [],
+        "source_multiplicity": "1",
+        "target_multiplicity": "1",
+        "properties": []
+      },
+      {
+        "name": "RelLoop",
+        "abstract": false,
+        "extends": "RelLoop",
+        "containment": false,
+        "source": "LoopA",
+        "target": "LoopB",
+        "mappings": [
+          {
+            "source": "LoopA",
+            "target": "LoopB"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Loose",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Keyless",
+        "target": "Keyless",
+        "mappings": [
+          {
+            "source": "Keyless",
+            "target": "Keyless"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..3",
+        "properties": []
+      }
+    ]
+  },
+  "elements": [
+    {
+      "name": "Base",
+      "is_element_type": true,
+      "own_properties": [
+        [
+          "name",
+          "string",
+          "1"
+        ],
+        [
+          "shade",
+          "Color",
+          "0..1"
+        ]
+      ],
+      "ancestors": [
+        "Base"
+      ],
+      "properties": [
+        [
+          "name",
+          "string",
+          "1"
+        ],
+        [
+          "shade",
+          "Color",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "name",
+        "shade"
+      ],
+      "key": [
+        "name"
+      ],
+      "key_spec": {
+        "properties": [
+          "name"
+        ],
+        "relationships": []
+      },
+      "end_constraints": [],
+      "descendants": [
+        "Base",
+        "EmptyKey",
+        "Leaf",
+        "Mid"
+      ],
+      "from": [
+        "Owns",
+        "Loose"
+      ],
+      "to": [
+        "Loose"
+      ],
+      "supertypes": [
+        "Base"
+      ]
+    },
+    {
+      "name": "Mid",
+      "is_element_type": true,
+      "own_properties": [
+        [
+          "size",
+          "integer",
+          "0..1"
+        ],
+        [
+          "name",
+          "integer",
+          "0..*"
+        ]
+      ],
+      "ancestors": [
+        "Mid",
+        "Base"
+      ],
+      "properties": [
+        [
+          "name",
+          "string",
+          "1"
+        ],
+        [
+          "shade",
+          "Color",
+          "0..1"
+        ],
+        [
+          "size",
+          "integer",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "name",
+        "shade",
+        "size"
+      ],
+      "key": [
+        "name"
+      ],
+      "key_spec": {
+        "properties": [
+          "name"
+        ],
+        "relationships": []
+      },
+      "end_constraints": [
+        [
+          "Owns",
+          "source",
+          0,
+          1
+        ],
+        [
+          "Broken",
+          "target",
+          1,
+          1
+        ]
+      ],
+      "descendants": [
+        "Leaf",
+        "Mid"
+      ],
+      "from": [
+        "Owns",
+        "Loose",
+        "Broken"
+      ],
+      "to": [
+        "Owns",
+        "Loose",
+        "Broken"
+      ],
+      "supertypes": [
+        "Base",
+        "Mid"
+      ]
+    },
+    {
+      "name": "Leaf",
+      "is_element_type": true,
+      "own_properties": [
+        [
+          "buddy",
+          "Leaf",
+          "0..1"
+        ]
+      ],
+      "ancestors": [
+        "Leaf",
+        "Mid",
+        "Base"
+      ],
+      "properties": [
+        [
+          "name",
+          "string",
+          "1"
+        ],
+        [
+          "shade",
+          "Color",
+          "0..1"
+        ],
+        [
+          "size",
+          "integer",
+          "0..1"
+        ],
+        [
+          "buddy",
+          "Leaf",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "buddy",
+        "name",
+        "shade",
+        "size"
+      ],
+      "key": [
+        "size",
+        "out:Links",
+        "in:Holds",
+        "out:"
+      ],
+      "key_spec": {
+        "properties": [
+          "size"
+        ],
+        "relationships": [
+          [
+            "Links",
+            "out"
+          ],
+          [
+            "Holds",
+            "in"
+          ],
+          [
+            "",
+            "out"
+          ]
+        ]
+      },
+      "end_constraints": [
+        [
+          "Owns",
+          "source",
+          0,
+          1
+        ],
+        [
+          "Links",
+          "target",
+          2,
+          2
+        ],
+        [
+          "Links",
+          "source",
+          1,
+          null
+        ],
+        [
+          "Broken",
+          "target",
+          1,
+          1
+        ]
+      ],
+      "descendants": [
+        "Leaf"
+      ],
+      "from": [
+        "Owns",
+        "Links",
+        "Loose",
+        "Broken"
+      ],
+      "to": [
+        "Owns",
+        "Links",
+        "Loose",
+        "Broken"
+      ],
+      "supertypes": [
+        "Base",
+        "Mid",
+        "Leaf"
+      ]
+    },
+    {
+      "name": "Keyless",
+      "is_element_type": true,
+      "own_properties": [
+        [
+          "note",
+          "string",
+          "0..1"
+        ]
+      ],
+      "ancestors": [
+        "Keyless"
+      ],
+      "properties": [
+        [
+          "note",
+          "string",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "note"
+      ],
+      "key": null,
+      "key_spec": null,
+      "end_constraints": [
+        [
+          "Links",
+          "target",
+          2,
+          2
+        ],
+        [
+          "Links",
+          "source",
+          1,
+          null
+        ],
+        [
+          "Loose",
+          "target",
+          0,
+          3
+        ]
+      ],
+      "descendants": [
+        "Keyless"
+      ],
+      "from": [
+        "Links",
+        "Loose"
+      ],
+      "to": [
+        "Links",
+        "Loose"
+      ],
+      "supertypes": [
+        "Keyless",
+        "Keyless"
+      ]
+    },
+    {
+      "name": "EmptyKey",
+      "is_element_type": true,
+      "own_properties": [],
+      "ancestors": [
+        "EmptyKey",
+        "Base"
+      ],
+      "properties": [
+        [
+          "name",
+          "string",
+          "1"
+        ],
+        [
+          "shade",
+          "Color",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "name",
+        "shade"
+      ],
+      "key": [],
+      "key_spec": {
+        "properties": [],
+        "relationships": []
+      },
+      "end_constraints": [],
+      "descendants": [
+        "EmptyKey"
+      ],
+      "from": [
+        "Owns",
+        "Loose"
+      ],
+      "to": [
+        "Loose"
+      ],
+      "supertypes": [
+        "Base",
+        "EmptyKey"
+      ]
+    },
+    {
+      "name": "Orphan",
+      "is_element_type": true,
+      "own_properties": [],
+      "ancestors": [
+        "Orphan"
+      ],
+      "properties": [],
+      "property_names": [],
+      "key": null,
+      "key_spec": null,
+      "end_constraints": [],
+      "descendants": [
+        "Orphan"
+      ],
+      "from": [],
+      "to": [],
+      "supertypes": [
+        "Orphan"
+      ]
+    },
+    {
+      "name": "LoopA",
+      "is_element_type": true,
+      "own_properties": [
+        [
+          "a",
+          "string",
+          "0..1"
+        ]
+      ],
+      "ancestors": [
+        "LoopA",
+        "LoopB"
+      ],
+      "properties": [
+        [
+          "b",
+          "string",
+          "0..1"
+        ],
+        [
+          "a",
+          "string",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "a",
+        "b"
+      ],
+      "key": null,
+      "key_spec": null,
+      "end_constraints": [],
+      "descendants": [
+        "LoopA",
+        "LoopB"
+      ],
+      "from": [
+        "RelLoop"
+      ],
+      "to": [
+        "RelLoop"
+      ],
+      "supertypes": [
+        "LoopA",
+        "LoopB"
+      ]
+    },
+    {
+      "name": "LoopB",
+      "is_element_type": true,
+      "own_properties": [
+        [
+          "b",
+          "string",
+          "0..1"
+        ]
+      ],
+      "ancestors": [
+        "LoopB",
+        "LoopA"
+      ],
+      "properties": [
+        [
+          "a",
+          "string",
+          "0..1"
+        ],
+        [
+          "b",
+          "string",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "a",
+        "b"
+      ],
+      "key": null,
+      "key_spec": null,
+      "end_constraints": [],
+      "descendants": [
+        "LoopA",
+        "LoopB"
+      ],
+      "from": [
+        "RelLoop"
+      ],
+      "to": [
+        "RelLoop"
+      ],
+      "supertypes": [
+        "LoopA",
+        "LoopB"
+      ]
+    },
+    {
+      "name": "Selfish",
+      "is_element_type": true,
+      "own_properties": [],
+      "ancestors": [
+        "Selfish"
+      ],
+      "properties": [],
+      "property_names": [],
+      "key": null,
+      "key_spec": null,
+      "end_constraints": [],
+      "descendants": [
+        "Selfish"
+      ],
+      "from": [],
+      "to": [],
+      "supertypes": [
+        "Selfish"
+      ]
+    },
+    {
+      "name": "Keyless",
+      "is_element_type": true,
+      "own_properties": [
+        [
+          "note",
+          "string",
+          "0..1"
+        ]
+      ],
+      "ancestors": [
+        "Keyless"
+      ],
+      "properties": [
+        [
+          "note",
+          "string",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "note"
+      ],
+      "key": null,
+      "key_spec": null,
+      "end_constraints": [
+        [
+          "Links",
+          "target",
+          2,
+          2
+        ],
+        [
+          "Links",
+          "source",
+          1,
+          null
+        ],
+        [
+          "Loose",
+          "target",
+          0,
+          3
+        ]
+      ],
+      "descendants": [
+        "Keyless"
+      ],
+      "from": [
+        "Links",
+        "Loose"
+      ],
+      "to": [
+        "Links",
+        "Loose"
+      ],
+      "supertypes": [
+        "Keyless",
+        "Keyless"
+      ]
+    },
+    {
+      "name": "Missing",
+      "is_element_type": false,
+      "own_properties": null,
+      "ancestors": [],
+      "properties": [],
+      "property_names": [],
+      "key": null,
+      "key_spec": null,
+      "end_constraints": [],
+      "descendants": [],
+      "from": [],
+      "to": [],
+      "supertypes": []
+    }
+  ],
+  "relationships": [
+    {
+      "name": "Holds",
+      "own_mappings": [],
+      "ancestors": [
+        "Holds"
+      ],
+      "properties": [
+        [
+          "since",
+          "date",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "since"
+      ],
+      "containment": true,
+      "descendants": [
+        "Holds",
+        "Owns"
+      ],
+      "supertypes": [
+        "Holds"
+      ]
+    },
+    {
+      "name": "Owns",
+      "own_mappings": [
+        [
+          "Base",
+          "Mid"
+        ]
+      ],
+      "ancestors": [
+        "Owns",
+        "Holds"
+      ],
+      "properties": [
+        [
+          "since",
+          "date",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "since"
+      ],
+      "containment": true,
+      "descendants": [
+        "Owns"
+      ],
+      "supertypes": [
+        "Holds",
+        "Owns"
+      ]
+    },
+    {
+      "name": "Links",
+      "own_mappings": [
+        [
+          "Leaf",
+          "Keyless"
+        ],
+        [
+          "Keyless",
+          "Leaf"
+        ]
+      ],
+      "ancestors": [
+        "Links"
+      ],
+      "properties": [
+        [
+          "weight",
+          "float",
+          "0..1"
+        ]
+      ],
+      "property_names": [
+        "weight"
+      ],
+      "containment": false,
+      "descendants": [
+        "Links"
+      ],
+      "supertypes": [
+        "Links"
+      ]
+    },
+    {
+      "name": "Loose",
+      "own_mappings": [
+        [
+          "Base",
+          "Base"
+        ]
+      ],
+      "ancestors": [
+        "Loose"
+      ],
+      "properties": [],
+      "property_names": [],
+      "containment": false,
+      "descendants": [
+        "Loose"
+      ],
+      "supertypes": [
+        "Loose",
+        "Loose"
+      ]
+    },
+    {
+      "name": "Broken",
+      "own_mappings": [
+        [
+          "Mid",
+          "Mid"
+        ]
+      ],
+      "ancestors": [
+        "Broken"
+      ],
+      "properties": [],
+      "property_names": [],
+      "containment": false,
+      "descendants": [
+        "Broken"
+      ],
+      "supertypes": [
+        "Broken"
+      ]
+    },
+    {
+      "name": "Unmapped",
+      "own_mappings": [],
+      "ancestors": [
+        "Unmapped"
+      ],
+      "properties": [],
+      "property_names": [],
+      "containment": false,
+      "descendants": [
+        "Unmapped"
+      ],
+      "supertypes": [
+        "Unmapped"
+      ]
+    },
+    {
+      "name": "RelLoop",
+      "own_mappings": [
+        [
+          "LoopA",
+          "LoopB"
+        ]
+      ],
+      "ancestors": [
+        "RelLoop"
+      ],
+      "properties": [],
+      "property_names": [],
+      "containment": false,
+      "descendants": [
+        "RelLoop"
+      ],
+      "supertypes": [
+        "RelLoop"
+      ]
+    },
+    {
+      "name": "Loose",
+      "own_mappings": [
+        [
+          "Base",
+          "Base"
+        ]
+      ],
+      "ancestors": [
+        "Loose"
+      ],
+      "properties": [],
+      "property_names": [],
+      "containment": false,
+      "descendants": [
+        "Loose"
+      ],
+      "supertypes": [
+        "Loose",
+        "Loose"
+      ]
+    },
+    {
+      "name": "Missing",
+      "own_mappings": null,
+      "ancestors": [],
+      "properties": [],
+      "property_names": [],
+      "containment": false,
+      "descendants": [],
+      "supertypes": []
+    }
+  ],
+  "multiplicities": [
+    {
+      "spec": "1",
+      "lower": 1,
+      "upper": 1,
+      "is_single": true,
+      "required": true,
+      "count_ok": [
+        false,
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "spec": "0..1",
+      "lower": 0,
+      "upper": 1,
+      "is_single": true,
+      "required": false,
+      "count_ok": [
+        true,
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "spec": "0..*",
+      "lower": 0,
+      "upper": null,
+      "is_single": false,
+      "required": false,
+      "count_ok": [
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": "*",
+      "lower": 0,
+      "upper": null,
+      "is_single": false,
+      "required": false,
+      "count_ok": [
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": "1..*",
+      "lower": 1,
+      "upper": null,
+      "is_single": false,
+      "required": true,
+      "count_ok": [
+        false,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": " 2 .. 5 ",
+      "lower": 2,
+      "upper": 5,
+      "is_single": false,
+      "required": true,
+      "count_ok": [
+        false,
+        false,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": "+1",
+      "lower": 1,
+      "upper": 1,
+      "is_single": true,
+      "required": true,
+      "count_ok": [
+        false,
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "spec": "1_0",
+      "lower": 10,
+      "upper": 10,
+      "is_single": false,
+      "required": true,
+      "count_ok": [
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "spec": "1..1_000",
+      "lower": 1,
+      "upper": 1000,
+      "is_single": false,
+      "required": true,
+      "count_ok": [
+        false,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": "-1",
+      "lower": -1,
+      "upper": -1,
+      "is_single": false,
+      "required": false,
+      "count_ok": [
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "spec": "-0",
+      "lower": 0,
+      "upper": 0,
+      "is_single": false,
+      "required": false,
+      "count_ok": [
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "spec": "00",
+      "lower": 0,
+      "upper": 0,
+      "is_single": false,
+      "required": false,
+      "count_ok": [
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "spec": "3..1",
+      "lower": 3,
+      "upper": 1,
+      "is_single": true,
+      "required": true,
+      "count_ok": [
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "spec": "* ",
+      "lower": 0,
+      "upper": null,
+      "is_single": false,
+      "required": false,
+      "count_ok": [
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": " * ",
+      "lower": 0,
+      "upper": null,
+      "is_single": false,
+      "required": false,
+      "count_ok": [
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": "1 ..*",
+      "lower": 1,
+      "upper": null,
+      "is_single": false,
+      "required": true,
+      "count_ok": [
+        false,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": "0.. *",
+      "lower": 0,
+      "upper": null,
+      "is_single": false,
+      "required": false,
+      "count_ok": [
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "spec": "",
+      "error": "Invalid multiplicity: ''"
+    },
+    {
+      "spec": "a",
+      "error": "Invalid multiplicity: 'a'"
+    },
+    {
+      "spec": "1..",
+      "error": "Invalid multiplicity: '1..'"
+    },
+    {
+      "spec": "..1",
+      "error": "Invalid multiplicity: '..1'"
+    },
+    {
+      "spec": "1..2..3",
+      "error": "Invalid multiplicity: '1..2..3'"
+    },
+    {
+      "spec": "1.5",
+      "error": "Invalid multiplicity: '1.5'"
+    },
+    {
+      "spec": "0x1",
+      "error": "Invalid multiplicity: '0x1'"
+    },
+    {
+      "spec": "1__0",
+      "error": "Invalid multiplicity: '1__0'"
+    },
+    {
+      "spec": "_1",
+      "error": "Invalid multiplicity: '_1'"
+    },
+    {
+      "spec": "1_",
+      "error": "Invalid multiplicity: '1_'"
+    },
+    {
+      "spec": "many",
+      "error": "Invalid multiplicity: 'many'"
+    },
+    {
+      "spec": "'",
+      "error": "Invalid multiplicity: \"'\""
+    }
+  ]
+}
