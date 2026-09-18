@@ -1,0 +1,733 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Thing",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "City",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [
+          {
+            "name": "population",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "mayor",
+            "datatype": "Person",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Person",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "City",
+        "target": "Person",
+        "mappings": [
+          {
+            "source": "City",
+            "target": "Person"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Knows",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Person",
+        "target": "Person",
+        "mappings": [
+          {
+            "source": "Person",
+            "target": "Person"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "since",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "create_element",
+      "type": "City",
+      "result": "id-1",
+      "error": null,
+      "digest": "b83d885159d11dd4",
+      "fingerprint": "d248c69b14623f44",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"id-1\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"]],\"duplicates\":[],\"roots\":[[\"id-1\",\"id-1\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Thing",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Cannot instantiate abstract type 'Thing'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "create_element",
+      "type": "Nope",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "Unknown element type 'Nope'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "create_element",
+      "type": "Person",
+      "result": "id-2",
+      "error": null,
+      "digest": "5a5636a5da0d7ddb",
+      "fingerprint": "5938c2b9705789a8"
+    },
+    {
+      "do": "create_element",
+      "type": "Person",
+      "result": "id-3",
+      "error": null,
+      "digest": "350b145ec5d2985f",
+      "fingerprint": "bf862c4d2ef4c75c"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "Rome"
+      },
+      "result": null,
+      "error": null,
+      "digest": "99e6e94afc7f8305",
+      "fingerprint": "ff4ea8ce85a9b562",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"id-1\"]],[\"Person\",[\"id-2\",\"id-3\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-2\",\"id-3\"]],\"duplicates\":[[\"id-2\",\"id-3\"]],\"roots\":[[\"Rome\",\"id-1\"],[\"id-2\",\"id-2\"],[\"id-3\",\"id-3\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "Rome"
+      },
+      "result": null,
+      "error": null,
+      "digest": "55dbecce7e306703",
+      "fingerprint": "f057bbb8d51d4c18"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "population",
+      "value": {
+        "t": "int",
+        "v": "2800000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "4282254eb6683b18",
+      "fingerprint": "7f8674480b6fa57a"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "nope",
+      "value": {
+        "t": "int",
+        "v": "1"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "'City' has no property 'nope'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "ghost",
+      "prop": "name",
+      "detached": "element",
+      "type": "City",
+      "value": {
+        "t": "str",
+        "v": "x"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "Entity 'ghost' is not part of this model"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "name",
+      "detached": "element",
+      "type": "City",
+      "value": {
+        "t": "str",
+        "v": "x"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "Entity 'id-1' is not part of this model"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "delete_property",
+      "id": "id-2",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "delete_property",
+      "id": "id-1",
+      "prop": "population",
+      "result": null,
+      "error": null,
+      "digest": "ffa1215aaafe82f2",
+      "fingerprint": "a36f57418a038b61"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-1",
+      "prop": "nope",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "'City' has no property 'nope'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "delete_property",
+      "id": "ghost",
+      "prop": "name",
+      "detached": "element",
+      "type": "City",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "Entity 'ghost' is not part of this model"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-1",
+      "target": "id-2",
+      "result": "id-4",
+      "error": null,
+      "digest": "74e8b9e08da592ee",
+      "fingerprint": "eca90981b380c456",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\"},\"rev\":4}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"id-1\"]],[\"Person\",[\"id-2\",\"id-3\"]]],\"out\":[[\"id-1\",[\"id-4\"]]],\"in\":[[\"id-2\",[\"id-4\"]]],\"out_count\":[[\"id-1\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-4\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"]],\"duplicates\":[],\"roots\":[[\"Rome\",\"id-1\"],[\"id-3\",\"id-3\"]]}"
+    },
+    {
+      "do": "connect",
+      "type": "Knows",
+      "source": "id-2",
+      "target": "id-3",
+      "result": "id-5",
+      "error": null,
+      "digest": "5e8f8df140e24f90",
+      "fingerprint": "972cffb4f4b2e0d4"
+    },
+    {
+      "do": "connect",
+      "type": "Nope",
+      "source": "id-1",
+      "target": "id-2",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "Unknown relationship type 'Nope'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Knows",
+      "source": "nobody",
+      "target": "id-2",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No source element 'nobody'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Knows",
+      "source": "id-2",
+      "target": "nobody",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No target element 'nobody'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-5",
+      "prop": "since",
+      "value": {
+        "t": "int",
+        "v": "2020"
+      },
+      "result": null,
+      "error": null,
+      "digest": "8b52297fc5c19cfc",
+      "fingerprint": "bab38e52aa0997e5",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\"},\"rev\":4}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{\"since\":2020},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"id-1\"]],[\"Person\",[\"id-2\",\"id-3\"]]],\"out\":[[\"id-1\",[\"id-4\"]],[\"id-2\",[\"id-5\"]]],\"in\":[[\"id-2\",[\"id-4\"]],[\"id-3\",[\"id-5\"]]],\"out_count\":[[\"id-1\",\"Owns\",1],[\"id-2\",\"Knows\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-3\",\"Knows\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-4\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"]],\"duplicates\":[],\"roots\":[[\"Rome\",\"id-1\"],[\"id-3\",\"id-3\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-5",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "x"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "'Knows' has no property 'name'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "ghost",
+      "prop": "since",
+      "detached": "relationship",
+      "type": "Knows",
+      "value": {
+        "t": "int",
+        "v": "1"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "Entity 'ghost' is not part of this model"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "delete_property",
+      "id": "id-5",
+      "prop": "since",
+      "result": null,
+      "error": null,
+      "digest": "ecb7fc70d6ac2560",
+      "fingerprint": "61e689ecd931c907"
+    },
+    {
+      "do": "get_element",
+      "id": "id-1",
+      "result": "id-1",
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "get_element",
+      "id": "nobody",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'nobody'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "get_element",
+      "id": "it's",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id \"it's\""
+      },
+      "unchanged": true
+    },
+    {
+      "do": "get_element",
+      "id": "id-4",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'id-4'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "get_relationship",
+      "id": "id-4",
+      "result": "id-4",
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "get_relationship",
+      "id": "id-1",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No relationship with id 'id-1'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "container_of",
+      "id": "id-2",
+      "result": "id-1",
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "container_of",
+      "id": "id-1",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "container_of",
+      "id": "nobody",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "relationships_from",
+      "id": "id-2",
+      "result": [
+        "id-5"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "relationships_to",
+      "id": "id-2",
+      "result": [
+        "id-4"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "relationships_from",
+      "id": "nobody",
+      "result": [],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "restore_element",
+      "id": "id-1",
+      "type": "Nope",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "Unknown element type 'Nope'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_element",
+      "id": "id-1",
+      "type": "Thing",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Cannot instantiate abstract type 'Thing'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_element",
+      "id": "id-1",
+      "type": "City",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-1' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_element",
+      "id": "id-4",
+      "type": "City",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-4' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_element",
+      "id": "kept",
+      "type": "City",
+      "result": "kept",
+      "error": null,
+      "digest": "6f35d246df8efa7a",
+      "fingerprint": "c07d16dc6e3fe60c",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\"},\"rev\":4}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"kept\",\"type_name\":\"City\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Knows\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":2}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"id-1\",\"kept\"]],[\"Person\",[\"id-2\",\"id-3\"]]],\"out\":[[\"id-1\",[\"id-4\"]],[\"id-2\",[\"id-5\"]]],\"in\":[[\"id-2\",[\"id-4\"]],[\"id-3\",[\"id-5\"]]],\"out_count\":[[\"id-1\",\"Owns\",1],[\"id-2\",\"Knows\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-3\",\"Knows\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-4\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"],[\"kept\"]],\"duplicates\":[],\"roots\":[[\"Rome\",\"id-1\"],[\"id-3\",\"id-3\"],[\"kept\",\"kept\"]]}"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-4",
+      "type": "Nope",
+      "source": "x",
+      "target": "y",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "Unknown relationship type 'Nope'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-4",
+      "type": "Knows",
+      "source": "x",
+      "target": "id-2",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No source element 'x'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-4",
+      "type": "Knows",
+      "source": "id-2",
+      "target": "y",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No target element 'y'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-4",
+      "type": "Knows",
+      "source": "id-2",
+      "target": "id-3",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-4' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-1",
+      "type": "Knows",
+      "source": "id-2",
+      "target": "id-3",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-1' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_relationship",
+      "id": "link",
+      "type": "Knows",
+      "source": "id-3",
+      "target": "id-2",
+      "result": "link",
+      "error": null,
+      "digest": "1ab9ace5d26744e2",
+      "fingerprint": "6c19f4e79d509d99"
+    },
+    {
+      "do": "disconnect",
+      "id": "nobody",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No relationship with id 'nobody'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "disconnect",
+      "id": "id-1",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No relationship with id 'id-1'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "disconnect",
+      "id": "id-5",
+      "result": null,
+      "error": null,
+      "digest": "82e6e975896ef36c",
+      "fingerprint": "aaaf102189504615"
+    },
+    {
+      "do": "delete_element",
+      "id": "nobody",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'nobody'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "delete_element",
+      "id": "id-4",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'id-4'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "delete_element",
+      "id": "id-3",
+      "result": null,
+      "error": null,
+      "digest": "9837b52d9b58a870",
+      "fingerprint": "ab24f4bc16a7c8b8"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-3",
+      "type": "Person",
+      "result": "id-3",
+      "error": null,
+      "digest": "f76a97d684874df4",
+      "fingerprint": "68d4055ca7772c94"
+    },
+    {
+      "do": "create_element",
+      "type": "Person",
+      "result": "id-6",
+      "error": null,
+      "digest": "07125aa6095a979f",
+      "fingerprint": "c3744b8330162b21",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"Rome\"},\"rev\":4}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"kept\",\"type_name\":\"City\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-6\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"City\",[\"id-1\",\"kept\"]],[\"Person\",[\"id-2\",\"id-3\",\"id-6\"]]],\"out\":[[\"id-1\",[\"id-4\"]]],\"in\":[[\"id-2\",[\"id-4\"]]],\"out_count\":[[\"id-1\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-4\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\",\"id-6\"],[\"kept\"]],\"duplicates\":[[\"id-3\",\"id-6\"]],\"roots\":[[\"Rome\",\"id-1\"],[\"id-3\",\"id-3\"],[\"id-6\",\"id-6\"],[\"kept\",\"kept\"]]}"
+    }
+  ]
+}

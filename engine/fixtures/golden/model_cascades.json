@@ -1,0 +1,511 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Node",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Contains",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Holds",
+        "abstract": false,
+        "extends": "Contains",
+        "containment": false,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Refers",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "restore_element",
+      "id": "a",
+      "type": "Node",
+      "result": "a",
+      "error": null,
+      "digest": "b0e8de8d4e6b1207",
+      "fingerprint": "5b0757a59ee401df",
+      "state": [
+        "{\"id\":\"a\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"a\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"a\"]],\"duplicates\":[],\"roots\":[[\"a\",\"a\"]]}"
+    },
+    {
+      "do": "restore_element",
+      "id": "b",
+      "type": "Node",
+      "result": "b",
+      "error": null,
+      "digest": "74bec0bc9a249a84",
+      "fingerprint": "5e492ef23a15888e"
+    },
+    {
+      "do": "restore_element",
+      "id": "c",
+      "type": "Node",
+      "result": "c",
+      "error": null,
+      "digest": "f7b2658d3a61e804",
+      "fingerprint": "8f20c0457a78ad1e"
+    },
+    {
+      "do": "restore_element",
+      "id": "out",
+      "type": "Node",
+      "result": "out",
+      "error": null,
+      "digest": "06b30d861dd3c988",
+      "fingerprint": "936d3cb236604304"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "a-b",
+      "type": "Contains",
+      "source": "a",
+      "target": "b",
+      "result": "a-b",
+      "error": null,
+      "digest": "f272659d3cde802a",
+      "fingerprint": "04db45e4fbc44d2c"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "b-c",
+      "type": "Holds",
+      "source": "b",
+      "target": "c",
+      "result": "b-c",
+      "error": null,
+      "digest": "637142cf9daacda3",
+      "fingerprint": "15ab83ca7d41485e",
+      "state": [
+        "{\"id\":\"a\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"c\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"out\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-b\",\"type_name\":\"Contains\",\"source_id\":\"a\",\"target_id\":\"b\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-c\",\"type_name\":\"Holds\",\"source_id\":\"b\",\"target_id\":\"c\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"a\",\"b\",\"c\",\"out\"]]],\"out\":[[\"a\",[\"a-b\"]],[\"b\",[\"b-c\"]]],\"in\":[[\"b\",[\"a-b\"]],[\"c\",[\"b-c\"]]],\"out_count\":[[\"a\",\"Contains\",1],[\"b\",\"Holds\",1]],\"in_count\":[[\"b\",\"Contains\",1],[\"c\",\"Holds\",1]],\"parents\":[[\"b\",[\"a\"],[\"a-b\"]],[\"c\",[\"b\"],[\"b-c\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"a\",\"out\"],[\"b\"],[\"c\"]],\"duplicates\":[[\"a\",\"out\"]],\"roots\":[[\"a\",\"a\"],[\"out\",\"out\"]]}"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "c-out",
+      "type": "Refers",
+      "source": "c",
+      "target": "out",
+      "result": "c-out",
+      "error": null,
+      "digest": "2a2c1ce1421d6a52",
+      "fingerprint": "f60e1fa45e99c1d2"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "out-b",
+      "type": "Refers",
+      "source": "out",
+      "target": "b",
+      "result": "out-b",
+      "error": null,
+      "digest": "b154410b5e9f63c1",
+      "fingerprint": "4e11df89ce406e8b"
+    },
+    {
+      "do": "set_property",
+      "id": "c",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "deep"
+      },
+      "result": null,
+      "error": null,
+      "digest": "8e2213a751954a33",
+      "fingerprint": "e2b7c6d1c7690938"
+    },
+    {
+      "do": "delete_element",
+      "id": "a",
+      "result": null,
+      "error": null,
+      "digest": "f101680b27b2218c",
+      "fingerprint": "bf94951a632a9bbd"
+    },
+    {
+      "do": "restore_element",
+      "id": "p",
+      "type": "Node",
+      "result": "p",
+      "error": null,
+      "digest": "52180e601527c028",
+      "fingerprint": "b9db00f06eb8789b",
+      "state": [
+        "{\"id\":\"out\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"p\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"out\",\"p\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"out\",\"p\"]],\"duplicates\":[[\"out\",\"p\"]],\"roots\":[[\"out\",\"out\"],[\"p\",\"p\"]]}"
+    },
+    {
+      "do": "restore_element",
+      "id": "q",
+      "type": "Node",
+      "result": "q",
+      "error": null,
+      "digest": "4931430aea46e830",
+      "fingerprint": "fb5424969ec4abe0"
+    },
+    {
+      "do": "restore_element",
+      "id": "x",
+      "type": "Node",
+      "result": "x",
+      "error": null,
+      "digest": "63fb93b9cfcea906",
+      "fingerprint": "4691105cd3425e49"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "p-x",
+      "type": "Contains",
+      "source": "p",
+      "target": "x",
+      "result": "p-x",
+      "error": null,
+      "digest": "f4b0c8387e162fec",
+      "fingerprint": "e6e9ba59f5b9aa16"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "q-x",
+      "type": "Contains",
+      "source": "q",
+      "target": "x",
+      "result": "q-x",
+      "error": null,
+      "digest": "bd7ac4bd7bc666d8",
+      "fingerprint": "1b3f6886eaf37fed"
+    },
+    {
+      "do": "container_of",
+      "id": "x",
+      "result": "p",
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "disconnect",
+      "id": "p-x",
+      "result": null,
+      "error": null,
+      "digest": "2a319f3cca1ee032",
+      "fingerprint": "adfd0ed5e5cf3f72"
+    },
+    {
+      "do": "container_of",
+      "id": "x",
+      "result": "q",
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "restore_relationship",
+      "id": "p-x",
+      "type": "Contains",
+      "source": "p",
+      "target": "x",
+      "result": "p-x",
+      "error": null,
+      "digest": "bd7ac4bd7bc666d8",
+      "fingerprint": "64dd1a4fc6518c50"
+    },
+    {
+      "do": "container_of",
+      "id": "x",
+      "result": "q",
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "delete_element",
+      "id": "p",
+      "result": null,
+      "error": null,
+      "digest": "ea282561d8d30994",
+      "fingerprint": "8f5dda0c04ecbc54",
+      "state": [
+        "{\"id\":\"out\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"q\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"out\",\"q\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"out\",\"q\"]],\"duplicates\":[[\"out\",\"q\"]],\"roots\":[[\"out\",\"out\"],[\"q\",\"q\"]]}"
+    },
+    {
+      "do": "restore_element",
+      "id": "m",
+      "type": "Node",
+      "result": "m",
+      "error": null,
+      "digest": "e4c1bc207ce771d6",
+      "fingerprint": "82262e941782720c"
+    },
+    {
+      "do": "restore_element",
+      "id": "n",
+      "type": "Node",
+      "result": "n",
+      "error": null,
+      "digest": "f914ef51e676747f",
+      "fingerprint": "4c461c7f3627ca50"
+    },
+    {
+      "do": "restore_element",
+      "id": "self",
+      "type": "Node",
+      "result": "self",
+      "error": null,
+      "digest": "0a45894fc5ba7bd0",
+      "fingerprint": "ceab22e977abdaae"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "m-n",
+      "type": "Contains",
+      "source": "m",
+      "target": "n",
+      "result": "m-n",
+      "error": null,
+      "digest": "33b4e84659b0de5b",
+      "fingerprint": "acc235ecfcfe8426"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "n-m",
+      "type": "Contains",
+      "source": "n",
+      "target": "m",
+      "result": "n-m",
+      "error": null,
+      "digest": "eb7f49fd9a82a297",
+      "fingerprint": "d058126cda82dd78",
+      "state": [
+        "{\"id\":\"out\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"q\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"m\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"n\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"self\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"m-n\",\"type_name\":\"Contains\",\"source_id\":\"m\",\"target_id\":\"n\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"n-m\",\"type_name\":\"Contains\",\"source_id\":\"n\",\"target_id\":\"m\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"m\",\"n\",\"out\",\"q\",\"self\"]]],\"out\":[[\"m\",[\"m-n\"]],[\"n\",[\"n-m\"]]],\"in\":[[\"m\",[\"n-m\"]],[\"n\",[\"m-n\"]]],\"out_count\":[[\"m\",\"Contains\",1],[\"n\",\"Contains\",1]],\"in_count\":[[\"m\",\"Contains\",1],[\"n\",\"Contains\",1]],\"parents\":[[\"m\",[\"n\"],[\"n-m\"]],[\"n\",[\"m\"],[\"m-n\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"m\"],[\"n\"],[\"out\",\"q\",\"self\"]],\"duplicates\":[[\"out\",\"q\",\"self\"]],\"roots\":[[\"out\",\"out\"],[\"q\",\"q\"],[\"self\",\"self\"]]}"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "self-self",
+      "type": "Contains",
+      "source": "self",
+      "target": "self",
+      "result": "self-self",
+      "error": null,
+      "digest": "490a6bd0e137ddb2",
+      "fingerprint": "3325d0cc1a775522"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "self-loop",
+      "type": "Refers",
+      "source": "self",
+      "target": "self",
+      "result": "self-loop",
+      "error": null,
+      "digest": "de27ea83a304917e",
+      "fingerprint": "5c6d79893f2bffdd"
+    },
+    {
+      "do": "delete_element",
+      "id": "m",
+      "result": null,
+      "error": null,
+      "digest": "2c21e001c29935d2",
+      "fingerprint": "f8180fca849031a6"
+    },
+    {
+      "do": "delete_element",
+      "id": "self",
+      "result": null,
+      "error": null,
+      "digest": "ea282561d8d30994",
+      "fingerprint": "8f5dda0c04ecbc54"
+    },
+    {
+      "do": "restore_element",
+      "id": "u",
+      "type": "Node",
+      "result": "u",
+      "error": null,
+      "digest": "e81a343581a1bc93",
+      "fingerprint": "7d56f3d606d24e33",
+      "state": [
+        "{\"id\":\"out\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"q\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"u\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"out\",\"q\",\"u\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"out\",\"q\",\"u\"]],\"duplicates\":[[\"out\",\"q\",\"u\"]],\"roots\":[[\"out\",\"out\"],[\"q\",\"q\"],[\"u\",\"u\"]]}"
+    },
+    {
+      "do": "restore_element",
+      "id": "v",
+      "type": "Node",
+      "result": "v",
+      "error": null,
+      "digest": "d64fff59f6d0d8d1",
+      "fingerprint": "1af42b498d93a289"
+    },
+    {
+      "do": "restore_element",
+      "id": "w",
+      "type": "Node",
+      "result": "w",
+      "error": null,
+      "digest": "8ebd5374b751652c",
+      "fingerprint": "a8bf6d7f1594ab3f"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "u-w-1",
+      "type": "Contains",
+      "source": "u",
+      "target": "w",
+      "result": "u-w-1",
+      "error": null,
+      "digest": "d5541c38372b78a1",
+      "fingerprint": "26f88d4bd876fdac"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "v-w",
+      "type": "Contains",
+      "source": "v",
+      "target": "w",
+      "result": "v-w",
+      "error": null,
+      "digest": "34456dd826894bb8",
+      "fingerprint": "1f2345424fa72f91"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "u-w-2",
+      "type": "Contains",
+      "source": "u",
+      "target": "w",
+      "result": "u-w-2",
+      "error": null,
+      "digest": "c6ddf4608da6a2d3",
+      "fingerprint": "4571cfdb56e53133",
+      "state": [
+        "{\"id\":\"out\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"q\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"u\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"v\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"w\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"u-w-1\",\"type_name\":\"Contains\",\"source_id\":\"u\",\"target_id\":\"w\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"v-w\",\"type_name\":\"Contains\",\"source_id\":\"v\",\"target_id\":\"w\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"u-w-2\",\"type_name\":\"Contains\",\"source_id\":\"u\",\"target_id\":\"w\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"out\",\"q\",\"u\",\"v\",\"w\"]]],\"out\":[[\"u\",[\"u-w-1\",\"u-w-2\"]],[\"v\",[\"v-w\"]]],\"in\":[[\"w\",[\"u-w-1\",\"u-w-2\",\"v-w\"]]],\"out_count\":[[\"u\",\"Contains\",2],[\"v\",\"Contains\",1]],\"in_count\":[[\"w\",\"Contains\",3]],\"parents\":[[\"w\",[\"u\",\"v\",\"u\"],[\"u-w-1\",\"v-w\",\"u-w-2\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"out\",\"q\",\"u\",\"v\"],[\"w\"]],\"duplicates\":[[\"out\",\"q\",\"u\",\"v\"]],\"roots\":[[\"out\",\"out\"],[\"q\",\"q\"],[\"u\",\"u\"],[\"v\",\"v\"]]}"
+    },
+    {
+      "do": "disconnect",
+      "id": "u-w-1",
+      "result": null,
+      "error": null,
+      "digest": "9d34bb2c0ddcbf5e",
+      "fingerprint": "21c42bf26a13a99e"
+    },
+    {
+      "do": "container_of",
+      "id": "w",
+      "result": "v",
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "delete_element",
+      "id": "w",
+      "result": null,
+      "error": null,
+      "digest": "d64fff59f6d0d8d1",
+      "fingerprint": "1af42b498d93a289"
+    },
+    {
+      "do": "delete_element",
+      "id": "u",
+      "result": null,
+      "error": null,
+      "digest": "d47dee0dafa26dd6",
+      "fingerprint": "c16f5c76697ec729",
+      "state": [
+        "{\"id\":\"out\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"q\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"v\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"out\",\"q\",\"v\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"out\",\"q\",\"v\"]],\"duplicates\":[[\"out\",\"q\",\"v\"]],\"roots\":[[\"out\",\"out\"],[\"q\",\"q\"],[\"v\",\"v\"]]}"
+    }
+  ]
+}

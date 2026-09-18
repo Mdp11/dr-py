@@ -1,0 +1,2024 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Named",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "Name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "NAME",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Loose",
+        "abstract": false,
+        "extends": "Named",
+        "properties": [
+          {
+            "name": "a",
+            "datatype": "float",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "b",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Keyed",
+        "abstract": false,
+        "extends": "Named",
+        "properties": [
+          {
+            "name": "code",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": [
+          "code",
+          "out:Tags",
+          "in:Tags"
+        ]
+      },
+      {
+        "name": "Holder",
+        "abstract": false,
+        "extends": "Named",
+        "properties": [
+          {
+            "name": "one",
+            "datatype": "Keyed",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "many",
+            "datatype": "Named",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "plain",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": [
+          "plain"
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Named",
+        "target": "Named",
+        "mappings": [
+          {
+            "source": "Named",
+            "target": "Named"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Tags",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Keyed",
+        "target": "Keyed",
+        "mappings": [
+          {
+            "source": "Keyed",
+            "target": "Keyed"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "via",
+            "datatype": "Loose",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      },
+      {
+        "name": "SubTags",
+        "abstract": false,
+        "extends": "Tags",
+        "containment": false,
+        "source": "Keyed",
+        "target": "Keyed",
+        "mappings": [
+          {
+            "source": "Keyed",
+            "target": "Keyed"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-1",
+      "error": null,
+      "digest": "b83d885159d11dd4",
+      "fingerprint": "2446335879437e4a",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"]],\"duplicates\":[],\"roots\":[[\"id-1\",\"id-1\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-2",
+      "error": null,
+      "digest": "5a5636a5da0d7ddb",
+      "fingerprint": "73d82af948da8f12"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-3",
+      "error": null,
+      "digest": "350b145ec5d2985f",
+      "fingerprint": "b2e1cd14c449fa90"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-4",
+      "error": null,
+      "digest": "be428ce4e2898843",
+      "fingerprint": "c013323c8dfaedae"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-5",
+      "error": null,
+      "digest": "9425b8f52fce553d",
+      "fingerprint": "51e4a6fd3f5be7b7"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-6",
+      "error": null,
+      "digest": "645d7585a2138f56",
+      "fingerprint": "1ed96452b667316b",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\"]],\"duplicates\":[[\"id-1\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\"]],\"roots\":[[\"id-1\",\"id-1\"],[\"id-2\",\"id-2\"],[\"id-3\",\"id-3\"],[\"id-4\",\"id-4\"],[\"id-5\",\"id-5\"],[\"id-6\",\"id-6\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-7",
+      "error": null,
+      "digest": "84c694f2dd64dcca",
+      "fingerprint": "426b3030e6a20b45"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-8",
+      "error": null,
+      "digest": "225d8fce56d3cf3f",
+      "fingerprint": "deb444205a9e9ea8"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-9",
+      "error": null,
+      "digest": "335c05acf3ae1663",
+      "fingerprint": "841c01482f9eae88"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-10",
+      "error": null,
+      "digest": "ec44df67ea847e33",
+      "fingerprint": "066aa37a3099aaf0"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-11",
+      "error": null,
+      "digest": "c39f18715525b953",
+      "fingerprint": "1baf0387ce2d23d1",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\",\"id-10\",\"id-11\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]],\"duplicates\":[[\"id-1\",\"id-10\",\"id-11\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]],\"roots\":[[\"id-1\",\"id-1\"],[\"id-10\",\"id-10\"],[\"id-11\",\"id-11\"],[\"id-2\",\"id-2\"],[\"id-3\",\"id-3\"],[\"id-4\",\"id-4\"],[\"id-5\",\"id-5\"],[\"id-6\",\"id-6\"],[\"id-7\",\"id-7\"],[\"id-8\",\"id-8\"],[\"id-9\",\"id-9\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-12",
+      "error": null,
+      "digest": "30be3aad26193fa6",
+      "fingerprint": "857030af3298a029"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-13",
+      "error": null,
+      "digest": "7e320223c78ffb45",
+      "fingerprint": "485cdcf739dd7f01"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-14",
+      "error": null,
+      "digest": "4d44462bf9981f91",
+      "fingerprint": "81bc00eda10f18dd"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-15",
+      "error": null,
+      "digest": "dd29cec7189dfb69",
+      "fingerprint": "a5421c2a316ab64a"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "b"
+      },
+      "result": null,
+      "error": null,
+      "digest": "71c433d32130e033",
+      "fingerprint": "aca542f09277554f",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]],\"duplicates\":[[\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]],\"roots\":[[\"b\",\"id-1\"],[\"id-10\",\"id-10\"],[\"id-11\",\"id-11\"],[\"id-12\",\"id-12\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-2\",\"id-2\"],[\"id-3\",\"id-3\"],[\"id-4\",\"id-4\"],[\"id-5\",\"id-5\"],[\"id-6\",\"id-6\"],[\"id-7\",\"id-7\"],[\"id-8\",\"id-8\"],[\"id-9\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-2",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "a"
+      },
+      "result": null,
+      "error": null,
+      "digest": "5688b142ae0bee17",
+      "fingerprint": "47fa78df46c62ce3"
+    },
+    {
+      "do": "set_property",
+      "id": "id-3",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "b122d863c0fec9c8",
+      "fingerprint": "a59eb6cd32876a03"
+    },
+    {
+      "do": "set_property",
+      "id": "id-4",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": ""
+      },
+      "result": null,
+      "error": null,
+      "digest": "172f46c80c4c25cd",
+      "fingerprint": "75aca217543a7645"
+    },
+    {
+      "do": "set_property",
+      "id": "id-5",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "é"
+      },
+      "result": null,
+      "error": null,
+      "digest": "c2f2e246896ff6a1",
+      "fingerprint": "40970a09bddec68b"
+    },
+    {
+      "do": "set_property",
+      "id": "id-6",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "é"
+      },
+      "result": null,
+      "error": null,
+      "digest": "10df748802968e2c",
+      "fingerprint": "d3de35e48955bde4",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-7\",\"id-8\",\"id-9\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"]],\"duplicates\":[[\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-7\",\"id-8\",\"id-9\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-2\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-10\",\"id-10\"],[\"id-11\",\"id-11\"],[\"id-12\",\"id-12\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-4\",\"id-4\"],[\"id-7\",\"id-7\"],[\"id-8\",\"id-8\"],[\"id-9\",\"id-9\"],[\"é\",\"id-5\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-7",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": ""
+      },
+      "result": null,
+      "error": null,
+      "digest": "9e558fab72b5f23f",
+      "fingerprint": "4af561b280ea3c26"
+    },
+    {
+      "do": "set_property",
+      "id": "id-8",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "￿"
+      },
+      "result": null,
+      "error": null,
+      "digest": "9ba2d35f5c5d2ec1",
+      "fingerprint": "eacb4e5ed2f99ce0"
+    },
+    {
+      "do": "set_property",
+      "id": "id-9",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "😀"
+      },
+      "result": null,
+      "error": null,
+      "digest": "8f271025e72624c2",
+      "fingerprint": "f07bad001bdd9a15"
+    },
+    {
+      "do": "set_property",
+      "id": "id-10",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "𐀀"
+      },
+      "result": null,
+      "error": null,
+      "digest": "2cc18f97fc417e99",
+      "fingerprint": "3774f25fc14fc8ce"
+    },
+    {
+      "do": "set_property",
+      "id": "id-11",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "a"
+      },
+      "result": null,
+      "error": null,
+      "digest": "4b5542eed433bc5b",
+      "fingerprint": "d20fd4754fe8c0c6",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\",\"id-2\"],[\"id-12\",\"id-13\",\"id-14\",\"id-15\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-11\",\"id-2\"],[\"id-12\",\"id-13\",\"id-14\",\"id-15\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"a\",\"id-2\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-12\",\"id-12\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-4\",\"id-4\"],[\"é\",\"id-5\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-12",
+      "prop": "name",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": ""
+          },
+          {
+            "t": "str",
+            "v": "zeta"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "1b4a918eaee9c756",
+      "fingerprint": "a9ce59fa0e2b50e1"
+    },
+    {
+      "do": "set_property",
+      "id": "id-13",
+      "prop": "name",
+      "value": {
+        "t": "list",
+        "v": []
+      },
+      "result": null,
+      "error": null,
+      "digest": "412669ec136a56e7",
+      "fingerprint": "e67fca2fa12311b9"
+    },
+    {
+      "do": "set_property",
+      "id": "id-14",
+      "prop": "name",
+      "value": {
+        "t": "int",
+        "v": "5"
+      },
+      "result": null,
+      "error": null,
+      "digest": "ecb53d3d7415daab",
+      "fingerprint": "c48fa8258d69b881"
+    },
+    {
+      "do": "set_property",
+      "id": "id-15",
+      "prop": "name",
+      "value": {
+        "t": "null"
+      },
+      "result": null,
+      "error": null,
+      "digest": "e79cd2d722694b97",
+      "fingerprint": "1935f3aa808e5eb8"
+    },
+    {
+      "do": "set_property",
+      "id": "id-4",
+      "prop": "NAME",
+      "value": {
+        "t": "str",
+        "v": "upper"
+      },
+      "result": null,
+      "error": null,
+      "digest": "b11bc3295160d1e4",
+      "fingerprint": "259dc668ce6ba3ef",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"NAME\":\"upper\"},\"rev\":2}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\",\"id-2\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-11\",\"id-2\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"a\",\"id-2\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"upper\",\"id-4\"],[\"zeta\",\"id-12\"],[\"é\",\"id-5\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-4",
+      "prop": "Name",
+      "value": {
+        "t": "str",
+        "v": "title"
+      },
+      "result": null,
+      "error": null,
+      "digest": "a89a4de6d825d686",
+      "fingerprint": "2997cabf5ac2c260"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "Name",
+      "value": {
+        "t": "str",
+        "v": "ignored"
+      },
+      "result": null,
+      "error": null,
+      "digest": "64a748625a6a3280",
+      "fingerprint": "b61f2e99cc2eb7a2"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-4",
+      "prop": "NAME",
+      "result": null,
+      "error": null,
+      "digest": "3a7b4372c59273d7",
+      "fingerprint": "7fe396a404623c6a"
+    },
+    {
+      "do": "set_property",
+      "id": "id-2",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "zz"
+      },
+      "result": null,
+      "error": null,
+      "digest": "092f9d3f8521cdf1",
+      "fingerprint": "e8424db21551b24f"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-2",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "digest": "cbbb89035aa4930b",
+      "fingerprint": "26ad6e900af10581",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-2\",\"id-2\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"é\",\"id-5\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-1",
+      "target": "id-2",
+      "result": "id-16",
+      "error": null,
+      "digest": "95cb6e7222e155a8",
+      "fingerprint": "882c8b695d86a282"
+    },
+    {
+      "do": "set_property",
+      "id": "id-2",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "inner"
+      },
+      "result": null,
+      "error": null,
+      "digest": "92da79bcfcb74809",
+      "fingerprint": "377e416ac08caf52"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-3",
+      "target": "id-2",
+      "result": "id-17",
+      "error": null,
+      "digest": "f9765b12f1c313ce",
+      "fingerprint": "714a0db1c8630560"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-16",
+      "result": null,
+      "error": null,
+      "digest": "a706bc638986d56d",
+      "fingerprint": "9375a5f31437050e"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-17",
+      "result": null,
+      "error": null,
+      "digest": "ccaa9ecd84f28eaa",
+      "fingerprint": "65154685ded20987",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"inner\",\"id-2\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"é\",\"id-5\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-1",
+      "target": "id-2",
+      "result": "id-18",
+      "error": null,
+      "digest": "2a92a931e555167e",
+      "fingerprint": "9a1ede80e802b190"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-5",
+      "result": null,
+      "error": null,
+      "digest": "d52839aead31186c",
+      "fingerprint": "c75873daee563d16"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-5",
+      "type": "Loose",
+      "result": "id-5",
+      "error": null,
+      "digest": "ff4f0dbf6076c512",
+      "fingerprint": "2268355d58396f90"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-18",
+      "result": null,
+      "error": null,
+      "digest": "19773a4301d15dc6",
+      "fingerprint": "d66fc64b5acc9b0e"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-18",
+      "type": "Owns",
+      "source": "id-1",
+      "target": "id-2",
+      "result": "id-18",
+      "error": null,
+      "digest": "ff4f0dbf6076c512",
+      "fingerprint": "2268355d58396f90",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\"]]],\"in\":[[\"id-2\",[\"id-18\"]]],\"out_count\":[[\"id-1\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-5\",\"id-5\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-19",
+      "error": null,
+      "digest": "378bf33f94a7e822",
+      "fingerprint": "2ec61e7afc5e4705"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-20",
+      "error": null,
+      "digest": "bf40db4661a2fd88",
+      "fingerprint": "4225b80d8511ff6b"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-21",
+      "error": null,
+      "digest": "f8388d3221ccb136",
+      "fingerprint": "38e4e61768130bb6"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-22",
+      "error": null,
+      "digest": "f01926744c800858",
+      "fingerprint": "ca483fcb26cedfdc"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-23",
+      "error": null,
+      "digest": "17b4ab4bb22a2f4c",
+      "fingerprint": "3d65ae2da2f4e0b1",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\"]]],\"in\":[[\"id-2\",[\"id-18\"]]],\"out_count\":[[\"id-1\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-5\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-5\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-22\",\"id-22\"],[\"id-23\",\"id-23\"],[\"id-5\",\"id-5\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-24",
+      "error": null,
+      "digest": "2796b993faa14c95",
+      "fingerprint": "7a195a52f29dfbb0"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-25",
+      "error": null,
+      "digest": "9df199fee8c1b756",
+      "fingerprint": "20e855f8bc609c2e"
+    },
+    {
+      "do": "create_element",
+      "type": "Loose",
+      "result": "id-26",
+      "error": null,
+      "digest": "91e26416d9444333",
+      "fingerprint": "790afb1a6983400f"
+    },
+    {
+      "do": "set_property",
+      "id": "id-19",
+      "prop": "a",
+      "value": {
+        "t": "int",
+        "v": "1"
+      },
+      "result": null,
+      "error": null,
+      "digest": "4f9e69804534eb88",
+      "fingerprint": "8863f43f55004eca"
+    },
+    {
+      "do": "set_property",
+      "id": "id-20",
+      "prop": "a",
+      "value": {
+        "t": "float",
+        "hex": "3ff0000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "995e833d36706fa3",
+      "fingerprint": "4d0492ad0c0822fc",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":1},\"rev\":1}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":1.0},\"rev\":1}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\"]]],\"in\":[[\"id-2\",[\"id-18\"]]],\"out_count\":[[\"id-1\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-5\"],[\"id-3\"],[\"id-4\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-5\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-22\",\"id-22\"],[\"id-23\",\"id-23\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-5\",\"id-5\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-21",
+      "prop": "a",
+      "value": {
+        "t": "bool",
+        "v": true
+      },
+      "result": null,
+      "error": null,
+      "digest": "fa845a5b3f9bdc76",
+      "fingerprint": "81c307ff2d09f675"
+    },
+    {
+      "do": "set_property",
+      "id": "id-22",
+      "prop": "a",
+      "value": {
+        "t": "int",
+        "v": "0"
+      },
+      "result": null,
+      "error": null,
+      "digest": "7a1cbe947e4f9a08",
+      "fingerprint": "46a8bb40d3fb00d2"
+    },
+    {
+      "do": "set_property",
+      "id": "id-23",
+      "prop": "a",
+      "value": {
+        "t": "float",
+        "hex": "8000000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "228cf9b0c45f25e8",
+      "fingerprint": "dedc6eff62ad62a2"
+    },
+    {
+      "do": "set_property",
+      "id": "id-24",
+      "prop": "a",
+      "value": {
+        "t": "bool",
+        "v": false
+      },
+      "result": null,
+      "error": null,
+      "digest": "a1b755ce9f9b942c",
+      "fingerprint": "ee888694547e2e5f"
+    },
+    {
+      "do": "set_property",
+      "id": "id-25",
+      "prop": "a",
+      "value": {
+        "t": "int",
+        "v": "9007199254740992"
+      },
+      "result": null,
+      "error": null,
+      "digest": "bac1d58c645c37ba",
+      "fingerprint": "bed6aa71f204b692",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":1},\"rev\":1}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":1.0},\"rev\":1}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":true},\"rev\":1}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":0},\"rev\":1}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":-0.0},\"rev\":1}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{\"a\":false},\"rev\":1}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992},\"rev\":1}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\"]]],\"in\":[[\"id-2\",[\"id-18\"]]],\"out_count\":[[\"id-1\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\",\"id-21\"],[\"id-2\"],[\"id-22\",\"id-23\",\"id-24\"],[\"id-25\"],[\"id-26\",\"id-5\"],[\"id-3\"],[\"id-4\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\",\"id-21\"],[\"id-22\",\"id-23\",\"id-24\"],[\"id-26\",\"id-5\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-22\",\"id-22\"],[\"id-23\",\"id-23\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-5\",\"id-5\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-26",
+      "prop": "a",
+      "value": {
+        "t": "float",
+        "hex": "4340000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "1969c6171ee008f0",
+      "fingerprint": "690114de95f261e9"
+    },
+    {
+      "do": "set_property",
+      "id": "id-25",
+      "prop": "a",
+      "value": {
+        "t": "int",
+        "v": "9007199254740993"
+      },
+      "result": null,
+      "error": null,
+      "digest": "6f183e1239cfc2fb",
+      "fingerprint": "12eafb0d46ef4f4c"
+    },
+    {
+      "do": "set_property",
+      "id": "id-19",
+      "prop": "a",
+      "value": {
+        "t": "str",
+        "v": "1"
+      },
+      "result": null,
+      "error": null,
+      "digest": "e4b4889d705d7303",
+      "fingerprint": "64919d4474bba1b6"
+    },
+    {
+      "do": "set_property",
+      "id": "id-19",
+      "prop": "a",
+      "value": {
+        "t": "dict",
+        "v": [
+          [
+            "x",
+            {
+              "t": "int",
+              "v": "1"
+            }
+          ],
+          [
+            "y",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "int",
+                  "v": "1"
+                },
+                {
+                  "t": "int",
+                  "v": "2"
+                }
+              ]
+            }
+          ]
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "081fcc55960a31ae",
+      "fingerprint": "bdceeecdf56b21c5"
+    },
+    {
+      "do": "set_property",
+      "id": "id-20",
+      "prop": "a",
+      "value": {
+        "t": "dict",
+        "v": [
+          [
+            "y",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "float",
+                  "hex": "3ff0000000000000"
+                },
+                {
+                  "t": "float",
+                  "hex": "4000000000000000"
+                }
+              ]
+            }
+          ],
+          [
+            "x",
+            {
+              "t": "bool",
+              "v": true
+            }
+          ]
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "fbdd4d83b8de975b",
+      "fingerprint": "3e088e618f8053a6",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":true},\"rev\":1}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":0},\"rev\":1}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":-0.0},\"rev\":1}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{\"a\":false},\"rev\":1}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\"]]],\"in\":[[\"id-2\",[\"id-18\"]]],\"out_count\":[[\"id-1\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\",\"id-23\",\"id-24\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-22\",\"id-23\",\"id-24\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-22\",\"id-22\"],[\"id-23\",\"id-23\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-5\",\"id-5\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-21",
+      "prop": "a",
+      "value": {
+        "t": "dict",
+        "v": [
+          [
+            "y",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "int",
+                  "v": "2"
+                },
+                {
+                  "t": "int",
+                  "v": "1"
+                }
+              ]
+            }
+          ],
+          [
+            "x",
+            {
+              "t": "int",
+              "v": "1"
+            }
+          ]
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "31463c846ee56831",
+      "fingerprint": "d5f463d122e0ee5a"
+    },
+    {
+      "do": "set_property",
+      "id": "id-22",
+      "prop": "b",
+      "value": {
+        "t": "str",
+        "v": "same"
+      },
+      "result": null,
+      "error": null,
+      "digest": "6f35823a6715bbb5",
+      "fingerprint": "8b53f90e91a244c9"
+    },
+    {
+      "do": "set_property",
+      "id": "id-22",
+      "prop": "a",
+      "value": {
+        "t": "int",
+        "v": "7"
+      },
+      "result": null,
+      "error": null,
+      "digest": "65f0a4ec2b4da2ab",
+      "fingerprint": "1396bbd4d49caaea"
+    },
+    {
+      "do": "set_property",
+      "id": "id-23",
+      "prop": "a",
+      "value": {
+        "t": "int",
+        "v": "7"
+      },
+      "result": null,
+      "error": null,
+      "digest": "3e70e00d777999d0",
+      "fingerprint": "b4f448d5efac1fbf"
+    },
+    {
+      "do": "set_property",
+      "id": "id-23",
+      "prop": "b",
+      "value": {
+        "t": "str",
+        "v": "same"
+      },
+      "result": null,
+      "error": null,
+      "digest": "cd43357796eaab24",
+      "fingerprint": "e62541fbc315ee49",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{\"a\":false},\"rev\":1}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\"]]],\"in\":[[\"id-2\",[\"id-18\"]]],\"out_count\":[[\"id-1\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\",\"id-23\"],[\"id-24\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-22\",\"id-23\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-22\",\"id-22\"],[\"id-23\",\"id-23\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-5\",\"id-5\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-24",
+      "prop": "a",
+      "value": {
+        "t": "null"
+      },
+      "result": null,
+      "error": null,
+      "digest": "d8b9db6a7e2ed259",
+      "fingerprint": "935a9439d149f377"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-24",
+      "prop": "a",
+      "result": null,
+      "error": null,
+      "digest": "1961e5470d16832d",
+      "fingerprint": "a0feee3c6671bc6d"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-1",
+      "target": "id-22",
+      "result": "id-27",
+      "error": null,
+      "digest": "698b99a026ae9679",
+      "fingerprint": "d7e10a450adda257"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-3",
+      "target": "id-23",
+      "result": "id-28",
+      "error": null,
+      "digest": "9513b67120f8b12c",
+      "fingerprint": "eac33ac8837067ff"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-28",
+      "result": null,
+      "error": null,
+      "digest": "698b99a026ae9679",
+      "fingerprint": "d7e10a450adda257",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-22\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-27\"]]],\"in\":[[\"id-2\",[\"id-18\"]],[\"id-22\",[\"id-27\"]]],\"out_count\":[[\"id-1\",\"Owns\",2]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-22\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]],[\"id-22\",[\"id-1\"],[\"id-27\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\",\"id-5\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-4\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-24\",\"id-5\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-23\",\"id-23\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-5\",\"id-5\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-1",
+      "target": "id-23",
+      "result": "id-29",
+      "error": null,
+      "digest": "d39f52b517702798",
+      "fingerprint": "716fc73a3d434ca0"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-3",
+      "target": "id-23",
+      "result": "id-30",
+      "error": null,
+      "digest": "99ece942535591fb",
+      "fingerprint": "bebdb5114c4b6f8e"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-29",
+      "result": null,
+      "error": null,
+      "digest": "23f82257628b201a",
+      "fingerprint": "2da5adb3ae3c6c68"
+    },
+    {
+      "do": "create_element",
+      "type": "Keyed",
+      "result": "id-31",
+      "error": null,
+      "digest": "eb7ceecfcceed1ab",
+      "fingerprint": "24561d0fb2f76757"
+    },
+    {
+      "do": "create_element",
+      "type": "Keyed",
+      "result": "id-32",
+      "error": null,
+      "digest": "61c3d5b914ade849",
+      "fingerprint": "1875e4b55b488c76",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-31\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-32\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-22\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-30\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Keyed\",[\"id-31\",\"id-32\"]],[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-27\"]],[\"id-3\",[\"id-30\"]]],\"in\":[[\"id-2\",[\"id-18\"]],[\"id-22\",[\"id-27\"]],[\"id-23\",[\"id-30\"]]],\"out_count\":[[\"id-1\",\"Owns\",2],[\"id-3\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-22\",\"Owns\",1],[\"id-23\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]],[\"id-22\",[\"id-1\"],[\"id-27\"]],[\"id-23\",[\"id-3\"],[\"id-30\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\",\"id-5\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-31\",\"id-32\"],[\"id-4\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-24\",\"id-5\"],[\"id-31\",\"id-32\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-31\",\"id-31\"],[\"id-32\",\"id-32\"],[\"id-5\",\"id-5\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Keyed",
+      "result": "id-33",
+      "error": null,
+      "digest": "d570d8079b11f781",
+      "fingerprint": "b6e86bc202723802"
+    },
+    {
+      "do": "create_element",
+      "type": "Keyed",
+      "result": "id-34",
+      "error": null,
+      "digest": "bf214a60418e74de",
+      "fingerprint": "a942f4ad56e8c255"
+    },
+    {
+      "do": "set_property",
+      "id": "id-31",
+      "prop": "code",
+      "value": {
+        "t": "int",
+        "v": "1"
+      },
+      "result": null,
+      "error": null,
+      "digest": "eb08ca342d9c5ba5",
+      "fingerprint": "88c2456168279dc7"
+    },
+    {
+      "do": "set_property",
+      "id": "id-32",
+      "prop": "code",
+      "value": {
+        "t": "float",
+        "hex": "3ff0000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "987eb173c1e4931f",
+      "fingerprint": "0089945f1a0747eb"
+    },
+    {
+      "do": "set_property",
+      "id": "id-31",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "not part of the key"
+      },
+      "result": null,
+      "error": null,
+      "digest": "dbe71d5aca2d8581",
+      "fingerprint": "d7453252a78eafa2",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-31\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1,\"name\":\"not part of the key\"},\"rev\":2}",
+        "{\"id\":\"id-32\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1.0},\"rev\":1}",
+        "{\"id\":\"id-33\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-34\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-22\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-30\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Keyed\",[\"id-31\",\"id-32\",\"id-33\",\"id-34\"]],[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-27\"]],[\"id-3\",[\"id-30\"]]],\"in\":[[\"id-2\",[\"id-18\"]],[\"id-22\",[\"id-27\"]],[\"id-23\",[\"id-30\"]]],\"out_count\":[[\"id-1\",\"Owns\",2],[\"id-3\",\"Owns\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-22\",\"Owns\",1],[\"id-23\",\"Owns\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]],[\"id-22\",[\"id-1\"],[\"id-27\"]],[\"id-23\",[\"id-3\"],[\"id-30\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\",\"id-5\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-31\",\"id-32\"],[\"id-33\",\"id-34\"],[\"id-4\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-24\",\"id-5\"],[\"id-31\",\"id-32\"],[\"id-33\",\"id-34\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-32\",\"id-32\"],[\"id-33\",\"id-33\"],[\"id-34\",\"id-34\"],[\"id-5\",\"id-5\"],[\"not part of the key\",\"id-31\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-33",
+      "prop": "code",
+      "value": {
+        "t": "null"
+      },
+      "result": null,
+      "error": null,
+      "digest": "207a434d903211a9",
+      "fingerprint": "7ce1e62bb673fb77"
+    },
+    {
+      "do": "connect",
+      "type": "Tags",
+      "source": "id-31",
+      "target": "id-33",
+      "result": "id-35",
+      "error": null,
+      "digest": "67f4fe5b149ec673",
+      "fingerprint": "4c6221a9298b56ce"
+    },
+    {
+      "do": "connect",
+      "type": "Tags",
+      "source": "id-32",
+      "target": "id-33",
+      "result": "id-36",
+      "error": null,
+      "digest": "79859123f63198d2",
+      "fingerprint": "6af762e6b0132a8c"
+    },
+    {
+      "do": "connect",
+      "type": "Tags",
+      "source": "id-32",
+      "target": "id-34",
+      "result": "id-37",
+      "error": null,
+      "digest": "1d6da6e5a2ecdfa4",
+      "fingerprint": "1188e5ccf03642d5"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-37",
+      "result": null,
+      "error": null,
+      "digest": "79859123f63198d2",
+      "fingerprint": "6af762e6b0132a8c",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-31\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1,\"name\":\"not part of the key\"},\"rev\":2}",
+        "{\"id\":\"id-32\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1.0},\"rev\":1}",
+        "{\"id\":\"id-33\",\"type_name\":\"Keyed\",\"properties\":{\"code\":null},\"rev\":1}",
+        "{\"id\":\"id-34\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-22\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-30\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-35\",\"type_name\":\"Tags\",\"source_id\":\"id-31\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-36\",\"type_name\":\"Tags\",\"source_id\":\"id-32\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Keyed\",[\"id-31\",\"id-32\",\"id-33\",\"id-34\"]],[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-27\"]],[\"id-3\",[\"id-30\"]],[\"id-31\",[\"id-35\"]],[\"id-32\",[\"id-36\"]]],\"in\":[[\"id-2\",[\"id-18\"]],[\"id-22\",[\"id-27\"]],[\"id-23\",[\"id-30\"]],[\"id-33\",[\"id-35\",\"id-36\"]]],\"out_count\":[[\"id-1\",\"Owns\",2],[\"id-3\",\"Owns\",1],[\"id-31\",\"Tags\",1],[\"id-32\",\"Tags\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-22\",\"Owns\",1],[\"id-23\",\"Owns\",1],[\"id-33\",\"Tags\",2]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]],[\"id-22\",[\"id-1\"],[\"id-27\"]],[\"id-23\",[\"id-3\"],[\"id-30\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\",\"id-5\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-31\",\"id-32\"],[\"id-33\"],[\"id-34\"],[\"id-4\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-24\",\"id-5\"],[\"id-31\",\"id-32\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-32\",\"id-32\"],[\"id-33\",\"id-33\"],[\"id-34\",\"id-34\"],[\"id-5\",\"id-5\"],[\"not part of the key\",\"id-31\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "connect",
+      "type": "SubTags",
+      "source": "id-32",
+      "target": "id-34",
+      "result": "id-38",
+      "error": null,
+      "digest": "2f45fe23417accb5",
+      "fingerprint": "6a055077d9327e32"
+    },
+    {
+      "do": "connect",
+      "type": "Tags",
+      "source": "id-31",
+      "target": "id-33",
+      "result": "id-39",
+      "error": null,
+      "digest": "89b9540bf15c1eab",
+      "fingerprint": "ce22fc35357041df"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-39",
+      "result": null,
+      "error": null,
+      "digest": "2f45fe23417accb5",
+      "fingerprint": "6a055077d9327e32"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-33",
+      "result": null,
+      "error": null,
+      "digest": "39947fe4f2dace2e",
+      "fingerprint": "9b43dbbecbf84d8d"
+    },
+    {
+      "do": "create_element",
+      "type": "Holder",
+      "result": "id-40",
+      "error": null,
+      "digest": "4ea91eb70f13daf1",
+      "fingerprint": "2681175e53abcebe",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-31\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1,\"name\":\"not part of the key\"},\"rev\":2}",
+        "{\"id\":\"id-32\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1.0},\"rev\":1}",
+        "{\"id\":\"id-34\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-40\",\"type_name\":\"Holder\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-22\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-30\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-38\",\"type_name\":\"SubTags\",\"source_id\":\"id-32\",\"target_id\":\"id-34\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Holder\",[\"id-40\"]],[\"Keyed\",[\"id-31\",\"id-32\",\"id-34\"]],[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-27\"]],[\"id-3\",[\"id-30\"]],[\"id-32\",[\"id-38\"]]],\"in\":[[\"id-2\",[\"id-18\"]],[\"id-22\",[\"id-27\"]],[\"id-23\",[\"id-30\"]],[\"id-34\",[\"id-38\"]]],\"out_count\":[[\"id-1\",\"Owns\",2],[\"id-3\",\"Owns\",1],[\"id-32\",\"SubTags\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-22\",\"Owns\",1],[\"id-23\",\"Owns\",1],[\"id-34\",\"SubTags\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]],[\"id-22\",[\"id-1\"],[\"id-27\"]],[\"id-23\",[\"id-3\"],[\"id-30\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\",\"id-5\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-31\",\"id-32\"],[\"id-34\"],[\"id-4\"],[\"id-40\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-24\",\"id-5\"],[\"id-31\",\"id-32\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-32\",\"id-32\"],[\"id-34\",\"id-34\"],[\"id-40\",\"id-40\"],[\"id-5\",\"id-5\"],[\"not part of the key\",\"id-31\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Holder",
+      "result": "id-41",
+      "error": null,
+      "digest": "c629e7b7fd6a2afe",
+      "fingerprint": "4a2c9430aef8f333"
+    },
+    {
+      "do": "set_property",
+      "id": "id-40",
+      "prop": "one",
+      "value": {
+        "t": "str",
+        "v": "id-31"
+      },
+      "result": null,
+      "error": null,
+      "digest": "d5660bb40fe4cefc",
+      "fingerprint": "2769a8e11b36a844"
+    },
+    {
+      "do": "set_property",
+      "id": "id-40",
+      "prop": "many",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": "id-31"
+          },
+          {
+            "t": "str",
+            "v": "id-32"
+          },
+          {
+            "t": "int",
+            "v": "5"
+          },
+          {
+            "t": "null"
+          },
+          {
+            "t": "str",
+            "v": "id-31"
+          },
+          {
+            "t": "str",
+            "v": "nowhere"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "33e81b0c5ee6d438",
+      "fingerprint": "7fa9194ea87ae035"
+    },
+    {
+      "do": "set_property",
+      "id": "id-41",
+      "prop": "many",
+      "value": {
+        "t": "str",
+        "v": "id-31"
+      },
+      "result": null,
+      "error": null,
+      "digest": "b7b52b7d6f7fbe37",
+      "fingerprint": "581c5c88ed8bdb98"
+    },
+    {
+      "do": "set_property",
+      "id": "id-41",
+      "prop": "one",
+      "value": {
+        "t": "int",
+        "v": "12"
+      },
+      "result": null,
+      "error": null,
+      "digest": "b88c448d5f9b10af",
+      "fingerprint": "7386060c497b7555",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-31\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1,\"name\":\"not part of the key\"},\"rev\":2}",
+        "{\"id\":\"id-32\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1.0},\"rev\":1}",
+        "{\"id\":\"id-34\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-40\",\"type_name\":\"Holder\",\"properties\":{\"one\":\"id-31\",\"many\":[\"id-31\",\"id-32\",5,null,\"id-31\",\"nowhere\"]},\"rev\":2}",
+        "{\"id\":\"id-41\",\"type_name\":\"Holder\",\"properties\":{\"many\":\"id-31\",\"one\":12},\"rev\":2}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-22\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-30\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-38\",\"type_name\":\"SubTags\",\"source_id\":\"id-32\",\"target_id\":\"id-34\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Holder\",[\"id-40\",\"id-41\"]],[\"Keyed\",[\"id-31\",\"id-32\",\"id-34\"]],[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-27\"]],[\"id-3\",[\"id-30\"]],[\"id-32\",[\"id-38\"]]],\"in\":[[\"id-2\",[\"id-18\"]],[\"id-22\",[\"id-27\"]],[\"id-23\",[\"id-30\"]],[\"id-34\",[\"id-38\"]]],\"out_count\":[[\"id-1\",\"Owns\",2],[\"id-3\",\"Owns\",1],[\"id-32\",\"SubTags\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-22\",\"Owns\",1],[\"id-23\",\"Owns\",1],[\"id-34\",\"SubTags\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]],[\"id-22\",[\"id-1\"],[\"id-27\"]],[\"id-23\",[\"id-3\"],[\"id-30\"]]],\"refs\":[[\"id-40\",[\"id-31\",\"id-32\",\"nowhere\"]],[\"id-41\",[\"id-31\"]]],\"referencers\":[[\"id-31\",[\"id-40\",\"id-41\"]],[\"id-32\",[\"id-40\"]],[\"nowhere\",[\"id-40\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\",\"id-5\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-31\",\"id-32\"],[\"id-34\"],[\"id-4\"],[\"id-40\",\"id-41\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-24\",\"id-5\"],[\"id-31\",\"id-32\"],[\"id-40\",\"id-41\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-32\",\"id-32\"],[\"id-34\",\"id-34\"],[\"id-40\",\"id-40\"],[\"id-41\",\"id-41\"],[\"id-5\",\"id-5\"],[\"not part of the key\",\"id-31\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-40",
+      "prop": "plain",
+      "value": {
+        "t": "str",
+        "v": "id-32"
+      },
+      "result": null,
+      "error": null,
+      "digest": "5ce0b40c4255c60d",
+      "fingerprint": "237951946a304253"
+    },
+    {
+      "do": "connect",
+      "type": "Tags",
+      "source": "id-31",
+      "target": "id-32",
+      "result": "id-42",
+      "error": null,
+      "digest": "ec6af0c61ac5f1db",
+      "fingerprint": "d0c1996e6a842dae"
+    },
+    {
+      "do": "set_property",
+      "id": "id-42",
+      "prop": "via",
+      "value": {
+        "t": "str",
+        "v": "id-19"
+      },
+      "result": null,
+      "error": null,
+      "digest": "6e8edc02444e780d",
+      "fingerprint": "2f32ff77e2892348"
+    },
+    {
+      "do": "set_property",
+      "id": "id-42",
+      "prop": "via",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": "id-20"
+          },
+          {
+            "t": "str",
+            "v": "id-40"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "8a0847026e2648d0",
+      "fingerprint": "0de322b763f3425b"
+    },
+    {
+      "do": "set_property",
+      "id": "id-40",
+      "prop": "many",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": "id-32"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "838c9b3c13052f1e",
+      "fingerprint": "42442e565f214599",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-31\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1,\"name\":\"not part of the key\"},\"rev\":2}",
+        "{\"id\":\"id-32\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1.0},\"rev\":1}",
+        "{\"id\":\"id-34\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-40\",\"type_name\":\"Holder\",\"properties\":{\"one\":\"id-31\",\"many\":[\"id-32\"],\"plain\":\"id-32\"},\"rev\":4}",
+        "{\"id\":\"id-41\",\"type_name\":\"Holder\",\"properties\":{\"many\":\"id-31\",\"one\":12},\"rev\":2}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-22\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-30\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-38\",\"type_name\":\"SubTags\",\"source_id\":\"id-32\",\"target_id\":\"id-34\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-42\",\"type_name\":\"Tags\",\"source_id\":\"id-31\",\"target_id\":\"id-32\",\"properties\":{\"via\":[\"id-20\",\"id-40\"]},\"rev\":2}"
+      ],
+      "indexes": "{\"by_type\":[[\"Holder\",[\"id-40\",\"id-41\"]],[\"Keyed\",[\"id-31\",\"id-32\",\"id-34\"]],[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-27\"]],[\"id-3\",[\"id-30\"]],[\"id-31\",[\"id-42\"]],[\"id-32\",[\"id-38\"]]],\"in\":[[\"id-2\",[\"id-18\"]],[\"id-22\",[\"id-27\"]],[\"id-23\",[\"id-30\"]],[\"id-32\",[\"id-42\"]],[\"id-34\",[\"id-38\"]]],\"out_count\":[[\"id-1\",\"Owns\",2],[\"id-3\",\"Owns\",1],[\"id-31\",\"Tags\",1],[\"id-32\",\"SubTags\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-22\",\"Owns\",1],[\"id-23\",\"Owns\",1],[\"id-32\",\"Tags\",1],[\"id-34\",\"SubTags\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]],[\"id-22\",[\"id-1\"],[\"id-27\"]],[\"id-23\",[\"id-3\"],[\"id-30\"]]],\"refs\":[[\"id-40\",[\"id-31\",\"id-32\"]],[\"id-41\",[\"id-31\"]],[\"id-42\",[\"id-20\",\"id-40\"]]],\"referencers\":[[\"id-20\",[\"id-42\"]],[\"id-31\",[\"id-40\",\"id-41\"]],[\"id-32\",[\"id-40\"]],[\"id-40\",[\"id-42\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\",\"id-5\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-31\"],[\"id-32\"],[\"id-34\"],[\"id-4\"],[\"id-40\"],[\"id-41\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-24\",\"id-5\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-32\",\"id-32\"],[\"id-34\",\"id-34\"],[\"id-40\",\"id-40\"],[\"id-41\",\"id-41\"],[\"id-5\",\"id-5\"],[\"not part of the key\",\"id-31\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-31",
+      "result": null,
+      "error": null,
+      "digest": "8a5088d7f6c86997",
+      "fingerprint": "264cb88a9b08bc6a"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-40",
+      "prop": "one",
+      "result": null,
+      "error": null,
+      "digest": "b42f6765cc7efef8",
+      "fingerprint": "238dbec23f2e13c6"
+    },
+    {
+      "do": "restore_element",
+      "id": "nowhere",
+      "type": "Loose",
+      "result": "nowhere",
+      "error": null,
+      "digest": "9a91a86deb7610dc",
+      "fingerprint": "8326054aa3b381e3"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-40",
+      "result": null,
+      "error": null,
+      "digest": "cbfaf688ef68dcc6",
+      "fingerprint": "2d2e1ac65754d5f3",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"b\",\"Name\":\"ignored\"},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"inner\"},\"rev\":4}",
+        "{\"id\":\"id-3\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\",\"Name\":\"title\"},\"rev\":4}",
+        "{\"id\":\"id-6\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"é\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Loose\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Loose\",\"properties\":{\"name\":[\"\",\"zeta\"]},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Loose\",\"properties\":{\"name\":[]},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Loose\",\"properties\":{\"name\":5},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Loose\",\"properties\":{\"name\":null},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"x\":1,\"y\":[1,2]}},\"rev\":3}",
+        "{\"id\":\"id-20\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[1.0,2.0],\"x\":true}},\"rev\":2}",
+        "{\"id\":\"id-21\",\"type_name\":\"Loose\",\"properties\":{\"a\":{\"y\":[2,1],\"x\":1}},\"rev\":2}",
+        "{\"id\":\"id-22\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-23\",\"type_name\":\"Loose\",\"properties\":{\"a\":7,\"b\":\"same\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":3}",
+        "{\"id\":\"id-25\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740993},\"rev\":2}",
+        "{\"id\":\"id-26\",\"type_name\":\"Loose\",\"properties\":{\"a\":9007199254740992.0},\"rev\":1}",
+        "{\"id\":\"id-32\",\"type_name\":\"Keyed\",\"properties\":{\"code\":1.0},\"rev\":1}",
+        "{\"id\":\"id-34\",\"type_name\":\"Keyed\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-41\",\"type_name\":\"Holder\",\"properties\":{\"many\":\"id-31\",\"one\":12},\"rev\":2}",
+        "{\"id\":\"nowhere\",\"type_name\":\"Loose\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-22\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-30\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-38\",\"type_name\":\"SubTags\",\"source_id\":\"id-32\",\"target_id\":\"id-34\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Holder\",[\"id-41\"]],[\"Keyed\",[\"id-32\",\"id-34\"]],[\"Loose\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-15\",\"id-19\",\"id-2\",\"id-20\",\"id-21\",\"id-22\",\"id-23\",\"id-24\",\"id-25\",\"id-26\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\",\"nowhere\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-27\"]],[\"id-3\",[\"id-30\"]],[\"id-32\",[\"id-38\"]]],\"in\":[[\"id-2\",[\"id-18\"]],[\"id-22\",[\"id-27\"]],[\"id-23\",[\"id-30\"]],[\"id-34\",[\"id-38\"]]],\"out_count\":[[\"id-1\",\"Owns\",2],[\"id-3\",\"Owns\",1],[\"id-32\",\"SubTags\",1]],\"in_count\":[[\"id-2\",\"Owns\",1],[\"id-22\",\"Owns\",1],[\"id-23\",\"Owns\",1],[\"id-34\",\"SubTags\",1]],\"parents\":[[\"id-2\",[\"id-1\"],[\"id-18\"]],[\"id-22\",[\"id-1\"],[\"id-27\"]],[\"id-23\",[\"id-3\"],[\"id-30\"]]],\"refs\":[[\"id-41\",[\"id-31\"]]],\"referencers\":[[\"id-31\",[\"id-41\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-19\",\"id-20\"],[\"id-2\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\",\"id-5\",\"nowhere\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-32\"],[\"id-34\"],[\"id-4\"],[\"id-41\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[[\"id-19\",\"id-20\"],[\"id-24\",\"id-5\",\"nowhere\"]],\"roots\":[[\"B\",\"id-3\"],[\"a\",\"id-11\"],[\"b\",\"id-1\"],[\"é\",\"id-6\"],[\"id-13\",\"id-13\"],[\"id-14\",\"id-14\"],[\"id-15\",\"id-15\"],[\"id-19\",\"id-19\"],[\"id-20\",\"id-20\"],[\"id-21\",\"id-21\"],[\"id-24\",\"id-24\"],[\"id-25\",\"id-25\"],[\"id-26\",\"id-26\"],[\"id-32\",\"id-32\"],[\"id-34\",\"id-34\"],[\"id-41\",\"id-41\"],[\"id-5\",\"id-5\"],[\"nowhere\",\"nowhere\"],[\"title\",\"id-4\"],[\"zeta\",\"id-12\"],[\"\",\"id-7\"],[\"￿\",\"id-8\"],[\"𐀀\",\"id-10\"],[\"😀\",\"id-9\"]]}"
+    }
+  ]
+}

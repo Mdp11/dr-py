@@ -6,6 +6,10 @@ from . import (  # noqa: F401
     json_dumps,
     json_parse,
     metamodel_caches,
+    model_cascades,
+    model_churn,
+    model_indexes,
+    model_mutations,
     py_repr,
     string_order,
 )

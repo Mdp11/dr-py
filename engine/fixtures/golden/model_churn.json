@@ -1,0 +1,2705 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Part",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "size",
+            "datatype": "float",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "peers",
+            "datatype": "Part",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Slot",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "code",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "holder",
+            "datatype": "Part",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": [
+          "code",
+          "out:Feeds",
+          "in:Feeds"
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Part",
+        "target": "Part",
+        "mappings": [
+          {
+            "source": "Part",
+            "target": "Part"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Seats",
+        "abstract": false,
+        "extends": "Owns",
+        "containment": false,
+        "source": "Part",
+        "target": "Slot",
+        "mappings": [
+          {
+            "source": "Part",
+            "target": "Slot"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Feeds",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Slot",
+        "target": "Slot",
+        "mappings": [
+          {
+            "source": "Slot",
+            "target": "Slot"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "via",
+            "datatype": "Part",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-1",
+      "error": null,
+      "digest": "b83d885159d11dd4",
+      "fingerprint": "69755ad1d7529910",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Slot\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Slot\",[\"id-1\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"]],\"duplicates\":[],\"roots\":[[\"id-1\",\"id-1\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-2",
+      "error": null,
+      "digest": "5a5636a5da0d7ddb",
+      "fingerprint": "907658d8e166ec20"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-3",
+      "error": null,
+      "digest": "350b145ec5d2985f",
+      "fingerprint": "47b4dae973d34502"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-3",
+      "result": null,
+      "error": null,
+      "digest": "5a5636a5da0d7ddb",
+      "fingerprint": "907658d8e166ec20"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "a"
+      },
+      "result": null,
+      "error": null,
+      "digest": "f6bbcbb1e3a06681",
+      "fingerprint": "74a7d7ca2537d15e"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-2",
+      "target": "id-1",
+      "result": "id-4",
+      "error": null,
+      "digest": "7df2530bc4fb769d",
+      "fingerprint": "247d3c7875faef3c"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-1",
+      "target": "id-1",
+      "result": "id-5",
+      "error": null,
+      "digest": "5795671a09bcabe3",
+      "fingerprint": "0f65bd83c8bab573"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-6",
+      "error": null,
+      "digest": "a7edaa6a84617188",
+      "fingerprint": "daf9189e9959d2db"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-7",
+      "error": null,
+      "digest": "47764b1dfb162214",
+      "fingerprint": "8bd1ec167814131e"
+    },
+    {
+      "do": "set_property",
+      "id": "id-2",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "603ac98c742d2c30",
+      "fingerprint": "d9fa7a2a2ed10c4b"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-8",
+      "error": null,
+      "digest": "c6a1d2b0ff9a3fc5",
+      "fingerprint": "890dc6f3cfac1d01"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-8",
+      "target": "id-1",
+      "result": "id-9",
+      "error": null,
+      "digest": "d7a058d25ae7e699",
+      "fingerprint": "baaf46d8a810fc72"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-10",
+      "error": null,
+      "digest": "08b8821943cd8ec9",
+      "fingerprint": "2f58b3bcf28cf92a"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-7",
+      "target": "id-8",
+      "result": "id-11",
+      "error": null,
+      "digest": "2763450ffc6c49a9",
+      "fingerprint": "d8085241db029b83"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-5",
+      "result": null,
+      "error": null,
+      "digest": "0d04711e312b94d7",
+      "fingerprint": "32bfdebfe7ec97ba"
+    },
+    {
+      "do": "set_property",
+      "id": "id-10",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "aee2eeac2a4cce8c",
+      "fingerprint": "6bfda0cf03182396"
+    },
+    {
+      "do": "set_property",
+      "id": "id-10",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "￿"
+      },
+      "result": null,
+      "error": null,
+      "digest": "2663b16022bac546",
+      "fingerprint": "97699ceedfcfff1a"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-4",
+      "result": null,
+      "error": null,
+      "digest": "ad2a29da05e1d55a",
+      "fingerprint": "ea975e9ebc4a219e"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "holder",
+      "value": {
+        "t": "str",
+        "v": "id-6"
+      },
+      "result": null,
+      "error": null,
+      "digest": "61172c5e87ae315c",
+      "fingerprint": "dea7f3da4c0a952f"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-2",
+      "target": "id-1",
+      "result": "id-12",
+      "error": null,
+      "digest": "92360e82f492b7a9",
+      "fingerprint": "aad5ab2920a3beb5"
+    },
+    {
+      "do": "set_property",
+      "id": "id-10",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "e1e789ae6ac02f1f",
+      "fingerprint": "35ec719ea3355d96"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-10",
+      "target": "id-2",
+      "result": "id-13",
+      "error": null,
+      "digest": "af6bb1208b56ebfc",
+      "fingerprint": "ed339dca2ea47ef2"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-1",
+      "target": "id-1",
+      "result": "id-14",
+      "error": null,
+      "digest": "9c1df528b5410f28",
+      "fingerprint": "bdb094526751dc3d"
+    },
+    {
+      "do": "set_property",
+      "id": "id-8",
+      "prop": "peers",
+      "value": {
+        "t": "list",
+        "v": []
+      },
+      "result": null,
+      "error": null,
+      "digest": "99eaa9dc9ba9d3d6",
+      "fingerprint": "73391da413c9ddda"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-3",
+      "type": "Part",
+      "result": "id-3",
+      "error": null,
+      "digest": "f6b78b2784763652",
+      "fingerprint": "f1ca8db243b7fc69"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-6",
+      "target": "id-2",
+      "result": "id-15",
+      "error": null,
+      "digest": "66da03cb6573d2aa",
+      "fingerprint": "1257389696723483"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-12",
+      "result": null,
+      "error": null,
+      "digest": "95fb2117164f545f",
+      "fingerprint": "0da74a40cb56de7b"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-3",
+      "type": "Part",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-3' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-16",
+      "error": null,
+      "digest": "cb8bc6666e0a92fc",
+      "fingerprint": "8940424feeb8883e"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-15",
+      "result": null,
+      "error": null,
+      "digest": "5be64e8a8f0f7604",
+      "fingerprint": "84558cc9225adadd"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-17",
+      "error": null,
+      "digest": "304a6c24827b2dc3",
+      "fingerprint": "31833494693e9c52"
+    },
+    {
+      "do": "set_property",
+      "id": "id-7",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "b"
+      },
+      "result": null,
+      "error": null,
+      "digest": "bec09707f25851d0",
+      "fingerprint": "dda7a59c556dadaf"
+    },
+    {
+      "do": "set_property",
+      "id": "id-1",
+      "prop": "code",
+      "value": {
+        "t": "float",
+        "hex": "4004000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "a9995e873a000dcb",
+      "fingerprint": "594d11da8d26ca84"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-17",
+      "target": "id-8",
+      "result": "id-18",
+      "error": null,
+      "digest": "4fa1697b5ba7951f",
+      "fingerprint": "0f1f721fcbcd9b25"
+    },
+    {
+      "do": "set_property",
+      "id": "id-10",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "a7cf3e29d8b5e6e3",
+      "fingerprint": "d9d405967241b462"
+    },
+    {
+      "do": "set_property",
+      "id": "id-16",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "d5868f3f46d51752",
+      "fingerprint": "68db51a9751eba6a"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-6",
+      "target": "id-2",
+      "result": "id-19",
+      "error": null,
+      "digest": "1d4271bfb2043a62",
+      "fingerprint": "8469883df04b96a4"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-20",
+      "error": null,
+      "digest": "958959c647012fc8",
+      "fingerprint": "94ad6af8fd052279"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-7",
+      "prop": "size",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-6",
+      "target": "id-7",
+      "result": "id-21",
+      "error": null,
+      "digest": "d2f10fb2076f6376",
+      "fingerprint": "cefa4e03c0c4ae0c"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-17",
+      "prop": "size",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-22",
+      "error": null,
+      "digest": "dad0a4f46a23da18",
+      "fingerprint": "2408154b344a83ff"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-20",
+      "target": "id-1",
+      "result": "id-23",
+      "error": null,
+      "digest": "3d7d29cb9489fd0c",
+      "fingerprint": "a280458e96f50485"
+    },
+    {
+      "do": "set_property",
+      "id": "id-16",
+      "prop": "holder",
+      "value": {
+        "t": "str",
+        "v": "id-6"
+      },
+      "result": null,
+      "error": null,
+      "digest": "9d45bd8bbcd2a3c8",
+      "fingerprint": "cabf01d173702787"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-13",
+      "result": null,
+      "error": null,
+      "digest": "d3c985055d44672b",
+      "fingerprint": "fd8345a9ca4801f0"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-10",
+      "target": "id-3",
+      "result": "id-24",
+      "error": null,
+      "digest": "e3eb97dd15cf04f2",
+      "fingerprint": "740a3f12b9344e78"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-7",
+      "result": null,
+      "error": null,
+      "digest": "aa6396cb6e075373",
+      "fingerprint": "ea17a47a964887ea"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-25",
+      "error": null,
+      "digest": "1004b6a67c67a8b0",
+      "fingerprint": "b371b29c0985da8f"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-25",
+      "result": "id-26",
+      "error": null,
+      "digest": "1c174b4e4de25cd5",
+      "fingerprint": "2e9cfbbff0d1f837"
+    },
+    {
+      "do": "set_property",
+      "id": "id-22",
+      "prop": "peers",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": "id-16"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "9c8faf810c361aab",
+      "fingerprint": "2b3706eed378d7d7"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-15",
+      "type": "Owns",
+      "source": "id-6",
+      "target": "id-2",
+      "result": "id-15",
+      "error": null,
+      "digest": "0ce2276ded33fe53",
+      "fingerprint": "afafc343af3eb334"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-20",
+      "target": "id-16",
+      "result": "id-27",
+      "error": null,
+      "digest": "7c085b8ac68beb07",
+      "fingerprint": "711f93dcc01f3942"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-25",
+      "result": "id-28",
+      "error": null,
+      "digest": "8090745bc0ddcc52",
+      "fingerprint": "d4ba19347234d1ef"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-10",
+      "result": null,
+      "error": null,
+      "digest": "b02f8eb380729884",
+      "fingerprint": "ab69e9aacf9cc3df"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-29",
+      "error": null,
+      "digest": "0a3b45a6b1ac2965",
+      "fingerprint": "326c6eb7c46f64fc"
+    },
+    {
+      "do": "set_property",
+      "id": "id-29",
+      "prop": "size",
+      "value": {
+        "t": "int",
+        "v": "2"
+      },
+      "result": null,
+      "error": null,
+      "digest": "2482019e10ab2bf3",
+      "fingerprint": "eb29af55228c1b4d"
+    },
+    {
+      "do": "set_property",
+      "id": "id-6",
+      "prop": "peers",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": "id-6"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "f6af97509b52537e",
+      "fingerprint": "12edfa10d29aea0d"
+    },
+    {
+      "do": "set_property",
+      "id": "id-16",
+      "prop": "holder",
+      "value": {
+        "t": "str",
+        "v": "id-25"
+      },
+      "result": null,
+      "error": null,
+      "digest": "bf4cbb4a684e113c",
+      "fingerprint": "77e62c115cfb41da"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-22",
+      "result": null,
+      "error": null,
+      "digest": "37f5f4c344d6ee2c",
+      "fingerprint": "3fbcd21b6d7911a8"
+    },
+    {
+      "do": "set_property",
+      "id": "id-29",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "71b27d2d4372916e",
+      "fingerprint": "2b50a84bfbd5ad12"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-17",
+      "target": "id-20",
+      "result": "id-30",
+      "error": null,
+      "digest": "3bc1c6da0757270d",
+      "fingerprint": "85d868752778461c"
+    },
+    {
+      "do": "set_property",
+      "id": "id-16",
+      "prop": "code",
+      "value": {
+        "t": "bool",
+        "v": false
+      },
+      "result": null,
+      "error": null,
+      "digest": "6cae52d8ce0f6ffb",
+      "fingerprint": "a7f1963a74fb6fc6"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-25",
+      "result": "id-31",
+      "error": null,
+      "digest": "a42a9e40606a9e4a",
+      "fingerprint": "f43329d80977aa39"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-19",
+      "result": null,
+      "error": null,
+      "digest": "6cee60c094bbb37a",
+      "fingerprint": "db9cd41136de6f04"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-20",
+      "target": "id-6",
+      "result": "id-32",
+      "error": null,
+      "digest": "e6515bb64cf88a98",
+      "fingerprint": "4cb5263e14722fef"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-25",
+      "result": null,
+      "error": null,
+      "digest": "6439657ac72e53da",
+      "fingerprint": "41e3913371b933d1"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-33",
+      "error": null,
+      "digest": "d08a68c448924c12",
+      "fingerprint": "dd100fec610bfad1"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-30",
+      "result": null,
+      "error": null,
+      "digest": "9af9d3330cb7fa71",
+      "fingerprint": "ac7868b930448f57"
+    },
+    {
+      "do": "set_property",
+      "id": "id-2",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "￿"
+      },
+      "result": null,
+      "error": null,
+      "digest": "a9ad0d7e4c044457",
+      "fingerprint": "4afdf07d13aca392"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-16",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "digest": "33de029f90683b4c",
+      "fingerprint": "51fdf820f3612e87"
+    },
+    {
+      "do": "set_property",
+      "id": "id-29",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "7de73a34f42e974a",
+      "fingerprint": "36ed9807cb65ae8c"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-16",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-4",
+      "type": "Seats",
+      "source": "id-2",
+      "target": "id-1",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No target element 'id-1'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-33",
+      "result": "id-34",
+      "error": null,
+      "digest": "17b6a8532eb11415",
+      "fingerprint": "2f4cccd8467dced3"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-17",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-2",
+      "target": "id-2",
+      "result": "id-35",
+      "error": null,
+      "digest": "50381545aa1dc3cf",
+      "fingerprint": "1f7e61800b9a4278"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-16",
+      "prop": "code",
+      "result": null,
+      "error": null,
+      "digest": "f92f0b2452773155",
+      "fingerprint": "5de5a9074811ac97"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-16",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "disconnect",
+      "id": "id-35",
+      "result": null,
+      "error": null,
+      "digest": "bea1b632d6dbe68f",
+      "fingerprint": "5f2270ba68171d5e"
+    },
+    {
+      "do": "set_property",
+      "id": "id-20",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "😀"
+      },
+      "result": null,
+      "error": null,
+      "digest": "68615c8fa59f62a4",
+      "fingerprint": "e1cbaca7240bd159"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-36",
+      "error": null,
+      "digest": "761033f747303c05",
+      "fingerprint": "14f71d690aeeab59",
+      "state": [
+        "{\"id\":\"id-2\",\"type_name\":\"Part\",\"properties\":{\"name\":\"￿\"},\"rev\":2}",
+        "{\"id\":\"id-6\",\"type_name\":\"Part\",\"properties\":{\"peers\":[\"id-6\"]},\"rev\":1}",
+        "{\"id\":\"id-16\",\"type_name\":\"Slot\",\"properties\":{\"holder\":\"id-25\"},\"rev\":6}",
+        "{\"id\":\"id-17\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-20\",\"type_name\":\"Part\",\"properties\":{\"name\":\"😀\"},\"rev\":1}",
+        "{\"id\":\"id-29\",\"type_name\":\"Part\",\"properties\":{\"size\":2,\"name\":\"B\"},\"rev\":3}",
+        "{\"id\":\"id-33\",\"type_name\":\"Slot\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-36\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-15\",\"type_name\":\"Owns\",\"source_id\":\"id-6\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Seats\",\"source_id\":\"id-20\",\"target_id\":\"id-16\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-32\",\"type_name\":\"Owns\",\"source_id\":\"id-20\",\"target_id\":\"id-6\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-34\",\"type_name\":\"Feeds\",\"source_id\":\"id-16\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Part\",[\"id-17\",\"id-2\",\"id-20\",\"id-29\",\"id-36\",\"id-6\"]],[\"Slot\",[\"id-16\",\"id-33\"]]],\"out\":[[\"id-16\",[\"id-34\"]],[\"id-20\",[\"id-27\",\"id-32\"]],[\"id-6\",[\"id-15\"]]],\"in\":[[\"id-16\",[\"id-27\"]],[\"id-2\",[\"id-15\"]],[\"id-33\",[\"id-34\"]],[\"id-6\",[\"id-32\"]]],\"out_count\":[[\"id-16\",\"Feeds\",1],[\"id-20\",\"Owns\",1],[\"id-20\",\"Seats\",1],[\"id-6\",\"Owns\",1]],\"in_count\":[[\"id-16\",\"Seats\",1],[\"id-2\",\"Owns\",1],[\"id-33\",\"Feeds\",1],[\"id-6\",\"Owns\",1]],\"parents\":[[\"id-16\",[\"id-20\"],[\"id-27\"]],[\"id-2\",[\"id-6\"],[\"id-15\"]],[\"id-6\",[\"id-20\"],[\"id-32\"]]],\"refs\":[[\"id-16\",[\"id-25\"]],[\"id-6\",[\"id-6\"]]],\"referencers\":[[\"id-25\",[\"id-16\"]],[\"id-6\",[\"id-6\"]]],\"uniq_groups\":[[\"id-16\"],[\"id-17\",\"id-36\"],[\"id-2\"],[\"id-20\"],[\"id-29\"],[\"id-33\"],[\"id-6\"]],\"duplicates\":[[\"id-17\",\"id-36\"]],\"roots\":[[\"B\",\"id-29\"],[\"id-17\",\"id-17\"],[\"id-33\",\"id-33\"],[\"id-36\",\"id-36\"],[\"😀\",\"id-20\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-37",
+      "error": null,
+      "digest": "12f8043113ed7b73",
+      "fingerprint": "ae8712ecefdbdeb9"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-27",
+      "result": null,
+      "error": null,
+      "digest": "621278d638556e27",
+      "fingerprint": "d9dad602224cebee"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-33",
+      "result": "id-38",
+      "error": null,
+      "digest": "34d217d68f1e3a40",
+      "fingerprint": "2b6401674887440b"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-39",
+      "error": null,
+      "digest": "922ebdfe3f38e85e",
+      "fingerprint": "9237889c8f612435"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-37",
+      "result": null,
+      "error": null,
+      "digest": "f6c68a386be5af28",
+      "fingerprint": "297dd320e829da37"
+    },
+    {
+      "do": "set_property",
+      "id": "id-16",
+      "prop": "holder",
+      "value": {
+        "t": "str",
+        "v": "id-39"
+      },
+      "result": null,
+      "error": null,
+      "digest": "0313a92e37d93e1c",
+      "fingerprint": "abe5a7a66d94a8ac"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-40",
+      "error": null,
+      "digest": "742ec87dca102ac3",
+      "fingerprint": "86184bb9ed0b4501"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-17",
+      "target": "id-33",
+      "result": "id-41",
+      "error": null,
+      "digest": "fcae317d3869dacc",
+      "fingerprint": "7dd386446c57e4b8"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-33",
+      "target": "id-16",
+      "result": "id-42",
+      "error": null,
+      "digest": "4c2475b760f9ed1a",
+      "fingerprint": "00f30ed8bf0958a6"
+    },
+    {
+      "do": "set_property",
+      "id": "id-20",
+      "prop": "size",
+      "value": {
+        "t": "bool",
+        "v": false
+      },
+      "result": null,
+      "error": null,
+      "digest": "bfe6f4614e2d4bef",
+      "fingerprint": "2a676a6773cd336e"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-33",
+      "result": "id-43",
+      "error": null,
+      "digest": "df5197cf50f7fa95",
+      "fingerprint": "8e0c27a87306318a"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-20",
+      "target": "id-33",
+      "result": "id-44",
+      "error": null,
+      "digest": "0a97b6b0260aa73e",
+      "fingerprint": "26259bbe6afe763c"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-30",
+      "type": "Owns",
+      "source": "id-17",
+      "target": "id-20",
+      "result": "id-30",
+      "error": null,
+      "digest": "40e40d47622f115d",
+      "fingerprint": "add2bbe0820ce3f2"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-29",
+      "target": "id-33",
+      "result": "id-45",
+      "error": null,
+      "digest": "f25f4d4de18c06fa",
+      "fingerprint": "7306c8920169e6cb"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-46",
+      "error": null,
+      "digest": "3561b7c0d4665815",
+      "fingerprint": "84fb4e4d3de25818"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-30",
+      "type": "Owns",
+      "source": "id-17",
+      "target": "id-20",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-30' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "restore_element",
+      "id": "id-37",
+      "type": "Part",
+      "result": "id-37",
+      "error": null,
+      "digest": "5189800680bb1f63",
+      "fingerprint": "c06fdb0807e06708"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-29",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "digest": "417977d9055af06c",
+      "fingerprint": "928db2c58ae94e3d"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-17",
+      "target": "id-16",
+      "result": "id-47",
+      "error": null,
+      "digest": "d8b00422e6980704",
+      "fingerprint": "df891f604bfdfdb5"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-48",
+      "error": null,
+      "digest": "480c978a41e364cc",
+      "fingerprint": "aee2181e7a0cc21c"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-2",
+      "target": "id-48",
+      "result": "id-49",
+      "error": null,
+      "digest": "e7227591a9f112c3",
+      "fingerprint": "1f58857597964f10"
+    },
+    {
+      "do": "set_property",
+      "id": "id-34",
+      "prop": "via",
+      "value": {
+        "t": "str",
+        "v": "id-16"
+      },
+      "result": null,
+      "error": null,
+      "digest": "cac7aa84fa310cdf",
+      "fingerprint": "86129ed2c2ac875b"
+    },
+    {
+      "do": "set_property",
+      "id": "id-34",
+      "prop": "via",
+      "value": {
+        "t": "str",
+        "v": "id-2"
+      },
+      "result": null,
+      "error": null,
+      "digest": "eca7f246c3d0a2c9",
+      "fingerprint": "1c4ba8816c404123"
+    },
+    {
+      "do": "set_property",
+      "id": "id-40",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "a"
+      },
+      "result": null,
+      "error": null,
+      "digest": "ffe81e45315e46cb",
+      "fingerprint": "65a6eaa29e13dd0d"
+    },
+    {
+      "do": "set_property",
+      "id": "id-20",
+      "prop": "size",
+      "value": {
+        "t": "bool",
+        "v": true
+      },
+      "result": null,
+      "error": null,
+      "digest": "d3420db3bdc5f8f5",
+      "fingerprint": "8142b40622ca18b5"
+    },
+    {
+      "do": "set_property",
+      "id": "id-48",
+      "prop": "code",
+      "value": {
+        "t": "null"
+      },
+      "result": null,
+      "error": null,
+      "digest": "b64100f4384cb4e7",
+      "fingerprint": "d6c0a33566f4d0af"
+    },
+    {
+      "do": "set_property",
+      "id": "id-2",
+      "prop": "peers",
+      "value": {
+        "t": "list",
+        "v": []
+      },
+      "result": null,
+      "error": null,
+      "digest": "74d514c8e7c9ea1d",
+      "fingerprint": "c594192b125ad601"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-17",
+      "target": "id-46",
+      "result": "id-50",
+      "error": null,
+      "digest": "74708aaff6439854",
+      "fingerprint": "e312f94c0a35aae5"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-34",
+      "result": null,
+      "error": null,
+      "digest": "15a49f1f46fdab01",
+      "fingerprint": "66dd115e3a5d5099"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-51",
+      "error": null,
+      "digest": "b6b29a4a54bbfbb5",
+      "fingerprint": "483e01a528ad7c4c"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-40",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "digest": "503c8af205b9e171",
+      "fingerprint": "0563e14823b4a1dd"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-37",
+      "target": "id-37",
+      "result": "id-52",
+      "error": null,
+      "digest": "73eb34d7b93d9c36",
+      "fingerprint": "1203648396582385"
+    },
+    {
+      "do": "set_property",
+      "id": "id-37",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "b"
+      },
+      "result": null,
+      "error": null,
+      "digest": "962db871bf2118d7",
+      "fingerprint": "8096ec8433d72de5"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-3",
+      "type": "Part",
+      "result": "id-3",
+      "error": null,
+      "digest": "f9709a8aa0fefd53",
+      "fingerprint": "81eb5fec73d990e0"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-53",
+      "error": null,
+      "digest": "ebd8f3fa11b54345",
+      "fingerprint": "0f2c183c93d7454b"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-54",
+      "error": null,
+      "digest": "fbae7ec795b9320a",
+      "fingerprint": "203181c3cffa938a"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-3",
+      "type": "Part",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-3' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-17",
+      "target": "id-33",
+      "result": "id-55",
+      "error": null,
+      "digest": "14267807e403cdc6",
+      "fingerprint": "2a0bdbb592a6188e"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-39",
+      "target": "id-48",
+      "result": "id-56",
+      "error": null,
+      "digest": "892cadd2fb5a0249",
+      "fingerprint": "49f751b6f2e293ec"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-57",
+      "error": null,
+      "digest": "87668d4168e4982b",
+      "fingerprint": "eb2fb604b6024712",
+      "state": [
+        "{\"id\":\"id-2\",\"type_name\":\"Part\",\"properties\":{\"name\":\"￿\",\"peers\":[]},\"rev\":3}",
+        "{\"id\":\"id-6\",\"type_name\":\"Part\",\"properties\":{\"peers\":[\"id-6\"]},\"rev\":1}",
+        "{\"id\":\"id-16\",\"type_name\":\"Slot\",\"properties\":{\"holder\":\"id-39\"},\"rev\":7}",
+        "{\"id\":\"id-17\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-20\",\"type_name\":\"Part\",\"properties\":{\"name\":\"😀\",\"size\":true},\"rev\":3}",
+        "{\"id\":\"id-29\",\"type_name\":\"Part\",\"properties\":{\"size\":2},\"rev\":4}",
+        "{\"id\":\"id-33\",\"type_name\":\"Slot\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-36\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-39\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-40\",\"type_name\":\"Part\",\"properties\":{},\"rev\":2}",
+        "{\"id\":\"id-46\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-37\",\"type_name\":\"Part\",\"properties\":{\"name\":\"b\"},\"rev\":1}",
+        "{\"id\":\"id-48\",\"type_name\":\"Slot\",\"properties\":{\"code\":null},\"rev\":1}",
+        "{\"id\":\"id-51\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-3\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-53\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-54\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-57\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-15\",\"type_name\":\"Owns\",\"source_id\":\"id-6\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-32\",\"type_name\":\"Owns\",\"source_id\":\"id-20\",\"target_id\":\"id-6\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-38\",\"type_name\":\"Feeds\",\"source_id\":\"id-16\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-41\",\"type_name\":\"Seats\",\"source_id\":\"id-17\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-42\",\"type_name\":\"Feeds\",\"source_id\":\"id-33\",\"target_id\":\"id-16\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-43\",\"type_name\":\"Feeds\",\"source_id\":\"id-16\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-44\",\"type_name\":\"Seats\",\"source_id\":\"id-20\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-30\",\"type_name\":\"Owns\",\"source_id\":\"id-17\",\"target_id\":\"id-20\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-45\",\"type_name\":\"Seats\",\"source_id\":\"id-29\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-47\",\"type_name\":\"Seats\",\"source_id\":\"id-17\",\"target_id\":\"id-16\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-49\",\"type_name\":\"Seats\",\"source_id\":\"id-2\",\"target_id\":\"id-48\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-50\",\"type_name\":\"Owns\",\"source_id\":\"id-17\",\"target_id\":\"id-46\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-52\",\"type_name\":\"Owns\",\"source_id\":\"id-37\",\"target_id\":\"id-37\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-55\",\"type_name\":\"Seats\",\"source_id\":\"id-17\",\"target_id\":\"id-33\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-56\",\"type_name\":\"Seats\",\"source_id\":\"id-39\",\"target_id\":\"id-48\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Part\",[\"id-17\",\"id-2\",\"id-20\",\"id-29\",\"id-3\",\"id-36\",\"id-37\",\"id-39\",\"id-40\",\"id-46\",\"id-51\",\"id-53\",\"id-54\",\"id-57\",\"id-6\"]],[\"Slot\",[\"id-16\",\"id-33\",\"id-48\"]]],\"out\":[[\"id-16\",[\"id-38\",\"id-43\"]],[\"id-17\",[\"id-30\",\"id-41\",\"id-47\",\"id-50\",\"id-55\"]],[\"id-2\",[\"id-49\"]],[\"id-20\",[\"id-32\",\"id-44\"]],[\"id-29\",[\"id-45\"]],[\"id-33\",[\"id-42\"]],[\"id-37\",[\"id-52\"]],[\"id-39\",[\"id-56\"]],[\"id-6\",[\"id-15\"]]],\"in\":[[\"id-16\",[\"id-42\",\"id-47\"]],[\"id-2\",[\"id-15\"]],[\"id-20\",[\"id-30\"]],[\"id-33\",[\"id-38\",\"id-41\",\"id-43\",\"id-44\",\"id-45\",\"id-55\"]],[\"id-37\",[\"id-52\"]],[\"id-46\",[\"id-50\"]],[\"id-48\",[\"id-49\",\"id-56\"]],[\"id-6\",[\"id-32\"]]],\"out_count\":[[\"id-16\",\"Feeds\",2],[\"id-17\",\"Owns\",2],[\"id-17\",\"Seats\",3],[\"id-2\",\"Seats\",1],[\"id-20\",\"Owns\",1],[\"id-20\",\"Seats\",1],[\"id-29\",\"Seats\",1],[\"id-33\",\"Feeds\",1],[\"id-37\",\"Owns\",1],[\"id-39\",\"Seats\",1],[\"id-6\",\"Owns\",1]],\"in_count\":[[\"id-16\",\"Feeds\",1],[\"id-16\",\"Seats\",1],[\"id-2\",\"Owns\",1],[\"id-20\",\"Owns\",1],[\"id-33\",\"Feeds\",2],[\"id-33\",\"Seats\",4],[\"id-37\",\"Owns\",1],[\"id-46\",\"Owns\",1],[\"id-48\",\"Seats\",2],[\"id-6\",\"Owns\",1]],\"parents\":[[\"id-16\",[\"id-17\"],[\"id-47\"]],[\"id-2\",[\"id-6\"],[\"id-15\"]],[\"id-20\",[\"id-17\"],[\"id-30\"]],[\"id-33\",[\"id-17\",\"id-20\",\"id-29\",\"id-17\"],[\"id-41\",\"id-44\",\"id-45\",\"id-55\"]],[\"id-37\",[\"id-37\"],[\"id-52\"]],[\"id-46\",[\"id-17\"],[\"id-50\"]],[\"id-48\",[\"id-2\",\"id-39\"],[\"id-49\",\"id-56\"]],[\"id-6\",[\"id-20\"],[\"id-32\"]]],\"refs\":[[\"id-16\",[\"id-39\"]],[\"id-6\",[\"id-6\"]]],\"referencers\":[[\"id-39\",[\"id-16\"]],[\"id-6\",[\"id-6\"]]],\"uniq_groups\":[[\"id-16\"],[\"id-17\",\"id-3\",\"id-36\",\"id-39\",\"id-40\",\"id-51\",\"id-53\",\"id-54\",\"id-57\"],[\"id-2\"],[\"id-20\"],[\"id-29\"],[\"id-33\"],[\"id-37\"],[\"id-46\"],[\"id-48\"],[\"id-6\"]],\"duplicates\":[[\"id-17\",\"id-3\",\"id-36\",\"id-39\",\"id-40\",\"id-51\",\"id-53\",\"id-54\",\"id-57\"]],\"roots\":[[\"id-17\",\"id-17\"],[\"id-29\",\"id-29\"],[\"id-3\",\"id-3\"],[\"id-36\",\"id-36\"],[\"id-39\",\"id-39\"],[\"id-40\",\"id-40\"],[\"id-51\",\"id-51\"],[\"id-53\",\"id-53\"],[\"id-54\",\"id-54\"],[\"id-57\",\"id-57\"]]}"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-58",
+      "error": null,
+      "digest": "b75cfdfc8b96f044",
+      "fingerprint": "2d41a6cce46f7c9f"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-34",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-33",
+      "result": "id-34",
+      "error": null,
+      "digest": "dd0d6f9b5109731b",
+      "fingerprint": "c12a0b73712e5126"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-53",
+      "target": "id-48",
+      "result": "id-59",
+      "error": null,
+      "digest": "a13a2d9841454fee",
+      "fingerprint": "ea54f9cfacc9cc7b"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-40",
+      "result": null,
+      "error": null,
+      "digest": "23c6b0701f00a5f7",
+      "fingerprint": "ec1bbf7d385c93fa"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-36",
+      "prop": "size",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-3",
+      "prop": "size",
+      "value": {
+        "t": "float",
+        "hex": "4004000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "c46cd95171f58228",
+      "fingerprint": "db4d6b5ee0aaa295"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-29",
+      "target": "id-36",
+      "result": "id-60",
+      "error": null,
+      "digest": "0159562e2462c1f4",
+      "fingerprint": "44e58f91a2532223"
+    },
+    {
+      "do": "set_property",
+      "id": "id-42",
+      "prop": "via",
+      "value": {
+        "t": "str",
+        "v": "id-6"
+      },
+      "result": null,
+      "error": null,
+      "digest": "83bd7aea7ae94822",
+      "fingerprint": "83b042b0f34a4dd1"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-10",
+      "type": "Part",
+      "result": "id-10",
+      "error": null,
+      "digest": "5ca5a02163c32072",
+      "fingerprint": "69056e242eab0d0e"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-17",
+      "prop": "size",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "delete_property",
+      "id": "id-10",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-15",
+      "type": "Owns",
+      "source": "id-6",
+      "target": "id-2",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-15' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-20",
+      "prop": "size",
+      "value": {
+        "t": "null"
+      },
+      "result": null,
+      "error": null,
+      "digest": "7dd0231c97c34d96",
+      "fingerprint": "72165fbb80d12a15"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-15",
+      "result": null,
+      "error": null,
+      "digest": "edbdabf076c6a96e",
+      "fingerprint": "fbebf0e2fd00a795"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-15",
+      "type": "Owns",
+      "source": "id-6",
+      "target": "id-2",
+      "result": "id-15",
+      "error": null,
+      "digest": "7dd0231c97c34d96",
+      "fingerprint": "86e6d9dc5a71a791"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-10",
+      "type": "Part",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-10' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-20",
+      "target": "id-57",
+      "result": "id-61",
+      "error": null,
+      "digest": "b3f9271264da25ed",
+      "fingerprint": "64a63e73a8e0da59"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-38",
+      "result": null,
+      "error": null,
+      "digest": "e5394812d391718a",
+      "fingerprint": "6d551fc0ae299bdb"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-33",
+      "prop": "name",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-6",
+      "prop": "size",
+      "value": {
+        "t": "int",
+        "v": "0"
+      },
+      "result": null,
+      "error": null,
+      "digest": "67a9fa7a007690ea",
+      "fingerprint": "78640f52fafb494f"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-3",
+      "result": null,
+      "error": null,
+      "digest": "ef5eb1a0715c52b1",
+      "fingerprint": "13b989082b7859b6"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-48",
+      "target": "id-48",
+      "result": "id-62",
+      "error": null,
+      "digest": "6a36a36c92d7f689",
+      "fingerprint": "6bf918f9cf812f2a"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-3",
+      "type": "Part",
+      "result": "id-3",
+      "error": null,
+      "digest": "056b81978d08130d",
+      "fingerprint": "968170a769517bb4"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-12",
+      "type": "Seats",
+      "source": "id-2",
+      "target": "id-1",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No target element 'id-1'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-10",
+      "prop": "size",
+      "value": {
+        "t": "int",
+        "v": "1"
+      },
+      "result": null,
+      "error": null,
+      "digest": "a68d1e25966f4956",
+      "fingerprint": "d8ff09e8cf5f87b9"
+    },
+    {
+      "do": "set_property",
+      "id": "id-16",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "b"
+      },
+      "result": null,
+      "error": null,
+      "digest": "de69b2857eb73a3e",
+      "fingerprint": "94f4f14660c8bbb9"
+    },
+    {
+      "do": "set_property",
+      "id": "id-53",
+      "prop": "peers",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": "dangling"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "d503fcda418683f9",
+      "fingerprint": "82577b703efcb99f"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-16",
+      "result": null,
+      "error": null,
+      "digest": "589af2ef04c2f40b",
+      "fingerprint": "16a3414281a4d55c"
+    },
+    {
+      "do": "set_property",
+      "id": "id-6",
+      "prop": "peers",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": "id-58"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "b4ec2fc928791a29",
+      "fingerprint": "dad457b7811a7c13"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-58",
+      "target": "id-48",
+      "result": "id-63",
+      "error": null,
+      "digest": "73fc651cd5dde478",
+      "fingerprint": "108e2e8336c90975"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-3",
+      "type": "Part",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-3' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-2",
+      "target": "id-2",
+      "result": "id-64",
+      "error": null,
+      "digest": "1cde6c411c3b2913",
+      "fingerprint": "32bf5fa47273ff84"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-65",
+      "error": null,
+      "digest": "ea1b487ce1b54298",
+      "fingerprint": "b72a0ba311e70f22"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-3",
+      "target": "id-53",
+      "result": "id-66",
+      "error": null,
+      "digest": "82eeb7b0615a4aaa",
+      "fingerprint": "b00453531fdf6fd3"
+    },
+    {
+      "do": "set_property",
+      "id": "id-39",
+      "prop": "size",
+      "value": {
+        "t": "int",
+        "v": "0"
+      },
+      "result": null,
+      "error": null,
+      "digest": "2568a43dde72c7c3",
+      "fingerprint": "8083dc06eeb8fe4a"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-67",
+      "error": null,
+      "digest": "7d2771ac7b75c96f",
+      "fingerprint": "e8b7da0664faa7ae"
+    },
+    {
+      "do": "set_property",
+      "id": "id-33",
+      "prop": "code",
+      "value": {
+        "t": "int",
+        "v": "0"
+      },
+      "result": null,
+      "error": null,
+      "digest": "86ba2fbb216a5d47",
+      "fingerprint": "2811f476df1672ae"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-60",
+      "result": null,
+      "error": null,
+      "digest": "438fa0c474fd1e9b",
+      "fingerprint": "cac0528165d62f3d"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-39",
+      "prop": "size",
+      "result": null,
+      "error": null,
+      "digest": "20ffb04b7276f97c",
+      "fingerprint": "1b1caad32ff00569"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-67",
+      "prop": "size",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-68",
+      "error": null,
+      "digest": "37e4c915c6202cc5",
+      "fingerprint": "9deb6132b4a244f8"
+    },
+    {
+      "do": "set_property",
+      "id": "id-36",
+      "prop": "size",
+      "value": {
+        "t": "int",
+        "v": "1"
+      },
+      "result": null,
+      "error": null,
+      "digest": "083e2b3e1a04b347",
+      "fingerprint": "7a2f1b02daaa6728"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-33",
+      "prop": "code",
+      "result": null,
+      "error": null,
+      "digest": "4baf840167379454",
+      "fingerprint": "01a29b8b64f4de03"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-53",
+      "target": "id-58",
+      "result": "id-69",
+      "error": null,
+      "digest": "e40f7e0ad5b2f4ea",
+      "fingerprint": "3e3ff0710b59c252"
+    },
+    {
+      "do": "set_property",
+      "id": "id-63",
+      "prop": "via",
+      "value": {
+        "t": "str",
+        "v": "id-20"
+      },
+      "result": null,
+      "error": null,
+      "digest": "57dfd8b023c78872",
+      "fingerprint": "817c6eee6590168e"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-70",
+      "error": null,
+      "digest": "c829b057f9c51045",
+      "fingerprint": "19d1d0365bbabd58"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-50",
+      "result": null,
+      "error": null,
+      "digest": "c88c2e30e84f620c",
+      "fingerprint": "e16857743ac8bef8"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-71",
+      "error": null,
+      "digest": "ea6ab0d34b7bae2f",
+      "fingerprint": "ca781e087bfa48f2"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-53",
+      "target": "id-71",
+      "result": "id-72",
+      "error": null,
+      "digest": "79a88b7b8687c5f2",
+      "fingerprint": "1f1e4c90ea48e91f"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-46",
+      "target": "id-71",
+      "result": "id-73",
+      "error": null,
+      "digest": "a20c1a6f3bed2123",
+      "fingerprint": "c5ae74c5763ee0c4"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-74",
+      "error": null,
+      "digest": "69379d2f2ea77ae9",
+      "fingerprint": "d4848389b5e2fdd2"
+    },
+    {
+      "do": "set_property",
+      "id": "id-63",
+      "prop": "via",
+      "value": {
+        "t": "str",
+        "v": "id-17"
+      },
+      "result": null,
+      "error": null,
+      "digest": "31b3c98e836e7f0c",
+      "fingerprint": "c1aba9c0dd85607e"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-46",
+      "result": null,
+      "error": null,
+      "digest": "9c0d075c652662cc",
+      "fingerprint": "255f5e5ea084d8d4"
+    },
+    {
+      "do": "set_property",
+      "id": "id-58",
+      "prop": "holder",
+      "value": {
+        "t": "str",
+        "v": "id-3"
+      },
+      "result": null,
+      "error": null,
+      "digest": "8831d2650d4023a1",
+      "fingerprint": "2c2a3454dd27f839"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-75",
+      "error": null,
+      "digest": "31de4848c700f9b8",
+      "fingerprint": "c64d73aab9c594ef"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-65",
+      "target": "id-33",
+      "result": "id-76",
+      "error": null,
+      "digest": "a0c4021ffb32b87d",
+      "fingerprint": "d29ea3617ca2112a"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-3",
+      "type": "Part",
+      "result": null,
+      "error": {
+        "kind": "value",
+        "message": "Id 'id-3' is already in use"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-39",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "é"
+      },
+      "result": null,
+      "error": null,
+      "digest": "c50a625765526836",
+      "fingerprint": "bbcd65610cc469f4"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-66",
+      "result": null,
+      "error": null,
+      "digest": "adff9d9be5bd6004",
+      "fingerprint": "3d5a14a0edbe4147"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-39",
+      "target": "id-33",
+      "result": "id-77",
+      "error": null,
+      "digest": "ea932ea4b67260d3",
+      "fingerprint": "44e69269ab39d0d7"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-65",
+      "target": "id-17",
+      "result": "id-78",
+      "error": null,
+      "digest": "50f49e056ea0ced1",
+      "fingerprint": "1dec2fdcc2b794eb"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-53",
+      "result": null,
+      "error": null,
+      "digest": "d010a785592d0907",
+      "fingerprint": "702333d25c0cd841"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-70",
+      "target": "id-74",
+      "result": "id-79",
+      "error": null,
+      "digest": "05fcf272bdf4b692",
+      "fingerprint": "ef52c4175a73d031"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-38",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-33",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No source element 'id-16'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-68",
+      "target": "id-2",
+      "result": "id-80",
+      "error": null,
+      "digest": "578d79494801f7d0",
+      "fingerprint": "3a55574eb4480ab7"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-57",
+      "prop": "size",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-10",
+      "target": "id-33",
+      "result": "id-81",
+      "error": null,
+      "digest": "d68264bcc339b5ce",
+      "fingerprint": "6513d9b3d980c73a"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-6",
+      "target": "id-33",
+      "result": "id-82",
+      "error": null,
+      "digest": "28989bc2a9ab5d56",
+      "fingerprint": "de1d9ade4fa6ea8e"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-3",
+      "target": "id-17",
+      "result": "id-83",
+      "error": null,
+      "digest": "41f2a671c72c2568",
+      "fingerprint": "edc6895ddaaae3b3"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-67",
+      "target": "id-33",
+      "result": "id-84",
+      "error": null,
+      "digest": "056df47a33ad3ceb",
+      "fingerprint": "e3b3aa66bf18104b"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-85",
+      "error": null,
+      "digest": "9e3a2a9563d7a93b",
+      "fingerprint": "c3556fdcc39ada6a"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-51",
+      "result": null,
+      "error": null,
+      "digest": "3d2c2fc07191f98f",
+      "fingerprint": "972d4cc3df48fe80"
+    },
+    {
+      "do": "delete_property",
+      "id": "id-39",
+      "prop": "size",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-70",
+      "prop": "size",
+      "value": {
+        "t": "float",
+        "hex": "8000000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "9fe78493ba9056aa",
+      "fingerprint": "4a66ce4178df07fb"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-86",
+      "error": null,
+      "digest": "6c714ae70791c0f8",
+      "fingerprint": "4a58981606bb28e1"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-50",
+      "type": "Owns",
+      "source": "id-17",
+      "target": "id-46",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No target element 'id-46'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "delete_element",
+      "id": "id-65",
+      "result": null,
+      "error": null,
+      "digest": "b6f055067e95ef17",
+      "fingerprint": "b5821ac6c483dd8c"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-87",
+      "error": null,
+      "digest": "3008b4e7b0fc0be5",
+      "fingerprint": "e0d0636da3f37335"
+    },
+    {
+      "do": "set_property",
+      "id": "id-75",
+      "prop": "size",
+      "value": {
+        "t": "null"
+      },
+      "result": null,
+      "error": null,
+      "digest": "53431c76b1ba45b9",
+      "fingerprint": "cbc4c8dd3e755e7e"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-88",
+      "error": null,
+      "digest": "dc3686073210eefd",
+      "fingerprint": "9aac007ebad5bbee",
+      "state": [
+        "{\"id\":\"id-29\",\"type_name\":\"Part\",\"properties\":{\"size\":2},\"rev\":4}",
+        "{\"id\":\"id-36\",\"type_name\":\"Part\",\"properties\":{\"size\":1},\"rev\":1}",
+        "{\"id\":\"id-39\",\"type_name\":\"Part\",\"properties\":{\"name\":\"é\"},\"rev\":3}",
+        "{\"id\":\"id-37\",\"type_name\":\"Part\",\"properties\":{\"name\":\"b\"},\"rev\":1}",
+        "{\"id\":\"id-54\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-10\",\"type_name\":\"Part\",\"properties\":{\"size\":1},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-67\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-68\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-70\",\"type_name\":\"Part\",\"properties\":{\"size\":-0.0},\"rev\":1}",
+        "{\"id\":\"id-74\",\"type_name\":\"Slot\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-75\",\"type_name\":\"Part\",\"properties\":{\"size\":null},\"rev\":1}",
+        "{\"id\":\"id-85\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-86\",\"type_name\":\"Slot\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-87\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-88\",\"type_name\":\"Slot\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-52\",\"type_name\":\"Owns\",\"source_id\":\"id-37\",\"target_id\":\"id-37\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-79\",\"type_name\":\"Seats\",\"source_id\":\"id-70\",\"target_id\":\"id-74\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Part\",[\"id-10\",\"id-29\",\"id-3\",\"id-36\",\"id-37\",\"id-39\",\"id-54\",\"id-67\",\"id-68\",\"id-70\",\"id-75\",\"id-85\",\"id-87\"]],[\"Slot\",[\"id-74\",\"id-86\",\"id-88\"]]],\"out\":[[\"id-37\",[\"id-52\"]],[\"id-70\",[\"id-79\"]]],\"in\":[[\"id-37\",[\"id-52\"]],[\"id-74\",[\"id-79\"]]],\"out_count\":[[\"id-37\",\"Owns\",1],[\"id-70\",\"Seats\",1]],\"in_count\":[[\"id-37\",\"Owns\",1],[\"id-74\",\"Seats\",1]],\"parents\":[[\"id-37\",[\"id-37\"],[\"id-52\"]],[\"id-74\",[\"id-70\"],[\"id-79\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-10\",\"id-36\"],[\"id-29\"],[\"id-3\",\"id-54\",\"id-67\",\"id-68\",\"id-85\",\"id-87\"],[\"id-37\"],[\"id-39\"],[\"id-70\"],[\"id-74\"],[\"id-75\"],[\"id-86\",\"id-88\"]],\"duplicates\":[[\"id-10\",\"id-36\"],[\"id-3\",\"id-54\",\"id-67\",\"id-68\",\"id-85\",\"id-87\"],[\"id-86\",\"id-88\"]],\"roots\":[[\"id-10\",\"id-10\"],[\"id-29\",\"id-29\"],[\"id-3\",\"id-3\"],[\"id-36\",\"id-36\"],[\"id-54\",\"id-54\"],[\"id-67\",\"id-67\"],[\"id-68\",\"id-68\"],[\"id-70\",\"id-70\"],[\"id-75\",\"id-75\"],[\"id-85\",\"id-85\"],[\"id-86\",\"id-86\"],[\"id-87\",\"id-87\"],[\"id-88\",\"id-88\"],[\"é\",\"id-39\"]]}"
+    },
+    {
+      "do": "set_property",
+      "id": "id-68",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "é"
+      },
+      "result": null,
+      "error": null,
+      "digest": "bf1435b33002abf8",
+      "fingerprint": "920cfbeaaad64590"
+    },
+    {
+      "do": "set_property",
+      "id": "id-87",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "B"
+      },
+      "result": null,
+      "error": null,
+      "digest": "28ce2d31ca0436e6",
+      "fingerprint": "e6995b6500903a30"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-89",
+      "error": null,
+      "digest": "f72b851faf0beade",
+      "fingerprint": "5a09538daee84ea5"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-90",
+      "error": null,
+      "digest": "ddcef534cb1cc89c",
+      "fingerprint": "84d0eb9ffd2956d3"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-90",
+      "result": null,
+      "error": null,
+      "digest": "f72b851faf0beade",
+      "fingerprint": "5a09538daee84ea5"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-65",
+      "type": "Part",
+      "result": "id-65",
+      "error": null,
+      "digest": "01eea12252858155",
+      "fingerprint": "f2475867da0009c5"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-46",
+      "type": "Part",
+      "result": "id-46",
+      "error": null,
+      "digest": "c6d05baf676fdfba",
+      "fingerprint": "df91f154d533c270"
+    },
+    {
+      "do": "set_property",
+      "id": "id-10",
+      "prop": "size",
+      "value": {
+        "t": "float",
+        "hex": "8000000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "4e5104636f99d470",
+      "fingerprint": "cb3cc24edb7a3029"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-39",
+      "target": "id-74",
+      "result": "id-91",
+      "error": null,
+      "digest": "a1481510229ee172",
+      "fingerprint": "cc773a0b1807e84e"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-92",
+      "error": null,
+      "digest": "442674cf67b2f9d2",
+      "fingerprint": "4da8971cc066b3c8"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-93",
+      "error": null,
+      "digest": "3fd0cf00ff8a3045",
+      "fingerprint": "b21f4dc71f18aa50"
+    },
+    {
+      "do": "set_property",
+      "id": "id-75",
+      "prop": "size",
+      "value": {
+        "t": "float",
+        "hex": "3ff0000000000000"
+      },
+      "result": null,
+      "error": null,
+      "digest": "86ad7fcf960daaf8",
+      "fingerprint": "4d5c4d5cc04136b2"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-87",
+      "target": "id-92",
+      "result": "id-94",
+      "error": null,
+      "digest": "37e0736c92a3157a",
+      "fingerprint": "8331c46fcad1fd5e"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-86",
+      "target": "id-93",
+      "result": "id-95",
+      "error": null,
+      "digest": "8fdc2c0ea76a3c1c",
+      "fingerprint": "519fcee125cdba4c"
+    },
+    {
+      "do": "create_element",
+      "type": "Slot",
+      "result": "id-96",
+      "error": null,
+      "digest": "44d98b5dbc5921af",
+      "fingerprint": "a3c95157e34bf756"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-50",
+      "type": "Owns",
+      "source": "id-17",
+      "target": "id-46",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No source element 'id-17'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-97",
+      "error": null,
+      "digest": "877398ea329d5fcf",
+      "fingerprint": "059da7139bade447"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-92",
+      "target": "id-92",
+      "result": "id-98",
+      "error": null,
+      "digest": "7ad61366cbe1e683",
+      "fingerprint": "3894cb6f959a5a42"
+    },
+    {
+      "do": "connect",
+      "type": "Owns",
+      "source": "id-54",
+      "target": "id-3",
+      "result": "id-99",
+      "error": null,
+      "digest": "36a552c4fb914dc6",
+      "fingerprint": "c8fa2741e0335bd2"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-50",
+      "type": "Owns",
+      "source": "id-17",
+      "target": "id-46",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No source element 'id-17'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-67",
+      "target": "id-74",
+      "result": "id-100",
+      "error": null,
+      "digest": "52e875914da47693",
+      "fingerprint": "c94ba9e928958bdd"
+    },
+    {
+      "do": "create_element",
+      "type": "Part",
+      "result": "id-101",
+      "error": null,
+      "digest": "2aff77598bd3b13d",
+      "fingerprint": "4eb3ac33e91ac861"
+    },
+    {
+      "do": "connect",
+      "type": "Seats",
+      "source": "id-87",
+      "target": "id-74",
+      "result": "id-102",
+      "error": null,
+      "digest": "2a7deba8af686a45",
+      "fingerprint": "58d73b904ca772c0"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-27",
+      "type": "Seats",
+      "source": "id-20",
+      "target": "id-16",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No source element 'id-20'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "disconnect",
+      "id": "id-98",
+      "result": null,
+      "error": null,
+      "digest": "d7d860245614d309",
+      "fingerprint": "75b81c3e42480b6e"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-86",
+      "target": "id-74",
+      "result": "id-103",
+      "error": null,
+      "digest": "ef64e81c0df6af6f",
+      "fingerprint": "e53e0df7fb09cf97"
+    },
+    {
+      "do": "set_property",
+      "id": "id-68",
+      "prop": "size",
+      "value": {
+        "t": "bool",
+        "v": true
+      },
+      "result": null,
+      "error": null,
+      "digest": "113b97b42883bc9b",
+      "fingerprint": "e0a621e686a8cfa7"
+    },
+    {
+      "do": "restore_element",
+      "id": "id-90",
+      "type": "Part",
+      "result": "id-90",
+      "error": null,
+      "digest": "3bdee79f4c949ed9",
+      "fingerprint": "b57f128dd4b02d11"
+    },
+    {
+      "do": "set_property",
+      "id": "id-96",
+      "prop": "holder",
+      "value": {
+        "t": "str",
+        "v": "id-93"
+      },
+      "result": null,
+      "error": null,
+      "digest": "21af18274fc4f2f5",
+      "fingerprint": "ee1c00465a459d5d"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-86",
+      "target": "id-93",
+      "result": "id-104",
+      "error": null,
+      "digest": "f439fa2d175f9855",
+      "fingerprint": "9685a4af844fb224"
+    },
+    {
+      "do": "set_property",
+      "id": "id-74",
+      "prop": "holder",
+      "value": {
+        "t": "str",
+        "v": "id-65"
+      },
+      "result": null,
+      "error": null,
+      "digest": "e50fbae0aefdff8c",
+      "fingerprint": "21f69ef26c07ec61"
+    },
+    {
+      "do": "delete_element",
+      "id": "id-92",
+      "result": null,
+      "error": null,
+      "digest": "b12cd79cef7f58ae",
+      "fingerprint": "fed275464d4930d4"
+    },
+    {
+      "do": "connect",
+      "type": "Feeds",
+      "source": "id-88",
+      "target": "id-88",
+      "result": "id-105",
+      "error": null,
+      "digest": "0d7124fd5f393568",
+      "fingerprint": "c88adb3edfbe788b"
+    },
+    {
+      "do": "disconnect",
+      "id": "id-104",
+      "result": null,
+      "error": null,
+      "digest": "d8e7c6f707a25fc8",
+      "fingerprint": "3d4f6fb4850613ed"
+    },
+    {
+      "do": "set_property",
+      "id": "id-97",
+      "prop": "peers",
+      "value": {
+        "t": "list",
+        "v": [
+          {
+            "t": "str",
+            "v": "id-29"
+          }
+        ]
+      },
+      "result": null,
+      "error": null,
+      "digest": "793195749742d7cb",
+      "fingerprint": "248e74445a38eb68"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-34",
+      "type": "Feeds",
+      "source": "id-16",
+      "target": "id-33",
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No source element 'id-16'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "set_property",
+      "id": "id-88",
+      "prop": "holder",
+      "value": {
+        "t": "str",
+        "v": "id-90"
+      },
+      "result": null,
+      "error": null,
+      "digest": "e4d29f07f3515830",
+      "fingerprint": "ad7607831bc05050"
+    },
+    {
+      "do": "set_property",
+      "id": "id-37",
+      "prop": "name",
+      "value": {
+        "t": "str",
+        "v": "￿"
+      },
+      "result": null,
+      "error": null,
+      "digest": "2d909c57fd8b0763",
+      "fingerprint": "432ad9f48f2e4987"
+    },
+    {
+      "do": "set_property",
+      "id": "id-29",
+      "prop": "size",
+      "value": {
+        "t": "bool",
+        "v": true
+      },
+      "result": null,
+      "error": null,
+      "digest": "9b632a07761900ac",
+      "fingerprint": "709deabb7cea7912",
+      "state": [
+        "{\"id\":\"id-29\",\"type_name\":\"Part\",\"properties\":{\"size\":true},\"rev\":5}",
+        "{\"id\":\"id-36\",\"type_name\":\"Part\",\"properties\":{\"size\":1},\"rev\":1}",
+        "{\"id\":\"id-39\",\"type_name\":\"Part\",\"properties\":{\"name\":\"é\"},\"rev\":3}",
+        "{\"id\":\"id-37\",\"type_name\":\"Part\",\"properties\":{\"name\":\"￿\"},\"rev\":2}",
+        "{\"id\":\"id-54\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-10\",\"type_name\":\"Part\",\"properties\":{\"size\":-0.0},\"rev\":2}",
+        "{\"id\":\"id-3\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-67\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-68\",\"type_name\":\"Part\",\"properties\":{\"name\":\"é\",\"size\":true},\"rev\":2}",
+        "{\"id\":\"id-70\",\"type_name\":\"Part\",\"properties\":{\"size\":-0.0},\"rev\":1}",
+        "{\"id\":\"id-74\",\"type_name\":\"Slot\",\"properties\":{\"holder\":\"id-65\"},\"rev\":1}",
+        "{\"id\":\"id-75\",\"type_name\":\"Part\",\"properties\":{\"size\":1.0},\"rev\":2}",
+        "{\"id\":\"id-85\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-86\",\"type_name\":\"Slot\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-87\",\"type_name\":\"Part\",\"properties\":{\"name\":\"B\"},\"rev\":1}",
+        "{\"id\":\"id-88\",\"type_name\":\"Slot\",\"properties\":{\"holder\":\"id-90\"},\"rev\":1}",
+        "{\"id\":\"id-89\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-65\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-46\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-93\",\"type_name\":\"Slot\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-96\",\"type_name\":\"Slot\",\"properties\":{\"holder\":\"id-93\"},\"rev\":1}",
+        "{\"id\":\"id-97\",\"type_name\":\"Part\",\"properties\":{\"peers\":[\"id-29\"]},\"rev\":1}",
+        "{\"id\":\"id-101\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-90\",\"type_name\":\"Part\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-52\",\"type_name\":\"Owns\",\"source_id\":\"id-37\",\"target_id\":\"id-37\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-79\",\"type_name\":\"Seats\",\"source_id\":\"id-70\",\"target_id\":\"id-74\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-91\",\"type_name\":\"Seats\",\"source_id\":\"id-39\",\"target_id\":\"id-74\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-95\",\"type_name\":\"Feeds\",\"source_id\":\"id-86\",\"target_id\":\"id-93\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-99\",\"type_name\":\"Owns\",\"source_id\":\"id-54\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-100\",\"type_name\":\"Seats\",\"source_id\":\"id-67\",\"target_id\":\"id-74\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-102\",\"type_name\":\"Seats\",\"source_id\":\"id-87\",\"target_id\":\"id-74\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-103\",\"type_name\":\"Feeds\",\"source_id\":\"id-86\",\"target_id\":\"id-74\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-105\",\"type_name\":\"Feeds\",\"source_id\":\"id-88\",\"target_id\":\"id-88\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Part\",[\"id-10\",\"id-101\",\"id-29\",\"id-3\",\"id-36\",\"id-37\",\"id-39\",\"id-46\",\"id-54\",\"id-65\",\"id-67\",\"id-68\",\"id-70\",\"id-75\",\"id-85\",\"id-87\",\"id-89\",\"id-90\",\"id-97\"]],[\"Slot\",[\"id-74\",\"id-86\",\"id-88\",\"id-93\",\"id-96\"]]],\"out\":[[\"id-37\",[\"id-52\"]],[\"id-39\",[\"id-91\"]],[\"id-54\",[\"id-99\"]],[\"id-67\",[\"id-100\"]],[\"id-70\",[\"id-79\"]],[\"id-86\",[\"id-103\",\"id-95\"]],[\"id-87\",[\"id-102\"]],[\"id-88\",[\"id-105\"]]],\"in\":[[\"id-3\",[\"id-99\"]],[\"id-37\",[\"id-52\"]],[\"id-74\",[\"id-100\",\"id-102\",\"id-103\",\"id-79\",\"id-91\"]],[\"id-88\",[\"id-105\"]],[\"id-93\",[\"id-95\"]]],\"out_count\":[[\"id-37\",\"Owns\",1],[\"id-39\",\"Seats\",1],[\"id-54\",\"Owns\",1],[\"id-67\",\"Seats\",1],[\"id-70\",\"Seats\",1],[\"id-86\",\"Feeds\",2],[\"id-87\",\"Seats\",1],[\"id-88\",\"Feeds\",1]],\"in_count\":[[\"id-3\",\"Owns\",1],[\"id-37\",\"Owns\",1],[\"id-74\",\"Feeds\",1],[\"id-74\",\"Seats\",4],[\"id-88\",\"Feeds\",1],[\"id-93\",\"Feeds\",1]],\"parents\":[[\"id-3\",[\"id-54\"],[\"id-99\"]],[\"id-37\",[\"id-37\"],[\"id-52\"]],[\"id-74\",[\"id-70\",\"id-39\",\"id-67\",\"id-87\"],[\"id-79\",\"id-91\",\"id-100\",\"id-102\"]]],\"refs\":[[\"id-74\",[\"id-65\"]],[\"id-88\",[\"id-90\"]],[\"id-96\",[\"id-93\"]],[\"id-97\",[\"id-29\"]]],\"referencers\":[[\"id-29\",[\"id-97\"]],[\"id-65\",[\"id-74\"]],[\"id-90\",[\"id-88\"]],[\"id-93\",[\"id-96\"]]],\"uniq_groups\":[[\"id-10\",\"id-70\"],[\"id-101\",\"id-46\",\"id-54\",\"id-65\",\"id-67\",\"id-85\",\"id-89\",\"id-90\"],[\"id-29\",\"id-36\",\"id-75\"],[\"id-3\"],[\"id-37\"],[\"id-39\"],[\"id-68\"],[\"id-74\"],[\"id-86\"],[\"id-87\"],[\"id-88\"],[\"id-93\"],[\"id-96\"],[\"id-97\"]],\"duplicates\":[[\"id-10\",\"id-70\"],[\"id-101\",\"id-46\",\"id-54\",\"id-65\",\"id-67\",\"id-85\",\"id-89\",\"id-90\"],[\"id-29\",\"id-36\",\"id-75\"]],\"roots\":[[\"B\",\"id-87\"],[\"id-10\",\"id-10\"],[\"id-101\",\"id-101\"],[\"id-29\",\"id-29\"],[\"id-36\",\"id-36\"],[\"id-46\",\"id-46\"],[\"id-54\",\"id-54\"],[\"id-65\",\"id-65\"],[\"id-67\",\"id-67\"],[\"id-70\",\"id-70\"],[\"id-75\",\"id-75\"],[\"id-85\",\"id-85\"],[\"id-86\",\"id-86\"],[\"id-88\",\"id-88\"],[\"id-89\",\"id-89\"],[\"id-90\",\"id-90\"],[\"id-93\",\"id-93\"],[\"id-96\",\"id-96\"],[\"id-97\",\"id-97\"],[\"é\",\"id-39\"],[\"é\",\"id-68\"]]}"
+    }
+  ]
+}
