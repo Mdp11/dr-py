@@ -1,0 +1,374 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Thing",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Box",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [
+          {
+            "name": "buddy",
+            "datatype": "Box",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Holds",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Box",
+        "target": "Box",
+        "mappings": [
+          {
+            "source": "Box",
+            "target": "Box"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Links",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Box",
+        "target": "Box",
+        "mappings": [
+          {
+            "source": "Box",
+            "target": "Box"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      }
+    ]
+  },
+  "accepted": {
+    "elements": [
+      "{\"id\":\"b1\",\"type_name\":\"Box\",\"properties\":{\"name\":\"one\",\"buddy\":\"b2\"},\"rev\":3}",
+      "{\"id\":\"b2\",\"type_name\":\"Box\",\"properties\":{\"name\":\"one\"},\"rev\":0,\"extra\":true}",
+      "{\"id\":\"b3\",\"type_name\":\"Box\"}",
+      "{\"id\":\"b4\",\"type_name\":\"Box\",\"properties\":null}",
+      "{\"id\":\"b5\",\"type_name\":\"Gone\",\"properties\":{\"anything\":[1,1.0,2e+30,18446744073709551617]}}",
+      "{\"id\":\"b6\",\"type_name\":\"Box\",\"properties\":{\"__proto__\":\"p\",\"constructor\":\"c\",\"name\":\"six\"},\"rev\":-2}",
+      "{\"rev\":1,\"properties\":{\"name\":\"one\"},\"type_name\":\"Box\",\"id\":\"b7\"}"
+    ],
+    "relationships": [
+      "{\"id\":\"r1\",\"type_name\":\"Holds\",\"source_id\":\"b1\",\"target_id\":\"b2\",\"properties\":{},\"rev\":1}",
+      "{\"id\":\"r2\",\"type_name\":\"Vanished\",\"source_id\":\"b2\",\"target_id\":\"b5\"}",
+      "{\"id\":\"r3\",\"type_name\":\"Holds\",\"source_id\":\"b3\",\"target_id\":\"b2\",\"properties\":{\"odd\":\"kept\"}}",
+      "{\"id\":\"r4\",\"type_name\":\"Links\",\"source_id\":\"b7\",\"target_id\":\"b7\",\"rev\":2}"
+    ],
+    "digest": "8809c5872d5d1a41",
+    "fingerprint": "d10e6ca16f88e97c",
+    "state": [
+      "{\"id\":\"b1\",\"type_name\":\"Box\",\"properties\":{\"name\":\"one\",\"buddy\":\"b2\"},\"rev\":3}",
+      "{\"id\":\"b2\",\"type_name\":\"Box\",\"properties\":{\"name\":\"one\"},\"rev\":0}",
+      "{\"id\":\"b3\",\"type_name\":\"Box\",\"properties\":{},\"rev\":0}",
+      "{\"id\":\"b4\",\"type_name\":\"Box\",\"properties\":{},\"rev\":0}",
+      "{\"id\":\"b5\",\"type_name\":\"Gone\",\"properties\":{\"anything\":[1,1.0,2e+30,18446744073709551617]},\"rev\":0}",
+      "{\"id\":\"b6\",\"type_name\":\"Box\",\"properties\":{\"__proto__\":\"p\",\"constructor\":\"c\",\"name\":\"six\"},\"rev\":-2}",
+      "{\"id\":\"b7\",\"type_name\":\"Box\",\"properties\":{\"name\":\"one\"},\"rev\":1}",
+      "{\"id\":\"r1\",\"type_name\":\"Holds\",\"source_id\":\"b1\",\"target_id\":\"b2\",\"properties\":{},\"rev\":1}",
+      "{\"id\":\"r2\",\"type_name\":\"Vanished\",\"source_id\":\"b2\",\"target_id\":\"b5\",\"properties\":{},\"rev\":0}",
+      "{\"id\":\"r3\",\"type_name\":\"Holds\",\"source_id\":\"b3\",\"target_id\":\"b2\",\"properties\":{\"odd\":\"kept\"},\"rev\":0}",
+      "{\"id\":\"r4\",\"type_name\":\"Links\",\"source_id\":\"b7\",\"target_id\":\"b7\",\"properties\":{},\"rev\":2}"
+    ],
+    "indexes": "{\"by_type\":[[\"Box\",[\"b1\",\"b2\",\"b3\",\"b4\",\"b6\",\"b7\"]],[\"Gone\",[\"b5\"]]],\"out\":[[\"b1\",[\"r1\"]],[\"b2\",[\"r2\"]],[\"b3\",[\"r3\"]],[\"b7\",[\"r4\"]]],\"in\":[[\"b2\",[\"r1\",\"r3\"]],[\"b5\",[\"r2\"]],[\"b7\",[\"r4\"]]],\"out_count\":[[\"b1\",\"Holds\",1],[\"b2\",\"Vanished\",1],[\"b3\",\"Holds\",1],[\"b7\",\"Links\",1]],\"in_count\":[[\"b2\",\"Holds\",2],[\"b5\",\"Vanished\",1],[\"b7\",\"Links\",1]],\"parents\":[[\"b2\",[\"b1\",\"b3\"],[\"r1\",\"r3\"]]],\"refs\":[[\"b1\",[\"b2\"]]],\"referencers\":[[\"b2\",[\"b1\"]]],\"uniq_groups\":[[\"b1\"],[\"b2\"],[\"b3\",\"b4\"],[\"b5\"],[\"b6\"],[\"b7\"]],\"duplicates\":[[\"b3\",\"b4\"]],\"roots\":[[\"b3\",\"b3\"],[\"b4\",\"b4\"],[\"b5\",\"b5\"],[\"one\",\"b1\"],[\"one\",\"b7\"],[\"six\",\"b6\"]]}"
+  },
+  "refused": [
+    {
+      "name": "element is a list",
+      "elements": [
+        "[]"
+      ],
+      "relationships": [],
+      "error": "elements[0]: must be an object"
+    },
+    {
+      "name": "element is a string",
+      "elements": [
+        "\"b1\""
+      ],
+      "relationships": [],
+      "error": "elements[0]: must be an object"
+    },
+    {
+      "name": "element is null",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}",
+        "null"
+      ],
+      "relationships": [],
+      "error": "elements[1]: must be an object"
+    },
+    {
+      "name": "element id is a number",
+      "elements": [
+        "{\"id\":1,\"type_name\":\"Box\"}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'id' must be a string"
+    },
+    {
+      "name": "element id is missing",
+      "elements": [
+        "{\"type_name\":\"Box\"}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'id' must be a string"
+    },
+    {
+      "name": "element type_name is null",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":null}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'type_name' must be a string"
+    },
+    {
+      "name": "element id is reserved",
+      "elements": [
+        "{\"id\":\"tmp_1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [],
+      "error": "Element id 'tmp_1' uses the reserved 'tmp_' prefix (client-side temporary ids of the ops protocol); loaded models must not contain such ids"
+    },
+    {
+      "name": "reserved id comes before the abstract type",
+      "elements": [
+        "{\"id\":\"tmp_1\",\"type_name\":\"Thing\"}"
+      ],
+      "relationships": [],
+      "error": "Element id 'tmp_1' uses the reserved 'tmp_' prefix (client-side temporary ids of the ops protocol); loaded models must not contain such ids"
+    },
+    {
+      "name": "element type is abstract",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Thing\"}"
+      ],
+      "relationships": [],
+      "error": "Element type 'Thing' is abstract and cannot be instantiated"
+    },
+    {
+      "name": "element id is repeated",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}",
+        "{\"id\":\"b2\",\"type_name\":\"Box\"}",
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [],
+      "error": "Duplicate element id 'b1' in snapshot"
+    },
+    {
+      "name": "repeated id comes before bad properties",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}",
+        "{\"id\":\"b1\",\"type_name\":\"Box\",\"properties\":[]}"
+      ],
+      "relationships": [],
+      "error": "Duplicate element id 'b1' in snapshot"
+    },
+    {
+      "name": "properties is a list",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\",\"properties\":[]}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'properties' must be an object"
+    },
+    {
+      "name": "properties is a string",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}",
+        "{\"id\":\"b2\",\"type_name\":\"Box\",\"properties\":\"x\"}"
+      ],
+      "relationships": [],
+      "error": "elements[1]: field 'properties' must be an object"
+    },
+    {
+      "name": "bad properties come before a bad rev",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\",\"properties\":1,\"rev\":\"x\"}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'properties' must be an object"
+    },
+    {
+      "name": "rev is a float",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\",\"rev\":1.0}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'rev' must be an integer"
+    },
+    {
+      "name": "rev is a boolean",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\",\"rev\":true}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'rev' must be an integer"
+    },
+    {
+      "name": "rev is a string",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\",\"rev\":\"1\"}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'rev' must be an integer"
+    },
+    {
+      "name": "rev is null",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\",\"rev\":null}"
+      ],
+      "relationships": [],
+      "error": "elements[0]: field 'rev' must be an integer"
+    },
+    {
+      "name": "relationship is a number",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "7"
+      ],
+      "error": "relationships[0]: must be an object"
+    },
+    {
+      "name": "relationship id is missing",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"type_name\":\"Links\",\"source_id\":\"b1\",\"target_id\":\"b1\"}"
+      ],
+      "error": "relationships[0]: field 'id' must be a string"
+    },
+    {
+      "name": "relationship source_id is missing",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"target_id\":\"b1\"}"
+      ],
+      "error": "relationships[0]: field 'source_id' must be a string"
+    },
+    {
+      "name": "relationship target_id is a list",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"b1\",\"target_id\":[]}"
+      ],
+      "error": "relationships[0]: field 'target_id' must be a string"
+    },
+    {
+      "name": "relationship id is reserved",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"tmp_r\",\"type_name\":\"Links\",\"source_id\":\"b1\",\"target_id\":\"b1\"}"
+      ],
+      "error": "Relationship id 'tmp_r' uses the reserved 'tmp_' prefix (client-side temporary ids of the ops protocol); loaded models must not contain such ids"
+    },
+    {
+      "name": "relationship source is unknown",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"nope\",\"target_id\":\"b1\"}"
+      ],
+      "error": "Relationship 'r1' references unknown source 'nope'"
+    },
+    {
+      "name": "relationship target is unknown",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"b1\",\"target_id\":\"it's\"}"
+      ],
+      "error": "Relationship 'r1' references unknown target \"it's\""
+    },
+    {
+      "name": "unknown source comes before a repeated id",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"b1\",\"target_id\":\"b1\"}",
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"nope\",\"target_id\":\"b1\"}"
+      ],
+      "error": "Relationship 'r1' references unknown source 'nope'"
+    },
+    {
+      "name": "relationship id is repeated",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}",
+        "{\"id\":\"b2\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"b1\",\"target_id\":\"b2\"}",
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"b2\",\"target_id\":\"b1\"}"
+      ],
+      "error": "Duplicate relationship id 'r1' in snapshot"
+    },
+    {
+      "name": "relationship rev is a float",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"b1\",\"target_id\":\"b1\",\"rev\":0.0}"
+      ],
+      "error": "relationships[0]: field 'rev' must be an integer"
+    },
+    {
+      "name": "relationship properties is null then a bad rev",
+      "elements": [
+        "{\"id\":\"b1\",\"type_name\":\"Box\"}"
+      ],
+      "relationships": [
+        "{\"id\":\"r1\",\"type_name\":\"Links\",\"source_id\":\"b1\",\"target_id\":\"b1\",\"properties\":null,\"rev\":[]}"
+      ],
+      "error": "relationships[0]: field 'rev' must be an integer"
+    }
+  ]
+}

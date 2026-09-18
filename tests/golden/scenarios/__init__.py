@@ -9,7 +9,10 @@ from . import (  # noqa: F401
     model_cascades,
     model_churn,
     model_indexes,
+    model_load,
     model_mutations,
     py_repr,
+    smart_city,
+    snapshot_v2,
     string_order,
 )

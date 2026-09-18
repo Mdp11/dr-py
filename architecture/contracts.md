@@ -27,6 +27,8 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
 - **Entity order is state.** Lines are in insertion order. An entity absent from a replica is
   appended when a delta introduces it. Every replica, on every host, MUST iterate entities in
   this order; exports depend on it.
+- An id is unique across elements and relationships (CT-3 folds both into one digest). The
+  engine refuses a snapshot that breaks this.
 - Stored as `application/gzip` and inflated by the reader (CN-11). The store key suffix is
   naming only; readers identify the format from the header line.
 - `src/data_rover/api/snapshot_codec.py` stays the only server module that knows the format
@@ -133,6 +135,6 @@ core is deleted.
 | Strings | Compare by code point, never UTF-16 code unit. `casefold` uses a table generated from Python's `str.casefold`. |
 | Regex | Patterns are Python `re` dialect: `re.fullmatch` for pattern facets, `re.search` for search criteria, an invalid pattern never matches. A translator converts them; a pattern outside its supported subset is a lint warning, never a silent difference. |
 | Dates | `date` values parse exactly as `datetime.date.fromisoformat` on Python 3.14. |
-| Order | No `Intl`, no locale comparison, no dependence on hash order. `Map` insertion order stands in for `dict` order. Sorts are stable. |
+| Order | No `Intl`, no locale comparison, no dependence on hash order. `Map` insertion order stands in for `dict` order. Sorts are stable. A plain object stands in for a property `dict`; it lists a canonical array-index key (`"0"`, `"42"`) first whatever the insertion order, so the engine refuses an entity carrying one at any depth of its properties. |
 | Arithmetic | `+ − × ÷` and comparisons only in evaluation paths; no transcendental `Math` functions. |
 | Exports | `json`, `jsonl`, `csv` and `manifest.json` match the oracle byte for byte. `xlsx` matches by cell content, and is byte-identical across the engine's two hosts. |

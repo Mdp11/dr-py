@@ -1,0 +1,103 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Item",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "amount",
+            "datatype": "float",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "peer",
+            "datatype": "Item",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Holds",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Item",
+        "target": "Item",
+        "mappings": [
+          {
+            "source": "Item",
+            "target": "Item"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Links",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Item",
+        "target": "Item",
+        "mappings": [
+          {
+            "source": "Item",
+            "target": "Item"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "weight",
+            "datatype": "float",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      }
+    ]
+  },
+  "text": "{\"format\":\"datarover.snapshot/v2\",\"project_id\":\"demo\",\"rev\":42,\"metamodel_id\":\"mm-7\",\"elements\":6,\"relationships\":3,\"state_digest\":\"6ef50a6d75d780bd\"}\n{\"id\":\"z-last-by-id-first-in-order\",\"type_name\":\"Item\",\"properties\":{\"name\":\"café 😀\"},\"rev\":4}\n{\"id\":\"a\",\"type_name\":\"Item\",\"properties\":{\"amount\":1.0,\"name\":\"whole float\"},\"rev\":1}\n{\"id\":\"b\",\"type_name\":\"Item\",\"properties\":{\"amount\":1,\"name\":\"whole float\"},\"rev\":0}\n{\"id\":\"c\",\"type_name\":\"Item\",\"properties\":{\"amount\":9223372036854775809,\"peer\":\"a\"},\"rev\":12}\n{\"id\":\"d\",\"type_name\":\"Item\",\"properties\":{\"amount\":\"Infinity\",\"name\":\"line\\nbreak   \\\"quoted\\\" \\\\ back\"},\"rev\":2}\n{\"id\":\"e\",\"type_name\":\"Item\",\"properties\":{\"amount\":1e-07,\"extra\":{\"k\":[1.5e+300,-0.0,null,true]}},\"rev\":3}\n{\"id\":\"r2\",\"type_name\":\"Holds\",\"source_id\":\"a\",\"target_id\":\"b\",\"properties\":{},\"rev\":0}\n{\"id\":\"r1\",\"type_name\":\"Holds\",\"source_id\":\"c\",\"target_id\":\"b\",\"properties\":{},\"rev\":5}\n{\"id\":\"r3\",\"type_name\":\"Links\",\"source_id\":\"e\",\"target_id\":\"e\",\"properties\":{\"weight\":0.1},\"rev\":1}\n",
+  "digest": "6ef50a6d75d780bd",
+  "fingerprint": "b06733b791559deb",
+  "state": [
+    "{\"id\":\"z-last-by-id-first-in-order\",\"type_name\":\"Item\",\"properties\":{\"name\":\"café 😀\"},\"rev\":4}",
+    "{\"id\":\"a\",\"type_name\":\"Item\",\"properties\":{\"amount\":1.0,\"name\":\"whole float\"},\"rev\":1}",
+    "{\"id\":\"b\",\"type_name\":\"Item\",\"properties\":{\"amount\":1,\"name\":\"whole float\"},\"rev\":0}",
+    "{\"id\":\"c\",\"type_name\":\"Item\",\"properties\":{\"amount\":9223372036854775809,\"peer\":\"a\"},\"rev\":12}",
+    "{\"id\":\"d\",\"type_name\":\"Item\",\"properties\":{\"amount\":\"Infinity\",\"name\":\"line\\nbreak   \\\"quoted\\\" \\\\ back\"},\"rev\":2}",
+    "{\"id\":\"e\",\"type_name\":\"Item\",\"properties\":{\"amount\":1e-07,\"extra\":{\"k\":[1.5e+300,-0.0,null,true]}},\"rev\":3}",
+    "{\"id\":\"r2\",\"type_name\":\"Holds\",\"source_id\":\"a\",\"target_id\":\"b\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"r1\",\"type_name\":\"Holds\",\"source_id\":\"c\",\"target_id\":\"b\",\"properties\":{},\"rev\":5}",
+    "{\"id\":\"r3\",\"type_name\":\"Links\",\"source_id\":\"e\",\"target_id\":\"e\",\"properties\":{\"weight\":0.1},\"rev\":1}"
+  ],
+  "indexes": "{\"by_type\":[[\"Item\",[\"a\",\"b\",\"c\",\"d\",\"e\",\"z-last-by-id-first-in-order\"]]],\"out\":[[\"a\",[\"r2\"]],[\"c\",[\"r1\"]],[\"e\",[\"r3\"]]],\"in\":[[\"b\",[\"r1\",\"r2\"]],[\"e\",[\"r3\"]]],\"out_count\":[[\"a\",\"Holds\",1],[\"c\",\"Holds\",1],[\"e\",\"Links\",1]],\"in_count\":[[\"b\",\"Holds\",2],[\"e\",\"Links\",1]],\"parents\":[[\"b\",[\"a\",\"c\"],[\"r2\",\"r1\"]]],\"refs\":[[\"c\",[\"a\"]]],\"referencers\":[[\"a\",[\"c\"]]],\"uniq_groups\":[[\"a\"],[\"b\"],[\"c\"],[\"d\"],[\"e\"],[\"z-last-by-id-first-in-order\"]],\"duplicates\":[],\"roots\":[[\"c\",\"c\"],[\"café 😀\",\"z-last-by-id-first-in-order\"],[\"e\",\"e\"],[\"line\\nbreak   \\\"quoted\\\" \\\\ back\",\"d\"],[\"whole float\",\"a\"]]}"
+}

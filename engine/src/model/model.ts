@@ -1,9 +1,10 @@
 import type { Metamodel } from '../metamodel/metamodel.ts';
 import { pyRepr } from '../value/repr.ts';
 import type { Value } from '../value/types.ts';
-import { ModelError } from './errors.ts';
+import { ModelError, SnapshotError } from './errors.ts';
 import { hashKey } from './hash.ts';
 import { IndexSet } from './indexes.ts';
+import { asEntity, readProps, readRev, requireStr, TEMP_ID_PREFIX } from './load.ts';
 import { ElementRec, RelRec, setProp } from './records.ts';
 
 export type ModelOptions = {
@@ -245,8 +246,83 @@ export class Model {
 
 	// -- bulk load -----------------------------------------------------------
 
+	/**
+	 * Adds one element of a snapshot, in snapshot order, unindexed. Lenient
+	 * about types — an unknown one loads, and validation reports it — and
+	 * strict about structure.
+	 */
+	loadElement(doc: Value): void {
+		const where = `elements[${this.elementMap.size}]`;
+		const entity = asEntity(doc, where);
+		const id = requireStr(entity, 'id', where);
+		const typeName = requireStr(entity, 'type_name', where);
+		if (id.startsWith(TEMP_ID_PREFIX)) throw new SnapshotError(reservedId('Element', id));
+		if (this.metamodel.elementType(typeName)?.abstract) {
+			throw new SnapshotError(
+				`Element type ${pyRepr(typeName)} is abstract and cannot be instantiated`
+			);
+		}
+		if (this.elementMap.has(id)) {
+			throw new SnapshotError(`Duplicate element id ${pyRepr(id)} in snapshot`);
+		}
+		const element = new ElementRec(
+			id,
+			typeName,
+			readProps(entity, where),
+			readRev(entity, where),
+			this.nextOrd++
+		);
+		this.elementMap.set(id, element);
+	}
+
+	/** Adds one relationship of a snapshot; every element must be loaded before the first one. */
+	loadRelationship(doc: Value): void {
+		const where = `relationships[${this.relationshipMap.size}]`;
+		const entity = asEntity(doc, where);
+		const id = requireStr(entity, 'id', where);
+		const typeName = requireStr(entity, 'type_name', where);
+		const sourceId = requireStr(entity, 'source_id', where);
+		const targetId = requireStr(entity, 'target_id', where);
+		if (id.startsWith(TEMP_ID_PREFIX)) throw new SnapshotError(reservedId('Relationship', id));
+		const source = this.elementMap.get(sourceId);
+		if (source === undefined) {
+			throw new SnapshotError(
+				`Relationship ${pyRepr(id)} references unknown source ${pyRepr(sourceId)}`
+			);
+		}
+		const target = this.elementMap.get(targetId);
+		if (target === undefined) {
+			throw new SnapshotError(
+				`Relationship ${pyRepr(id)} references unknown target ${pyRepr(targetId)}`
+			);
+		}
+		if (this.relationshipMap.has(id)) {
+			throw new SnapshotError(`Duplicate relationship id ${pyRepr(id)} in snapshot`);
+		}
+		if (this.elementMap.has(id)) {
+			throw new SnapshotError(`Relationship id ${pyRepr(id)} is already an element id`);
+		}
+		const rel = new RelRec(
+			id,
+			typeName,
+			source,
+			target,
+			readProps(entity, where),
+			readRev(entity, where),
+			this.nextOrd++
+		);
+		this.relationshipMap.set(id, rel);
+	}
+
 	/** Recomputes every index and the records' adjacency from the entities. */
 	rebuildIndexes(): void {
 		this.indexes.rebuild();
 	}
+}
+
+function reservedId(kind: string, id: string): string {
+	return (
+		`${kind} id ${pyRepr(id)} uses the reserved ${pyRepr(TEMP_ID_PREFIX)} prefix ` +
+		'(client-side temporary ids of the ops protocol); loaded models must not contain such ids'
+	);
 }
