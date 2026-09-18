@@ -10,7 +10,7 @@ import {
 	type Delta,
 	type ModelOp
 } from '../../src/index.ts';
-import { entityHash, stateDigest } from '../golden/digest.ts';
+import { stateDigest } from '../golden/digest.ts';
 
 /** A second model holding the same state, entity order and `rev`s included, loaded from its lines. */
 export function clone(model: Model): Model {
@@ -22,8 +22,9 @@ export function clone(model: Model): Model {
 	return copy;
 }
 
+/** Folds with the engine's own hash, while every digest it is held to comes from the reference one. */
 export const workingCopy = (model: Model, rev = 0) =>
-	new WorkingCopy(model, { rev, digest: stateDigest(model) }, { entityHash });
+	new WorkingCopy(model, { rev, digest: stateDigest(model) });
 
 /**
  * Stands in for the server: one model that lands batches under ids of its own

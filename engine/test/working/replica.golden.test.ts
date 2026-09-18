@@ -7,7 +7,6 @@ import {
 	verifyConsistent,
 	WorkingCopy
 } from '../../src/index.ts';
-import { entityHash } from '../golden/digest.ts';
 import { loadFixture } from '../golden/load.ts';
 import {
 	observe,
@@ -24,7 +23,7 @@ import {
 function follow(name: string): void {
 	const fixture = loadFixture<StepsFixture>(name);
 	const model = new Model(Metamodel.fromJSON(fixture.metamodel));
-	const replica = new WorkingCopy(model, { rev: 0, digest: '0'.repeat(16) }, { entityHash });
+	const replica = new WorkingCopy(model, { rev: 0, digest: '0'.repeat(16) });
 	const random = seededRandom(20260919);
 	let expected = { digest: replica.digest, fingerprint: observe(model).fingerprint };
 	fixture.steps.forEach((step, index) => {

@@ -12,12 +12,13 @@ import {
 } from '../ops/result.ts';
 import { rewind } from '../ops/rewind.ts';
 import type { ModelOp } from '../ops/types.ts';
+import { entityHash, formatDigest, type EntityHash } from '../snapshot/digest.ts';
 import { readDelta, type CommittedChange, type Delta } from './delta.ts';
 
-/** The 64-bit hash of one `(id, rev)` pair that the state digest folds with XOR. */
-export type EntityHash = (id: string, rev: number) => bigint;
-
-export type WorkingCopyOptions = { entityHash: EntityHash };
+export type WorkingCopyOptions = {
+	/** Replaces the `(id, rev)` hash of the state digest; tests check the engine's own against another. */
+	entityHash?: EntityHash;
+};
 
 export type StagedBatch = { readonly id: number; readonly ops: readonly ModelOp[] };
 
@@ -126,12 +127,12 @@ export class WorkingCopy {
 	constructor(
 		model: Model,
 		committed: { rev: number; digest: string },
-		options: WorkingCopyOptions
+		options: WorkingCopyOptions = {}
 	) {
 		this.model = model;
 		this.committedRev = committed.rev;
 		this.committedDigest = BigInt('0x' + committed.digest);
-		this.entityHash = options.entityHash;
+		this.entityHash = options.entityHash ?? entityHash;
 	}
 
 	// -- reading -------------------------------------------------------------
@@ -143,7 +144,7 @@ export class WorkingCopy {
 
 	/** The state digest of the committed state, as the wire carries it. */
 	get digest(): string {
-		return this.committedDigest.toString(16).padStart(16, '0');
+		return formatDigest(this.committedDigest);
 	}
 
 	/** Set once the committed state is known to differ from the server's: discard the replica. */
@@ -176,6 +177,29 @@ export class WorkingCopy {
 		if (image !== undefined) return image;
 		const rel = this.model.findRelationship(id);
 		return rel === undefined ? null : relImage(rel);
+	}
+
+	/**
+	 * Recomputes the state digest from every committed entity — the model's,
+	 * with the committed image standing in wherever a staged batch has been —
+	 * and compares it with the one held. A mismatch sets `diverged`.
+	 */
+	verifyDigest(): boolean {
+		const hash = this.entityHash;
+		let value = 0n;
+		for (const element of this.model.elements()) {
+			if (!this.committedElements.has(element.id)) value ^= hash(element.id, element.rev);
+		}
+		for (const rel of this.model.relationships()) {
+			if (!this.committedRelationships.has(rel.id)) value ^= hash(rel.id, rel.rev);
+		}
+		for (const images of [this.committedElements, this.committedRelationships]) {
+			for (const image of images.values()) {
+				if (image !== null) value ^= hash(image.id, image.rev);
+			}
+		}
+		if (value !== this.committedDigest) this.hasDiverged = true;
+		return value === this.committedDigest;
 	}
 
 	// -- staging -------------------------------------------------------------

@@ -31,6 +31,8 @@ export type {
 	UpdateElementOp,
 	UpdateRelationshipOp
 } from './ops/types.ts';
+export { entityHash, formatDigest, modelDigest, type EntityHash } from './snapshot/digest.ts';
+export { sha256 } from './snapshot/sha256.ts';
 export { cmpCodePoint } from './value/compare.ts';
 export { pyFloatRepr } from './value/float-repr.ts';
 export { pyKey } from './value/key.ts';
@@ -44,7 +46,6 @@ export {
 	type ChangeSet,
 	type Conflict,
 	type DeltaStatus,
-	type EntityHash,
 	type OwnCommit,
 	type StagedBatch,
 	type Unstage,

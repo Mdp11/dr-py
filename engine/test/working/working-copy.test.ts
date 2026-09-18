@@ -4,6 +4,7 @@ import {
 	parseJson,
 	SnapshotError,
 	verifyConsistent,
+	WorkingCopy,
 	type ModelOp
 } from '../../src/index.ts';
 import { stateDigest } from '../golden/digest.ts';
@@ -316,5 +317,55 @@ describe('divergence', () => {
 		);
 		expect(observe(wc.model)).toEqual(before);
 		expect([wc.rev, wc.diverged]).toEqual([0, false]);
+	});
+});
+
+describe('verifying the digest', () => {
+	it('recomputes it from committed state, whatever is staged on top', () => {
+		const wc = workingCopy(family());
+		expect(wc.verifyDigest()).toBe(true);
+		wc.stage([
+			rename('a', 'mine'),
+			node('tmp_e', 'E'),
+			refers('tmp_r', 'tmp_e', 'c'),
+			{ kind: 'delete_element', id: 'b' }
+		]);
+		expect(wc.verifyDigest()).toBe(true);
+		expect(wc.diverged).toBe(false);
+	});
+
+	it('holds after a delta lands under staged work', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		wc.stage([rename('c', 'mine'), { kind: 'delete_relationship', id: 'a-c' }]);
+		wc.applyDelta(server.commit([rename('a', 'theirs'), node('tmp_x', 'X')]).delta);
+		expect(wc.verifyDigest()).toBe(true);
+		expect(wc.diverged).toBe(false);
+	});
+
+	it('fails, and sets diverged, when the replica does not hold what the digest names', () => {
+		const model = family();
+		const wrong = new WorkingCopy(model, { rev: 0, digest: '0'.repeat(16) });
+		expect(wrong.verifyDigest()).toBe(false);
+		expect(wrong.diverged).toBe(true);
+
+		const wc = workingCopy(family());
+		wc.model.setProperty(wc.model.getElement('d'), 'name', 'behind its back');
+		expect(wc.verifyDigest()).toBe(false);
+		expect(wc.diverged).toBe(true);
+	});
+
+	it('takes another hash when one is given', () => {
+		const model = family();
+		const count = model.elementCount + model.relationshipCount;
+		let calls = 0;
+		const wc = new WorkingCopy(
+			model,
+			{ rev: 0, digest: '0'.repeat(16) },
+			{ entityHash: () => (calls++, 0n) }
+		);
+		expect(wc.verifyDigest()).toBe(true);
+		expect(calls).toBe(count);
 	});
 });

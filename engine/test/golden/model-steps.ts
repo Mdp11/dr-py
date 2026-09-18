@@ -9,6 +9,7 @@ import {
 	Metamodel,
 	Model,
 	ModelError,
+	modelDigest,
 	modelLines,
 	OpError,
 	parseJson,
@@ -25,7 +26,6 @@ import {
 	type RelImage,
 	type Value
 } from '../../src/index.ts';
-import { stateDigest } from './digest.ts';
 import { untag, type Tagged } from './load.ts';
 
 /**
@@ -97,7 +97,7 @@ export function fingerprint(state: readonly string[], indexes: string): string {
 export function observe(model: Model): Required<Observed> {
 	const state = modelLines(model);
 	const indexes = pyDumps(dumpIndexes(model));
-	return { digest: stateDigest(model), fingerprint: fingerprint(state, indexes), state, indexes };
+	return { digest: modelDigest(model), fingerprint: fingerprint(state, indexes), state, indexes };
 }
 
 const sortedIds = (rels: readonly RelRec[]) => rels.map((rel) => rel.id).sort(cmpCodePoint);
