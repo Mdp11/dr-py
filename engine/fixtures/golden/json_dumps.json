@@ -1,0 +1,317 @@
+[
+  {
+    "value": {
+      "t": "null"
+    },
+    "compact": "null",
+    "indented": "null"
+  },
+  {
+    "value": {
+      "t": "bool",
+      "v": true
+    },
+    "compact": "true",
+    "indented": "true"
+  },
+  {
+    "value": {
+      "t": "bool",
+      "v": false
+    },
+    "compact": "false",
+    "indented": "false"
+  },
+  {
+    "value": {
+      "t": "int",
+      "v": "0"
+    },
+    "compact": "0",
+    "indented": "0"
+  },
+  {
+    "value": {
+      "t": "int",
+      "v": "-5"
+    },
+    "compact": "-5",
+    "indented": "-5"
+  },
+  {
+    "value": {
+      "t": "int",
+      "v": "9007199254740992"
+    },
+    "compact": "9007199254740992",
+    "indented": "9007199254740992"
+  },
+  {
+    "value": {
+      "t": "int",
+      "v": "18446744073709551616"
+    },
+    "compact": "18446744073709551616",
+    "indented": "18446744073709551616"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "3ff0000000000000"
+    },
+    "compact": "1.0",
+    "indented": "1.0"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "8000000000000000"
+    },
+    "compact": "-0.0",
+    "indented": "-0.0"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "4341c37937e08000"
+    },
+    "compact": "1e+16",
+    "indented": "1e+16"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "3e7ad7f29abcaf48"
+    },
+    "compact": "1e-07",
+    "indented": "1e-07"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "3fb999999999999a"
+    },
+    "compact": "0.1",
+    "indented": "0.1"
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": ""
+    },
+    "compact": "\"\"",
+    "indented": "\"\""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "plain"
+    },
+    "compact": "\"plain\"",
+    "indented": "\"plain\""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "quote \" backslash \\ slash /"
+    },
+    "compact": "\"quote \\\" backslash \\\\ slash /\"",
+    "indented": "\"quote \\\" backslash \\\\ slash /\""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "ctl \u0000 \u001f  \b \f \n \r \t"
+    },
+    "compact": "\"ctl \\u0000 \\u001f  \\b \\f \\n \\r \\t\"",
+    "indented": "\"ctl \\u0000 \\u001f  \\b \\f \\n \\r \\t\""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "café 中文 😀    "
+    },
+    "compact": "\"café 中文 😀    \"",
+    "indented": "\"café 中文 😀    \""
+  },
+  {
+    "value": {
+      "t": "list",
+      "v": []
+    },
+    "compact": "[]",
+    "indented": "[]"
+  },
+  {
+    "value": {
+      "t": "dict",
+      "v": []
+    },
+    "compact": "{}",
+    "indented": "{}"
+  },
+  {
+    "value": {
+      "t": "list",
+      "v": [
+        {
+          "t": "list",
+          "v": []
+        }
+      ]
+    },
+    "compact": "[[]]",
+    "indented": "[\n  []\n]"
+  },
+  {
+    "value": {
+      "t": "list",
+      "v": [
+        {
+          "t": "dict",
+          "v": []
+        }
+      ]
+    },
+    "compact": "[{}]",
+    "indented": "[\n  {}\n]"
+  },
+  {
+    "value": {
+      "t": "dict",
+      "v": [
+        [
+          "a",
+          {
+            "t": "list",
+            "v": []
+          }
+        ]
+      ]
+    },
+    "compact": "{\"a\":[]}",
+    "indented": "{\n  \"a\": []\n}"
+  },
+  {
+    "value": {
+      "t": "dict",
+      "v": [
+        [
+          "a",
+          {
+            "t": "dict",
+            "v": []
+          }
+        ]
+      ]
+    },
+    "compact": "{\"a\":{}}",
+    "indented": "{\n  \"a\": {}\n}"
+  },
+  {
+    "value": {
+      "t": "list",
+      "v": [
+        {
+          "t": "int",
+          "v": "1"
+        },
+        {
+          "t": "float",
+          "hex": "4004000000000000"
+        },
+        {
+          "t": "str",
+          "v": "x"
+        },
+        {
+          "t": "null"
+        },
+        {
+          "t": "bool",
+          "v": true
+        }
+      ]
+    },
+    "compact": "[1,2.5,\"x\",null,true]",
+    "indented": "[\n  1,\n  2.5,\n  \"x\",\n  null,\n  true\n]"
+  },
+  {
+    "value": {
+      "t": "dict",
+      "v": [
+        [
+          "id",
+          {
+            "t": "str",
+            "v": "e1"
+          }
+        ],
+        [
+          "properties",
+          {
+            "t": "dict",
+            "v": [
+              [
+                "name",
+                {
+                  "t": "str",
+                  "v": "N"
+                }
+              ],
+              [
+                "list",
+                {
+                  "t": "list",
+                  "v": [
+                    {
+                      "t": "int",
+                      "v": "1"
+                    },
+                    {
+                      "t": "list",
+                      "v": [
+                        {
+                          "t": "int",
+                          "v": "2"
+                        },
+                        {
+                          "t": "dict",
+                          "v": [
+                            [
+                              "z",
+                              {
+                                "t": "float",
+                                "hex": "3ff8000000000000"
+                              }
+                            ]
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              [
+                "empty",
+                {
+                  "t": "dict",
+                  "v": []
+                }
+              ]
+            ]
+          }
+        ],
+        [
+          "rev",
+          {
+            "t": "int",
+            "v": "0"
+          }
+        ]
+      ]
+    },
+    "compact": "{\"id\":\"e1\",\"properties\":{\"name\":\"N\",\"list\":[1,[2,{\"z\":1.5}]],\"empty\":{}},\"rev\":0}",
+    "indented": "{\n  \"id\": \"e1\",\n  \"properties\": {\n    \"name\": \"N\",\n    \"list\": [\n      1,\n      [\n        2,\n        {\n          \"z\": 1.5\n        }\n      ]\n    ],\n    \"empty\": {}\n  },\n  \"rev\": 0\n}"
+  }
+]
