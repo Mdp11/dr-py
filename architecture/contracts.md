@@ -52,6 +52,14 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
 - **Apply rule.** Apply a delta iff `prev_rev == replica.rev`. If `rev <= replica.rev`, drop it
   as a duplicate. Otherwise fetch the tail from `replica.rev`; if it is incomplete,
   re-bootstrap.
+- **Entities in a delta.** Apply in this order: relationships out, elements out, elements in,
+  relationships in. A deleted id the replica does not hold is skipped (an entity created and
+  deleted within one commit). A changed entity the replica holds keeps its record and its
+  place; one it does not hold is appended. One that arrives under another type, or other ends,
+  than the replica's record was deleted and created again within the commit — an apply-CR
+  rewire does that — which put it last on the server: the replica removes it and appends it.
+  A re-creation that changes neither cannot be told from an update and keeps its place
+  (`BACKLOG.md`, `K-31`).
 - Artifact, view and metamodel-layout changes stay header-only on the wire; their content is
   refetched as today.
 
@@ -96,7 +104,10 @@ event     {event, …}                     engine → client, unsolicited
 1. Committed state changes only by opening a snapshot or applying a delta.
 2. Staged ops use the op shapes of `src/data_rover/api/schemas.py`, are applied in place, and
    each records its inverse. The engine keeps the committed state of every entity a staged op
-   touched, so committed reads need no rewind.
+   touched, so committed reads need no rewind. A refused batch leaves no trace, and a rewind
+   is exact: every touched entity goes back to its before-image — properties, `rev` and place
+   in state order — which replaying inverse ops, as the server's rollback does, cannot give
+   (`BACKLOG.md`, `K-30`).
 3. To apply a delta: rewind all staged ops in reverse order → apply the delta → drop the staged
    ops it committed → rewrite temp ids through `id_map` → replay the rest. An op that fails
    replay is parked as a conflict and surfaced; it is never dropped silently.

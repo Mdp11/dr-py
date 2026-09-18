@@ -1,0 +1,320 @@
+import { describe, expect, it } from 'vitest';
+import {
+	OpError,
+	parseJson,
+	SnapshotError,
+	verifyConsistent,
+	type ModelOp
+} from '../../src/index.ts';
+import { stateDigest } from '../golden/digest.ts';
+import { observe } from '../golden/model-steps.ts';
+import { thrown } from '../golden/thrown.ts';
+import { family } from '../model/fixtures.ts';
+import { clone, Server, workingCopy } from './helpers.ts';
+
+const rename = (id: string, name: string | null): ModelOp => ({
+	kind: 'update_element',
+	id,
+	properties_patch: { name }
+});
+
+const node = (temp_id: string, name: string): ModelOp => ({
+	kind: 'create_element',
+	temp_id,
+	type_name: 'Node',
+	properties: { name }
+});
+
+const refers = (temp_id: string, source_id: string, target_id: string): ModelOp => ({
+	kind: 'create_relationship',
+	temp_id,
+	type_name: 'Refers',
+	source_id,
+	target_id
+});
+
+describe('staging', () => {
+	it('applies in place under temp ids, says what changed, and keeps committed state readable', () => {
+		const wc = workingCopy(family());
+		const { batch, changes } = wc.stage([
+			rename('a', 'renamed'),
+			node('tmp_e', 'E'),
+			refers('tmp_r', 'tmp_e', 'a'),
+			{ kind: 'delete_element', id: 'b' }
+		]);
+		expect(batch.id).toBe(1);
+		expect(changes).toEqual({
+			elementIds: ['a', 'tmp_e'],
+			relationshipIds: ['tmp_r'],
+			deletedElementIds: ['b', 'd'],
+			// per deleted element, its outgoing relationships, then its incoming ones
+			deletedRelationshipIds: ['b-d', 'a-b']
+		});
+		expect(wc.model.getElement('a').props).toEqual({ name: 'renamed' });
+		expect(wc.committedElement('a')).toMatchObject({ props: { name: 'A' }, rev: 1 });
+		expect(wc.committedElement('b')).toMatchObject({ props: { name: 'B' } });
+		expect(wc.committedElement('tmp_e')).toBeNull();
+		expect(wc.committedElement('c')).toMatchObject({ props: { name: 'C' } });
+		expect(wc.committedRelationship('a-b')).toMatchObject({ sourceId: 'a', targetId: 'b' });
+		expect(wc.committedRelationship('tmp_r')).toBeNull();
+		expect(['a', 'tmp_e', 'a-b', 'c'].map((id) => wc.isStaged(id))).toEqual([
+			true,
+			true,
+			true,
+			false
+		]);
+		verifyConsistent(wc.model);
+	});
+
+	it('keeps the FIRST committed image when batches touch an entity again', () => {
+		const wc = workingCopy(family());
+		wc.stage([rename('a', 'one')]);
+		wc.stage([rename('a', 'two')]);
+		expect(wc.committedElement('a')).toMatchObject({ props: { name: 'A' }, rev: 1 });
+	});
+
+	it('throws on a refused batch and leaves no trace of it', () => {
+		const wc = workingCopy(family());
+		wc.stage([rename('a', 'kept')]);
+		const before = observe(wc.model);
+		const error = thrown(() => wc.stage([rename('c', 'lost'), rename('ghost', 'x')]));
+		expect(error).toBeInstanceOf(OpError);
+		expect(observe(wc.model)).toEqual(before);
+		expect(wc.staged().map((batch) => batch.id)).toEqual([1]);
+		expect(wc.isStaged('c')).toBe(false);
+	});
+});
+
+describe('unstaging', () => {
+	it('everything: the committed state is back byte for byte, order included', () => {
+		const wc = workingCopy(family());
+		const committed = observe(wc.model);
+		wc.stage([{ kind: 'delete_element', id: 'a' }]);
+		wc.stage([node('tmp_e', 'E'), refers('tmp_r', 'tmp_e', 'c')]);
+		wc.stage([rename('c', null)]);
+		const changes = wc.unstage('all');
+		expect(observe(wc.model)).toEqual(committed);
+		expect(wc.staged()).toEqual([]);
+		expect(wc.isStaged('a')).toBe(false);
+		expect(changes.elementIds.sort()).toEqual(['a', 'b', 'c', 'd']);
+		expect(changes.deletedElementIds).toEqual(['tmp_e']);
+		expect(changes.deletedRelationshipIds).toEqual(['tmp_r']);
+		verifyConsistent(wc.model);
+	});
+
+	it('one batch: the rest replays on top, and a batch that needed it is parked, not dropped', () => {
+		const wc = workingCopy(family());
+		wc.stage([node('tmp_e', 'E')]);
+		wc.stage([rename('c', 'still here')]);
+		wc.stage([refers('tmp_r', 'tmp_e', 'c')]);
+		wc.unstage({ batch: 1 });
+		expect(wc.staged().map((batch) => batch.id)).toEqual([2]);
+		expect(wc.model.getElement('c').props).toEqual({ name: 'still here' });
+		expect(wc.model.findElement('tmp_e')).toBeUndefined();
+		expect(wc.conflicts().map(({ batch, error }) => [batch.id, error.detail])).toEqual([
+			[3, "No source element 'tmp_e"]
+		]);
+		wc.unstage({ batch: 3 });
+		expect(wc.conflicts()).toEqual([]);
+		verifyConsistent(wc.model);
+	});
+
+	it('one entity: the ops that target it go, the rest of their batches stay', () => {
+		const wc = workingCopy(family());
+		wc.stage([rename('a', 'x'), rename('c', 'y')]);
+		wc.stage([rename('a', 'z')]);
+		wc.unstage({ entity: 'a' });
+		expect(wc.staged()).toEqual([{ id: 1, ops: [rename('c', 'y')] }]);
+		expect(wc.model.getElement('a').props).toEqual({ name: 'A' });
+		expect(wc.model.getElement('a').rev).toBe(1);
+		expect(wc.unstage({ entity: 'nobody' })).toEqual({
+			elementIds: [],
+			relationshipIds: [],
+			deletedElementIds: [],
+			deletedRelationshipIds: []
+		});
+	});
+
+	it('one entity with its incident relationship ops, whatever names their ends', () => {
+		const wc = workingCopy(family());
+		wc.stage([node('tmp_e', 'E'), refers('tmp_r', 'tmp_e', 'c')]);
+		wc.stage([{ kind: 'delete_relationship', id: 'tmp_r' }]);
+		wc.stage([{ kind: 'delete_relationship', id: 'a-c' }, rename('d', 'D2')]);
+		wc.unstage({ entity: 'c', incident: true });
+		expect(wc.staged()).toEqual([
+			{ id: 1, ops: [node('tmp_e', 'E')] },
+			{ id: 3, ops: [rename('d', 'D2')] }
+		]);
+		expect(wc.conflicts()).toEqual([]);
+		expect(wc.model.findRelationship('a-c')).toBeDefined();
+	});
+});
+
+describe('deltas', () => {
+	it('rebases the staged batches over a peer commit, as if they had been staged after it', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		wc.stage([rename('a', 'mine'), node('tmp_e', 'E'), refers('tmp_r', 'tmp_e', 'c')]);
+		const { delta } = server.commit([
+			rename('c', 'theirs'),
+			node('tmp_p', 'P'),
+			{ kind: 'delete_element', id: 'd' }
+		]);
+		const { status, changes } = wc.applyDelta(delta);
+		expect(status).toBe('applied');
+		expect([wc.rev, wc.digest, wc.diverged]).toEqual([1, delta.state_digest, false]);
+		expect(changes.elementIds.sort()).toEqual(['a', 'c', 'srv-1', 'tmp_e']);
+		expect(changes.deletedElementIds).toEqual(['d']);
+
+		const fresh = workingCopy(clone(server.model));
+		fresh.stage(wc.staged()[0]!.ops);
+		expect(observe(wc.model)).toEqual(observe(fresh.model));
+		expect([...wc.model.elements()].map((e) => e.id)).toEqual(['a', 'b', 'c', 'srv-1', 'tmp_e']);
+		expect(wc.committedElement('c')).toMatchObject({ props: { name: 'theirs' } });
+		verifyConsistent(wc.model);
+	});
+
+	it('ignores a delta that is not newer and reports one that skips ahead', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const first = server.commit([rename('a', 'one')]).delta;
+		const second = server.commit([rename('a', 'two')]).delta;
+		expect(wc.applyDelta(second).status).toBe('gap');
+		expect(wc.rev).toBe(0);
+		expect(wc.applyDelta(first).status).toBe('applied');
+		expect(wc.applyDelta(first).status).toBe('duplicate');
+		expect(wc.applyDelta(second).status).toBe('applied');
+		expect(wc.model.getElement('a').props).toEqual({ name: 'two' });
+		expect(wc.diverged).toBe(false);
+	});
+
+	it('own commit: drops the committed batches and rewrites their temp ids in what stays', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const first = wc.stage([node('tmp_e', 'E')]).batch;
+		const second = wc.stage([refers('tmp_r', 'tmp_e', 'c')]).batch;
+		wc.stage([
+			{ kind: 'update_element', id: 'tmp_e', properties_patch: { peer: 'tmp_e' } },
+			{ kind: 'update_element', id: 'a', properties_patch: { peer: 'tmp_e' } },
+			refers('tmp_s', 'a', 'tmp_e'),
+			{ kind: 'delete_relationship', id: 'tmp_r' }
+		]);
+		const { delta, result } = server.commit([...first.ops, ...second.ops]);
+		wc.applyDelta(delta, { batchIds: [first.id, second.id], idMap: result.idMap });
+		expect(wc.staged()).toEqual([
+			{
+				id: 3,
+				ops: [
+					{ kind: 'update_element', id: 'srv-1', properties_patch: { peer: 'srv-1' } },
+					{ kind: 'update_element', id: 'a', properties_patch: { peer: 'srv-1' } },
+					{ ...refers('tmp_s', 'a', 'srv-1'), properties: {} },
+					{ kind: 'delete_relationship', id: 'srv-2' }
+				]
+			}
+		]);
+		expect(wc.conflicts()).toEqual([]);
+		expect(wc.model.findElement('tmp_e')).toBeUndefined();
+		expect(wc.model.getElement('srv-1').props).toEqual({ name: 'E', peer: 'srv-1' });
+		expect(wc.committedElement('srv-1')).toMatchObject({ props: { name: 'E' } });
+		expect(wc.model.findRelationship('srv-2')).toBeUndefined();
+		expect(wc.diverged).toBe(false);
+		verifyConsistent(wc.model);
+	});
+
+	it('parks a staged batch the commit made impossible, and replays the others', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		wc.stage([rename('d', 'doomed')]);
+		wc.stage([rename('c', 'fine')]);
+		wc.applyDelta(server.commit([{ kind: 'delete_element', id: 'b' }]).delta);
+		expect(wc.staged().map((batch) => batch.id)).toEqual([2]);
+		expect(
+			wc.conflicts().map(({ batch, error }) => [batch.id, error.status, error.detail])
+		).toEqual([[1, 422, "No element with id 'd"]]);
+		expect(wc.model.getElement('c').props).toEqual({ name: 'fine' });
+		expect(wc.diverged).toBe(false);
+	});
+
+	it('puts an entity that comes back under other ends or another type last, as the server did', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const { delta } = server.commit([
+			{ kind: 'delete_relationship', id: 'a-b' },
+			{
+				kind: 'create_relationship',
+				temp_id: 'tmp_r',
+				type_name: 'Contains',
+				source_id: 'c',
+				target_id: 'b',
+				id: 'a-b'
+			}
+		]);
+		wc.applyDelta(delta);
+		expect(observe(wc.model)).toEqual(observe(server.model));
+		expect([...wc.model.relationships()].map((r) => r.id)).toEqual(['b-d', 'a-c', 'a-b']);
+		expect(wc.model.containerOf('b')).toBe('c');
+		verifyConsistent(wc.model);
+	});
+});
+
+describe('divergence', () => {
+	it('is set when the digest after a delta is not the one the delta names', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const { delta } = server.commit([rename('a', 'x')]);
+		wc.applyDelta({ ...delta, state_digest: '0'.repeat(16) });
+		expect(wc.diverged).toBe(true);
+		expect(wc.digest).toBe(stateDigest(wc.model));
+	});
+
+	it('is set by a delta that does not fit the replica, and staged work survives', () => {
+		const wc = workingCopy(family());
+		wc.stage([rename('a', 'mine')]);
+		const orphan = parseJson(
+			'{"id":"r","type_name":"Refers","source_id":"nobody","target_id":"a","properties":{},"rev":0}'
+		);
+		wc.applyDelta({
+			rev: 1,
+			prev_rev: 0,
+			state_digest: wc.digest,
+			changed_elements: [],
+			changed_relationships: [orphan],
+			deleted_element_ids: [],
+			deleted_relationship_ids: []
+		});
+		expect(wc.diverged).toBe(true);
+		expect(wc.staged().map((batch) => batch.id)).toEqual([1]);
+		expect(wc.model.getElement('a').props).toEqual({ name: 'mine' });
+	});
+
+	it('a delta the replica cannot hold throws before anything moves', () => {
+		const wc = workingCopy(family());
+		wc.stage([rename('a', 'mine')]);
+		const before = observe(wc.model);
+		const error = thrown(() =>
+			wc.applyDelta({
+				rev: 1,
+				prev_rev: 0,
+				state_digest: wc.digest,
+				changed_elements: [
+					parseJson('{"id":"a","type_name":"Node","properties":{"name":{"7":1}},"rev":2}')
+				],
+				changed_relationships: [],
+				deleted_element_ids: [],
+				deleted_relationship_ids: []
+			})
+		);
+		expect(error).toBeInstanceOf(SnapshotError);
+		expect((error as Error).message).toBe(
+			"changed_elements[0]: property key '7' is an array index, which cannot keep its place in insertion order"
+		);
+		expect(observe(wc.model)).toEqual(before);
+		expect([wc.rev, wc.diverged]).toEqual([0, false]);
+	});
+});

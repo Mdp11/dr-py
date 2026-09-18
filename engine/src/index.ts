@@ -19,6 +19,7 @@ export { displayName, nameOf } from './model/naming.ts';
 export { ElementRec, RelRec, type Props } from './model/records.ts';
 export { applyBatch, type ApplyOptions } from './ops/apply.ts';
 export { OpError } from './ops/errors.ts';
+export { remapOp } from './ops/remap.ts';
 export { BatchResult, type ElementImage, type RelImage } from './ops/result.ts';
 export { rewind } from './ops/rewind.ts';
 export type {
@@ -37,3 +38,15 @@ export { needsExactParse, parseExact, parseJson, parseLines } from './value/pars
 export { pyRepr } from './value/repr.ts';
 export { pyDumps } from './value/serialize.ts';
 export { PyFloat, type Value } from './value/types.ts';
+export type { Delta } from './working/delta.ts';
+export {
+	WorkingCopy,
+	type ChangeSet,
+	type Conflict,
+	type DeltaStatus,
+	type EntityHash,
+	type OwnCommit,
+	type StagedBatch,
+	type Unstage,
+	type WorkingCopyOptions
+} from './working/working-copy.ts';
