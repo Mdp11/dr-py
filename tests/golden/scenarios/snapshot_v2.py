@@ -1,10 +1,16 @@
 """A ``datarover.snapshot/v2`` text as the server encodes it (a header line,
 then one line per entity) over values a careless reader would lose, with what
-the oracle holds after reading it back."""
+the oracle holds after reading it back.
+
+``same`` lists texts no writer emits that the oracle reads to the same
+document; ``refused`` lists texts its decoder refuses in words of its own. A
+text it refuses in the JSON parser's words, or accepts by accident, is left
+out: the engine's reader answers for those alone."""
 
 from __future__ import annotations
 
 import gzip
+import json
 from typing import Any
 
 from data_rover.api.routes._snapshot import build_model_from_dicts
@@ -54,6 +60,27 @@ _RELATIONSHIPS: list[tuple[str, str, str, str, dict[str, Any], int]] = [
 ]
 
 
+def _with_header(text: str, **changes: Any) -> str:
+    """``text`` with keys of its header line replaced; ``None`` drops a key."""
+    first, _, body = text.partition("\n")
+    header = json.loads(first)
+    for key, value in changes.items():
+        if value is None:
+            del header[key]
+        else:
+            header[key] = value
+    return json.dumps(header, separators=(",", ":")) + "\n" + body
+
+
+def _refusal(text: str) -> str:
+    try:
+        decode_snapshot(text.encode("utf-8"))
+    except ValueError as exc:
+        assert type(exc) is ValueError, "refused, but not in the decoder's own words"
+        return str(exc)
+    raise AssertionError("the oracle read a text this scenario expects it to refuse")
+
+
 @scenario("snapshot_v2")
 def snapshot_v2() -> Any:
     mm = Metamodel.model_validate(_METAMODEL)
@@ -71,8 +98,32 @@ def snapshot_v2() -> Any:
     reread = build_model_from_dicts(mm, decode_snapshot(blob), strict=False)
     seen = observe(reread)
     assert seen == observe(model), "the oracle's own round trip changed the model"
+    text = gzip.decompress(blob).decode("utf-8")
+    last_line = text[text.rindex("\n", 0, -1) + 1 :]
+    same = {
+        "the last line without its LF": text[:-1],
+        "CRLF line ends": text.replace("\n", "\r\n"),
+    }
+    for variant in same.values():
+        assert decode_snapshot(variant.encode("utf-8")) == decode_snapshot(blob)
+    refused = {
+        "no element count": _with_header(text, elements=None),
+        "a negative count": _with_header(text, relationships=-1),
+        "a boolean count": _with_header(text, elements=True),
+        "a float count": _with_header(text, elements=6.0),
+        "a text count": _with_header(text, relationships="3"),
+        "cut after a line": text[: -len(last_line)],
+        "cut inside a line": text[: -len(last_line) // 2 - len(last_line)],
+        "a line too many": text + last_line,
+        "a second LF at the end": text + "\n",
+    }
     return {
         "metamodel": mm.model_dump(mode="json"),
-        "text": gzip.decompress(blob).decode("utf-8"),
+        "text": text,
         **seen,
+        "same": [{"name": name, "text": variant} for name, variant in same.items()],
+        "refused": [
+            {"name": name, "text": variant, "error": _refusal(variant)}
+            for name, variant in refused.items()
+        ],
     }

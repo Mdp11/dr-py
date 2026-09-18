@@ -48,6 +48,11 @@ describe('parseLines', () => {
 	it('handles an empty batch', () => {
 		expect(parseLines([])).toEqual([]);
 	});
+
+	it('refuses a line that holds more than one document', () => {
+		expect(() => parseLines(['{"a":1},{"b":2}', '{"c":3}'])).toThrow(SyntaxError);
+		expect(() => parseLines(['{"a":1.5},{"b":2}', '{"c":3}'])).toThrow(SyntaxError);
+	});
 });
 
 describe('parseExact errors', () => {

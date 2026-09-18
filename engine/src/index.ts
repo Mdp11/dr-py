@@ -32,6 +32,15 @@ export type {
 	UpdateRelationshipOp
 } from './ops/types.ts';
 export { entityHash, formatDigest, modelDigest, type EntityHash } from './snapshot/digest.ts';
+export { LineSplitter } from './snapshot/lines.ts';
+export {
+	openSnapshot,
+	SNAPSHOT_V2_FORMAT,
+	type OpenedSnapshot,
+	type OpenOptions,
+	type OpenProgress,
+	type SnapshotHeader
+} from './snapshot/open.ts';
 export { sha256 } from './snapshot/sha256.ts';
 export { cmpCodePoint } from './value/compare.ts';
 export { pyFloatRepr } from './value/float-repr.ts';

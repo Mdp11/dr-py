@@ -187,6 +187,8 @@ export function parseLines(lines: readonly string[]): Value[] {
 	}
 	if (fast.length > 0) {
 		const parsed = JSON.parse('[' + fast.map((i) => lines[i]).join(',') + ']') as Value[];
+		// A line holding `1,2` would shift every document after it.
+		if (parsed.length !== fast.length) throw new SyntaxError('A line holds more than one document');
 		for (let k = 0; k < fast.length; k++) out[fast[k]!] = parsed[k]!;
 	}
 	return out;
