@@ -16,7 +16,7 @@ are promoted into this directory.
 | E | Headless host | not started |
 | F | Thin server and deploy | not started |
 
-`BACKLOG.md` tracks the program as `R-3`.
+`BACKLOG-ENGINE.md` tracks the program as `R-3`, with its open items.
 
 ## Sub-projects
 

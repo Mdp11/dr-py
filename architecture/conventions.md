@@ -12,6 +12,7 @@ current code; this file holds the rules.
 | `architecture/` | Target architecture, decisions, contracts, constraints — this directory | yes |
 | `CLAUDE.md`, co-located `README.md`s | How the current code works | yes |
 | `BACKLOG.md` | Everything known but not done, with stable one-letter ids | yes |
+| `BACKLOG-ENGINE.md` | The same, for the client-engine program; ids unique across both files | yes |
 | `src/data_rover/` | Python server (`api/`), Python core (`core/`), legacy `migration/` CLI | yes |
 | `frontend/` | SvelteKit UI | yes |
 | `engine/` | TypeScript engine package — created by sub-project A | yes |
@@ -52,15 +53,15 @@ the op applier. Nothing else writes entity state; indexes are maintained there.
 
 **RC-9 · Design before code.** Brainstorm → spec → plan → build. Specs and plans live under the
 git-ignored `docs/superpowers/`. Anything a later session must not rediscover is promoted: a
-decision into `architecture/`, an open item into `BACKLOG.md`, current behaviour into
-`CLAUDE.md`.
+decision into `architecture/`, an open item into `BACKLOG.md` (`BACKLOG-ENGINE.md` for this
+program), current behaviour into `CLAUDE.md`.
 
 **RC-10 · Docs change with the code**, in the same commit: `CLAUDE.md` for current behaviour,
-`program.md` for status, `BACKLOG.md` when an item opens or closes.
+`program.md` for status, `BACKLOG.md` or `BACKLOG-ENGINE.md` when an item opens or closes.
 
 **RC-11 · Git.** Work on `feat/<topic>`, `perf/<topic>` or `chore/<topic>` and merge into
 `main`. Commit subjects are one imperative sentence, capitalized, no prefix, no trailing
-period (`Handle infinity parsing for floats`). Reference `BACKLOG.md` ids where one applies.
+period (`Handle infinity parsing for floats`). Reference backlog ids where one applies.
 
 ## Tests
 

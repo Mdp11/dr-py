@@ -59,7 +59,7 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
   than the replica's record was deleted and created again within the commit — an apply-CR
   rewire does that — which put it last on the server: the replica removes it and appends it.
   A re-creation that changes neither cannot be told from an update and keeps its place
-  (`BACKLOG.md`, `K-31`).
+  (`BACKLOG-ENGINE.md`, `K-31`).
 - Artifact, view and metamodel-layout changes stay header-only on the wire; their content is
   refetched as today.
 
@@ -107,7 +107,7 @@ event     {event, …}                     engine → client, unsolicited
    touched, so committed reads need no rewind. A refused batch leaves no trace, and a rewind
    is exact: every touched entity goes back to its before-image — properties, `rev` and place
    in state order — which replaying inverse ops, as the server's rollback does, cannot give
-   (`BACKLOG.md`, `K-30`).
+   (`BACKLOG-ENGINE.md`, `K-30`).
 3. To apply a delta: rewind all staged ops in reverse order → apply the delta → drop the staged
    ops it committed → rewrite temp ids through `id_map` → replay the rest. An op that fails
    replay is parked as a conflict and surfaced; it is never dropped silently.

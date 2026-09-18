@@ -35,7 +35,7 @@ single-sourced.
 - When a sub-project lands, update the status in `program.md` and move what is now current
   behaviour into `CLAUDE.md`, in the same change.
 - Cite IDs in specs, plans, commits and reviews (`per CT-2`, `violates CN-17`).
-- The two-letter prefixes are deliberate: `BACKLOG.md` owns the one-letter ids.
+- The two-letter prefixes are deliberate: `BACKLOG.md` and `BACKLOG-ENGINE.md` own the one-letter ids.
 
 ## Glossary
 
