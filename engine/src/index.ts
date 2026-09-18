@@ -8,6 +8,9 @@ export type {
 	PropertyDef,
 	RelationshipType
 } from './metamodel/types.ts';
+export { ModelError, SnapshotError } from './model/errors.ts';
+export { displayName, nameOf } from './model/naming.ts';
+export { ElementRec, RelRec, type Props } from './model/records.ts';
 export { cmpCodePoint } from './value/compare.ts';
 export { pyFloatRepr } from './value/float-repr.ts';
 export { pyKey } from './value/key.ts';
