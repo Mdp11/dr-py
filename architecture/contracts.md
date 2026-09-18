@@ -14,10 +14,15 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
 
 ## CT-1 · Snapshot — `datarover.snapshot/v2`
 
-- One gzip member, UTF-8, LF-delimited, one compact JSON object per line
-  (`separators=(",", ":")`, `ensure_ascii=False`, `allow_nan=False`).
-- Line 1 is the header:
+- One gzip member, UTF-8, one compact JSON object per line (`separators=(",", ":")`,
+  `ensure_ascii=False`, `allow_nan=False`). Every line, the last included, ends with LF. A
+  writer escapes every control character, so LF never occurs inside a line; a reader MUST
+  split on LF alone (U+2028 and U+2029 occur raw).
+- Line 1 is the header, its keys in this order:
   `{"format":"datarover.snapshot/v2","project_id","rev","metamodel_id","elements":<count>,"relationships":<count>,"state_digest"}`.
+  `format` comes first, so the inflated bytes of every v2 snapshot start with
+  `{"format":"datarover.snapshot/v2"` — that prefix is how a reader tells v2 from v1, whose
+  first line may be the whole document.
 - Then `elements` element lines, then `relationships` relationship lines.
 - **Entity order is state.** Lines are in insertion order. An entity absent from a replica is
   appended when a delta introduces it. Every replica, on every host, MUST iterate entities in

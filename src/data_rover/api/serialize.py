@@ -187,6 +187,27 @@ def iter_model_json_compact(model: Model) -> Iterator[str]:
     yield "}"
 
 
+_LINE_ENCODER = json.JSONEncoder(
+    separators=_COMPACT_SEPARATORS, ensure_ascii=False, allow_nan=False
+)
+
+
+def iter_entity_lines(model: Model) -> Iterator[str]:
+    """Yield one compact JSON object per entity — every element, then every
+    relationship, in insertion order — with no line terminator.
+
+    Each line is byte-identical to that entity's text inside
+    ``iter_model_json_compact``. ``json.dumps`` escapes every control
+    character, so a line never holds a raw LF. Same point-in-time semantics
+    as ``iter_model_json``.
+    """
+    encode = _LINE_ENCODER.encode
+    for entity in _element_dicts(list(model.elements.values())):
+        yield encode(entity)
+    for entity in _relationship_dicts(list(model.relationships.values())):
+        yield encode(entity)
+
+
 def iter_buffered(chunks: Iterable[str], min_size: int = 64 * 1024) -> Iterator[str]:
     """Re-chunk ``chunks`` into pieces of at least ``min_size`` characters.
 
