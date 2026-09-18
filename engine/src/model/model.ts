@@ -5,7 +5,7 @@ import { ModelError, SnapshotError } from './errors.ts';
 import { hashKey } from './hash.ts';
 import { IndexSet } from './indexes.ts';
 import { asEntity, readProps, readRev, requireStr, TEMP_ID_PREFIX } from './load.ts';
-import { ElementRec, RelRec, setProp } from './records.ts';
+import { ElementRec, RelRec, setProp, type Props } from './records.ts';
 
 export type ModelOptions = {
 	/** Replaces the uniqueness-bucket hash; tests force collisions with it. */
@@ -125,12 +125,7 @@ export class Model {
 		if (type.abstract) {
 			throw new ModelError('value', `Cannot instantiate abstract type ${pyRepr(typeName)}`);
 		}
-		this.requireFreeId(id);
-		if (ord !== undefined && ord < this.nextOrd) this.elementsShuffled = true;
-		const element = new ElementRec(id, typeName, {}, 0, this.takeOrd(ord));
-		this.elementMap.set(id, element);
-		this.indexes.onElementCreated(element);
-		return element;
+		return this.insertElement(id, typeName, {}, 0, ord);
 	}
 
 	/** Contained children go first, recursively; then every relationship left; then the element. */
@@ -210,6 +205,41 @@ export class Model {
 		if (this.metamodel.relationshipType(relType) === undefined) {
 			throw new ModelError('key', `Unknown relationship type ${pyRepr(relType)}`);
 		}
+		return this.insertRelationship(id, relType, sourceId, targetId, {}, 0, ord);
+	}
+
+	disconnect(relId: string): void {
+		const rel = this.getRelationship(relId);
+		this.relationshipMap.delete(relId);
+		this.indexes.onRelationshipDeleted(rel);
+	}
+
+	// -- committed state -----------------------------------------------------
+	//
+	// What the server committed, and what a rewind puts back, arrives whole:
+	// its types are not checked (a model may hold a type its metamodel no
+	// longer has) and its `rev` is given, not counted.
+
+	/** Inserts an element as it is, at its old place when `ord` is given. Takes over `props`. */
+	insertElement(id: string, typeName: string, props: Props, rev: number, ord?: number): ElementRec {
+		this.requireFreeId(id);
+		if (ord !== undefined && ord < this.nextOrd) this.elementsShuffled = true;
+		const element = new ElementRec(id, typeName, props, rev, this.takeOrd(ord));
+		this.elementMap.set(id, element);
+		this.indexes.onElementCreated(element);
+		return element;
+	}
+
+	/** Inserts a relationship as it is, at its old place when `ord` is given. Takes over `props`. */
+	insertRelationship(
+		id: string,
+		relType: string,
+		sourceId: string,
+		targetId: string,
+		props: Props,
+		rev: number,
+		ord?: number
+	): RelRec {
 		const source = this.elementMap.get(sourceId);
 		if (source === undefined) {
 			throw new ModelError('key', `No source element ${pyRepr(sourceId)}`);
@@ -220,16 +250,17 @@ export class Model {
 		}
 		this.requireFreeId(id);
 		if (ord !== undefined && ord < this.nextOrd) this.relationshipsShuffled = true;
-		const rel = new RelRec(id, relType, source, target, {}, 0, this.takeOrd(ord));
+		const rel = new RelRec(id, relType, source, target, props, rev, this.takeOrd(ord));
 		this.relationshipMap.set(id, rel);
 		this.indexes.onRelationshipCreated(rel);
 		return rel;
 	}
 
-	disconnect(relId: string): void {
-		const rel = this.getRelationship(relId);
-		this.relationshipMap.delete(relId);
-		this.indexes.onRelationshipDeleted(rel);
+	/** Replaces an attached entity's properties and `rev` whole. Takes over `props`. */
+	overwrite(target: ElementRec | RelRec, props: Props, rev: number): void {
+		target.props = props;
+		target.rev = rev;
+		this.indexes.onPropertyChanged(target);
 	}
 
 	private requireFreeId(id: string): void {
