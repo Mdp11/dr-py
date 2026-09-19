@@ -36,6 +36,7 @@ from .routes import (
     projects,
     read,
     relationships,
+    replica,
     rules,
     settings as settings_routes,
     snippets,
@@ -326,6 +327,7 @@ def create_app() -> FastAPI:
     app.include_router(snippets.router, prefix=proj, tags=["snippets"])
     app.include_router(settings_routes.router, prefix=proj, tags=["settings"])
     app.include_router(feed.router, prefix=proj, tags=["feed"])
+    app.include_router(replica.router, prefix=proj, tags=["replica"])
     return app
 
 

@@ -647,6 +647,15 @@ class OpsRequest(BaseModel):
     ops: list[OpIn] = Field(default_factory=list)
 
 
+class ReplicaTailOut(BaseModel):
+    """``GET /replica/tail``. Each delta is the feed's ``commit`` event dict."""
+
+    from_rev: int
+    head_rev: int
+    complete: bool
+    deltas: list[dict[str, Any]]
+
+
 class OpsResponse(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 

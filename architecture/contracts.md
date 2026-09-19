@@ -49,9 +49,12 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
   entity, which the server's dict holds last.
 - Carriers: the feed event, the commit response (which keeps its extra fields: `id_map`,
   `changed_artifacts`, `deleted_artifact_ids`, `view_revs`, …), and the tail route.
-- Tail response: `{"from_rev","head_rev","complete","deltas":[…]}`. `complete` is `false` when
-  any revision in range cannot be expressed as a delta: a baseline, a commit whose
-  `entity_states` is `NULL`, a metamodel rebind, or a `model_rev` bump with no journal row.
+- Tail response: `{"from_rev","head_rev","complete","deltas":[…]}`. `complete` is `false`, and
+  `deltas` empty, when any revision in range cannot be expressed as a delta — a baseline, a
+  commit whose `entity_states` or `state_digest` is missing, a metamodel rebind, a `model_rev`
+  bump with no journal row — when more than 1,000 revisions separate `from_rev` from head, or
+  when `from_rev` is beyond head. `head_rev` is the session's `model_rev`, the one the feed
+  reports.
 - **Apply rule.** Apply a delta iff `prev_rev == replica.rev`. If `rev <= replica.rev`, drop it
   as a duplicate. Otherwise fetch the tail from `replica.rev`; if it is incomplete,
   re-bootstrap.

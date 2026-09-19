@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
-from sqlalchemy import select
+from sqlalchemy import null, select, update
 
 from data_rover.api import content, db
-from data_rover.api.db_models import ArtifactKind, Commit, Project, Snapshot
+from data_rover.api.db_models import (
+    ArtifactKind,
+    Commit,
+    MetamodelRow,
+    Project,
+    Snapshot,
+)
 
 
 def _setup() -> None:
@@ -300,3 +308,56 @@ def test_artifact_project_cascade_delete() -> None:
         s.delete(s.get(Project, "p1"))
     with db.db_session() as s:
         assert content.get_artifact(s, aid) is None  # FK ON DELETE CASCADE
+
+
+def test_commit_tail_marks_tell_expressible_rows_apart() -> None:
+    """A ``None`` in a JSON column is stored as JSON ``null``, not SQL NULL:
+    the marks must count both as a row without entity states."""
+    _setup()
+    full = {"elements": {}, "relationships": {}}
+    with db.db_session() as s:
+        s.add(Project(id="p2", name="P2"))
+        s.add(MetamodelRow(id="m1", name="M1", version=1, blob="x: 1"))
+
+        def add(project_id: str, rev: int, **kw: Any) -> None:
+            args: dict[str, Any] = {"entity_states": full, "state_digest": "0" * 16}
+            args.update(kw)
+            content.append_commit(
+                s,
+                project_id,
+                rev=rev,
+                commit_id=f"c{rev}",
+                author_id=None,
+                ops=[],
+                inverse_ops=[],
+                id_map={},
+                **args,
+            )
+
+        add("p1", 1)
+        add("p1", 2, entity_states=None)
+        add("p1", 3)
+        add("p1", 4, state_digest=None)
+        add("p1", 5, to_metamodel_id="m1")
+        add("p1", 6, from_metamodel_id="m1")
+        add("p1", 7)
+        add("p2", 3)
+        s.flush()
+        s.execute(
+            update(Commit)
+            .where(Commit.project_id == "p1", Commit.rev == 3)
+            .values(entity_states=null())
+        )
+    with db.db_session() as s:
+        marks = content.commit_tail_marks(s, "p1", after_rev=0, max_rev=6)
+        assert marks == [
+            (1, True),
+            (2, False),
+            (3, False),
+            (4, False),
+            (5, False),
+            (6, False),
+        ]
+        assert content.commit_tail_marks(s, "p1", after_rev=1, max_rev=1) == []
+        assert content.commit_tail_marks(s, "p1", after_rev=6, max_rev=7) == [(7, True)]
+        assert content.commit_tail_marks(s, "p2", after_rev=0, max_rev=9) == [(3, True)]
