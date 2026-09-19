@@ -6,7 +6,8 @@ import type { Value } from '../value/types.ts';
 /**
  * What a replica reads of a commit delta, in the wire's names. `changed_*`
  * hold whole entities as committed, in first-touch order; `deleted_*` name
- * every entity the commit removed, cascades included.
+ * every entity the commit removed, cascades included; `recreated_*` name the
+ * changed entities the commit deleted and created again under their ids.
  */
 export type Delta = {
 	rev: number;
@@ -16,6 +17,8 @@ export type Delta = {
 	changed_relationships: readonly Value[];
 	deleted_element_ids: readonly string[];
 	deleted_relationship_ids: readonly string[];
+	recreated_element_ids: readonly string[];
+	recreated_relationship_ids: readonly string[];
 };
 
 export type CommittedElement = { id: string; typeName: string; props: Props; rev: number };
@@ -26,6 +29,8 @@ export type CommittedChange = {
 	relationships: CommittedRel[];
 	deletedElementIds: readonly string[];
 	deletedRelationshipIds: readonly string[];
+	recreatedElementIds: readonly string[];
+	recreatedRelationshipIds: readonly string[];
 };
 
 function readElement(doc: Value, where: string): CommittedElement {
@@ -39,6 +44,7 @@ function readElement(doc: Value, where: string): CommittedElement {
 }
 
 function readIds(ids: readonly string[], where: string): readonly string[] {
+	if (!Array.isArray(ids)) throw new SnapshotError(`${where}: must be a list`);
 	ids.forEach((id, i) => {
 		if (typeof id !== 'string') throw new SnapshotError(`${where}[${i}]: must be a string`);
 	});
@@ -63,6 +69,11 @@ export function readDelta(delta: Delta): CommittedChange {
 			};
 		}),
 		deletedElementIds: readIds(delta.deleted_element_ids, 'deleted_element_ids'),
-		deletedRelationshipIds: readIds(delta.deleted_relationship_ids, 'deleted_relationship_ids')
+		deletedRelationshipIds: readIds(delta.deleted_relationship_ids, 'deleted_relationship_ids'),
+		recreatedElementIds: readIds(delta.recreated_element_ids, 'recreated_element_ids'),
+		recreatedRelationshipIds: readIds(
+			delta.recreated_relationship_ids,
+			'recreated_relationship_ids'
+		)
 	};
 }

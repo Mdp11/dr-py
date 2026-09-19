@@ -54,7 +54,9 @@ export class Server {
 				parseJson(relationshipLine(model.getRelationship(id)))
 			),
 			deleted_element_ids: [...result.deletedElementIds],
-			deleted_relationship_ids: [...result.deletedRelationshipIds]
+			deleted_relationship_ids: [...result.deletedRelationshipIds],
+			recreated_element_ids: [...result.recreatedElementIds],
+			recreated_relationship_ids: [...result.recreatedRelationshipIds]
 		};
 		this.rev += 1;
 		return { delta, result };

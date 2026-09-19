@@ -145,7 +145,9 @@ function deltaOver(
 		],
 		changed_relationships: relationships,
 		deleted_element_ids: [],
-		deleted_relationship_ids: deleted.map((rel) => rel.id)
+		deleted_relationship_ids: deleted.map((rel) => rel.id),
+		recreated_element_ids: [],
+		recreated_relationship_ids: []
 	};
 }
 

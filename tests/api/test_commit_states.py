@@ -182,6 +182,90 @@ def test_relationship_update_and_delete() -> None:
     assert states["relationships"][r]["after"] is None
 
 
+def _recreating_batch(m: Model) -> tuple[str, str, str]:
+    """p contains c; one batch deletes c and creates it, and the relationship
+    its cascade took, again under their ids."""
+    setup = _apply_batch(
+        m,
+        [
+            _create("tmp_p"),
+            _create("tmp_c", label="c"),
+            CreateRelationshipOp(
+                kind="create_relationship",
+                temp_id="tmp_r",
+                type_name="Contains",
+                source_id="tmp_p",
+                target_id="tmp_c",
+            ),
+        ],
+        restore=False,
+    )
+    p, c, r = (setup.id_map[k] for k in ("tmp_p", "tmp_c", "tmp_r"))
+    return p, c, r
+
+
+def test_an_entity_created_again_under_its_id_is_named_recreated() -> None:
+    m = _model()
+    p, c, r = _recreating_batch(m)
+    res = _apply_batch(
+        m,
+        [
+            UpdateElementOp(kind="update_element", id=p, properties_patch={"label": "p"}),
+            DeleteElementOp(kind="delete_element", id=c),
+            CreateElementOp(
+                kind="create_element", temp_id="tmp_c2", type_name="Node", id=c
+            ),
+            CreateRelationshipOp(
+                kind="create_relationship",
+                temp_id="tmp_r2",
+                type_name="Contains",
+                source_id=p,
+                target_id="tmp_c2",
+                id=r,
+            ),
+        ],
+        restore=False,
+    )
+    # changed, not deleted — and named, because each is a NEW entity now last
+    assert list(res.changed_element_ids) == [p, c]
+    assert list(res.deleted_element_ids) == []
+    assert list(res.recreated_element_ids) == [c]
+    assert list(res.recreated_relationship_ids) == [r]
+    assert list(m.elements) == [p, c]
+
+    states = capture_entity_states(m, res)
+    assert states is not None
+    assert states["recreated"] == {"elements": [c], "relationships": [r]}
+    loaded = load_entity_states(states)
+    assert loaded.recreated_element_ids == [c]
+    assert loaded.recreated_relationship_ids == [r]
+
+
+def test_an_entity_deleted_once_more_is_recreated_no_longer() -> None:
+    m = _model()
+    _p, c, r = _recreating_batch(m)
+    res = _apply_batch(
+        m,
+        [
+            DeleteElementOp(kind="delete_element", id=c),
+            CreateElementOp(
+                kind="create_element", temp_id="tmp_c2", type_name="Node", id=c
+            ),
+            DeleteElementOp(kind="delete_element", id="tmp_c2"),
+        ],
+        restore=False,
+    )
+    assert list(res.recreated_element_ids) == []
+    assert list(res.deleted_element_ids) == [c]
+    assert list(res.deleted_relationship_ids) == [r]
+
+
+def test_a_row_without_the_recreated_key_loads_with_none_named() -> None:
+    loaded = load_entity_states({"elements": {}, "relationships": {}})
+    assert loaded.recreated_element_ids == []
+    assert loaded.recreated_relationship_ids == []
+
+
 def test_over_cap_batch_captures_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(commit_states, "ENTITY_STATES_MAX", 1)
     m = _model()
@@ -299,7 +383,11 @@ def test_artifact_only_commit_persists_empty_states(client: TestClient) -> None:
                         "code": "def value(el):\n    return 1\n"},
         }],
     )
-    assert _states_at(body["model_rev"]) == {"elements": {}, "relationships": {}}
+    assert _states_at(body["model_rev"]) == {
+        "elements": {},
+        "relationships": {},
+        "recreated": {"elements": [], "relationships": []},
+    }
 
 
 def test_legacy_ops_and_undo_persist_states(client: TestClient) -> None:

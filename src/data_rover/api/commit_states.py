@@ -10,10 +10,13 @@ reconstructs the model for a commit that carries it.
 Column shape::
 
     {"elements":      {id: {"before": ElementOut | null, "after": ElementOut | null}},
-     "relationships": {id: {"before": RelationshipOut | null, "after": RelationshipOut | null}}}
+     "relationships": {id: {"before": RelationshipOut | null, "after": RelationshipOut | null}},
+     "recreated":     {"elements": [id, ...], "relationships": [id, ...]}}
 
 ``before: null`` = did not exist before the commit; ``after: null`` = does
-not exist after it. A batch touching more than ``ENTITY_STATES_MAX`` entities
+not exist after it. ``recreated`` names the ids the commit deleted and then
+created again — new entities at the end of their dict, which a before/after
+pair cannot say — and is absent from rows older than the key. A batch touching more than ``ENTITY_STATES_MAX`` entities
 stores NULL instead (the row would otherwise grow with the batch — a subtree
 delete can touch a large share of the model), and NULL means "reconstruct".
 """
@@ -21,7 +24,7 @@ delete can touch a large share of the model), and NULL means "reconstruct".
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from data_rover.core.model.model import Model
@@ -46,6 +49,8 @@ class EntityStates:
 
     elements: dict[str, ElementPair]
     relationships: dict[str, RelationshipPair]
+    recreated_element_ids: list[str] = field(default_factory=list)
+    recreated_relationship_ids: list[str] = field(default_factory=list)
 
 
 def _dump(out: ElementOut | RelationshipOut | None) -> dict[str, Any] | None:
@@ -84,7 +89,14 @@ def capture_entity_states(model: Model, res: _BatchResult) -> dict[str, Any] | N
             "before": _dump(res.before_relationships[rid]),
             "after": None,
         }
-    return {"elements": elements, "relationships": relationships}
+    return {
+        "elements": elements,
+        "relationships": relationships,
+        "recreated": {
+            "elements": list(res.recreated_element_ids),
+            "relationships": list(res.recreated_relationship_ids),
+        },
+    }
 
 
 def load_entity_states(raw: Mapping[str, Any]) -> EntityStates:
@@ -96,6 +108,7 @@ def load_entity_states(raw: Mapping[str, Any]) -> EntityStates:
     def rel(v: Any) -> RelationshipOut | None:
         return RelationshipOut.model_validate(v) if v is not None else None
 
+    recreated = raw.get("recreated", {})
     return EntityStates(
         elements={
             eid: (el(entry.get("before")), el(entry.get("after")))
@@ -105,4 +118,6 @@ def load_entity_states(raw: Mapping[str, Any]) -> EntityStates:
             rid: (rel(entry.get("before")), rel(entry.get("after")))
             for rid, entry in raw.get("relationships", {}).items()
         },
+        recreated_element_ids=list(recreated.get("elements", [])),
+        recreated_relationship_ids=list(recreated.get("relationships", [])),
     )

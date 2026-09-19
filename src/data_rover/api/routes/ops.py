@@ -169,6 +169,9 @@ class _BatchResult:
     The four id dicts are ordered sets (dict-of-None idiom) in first-touch op
     application order; deleting an entity removes it from the changed set and
     re-creating it removes it from the deleted set, so the two are disjoint.
+    The two ``recreated_*`` sets name, among the changed ids, the ones the
+    batch deleted and then created again: such an entity is a new one at the
+    END of its dict, which its changed state alone cannot say.
     """
 
     canonical_ops: list[ModelOpIn] = field(default_factory=list)
@@ -182,6 +185,8 @@ class _BatchResult:
     changed_relationship_ids: dict[str, None] = field(default_factory=dict)
     deleted_element_ids: dict[str, None] = field(default_factory=dict)
     deleted_relationship_ids: dict[str, None] = field(default_factory=dict)
+    recreated_element_ids: dict[str, None] = field(default_factory=dict)
+    recreated_relationship_ids: dict[str, None] = field(default_factory=dict)
     #: pre-batch state per touched id, captured on FIRST touch (None = did
     #: not exist). Later touches in the same batch never overwrite, so an
     #: entity created-then-updated stays None and one deleted-then-restored
@@ -205,13 +210,25 @@ class _BatchResult:
         self.changed_relationship_ids[rel_id] = None
         self.deleted_relationship_ids.pop(rel_id, None)
 
+    def mark_element_created(self, element_id: str) -> None:
+        if element_id in self.deleted_element_ids:
+            self.recreated_element_ids[element_id] = None
+        self.mark_element_changed(element_id)
+
+    def mark_relationship_created(self, rel_id: str) -> None:
+        if rel_id in self.deleted_relationship_ids:
+            self.recreated_relationship_ids[rel_id] = None
+        self.mark_relationship_changed(rel_id)
+
     def mark_element_deleted(self, element_id: str) -> None:
         self.deleted_element_ids[element_id] = None
         self.changed_element_ids.pop(element_id, None)
+        self.recreated_element_ids.pop(element_id, None)
 
     def mark_relationship_deleted(self, rel_id: str) -> None:
         self.deleted_relationship_ids[rel_id] = None
         self.changed_relationship_ids.pop(rel_id, None)
+        self.recreated_relationship_ids.pop(rel_id, None)
 
     def note_element_before(
         self, model: Model, element_id: str, element: Element | None
@@ -314,7 +331,7 @@ def _apply_one(
                 update={"temp_id": element.id, "properties": props, "id": None}
             )
         )
-        res.mark_element_changed(element.id)
+        res.mark_element_created(element.id)
         return
 
     if isinstance(op, UpdateElementOp):
@@ -442,7 +459,7 @@ def _apply_one(
                 }
             )
         )
-        res.mark_relationship_changed(rel.id)
+        res.mark_relationship_created(rel.id)
         return
 
     if isinstance(op, UpdateRelationshipOp):

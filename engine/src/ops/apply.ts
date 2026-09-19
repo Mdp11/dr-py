@@ -125,7 +125,7 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 			res.noteElementBefore(element.id, null);
 			res.inverseUnits.push([{ kind: 'delete_element', id: element.id }]);
 			for (const key of Object.keys(props)) model.setProperty(element, key, getProp(props, key)!);
-			res.markElementChanged(element.id);
+			res.markElementCreated(element.id);
 			return;
 		}
 		case 'update_element': {
@@ -184,7 +184,7 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 			res.noteRelationshipBefore(rel.id, null);
 			res.inverseUnits.push([{ kind: 'delete_relationship', id: rel.id }]);
 			for (const key of Object.keys(props)) model.setProperty(rel, key, getProp(props, key)!);
-			res.markRelationshipChanged(rel.id);
+			res.markRelationshipCreated(rel.id);
 			return;
 		}
 		case 'update_relationship': {

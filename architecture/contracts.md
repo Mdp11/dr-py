@@ -39,11 +39,14 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
 ```
 {"type":"commit","rev","prev_rev","state_digest","scope","commit_id","author_id","message",
  "validation_error_count","changed_elements","changed_relationships",
- "deleted_element_ids","deleted_relationship_ids"}
+ "deleted_element_ids","deleted_relationship_ids",
+ "recreated_element_ids","recreated_relationship_ids"}
 ```
 
-- Today's feed `commit_event` plus `prev_rev` and `state_digest`. `changed_*` hold full
-  post-commit entities in first-touch order; `deleted_*` include cascade deletions.
+- The feed's `commit_event`. `changed_*` hold full post-commit entities in first-touch order;
+  `deleted_*` include cascade deletions; `recreated_*` name the changed ids the commit
+  deleted and created again under the same id — an apply-CR rewire does that — each a new
+  entity, which the server's dict holds last.
 - Carriers: the feed event, the commit response (which keeps its extra fields: `id_map`,
   `changed_artifacts`, `deleted_artifact_ids`, `view_revs`, …), and the tail route.
 - Tail response: `{"from_rev","head_rev","complete","deltas":[…]}`. `complete` is `false` when
@@ -53,13 +56,12 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
   as a duplicate. Otherwise fetch the tail from `replica.rev`; if it is incomplete,
   re-bootstrap.
 - **Entities in a delta.** Apply in this order: relationships out, elements out, elements in,
-  relationships in. A deleted id the replica does not hold is skipped (an entity created and
-  deleted within one commit). A changed entity the replica holds keeps its record and its
-  place; one it does not hold is appended. One that arrives under another type, or other ends,
-  than the replica's record was deleted and created again within the commit — an apply-CR
-  rewire does that — which put it last on the server: the replica removes it and appends it.
-  A re-creation that changes neither cannot be told from an update and keeps its place
-  (`BACKLOG-ENGINE.md`, `K-31`).
+  relationships in. What goes out is every `deleted_*` and every `recreated_*` id; one the
+  replica does not hold is skipped (an entity created and deleted within one commit). A
+  changed entity the replica holds keeps its record and its place; one it does not hold — a
+  recreated one, by then — is appended. A changed entity that arrives under another type, or
+  other ends, than the replica's record WITHOUT being named in `recreated_*` does not fit the
+  replica, which is then diverged (AD-12).
 - Artifact, view and metamodel-layout changes stay header-only on the wire; their content is
   refetched as today.
 

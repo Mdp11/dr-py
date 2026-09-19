@@ -45,6 +45,8 @@ export type BatchOutcome = {
 	changed_relationship_ids: string[];
 	deleted_element_ids: string[];
 	deleted_relationship_ids: string[];
+	recreated_element_ids: string[];
+	recreated_relationship_ids: string[];
 	before_elements: [string, string | null][];
 	before_relationships: [string, string | null][];
 	inverse_ops: string[];
@@ -135,6 +137,8 @@ export function outcome(model: Model, res: BatchResult): BatchOutcome {
 		changed_relationship_ids: [...res.changedRelationshipIds],
 		deleted_element_ids: [...res.deletedElementIds],
 		deleted_relationship_ids: [...res.deletedRelationshipIds],
+		recreated_element_ids: [...res.recreatedElementIds],
+		recreated_relationship_ids: [...res.recreatedRelationshipIds],
 		before_elements: [...res.beforeElements].map(([id, image]) => [
 			id,
 			image === null ? null : elementImageLine(image)

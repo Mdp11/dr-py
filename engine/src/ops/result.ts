@@ -38,7 +38,9 @@ export function relImage(rel: RelRec): RelImage {
  * Everything one batch application produced. The four id sets are in
  * first-touch order and the changed and deleted ones stay disjoint: deleting
  * an entity takes it out of the changed set, creating it again takes it out of
- * the deleted set.
+ * the deleted set. The two recreated sets name, among the changed ids, the ones
+ * the batch deleted and then created again: such an entity is a new one, last
+ * in state order, which its changed state alone cannot say.
  */
 export class BatchResult {
 	/** Temp id → the id the entity was created under. */
@@ -49,6 +51,8 @@ export class BatchResult {
 	readonly changedRelationshipIds = new Set<string>();
 	readonly deletedElementIds = new Set<string>();
 	readonly deletedRelationshipIds = new Set<string>();
+	readonly recreatedElementIds = new Set<string>();
+	readonly recreatedRelationshipIds = new Set<string>();
 	/**
 	 * The state of every touched entity before its FIRST touch; `null` when it
 	 * did not exist. Every id in the four sets has an entry.
@@ -71,14 +75,26 @@ export class BatchResult {
 		this.deletedRelationshipIds.delete(id);
 	}
 
+	markElementCreated(id: string): void {
+		if (this.deletedElementIds.has(id)) this.recreatedElementIds.add(id);
+		this.markElementChanged(id);
+	}
+
+	markRelationshipCreated(id: string): void {
+		if (this.deletedRelationshipIds.has(id)) this.recreatedRelationshipIds.add(id);
+		this.markRelationshipChanged(id);
+	}
+
 	markElementDeleted(id: string): void {
 		this.deletedElementIds.add(id);
 		this.changedElementIds.delete(id);
+		this.recreatedElementIds.delete(id);
 	}
 
 	markRelationshipDeleted(id: string): void {
 		this.deletedRelationshipIds.add(id);
 		this.changedRelationshipIds.delete(id);
+		this.recreatedRelationshipIds.delete(id);
 	}
 
 	/** Call BEFORE mutating; a later touch never overwrites the first image. */

@@ -107,6 +107,8 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-1",
@@ -195,6 +197,12 @@
         "deleted_relationship_ids": [
           "id-4"
         ],
+        "recreated_element_ids": [
+          "id-2"
+        ],
+        "recreated_relationship_ids": [
+          "id-5"
+        ],
         "before_elements": [
           [
             "id-2",
@@ -248,6 +256,10 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [
+          "id-6"
+        ],
         "before_elements": [],
         "before_relationships": [
           [
@@ -282,6 +294,12 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [
+          "id-2"
+        ],
+        "recreated_relationship_ids": [
+          "id-5"
+        ],
         "before_elements": [
           [
             "id-2",

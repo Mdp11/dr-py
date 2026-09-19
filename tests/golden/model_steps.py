@@ -100,6 +100,8 @@ def _outcome(model: Model, res: _BatchResult) -> dict[str, Any]:
         "changed_relationship_ids": list(res.changed_relationship_ids),
         "deleted_element_ids": list(res.deleted_element_ids),
         "deleted_relationship_ids": list(res.deleted_relationship_ids),
+        "recreated_element_ids": list(res.recreated_element_ids),
+        "recreated_relationship_ids": list(res.recreated_relationship_ids),
         "before_elements": [
             [eid, None if before is None else _line(before)]
             for eid, before in res.before_elements.items()

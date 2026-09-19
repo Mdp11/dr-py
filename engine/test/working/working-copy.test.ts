@@ -240,7 +240,7 @@ describe('deltas', () => {
 		expect(wc.diverged).toBe(false);
 	});
 
-	it('puts an entity that comes back under other ends or another type last, as the server did', () => {
+	it('puts an entity the delta names as created again last, as the server did', () => {
 		const committed = family();
 		const server = new Server(clone(committed));
 		const wc = workingCopy(committed);
@@ -259,6 +259,24 @@ describe('deltas', () => {
 		expect(observe(wc.model)).toEqual(observe(server.model));
 		expect([...wc.model.relationships()].map((r) => r.id)).toEqual(['b-d', 'a-c', 'a-b']);
 		expect(wc.model.containerOf('b')).toBe('c');
+		verifyConsistent(wc.model);
+	});
+
+	it('also when it comes back as it was, which only the name can tell from an update', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const { delta } = server.commit([
+			{ kind: 'delete_element', id: 'c' },
+			{ kind: 'create_element', temp_id: 'tmp_c', type_name: 'Node', id: 'c' },
+			refers('tmp_r', 'a', 'tmp_c')
+		]);
+		expect(delta.recreated_element_ids).toEqual(['c']);
+		expect(delta.deleted_relationship_ids).toEqual(['a-c']);
+		wc.applyDelta(delta);
+		expect(wc.diverged).toBe(false);
+		expect(observe(wc.model)).toEqual(observe(server.model));
+		expect([...wc.model.elements()].map((e) => e.id)).toEqual(['a', 'b', 'd', 'c']);
 		verifyConsistent(wc.model);
 	});
 });
@@ -287,11 +305,46 @@ describe('divergence', () => {
 			changed_elements: [],
 			changed_relationships: [orphan],
 			deleted_element_ids: [],
-			deleted_relationship_ids: []
+			deleted_relationship_ids: [],
+			recreated_element_ids: [],
+			recreated_relationship_ids: []
 		});
 		expect(wc.diverged).toBe(true);
 		expect(wc.staged().map((batch) => batch.id)).toEqual([1]);
 		expect(wc.model.getElement('a').props).toEqual({ name: 'mine' });
+	});
+
+	it('is set by a record that changes its ends or its type without being named as created again', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const rewired = workingCopy(committed);
+		const { delta } = server.commit([
+			{ kind: 'delete_relationship', id: 'a-b' },
+			{
+				kind: 'create_relationship',
+				temp_id: 'tmp_r',
+				type_name: 'Contains',
+				source_id: 'c',
+				target_id: 'b',
+				id: 'a-b'
+			}
+		]);
+		rewired.applyDelta({ ...delta, recreated_relationship_ids: [] });
+		expect(rewired.diverged).toBe(true);
+
+		const retyped = workingCopy(family());
+		retyped.applyDelta({
+			rev: 1,
+			prev_rev: 0,
+			state_digest: retyped.digest,
+			changed_elements: [parseJson('{"id":"c","type_name":"Other","properties":{},"rev":0}')],
+			changed_relationships: [],
+			deleted_element_ids: [],
+			deleted_relationship_ids: [],
+			recreated_element_ids: [],
+			recreated_relationship_ids: []
+		});
+		expect(retyped.diverged).toBe(true);
 	});
 
 	it('a delta the replica cannot hold throws before anything moves', () => {
@@ -308,7 +361,9 @@ describe('divergence', () => {
 				],
 				changed_relationships: [],
 				deleted_element_ids: [],
-				deleted_relationship_ids: []
+				deleted_relationship_ids: [],
+				recreated_element_ids: [],
+				recreated_relationship_ids: []
 			})
 		);
 		expect(error).toBeInstanceOf(SnapshotError);

@@ -26,7 +26,7 @@ Python snapshot v2 and state digest; metamodel, record-graph store, indexes and 
 boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
 the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
 and frontend seam) is designed — six plans, listed in `architecture/program.md`, none built —
-and inherits `K-31` and `K-32`. The freeze rule (`MR-3`)
+and inherits `K-32`. The freeze rule (`MR-3`)
 covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
 plan. Size: very large.
 
@@ -42,18 +42,6 @@ folds both kinds into one namespace — a same-`rev` pair cancels out of it. The
 loader refuses such a snapshot (`Relationship id 'x' is already an element id`), so a project
 imported with one would open on the server and not in the browser. Fix: check the other
 kind's ids in `_guard_relationship`; the file is outside the MR-3 freeze.
-
-### K-31 · A commit delta cannot say "deleted and created again under the same id" · `open` · *2026-09-18*
-Within one batch, `delete X` followed by a create with `id: X` moves X to the end of the
-server's dict, while the delta (CT-2) lists X only under `changed_*`.
-`change_request_ops.ops_for_change` emits exactly that for a relationship rewire, and any
-hand-written batch may do it for an element. The engine tells the case apart when the type
-or the ends changed and then removes and appends (fixture `ops_batches`, the rewire and the
-type-change steps, followed by `engine/test/working/replica.golden.test.ts`); when neither
-changed (fixture `ops_recreate`) the replica keeps X's place, and its entity order differs
-from the server's until the next snapshot. The digest cannot see it: a re-created entity
-that ends at its old `rev` hashes to the same `(id, rev)` pair. Fix, in B: name such ids in
-both `deleted_*` and `changed_*`, or add a `recreated_*` list to the delta.
 
 ### K-32 · Two background operations must run in slices; the `ord` re-sort is watched · `open` · perf · *2026-09-18*
 `architecture/system.md` rule 4 has evaluation and background work yield between chunks of

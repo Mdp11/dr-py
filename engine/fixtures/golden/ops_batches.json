@@ -188,6 +188,8 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-1",
@@ -267,6 +269,8 @@
         "changed_relationship_ids": [],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-1",
@@ -300,6 +304,8 @@
         "changed_relationship_ids": [],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-2",
@@ -334,6 +340,8 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [],
         "before_relationships": [
           [
@@ -370,6 +378,8 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-3",
@@ -405,6 +415,8 @@
         "changed_relationship_ids": [],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [],
         "before_relationships": [],
         "inverse_ops": [],
@@ -430,6 +442,8 @@
         "changed_relationship_ids": [],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-1",
@@ -487,6 +501,8 @@
           "id-7",
           "id-5"
         ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-3",
@@ -550,6 +566,8 @@
         "deleted_relationship_ids": [
           "id-7"
         ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-6",
@@ -608,6 +626,8 @@
         "changed_relationship_ids": [],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-1",
@@ -661,6 +681,8 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "city-milan",
@@ -797,6 +819,8 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "plain",
@@ -906,6 +930,8 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-9",
@@ -1001,6 +1027,8 @@
           "id-13",
           "id-14"
         ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-1",
@@ -1103,6 +1131,8 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "id-1",
@@ -1215,6 +1245,10 @@
         ],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [
+          "plain-knows"
+        ],
         "before_elements": [],
         "before_relationships": [
           [
@@ -1254,6 +1288,10 @@
         "changed_relationship_ids": [],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [
+          "plain"
+        ],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "plain",
@@ -1549,6 +1587,10 @@
         "changed_relationship_ids": [],
         "deleted_element_ids": [],
         "deleted_relationship_ids": [],
+        "recreated_element_ids": [
+          "plain"
+        ],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "plain",
@@ -1590,6 +1632,8 @@
           "id-12",
           "id-10"
         ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
         "before_elements": [
           [
             "city-milan",

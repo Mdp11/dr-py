@@ -1,4 +1,5 @@
 import { ModelError } from '../model/errors.ts';
+import { pyRepr } from '../value/repr.ts';
 import type { Model } from '../model/model.ts';
 import { applyBatch } from '../ops/apply.ts';
 import { OpError } from '../ops/errors.ts';
@@ -298,9 +299,9 @@ export class WorkingCopy {
 	/**
 	 * Writes committed state, the staged batches being rewound: relationships
 	 * out, elements out, elements in, relationships in. A record keeps its
-	 * identity and its place; a new entity goes last. An entity that comes back
-	 * under another type or other ends was deleted and created again within the
-	 * commit, which put it last on the server: so it is here.
+	 * identity and its place; a new entity goes last, and so does one the delta
+	 * names as created again, which goes out first. A record that would have to
+	 * change its type or its ends without being named does not fit the replica.
 	 */
 	private commit(change: CommittedChange, touched: Touched): void {
 		const model = this.model;
@@ -324,35 +325,44 @@ export class WorkingCopy {
 			touched.elements.add(id);
 		};
 		for (const id of change.deletedRelationshipIds) dropRelationship(id);
+		for (const id of change.recreatedRelationshipIds) dropRelationship(id);
 		for (const id of change.deletedElementIds) dropElement(id);
+		for (const id of change.recreatedElementIds) dropElement(id);
 		for (const next of change.elements) {
 			const element = model.findElement(next.id);
 			touched.elements.add(next.id);
-			if (element !== undefined && element.typeName === next.typeName) {
+			if (element === undefined) {
+				model.insertElement(next.id, next.typeName, next.props, next.rev);
+			} else {
+				if (element.typeName !== next.typeName) {
+					throw new ModelError(
+						'value',
+						`Element ${pyRepr(next.id)} changes its type without being named as created again`
+					);
+				}
 				fold(next.id, element.rev);
 				model.overwrite(element, next.props, next.rev);
-			} else {
-				if (element !== undefined) {
-					for (const rel of [...element.out, ...element.in]) dropRelationship(rel.id);
-					dropElement(next.id);
-				}
-				model.insertElement(next.id, next.typeName, next.props, next.rev);
 			}
 			fold(next.id, next.rev);
 		}
 		for (const next of change.relationships) {
 			const rel = model.findRelationship(next.id);
 			touched.relationships.add(next.id);
-			const same =
-				rel !== undefined &&
-				rel.typeName === next.typeName &&
-				rel.source.id === next.sourceId &&
-				rel.target.id === next.targetId;
-			if (same) {
+			if (rel !== undefined) {
+				const same =
+					rel.typeName === next.typeName &&
+					rel.source.id === next.sourceId &&
+					rel.target.id === next.targetId;
+				if (!same) {
+					throw new ModelError(
+						'value',
+						`Relationship ${pyRepr(next.id)} changes its type or its ends ` +
+							'without being named as created again'
+					);
+				}
 				fold(next.id, rel.rev);
 				model.overwrite(rel, next.props, next.rev);
 			} else {
-				dropRelationship(next.id);
 				model.insertRelationship(
 					next.id,
 					next.typeName,

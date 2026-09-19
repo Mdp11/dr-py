@@ -17,8 +17,8 @@ import {
 
 /**
  * A replica that starts empty and is told of each landed batch only what a
- * commit delta says (whole changed entities, deleted ids, the digest) must
- * stand where the oracle stands, entity order included.
+ * commit delta says (whole changed entities, deleted ids, the ids created
+ * again, the digest) must stand where the oracle stands, entity order included.
  */
 function follow(name: string): void {
 	const fixture = loadFixture<StepsFixture>(name);
@@ -39,7 +39,9 @@ function follow(name: string): void {
 			changed_elements: landed.changed_elements.map(parseJson),
 			changed_relationships: landed.changed_relationships.map(parseJson),
 			deleted_element_ids: landed.deleted_element_ids,
-			deleted_relationship_ids: landed.deleted_relationship_ids
+			deleted_relationship_ids: landed.deleted_relationship_ids,
+			recreated_element_ids: landed.recreated_element_ids,
+			recreated_relationship_ids: landed.recreated_relationship_ids
 		});
 		expect(status, label).toBe('applied');
 		expect(replica.diverged, label).toBe(false);
@@ -58,5 +60,13 @@ describe('a replica fed only deltas stands where the oracle stands', () => {
 
 	it('through a random walk of batches', () => {
 		follow('ops_churn');
+	});
+
+	it('through entities created again under their ids, unchanged in type and ends', () => {
+		follow('ops_recreate');
+	});
+
+	it('through the batches that land between refused ones', () => {
+		follow('ops_refused');
 	});
 });
