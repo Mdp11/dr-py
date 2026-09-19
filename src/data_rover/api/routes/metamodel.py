@@ -100,8 +100,21 @@ async def upload_metamodel(
 
 
 @router.get("/metamodel")
-def get_metamodel(session: Session = Depends(get_request_session)) -> Metamodel:
-    return require_metamodel(session)
+def get_metamodel(
+    project_id: str,
+    response: Response,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> Metamodel:
+    """The metamodel document, with the id of the metamodel row the project is
+    bound to in ``X-Metamodel-Id`` (``""`` without one). Lock-free: a rebind
+    between the two reads is healed by the ``rebind_event`` that follows it."""
+    metamodel = require_metamodel(session)
+    model_row = content.get_model_row(db, project_id)
+    response.headers["X-Metamodel-Id"] = (
+        (model_row.metamodel_id or "") if model_row else ""
+    )
+    return metamodel
 
 
 @router.get("/metamodel/raw")

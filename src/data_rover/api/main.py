@@ -298,6 +298,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Metamodel-Id"],
     )
     app.add_middleware(CSRFMiddleware)
     register_exception_handlers(app)
