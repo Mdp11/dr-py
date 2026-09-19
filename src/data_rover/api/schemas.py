@@ -647,6 +647,18 @@ class OpsRequest(BaseModel):
     ops: list[OpIn] = Field(default_factory=list)
 
 
+class SnapshotDescriptorOut(BaseModel):
+    """``GET /replica/snapshot``: the blob's header fields and the path of
+    ``GET /replica/snapshots/{rev}``."""
+
+    rev: int
+    metamodel_id: str
+    state_digest: str
+    elements: int
+    relationships: int
+    url: str
+
+
 class ReplicaTailOut(BaseModel):
     """``GET /replica/tail``. Each delta is the feed's ``commit`` event dict."""
 

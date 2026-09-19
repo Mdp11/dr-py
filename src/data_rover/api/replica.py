@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from . import content
 from .artifact_ops import ARTIFACT_OP_KINDS
-from .db_models import Commit
+from .db_models import Commit, Snapshot
 from .feed import commit_event
 from .schemas import METAMODEL_OP_KINDS, VIEW_OP_KINDS
 
@@ -110,3 +110,16 @@ def build_tail(
         "complete": True,
         "deltas": [delta_from_commit(row, row.rev - 1) for row in rows],
     }
+
+
+def pick_snapshot(db: DbSession, project_id: str, head_rev: int) -> Snapshot | None:
+    """The newest stored v2 snapshot at or below ``head_rev`` from which head is
+    reachable by a complete tail, or None. Only the newest is a candidate: an
+    older one's range contains its range, so if it fails, all fail."""
+    snap = content.latest_snapshot(db, project_id, max_rev=head_rev, format="v2")
+    if snap is None:
+        return None
+    marks = content.commit_tail_marks(
+        db, project_id, after_rev=snap.rev, max_rev=head_rev
+    )
+    return snap if tail_is_complete(marks, snap.rev, head_rev) else None
