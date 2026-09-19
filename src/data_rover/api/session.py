@@ -18,9 +18,11 @@ from .feed import FeedHub
 from .locking import LockTable
 from .script_sweep import ScriptSweepRegistry
 from .settings import get_settings
+from .state_digest import digest_value, fold_batch, format_digest
 from .table_cache import TableOrderCache
 
 if TYPE_CHECKING:
+    from .routes.ops import _BatchResult
     from .schemas import OpIn
     from .search_index_build import SearchIndexProgress
     from .snapshot_job import SnapshotJob
@@ -176,6 +178,31 @@ class Session:
     script_sweeps: ScriptSweepRegistry = field(
         default_factory=ScriptSweepRegistry, repr=False
     )
+    #: the state digest of ``model`` (``state_digest.py``) as an integer, or
+    #: None while it is not known: on a fresh or hydrated session, and after
+    #: ``set_model`` / ``touch_model``. A landed batch folds into it in
+    #: O(batch); a batch that is rolled back needs nothing, the rollback being
+    #: exact. Read and written under ``write_mutex``.
+    state_digest_value: int | None = field(default=None, repr=False)
+
+    def state_digest(self) -> str:
+        """The digest as the wire carries it, recomputed in one O(model) pass
+        when it is not known. Call under ``write_mutex``."""
+        if self.state_digest_value is None:
+            self.state_digest_value = (
+                digest_value(self.model) if self.model is not None else 0
+            )
+        return format_digest(self.state_digest_value)
+
+    def advance_state_digest(self, res: _BatchResult) -> str:
+        """Take a batch that has just landed on ``model`` into the digest and
+        return it. A caller that may still take the batch back keeps
+        ``state_digest_value`` from before the call and restores it then."""
+        if self.state_digest_value is not None and self.model is not None:
+            self.state_digest_value = fold_batch(
+                self.state_digest_value, self.model, res
+            )
+        return self.state_digest()
 
     def invalidate_derived_caches(self) -> None:
         """Drop every model-derived cache and re-stamp the cell cache to the
@@ -253,6 +280,7 @@ class Session:
         self.op_log.clear()  # recorded inverses no longer apply to this model
         self.op_log_dropped = 0
         self.model_rev += 1
+        self.state_digest_value = None
         self.invalidate_derived_caches()
 
     def touch_model(self) -> None:
@@ -280,6 +308,7 @@ class Session:
         self.op_log.clear()
         self.op_log_dropped = 0
         self.validation = None
+        self.state_digest_value = None
         self.invalidate_derived_caches()
 
     def set_metamodel(self, metamodel: Metamodel | None) -> None:

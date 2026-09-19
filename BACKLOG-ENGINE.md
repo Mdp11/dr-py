@@ -25,8 +25,8 @@ A → F. A (engine foundation) has landed: package, value layer and golden-fixtu
 Python snapshot v2 and state digest; metamodel, record-graph store, indexes and mutation
 boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
 the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
-and frontend seam) is designed — six plans, listed in `architecture/program.md`, none built —
-and inherits `K-32`. The freeze rule (`MR-3`)
+and frontend seam) is designed — six plans, listed in `architecture/program.md`, the first built
+(exact server state) — and inherits `K-32`. The freeze rule (`MR-3`)
 covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
 plan. Size: very large.
 

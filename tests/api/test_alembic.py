@@ -139,3 +139,21 @@ def test_migration_0013_adds_commit_entity_states(tmp_path: Path) -> None:
     command.downgrade(cfg, "0012")
     cols = {c["name"] for c in inspect(engine).get_columns("commits")}
     assert "entity_states" not in cols
+
+
+def test_migration_0015_adds_commit_state_digest(tmp_path: Path) -> None:
+    db_path = tmp_path / "t6.db"
+    url = f"sqlite:///{db_path}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    cols = {c["name"]: c for c in inspect(engine).get_columns("commits")}
+    assert "state_digest" in cols
+    assert cols["state_digest"]["nullable"] is True
+
+    command.downgrade(cfg, "0014")
+    cols = {c["name"] for c in inspect(engine).get_columns("commits")}
+    assert "state_digest" not in cols

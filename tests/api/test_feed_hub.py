@@ -80,6 +80,8 @@ def test_event_builders_shapes() -> None:
     assert snap["type"] == "snapshot" and snap["model_rev"] == 3
     commit = feed.commit_event(
         rev=4,
+        prev_rev=3,
+        state_digest="00000000000000ff",
         scope=["model"],
         commit_id="c1",
         author_id="bob",
@@ -89,7 +91,12 @@ def test_event_builders_shapes() -> None:
         changed_relationships=[],
         deleted_element_ids=[],
         deleted_relationship_ids=[],
+        recreated_element_ids=["e1"],
+        recreated_relationship_ids=[],
     )
     assert commit["type"] == "commit" and commit["rev"] == 4
+    assert (commit["prev_rev"], commit["state_digest"]) == (3, "00000000000000ff")
+    assert commit["recreated_element_ids"] == ["e1"]
+    assert commit["recreated_relationship_ids"] == []
     assert commit["scope"] == ["model"]
     assert commit["changed_elements"] == [{"id": "e1"}]

@@ -10,7 +10,7 @@ are promoted into this directory.
 |---|---|---|
 | — | Program design (this directory) | approved 2026-09-18 |
 | A | Engine foundation | done — every golden fixture passes in Node; at M the engine opens a snapshot in 2.3 s of CN-3's 3 s and one open replica holds 231 MB of heap *(measured, Node 22, `pixi run engine-bench`, 2026-09-18)* |
-| B | Replica and frontend seam | designed 2026-09-19, six plans — none built |
+| B | Replica and frontend seam | designed 2026-09-19, six plans — plan 1 built (exact server state: `K-30` and `K-31` closed, digest and `prev_rev` on every delta carrier) |
 | C | Evaluation | not started |
 | D | Scripts in the browser | not started |
 | E | Headless host | not started |

@@ -415,7 +415,9 @@ class _CommitUnwind:
     - ``op_log.pop()`` and the ``session.validation`` null only when
       ``rev_bumped``: the batch enters the op log — and the issue store gets
       its irreversible splice — at the same instant the rev bumps (step d),
-      never earlier.
+      never earlier. The state digest advances at that instant too, so the
+      same flag puts ``prior_digest`` back; before it, the exact model
+      rollback leaves the digest true as it stands.
     - ``db.rollback()`` last, and only once ``db_staged`` — the paths
       before any staging (missing-lock 409, model-apply failure) never
       rolled the request transaction back and still must not.
@@ -443,6 +445,9 @@ class _CommitUnwind:
     #: instant of the swap, like ``prior_metamodel``; None whenever the batch
     #: left ``session.compiled_rules`` alone (the common case).
     prior_compiled: CompiledRules | None = None
+    #: ``session.state_digest_value`` from before the batch was folded into
+    #: it (None = it was not known then either). Meaningful once ``rev_bumped``.
+    prior_digest: int | None = None
     db_staged: bool = False
     rev_bumped: bool = False
 
@@ -473,6 +478,7 @@ class _CommitUnwind:
             # nothing.
             self.session.validation = None
             self.session.model_rev -= 1
+            self.session.state_digest_value = self.prior_digest
         if self.model_res is not None or self.prior_metamodel is not None:
             # Runs AFTER the rev decrement by the invariant above. The
             # metamodel arm matters as much as the model one: every derived
@@ -1203,7 +1209,10 @@ def create_commit(
             delta = state.replace(res.dirty.ids, scoped)
             issues_removed = delta.removed_owner_ids
             issues_added = [IssueOut.from_core(i) for i in delta.added]
+        prev_rev = session.model_rev
+        unwind.prior_digest = session.state_digest_value
         session.model_rev += 1
+        state_digest = session.advance_state_digest(res)
         if rebound:
             # Mirrors the standalone rebind route: EVERY derived row order and
             # script cell value was computed against the old schema, so
@@ -1299,6 +1308,7 @@ def create_commit(
                 _from_metamodel_id=mm_res.from_metamodel_id if mm_res else None,
                 _to_metamodel_id=mm_res.to_metamodel_id if mm_res else None,
                 _entity_states=capture_entity_states(model, res),
+                _state_digest=state_digest,
             )
         except Exception as exc:
             # undo every live half — see _CommitUnwind. By this point that is
@@ -1406,6 +1416,8 @@ def create_commit(
             session.hub.broadcast(
                 commit_event(
                     rev=session.model_rev,
+                    prev_rev=prev_rev,
+                    state_digest=state_digest,
                     commit_id=commit_id,
                     author_id=user.id,
                     message=payload.message,
@@ -1415,6 +1427,8 @@ def create_commit(
                     changed_relationships=changed_relationships,
                     deleted_element_ids=list(res.deleted_element_ids),
                     deleted_relationship_ids=list(res.deleted_relationship_ids),
+                    recreated_element_ids=list(res.recreated_element_ids),
+                    recreated_relationship_ids=list(res.recreated_relationship_ids),
                 )
             )
         broadcast_artifact_events(
@@ -1451,6 +1465,10 @@ def create_commit(
         ],
         deleted_element_ids=list(res.deleted_element_ids),
         deleted_relationship_ids=list(res.deleted_relationship_ids),
+        recreated_element_ids=list(res.recreated_element_ids),
+        recreated_relationship_ids=list(res.recreated_relationship_ids),
+        prev_rev=prev_rev,
+        state_digest=state_digest,
         issues_removed_owner_ids=issues_removed,
         issues_added=issues_added,
         issue_counts=state.counts(),
@@ -1636,7 +1654,10 @@ def revert_commit(
             )
         conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
         delta = state.replace(res.dirty.ids, scoped)
+        prev_rev = session.model_rev
+        unwind.prior_digest = session.state_digest_value
         session.model_rev += 1
+        state_digest = session.advance_state_digest(res)
         session.invalidate_derived_caches()  # mirrors touch_model
         session.record_batch(
             AppliedBatch(
@@ -1668,6 +1689,7 @@ def revert_commit(
                 _validation_error_count=len(conformance),
                 _issues=issues_json,
                 _entity_states=capture_entity_states(model, res),
+                _state_digest=state_digest,
             )
         except Exception as exc:
             unwind.unwind()  # undo every live half — see _CommitUnwind
@@ -1698,6 +1720,8 @@ def revert_commit(
         session.hub.broadcast(
             commit_event(
                 rev=session.model_rev,
+                prev_rev=prev_rev,
+                state_digest=state_digest,
                 commit_id=commit_id,
                 author_id=user.id,
                 message=message,
@@ -1709,6 +1733,8 @@ def revert_commit(
                 changed_relationships=changed_relationships,
                 deleted_element_ids=list(res.deleted_element_ids),
                 deleted_relationship_ids=list(res.deleted_relationship_ids),
+                recreated_element_ids=list(res.recreated_element_ids),
+                recreated_relationship_ids=list(res.recreated_relationship_ids),
             )
         )
     return CommitResponse(
@@ -1723,6 +1749,10 @@ def revert_commit(
         ],
         deleted_element_ids=list(res.deleted_element_ids),
         deleted_relationship_ids=list(res.deleted_relationship_ids),
+        recreated_element_ids=list(res.recreated_element_ids),
+        recreated_relationship_ids=list(res.recreated_relationship_ids),
+        prev_rev=prev_rev,
+        state_digest=state_digest,
         issues_removed_owner_ids=delta.removed_owner_ids,
         issues_added=[IssueOut.from_core(i) for i in delta.added],
         issue_counts=state.counts(),

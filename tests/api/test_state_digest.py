@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import zlib
 
-from data_rover.api.state_digest import entity_hash, format_digest, model_digest
+from data_rover.api.routes.ops import _apply_batch
+from data_rover.api.schemas import ModelOpIn
+from data_rover.api.state_digest import (
+    digest_value,
+    entity_hash,
+    fold_batch,
+    format_digest,
+    model_digest,
+)
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.ids import SequentialIdGenerator
 from data_rover.core.model.model import Model
+from pydantic import TypeAdapter
 
 MM_YAML = """
 elements:
@@ -85,3 +94,21 @@ def test_digest_sees_two_ids_exchanging_revs() -> None:
         return zlib.crc32(entity_id.encode() + b"\x00" + str(rev).encode())
 
     assert crc("a", 1) ^ crc("b", 2) == crc("a", 2) ^ crc("b", 1)
+
+
+def test_a_landed_batch_folds_into_the_digest() -> None:
+    model = _model()
+    ops = TypeAdapter(list[ModelOpIn]).validate_python(
+        [
+            {"kind": "update_element", "id": "id-1", "properties_patch": {"name": "Z"}},
+            {"kind": "delete_element", "id": "id-2"},
+            {"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"},
+            # created and deleted within the batch: in neither digest
+            {"kind": "create_element", "temp_id": "tmp_gone", "type_name": "Node"},
+            {"kind": "delete_element", "id": "tmp_gone"},
+        ]
+    )
+    before = digest_value(model)
+    res = _apply_batch(model, ops, restore=False)
+    assert "id-3" in res.before_relationships  # the cascade took the link
+    assert format_digest(fold_batch(before, model, res)) == model_digest(model)

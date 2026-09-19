@@ -270,6 +270,10 @@ class Commit(Base):
     #: ``ENTITY_STATES_MAX`` entities — the diff reader reconstructs the model
     #: instead. Never backfilled.
     entity_states: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    #: State digest (``state_digest.py``) of the model after this commit, 16
+    #: hex digits. NULL on rows written before the column existed and on the
+    #: baseline markers, which carry no batch.
+    state_digest: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     #: Declared so the ORM unit-of-work can order INSERTs correctly.
     project: Mapped[Project] = relationship()

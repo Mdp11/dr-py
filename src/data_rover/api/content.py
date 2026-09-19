@@ -106,6 +106,7 @@ def append_commit(
     from_metamodel_id: str | None = None,
     to_metamodel_id: str | None = None,
     entity_states: dict[str, Any] | None = None,
+    state_digest: str | None = None,
 ) -> Commit:
     row = Commit(
         project_id=project_id,
@@ -121,6 +122,7 @@ def append_commit(
         from_metamodel_id=from_metamodel_id,
         to_metamodel_id=to_metamodel_id,
         entity_states=entity_states,
+        state_digest=state_digest,
     )
     db.add(row)
     db.flush()

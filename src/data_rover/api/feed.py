@@ -118,6 +118,8 @@ def snapshot_event(
 def commit_event(
     *,
     rev: int,
+    prev_rev: int,
+    state_digest: str,
     scope: list[str],
     commit_id: str,
     author_id: str,
@@ -127,8 +129,14 @@ def commit_event(
     changed_relationships: list[dict[str, Any]],
     deleted_element_ids: list[str],
     deleted_relationship_ids: list[str],
+    recreated_element_ids: list[str],
+    recreated_relationship_ids: list[str],
 ) -> dict[str, Any]:
-    """``scope`` says which content families the commit touched (``model`` /
+    """The commit delta a replica follows: ``prev_rev`` is the revision it
+    continues from, ``state_digest`` the digest of the model after it, and
+    ``recreated_*`` the changed ids the commit deleted and created again.
+
+    ``scope`` says which content families the commit touched (``model`` /
     ``artifact`` / ``view`` / ``metamodel-layout``) so clients refresh only
     what moved: a commit that only renamed a saved table must not make every
     peer refetch model pages. It is a REQUIRED keyword rather than a defaulted
@@ -141,6 +149,8 @@ def commit_event(
     return {
         "type": "commit",
         "rev": rev,
+        "prev_rev": prev_rev,
+        "state_digest": state_digest,
         "scope": scope,
         "commit_id": commit_id,
         "author_id": author_id,
@@ -150,6 +160,8 @@ def commit_event(
         "changed_relationships": changed_relationships,
         "deleted_element_ids": deleted_element_ids,
         "deleted_relationship_ids": deleted_relationship_ids,
+        "recreated_element_ids": recreated_element_ids,
+        "recreated_relationship_ids": recreated_relationship_ids,
     }
 
 

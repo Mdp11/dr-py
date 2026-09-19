@@ -67,6 +67,19 @@ describe('checkout schemas', () => {
 		expect(v.model_rev).toBe(4);
 	});
 
+	it('parses a commit response carrying what a replica follows it by', () => {
+		const v = CommitResponseSchema.parse({
+			model_rev: 5,
+			commit_id: 'c2',
+			prev_rev: 4,
+			state_digest: '00000000000000ff',
+			recreated_element_ids: ['e1'],
+			recreated_relationship_ids: []
+		});
+		expect(v.model_rev).toBe(5);
+		expect(v.changed_elements).toEqual([]);
+	});
+
 	it('parses a commit response carrying the artifact delta', () => {
 		const res = CommitResponseSchema.parse({
 			model_rev: 3,

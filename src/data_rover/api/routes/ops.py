@@ -55,10 +55,19 @@ stages it inside the same try/except for the same reason ``create_commit``
 does (a staging failure must not escape with ``model_rev`` already bumped and
 the batch already off the op_log).
 
-Undo restores entity STATE (ids, types, endpoints, properties) but per-entity
-``rev`` counters continue forward: nothing uses ``rev`` for conflict detection
-(CR matching explicitly ignores it, see ``core/model/change_request.py``), it
-is only a change ticker.
+Undo restores entity STATE (ids, types, endpoints, properties) but not the
+per-entity ``rev`` counters: an entity it reinstates starts counting again.
+Nothing uses ``rev`` for conflict detection (CR matching explicitly ignores
+it, see ``core/model/change_request.py``); it is a change ticker, and with the
+id one half of every pair the state digest folds (``api/state_digest.py``).
+
+The delta a replica follows
+---------------------------
+Every landed batch answers with the revision it continues from (``prev_rev``),
+the ids it deleted and created again (``recreated_*``) and the state digest of
+the model after it, which the session keeps up in O(batch)
+(``Session.advance_state_digest``) and the journal row records. A path that
+takes a landed batch back puts the digest back with it.
 """
 
 from __future__ import annotations
@@ -619,7 +628,13 @@ def _ensure_validation_seeded(session: Session, model: Model) -> ValidationState
 
 
 def _finalize(
-    session: Session, state: ValidationState, model: Model, res: _BatchResult
+    session: Session,
+    state: ValidationState,
+    model: Model,
+    res: _BatchResult,
+    *,
+    prev_rev: int,
+    state_digest: str,
 ) -> OpsResponse:
     """Scoped re-validation + issue-store splice + response assembly.
 
@@ -650,6 +665,10 @@ def _finalize(
         ],
         deleted_element_ids=list(res.deleted_element_ids),
         deleted_relationship_ids=list(res.deleted_relationship_ids),
+        recreated_element_ids=list(res.recreated_element_ids),
+        recreated_relationship_ids=list(res.recreated_relationship_ids),
+        prev_rev=prev_rev,
+        state_digest=state_digest,
         issues_removed_owner_ids=delta.removed_owner_ids,
         issues_added=[IssueOut.from_core(i) for i in delta.added],
         issue_counts=state.counts(),
@@ -672,6 +691,7 @@ def _persist_commit(
     _from_metamodel_id: str | None = None,
     _to_metamodel_id: str | None = None,
     _entity_states: dict[str, Any] | None = None,
+    _state_digest: str | None = None,
 ) -> bool:
     """Append the accepted batch to the durable journal and advance model_rev.
 
@@ -703,6 +723,7 @@ def _persist_commit(
     ``_entity_states`` is ``capture_entity_states(model, res)`` for the
     applied batch — the diff reader's journal-only input; None (over-cap or
     a writer that has no model batch) means the reader reconstructs.
+    ``_state_digest`` is the session's state digest after the batch.
 
     Returns True if a durable row existed and the commit was persisted,
     False when the project has no model row (in-memory-only session)."""
@@ -723,6 +744,7 @@ def _persist_commit(
         from_metamodel_id=_from_metamodel_id,
         to_metamodel_id=_to_metamodel_id,
         entity_states=_entity_states,
+        state_digest=_state_digest,
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
@@ -739,6 +761,7 @@ def _persist_undo_commit(
     inverse_ops: Sequence[OpIn],
     id_map: dict[str, str],
     entity_states: dict[str, Any] | None = None,
+    state_digest: str | None = None,
 ) -> bool:
     """Record an undo as a forward compensating commit (append-only journal).
 
@@ -764,6 +787,7 @@ def _persist_undo_commit(
         inverse_ops=serialize_ops(inverse_ops),
         id_map=dict(id_map),
         entity_states=entity_states,
+        state_digest=state_digest,
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
@@ -840,7 +864,10 @@ def apply_ops(
         return OpsResponse(model_rev=session.model_rev, issue_counts=state.counts())
     with session.write_mutex:
         res = _apply_batch(model, model_ops, restore=False)
+        prev_rev = session.model_rev
+        prior_digest = session.state_digest_value
         session.model_rev += 1
+        state_digest = session.advance_state_digest(res)
         if get_settings().snippet_incremental_invalidation:
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
@@ -865,10 +892,12 @@ def apply_ops(
                 inverse_ops=res.inverse_ops(),
                 id_map=dict(res.id_map),
                 _entity_states=capture_entity_states(model, res),
+                _state_digest=state_digest,
             )
         except Exception as exc:
             _rollback(model, res)  # undo the in-memory mutation
             session.model_rev -= 1
+            session.state_digest_value = prior_digest
             # The rev moves BACKWARDS here. A concurrent lock-free
             # /tables/evaluate may already have stamped the script cell cache
             # at the higher rev (it only self-clears on a FORWARD stamp move),
@@ -883,7 +912,9 @@ def apply_ops(
             ) from exc
         if persisted:
             _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
-        return _finalize(session, state, model, res)
+        return _finalize(
+            session, state, model, res, prev_rev=prev_rev, state_digest=state_digest
+        )
 
 
 @router.post("/model/undo", response_model=None)
@@ -1072,7 +1103,10 @@ def undo(
                 session.op_log.append(batch)
                 db.rollback()
                 raise
+        prev_rev = session.model_rev
+        prior_digest = session.state_digest_value
         session.model_rev += 1
+        state_digest = session.advance_state_digest(res)
         if get_settings().snippet_incremental_invalidation:
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
@@ -1130,10 +1164,12 @@ def undo(
                 inverse_ops=inverse_ops,
                 id_map=merged_id_map,
                 entity_states=capture_entity_states(model, res),
+                state_digest=state_digest,
             )
         except Exception as exc:
             _rollback(model, res)  # undo the in-memory mutation
             session.model_rev -= 1
+            session.state_digest_value = prior_digest
             session.invalidate_derived_caches()  # rev moved BACK; see apply_ops
             for _vid, done_view, done_res in reversed(view_results):
                 rollback_view(done_view, done_res.inverse_units)
@@ -1174,4 +1210,6 @@ def undo(
             res.dirty.update(
                 applies_population(model, prior_compiled, session.compiled_rules)
             )
-        return _finalize(session, state, model, res)
+        return _finalize(
+            session, state, model, res, prev_rev=prev_rev, state_digest=state_digest
+        )

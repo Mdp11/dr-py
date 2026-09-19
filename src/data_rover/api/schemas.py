@@ -661,6 +661,17 @@ class OpsResponse(BaseModel):
     #: deletions (cascade order: containment closure walk / sorted rel ids)
     deleted_element_ids: list[str] = Field(default_factory=list)
     deleted_relationship_ids: list[str] = Field(default_factory=list)
+    #: the changed ids the batch deleted and then created again: each is a
+    #: new entity at the END of the model's insertion order, which its
+    #: changed state alone cannot say
+    recreated_element_ids: list[str] = Field(default_factory=list)
+    recreated_relationship_ids: list[str] = Field(default_factory=list)
+    #: ``model_rev`` before this batch bumped it, and the state digest
+    #: (``api/state_digest.py``) of the model after it: what a replica needs
+    #: to tell that it missed nothing and stands where the server stands.
+    #: None on a response that applied nothing.
+    prev_rev: int | None = None
+    state_digest: str | None = None
     #: issue-store delta of the scoped re-validation (see ValidationState)
     issues_removed_owner_ids: list[str] = Field(default_factory=list)
     issues_added: list[IssueOut] = Field(default_factory=list)
