@@ -106,8 +106,8 @@ event     {event, …}                     engine → client, unsolicited
    each records its inverse. The engine keeps the committed state of every entity a staged op
    touched, so committed reads need no rewind. A refused batch leaves no trace, and a rewind
    is exact: every touched entity goes back to its before-image — properties, `rev` and place
-   in state order — which replaying inverse ops, as the server's rollback does, cannot give
-   (`BACKLOG-ENGINE.md`, `K-30`).
+   in state order — which replaying inverse ops cannot give. The server's rollback
+   (`routes/ops.py::_rollback`) is the same operation, pass for pass.
 3. To apply a delta: rewind all staged ops in reverse order → apply the delta → drop the staged
    ops it committed → rewrite temp ids through `id_map` → replay the rest. An op that fails
    replay is parked as a conflict and surfaced; it is never dropped silently.

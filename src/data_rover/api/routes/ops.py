@@ -10,11 +10,14 @@ issue delta), bumps ``session.model_rev`` once, and is appended to
 Atomicity without deep copies
 -----------------------------
 Batches are atomic, but the model is NOT deep-copied per request (it can be
-~80 MB): ops are applied directly to the live session model while inverse
-ops are collected per completed mutation. If an op fails mid-batch, the
-collected inverses are applied in reverse to roll the live model back to its
-pre-batch state, and the request fails with 422. This trades a tiny rollback
-path for O(batch) request cost instead of O(model).
+~80 MB): ops are applied directly to the live session model while the state
+of every entity is noted before its first touch. If an op fails mid-batch,
+``_rollback`` puts each touched entity back from that before-image —
+properties, ``rev`` and place in insertion order — and the request fails with
+422. Every other path that applies a batch and takes it back (a preview, a
+staged validation, a commit refused or not persisted) rolls back the same way,
+so none of them leaves a trace. This trades a small rollback path for O(batch)
+request cost instead of O(model).
 
 Validation seeding
 ------------------
@@ -187,6 +190,12 @@ class _BatchResult:
     before_relationships: dict[str, RelationshipOut | None] = field(
         default_factory=dict
     )
+    #: insertion sequence number of every before-image that is not None
+    #: (``IndexSet.element_order`` / ``relationship_order``): where a rollback
+    #: puts the entity back, and how it tells a survivor from an entity
+    #: created again under the same id
+    before_element_orders: dict[str, int] = field(default_factory=dict)
+    before_relationship_orders: dict[str, int] = field(default_factory=dict)
 
     def mark_element_changed(self, element_id: str) -> None:
         self.changed_element_ids[element_id] = None
@@ -204,19 +213,31 @@ class _BatchResult:
         self.deleted_relationship_ids[rel_id] = None
         self.changed_relationship_ids.pop(rel_id, None)
 
-    def note_element_before(self, element_id: str, element: Element | None) -> None:
+    def note_element_before(
+        self, model: Model, element_id: str, element: Element | None
+    ) -> None:
         """Record ``element``'s current state as its pre-batch state unless an
         earlier op in this batch already did. Call BEFORE mutating it."""
-        if element_id not in self.before_elements:
-            self.before_elements[element_id] = (
-                ElementOut.from_core(element) if element is not None else None
-            )
+        if element_id in self.before_elements:
+            return
+        if element is None:
+            self.before_elements[element_id] = None
+            return
+        self.before_elements[element_id] = ElementOut.from_core(element)
+        self.before_element_orders[element_id] = model.indexes.element_order[element_id]
 
-    def note_relationship_before(self, rel_id: str, rel: Relationship | None) -> None:
-        if rel_id not in self.before_relationships:
-            self.before_relationships[rel_id] = (
-                RelationshipOut.from_core(rel) if rel is not None else None
-            )
+    def note_relationship_before(
+        self, model: Model, rel_id: str, rel: Relationship | None
+    ) -> None:
+        if rel_id in self.before_relationships:
+            return
+        if rel is None:
+            self.before_relationships[rel_id] = None
+            return
+        self.before_relationships[rel_id] = RelationshipOut.from_core(rel)
+        self.before_relationship_orders[rel_id] = model.indexes.relationship_order[
+            rel_id
+        ]
 
     def inverse_ops(self) -> list[ModelOpIn]:
         """Flat inverse batch: applying it front-to-back undoes this batch."""
@@ -280,9 +301,9 @@ def _apply_one(
                 f"create_element temp_id {op.temp_id!r} must start with "
                 f"{TEMP_ID_PREFIX!r}"
             )
-        res.note_element_before(element.id, None)
-        # inverse recorded BEFORE the property sets: if one of them fails,
-        # rollback must delete the half-initialized element
+        res.note_element_before(model, element.id, None)
+        # inverse recorded BEFORE the property sets, so the unit list never
+        # lags a mutation that happened
         res.inverse_units.append(
             [DeleteElementOp(kind="delete_element", id=element.id)]
         )
@@ -299,7 +320,7 @@ def _apply_one(
     if isinstance(op, UpdateElementOp):
         eid = res.id_map.get(op.id, op.id)
         element = model.get_element(eid)
-        res.note_element_before(eid, element)
+        res.note_element_before(model, eid, element)
         patch = _resolve_props(op.properties_patch, res.id_map)
         _check_patch_keys(model, element.type_name, element=True, patch=patch)
         # mergePatch semantics (frontend apply.ts): None deletes the key,
@@ -347,7 +368,7 @@ def _apply_one(
         unit: list[ModelOpIn] = []
         for ce in closure:
             e = model.elements[ce]
-            res.note_element_before(ce, e)
+            res.note_element_before(model, ce, e)
             unit.append(
                 CreateElementOp(
                     kind="create_element",
@@ -358,7 +379,7 @@ def _apply_one(
             )
         for rid in removed_rel_ids:
             r = model.relationships[rid]
-            res.note_relationship_before(rid, r)
+            res.note_relationship_before(model, rid, r)
             unit.append(
                 CreateRelationshipOp(
                     kind="create_relationship",
@@ -404,7 +425,7 @@ def _apply_one(
                 f"create_relationship temp_id {op.temp_id!r} must start with "
                 f"{TEMP_ID_PREFIX!r}"
             )
-        res.note_relationship_before(rel.id, None)
+        res.note_relationship_before(model, rel.id, None)
         res.inverse_units.append(
             [DeleteRelationshipOp(kind="delete_relationship", id=rel.id)]
         )
@@ -427,7 +448,7 @@ def _apply_one(
     if isinstance(op, UpdateRelationshipOp):
         rid = res.id_map.get(op.id, op.id)
         rel = model.get_relationship(rid)
-        res.note_relationship_before(rid, rel)
+        res.note_relationship_before(model, rid, rel)
         patch = _resolve_props(op.properties_patch, res.id_map)
         _check_patch_keys(model, rel.type_name, element=False, patch=patch)
         inverse_patch = {
@@ -454,7 +475,7 @@ def _apply_one(
     if isinstance(op, DeleteRelationshipOp):
         rid = res.id_map.get(op.id, op.id)
         rel = model.get_relationship(rid)
-        res.note_relationship_before(rid, rel)
+        res.note_relationship_before(model, rid, rel)
         unit = [
             CreateRelationshipOp(
                 kind="create_relationship",
@@ -474,17 +495,65 @@ def _apply_one(
     assert_never(op)  # a new OpIn variant without a branch fails type-checking
 
 
-def _rollback(model: Model, inverse_units: list[list[ModelOpIn]]) -> None:
-    """Undo the completed mutations of a failed batch on the live model.
+def _rollback(model: Model, res: _BatchResult) -> None:
+    """Put every entity the batch touched back exactly as its before-image
+    has it: properties, ``rev`` and place in insertion order. ``res`` may be
+    the result of a batch that failed midway; the batch must be the newest
+    change still applied to the model.
 
-    Applies the recorded inverse units newest-first (preserving each unit's
-    internal order) in restore mode. The dirty/delta bookkeeping is thrown
-    away — the request fails, so no validation or response delta is built.
+    An entity that outlived the batch still carries the sequence number of
+    its image — one created again under the same id never does, creation
+    always takes a new number — and is rewritten where it is. Whatever else
+    the batch left under a touched id goes, relationships first, so that no
+    element delete cascades into anything the batch did not touch; then what
+    is missing comes back, elements first, because a relationship needs its
+    ends. Replaying inverse ops instead would count ``rev`` up again and
+    leave every restored entity last in its dict.
     """
-    scratch = _BatchResult()
-    for unit in reversed(inverse_units):
-        for op in unit:
-            _apply_one(model, op, scratch, restore=True)
+    indexes = model.indexes
+    for rid, rel_image in res.before_relationships.items():
+        rel = model.relationships.get(rid)
+        if rel is None:
+            continue
+        if (
+            rel_image is not None
+            and indexes.relationship_order[rid] == res.before_relationship_orders[rid]
+        ):
+            model.overwrite(rel, dict(rel_image.properties), rel_image.rev)
+        else:
+            model.disconnect(rid)
+    for eid, image in res.before_elements.items():
+        element = model.elements.get(eid)
+        if element is None:
+            continue
+        if (
+            image is not None
+            and indexes.element_order[eid] == res.before_element_orders[eid]
+        ):
+            model.overwrite(element, dict(image.properties), image.rev)
+        else:
+            model.delete_element(eid)
+    for eid, image in res.before_elements.items():
+        if image is not None and eid not in model.elements:
+            model.insert_element(
+                eid,
+                image.type_name,
+                dict(image.properties),
+                image.rev,
+                res.before_element_orders[eid],
+            )
+    for rid, rel_image in res.before_relationships.items():
+        if rel_image is not None and rid not in model.relationships:
+            model.insert_relationship(
+                rid,
+                rel_image.type_name,
+                rel_image.source_id,
+                rel_image.target_id,
+                dict(rel_image.properties),
+                rel_image.rev,
+                res.before_relationship_orders[rid],
+            )
+    model.settle_order()
 
 
 def _error_detail(exc: BaseException) -> str:
@@ -496,8 +565,8 @@ def _error_detail(exc: BaseException) -> str:
 def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _BatchResult:
     """Apply *ops* atomically to the live model.
 
-    On ANY op failure the completed mutations are rolled back via their
-    recorded inverses — the model, its indexes, and the validation store are
+    On ANY op failure every touched entity is put back from its before-image
+    (``_rollback``) — the model, its indexes, and the validation store are
     left exactly as before the batch. The expected validation failures
     (KeyError/ValueError from the mutation boundary) become a 422; anything
     else is a bug and propagates (as a 500) AFTER the rollback, so even an
@@ -508,7 +577,7 @@ def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _Batch
         for op in ops:
             _apply_one(model, op, res, restore=restore)
     except Exception as exc:
-        _rollback(model, res.inverse_units)
+        _rollback(model, res)
         if isinstance(exc, (KeyError, ValueError)):
             raise HTTPException(status_code=422, detail=_error_detail(exc)) from exc
         raise
@@ -781,7 +850,7 @@ def apply_ops(
                 _entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
-            _rollback(model, res.inverse_units)  # undo the in-memory mutation
+            _rollback(model, res)  # undo the in-memory mutation
             session.model_rev -= 1
             # The rev moves BACKWARDS here. A concurrent lock-free
             # /tables/evaluate may already have stamped the script cell cache
@@ -930,7 +999,7 @@ def undo(
             # renamed the row this undo wants back), but an UNforeseen error
             # must not be the one case that leaves the model half-undone.
             # Undo BOTH halves and re-push the batch so undo history survives.
-            _rollback(model, res.inverse_units)
+            _rollback(model, res)
             session.invalidate_derived_caches()  # rolled back in place
             session.op_log.append(batch)
             db.rollback()  # discard staged artifact rows
@@ -951,7 +1020,7 @@ def undo(
                 # docstring), so there is no separate rollback_view call here
                 # — only a failure raised AFTER it succeeded needs one (the
                 # persist-failure branch below).
-                _rollback(model, res.inverse_units)
+                _rollback(model, res)
                 session.invalidate_derived_caches()
                 for _vid, done_view, done_res in reversed(view_results):
                     rollback_view(done_view, done_res.inverse_units)
@@ -979,7 +1048,7 @@ def undo(
             try:
                 mm_res = apply_metamodel_ops(db, project_id, session, metamodel_inv)
             except Exception:
-                _rollback(model, res.inverse_units)
+                _rollback(model, res)
                 session.invalidate_derived_caches()
                 for _vid, done_view, done_res in reversed(view_results):
                     rollback_view(done_view, done_res.inverse_units)
@@ -1046,7 +1115,7 @@ def undo(
                 entity_states=capture_entity_states(model, res),
             )
         except Exception as exc:
-            _rollback(model, res.inverse_units)  # undo the in-memory mutation
+            _rollback(model, res)  # undo the in-memory mutation
             session.model_rev -= 1
             session.invalidate_derived_caches()  # rev moved BACK; see apply_ops
             for _vid, done_view, done_res in reversed(view_results):

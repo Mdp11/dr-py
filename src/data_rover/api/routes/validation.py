@@ -208,7 +208,7 @@ def validate_model(
                     current, res.dirty.to_scope()
                 )
             finally:
-                _rollback(current, res.inverse_units)
+                _rollback(current, res)
         dirty_ids = set(res.dirty.ids)
         # working full set = committed issues OUTSIDE the dirty scope ∪ the fresh
         # dirty-scope issues (what state.replace would yield, computed purely).

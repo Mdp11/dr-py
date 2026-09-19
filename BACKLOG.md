@@ -1174,6 +1174,15 @@ written for a table column with inputs shows an enabled "Run as value" and fails
 targeted message ("this value() takes column inputs; run it from the table") or disabling the
 entry in the console for arity-2 snippets would save a support round-trip.
 
+### K-33 · `POST /model/validate` with staged ops leaves derived caches standing · `open` · *2026-09-19*
+The staged branch of `routes/validation.py` applies the ops to the live model, validates and
+rolls back under `write_mutex`, as `POST /commits/preview` does — but never calls
+`session.invalidate_derived_caches()`, which preview does for this very case. Table routes
+take no mutex, so a `/tables/evaluate` that reads the model mid-validation can cache a row
+order and script cells computed against the discarded state under an unchanged
+`(fingerprint, rev)`, and nothing evicts them before the next commit. The rollback itself is
+exact. Fix: invalidate in the `finally` that rolls back, as preview's does.
+
 The client-engine program's issues (`K-29` → `K-32`) are in `BACKLOG-ENGINE.md`.
 
 ---

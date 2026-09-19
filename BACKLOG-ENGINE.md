@@ -26,7 +26,7 @@ Python snapshot v2 and state digest; metamodel, record-graph store, indexes and 
 boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
 the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
 and frontend seam) is designed — six plans, listed in `architecture/program.md`, none built —
-and inherits `K-30`, `K-31` and `K-32`. The freeze rule (`MR-3`)
+and inherits `K-31` and `K-32`. The freeze rule (`MR-3`)
 covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
 plan. Size: very large.
 
@@ -42,20 +42,6 @@ folds both kinds into one namespace — a same-`rev` pair cancels out of it. The
 loader refuses such a snapshot (`Relationship id 'x' is already an element id`), so a project
 imported with one would open on the server and not in the browser. Fix: check the other
 kind's ids in `_guard_relationship`; the file is outside the MR-3 freeze.
-
-### K-30 · The op applier's rollback is not exact: `rev` drifts and restored entities move last · `open` · *2026-09-18*
-`routes/ops.py::_rollback` replays inverse ops in restore mode, so a refused batch — and
-every `POST /commits/preview`, which rolls back the same way — leaves each updated entity's
-`rev` two higher and each deleted-then-restored entity at the end of its dict with `rev`
-counted again from zero. Observed on the core: `[update id-3, delete id-1, update ghost]` →
-422, `id-3` at `rev` 3 instead of 1, `id-1` and `id-2` behind it, state digest
-`d2499a403aeabae2` → `6b1333ccfa35d720`, no commit. Harmless while nothing reads `rev`; once
-the server serves the CT-3 digest and v2 snapshots (sub-project B) a single preview would make
-every replica report divergence at the next delta, and entity order (state, CT-1) would
-differ between the server and its replicas. The engine's applier restores before-images
-exactly, and the golden recorder runs each batch on a copy of the oracle's model so the
-drift never enters a fixture. Fix, in B: make the server's rollback exact (put `rev` and
-dict position back) or run previews on a copy; the applier is under the MR-3 freeze.
 
 ### K-31 · A commit delta cannot say "deleted and created again under the same id" · `open` · *2026-09-18*
 Within one batch, `delete X` followed by a create with `id: X` moves X to the end of the

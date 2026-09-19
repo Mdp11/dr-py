@@ -448,7 +448,7 @@ class _CommitUnwind:
 
     def unwind(self) -> None:
         if self.model_res is not None:
-            _rollback(self.model, self.model_res.inverse_units)
+            _rollback(self.model, self.model_res)
         if self.prior_metamodel is not None:
             # Reverse of apply order: the swap went in first, so it unwinds
             # after the model ops that were applied on top of it. See the
@@ -600,7 +600,7 @@ def preview_commit(
                         model, res.dirty.to_scope()
                     )
             finally:
-                _rollback(model, res.inverse_units)  # always restore the model
+                _rollback(model, res)  # always restore the model
         finally:
             # Unconditional across every exit from the try above — the happy
             # path, a validation-pipeline exception, and an `_apply_batch`

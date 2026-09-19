@@ -1,0 +1,638 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Node",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "note",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "peer",
+            "datatype": "Node",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": [
+          "name"
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Holds",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Link",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "label",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a\",\"type_name\":\"Node\",\"properties\":{\"name\":\"a\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d\",\"type_name\":\"Node\",\"properties\":{\"name\":\"d\",\"peer\":\"tmp_c\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h1\",\"type_name\":\"Holds\",\"source_id\":\"tmp_a\",\"target_id\":\"tmp_c\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h2\",\"type_name\":\"Holds\",\"source_id\":\"tmp_b\",\"target_id\":\"tmp_c\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l1\",\"type_name\":\"Link\",\"source_id\":\"tmp_c\",\"target_id\":\"tmp_d\",\"properties\":{\"label\":\"x\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l2\",\"type_name\":\"Link\",\"source_id\":\"tmp_d\",\"target_id\":\"tmp_a\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_a",
+            "id-1"
+          ],
+          [
+            "tmp_b",
+            "id-2"
+          ],
+          [
+            "tmp_c",
+            "id-3"
+          ],
+          [
+            "tmp_d",
+            "id-4"
+          ],
+          [
+            "tmp_h1",
+            "id-5"
+          ],
+          [
+            "tmp_h2",
+            "id-6"
+          ],
+          [
+            "tmp_l1",
+            "id-7"
+          ],
+          [
+            "tmp_l2",
+            "id-8"
+          ]
+        ],
+        "changed_element_ids": [
+          "id-1",
+          "id-2",
+          "id-3",
+          "id-4"
+        ],
+        "changed_relationship_ids": [
+          "id-5",
+          "id-6",
+          "id-7",
+          "id-8"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-1",
+            null
+          ],
+          [
+            "id-2",
+            null
+          ],
+          [
+            "id-3",
+            null
+          ],
+          [
+            "id-4",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-5",
+            null
+          ],
+          [
+            "id-6",
+            null
+          ],
+          [
+            "id-7",
+            null
+          ],
+          [
+            "id-8",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-8\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-7\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-6\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-5\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+          "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\"},\"rev\":1}",
+          "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"rev\":1}",
+          "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{\"name\":\"d\",\"peer\":\"id-3\"},\"rev\":2}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-5\",\"type_name\":\"Holds\",\"source_id\":\"id-1\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-6\",\"type_name\":\"Holds\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"x\"},\"rev\":1}",
+          "{\"id\":\"id-8\",\"type_name\":\"Link\",\"source_id\":\"id-4\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "3056ed1c4128f7fb",
+      "fingerprint": "48ec7c792aac5d1d",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{\"name\":\"d\",\"peer\":\"id-3\"},\"rev\":2}",
+        "{\"id\":\"id-5\",\"type_name\":\"Holds\",\"source_id\":\"id-1\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-6\",\"type_name\":\"Holds\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"x\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Link\",\"source_id\":\"id-4\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"id-1\",\"id-2\",\"id-3\",\"id-4\"]]],\"out\":[[\"id-1\",[\"id-5\"]],[\"id-2\",[\"id-6\"]],[\"id-3\",[\"id-7\"]],[\"id-4\",[\"id-8\"]]],\"in\":[[\"id-1\",[\"id-8\"]],[\"id-3\",[\"id-5\",\"id-6\"]],[\"id-4\",[\"id-7\"]]],\"out_count\":[[\"id-1\",\"Holds\",1],[\"id-2\",\"Holds\",1],[\"id-3\",\"Link\",1],[\"id-4\",\"Link\",1]],\"in_count\":[[\"id-1\",\"Link\",1],[\"id-3\",\"Holds\",2],[\"id-4\",\"Link\",1]],\"parents\":[[\"id-3\",[\"id-1\",\"id-2\"],[\"id-5\",\"id-6\"]]],\"refs\":[[\"id-4\",[\"id-3\"]]],\"referencers\":[[\"id-3\",[\"id-4\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"],[\"id-4\"]],\"duplicates\":[],\"roots\":[[\"a\",\"id-1\"],[\"b\",\"id-2\"],[\"d\",\"id-4\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"note\":\"n\"}}",
+        "{\"kind\":\"update_relationship\",\"id\":\"id-7\",\"properties_patch\":{\"label\":\"y\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-2"
+        ],
+        "changed_relationship_ids": [
+          "id-7"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-2",
+            "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-7",
+            "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"x\"},\"rev\":1}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_relationship\",\"id\":\"id-7\",\"properties_patch\":{\"label\":\"x\"}}",
+          "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"note\":null}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\",\"note\":\"n\"},\"rev\":2}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"y\"},\"rev\":2}"
+        ]
+      },
+      "error": null,
+      "digest": "11c3ad39fb61b707",
+      "fingerprint": "8dc7c31ba0975c6b",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\",\"note\":\"n\"},\"rev\":2}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{\"name\":\"d\",\"peer\":\"id-3\"},\"rev\":2}",
+        "{\"id\":\"id-5\",\"type_name\":\"Holds\",\"source_id\":\"id-1\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-6\",\"type_name\":\"Holds\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"y\"},\"rev\":2}",
+        "{\"id\":\"id-8\",\"type_name\":\"Link\",\"source_id\":\"id-4\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"id-1\",\"id-2\",\"id-3\",\"id-4\"]]],\"out\":[[\"id-1\",[\"id-5\"]],[\"id-2\",[\"id-6\"]],[\"id-3\",[\"id-7\"]],[\"id-4\",[\"id-8\"]]],\"in\":[[\"id-1\",[\"id-8\"]],[\"id-3\",[\"id-5\",\"id-6\"]],[\"id-4\",[\"id-7\"]]],\"out_count\":[[\"id-1\",\"Holds\",1],[\"id-2\",\"Holds\",1],[\"id-3\",\"Link\",1],[\"id-4\",\"Link\",1]],\"in_count\":[[\"id-1\",\"Link\",1],[\"id-3\",\"Holds\",2],[\"id-4\",\"Link\",1]],\"parents\":[[\"id-3\",[\"id-1\",\"id-2\"],[\"id-5\",\"id-6\"]]],\"refs\":[[\"id-4\",[\"id-3\"]]],\"referencers\":[[\"id-3\",[\"id-4\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"],[\"id-4\"]],\"duplicates\":[],\"roots\":[[\"a\",\"id-1\"],[\"b\",\"id-2\"],[\"d\",\"id-4\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-3\",\"properties_patch\":{\"name\":\"c2\",\"note\":\"new\"}}",
+        "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"note\":null}}",
+        "{\"kind\":\"update_relationship\",\"id\":\"id-7\",\"properties_patch\":{\"label\":\"z\"}}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"note\":\"never\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":\"a\"}}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"note\":\"never\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"id-1\"}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"note\":\"never\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"id-5\"}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"note\":\"never\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_x\",\"type_name\":\"Node\",\"properties\":{\"name\":\"x\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_hx\",\"type_name\":\"Holds\",\"source_id\":\"tmp_x\",\"target_id\":\"id-4\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_lx\",\"type_name\":\"Link\",\"source_id\":\"tmp_x\",\"target_id\":\"id-1\",\"properties\":{\"label\":\"new\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_y\",\"type_name\":\"Node\",\"properties\":{\"name\":\"y\",\"nope\":1},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "Node' has no property 'nope"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b again\"},\"id\":\"id-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c again\"},\"id\":\"id-3\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h3\",\"type_name\":\"Holds\",\"source_id\":\"tmp_b2\",\"target_id\":\"tmp_c2\",\"properties\":{},\"id\":\"id-6\"}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"note\":\"never\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"id-7\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l3\",\"type_name\":\"Link\",\"source_id\":\"id-4\",\"target_id\":\"id-3\",\"properties\":{},\"id\":\"id-7\"}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"note\":\"never\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"note\":\"gone again\"}}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"bare\",\"type_name\":\"Node\",\"properties\":{},\"id\":null}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "create_element temp_id 'bare' must start with 'tmp_'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "restore": true,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"id-40\",\"type_name\":\"Node\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"delete_element\",\"id\":\"id-4\"}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"note\":\"never\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_e\",\"type_name\":\"Node\",\"properties\":{\"name\":\"e\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_le\",\"type_name\":\"Link\",\"source_id\":\"tmp_e\",\"target_id\":\"id-2\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_e",
+            "id-9"
+          ],
+          [
+            "tmp_le",
+            "id-10"
+          ]
+        ],
+        "changed_element_ids": [
+          "id-9"
+        ],
+        "changed_relationship_ids": [
+          "id-10"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-9",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-10",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-10\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-9\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"e\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-10\",\"type_name\":\"Link\",\"source_id\":\"id-9\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "cb5f3eeafc4d0c08",
+      "fingerprint": "2adb04e59de7721d",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\",\"note\":\"n\"},\"rev\":2}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{\"name\":\"d\",\"peer\":\"id-3\"},\"rev\":2}",
+        "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"e\"},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Holds\",\"source_id\":\"id-1\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-6\",\"type_name\":\"Holds\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"y\"},\"rev\":2}",
+        "{\"id\":\"id-8\",\"type_name\":\"Link\",\"source_id\":\"id-4\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-10\",\"type_name\":\"Link\",\"source_id\":\"id-9\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"id-1\",\"id-2\",\"id-3\",\"id-4\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-5\"]],[\"id-2\",[\"id-6\"]],[\"id-3\",[\"id-7\"]],[\"id-4\",[\"id-8\"]],[\"id-9\",[\"id-10\"]]],\"in\":[[\"id-1\",[\"id-8\"]],[\"id-2\",[\"id-10\"]],[\"id-3\",[\"id-5\",\"id-6\"]],[\"id-4\",[\"id-7\"]]],\"out_count\":[[\"id-1\",\"Holds\",1],[\"id-2\",\"Holds\",1],[\"id-3\",\"Link\",1],[\"id-4\",\"Link\",1],[\"id-9\",\"Link\",1]],\"in_count\":[[\"id-1\",\"Link\",1],[\"id-2\",\"Link\",1],[\"id-3\",\"Holds\",2],[\"id-4\",\"Link\",1]],\"parents\":[[\"id-3\",[\"id-1\",\"id-2\"],[\"id-5\",\"id-6\"]]],\"refs\":[[\"id-4\",[\"id-3\"]]],\"referencers\":[[\"id-3\",[\"id-4\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"a\",\"id-1\"],[\"b\",\"id-2\"],[\"d\",\"id-4\"],[\"e\",\"id-9\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"id-2\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "id-2",
+          "id-3"
+        ],
+        "deleted_relationship_ids": [
+          "id-6",
+          "id-10",
+          "id-7",
+          "id-5"
+        ],
+        "before_elements": [
+          [
+            "id-2",
+            "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\",\"note\":\"n\"},\"rev\":2}"
+          ],
+          [
+            "id-3",
+            "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-6",
+            "{\"id\":\"id-6\",\"type_name\":\"Holds\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-10",
+            "{\"id\":\"id-10\",\"type_name\":\"Link\",\"source_id\":\"id-9\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-7",
+            "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"y\"},\"rev\":2}"
+          ],
+          [
+            "id-5",
+            "{\"id\":\"id-5\",\"type_name\":\"Holds\",\"source_id\":\"id-1\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\",\"note\":\"n\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-6\",\"type_name\":\"Holds\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-10\",\"type_name\":\"Link\",\"source_id\":\"id-9\",\"target_id\":\"id-2\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"y\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-5\",\"type_name\":\"Holds\",\"source_id\":\"id-1\",\"target_id\":\"id-3\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "cc0c308e6d2da04e",
+      "fingerprint": "ff93e5d540bb8989",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{\"name\":\"d\",\"peer\":\"id-3\"},\"rev\":2}",
+        "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"e\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Link\",\"source_id\":\"id-4\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"id-1\",\"id-4\",\"id-9\"]]],\"out\":[[\"id-4\",[\"id-8\"]]],\"in\":[[\"id-1\",[\"id-8\"]]],\"out_count\":[[\"id-4\",\"Link\",1]],\"in_count\":[[\"id-1\",\"Link\",1]],\"parents\":[],\"refs\":[[\"id-4\",[\"id-3\"]]],\"referencers\":[[\"id-3\",[\"id-4\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-4\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"a\",\"id-1\"],[\"d\",\"id-4\"],[\"e\",\"id-9\"]]}"
+    },
+    {
+      "do": "undo",
+      "of": 12,
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-2",
+          "id-3"
+        ],
+        "changed_relationship_ids": [
+          "id-6",
+          "id-10",
+          "id-7",
+          "id-5"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-2",
+            null
+          ],
+          [
+            "id-3",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-6",
+            null
+          ],
+          [
+            "id-10",
+            null
+          ],
+          [
+            "id-7",
+            null
+          ],
+          [
+            "id-5",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-5\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-7\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-10\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-6\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-2\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\",\"note\":\"n\"},\"rev\":2}",
+          "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"id-6\",\"type_name\":\"Holds\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-10\",\"type_name\":\"Link\",\"source_id\":\"id-9\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"y\"},\"rev\":1}",
+          "{\"id\":\"id-5\",\"type_name\":\"Holds\",\"source_id\":\"id-1\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "d99ea08206b7f2d2",
+      "fingerprint": "dd4df0e44702e06a",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"a\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{\"name\":\"d\",\"peer\":\"id-3\"},\"rev\":2}",
+        "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"e\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"b\",\"note\":\"n\"},\"rev\":2}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"c\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Link\",\"source_id\":\"id-4\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-6\",\"type_name\":\"Holds\",\"source_id\":\"id-2\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-10\",\"type_name\":\"Link\",\"source_id\":\"id-9\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-7\",\"type_name\":\"Link\",\"source_id\":\"id-3\",\"target_id\":\"id-4\",\"properties\":{\"label\":\"y\"},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Holds\",\"source_id\":\"id-1\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"id-1\",\"id-2\",\"id-3\",\"id-4\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-5\"]],[\"id-2\",[\"id-6\"]],[\"id-3\",[\"id-7\"]],[\"id-4\",[\"id-8\"]],[\"id-9\",[\"id-10\"]]],\"in\":[[\"id-1\",[\"id-8\"]],[\"id-2\",[\"id-10\"]],[\"id-3\",[\"id-5\",\"id-6\"]],[\"id-4\",[\"id-7\"]]],\"out_count\":[[\"id-1\",\"Holds\",1],[\"id-2\",\"Holds\",1],[\"id-3\",\"Link\",1],[\"id-4\",\"Link\",1],[\"id-9\",\"Link\",1]],\"in_count\":[[\"id-1\",\"Link\",1],[\"id-2\",\"Link\",1],[\"id-3\",\"Holds\",2],[\"id-4\",\"Link\",1]],\"parents\":[[\"id-3\",[\"id-2\",\"id-1\"],[\"id-6\",\"id-5\"]]],\"refs\":[[\"id-4\",[\"id-3\"]]],\"referencers\":[[\"id-3\",[\"id-4\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"a\",\"id-1\"],[\"b\",\"id-2\"],[\"d\",\"id-4\"],[\"e\",\"id-9\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"note\":\"m\"}}",
+        "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+        "{\"kind\":\"delete_element\",\"id\":\"id-9\"}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"note\":\"never\"}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    }
+  ]
+}

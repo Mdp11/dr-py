@@ -14,6 +14,7 @@ from . import (  # noqa: F401
     ops_batches,
     ops_churn,
     ops_recreate,
+    ops_refused,
     py_repr,
     smart_city,
     snapshot_v2,

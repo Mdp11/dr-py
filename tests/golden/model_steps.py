@@ -10,16 +10,16 @@ the lines and the dump themselves, so a mismatch can be read, not just seen. A
 step that changed nothing says ``"unchanged": true`` instead. The engine's
 golden runner replays the same steps and compares all of it.
 
-A batch is applied to a deep copy of the model, and the copy is kept only when
-the batch lands. The applier's own rollback replays inverse ops, which leaves
-``rev`` counters bumped and restored entities at the end of their dict; the
-engine's contract is that a refused batch leaves no trace at all, so none of
-that may enter a fixture. The detail text of the refusal is still the oracle's.
+A batch runs on the recorder's own model, as it does on a session's. A refused
+batch leaves no trace — the applier puts every touched entity back, ``rev``
+and place in insertion order included — and the recorder holds the oracle to
+it: a refusal that changed the state, the index dump or the digest fails the
+run instead of entering a fixture. The ids a refused batch drew go back to the
+generator, which is the recorder's scaffolding and no part of the state.
 """
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 from collections.abc import Iterable
@@ -34,7 +34,6 @@ from data_rover.api.serialize import iter_entity_lines
 from data_rover.api.state_digest import model_digest
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.element import Element
-from data_rover.core.model.ids import SequentialIdGenerator
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 
@@ -121,12 +120,24 @@ def _outcome(model: Model, res: _BatchResult) -> dict[str, Any]:
     }
 
 
+class _Ids:
+    """``id-1``, ``id-2``, … with a counter the recorder can put back."""
+
+    def __init__(self) -> None:
+        self.drawn = 0
+
+    def new_id(self) -> str:
+        self.drawn += 1
+        return f"id-{self.drawn}"
+
+
 class Recorder:
     """One scenario in the making: a model with sequential ids, and its log."""
 
     def __init__(self, metamodel: Metamodel, *, full_every: int = 5) -> None:
         self.metamodel = metamodel
-        self.model = Model(metamodel, SequentialIdGenerator())
+        self._ids = _Ids()
+        self.model = Model(metamodel, self._ids)
         self._full_every = full_every
         self._steps: list[dict[str, Any]] = []
         self._last: dict[str, Any] | None = None
@@ -147,12 +158,14 @@ class Recorder:
         return entity
 
     def _batch(self, ops: list[ModelOpIn], *, restore: bool) -> dict[str, Any]:
-        # The metamodel is immutable: share it instead of copying it.
-        trial = copy.deepcopy(self.model, {id(self.metamodel): self.metamodel})
-        res = _apply_batch(trial, ops, restore=restore)
-        self.model = trial
+        drawn = self._ids.drawn
+        try:
+            res = _apply_batch(self.model, ops, restore=restore)
+        except HTTPException:
+            self._ids.drawn = drawn
+            raise
         self._landed[len(self._steps)] = res
-        return _outcome(trial, res)
+        return _outcome(self.model, res)
 
     def _apply(self, step: dict[str, Any]) -> Any:
         model = self.model
@@ -218,6 +231,12 @@ class Recorder:
             entry["result"] = None
             entry["error"] = {"status": exc.status_code, "detail": exc.detail}
         seen = observe(self.model)
+        if entry["error"] is not None and "status" in entry["error"]:
+            before = self._last or observe(Model(self.metamodel))
+            if seen != before:
+                raise AssertionError(
+                    f"step {len(self._steps)}: a refused batch left a trace"
+                )
         if seen == self._last:
             entry["unchanged"] = True
         else:
