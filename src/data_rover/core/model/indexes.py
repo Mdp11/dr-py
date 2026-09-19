@@ -21,10 +21,11 @@ The containment-roots order index
 carries the same obligations: ``rebuild()`` recomputes it from scratch, and
 any direct writer of ``entity.properties`` must go through
 ``on_properties_changed`` so a root's display-name reposition is not missed.
-The element insertion-order index (``element_order``) is maintained by the
-two element hooks alone — an element never moves within ``model.elements``,
-so property and relationship changes leave it untouched — and re-derived by
-``rebuild()``.
+The insertion-order indexes (``element_order``, ``relationship_order``) are
+maintained by the create and delete hooks alone — an entity never moves within
+its dict, so property changes leave them untouched — and re-derived by
+``rebuild()``. A create hook handed an ``order`` puts the entity back under
+the number it had (``Model.insert_element`` / ``insert_relationship``).
 The trigram search index (``search_postings`` / ``_trigrams_of``) is
 maintained at that same boundary with the same obligations; it feeds
 ``search_candidates`` (the fuzzy-search candidate generator) and, like the
@@ -146,9 +147,17 @@ class IndexSet:
         #: uniqueness validator pick a duplicate group's insertion-first
         #: primary without enumerating the model. Numbers are sparse after
         #: churn; only their ORDER is meaningful. Replaced wholesale by
-        #: ``rebuild()``: never cache the dict across one.
+        #: ``rebuild()``: never cache the dict across one. The one exception
+        #: to "lands last": an entity inserted WITH its old number
+        #: (``Model.insert_element``) sits last in the dict until
+        #: ``Model.settle_order`` moves it back, and the invariant holds
+        #: again from there.
         self.element_order: dict[str, int] = {}
         self._next_order: int = 0
+        #: relationship id -> insertion sequence number; the twin of
+        #: ``element_order`` over ``model.relationships``, with its own counter.
+        self.relationship_order: dict[str, int] = {}
+        self._next_relationship_order: int = 0
         #: lowercased trigram -> ids of elements whose searchable text
         #: contains it. The searchable text is exactly the fields the fuzzy
         #: element search scores (routes/read.py _search_score): the id, the
@@ -291,9 +300,13 @@ class IndexSet:
 
     # -- mutation hooks (called from the Model mutation boundary) ----------
 
-    def on_element_created(self, element: Element) -> None:
-        self.element_order[element.id] = self._next_order
-        self._next_order += 1
+    def on_element_created(self, element: Element, order: int | None = None) -> None:
+        """``order`` is the sequence number of an element put back where it
+        was; absent, the element is new and takes the next one."""
+        if order is None:
+            order = self._next_order
+        self.element_order[element.id] = order
+        self._next_order = max(self._next_order, order + 1)
         self.elements_by_type.setdefault(element.type_name, set()).add(element.id)
         self._add_to_group(element)
         self._update_refs(element.id, self._element_refs(element))
@@ -316,22 +329,37 @@ class IndexSet:
         self._trigrams_of.pop(element.id, None)
         self.element_order.pop(element.id, None)
 
-    def on_relationship_created(self, rel: Relationship) -> None:
+    def on_relationship_created(
+        self, rel: Relationship, order: int | None = None
+    ) -> None:
+        """``order`` as in :meth:`on_element_created`."""
+        if order is None:
+            order = self._next_relationship_order
+        self.relationship_order[rel.id] = order
+        self._next_relationship_order = max(self._next_relationship_order, order + 1)
         self.out_rels.setdefault(rel.source_id, set()).add(rel.id)
         self.in_rels.setdefault(rel.target_id, set()).add(rel.id)
         self.out_count[(rel.source_id, rel.type_name)] += 1
         self.in_count[(rel.target_id, rel.type_name)] += 1
         self._update_refs(rel.id, self._relationship_refs(rel))
         if self._containment(rel.type_name):
-            self.containment_parents.setdefault(rel.target_id, []).append(rel.source_id)
-            self._containment_rel_ids.setdefault(rel.target_id, []).append(rel.id)
-            if len(self.containment_parents[rel.target_id]) == 1:
+            parents = self.containment_parents.setdefault(rel.target_id, [])
+            rel_ids = self._containment_rel_ids.setdefault(rel.target_id, [])
+            # relationship insertion order: a new relationship goes last, one
+            # put back under its old number goes back among its siblings
+            at = len(rel_ids)
+            while at > 0 and self.relationship_order[rel_ids[at - 1]] > order:
+                at -= 1
+            parents.insert(at, rel.source_id)
+            rel_ids.insert(at, rel.id)
+            if len(parents) == 1:
                 # first containment parent: the target stops being a root
                 self._roots_remove(rel.target_id)
             self._rekey_if_present(rel.target_id)
         self._rekey_key_rel_endpoints(rel)
 
     def on_relationship_deleted(self, rel: Relationship) -> None:
+        self.relationship_order.pop(rel.id, None)
         outs = self.out_rels.get(rel.source_id)
         if outs is not None:
             outs.discard(rel.id)
@@ -445,7 +473,9 @@ class IndexSet:
             self._rebuild_gen += 1
 
         # relationships first so containment parents are known before grouping
-        for rel in self._model.relationships.values():
+        rel_order: dict[str, int] = {}
+        for i, rel in enumerate(self._model.relationships.values()):
+            rel_order[rel.id] = i
             self.out_rels.setdefault(rel.source_id, set()).add(rel.id)
             self.in_rels.setdefault(rel.target_id, set()).add(rel.id)
             self.out_count[(rel.source_id, rel.type_name)] += 1
@@ -466,6 +496,8 @@ class IndexSet:
                 self._root_key_of[element.id] = (display_name(element), element.id)
         self.element_order = order
         self._next_order = len(order)
+        self.relationship_order = rel_order
+        self._next_relationship_order = len(rel_order)
         # bulk-construct in one O(n log n) pass instead of n incremental adds
         self.roots_order = SortedPairs(self._root_key_of.values())
 
@@ -548,17 +580,23 @@ class IndexSet:
             )
             if _norm(name, getattr(self, name)) != _norm(name, getattr(fresh, name))
         ]
-        # element_order carries sparse numbers after churn (a rebuild's are
-        # dense), so compare the ORDER it induces, never the numbers; the
+        # the order indexes carry sparse numbers after churn (a rebuild's are
+        # dense), so compare the ORDER they induce, never the numbers; the
         # numbers must also be distinct, since a stable sort hides a duplicate
-        order = self.element_order
-        ids = list(self._model.elements)
-        if (
-            set(order) != set(ids)
-            or len(set(order.values())) != len(order)
-            or sorted(ids, key=order.__getitem__) != ids
+        for name, order, ids in (
+            ("element_order", self.element_order, list(self._model.elements)),
+            (
+                "relationship_order",
+                self.relationship_order,
+                list(self._model.relationships),
+            ),
         ):
-            mismatched.append("element_order")
+            if (
+                set(order) != set(ids)
+                or len(set(order.values())) != len(order)
+                or sorted(ids, key=order.__getitem__) != ids
+            ):
+                mismatched.append(name)
         if mismatched:
             raise AssertionError(
                 "IndexSet inconsistent with a fresh rebuild in: "

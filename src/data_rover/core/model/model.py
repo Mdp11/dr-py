@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from ..metamodel.schema import Metamodel
 from .element import Element
 from .ids import IdGenerator, Uuid7Generator
@@ -23,6 +25,10 @@ class Model:
         self.elements: dict[str, Element] = {}
         self.relationships: dict[str, Relationship] = {}
         self.indexes = IndexSet(self)
+        # set when an entity came back under an old sequence number: its dict
+        # is out of order until settle_order() puts it right
+        self._elements_unsettled = False
+        self._relationships_unsettled = False
 
     # --- mutation boundary: elements ---
     def create_element(self, type_name: str) -> Element:
@@ -48,12 +54,7 @@ class Model:
             raise KeyError(f"Unknown element type {type_name!r}")
         if et.abstract:
             raise ValueError(f"Cannot instantiate abstract type {type_name!r}")
-        if element_id in self.elements or element_id in self.relationships:
-            raise ValueError(f"Id {element_id!r} is already in use")
-        element = Element(id=element_id, type_name=type_name)
-        self.elements[element.id] = element
-        self.indexes.on_element_created(element)
-        return element
+        return self.insert_element(element_id, type_name, {}, 0)
 
     # --- queries ---
     def get_element(self, element_id: str) -> Element:
@@ -150,6 +151,57 @@ class Model:
             raise KeyError(f"No source element {source_id!r}")
         if target_id not in self.elements:
             raise KeyError(f"No target element {target_id!r}")
+        return self.insert_relationship(rel_id, rel_type, source_id, target_id, {}, 0)
+
+    def disconnect(self, rel_id: str) -> None:
+        if rel_id not in self.relationships:
+            raise KeyError(f"No relationship with id {rel_id!r}")
+        rel = self.relationships.pop(rel_id)
+        self.indexes.on_relationship_deleted(rel)
+
+    # --- committed state ---
+    #
+    # An entity put back as it was arrives whole: its type is not checked (a
+    # model may hold one its metamodel no longer has) and its ``rev`` is
+    # given, not counted. ``order`` is the sequence number it had
+    # (``IndexSet.element_order`` / ``relationship_order``); the entity then
+    # sits last in its dict until :meth:`settle_order`.
+
+    def insert_element(
+        self,
+        element_id: str,
+        type_name: str,
+        properties: dict[str, Any],
+        rev: int,
+        order: int | None = None,
+    ) -> Element:
+        """Insert an element as it is. Takes over ``properties``."""
+        if element_id in self.elements or element_id in self.relationships:
+            raise ValueError(f"Id {element_id!r} is already in use")
+        element = Element(
+            id=element_id, type_name=type_name, properties=properties, rev=rev
+        )
+        if _lands_out_of_place(self.elements, self.indexes.element_order, order):
+            self._elements_unsettled = True
+        self.elements[element.id] = element
+        self.indexes.on_element_created(element, order)
+        return element
+
+    def insert_relationship(
+        self,
+        rel_id: str,
+        rel_type: str,
+        source_id: str,
+        target_id: str,
+        properties: dict[str, Any],
+        rev: int,
+        order: int | None = None,
+    ) -> Relationship:
+        """Insert a relationship as it is. Takes over ``properties``."""
+        if source_id not in self.elements:
+            raise KeyError(f"No source element {source_id!r}")
+        if target_id not in self.elements:
+            raise KeyError(f"No target element {target_id!r}")
         if rel_id in self.relationships or rel_id in self.elements:
             raise ValueError(f"Id {rel_id!r} is already in use")
         rel = Relationship(
@@ -157,16 +209,56 @@ class Model:
             type_name=rel_type,
             source_id=source_id,
             target_id=target_id,
+            properties=properties,
+            rev=rev,
         )
+        if _lands_out_of_place(
+            self.relationships, self.indexes.relationship_order, order
+        ):
+            self._relationships_unsettled = True
         self.relationships[rel.id] = rel
-        self.indexes.on_relationship_created(rel)
+        self.indexes.on_relationship_created(rel, order)
         return rel
 
-    def disconnect(self, rel_id: str) -> None:
-        if rel_id not in self.relationships:
-            raise KeyError(f"No relationship with id {rel_id!r}")
-        rel = self.relationships.pop(rel_id)
-        self.indexes.on_relationship_deleted(rel)
+    def overwrite(
+        self, target: Element | Relationship, properties: dict[str, Any], rev: int
+    ) -> None:
+        """Replace an attached entity's properties and ``rev`` whole. Takes
+        over ``properties``."""
+        if (
+            self.elements.get(target.id) is not target
+            and self.relationships.get(target.id) is not target
+        ):
+            raise KeyError(f"Entity {target.id!r} is not part of this model")
+        target.properties = properties
+        target.rev = rev
+        self.indexes.on_properties_changed(target)
+
+    def settle_order(self) -> None:
+        """Put ``elements`` / ``relationships`` back in sequence order after
+        an insert under an old number. O(n) per dict that needs it, nothing
+        otherwise.
+
+        The ordered dict REPLACES the attribute instead of being refilled in
+        place: read paths iterate these dicts without the session's write
+        mutex, and a rebind shows them either dict whole, never an empty one.
+        Do not keep a reference to either dict across this call.
+        """
+        if self._elements_unsettled:
+            order = self.indexes.element_order
+            elements = self.elements
+            self.elements = {
+                eid: elements[eid] for eid in sorted(elements, key=order.__getitem__)
+            }
+            self._elements_unsettled = False
+        if self._relationships_unsettled:
+            order = self.indexes.relationship_order
+            relationships = self.relationships
+            self.relationships = {
+                rid: relationships[rid]
+                for rid in sorted(relationships, key=order.__getitem__)
+            }
+            self._relationships_unsettled = False
 
     # The index-backed helpers below return relationships in unspecified set
     # iteration order; no caller depends on the order.
@@ -209,6 +301,16 @@ class Model:
             self.disconnect(rel_id)
         element = self.elements.pop(element_id)
         self.indexes.on_element_deleted(element)
+
+
+def _lands_out_of_place(
+    entities: dict[str, Any], numbers: dict[str, int], order: int | None
+) -> bool:
+    """Whether an entity appended to ``entities`` under sequence number
+    ``order`` sits behind one with a larger number."""
+    if order is None or not entities:
+        return False
+    return numbers[next(reversed(entities))] > order
 
 
 def build_rebind_view(live_model: Model, candidate: Metamodel) -> Model:

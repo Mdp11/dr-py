@@ -803,6 +803,59 @@ def test_verify_consistent_detects_element_order_drift():
         model.indexes.verify_consistent()
 
 
+def test_relationship_order_tracks_insertion_through_churn():
+    model = Model(_mm())
+    a = model.create_element("Doc")
+    b = model.create_element("Doc")
+    r1 = model.connect("Links", a.id, b.id)
+    r2 = model.connect("Links", b.id, a.id)
+    order = model.indexes.relationship_order
+    assert order[r1.id] < order[r2.id]
+
+    model.disconnect(r1.id)
+    assert r1.id not in model.indexes.relationship_order
+
+    # a re-inserted id lands LAST in the dict and gets a fresh, larger number
+    model.restore_relationship(r1.id, "Links", a.id, b.id)
+    assert list(model.relationships) == [r2.id, r1.id]
+    assert order[r1.id] > order[r2.id]
+    model.indexes.verify_consistent()
+
+    # a cascade takes the numbers of the relationships it removes
+    model.delete_element(a.id)
+    assert model.indexes.relationship_order == {}
+    model.indexes.verify_consistent()
+
+
+def test_relationship_order_rebuilt_from_dict_order():
+    model = Model(_mm())
+    a = model.create_element("Doc")
+    b = model.create_element("Doc")
+    r1 = model.connect("Links", a.id, b.id)
+    r2 = model.connect("Links", b.id, a.id)
+    model.disconnect(r1.id)
+    model.restore_relationship(r1.id, "Links", a.id, b.id)
+
+    model.indexes.rebuild()
+    assert model.indexes.relationship_order == {r2.id: 0, r1.id: 1}
+    # the counter continues past the rebuilt numbers
+    r3 = model.connect("Links", a.id, a.id)
+    assert model.indexes.relationship_order[r3.id] == 2
+    model.indexes.verify_consistent()
+
+
+def test_verify_consistent_detects_relationship_order_drift():
+    model = Model(_mm())
+    a = model.create_element("Doc")
+    b = model.create_element("Doc")
+    r1 = model.connect("Links", a.id, b.id)
+    r2 = model.connect("Links", b.id, a.id)
+    order = model.indexes.relationship_order
+    order[r1.id], order[r2.id] = order[r2.id], order[r1.id]
+    with pytest.raises(AssertionError, match="relationship_order"):
+        model.indexes.verify_consistent()
+
+
 def test_verify_consistent_detects_element_order_missing_key():
     model = Model(_mm())
     a = model.create_element("Doc")
