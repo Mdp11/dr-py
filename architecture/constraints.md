@@ -27,7 +27,8 @@ and generated locally.
 | 112k-row table, build + sort + every cell | ≤ 3 s |
 | 10,000 Python script cells | ≤ 2 s |
 | Engine heap, steady state (Pyodide excluded) | ≤ 400 MB |
-| Engine chunk between yields (system.md rule 4) | ≤ 16 ms |
+| Engine chunk between yields — evaluation and background work (system.md rule 4) | ≤ 16 ms |
+| One transition — stage, unstage, rebase, delta apply — of up to 1,000 ops, order repair included (AD-23) | ≤ 100 ms |
 
 **CN-4 · Measured baseline** — headless Chromium 148, Ryzen 9 3900X under WSL2, Pyodide
 314.0.7 (CPython 3.14.2), model M, median of 3, all engines in one pass. JS and Rust are

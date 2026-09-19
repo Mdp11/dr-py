@@ -10,7 +10,7 @@ are promoted into this directory.
 |---|---|---|
 | — | Program design (this directory) | approved 2026-09-18 |
 | A | Engine foundation | done — every golden fixture passes in Node; at M the engine opens a snapshot in 2.3 s of CN-3's 3 s and one open replica holds 231 MB of heap *(measured, Node 22, `pixi run engine-bench`, 2026-09-18)* |
-| B | Replica and frontend seam | not started |
+| B | Replica and frontend seam | designed 2026-09-19, six plans — none built |
 | C | Evaluation | not started |
 | D | Scripts in the browser | not started |
 | E | Headless host | not started |
@@ -39,11 +39,18 @@ open meets budget (CN-3).
 **Scope.** Sandbox page and engine worker; shell (snapshot descriptor route, tail route, feed
 buffering, IndexedDB cache, re-bootstrap); `prev_rev` and digest on the current server; the
 server's snapshot writers switch to v2; engine client behind `lib/api`; the read surfaces —
-element pages, tree, search, neighborhoods, summary. `frontend/src/lib/state/model.svelte.ts`
-becomes a view over the engine.
+elements, fuzzy search, incident relationships, containment tree, summary counts.
+`frontend/src/lib/state/model.svelte.ts` becomes a view over the engine (AD-24). Criteria
+search is C's; neighborhoods have no caller today and move when one exists.
 **Depends on.** A.
-**Done when.** Those surfaces are served by the engine by default; cold open and heap meet
-budget; divergence recovery is exercised by a test.
+**Built as six plans**, each leaving the branch green: (1) exact server state — exact
+rollback, recreated entities, digest and `prev_rev` on every delta carrier; (2) v2 snapshot
+writers and the snapshot descriptor, blob and tail routes; (3) the engine service — CT-4
+dispatcher, scheduler, sliced index build and digest check, the reads; (4) sandbox and shell,
+the replica opening and following in the background; (5) the transport swap, surface by
+surface, with shadow comparison and the browser benchmark; (6) the forked store.
+**Done when.** Those surfaces and staging are served by the engine by default; cold open and
+heap meet budget; divergence recovery is exercised by a test.
 
 ### C · Evaluation
 **Scope.** Navigation, search criteria, tables (evaluate, sort, layouts, JSON/CSV/JSONL/xlsx,
@@ -100,9 +107,10 @@ start of its port until its surface defaults to the engine. After that, features
 land in TypeScript only. A bug fixed during a port lands on both sides, with a fixture. Areas
 not yet being ported carry on as normal.
 
-**MR-4 · Tests follow the surface.** Route-level mock tests of a migrated read surface are
-replaced by tests that run the real engine on a small fixture model. Tests of write and
-tenancy routes stay. Python tests of a dropped area are deleted in F with the code.
+**MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
+engine on a small fixture model. The route-level mock tests of its server path stay while
+that path does (MR-1) and are deleted with it in F. Tests of write and tenancy routes stay.
+Python tests of a dropped area are deleted in F with the code.
 
 **MR-5 · Spike code is throwaway.** Nothing under `spikes/` is promoted into the engine,
 `frontend/` or `src/`.

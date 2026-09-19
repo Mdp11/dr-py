@@ -158,3 +158,32 @@ side table of float-typed keys (two sources of truth per value).
 YAML parsing and `check_metamodel` stay on the server.
 **Why.** The server must validate a metamodel anyway before accepting it (AD-7); a second
 validator in the engine would be a second implementation to keep identical.
+
+## AD-23 · A transition is atomic; the chunk rule binds evaluation and background work
+**Decision.** Stage, unstage, rebase and delta apply run to completion without yielding,
+under their own budget (CN-3). Opening, the index build, the digest check and every
+evaluation yield in chunks ([system.md](system.md) rule 4).
+**Why.** A half-applied batch is not a consistent state, and rule 4 demands consistency at
+every yield. The engine runs in a worker, so a transition delays the reads queued behind it
+and never the UI; 100 ms is where a discrete action stops feeling instant. Measurements:
+`BACKLOG-ENGINE.md`, `K-32`.
+**Rejected.** Resumable staging, with reads blocked or served from committed state mid-batch.
+
+## AD-24 · The model store forks; the legacy half lives until F
+**Decision.** In engine mode staged edits live in the engine's working copy and
+`frontend/src/lib/state/model.svelte.ts` is a view over it. Today's store — fetched-subset
+cache, optimistic overlay, staged-delete guards — stays behind the switch as the server-mode
+implementation and is deleted in F. The engine-backed store is built last in sub-project B,
+after the read surfaces have moved as a plain transport swap.
+**Why.** A server read is committed-only, so server mode cannot work without the overlay
+(MR-1); and one staged state has to exist before evaluation reads it (sub-project C).
+**Rejected.** *Transport swap only*: from C on, the engine's working copy and the store's
+overlay would be two implementations of staged state. *No fallback*: MR-1.
+
+## AD-25 · The workspace waits for the replica
+**Decision.** In engine mode every engine-served read waits for `ready`; the open progress
+shows download, parse, index and tail.
+**Why.** One source of truth from first paint. CN-3's cold-open budget is what makes the wait
+acceptable.
+**Rejected.** Serving reads from the server until the replica is ready: two sources during
+the hand-over, and code that F deletes.

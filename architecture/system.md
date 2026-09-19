@@ -32,8 +32,10 @@ The target system. Rationale lives in [decisions.md](decisions.md); wire formats
    the bridge (CT-6) and hold no model.
 4. **The engine never blocks.** Script workers block on the bridge; the engine awaits script
    results asynchronously and keeps serving UI reads and bridge reads meanwhile. Evaluations
-   run in chunks that yield to the event loop and are cancellable. Engine state MUST be
-   consistent at every yield point.
+   and background work — opening, the index build, the digest check — run in chunks that
+   yield to the event loop and are cancellable. Engine state MUST be consistent at every
+   yield point, so a transition — stage, unstage, rebase, delta apply — is atomic and never
+   yields (AD-23). Budgets: CN-3.
 5. **Writes are server-authoritative.** Locks and commits go over HTTPS. Committed state enters
    the replica only as a snapshot or a delta (CT-1, CT-2); the engine never derives committed
    state from its own ops.
