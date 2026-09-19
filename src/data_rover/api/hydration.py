@@ -4,8 +4,9 @@ back to durable storage.
 Hydrate = nearest snapshot (rev <= model_rev) -> ``build_model_from_dicts`` ->
 replay the commit tail (rev > snapshot_rev) through the SAME restore-mode
 applier the ops route uses. Persist = stream the model through the snapshot
-codec + record the row; a baseline reset additionally clears old history and
-writes the rev-0 commit + snapshot.
+codec as ``datarover.snapshot/v2`` + record the row with the header's fields;
+a baseline reset additionally clears old history and writes the rev-0 commit
++ snapshot.
 
 A contentless project (no ``ModelRow``) hydrates to an EMPTY ``Session``, so
 projects that haven't been given content yet behave identically and the
@@ -32,7 +33,7 @@ from .db_models import Commit
 from .schemas import OPS_ADAPTER, OpIn
 from .search_index_build import start_search_index_build
 from .session import Session
-from .snapshot_codec import decode_snapshot, encode_snapshot
+from .snapshot_codec import decode_snapshot, encode_snapshot_v2
 from .storage import get_snapshot_store, snapshot_key
 from .validation_sweep import start_validation_sweep
 
@@ -73,14 +74,45 @@ def deserialize_ops(raw: list[Any]) -> list[OpIn]:
 
 
 def write_snapshot(project_id: str, session: Session, rev: int) -> None:
-    """Stream the session model to the blob store (gzip of the compact
-    document) and record the snapshot row."""
-    assert session.model is not None
-    store = get_snapshot_store()
-    key = snapshot_key(project_id, rev)
-    store.put(key, encode_snapshot(session.model))
-    with db_session() as s:
-        content.record_snapshot(s, project_id, rev=rev, key=key)
+    """Stream the session model to the blob store as a v2 text and record the
+    snapshot row.
+
+    Holds ``write_mutex`` for the whole stream: a commit landing mid-stream
+    would leave a header whose counts the lines contradict, which the decoder
+    refuses. The header carries the session's digest and the bound metamodel
+    id (``""`` without a model row), and the row mirrors the header from the
+    same values."""
+    with session.write_mutex:
+        model = session.model
+        assert model is not None
+        store = get_snapshot_store()
+        key = snapshot_key(project_id, rev)
+        with db_session() as s:
+            model_row = content.get_model_row(s, project_id)
+            metamodel_id = model_row.metamodel_id if model_row is not None else ""
+            state_digest = session.state_digest()
+            elements, relationships = len(model.elements), len(model.relationships)
+            store.put(
+                key,
+                encode_snapshot_v2(
+                    model,
+                    project_id=project_id,
+                    rev=rev,
+                    metamodel_id=metamodel_id,
+                    state_digest=state_digest,
+                ),
+            )
+            content.record_snapshot(
+                s,
+                project_id,
+                rev=rev,
+                key=key,
+                format="v2",
+                metamodel_id=metamodel_id,
+                state_digest=state_digest,
+                elements=elements,
+                relationships=relationships,
+            )
 
 
 def persist_baseline(

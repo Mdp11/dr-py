@@ -1183,6 +1183,14 @@ order and script cells computed against the discarded state under an unchanged
 `(fingerprint, rev)`, and nothing evicts them before the next commit. The rollback itself is
 exact. Fix: invalidate in the `finally` that rolls back, as preview's does.
 
+### K-34 · Decoding a v2 snapshot costs twice a v1 · `open` · perf · *2026-09-19*
+At model M (170,340 elements, 126,820 relationships) `decode_snapshot` takes 2,360 ms on a v2
+blob against 1,238 ms on v1, and encoding 858 → ≈ 1,150 ms once the session's digest is
+passed in (both blobs 5.83 MiB). The decode is paid once per cold hydration, the encode under
+`write_mutex` by every snapshot writer. The suspect is `_decode_v2`'s split / join / one-parse
+path. The owner accepted the cost when every writer moved to v2: watch it, do not fix it
+without a missed budget.
+
 The client-engine program's issues (`K-29` → `K-32`) are in `BACKLOG-ENGINE.md`.
 
 ---

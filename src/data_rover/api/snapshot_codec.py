@@ -1,16 +1,17 @@
 """Snapshot blob formats: gzip members of the model, as one document or as lines.
 
 The ONE place that knows what bytes the ``SnapshotStore`` holds. Writers
-stream ``encode_snapshot`` into ``store.put``; readers hand whatever
+stream ``encode_snapshot_v2`` into ``store.put``; readers hand whatever
 ``store.get`` returned to ``decode_snapshot``. The decoder branches on the
 bytes (the gzip magic, then the header line) — never on the key — so a row
 written before compression (indented JSON under a ``.json`` key) keeps
 loading, and a test that puts plain JSON under a ``.json.gz`` key loads too.
 
-Two formats share the gzip framing. v1 is the compact ``{"elements",
-"relationships"}`` document and is what every writer emits. v2
-(``datarover.snapshot/v2``) is line-delimited — a header line, then one line
-per entity in insertion order — so a reader can parse while bytes arrive.
+Two formats share the gzip framing. v2 (``datarover.snapshot/v2``) is what
+every writer emits: line-delimited — a header line, then one line per entity
+in insertion order — so a reader can parse while bytes arrive. v1, the compact
+``{"elements", "relationships"}`` document, is still read; no server path
+writes it.
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ def encode_snapshot(model: Model) -> Iterator[bytes]:
 
 
 def _v2_lines(
-    model: Model, project_id: str, rev: int, metamodel_id: str
+    model: Model, project_id: str, rev: int, metamodel_id: str, state_digest: str
 ) -> Iterator[str]:
     header = {
         "format": SNAPSHOT_V2_FORMAT,
@@ -77,7 +78,7 @@ def _v2_lines(
         "metamodel_id": metamodel_id,
         "elements": len(model.elements),
         "relationships": len(model.relationships),
-        "state_digest": model_digest(model),
+        "state_digest": state_digest,
     }
     yield (
         json.dumps(header, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
@@ -88,16 +89,24 @@ def _v2_lines(
 
 
 def encode_snapshot_v2(
-    model: Model, *, project_id: str, rev: int, metamodel_id: str
+    model: Model,
+    *,
+    project_id: str,
+    rev: int,
+    metamodel_id: str,
+    state_digest: str | None = None,
 ) -> Iterator[bytes]:
     """Stream the model as one gzip member of LF-terminated JSON lines: the
     header, then every element, then every relationship, in insertion order.
 
-    The header's counts and digest are taken when iteration starts; the caller
+    ``state_digest`` is written as given; ``None`` recomputes it from the
+    model. The header's counts are taken when iteration starts; the caller
     holds the model still (the write mutex) for the whole stream, as the
-    digest is only meaningful for the entities that follow it.
+    header is only true of the entities that follow it.
     """
-    return _gzip_member(_v2_lines(model, project_id, rev, metamodel_id))
+    if state_digest is None:
+        state_digest = model_digest(model)
+    return _gzip_member(_v2_lines(model, project_id, rev, metamodel_id, state_digest))
 
 
 def is_gzip(blob: bytes) -> bool:

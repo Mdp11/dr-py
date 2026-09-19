@@ -132,14 +132,15 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   `build_store_from_settings` passes `create_bucket=` **iff** an emulator
   endpoint is set, so the bucket is provisioned at backend boot in dev (docker
   compose owns containers only) while prod never calls `storage.buckets.create`.
-  **`snapshot_codec.py`** is the ONE place that knows the blob format — `encode_snapshot`
+  **`snapshot_codec.py`** is the ONE place that knows the blob format — `encode_snapshot` (v1,
+  written by no server path, read until F)
   streams a gzip member (level 3) of the COMPACT document (`serialize.iter_model_json_compact`,
   one `json.dumps` per `SNAPSHOT_BATCH` = 2000 entities, byte-identical to a whole-document
   dumps; ~5 % of the indented save-file size), and `decode_snapshot` sniffs the gzip magic and
   falls through to plain `json.loads`, so every row written before compression (indented JSON
   under a `.json` key) still loads: the `.json.gz` key suffix is naming only, readers NEVER
   branch on it, and there is no migration, `encoding` column or backfill. The indented
-  `iter_model_json` stays the `/model/save` + `/model/download` contract. `encode_snapshot_v2` writes the line-delimited `datarover.snapshot/v2` form (CT-1: a header line carrying the entity counts and the `state_digest` of `api/state_digest.py`, then one `serialize.iter_entity_lines` line per entity); NO server writer emits it yet (`scripts/snapshot_v2.py` writes one from a model file, inflated, for the engine's benchmark; the engine's `openSnapshot` reads it), and `decode_snapshot` recognizes it by its first bytes, returns the same `{"elements", "relationships"}` document and raises `ValueError` on a line count that disagrees with the header.
+  `iter_model_json` stays the `/model/save` + `/model/download` contract. `encode_snapshot_v2` writes the line-delimited `datarover.snapshot/v2` form (CT-1: a header line carrying the entity counts, the `metamodel_id` and the `state_digest` of `api/state_digest.py`, then one `serialize.iter_entity_lines` line per entity), and every writer emits it through ONE funnel, `hydration.write_snapshot`: it takes `write_mutex` itself for the whole stream (a v2 text torn by a concurrent commit would be refused by its own header counts — `persist_baseline` and the importer hold no mutex of their own), reads `metamodel_id` from `ModelRow` (`""` without one), writes the SESSION's digest into the header (`encode_snapshot_v2(state_digest=)`; `None` recomputes it) and mirrors the header onto the `Snapshot` row. `scripts/snapshot_v2.py` writes one from a model file, inflated, for the engine's benchmark; the engine's `openSnapshot` reads it; and `decode_snapshot` recognizes it by its first bytes, returns the same `{"elements", "relationships"}` document and raises `ValueError` on a line count that disagrees with the header.
 - **`content.py`** — service functions over the content tables (the `tenancy.py`
   of model content). **`hydration.py`** — `hydrate_session` (nearest snapshot +
   replay commit tail through the restore-mode applier) and `persist_baseline`/

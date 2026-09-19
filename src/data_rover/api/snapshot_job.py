@@ -3,8 +3,8 @@
 The journal writers trigger a snapshot every ``settings.snapshot_every``
 commits. Encoding a large model takes seconds, so the trigger schedules
 this job instead of writing inline: a daemon thread takes
-``session.write_mutex`` itself and snapshots the model at whatever rev it
-finds there — any rev at or past the trigger bounds the replay tail
+``session.write_mutex`` itself (``write_snapshot`` re-enters it) and
+snapshots the model at whatever rev it finds there — any rev at or past the trigger bounds the replay tail
 equally. Under the mutex it also re-checks that the registry still holds
 this exact session: an evicted session was already snapshotted by the
 evict hook, and a discarded one belongs to a deleted project whose row

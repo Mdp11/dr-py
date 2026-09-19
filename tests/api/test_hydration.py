@@ -262,13 +262,17 @@ def test_hydrate_builds_the_search_index() -> None:
     assert h.model.indexes.search_candidates("turbine") == {"x1"}
 
 
-def test_snapshot_blob_is_gzip_under_the_gz_key() -> None:
+def test_snapshot_blob_is_a_gzipped_v2_text_under_the_gz_key() -> None:
     _seed_baseline()
     key = snapshot_key("p1", 0)
     assert key.endswith(".json.gz")
     blob = get_snapshot_store().get(key)
     assert blob[:2] == b"\x1f\x8b"
-    assert gzip.decompress(blob) == b'{"elements":[],"relationships":[]}'
+    header_line, _, rest = gzip.decompress(blob).partition(b"\n")
+    header = json.loads(header_line)
+    assert header["format"] == "datarover.snapshot/v2"
+    assert (header["elements"], header["relationships"]) == (0, 0)
+    assert rest == b""
     with db.db_session() as s:
         snap = content.latest_snapshot(s, "p1")
         assert snap is not None and snap.key == key

@@ -194,3 +194,36 @@ def test_v2_decode_rejects_a_header_without_counts() -> None:
     blob = b'{"format":"datarover.snapshot/v2","elements":"1","relationships":0}\n'
     with pytest.raises(ValueError, match="no valid entity counts"):
         decode_snapshot(blob)
+
+
+def test_v2_header_takes_the_digest_it_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _example_model()
+
+    def _no_full_pass(_: Model) -> str:
+        raise AssertionError("a full digest pass")
+
+    monkeypatch.setattr("data_rover.api.snapshot_codec.model_digest", _no_full_pass)
+    blob = b"".join(
+        encode_snapshot_v2(
+            model,
+            project_id="p",
+            rev=7,
+            metamodel_id="mm",
+            state_digest="00000000deadbeef",
+        )
+    )
+    header = json.loads(gzip.decompress(blob).partition(b"\n")[0])
+    assert header["state_digest"] == "00000000deadbeef"
+
+
+def test_v2_header_computes_the_digest_when_given_none() -> None:
+    model = _example_model()
+    blob = b"".join(
+        encode_snapshot_v2(
+            model, project_id="p", rev=7, metamodel_id="mm", state_digest=None
+        )
+    )
+    header = json.loads(gzip.decompress(blob).partition(b"\n")[0])
+    assert header["state_digest"] == model_digest(model)
