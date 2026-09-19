@@ -4,7 +4,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import Integer, String, create_engine, inspect, text
 from sqlalchemy.orm import Session
 
 from data_rover.api.db_models import ArtifactKind, ArtifactRow, Project
@@ -157,3 +157,52 @@ def test_migration_0015_adds_commit_state_digest(tmp_path: Path) -> None:
     command.downgrade(cfg, "0014")
     cols = {c["name"] for c in inspect(engine).get_columns("commits")}
     assert "state_digest" not in cols
+
+
+def test_migration_0016_adds_snapshot_format_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / "t7.db"
+    url = f"sqlite:///{db_path}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "0015")
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO projects (id, name) VALUES ('p1', 'P1')"))
+        conn.execute(
+            text(
+                "INSERT INTO snapshots (project_id, rev, key, ts) "
+                "VALUES ('p1', 3, 'k3', '2026-09-19 00:00:00')"
+            )
+        )
+
+    command.upgrade(cfg, "head")
+    new = ("format", "metamodel_id", "state_digest", "elements", "relationships")
+    cols = {c["name"]: c for c in inspect(engine).get_columns("snapshots")}
+    for name in new:
+        assert cols[name]["nullable"] is True
+    assert isinstance(cols["format"]["type"], String)
+    assert cols["format"]["type"].length == 8
+    assert isinstance(cols["metamodel_id"]["type"], String)
+    assert isinstance(cols["state_digest"]["type"], String)
+    assert cols["state_digest"]["type"].length == 16
+    assert isinstance(cols["elements"]["type"], Integer)
+    assert isinstance(cols["relationships"]["type"], Integer)
+    fk_cols = {
+        c
+        for fk in inspect(engine).get_foreign_keys("snapshots")
+        for c in fk["constrained_columns"]
+    }
+    assert "metamodel_id" not in fk_cols
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(f"SELECT key, {', '.join(new)} FROM snapshots WHERE rev = 3")
+        ).one()
+    assert tuple(row) == ("k3", None, None, None, None, None)
+
+    command.downgrade(cfg, "0015")
+    cols = {c["name"]: c for c in inspect(engine).get_columns("snapshots")}
+    assert not set(new) & set(cols)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT key FROM snapshots")).scalars().all() == ["k3"]

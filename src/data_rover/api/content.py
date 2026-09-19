@@ -207,24 +207,51 @@ def list_commits(
     return list(db.execute(q).scalars())
 
 
-def record_snapshot(db: Session, project_id: str, *, rev: int, key: str) -> Snapshot:
+def record_snapshot(
+    db: Session,
+    project_id: str,
+    *,
+    rev: int,
+    key: str,
+    format: str | None = None,
+    metamodel_id: str | None = None,
+    state_digest: str | None = None,
+    elements: int | None = None,
+    relationships: int | None = None,
+) -> Snapshot:
+    """Upsert a snapshot row. Every field is set, so the row says what the
+    last writer at this ``rev`` wrote."""
     row = db.get(Snapshot, (project_id, rev))
     if row is None:
-        row = Snapshot(project_id=project_id, rev=rev, key=key)
+        row = Snapshot(project_id=project_id, rev=rev)
         db.add(row)
-    else:
-        row.key = key
+    row.key = key
+    row.format = format
+    row.metamodel_id = metamodel_id
+    row.state_digest = state_digest
+    row.elements = elements
+    row.relationships = relationships
     db.flush()
     return row
 
 
 def latest_snapshot(
-    db: Session, project_id: str, max_rev: int | None = None
+    db: Session,
+    project_id: str,
+    max_rev: int | None = None,
+    *,
+    format: str | None = None,
 ) -> Snapshot | None:
     stmt = select(Snapshot).where(Snapshot.project_id == project_id)
     if max_rev is not None:
         stmt = stmt.where(Snapshot.rev <= max_rev)
+    if format is not None:
+        stmt = stmt.where(Snapshot.format == format)
     return db.execute(stmt.order_by(Snapshot.rev.desc()).limit(1)).scalar_one_or_none()
+
+
+def get_snapshot(db: Session, project_id: str, rev: int) -> Snapshot | None:
+    return db.get(Snapshot, (project_id, rev))
 
 
 def clear_history(db: Session, project_id: str) -> None:

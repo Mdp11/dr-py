@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 
 from data_rover.api import content, db
-from data_rover.api.db_models import ArtifactKind, Commit, Project
+from data_rover.api.db_models import ArtifactKind, Commit, Project, Snapshot
 
 
 def _setup() -> None:
@@ -53,6 +54,67 @@ def test_snapshot_record_and_latest() -> None:
         snap0 = content.latest_snapshot(s, "p1", max_rev=3)
         assert snap0 is not None and snap0.rev == 0
         assert content.latest_snapshot(s, "p1", max_rev=-1) is None
+
+
+_HEADER = {
+    "format": "v2",
+    "metamodel_id": "mm-1",
+    "state_digest": "0123456789abcdef",
+    "elements": 7,
+    "relationships": 3,
+}
+
+
+def test_record_snapshot_stores_the_header_fields() -> None:
+    _setup()
+    with db.db_session() as s:
+        content.record_snapshot(s, "p1", rev=2, key="k2", **_HEADER)
+    with db.db_session() as s:
+        row = content.get_snapshot(s, "p1", 2)
+        assert row is not None and row.key == "k2"
+        assert {k: getattr(row, k) for k in _HEADER} == _HEADER
+
+
+def test_record_snapshot_over_a_v1_row_replaces_every_field() -> None:
+    _setup()
+    with db.db_session() as s:
+        content.record_snapshot(s, "p1", rev=3, key="k3")
+        content.record_snapshot(s, "p1", rev=3, key="k3", **_HEADER)
+    with db.db_session() as s:
+        rows = s.execute(select(Snapshot).where(Snapshot.project_id == "p1")).scalars()
+        (row,) = list(rows)
+        assert {k: getattr(row, k) for k in _HEADER} == _HEADER
+        content.record_snapshot(s, "p1", rev=3, key="k3")
+    with db.db_session() as s:
+        row = content.get_snapshot(s, "p1", 3)
+        assert row is not None
+        assert all(getattr(row, k) is None for k in _HEADER)
+
+
+def test_latest_snapshot_can_ask_for_v2_only() -> None:
+    _setup()
+    with db.db_session() as s:
+        s.add(Project(id="p2", name="P2"))
+        for rev, fmt in ((1, "v2"), (2, None), (3, "v2"), (4, None)):
+            content.record_snapshot(s, "p1", rev=rev, key=f"k{rev}", format=fmt)
+        content.record_snapshot(s, "p2", rev=1, key="k1")
+    with db.db_session() as s:
+        v2 = content.latest_snapshot(s, "p1", format="v2")
+        assert v2 is not None and v2.rev == 3
+        old = content.latest_snapshot(s, "p1", max_rev=2, format="v2")
+        assert old is not None and old.rev == 1
+        anyf = content.latest_snapshot(s, "p1")
+        assert anyf is not None and anyf.rev == 4
+        assert content.latest_snapshot(s, "p2", format="v2") is None
+
+
+def test_get_snapshot_is_none_for_an_unknown_rev() -> None:
+    _setup()
+    with db.db_session() as s:
+        content.record_snapshot(s, "p1", rev=1, key="k1")
+    with db.db_session() as s:
+        assert content.get_snapshot(s, "p1", 2) is None
+        assert content.get_snapshot(s, "p2", 1) is None
 
 
 def test_clear_history_removes_commits_and_snapshots() -> None:

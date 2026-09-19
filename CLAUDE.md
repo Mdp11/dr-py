@@ -124,7 +124,7 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   `ModelRow` (1:1 with `Project`; carries DB-authoritative `model_rev` + the
   swappable `metamodel_id`), `ViewRow`, `Commit` (PK `(project_id, rev)`; the
   durable op-journal — `ops`/`inverse_ops`/`id_map` as JSON, `author_id` SET
-  NULL on user delete), `Snapshot` (PK `(project_id, rev)`; blob `key`).
+  NULL on user delete), `Snapshot` (PK `(project_id, rev)`; blob `key`; and, for a v2 blob, its header's fields — `format`, `metamodel_id`, `state_digest`, `elements`, `relationships`; all NULL on a v1 row, Alembic `0016`).
 - **`storage.py` / `storage_gcs.py`** — the `SnapshotStore` seam. `GcsSnapshotStore`
   (real `google-cloud-storage`) is used in dev (pointed at `fake-gcs-server` via
   `DATA_ROVER_STORAGE_EMULATOR_HOST`) and prod; `MemorySnapshotStore` backs the

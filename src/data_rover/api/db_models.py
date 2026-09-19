@@ -293,6 +293,15 @@ class Snapshot(Base):
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
+    #: The blob's header, written by the call that writes the blob: ``"v2"``
+    #: and its ``metamodel_id`` (``""`` for a project without a model row, so
+    #: no foreign key), ``state_digest`` and entity counts. All NULL on a v1
+    #: blob or a row older than the columns.
+    format: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    metamodel_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    state_digest: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    elements: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    relationships: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ArtifactKind(enum.StrEnum):
