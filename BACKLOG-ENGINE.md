@@ -25,8 +25,8 @@ A → F. A (engine foundation) has landed: package, value layer and golden-fixtu
 Python snapshot v2 and state digest; metamodel, record-graph store, indexes and mutation
 boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
 the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
-and frontend seam) is designed — six plans, listed in `architecture/program.md`, the first built
-(exact server state) — and inherits `K-32`. The freeze rule (`MR-3`)
+and frontend seam) is designed — six plans, listed in `architecture/program.md`, the first two
+built (exact server state; v2 snapshot writers and the replica routes) — and inherits `K-32`. The freeze rule (`MR-3`)
 covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
 plan. Size: very large.
 
@@ -58,6 +58,25 @@ insert in place, or a sort kept to the entities that moved. The other transition
 inside: a 1,000-op batch stages in 44 ms, 100 staged batches rebase over a delta in 14 ms, a
 149-entity delta applies in 8.9 ms.
 
+### K-35 · The server's v2 decoder accepts a line holding two documents; the engine refuses it · `open` · *2026-09-19*
+`api/snapshot_codec.py::_decode_v2` joins the entity lines with `,` and parses the lot as one
+JSON array, so a line holding `{…},{…}` parses as two entities — shifting every entity after
+it, and the element/relationship split with them — while only the line count is checked. The
+engine's `parseLines` refuses such a line. No writer emits one, so
+nothing breaks today; a hand-made or corrupted blob could hydrate on the server and fail in the
+browser. Decide whether the server should refuse it too (cost: `K-34`'s decode path, the
+place to change) or whether the engine's stricter reading is enough.
+
+### K-36 · The tail's "no entity states" test is unverified on Postgres · `open` · *2026-09-19*
+`content.commit_tail_marks` treats a row as lacking `entity_states` when the column is SQL NULL
+OR `CAST(entity_states AS VARCHAR) = 'null'` — a Python `None` in a JSON column is stored as
+JSON `null`. The hermetic suite runs it on SQLite only; on Postgres it rests on `json → varchar`
+being an I/O cast that yields the stored text. Not checked: no dev database was running when
+plan 2 landed. Check once against the dev stack:
+`select cast('null'::json as varchar) = 'null', cast(null::json as varchar) is null;` must
+answer `t, t`. If it does not, the descriptor and the tail would call an over-cap commit
+expressible and serve a delta with no entities.
+
 ---
 
 ## 3. Cleanups
@@ -65,3 +84,4 @@ inside: a 1,000-op batch stages in 44 ms, 100 staged batches rebase over a delta
 | ID | Item | Source |
 |---|---|---|
 | C-20 | `core/metamodel/schema.py::_effective_props`' comment says definitions by closer types win; the code keeps the FIRST name seen walking root → leaf, so on a redeclared property the ancestor's definition stays (fixture `metamodel_caches`, type `Mid`). The engine mirrors the code. Decide which was meant; frozen under MR-3 until the metamodel surface defaults to the engine. | 2026-09-18 |
+| C-21 | `api/routes/commits.py:785` and `:923` list "apply-cr baseline reset" among what bumps `model_rev` opaquely; apply-CR is a dry run that stages a batch and never resets the baseline. Drop it from both comments (C-12 applies: reword only, no reshaping). | 2026-09-19 |
