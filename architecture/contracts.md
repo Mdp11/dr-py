@@ -98,9 +98,26 @@ event     {event, …}                     engine → client, unsolicited
 - `error.status` reuses the HTTP vocabulary callers already branch on (404, 409, 422), so
   `errorForStatus` and the `ApiError` subclasses keep working.
 - Bytes (exports, downloads, snapshots) cross as transferable `ArrayBuffer`s, never strings.
-- Events: `replica {state: opening|ready|diverged}`, `progress {task, done, total}`,
-  `changed {rev, staged, element_ids, relationship_ids, deleted_element_ids,
-  deleted_relationship_ids}`.
+- Errors: `OpError` and a read's refusal keep their status; a `KeyError` of the model is 404
+  with the server's quote-stripped text (`No element with id 'x`), a `ValueError` 422; a
+  snapshot or delta the engine cannot read is 422; an unknown method is 404
+  `No method 'x'`; anything else is 500 with its message.
+- Replica methods, answered in any state, in this order: `open {project_id, metamodel}` →
+  `chunk {bytes}` … (the gzip bytes as received, in transferred buffers) → `end` (answers the
+  snapshot header once the replica is read and indexed; the replica stays `opening`) →
+  `adoptStaged {batches}` (a re-bootstrap only: the staged batches carried over, under their
+  ids) → `applyTail {text}`, which makes the replica `ready` — the tail ends opening, an empty
+  one included. Then `applyDelta {text, own?}` → `applied | duplicate | gap`, a 409 unless
+  `ready` (the shell buffers). `close` drops the replica, and any open in flight. A delta and
+  a tail cross as the text the shell received (AD-26); a commit response is a delta as it
+  stands, its `model_rev` read as `rev`.
+- Events: `replica {state: opening|ready|diverged, rev}` (`rev` null while opening);
+  `progress {task, done, total}` for the tasks `parse`, `index`, `tail` and `verify` — at most
+  once per slice per task, plus a task's first and last; `changed {rev, staged_version,
+  element_ids, relationship_ids, deleted_element_ids, deleted_relationship_ids, structural}`
+  after every transition of a `ready` replica that changed something. `structural` says the
+  element set or a relationship may have moved; `staged_version` moves whenever the staged
+  batches do.
 - Every request is cancellable. The engine client rejects a cancelled call with an
   `AbortError`, as an aborted `fetch` does.
 

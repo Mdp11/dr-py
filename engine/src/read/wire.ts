@@ -169,13 +169,18 @@ function readOp(doc: Value, where: string): ModelOp {
  * `JSON.stringify` — an integral double becomes an `int`, `NaN` `null`, `-0`
  * `0` — and the exact parser. A malformed op refuses the whole list.
  */
-export function readOps(raw: unknown): ModelOp[] {
-	if (!Array.isArray(raw)) refuse('ops', 'must be a list');
+export function readOps(raw: unknown, where = 'ops'): ModelOp[] {
+	if (!Array.isArray(raw)) refuse(where, 'must be a list');
 	let docs: Value;
 	try {
 		docs = parseJson(JSON.stringify(raw));
 	} catch (caught) {
-		return refuse('ops', `not JSON: ${(caught as Error).message}`);
+		return refuse(where, `not JSON: ${(caught as Error).message}`);
 	}
-	return (docs as Value[]).map((doc, i) => readOp(doc, `ops[${i}]`));
+	return (docs as Value[]).map((doc, i) => readOp(doc, `${where}[${i}]`));
+}
+
+/** Ops as the wire carries them: copies, their values as `toWire` gives them. */
+export function wireOps(ops: readonly ModelOp[]): Wire[] {
+	return ops.map((op) => toWire(op as unknown as Value));
 }

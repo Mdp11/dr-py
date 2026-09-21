@@ -122,11 +122,6 @@ export class Scheduler {
 		if (this.background !== null) this.background.steps = null;
 	}
 
-	/** Marks the start of a host turn: a slice starts now. */
-	turnStarted(): void {
-		this.sliceStart = this.deps.now();
-	}
-
 	/**
 	 * For work outside the pump, such as a snapshot open: `undefined` while the
 	 * slice has room, else the host's turn, after which a new slice has begun.

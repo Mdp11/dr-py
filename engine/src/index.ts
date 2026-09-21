@@ -66,6 +66,7 @@ export {
 export {
 	readOps,
 	toWire,
+	wireOps,
 	wireElement,
 	wireElementImage,
 	wireRelationship,
@@ -74,6 +75,7 @@ export {
 	type WireElement,
 	type WireRelationship
 } from './read/wire.ts';
+export { ByteQueue } from './service/byte-queue.ts';
 export {
 	Scheduler,
 	SLICE_TARGET_MS,
@@ -83,6 +85,32 @@ export {
 	type Lane,
 	type Outcome
 } from './service/scheduler.ts';
+export { createService } from './service/service.ts';
+export type {
+	AdoptParams,
+	AdoptResult,
+	CancelMessage,
+	ChunkParams,
+	DeltaParams,
+	DeltaResult,
+	EndResult,
+	ErrorBody,
+	OpenParams,
+	Port,
+	ProgressTask,
+	ReplicaState,
+	RequestMessage,
+	ResponseMessage,
+	ServiceDeps,
+	ServiceEvent,
+	StageParams,
+	StageResult,
+	TailParams,
+	TailResult,
+	WireBatch,
+	WireChanges,
+	WireConflict
+} from './service/types.ts';
 export { entityHash, formatDigest, modelDigest, type EntityHash } from './snapshot/digest.ts';
 export { LineSplitter } from './snapshot/lines.ts';
 export {
@@ -103,7 +131,7 @@ export { needsExactParse, parseExact, parseJson, parseLines } from './value/pars
 export { pyRepr } from './value/repr.ts';
 export { pyDumps } from './value/serialize.ts';
 export { PyFloat, type Value } from './value/types.ts';
-export type { Delta } from './working/delta.ts';
+export { readDeltaText, readTailText, type Delta } from './working/delta.ts';
 export {
 	WorkingCopy,
 	type ChangeSet,

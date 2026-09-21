@@ -187,3 +187,13 @@ shows download, parse, index and tail.
 acceptable.
 **Rejected.** Serving reads from the server until the replica is ready: two sources during
 the hand-over, and code that F deletes.
+
+## AD-26 · A delta crosses into the engine as JSON text
+**Decision.** The shell hands the engine the text it received — a feed frame, a commit
+response, a tail body — and the engine reads it with its exact parser (`applyDelta {text}`,
+`applyTail {text}`).
+**Why.** The host's `JSON.parse` loses `1` vs `1.0` and every integer past 2^53 (CT-7), and
+the state digest, which folds `(id, rev)` only, cannot see a wrong value: it would stay until
+the next re-bootstrap.
+**Rejected.** Parsed objects: the loss. Transferred bytes: exact too, but a feed frame arrives
+as a string.

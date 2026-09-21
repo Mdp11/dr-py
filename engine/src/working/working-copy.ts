@@ -282,9 +282,9 @@ export class WorkingCopy {
 	}
 
 	/**
-	 * `verifyDigest` in steps of 2,048 entities; `diverged` is set, if at all,
-	 * after the last. A transition between two steps invalidates it: drop it
-	 * and start another.
+	 * `verifyDigest` in steps of 2,048 entities, after a first that reports
+	 * where it starts; `diverged` is set, if at all, after the last. A
+	 * transition between two steps invalidates it: drop it and start another.
 	 */
 	*verifyDigestSteps(): Steps<boolean> {
 		const hash = this.entityHash;
@@ -296,6 +296,7 @@ export class WorkingCopy {
 			this.committedRelationships.size;
 		let done = 0;
 		const counted = () => (++done & 2047) === 0;
+		yield { done, total };
 		let value = 0n;
 		for (const element of model.elements()) {
 			if (!this.committedElements.has(element.id)) value ^= hash(element.id, element.rev);
