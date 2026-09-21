@@ -199,6 +199,8 @@ type Run = {
 	/** The staged and parked batches a re-bootstrap took, held until a replica adopted them and is ready. */
 	held: WireBatch[] | null;
 	connecting: Promise<EngineLink> | null;
+	/** The highest rev a rebind froze the replica at; a rebind at or below it is its echo. */
+	frozenAt: number;
 };
 
 /** One open or re-bootstrap, with its attempts; a freeze or a stop ends it. */
@@ -642,12 +644,21 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		rebootstrap(r);
 	};
 
-	/** The replica stays as it is and follows nothing until the UI adopts the new metamodel. */
+	/**
+	 * The replica stays as it is and follows nothing until the UI adopts the
+	 * new metamodel. A rebind already frozen at — the feed's echo of the
+	 * user's own, which may come after the adoption — changes nothing, nor
+	 * does one a ready replica is already past: it opened from a snapshot
+	 * written under the new metamodel.
+	 */
 	const freeze = (r: Run, rev: number) => {
 		const phase = status.phase;
 		if (phase !== 'opening' && phase !== 'ready' && phase !== 'resyncing' && phase !== 'frozen') {
 			return;
 		}
+		if (rev <= r.frozenAt) return;
+		if (phase === 'ready' && status.rev !== null && rev <= status.rev) return;
+		r.frozenAt = rev;
 		r.epoch += 1;
 		r.again = false;
 		r.cycle?.controller.abort();
@@ -836,7 +847,8 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				cycling: false,
 				again: false,
 				held: null,
-				connecting: null
+				connecting: null,
+				frozenAt: -1
 			};
 			run = r;
 			set({ ...OFF, phase: 'opening', attempt: 1 });

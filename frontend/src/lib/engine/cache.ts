@@ -48,7 +48,18 @@ function openDb(factory: IDBFactory): Promise<IDBDatabase | null> {
 				db.createObjectStore(STORE_NAME, { keyPath: 'project_id' });
 			}
 		};
-		request.onsuccess = () => finish(request.result);
+		request.onsuccess = () => {
+			if (!settled) {
+				finish(request.result);
+				return;
+			}
+			// The call already answered `null`: nothing else would close this connection.
+			try {
+				request.result.close();
+			} catch {
+				// The connection is being discarded either way.
+			}
+		};
 		request.onerror = () => finish(null);
 		request.onblocked = () => finish(null);
 	});

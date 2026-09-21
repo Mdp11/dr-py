@@ -487,6 +487,58 @@ describe('the rebind', () => {
 		expect(over.calls).toHaveLength(calls);
 		expect(over.statuses).toHaveLength(statuses);
 	});
+
+	it('the echo of an own rebind that comes after the adoption changes nothing', async () => {
+		const project = fakeProject();
+		const over = await ready(project);
+		const next = otherDoc(project.doc, 'Extra');
+		const flight = over.sync.beginCommit();
+		project.rebind('mm-2', next);
+		flight.settle({ text: '{}', rev: project.rev, applied: true, rebound: true, idMap: {} });
+		expect(over.sync.status().phase).toBe('frozen');
+		const opens = over.methods().filter((method) => method === 'open').length;
+
+		over.sync.metamodelAdopted();
+		expect(over.sync.status().phase).toBe('resyncing');
+		over.sync.feedRebind(1);
+		expect(over.sync.status().phase).toBe('resyncing');
+		await over.sync.settled();
+
+		expect(last(over.statuses)).toMatchObject({ phase: 'ready', rev: 1 });
+		expect(over.statuses.map((s) => s.phase).lastIndexOf('frozen')).toBeLessThan(
+			over.statuses.map((s) => s.phase).indexOf('resyncing')
+		);
+		const after = over.methods().filter((method) => method === 'open');
+		expect(after).toHaveLength(opens + 1);
+		const opened = over.calls.filter((call) => call.method === 'open');
+		expect((opened.at(-1)!.params as { metamodel: unknown }).metamodel).toEqual(next);
+
+		// Once ready, the echo is as old as the replica.
+		over.sync.feedRebind(1);
+		await over.sync.settled();
+		expect(over.sync.status()).toMatchObject({ phase: 'ready', rev: 1 });
+	});
+
+	it('a replica already past a rebind is not frozen by it', async () => {
+		const project = fakeProject();
+		project.rebind('mm-2', otherDoc(project.doc, 'Extra'));
+		project.commit(rename('e_000001', 'under mm-2'));
+		const over = await ready(project);
+		expect(over.sync.status().rev).toBe(2);
+
+		const calls = over.calls.length;
+		over.sync.feedRebind(1);
+		over.sync.feedRebind(2);
+		await over.sync.settled();
+		expect(over.sync.status()).toMatchObject({ phase: 'ready', rev: 2 });
+		expect(over.calls).toHaveLength(calls);
+
+		over.sync.feedRebind(3);
+		expect(over.sync.status()).toMatchObject({
+			phase: 'frozen',
+			reason: 'metamodel changed at rev 3'
+		});
+	});
 });
 
 describe('re-bootstraps', () => {

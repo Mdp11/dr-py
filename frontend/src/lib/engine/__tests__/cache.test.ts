@@ -175,6 +175,18 @@ describe('SnapshotCache', () => {
 			await expect(c.get('p1', 1)).resolves.toBeNull();
 		});
 
+		it('a connection that succeeds after the open was blocked is closed', async () => {
+			let close = 0;
+			const factory = brokenFactory((request) => {
+				request.onblocked?.();
+				request.result = { close: () => (close += 1) };
+				request.onsuccess?.();
+			});
+			const c = createSnapshotCache({ factory });
+			await expect(c.get('p1', 1)).resolves.toBeNull();
+			expect(close).toBe(1);
+		});
+
 		it('a put whose transaction aborts', async () => {
 			vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
 				throw new DOMException('quota exceeded', 'QuotaExceededError');
