@@ -360,8 +360,16 @@ export function fakeProject(
 	return project;
 }
 
-/** A call the sync made through a link, as it was made: `byteLength` read before any transfer. */
-export type RecordedCall = { method: string; params: unknown; byteLength: number | null };
+/**
+ * A call the sync made through a link, as it was made: `byteLength` read
+ * before any transfer; `result` is the answer once it came, if it resolved.
+ */
+export type RecordedCall = {
+	method: string;
+	params: unknown;
+	byteLength: number | null;
+	result?: unknown;
+};
 
 export type SyncOverrides = {
 	connect?: () => Promise<EngineLink>;
@@ -378,6 +386,7 @@ export type SyncOverrides = {
  */
 export function syncOver(project: { projectId: string }, overrides: SyncOverrides = {}) {
 	const statuses: ReplicaStatus[] = [];
+	const watchers: { from: number; test: (s: ReplicaStatus) => boolean; resolve(): void }[] = [];
 	const sleeps: number[] = [];
 	const calls: RecordedCall[] = [];
 	const links: EngineLink[] = [];
@@ -388,12 +397,16 @@ export function syncOver(project: { projectId: string }, overrides: SyncOverride
 	const recorded = (made: EngineLink): EngineLink => {
 		const call = <T>(method: string, params?: unknown, options?: CallOptions): Promise<T> => {
 			const bytes = (params as { bytes?: unknown } | undefined)?.bytes;
-			calls.push({
+			const entry: RecordedCall = {
 				method,
 				params,
 				byteLength: bytes instanceof ArrayBuffer ? bytes.byteLength : null
+			};
+			calls.push(entry);
+			return made.client.call<T>(method, params, options).then((result) => {
+				entry.result = result;
+				return result;
 			});
-			return made.client.call<T>(method, params, options);
 		};
 		return { ...made, client: { ...made.client, call } };
 	};
@@ -413,7 +426,15 @@ export function syncOver(project: { projectId: string }, overrides: SyncOverride
 				sleeps.push(ms);
 				return Promise.resolve();
 			}),
-		onStatus: (status) => statuses.push(status)
+		onStatus: (status) => {
+			statuses.push(status);
+			for (const watcher of [...watchers]) {
+				if (statuses.length > watcher.from && watcher.test(status)) {
+					watchers.splice(watchers.indexOf(watcher), 1);
+					watcher.resolve();
+				}
+			}
+		}
 	};
 	const sync: ReplicaSync = createReplicaSync(deps);
 	// The sync learns its project at `open`; `project` names whose server it runs against.
@@ -434,6 +455,15 @@ export function syncOver(project: { projectId: string }, overrides: SyncOverride
 		},
 		/** The methods called, in order. */
 		methods: () => calls.map((call) => call.method),
+		/**
+		 * Resolves on the first status at index `from` or later that passes
+		 * `test` — for what the engine starts on its own, such as the
+		 * background digest check, which `settled()` does not wait for.
+		 */
+		until(test: (status: ReplicaStatus) => boolean, from = 0): Promise<void> {
+			if (statuses.slice(from).some(test)) return Promise.resolve();
+			return new Promise<void>((resolve) => watchers.push({ from, test, resolve }));
+		},
 		dispose() {
 			sync.stop();
 			for (const made of links) made.dispose();

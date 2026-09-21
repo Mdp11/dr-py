@@ -651,14 +651,14 @@ call carries `{baseUrl: root + '/projects/<id>'}` of the sync's OWN project, so
 a late call of a stopped open can never land on the next project (the active
 base URL is a module global read at call time).
 
-`open(projectId)` runs attempts (M7). One attempt:
+`open(projectId)` runs attempts. One attempt:
 
 1. The snapshot descriptor. `null` (a 404, no model) ends the open with phase
    `off`, reason `no model` — no frame is even built.
 2. The engine link, built on first need and kept until `stop()`. A `connect()`
    that rejects (`FrameError`: same host, timeout, worker error) is phase
    `server` AT ONCE, its message the reason, no retry.
-3. The metamodel document (D3: before the bytes, because the engine's `open`
+3. The metamodel document (before the bytes, because the engine's `open`
    takes it). An `X-Metamodel-Id` that is not the descriptor's `metamodel_id`
    — a rebind landed mid-open — goes back to step 1 at no charge, three times
    per open; after that a mismatch is a counted failure.
@@ -673,20 +673,21 @@ base URL is a module global read at call time).
 5. `end`: the header must name the descriptor's `rev` and `metamodel_id`. When
    the cached bytes are refused (a 422, or a header that is not the
    descriptor's) the row is dropped and the attempt runs again from step 1
-   from the network, uncounted (D9). After a good `end` on a download, the
+   from the network, uncounted. After a good `end` on a download, the
    bytes are `put` in the cache — never before, so a broken download is never
    cached.
 6. (A re-bootstrap's staged batches: `adoptStaged`.)
 7. The tail from the header's `rev`. `complete: false` fails the attempt: the
    descriptor promised a complete tail, so something moved, and the next
    attempt's descriptor names another snapshot. The body is parsed twice, by
-   the shell for `complete` and by the engine exactly (D15).
+   the shell for `complete` and by the engine exactly.
 8. `applyTail {text}`; a `gap` or `diverged: true` fails the attempt.
 9. `ready` at the result's `rev`, and the waiting inputs drain.
 
 A failed attempt tells the engine `close` (its answer ignored), sleeps 1 s,
 then 3 s, and tries again; after the third failure the phase is `server` when
-this open was never `ready` — the link is disposed — and `failed` otherwise. A
+this open was never `ready` — the link is disposed — and `failed` otherwise;
+a wait that itself rejects ends the attempts the same way. A
 call rejected with `EngineGoneError` (the worker died after the handshake)
 drops the link, and the next attempt builds a new one. `stop()` aborts the
 run: every await of an attempt races the run's abort signal, the download's
@@ -697,21 +698,76 @@ of another, `stop()` first. `settled()` resolves once no attempt runs, the
 pump is idle, no sleep is pending and the cache write is done — tests await it
 instead of polling.
 
-**Feed inputs** (`feedCommit(raw, rev)`, `feedSnapshot(modelRev)`) form ONE
-queue, handled one at a time in arrival order (M8). While `opening` or
-`resyncing` they wait; at 1,000 waiting (D12) the queue is emptied and a
-catch-up is owed instead — the tail from the replica's `rev`, which covers
-everything that was waiting. In `off`, `frozen`, `failed` and `server` they
-are dropped. Once `ready`: a delta whose `rev` is not past the replica's is
-dropped without a call (unless it is the user's own), anything else is
-`applyDelta {text}`; a snapshot event ahead of the replica runs a catch-up.
-The replica's `rev` comes from the answers of `applyTail` and `applyDelta`,
-never from the shell's arithmetic. A delta answered `gap` or `diverged`, an
-incomplete catch-up tail, a failed call or the engine's `replica diverged`
-event stop the following (phase `failed`, with the reason) — healing them,
-the rebind freeze and the commit in flight are not built yet.
+**Following.** Feed inputs (`feedCommit(raw, rev)`, `feedSnapshot(modelRev)`)
+and the user's own commit responses form ONE queue, handled one at a time,
+each to its end. Deltas wait in `rev` order (a frame that arrives out of order
+takes its place); anything else in arrival order. While `opening` or
+`resyncing` inputs wait; at 1,000 waiting the queue is emptied and a catch-up
+is owed instead — the tail from the replica's `rev`, which covers everything
+that was waiting. In `off`, `failed` and `server` they are dropped, and in
+`frozen` too, except the user's own. Once `ready`, the pump:
 
-**Status** (M11). One `ReplicaStatus` object, replaced on every change and
+- A delta whose `rev` is not past the replica's is dropped without a call —
+  unless it is the user's own, which still has bookkeeping to do in the
+  engine (its staged batches drop, its temp ids are rewritten). Anything else
+  is `applyDelta {text}`: `applied` and `duplicate` move on.
+- `gap` runs a **catch-up**: the tail from the replica's `rev`, then
+  `applyTail {text}`. Deltas that arrived meanwhile are behind it in the queue
+  and drop as covered. The user's own response that gapped goes again once
+  the tail has healed it, to be answered `duplicate` with its bookkeeping
+  done.
+- A snapshot event ahead of the replica — a reconnect that missed commits —
+  runs a catch-up; one that is not does nothing.
+
+The replica's `rev` comes from the answers of `end`, `applyTail` and
+`applyDelta`, and from the engine's `replica` events while `ready` (before
+that, such an event speaks of a replica an attempt is still opening, and the
+attempt reads its answers) — never from the shell's arithmetic.
+
+**Three roads to a re-bootstrap**: a catch-up tail that is incomplete — a
+rebind, a `rev` bump with no journal row, more than 1,000 revisions behind —
+or that does not continue the replica; a delta or a tail answered `diverged:
+true`; the engine's `replica {state: 'diverged'}` event, which is how the
+background digest check ends false. A failed call or fetch in the
+pump re-bootstraps too — the re-bootstrap has retries of its own. A
+re-bootstrap is phase `resyncing`: `staged` and `conflicts` are read from the
+engine and their batches joined by id, parked ones included; the snapshot
+cache row is dropped and not read (bytes a replica diverged from must not
+open the next one); `close`; then the attempts above on the SAME worker, each
+adopting those batches (`adoptStaged`) — the sync holds them across the
+attempts, since after `close` the engine no longer has them, and until a
+replica is ready with them. Reads posted to the engine meanwhile wait in it
+and are answered from the new replica. Feed inputs wait in the queue. Three
+failed attempts are `failed` (not `server`: this open was ready once). A
+re-bootstrap asked for while one runs is remembered and runs once more after
+it, never in parallel; the divergence a delta's answer and the engine's event
+both report is one re-bootstrap, not two — every re-bootstrap and freeze
+moves an epoch, and whatever judged an older replica is not acted on.
+
+**The commit in flight** (CT-2). `beginCommit()` is called BEFORE the POST
+(`/commits` or `/commits/revert`) and returns a flight; while any flight is
+open the pump holds, so feed deltas — the commit's own echo among them —
+wait. `flight.settle({text, rev, applied, rebound, idMap, batchIds?})` after
+the response: `rebound` freezes the replica and applies nothing; `applied:
+false` (the batch applied nothing, `prev_rev` null) queues nothing; otherwise
+the response body's text is queued as a delta at its place by `rev` — before
+its echo — with `own: {batch_ids, id_map}`, and the pump goes: what landed
+before the commit, the commit, the rest; the echo, no longer past the
+replica, drops without a call. `flight.abandon()` (the POST failed) just lets
+the pump go. Settling or abandoning twice is a no-op. A response settled while
+the replica is not `ready` waits like any delta, and still reaches the engine
+when the tail already covered it.
+
+**The freeze** (AD-27). A peer's rebind (`feedRebind(rev)`) and the user's own
+(`settle` with `rebound`) set phase `frozen`, reason `metamodel changed at rev
+N`: the waiting inputs are emptied (the user's own responses kept), any
+attempt in flight ends at its next step, and nothing is followed — no delta
+crosses a rebind anyway. `metamodelAdopted()` — the rebind banner's Reload,
+the committer's in-place refetch — re-bootstraps it onto the metamodel the
+server serves now, staged batches carried; in any other phase it does
+nothing.
+
+**Status**. One `ReplicaStatus` object, replaced on every change and
 handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
 `frozen`, `failed`, `server`), `rev`, `progress` (`{task, done, total}` —
 `download` from the shell; `parse`, `index` and `tail` from the engine while
@@ -722,10 +778,9 @@ handshake), `cspViolations` (every violation the frame reported) and `reason`
 (why `off`, `frozen`, `failed` or `server`). `server` is the boot fallback: the
 frame did not connect, or three opens failed before the first `ready`. Today
 it only shows in the status; plan 5 turns `server` into the surface flip and
-its notice, and `failed` into the blocking re-bootstrap banner (D1).
+its notice, and `failed` into the blocking re-bootstrap banner.
 
-**The fake project server** (`lib/engine/__tests__/support/project-server.ts`,
-M12). `fakeProject({projectId, rev, metamodelId})` holds the smart-city example
+**The fake project server** (`lib/engine/__tests__/support/project-server.ts`). `fakeProject({projectId, rev, metamodelId})` holds the smart-city example
 in an engine `Model` built from the engine's public exports (the engine's own
 test helpers cannot be imported from this Vite root) and stands for the
 backend: `commit(ops)` / `silentCommit(ops)` land a batch (ids `srv-1`, …) and
@@ -739,7 +794,10 @@ snapshot bytes with `Content-Length`, tail, metamodel with `X-Metamodel-Id`),
 and `wrongDigestInNextSnapshot()` script failures. `syncOver(project,
 overrides?)` is a sync over `connectInProcess()`, `replicaApi(BASE)`, a cache
 on a fresh `fake-indexeddb` and a `sleep` that records its delay and resolves
-at once, with every status, sleep, link and engine call recorded.
+at once, with every status, sleep, link and engine call recorded (each call
+with its answer), and `until(test, from?)` to wait for a status the engine
+brings about on its own — the background digest check ending false — which
+`settled()` cannot know of.
 
 ### Artifact import/export (bundle export/preview/import)
 

@@ -197,3 +197,13 @@ the state digest, which folds `(id, rev)` only, cannot see a wrong value: it wou
 the next re-bootstrap.
 **Rejected.** Parsed objects: the loss. Transferred bytes: exact too, but a feed frame arrives
 as a string.
+
+## AD-27 · The replica changes metamodel when the UI does
+**Decision.** A rebind, a peer's or the user's own, freezes the replica; it re-bootstraps onto
+the new metamodel when the UI adopts it (the banner's Reload, the committer's in-place
+refetch).
+**Why.** The engine checks staged edits against ITS metamodel and the forms are drawn from the
+UI's; while the two differ a refusal contradicts the form, and staged edits would be replayed —
+and parked — under a schema the user has not seen. Nothing is lost by waiting: no delta can
+cross a rebind anyway (CT-2).
+**Rejected.** Re-bootstrapping on the event.

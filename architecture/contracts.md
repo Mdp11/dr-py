@@ -58,6 +58,10 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
 - **Apply rule.** Apply a delta iff `prev_rev == replica.rev`. If `rev <= replica.rev`, drop it
   as a duplicate. Otherwise fetch the tail from `replica.rev`; if it is incomplete,
   re-bootstrap.
+- **Commit in flight.** From a `POST /commits` (or `/commits/revert`) to its response the shell
+  holds the feed's deltas; then everything is applied in `rev` order, the response in its
+  place with the user's own commit named, the echo dropping as a duplicate. A response that
+  says `rebound` is no delta.
 - **Entities in a delta.** Apply in this order: relationships out, elements out, elements in,
   relationships in. What goes out is every `deleted_*` and every `recreated_*` id; one the
   replica does not hold is skipped (an entity created and deleted within one commit). A

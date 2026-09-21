@@ -4,7 +4,8 @@ import type {
 	ProgressTask,
 	ServiceEvent,
 	TailResult,
-	WireBatch
+	WireBatch,
+	WireConflict
 } from '$engine';
 import { ValidationError } from '$lib/api/errors';
 import {
@@ -169,17 +170,47 @@ function reasonOf(error: unknown): string {
 type Own = { batch_ids: number[]; id_map: { [tempId: string]: string } };
 
 type Input =
-	| { kind: 'delta'; raw: string; rev: number; own?: Own }
+	/** `retried`: it already waited once for the replica to reach it; a second failure drops it. */
+	| { kind: 'delta'; raw: string; rev: number; own?: Own; retried?: boolean }
 	| { kind: 'snapshot'; modelRev: number }
 	| { kind: 'catch-up' };
+
+const isOwn = (input: Input): boolean => input.kind === 'delta' && input.own !== undefined;
 
 /** One `open()`, until `stop()`: every continuation checks it is still the current one. */
 type Run = {
 	readonly projectId: string;
 	readonly controller: AbortController;
 	everReady: boolean;
-	pumping: boolean;
+	/**
+	 * Moves on every re-bootstrap and freeze: whatever the pump began under an
+	 * older one speaks for a replica that is gone, and is not acted on.
+	 */
+	epoch: number;
+	/** The epoch whose drain runs, if one does. */
+	draining: number | null;
+	/** Commits whose response has not come back: the pump holds while any is open. */
+	flights: number;
+	/** The open or re-bootstrap running now; a new one is its own cycle. */
+	cycle: Cycle | null;
+	cycling: boolean;
+	/** A re-bootstrap was asked for while a cycle ran: it runs once more, after. */
+	again: boolean;
+	/** The staged and parked batches a re-bootstrap took, held until a replica adopted them and is ready. */
+	held: WireBatch[] | null;
+	connecting: Promise<EngineLink> | null;
 };
+
+/** One open or re-bootstrap, with its attempts; a freeze or a stop ends it. */
+type Cycle = { readonly run: Run; readonly controller: AbortController };
+
+/** The replica the pump worked for was replaced while it waited; the input goes back. */
+class Superseded extends Error {
+	constructor() {
+		super('superseded');
+		this.name = 'Superseded';
+	}
+}
 
 /** Transferring a view's `buffer` sends the WHOLE buffer, so a view is copied first. */
 function exactBuffer(chunk: Uint8Array): ArrayBuffer {
@@ -204,8 +235,10 @@ function joined(pieces: readonly ArrayBuffer[]): ArrayBuffer {
  * The replica's life, and the one place that knows the order of things. An
  * open is: the snapshot descriptor, the metamodel it was written under, the
  * bytes from the cache or the network, the engine's header, the tail to
- * head, ready. Feed inputs wait while the replica opens and are applied in
- * arrival order once it is ready.
+ * head, ready. From then on it follows the feed: deltas in `rev` order, a gap
+ * healed through the tail, and a re-bootstrap — the staged batches carried
+ * over — when the tail cannot heal it or the replica diverged. A metamodel
+ * rebind freezes it until the UI adopts the new metamodel.
  */
 export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	let status: ReplicaStatus = OFF;
@@ -219,6 +252,10 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	const set = (patch: Partial<ReplicaStatus>) => {
 		status = { ...status, ...patch };
 		deps.onStatus(status);
+	};
+
+	const learnRev = (rev: number) => {
+		if (status.rev !== rev) set({ rev });
 	};
 
 	/** Counts `work` toward `settled()`. It must not reject. */
@@ -236,9 +273,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		});
 	};
 
-	/** `work`, unless the run is stopped first: then a `Stopped`, at once. */
-	const guard = <T>(r: Run, work: Promise<T>): Promise<T> => {
-		const signal = r.controller.signal;
+	/** `work`, unless the token is aborted first: then a `Stopped`, at once. */
+	const guard = <T>(token: { controller: AbortController }, work: Promise<T>): Promise<T> => {
+		const signal = token.controller.signal;
 		return new Promise<T>((resolve, reject) => {
 			const stopped = () => reject(new Stopped());
 			if (signal.aborted) {
@@ -261,6 +298,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		});
 	};
 
+	const current = (c: Cycle): boolean =>
+		run === c.run && c.run.cycle === c && !c.controller.signal.aborted;
+
 	// -- the link --------------------------------------------------------------
 
 	const dropLink = () => {
@@ -281,24 +321,41 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		];
 	};
 
-	/** The link, built on first need; one that arrives after its run was stopped is disposed. */
-	const client = async (r: Run): Promise<EngineClient> => {
+	/**
+	 * The link, built on first need and shared by every cycle of the run that
+	 * asks while it is being built; one that arrives after its run was stopped
+	 * is disposed.
+	 */
+	const client = async (c: Cycle): Promise<EngineClient> => {
 		if (link !== null) return link.client;
-		const adopted = deps.connect().then((made) => {
-			if (run !== r) {
-				made.dispose();
-				throw new Stopped();
-			}
-			adopt(r, made);
-			return made;
-		});
+		const r = c.run;
+		if (r.connecting === null) {
+			const pending = deps.connect().then((made) => {
+				if (run !== r) {
+					made.dispose();
+					throw new Stopped();
+				}
+				adopt(r, made);
+				return made;
+			});
+			r.connecting = pending;
+			const clear = () => {
+				if (r.connecting === pending) r.connecting = null;
+			};
+			pending.then(clear, clear);
+		}
 		try {
-			return (await guard(r, adopted)).client;
+			return (await guard(c, r.connecting)).client;
 		} catch (error) {
 			throw error instanceof Stopped ? error : new LinkFailed(error);
 		}
 	};
 
+	/**
+	 * Only while the replica is ready does an engine `replica` event speak of
+	 * the replica the shell follows; before, it speaks of one an attempt is
+	 * still opening, and the attempt reads its outcome from the answers.
+	 */
 	const onEngineEvent = (r: Run, event: ServiceEvent) => {
 		if (run !== r) return;
 		const phase = status.phase;
@@ -307,8 +364,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 			if (opening || (event.task === 'verify' && phase === 'ready')) {
 				set({ progress: { task: event.task, done: event.done, total: event.total } });
 			}
-		} else if (event.event === 'replica' && event.state === 'diverged') {
-			lost(r, `the replica diverged from the server at rev ${event.rev ?? status.rev}`);
+		} else if (event.event === 'replica' && phase === 'ready') {
+			if (event.rev !== null) learnRev(event.rev);
+			if (event.state === 'diverged') ask(r, r.epoch);
 		}
 	};
 
@@ -321,12 +379,12 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	};
 
 	const download = async (
-		r: Run,
+		c: Cycle,
 		engine: EngineClient,
 		url: string
 	): Promise<{ sent: Promise<void>; copies: ArrayBuffer[] }> => {
 		set({ source: 'network' });
-		const response = await guard(r, deps.api.snapshot(url, r.controller.signal));
+		const response = await guard(c, deps.api.snapshot(url, c.controller.signal));
 		const length = response.headers.get('Content-Length');
 		const parsed = length === null ? NaN : Number.parseInt(length, 10);
 		const total = Number.isFinite(parsed) ? parsed : null;
@@ -338,7 +396,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		set({ progress: { task: 'download', done, total } });
 		try {
 			for (;;) {
-				const next = await guard(r, reader.read());
+				const next = await guard(c, reader.read());
 				if (next.done) break;
 				// Read before the transfer, which may detach the chunk's own buffer.
 				done += next.value.byteLength;
@@ -358,33 +416,34 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 
 	/** One attempt; resolves `'no model'`, or once the replica is ready. */
 	const attempt = async (
-		r: Run,
+		c: Cycle,
 		cacheAllowed: boolean,
 		batches: WireBatch[] | null
 	): Promise<'ready' | 'no model'> => {
+		const r = c.run;
 		const projectId = r.projectId;
-		const descriptor = await guard(r, deps.api.descriptor(projectId));
+		const descriptor = await guard(c, deps.api.descriptor(projectId));
 		if (descriptor === null) return 'no model';
-		const engine = await client(r);
-		const { doc, metamodelId } = await guard(r, deps.api.metamodel(projectId));
+		const engine = await client(c);
+		const { doc, metamodelId } = await guard(c, deps.api.metamodel(projectId));
 		if (metamodelId !== descriptor.metamodel_id) {
 			throw new MetamodelMismatch(metamodelId, descriptor.metamodel_id);
 		}
-		await guard(r, engine.call('open', { project_id: projectId, metamodel: doc }));
+		await guard(c, engine.call('open', { project_id: projectId, metamodel: doc }));
 
-		const cached = cacheAllowed ? await guard(r, deps.cache.get(projectId, descriptor.rev)) : null;
+		const cached = cacheAllowed ? await guard(c, deps.cache.get(projectId, descriptor.rev)) : null;
 		let copies: ArrayBuffer[] | null = null;
 		let sent: Promise<void>;
 		if (cached !== null) {
 			sent = sendCached(engine, cached);
 		} else {
-			({ sent, copies } = await download(r, engine, descriptor.url));
+			({ sent, copies } = await download(c, engine, descriptor.url));
 		}
 		sent.catch(() => {});
 		let header: EndResult;
 		try {
-			header = await guard(r, engine.call<EndResult>('end'));
-			await guard(r, sent);
+			header = await guard(c, engine.call<EndResult>('end'));
+			await guard(c, sent);
 			if (header.rev !== descriptor.rev || header.metamodel_id !== descriptor.metamodel_id) {
 				throw new HeaderMismatch(header, descriptor);
 			}
@@ -396,48 +455,50 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		// Only bytes the engine has read whole are cached.
 		if (copies !== null) track(deps.cache.put(projectId, header.rev, joined(copies)));
 
-		if (batches !== null) await guard(r, engine.call('adoptStaged', { batches }));
-		const tail = await guard(r, deps.api.tail(projectId, header.rev));
+		if (batches !== null) await guard(c, engine.call('adoptStaged', { batches }));
+		const tail = await guard(c, deps.api.tail(projectId, header.rev));
 		// The descriptor promised a complete tail: something moved, most likely a rebind.
 		if (!tail.complete) throw new Error(`the tail from rev ${header.rev} is not complete`);
-		const result = await guard(r, engine.call<TailResult>('applyTail', { text: tail.text }));
+		const result = await guard(c, engine.call<TailResult>('applyTail', { text: tail.text }));
 		if (result.diverged) throw new Error(`the replica diverged at rev ${result.rev}`);
 		if (result.status === 'gap') {
 			throw new Error(`the tail from rev ${header.rev} does not continue the snapshot`);
 		}
 		r.everReady = true;
+		r.held = null;
 		set({ phase: 'ready', rev: result.rev, attempt: 0, progress: null, reason: null });
 		pump(r);
 		return 'ready';
 	};
 
-	/** `close` on the engine, its answer ignored; false once the run is stopped. */
-	const closeReplica = async (r: Run): Promise<boolean> => {
-		if (link === null) return run === r;
+	/** `close` on the engine, its answer ignored; false once the cycle is over. */
+	const closeReplica = async (c: Cycle): Promise<boolean> => {
+		if (link === null) return current(c);
 		try {
-			await guard(r, link.client.call('close'));
+			await guard(c, link.client.call('close'));
 		} catch (error) {
 			if (error instanceof Stopped) return false;
 		}
-		return run === r;
+		return current(c);
 	};
 
 	/** Up to three attempts, 1 s and 3 s apart; the last failure decides the phase. */
 	const openReplica = async (
-		r: Run,
+		c: Cycle,
 		phase: 'opening' | 'resyncing',
-		batches: WireBatch[] | null
+		batches: WireBatch[] | null,
+		cacheAllowed: boolean
 	): Promise<void> => {
+		const r = c.run;
 		let failures = 0;
 		let freeRestarts = 0;
-		let cacheAllowed = true;
 		for (;;) {
 			set({ phase, attempt: failures + 1, progress: null, source: null, reason: null });
 			let outcome: 'ready' | 'no model';
 			try {
-				outcome = await attempt(r, cacheAllowed, batches);
+				outcome = await attempt(c, cacheAllowed, batches);
 			} catch (error) {
-				if (error instanceof Stopped || run !== r) return;
+				if (error instanceof Stopped || !current(c)) return;
 				if (error instanceof LinkFailed) {
 					queue.length = 0;
 					set({ phase: 'server', attempt: 0, progress: null, reason: error.message });
@@ -445,8 +506,8 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				}
 				if (error instanceof CachedBytesRefused) {
 					cacheAllowed = false;
-					await guard(r, deps.cache.drop(r.projectId)).catch(() => {});
-					if (!(await closeReplica(r))) return;
+					await guard(c, deps.cache.drop(r.projectId)).catch(() => {});
+					if (!(await closeReplica(c))) return;
 					continue;
 				}
 				if (error instanceof MetamodelMismatch && freeRestarts < FREE_RESTARTS) {
@@ -456,14 +517,16 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				failures += 1;
 				// A link whose engine went away is rebuilt by the next attempt.
 				if (error instanceof EngineGoneError) dropLink();
-				if (!(await closeReplica(r))) return;
+				if (!(await closeReplica(c))) return;
 				if (failures >= ATTEMPTS) {
 					giveUp(r, reasonOf(error));
 					return;
 				}
 				try {
-					await guard(r, deps.sleep(RETRY_DELAYS_MS[failures - 1]!));
-				} catch {
+					await guard(c, deps.sleep(RETRY_DELAYS_MS[failures - 1]!));
+				} catch (slept) {
+					if (slept instanceof Stopped || !current(c)) return;
+					giveUp(r, reasonOf(slept));
 					return;
 				}
 				continue;
@@ -494,52 +557,206 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		}
 	};
 
+	// -- re-bootstrap ----------------------------------------------------------
+
+	/**
+	 * A fresh replica from a fresh snapshot, on the same worker: the staged and
+	 * parked batches are read first and held — once the engine is told `close`
+	 * it no longer has them — and every attempt adopts them. The cache is not
+	 * read, and its row is dropped: bytes a replica diverged from must not
+	 * open the next one.
+	 */
+	const resync = async (c: Cycle): Promise<void> => {
+		const r = c.run;
+		set({ phase: 'resyncing', attempt: 1, progress: null, source: null, reason: null });
+		if (r.held === null) {
+			let batches: WireBatch[] = [];
+			if (link !== null) {
+				const engine = link.client;
+				try {
+					const [staged, conflicts] = await guard(
+						c,
+						Promise.all([
+							engine.call<WireBatch[]>('staged'),
+							engine.call<WireConflict[]>('conflicts')
+						])
+					);
+					batches = [...staged, ...conflicts.map((conflict) => conflict.batch)];
+					batches.sort((a, b) => a.id - b.id);
+				} catch (error) {
+					if (error instanceof Stopped || !current(c)) return;
+					// The worker is gone, and its batches with it.
+					if (!(error instanceof EngineGoneError)) {
+						giveUp(r, reasonOf(error));
+						return;
+					}
+					dropLink();
+				}
+			}
+			r.held = batches;
+		}
+		try {
+			await guard(c, deps.cache.drop(r.projectId));
+		} catch {
+			if (!current(c)) return;
+		}
+		if (!(await closeReplica(c))) return;
+		await openReplica(c, 'resyncing', r.held, false);
+	};
+
+	/** Opens, then re-bootstraps once more for every time one was asked for meanwhile. */
+	const cycles = async (r: Run, first: 'opening' | 'resyncing'): Promise<void> => {
+		r.cycling = true;
+		try {
+			let kind = first;
+			for (;;) {
+				r.again = false;
+				const c: Cycle = { run: r, controller: new AbortController() };
+				r.cycle = c;
+				if (kind === 'opening') await openReplica(c, 'opening', null, true);
+				else await resync(c);
+				if (!r.again || run !== r) return;
+				kind = 'resyncing';
+			}
+		} finally {
+			r.cycling = false;
+		}
+	};
+
+	const rebootstrap = (r: Run) => {
+		r.epoch += 1;
+		if (r.cycling) {
+			r.again = true;
+			set({ phase: 'resyncing', attempt: 1, progress: null, source: null, reason: null });
+			return;
+		}
+		track(cycles(r, 'resyncing'));
+	};
+
+	/**
+	 * A re-bootstrap asked for by whatever judged the replica of `epoch`; one
+	 * already replaced, or no longer followed, is not rebuilt again.
+	 */
+	const ask = (r: Run, epoch: number) => {
+		if (run !== r || r.epoch !== epoch || status.phase !== 'ready') return;
+		rebootstrap(r);
+	};
+
+	/** The replica stays as it is and follows nothing until the UI adopts the new metamodel. */
+	const freeze = (r: Run, rev: number) => {
+		const phase = status.phase;
+		if (phase !== 'opening' && phase !== 'ready' && phase !== 'resyncing' && phase !== 'frozen') {
+			return;
+		}
+		r.epoch += 1;
+		r.again = false;
+		r.cycle?.controller.abort();
+		// The user's own commits keep their bookkeeping for the replica that comes next.
+		const own = queue.filter(isOwn);
+		queue.length = 0;
+		queue.push(...own);
+		set({
+			phase: 'frozen',
+			attempt: 0,
+			progress: null,
+			source: null,
+			reason: `metamodel changed at rev ${rev}`
+		});
+	};
+
 	// -- following -------------------------------------------------------------
 
-	/** The replica can no longer follow by delta; it stops following. */
-	const lost = (r: Run, reason: string) => {
-		if (run !== r || status.phase !== 'ready') return;
-		queue.length = 0;
-		set({ phase: 'failed', progress: null, reason });
+	/** Deltas wait in `rev` order; the user's own goes before its echo. */
+	const place = (input: Input) => {
+		if (input.kind !== 'delta') {
+			queue.push(input);
+			return;
+		}
+		let at = queue.length;
+		for (let i = queue.length - 1; i >= 0; i--) {
+			const other = queue[i]!;
+			if (other.kind !== 'delta') continue;
+			if (other.rev > input.rev || (input.own !== undefined && other.rev === input.rev)) at = i;
+			else break;
+		}
+		queue.splice(at, 0, input);
+	};
+
+	const waits = (input: Input): boolean => {
+		const phase = status.phase;
+		if (phase === 'opening' || phase === 'resyncing' || phase === 'ready') return true;
+		return phase === 'frozen' && isOwn(input);
 	};
 
 	const enqueue = (input: Input) => {
-		const phase = status.phase;
-		if (phase !== 'opening' && phase !== 'resyncing' && phase !== 'ready') return;
+		const r = run;
+		if (r === null || !waits(input)) return;
 		if (queue.length >= WAITING_MAX) {
 			// The tail brings the replica to head, past whatever was waiting.
+			const own = queue.filter(isOwn);
 			queue.length = 0;
-			queue.push({ kind: 'catch-up' });
+			queue.push({ kind: 'catch-up' }, ...own);
+			if (isOwn(input)) place(input);
 		} else {
-			queue.push(input);
+			place(input);
 		}
-		if (phase === 'ready' && run !== null) pump(run);
+		pump(r);
 	};
 
-	/** Handles the waiting inputs one at a time, each to its end, while the replica is ready. */
+	/** An input whose replica was replaced under it waits for the next one. */
+	const requeue = (input: Input) => {
+		if (!waits(input)) return;
+		if (input.kind === 'delta') place(input);
+		else queue.unshift(input);
+	};
+
+	const following = (r: Run, epoch: number): boolean =>
+		run === r && r.epoch === epoch && status.phase === 'ready';
+
+	/** The engine, while the replica of `epoch` is still the one followed. */
+	const live = (r: Run, epoch: number): EngineClient => {
+		if (run !== r || link === null) throw new Stopped();
+		if (!following(r, epoch)) throw new Superseded();
+		return link.client;
+	};
+
+	/** Handles the waiting inputs one at a time, each to its end, while ready and no commit is in flight. */
 	const pump = (r: Run) => {
-		if (r.pumping || run !== r) return;
-		r.pumping = true;
-		track(drain(r));
+		if (run !== r || status.phase !== 'ready' || r.flights > 0) return;
+		if (r.draining === r.epoch || queue.length === 0) return;
+		r.draining = r.epoch;
+		track(drain(r, r.epoch));
 	};
 
-	const drain = async (r: Run): Promise<void> => {
+	const drain = async (r: Run, epoch: number): Promise<void> => {
 		try {
-			while (run === r && status.phase === 'ready' && queue.length > 0) {
+			while (following(r, epoch) && r.flights === 0 && queue.length > 0) {
 				const input = queue.shift()!;
 				try {
-					await handle(r, input);
+					await handle(r, epoch, input);
 				} catch (error) {
-					if (error instanceof Stopped) return;
-					lost(r, reasonOf(error));
+					if (run !== r || error instanceof Stopped) return;
+					if (error instanceof Superseded || !following(r, epoch)) {
+						requeue(input);
+						// The next replica may be following already, its own drain done.
+						pump(r);
+						return;
+					}
+					// A failed call or fetch: a re-bootstrap has retries of its own, and a
+					// delta waits for the replica it brings, once.
+					if (error instanceof EngineGoneError) dropLink();
+					if (input.kind === 'delta' && input.retried !== true) {
+						requeue({ ...input, retried: true });
+					}
+					ask(r, epoch);
 				}
 			}
 		} finally {
-			r.pumping = false;
+			if (r.draining === epoch) r.draining = null;
 		}
 	};
 
-	const handle = async (r: Run, input: Input): Promise<void> => {
+	const handle = async (r: Run, epoch: number, input: Input): Promise<void> => {
 		const rev = status.rev ?? 0;
 		switch (input.kind) {
 			case 'delta': {
@@ -547,38 +764,46 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				if (input.own === undefined && input.rev <= rev) return;
 				const params =
 					input.own === undefined ? { text: input.raw } : { text: input.raw, own: input.own };
-				const result = await guard(r, engine(r).call<DeltaResult>('applyDelta', params));
-				set({ rev: result.rev });
-				if (result.diverged) lost(r, `the replica diverged from the server at rev ${result.rev}`);
-				else if (result.status === 'gap') lost(r, `rev ${input.rev} does not follow rev ${rev}`);
+				const result = await guard(r, live(r, epoch).call<DeltaResult>('applyDelta', params));
+				live(r, epoch);
+				learnRev(result.rev);
+				if (result.diverged) {
+					ask(r, epoch);
+				} else if (result.status === 'gap') {
+					if (input.retried === true) {
+						ask(r, epoch);
+						return;
+					}
+					await catchUp(r, epoch);
+					// The user's own commit goes again once the replica has reached it.
+					if (input.own !== undefined) requeue({ ...input, retried: true });
+				}
 				return;
 			}
 			case 'snapshot':
-				if (input.modelRev > rev) await catchUp(r);
+				if (input.modelRev > rev) await catchUp(r, epoch);
 				return;
 			case 'catch-up':
-				await catchUp(r);
+				await catchUp(r, epoch);
 				return;
 		}
 	};
 
-	const engine = (r: Run): EngineClient => {
-		if (run !== r || link === null) throw new Stopped();
-		return link.client;
-	};
-
-	/** The tail from the replica's rev to head, in one go. */
-	const catchUp = async (r: Run): Promise<void> => {
+	/** The tail from the replica's rev to head, in one go; one that cannot heal re-bootstraps. */
+	const catchUp = async (r: Run, epoch: number): Promise<void> => {
 		const from = status.rev ?? 0;
 		const tail = await guard(r, deps.api.tail(r.projectId, from));
 		if (!tail.complete) {
-			lost(r, `the tail from rev ${from} is not complete`);
+			ask(r, epoch);
 			return;
 		}
-		const result = await guard(r, engine(r).call<TailResult>('applyTail', { text: tail.text }));
-		set({ rev: result.rev });
-		if (result.diverged) lost(r, `the replica diverged from the server at rev ${result.rev}`);
-		else if (result.status === 'gap') lost(r, `the tail from rev ${from} does not follow it`);
+		const result = await guard(
+			r,
+			live(r, epoch).call<TailResult>('applyTail', { text: tail.text })
+		);
+		live(r, epoch);
+		learnRev(result.rev);
+		if (result.diverged || result.status === 'gap') ask(r, epoch);
 	};
 
 	// -- the surface -----------------------------------------------------------
@@ -587,6 +812,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		const r = run;
 		run = null;
 		r?.controller.abort();
+		r?.cycle?.controller.abort();
 		queue.length = 0;
 		dropLink();
 		if (status !== OFF) {
@@ -603,11 +829,18 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				projectId,
 				controller: new AbortController(),
 				everReady: false,
-				pumping: false
+				epoch: 0,
+				draining: null,
+				flights: 0,
+				cycle: null,
+				cycling: false,
+				again: false,
+				held: null,
+				connecting: null
 			};
 			run = r;
 			set({ ...OFF, phase: 'opening', attempt: 1 });
-			track(openReplica(r, 'opening', null));
+			track(cycles(r, 'opening'));
 		},
 
 		stop,
@@ -627,14 +860,40 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 			enqueue({ kind: 'snapshot', modelRev });
 		},
 
-		// The freeze and the commit in flight complete these; until then an own
-		// commit reaches the replica as its feed echo.
-		feedRebind() {},
-
-		beginCommit() {
-			return { settle() {}, abandon() {} };
+		feedRebind(rev) {
+			if (run !== null) freeze(run, rev);
 		},
 
-		metamodelAdopted() {}
+		beginCommit() {
+			const r = run;
+			if (r === null) return { settle() {}, abandon() {} };
+			r.flights += 1;
+			let open = true;
+			const land = (): boolean => {
+				if (!open) return false;
+				open = false;
+				r.flights -= 1;
+				return run === r;
+			};
+			return {
+				settle(answer) {
+					if (!land()) return;
+					if (answer.rebound) {
+						freeze(r, answer.rev);
+					} else if (answer.applied) {
+						const own = { batch_ids: answer.batchIds ?? [], id_map: answer.idMap };
+						enqueue({ kind: 'delta', raw: answer.text, rev: answer.rev, own });
+					}
+					pump(r);
+				},
+				abandon() {
+					if (land()) pump(r);
+				}
+			};
+		},
+
+		metamodelAdopted() {
+			if (run !== null && status.phase === 'frozen') rebootstrap(run);
+		}
 	};
 }

@@ -331,6 +331,17 @@ describe('opening a replica', () => {
 		expect(runs(over.statuses.map((s) => s.attempt))).toEqual([1, 2, 0]);
 	});
 
+	it('a wait that fails ends the open instead of leaving it opening', async () => {
+		const project = fakeProject();
+		project.fail('snapshot', 503, 1);
+		server.use(...project.handlers());
+		const over = open(project, { sleep: () => Promise.reject(new Error('no timer')) });
+		await over.sync.settled();
+
+		expect(last(over.statuses)).toMatchObject({ phase: 'server', reason: 'no timer' });
+		expect(project.requests.snapshot).toBe(1);
+	});
+
 	it('a frame that does not connect is the boot fallback at once', async () => {
 		const project = fakeProject();
 		server.use(...project.handlers());
