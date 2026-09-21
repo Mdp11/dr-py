@@ -1,4 +1,4 @@
-"""``python -m tests.golden`` writes the fixtures; ``--check`` only compares."""
+"""``python -m tests.golden`` writes the fixtures and generated sources; ``--check`` only compares."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ def main(argv: list[str]) -> int:
     if "--check" in argv:
         names = stale()
         for name in names:
-            print(f"stale: {FIXTURE_DIR / name}")
+            print(f"stale: {name}")
         return 1 if names else 0
     write()
     print(f"wrote golden fixtures to {FIXTURE_DIR}")

@@ -10,8 +10,9 @@ this file holds only what is open. Everything else — the app as it runs today 
 (`open`, `in progress`, `done`, `won't do`), and an item closes in the commit that fixes it.
 Ids are unique across both files — a new item takes the next free number of its letter in
 either — so an id never needs to say which file it is in. The Python core is under the MR-3
-freeze: a fix that touches `core/model`, `core/metamodel` or the model-op applier lands on
-both sides with a fixture.
+freeze: a fix that touches `core/model`, `core/metamodel`, the model-op applier or — from the
+start of B's third plan — `routes/read.py`'s route functions and `routes/elements.py::get_element`
+lands on both sides with a fixture.
 
 ---
 
@@ -28,7 +29,8 @@ the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget)
 and frontend seam) is designed — six plans, listed in `architecture/program.md`, the first two
 built (exact server state; v2 snapshot writers and the replica routes) — and inherits `K-32`. The freeze rule (`MR-3`)
 covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
-plan. Size: very large.
+plan, and `routes/read.py`'s route functions and `routes/elements.py::get_element` from the
+start of B's third. Size: very large.
 
 ---
 

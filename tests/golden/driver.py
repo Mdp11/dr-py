@@ -1,8 +1,9 @@
-"""Scenario registry and fixture files.
+"""Scenario registry, fixture files and generated engine sources.
 
 A scenario is a function returning a JSON-ready document. Its file is
-``<name>.json`` under ``engine/fixtures/golden``; ``stale`` is what keeps the
-committed files honest (see ``test_fixtures_current.py``).
+``<name>.json`` under ``engine/fixtures/golden``. A generated source is engine
+code derived from the core, written beside the fixtures by the same task;
+``stale`` is what keeps both honest (see ``test_fixtures_current.py``).
 """
 
 from __future__ import annotations
@@ -12,7 +13,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-FIXTURE_DIR = Path(__file__).resolve().parents[2] / "engine" / "fixtures" / "golden"
+from . import lower_tables
+
+ROOT = Path(__file__).resolve().parents[2]
+FIXTURE_DIR = ROOT / "engine" / "fixtures" / "golden"
+
+GENERATED: dict[Path, Callable[[], str]] = {
+    Path("engine/src/value/lower-tables.ts"): lower_tables.render,
+}
 
 Scenario = Callable[[], Any]
 _SCENARIOS: dict[str, Scenario] = {}
@@ -47,10 +55,13 @@ def write(directory: Path = FIXTURE_DIR) -> None:
             path.unlink()
     for name, text in files.items():
         (directory / name).write_text(text, encoding="utf-8")
+    for rel, make in GENERATED.items():
+        (ROOT / rel).write_text(make(), encoding="utf-8")
 
 
 def stale(directory: Path = FIXTURE_DIR) -> list[str]:
-    """Names of fixture files that are missing, outdated or left over."""
+    """Fixture files that are missing, outdated or left over, and generated
+    sources that are missing or outdated, by their path from the repository."""
     files = generate()
     on_disk = (
         {p.name for p in directory.glob("*.json")} if directory.is_dir() else set()
@@ -60,4 +71,12 @@ def stale(directory: Path = FIXTURE_DIR) -> list[str]:
         for name, text in files.items()
         if name not in on_disk or (directory / name).read_text(encoding="utf-8") != text
     ]
-    return sorted(changed + [name for name in on_disk if name not in files])
+    generated = [
+        rel.as_posix()
+        for rel, make in GENERATED.items()
+        if not (ROOT / rel).is_file()
+        or (ROOT / rel).read_text(encoding="utf-8") != make()
+    ]
+    return sorted(changed + [name for name in on_disk if name not in files]) + sorted(
+        generated
+    )
