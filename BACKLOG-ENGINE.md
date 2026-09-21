@@ -26,8 +26,9 @@ A → F. A (engine foundation) has landed: package, value layer and golden-fixtu
 Python snapshot v2 and state digest; metamodel, record-graph store, indexes and mutation
 boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
 the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
-and frontend seam) is designed — six plans, listed in `architecture/program.md`, the first two
-built (exact server state; v2 snapshot writers and the replica routes) — and inherits `K-32`. The freeze rule (`MR-3`)
+and frontend seam) is designed — six plans, listed in `architecture/program.md`, the first three
+built (exact server state; v2 snapshot writers and the replica routes; the engine service) — and
+watches `K-32`. The freeze rule (`MR-3`)
 covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
 plan, and `routes/read.py`'s route functions and `routes/elements.py::get_element` from the
 start of B's third. Size: very large.
@@ -45,20 +46,15 @@ loader refuses such a snapshot (`Relationship id 'x' is already an element id`),
 imported with one would open on the server and not in the browser. Fix: check the other
 kind's ids in `_guard_relationship`; the file is outside the MR-3 freeze.
 
-### K-32 · Two background operations must run in slices; the `ord` re-sort is watched · `open` · perf · *2026-09-18*
-`architecture/system.md` rule 4 has evaluation and background work yield between chunks of
-at most 16 ms; a transition — stage, unstage, rebase, delta apply — is atomic under its own
-budget, 100 ms for up to 1,000 ops with the order repair included (CN-3, AD-23). Measured at
-M by `pixi run engine-bench` (Node 22, medians of 3): `rebuildIndexes()` at the end of
-`openSnapshot` is one 0.52 s task and `verifyDigest()` hashes 297,160 entities in 0.2 s. None
-of it matters in Node; in the engine worker both must run in slices (sub-project B, the
-engine service) — CT-3 already says the digest check runs in the background. The first
-ordered iteration after a rewind that put an entity back at an old `ord` re-sorts the whole
-entity map, 58 ms against 2 ms for a plain pass: behind a 39 ms unstage that is 97 ms of the
-transition budget — inside it, and watched. If the browser benchmark misses, the fix is an
-insert in place, or a sort kept to the entities that moved. The other transitions are well
-inside: a 1,000-op batch stages in 44 ms, 100 staged batches rebase over a delta in 14 ms, a
-149-entity delta applies in 8.9 ms.
+### K-32 · The `ord` re-sort after a rewind is watched · `open` · perf · *2026-09-18*
+The first ordered iteration after a rewind that put an entity back at an old `ord` re-sorts
+the whole entity map: 58 ms at M against 2 ms for a plain pass, and behind a 39 ms unstage that
+is 97 ms of a transition's 100 ms budget (CN-3, AD-23) — inside it, and watched. If the browser
+benchmark misses, the fix is an insert in place, or a sort kept to the entities that moved.
+The rest of what this item held is done: the index build, the digest check, the roots sort
+and the search now run in steps, and their longest step at M is 12, 3.8 and 5.2 ms
+(`pixi run engine-bench`, Node 22, medians of 3; the index build's is 8–13 ms across passes)
+*(measured)* — under the 16 ms chunk, with the index build over the 8 ms slice target.
 
 ### K-35 · The server's v2 decoder accepts a line holding two documents; the engine refuses it · `open` · *2026-09-19*
 `api/snapshot_codec.py::_decode_v2` joins the entity lines with `,` and parses the lot as one

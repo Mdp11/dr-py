@@ -1,7 +1,8 @@
 /**
  * The engine at model M: opening a snapshot, against opening the same model
- * as one document in the same pass; the digest check; the heap one replica
- * holds; staging, rewinding, rebasing and a delta.
+ * as one document in the same pass; the digest check; the long operations in
+ * steps — their total and their longest step, for there is no scheduler here;
+ * the heap one replica holds; staging, rewinding, rebasing and a delta.
  *
  * `pixi run engine-bench-data` writes the input once, `pixi run engine-bench`
  * measures. Timings drift between sessions: compare only numbers of one run.
@@ -14,11 +15,14 @@ import {
 	Model,
 	openSnapshot,
 	parseExact,
+	READS,
+	ViewPlacements,
 	type Delta,
 	type ElementRec,
 	type MetamodelDoc,
 	type ModelOp,
 	type RelRec,
+	type Steps,
 	type Value,
 	type WorkingCopy
 } from '../src/index.ts';
@@ -51,6 +55,13 @@ const ROWS = {
 	documentIndex: '  index',
 	nativeParse: '  (its native parse, which loses 1 vs 1.0)',
 	verify: 'verify the digest: every entity hashed',
+	indexSteps: 'the index build in steps (the document model again)',
+	indexLongest: '  its longest step',
+	verifySteps: 'the digest check in steps',
+	verifyLongest: '  its longest step',
+	scan: "search q='a', the broadest: every element scored, the hits sorted",
+	scanLongest: '  its longest step',
+	scanRare: "search q='sensor'",
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -73,6 +84,25 @@ function timed<T>(row: Row, run: () => T): T {
 	record(row, performance.now() - start);
 	return result;
 }
+
+/** Drives `steps` by hand: the whole run under `total`, its longest step under `longest`. */
+function stepped<T>(total: Row, longest: Row | null, steps: Steps<T>): T {
+	let worst = 0;
+	const start = performance.now();
+	for (;;) {
+		const before = performance.now();
+		const next = steps.next();
+		worst = Math.max(worst, performance.now() - before);
+		if (next.done === true) {
+			record(total, performance.now() - start);
+			if (longest !== null) record(longest, worst);
+			return next.value;
+		}
+	}
+}
+
+const search = (model: Model, q: string) =>
+	READS['listElementsPage']!(model, new ViewPlacements(), { q, limit: 100 }) as Steps<unknown>;
 
 const count = (n: number) => n.toLocaleString('en-US');
 
@@ -239,6 +269,11 @@ async function pass(): Promise<void> {
 	if (!timed('verify', () => workingCopy.verifyDigest())) {
 		throw new Error('the snapshot does not hold what its digest names');
 	}
+	if (!stepped('verifySteps', 'verifyLongest', workingCopy.verifyDigestSteps())) {
+		throw new Error('the digest check in steps disagrees');
+	}
+	stepped('scan', 'scanLongest', search(workingCopy.model, 'a'));
+	stepped('scanRare', null, search(workingCopy.model, 'sensor'));
 	counts = `${count(header.elements)} elements, ${count(header.relationships)} relationships`;
 	// Weighed before the document is read: the last text a regular expression
 	// ran over stays reachable, and further down that is the whole document.
@@ -256,6 +291,7 @@ async function pass(): Promise<void> {
 	});
 	timed('documentIndex', () => model.rebuildIndexes());
 	record('document', performance.now() - documentStart);
+	stepped('indexSteps', 'indexLongest', model.rebuildIndexSteps());
 	timed('nativeParse', () => JSON.parse(text) as unknown);
 
 	measureEdits(workingCopy);
