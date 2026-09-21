@@ -13,7 +13,12 @@ const config = {
 			fallback: 'index.html',
 			precompress: false,
 			strict: false
-		})
+		}),
+		// Production code imports these as types only (see eslint.config.js).
+		alias: {
+			$engine: '../engine/src/index.ts',
+			$sandbox: '../sandbox/src'
+		}
 	}
 };
 

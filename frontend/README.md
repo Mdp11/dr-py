@@ -496,6 +496,53 @@ full validation pipeline.** `POST /model/validate` with no ops is an O(model)
 sweep over what can be an ~80 MB model, so it stays reachable only from an
 explicit user click. `GET /model/issues` is the cheap read used everywhere else.
 
+### Replica (engine shell)
+
+The TypeScript engine (`../engine`) runs a full replica of the model in a
+worker of the sandbox site (`../sandbox`); `lib/engine/` is the app's side of
+it. Nothing reads from the replica yet.
+
+**Aliases and the types-only rule.** `$engine` points at
+`../engine/src/index.ts` and `$sandbox` at `../sandbox/src`, in `kit.alias`
+(svelte-check and the build) and again in `vitest.config.ts`, which runs
+without the SvelteKit plugin. Production code imports them **as types only**:
+`import type` is erased, so the app bundle never holds the engine — the engine
+runs in the worker, in another origin, and nowhere else. ESLint's
+`@typescript-eslint/no-restricted-imports` (with `allowTypeImports`) refuses a
+value import of either alias everywhere but `**/__tests__/**` and
+`lib/engine/testing.ts`.
+
+**The client** (`lib/engine/client.ts`). `createEngineClient(port)` speaks the
+engine service's message protocol over a `ClientPort` (a `MessagePort` fits):
+
+- `call(method, params?, {signal?, transfer?})` posts `{id, method, params}`
+  under an id counted from 1 and settles with the answer under that id. An
+  error answer `{status, detail}` rejects with `errorForStatus` of
+  `lib/api/errors` — `NotFoundError` / `ConflictError` / `ValidationError`, as
+  after an HTTP call, `body` being `{detail}`. `transfer` rides as the transfer
+  list, so a transferred `ArrayBuffer` is detached in the caller.
+- A signal already aborted rejects the call with a `DOMException` named
+  `AbortError` and posts nothing; aborted later, `{cancel: id}` is posted, the
+  call rejects the same way and its id is forgotten, so a late answer is
+  dropped.
+- `on(listener)` subscribes to the engine's events (`replica`, `progress`,
+  `changed`) and returns the unsubscribe; every listener sees every event.
+- `dispose()` rejects every pending call with an `EngineGoneError`, closes the
+  port, and makes every later call reject the same way.
+
+An `EngineLink` (`client`, `isolated`, `onViolation`, `dispose`) is what the
+replica's sync logic is handed.
+
+**Tests.** `connectInProcess()` (`lib/engine/testing.ts`) is the only way a
+shell test gets an engine: the real `createService` with the worker's own host
+code (`$sandbox/host.ts`'s `createHost()` and `portOf()`) over a Node
+`MessageChannel`, a client on the other end, `isolated: null`. Never mock the
+engine. Every link must be `dispose()`d in teardown — an open port keeps the
+vitest worker alive — and no test uses fake timers: the engine's scheduler
+yields through real macrotasks. The engine's own test helpers
+(`engine/test/**`) cannot be imported from this Vite root; build fixtures from
+the engine's public exports.
+
 ### Artifact import/export (bundle export/preview/import)
 
 The TopBar's toolbar `<nav>` (see Layout above) hosts an **Artifacts** menu

@@ -46,6 +46,34 @@ export default defineConfig(
 		}
 	},
 	{
+		// The app bundle never holds the engine: production code imports its
+		// types only (`import type` is erased). Tests and the in-process test
+		// link run it for real.
+		files: ['**/*.ts', '**/*.js', '**/*.svelte'],
+		ignores: ['**/__tests__/**', 'src/lib/engine/testing.ts'],
+		rules: {
+			'@typescript-eslint/no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: '$engine',
+							message: 'Import engine types only (`import type`).',
+							allowTypeImports: true
+						}
+					],
+					patterns: [
+						{
+							group: ['$sandbox', '$sandbox/*'],
+							message: 'Import sandbox types only (`import type`).',
+							allowTypeImports: true
+						}
+					]
+				}
+			]
+		}
+	},
+	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
 		rules: {}
