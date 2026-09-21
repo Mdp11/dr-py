@@ -33,8 +33,8 @@ import {
 
 /** Stop counting matches past this many. A one-character query against a long
  * snippet would otherwise turn every keystroke into a full-document scan; the
- * counter is a comfort, not a report, so it degrades to "1/1000+". */
-const MATCH_CAP = 1000;
+ * counter is a comfort, not a report, so it degrades to "1/10000+". */
+const MATCH_CAP = 10_000;
 
 interface Counted {
 	total: number;

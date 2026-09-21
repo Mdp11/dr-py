@@ -112,7 +112,7 @@ export function searchModel(
 
 /**
  * GET /model/elements/{id}/neighborhood — BFS graph extraction around one
- * element (`hops` 1-5, `cap` is a hard node-count cap; `truncated` reports
+ * element (`hops` 1-10, `cap` is a hard node-count cap; `truncated` reports
  * dropped neighbors).
  */
 export function getNeighborhood(

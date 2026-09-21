@@ -81,7 +81,7 @@ import { onCommitEvent } from './realtime.svelte';
 
 /** Bounded because these are full buffer snapshots; the metamodel is tens of
  * KB, so 50 is cheap and deep enough for any realistic edit run. */
-const UNDO_MAX = 50;
+const UNDO_MAX = 500;
 
 type XY = { x: number; y: number };
 type Positions = Record<string, XY>;

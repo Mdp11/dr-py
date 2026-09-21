@@ -49,5 +49,5 @@ def test_open_reports_lock_ttl_seconds(client: TestClient) -> None:
     r = client.get(papi("/open"), headers=AUTH_HEADERS)
     assert r.status_code == 200, r.text
     body = r.json()
-    # default lock TTL is 300s (settings.lock_ttl_seconds); the field must be present
-    assert body["lock_ttl_seconds"] == 300
+    # default lock TTL is 3600s (settings.lock_ttl_seconds); the field must be present
+    assert body["lock_ttl_seconds"] == 3600

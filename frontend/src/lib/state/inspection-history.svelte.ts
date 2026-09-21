@@ -8,7 +8,7 @@ import { select } from './selection.svelte';
 export type VisitEntry = { id: string; name?: string; type_name?: string };
 export type VisitMenuEntry = { index: number; entry: VisitEntry };
 
-const STACK_MAX = 50;
+const STACK_MAX = 500;
 
 let _stack: VisitEntry[] = $state([]);
 let _cursor = $state(-1); // index of the current entry; -1 = empty

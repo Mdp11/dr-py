@@ -13,7 +13,7 @@ from data_rover.core.script.runner import (
     ScriptBudget,
     decode_call_payload,
 )
-from data_rover.core.script.warnings import ScriptWarningCode
+from data_rover.core.script.warnings import MAX_SCRIPT_WARNINGS, ScriptWarningCode
 from tests.script.trusted_runner import TrustedRunner
 
 
@@ -343,11 +343,11 @@ def test_ctx_boot_error_and_warnings(small_model) -> None:
     assert res.error is not None and ctx.errored
     ctx.add_warning(ScriptWarningCode.NAV_STEP_FAILED, detail="w")
     ctx.add_warning(ScriptWarningCode.NAV_STEP_FAILED, detail="w")  # aggregates
-    for i in range(30):
+    for i in range(MAX_SCRIPT_WARNINGS + 10):
         ctx.add_warning(ScriptWarningCode.NAV_STEP_FAILED, detail=f"w{i}")
     assert ctx.warnings[0].detail == "w"
     assert ctx.warnings[0].occurrences == 2
-    assert len(ctx.warnings) == 20  # capped
+    assert len(ctx.warnings) == MAX_SCRIPT_WARNINGS  # capped
     ctx.close()
 
 

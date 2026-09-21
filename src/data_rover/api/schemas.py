@@ -835,7 +835,7 @@ class ChangesSummaryOut(BaseModel):
 
 #: rejected at request-parse time: every CR costs one O(model) copy plus a
 #: full index rebuild, so an unbounded list is an N-fold multiplier on it
-MAX_CRS_PER_REQUEST = 20
+MAX_CRS_PER_REQUEST = 100
 
 
 class ProposeCrRequest(BaseModel):

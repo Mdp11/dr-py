@@ -57,11 +57,11 @@ describe('visit stack', () => {
 		expect(canGoForward()).toBe(false);
 	});
 
-	it('caps the stack at 50, dropping the oldest', () => {
-		for (let i = 0; i < 55; i++) pushVisit(`e${i}`);
-		expect(getVisitStack()).toHaveLength(50);
+	it('caps the stack at 500, dropping the oldest', () => {
+		for (let i = 0; i < 505; i++) pushVisit(`e${i}`);
+		expect(getVisitStack()).toHaveLength(500);
 		expect(getVisitStack()[0].id).toBe('e5');
-		expect(getVisitCursor()).toBe(49);
+		expect(getVisitCursor()).toBe(499);
 	});
 });
 

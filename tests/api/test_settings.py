@@ -46,7 +46,7 @@ def test_phase3_storage_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.gcs_bucket == "data-rover-snapshots"
     assert s.storage_emulator_host == ""
     assert s.snapshot_every == 200
-    assert s.idle_evict_seconds == 1800
+    assert s.idle_evict_seconds == 0
     assert s.snapshot_sync is False
 
 

@@ -14,9 +14,9 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 RULES_SCHEMA_VERSION: Literal[1] = 1
-RULES_MAX_YAML_BYTES = 64 * 1024
-MAX_RULES_PER_SET = 200
-MAX_CONDITION_DEPTH = 8
+RULES_MAX_YAML_BYTES = 1024 * 1024
+MAX_RULES_PER_SET = 2000
+MAX_CONDITION_DEPTH = 16
 
 Scalar = str | int | float | bool
 

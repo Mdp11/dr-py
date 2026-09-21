@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 #: touched-entity cap (elements + relationships) above which a commit stores
 #: no states; same order as ISSUES_RESPONSE_MAX, bounding the row size.
-ENTITY_STATES_MAX = 5000
+ENTITY_STATES_MAX = 100_000
 
 ElementPair = tuple[ElementOut | None, ElementOut | None]
 RelationshipPair = tuple[RelationshipOut | None, RelationshipOut | None]

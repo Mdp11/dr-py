@@ -43,7 +43,7 @@ export interface TypeSearchResult {
 }
 
 /** How many hits the dropdown shows before deferring to a better query. */
-export const TYPE_SEARCH_LIMIT = 20;
+export const TYPE_SEARCH_LIMIT = 100;
 
 export function searchTypes(
 	mm: Metamodel,

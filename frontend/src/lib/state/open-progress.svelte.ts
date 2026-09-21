@@ -15,10 +15,10 @@ import { getActiveProjectId } from './active-project.svelte';
 import { refetchIssues, refreshSummary } from './model.svelte';
 import { journeyStatus } from './open-journey';
 
-// Consecutive 'cold' polls tolerated before giving up (~20s at the default
+// Consecutive 'cold' polls tolerated before giving up (~10min at the default
 // 400ms pollMs). A project whose server-side hydration failed reports 'cold'
 // forever; without this cap the poll loop would never exit.
-export const MAX_COLD_POLLS = 50;
+export const MAX_COLD_POLLS = 1500;
 
 // Bumped by cancelOpenProgress() to abort any in-flight poll loop. Each
 // trackOpenProgress captures the generation at entry and re-checks it every

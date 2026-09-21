@@ -483,7 +483,7 @@ def test_neighborhood_errors(graph_client: TestClient) -> None:
     assert (
         graph_client.get(f"{API}/model/elements/ghost/neighborhood").status_code == 404
     )
-    for params in ({"hops": 0}, {"hops": 6}, {"cap": 0}, {"cap": 501}):
+    for params in ({"hops": 0}, {"hops": 11}, {"cap": 0}, {"cap": 501}):
         res = graph_client.get(f"{API}/model/elements/c/neighborhood", params=params)
         assert res.status_code == 422, params
 

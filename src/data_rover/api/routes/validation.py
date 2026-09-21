@@ -28,7 +28,7 @@ router = APIRouter()
 
 #: max issues returned by GET /model/issues; counts stay exact past the cap.
 #: One flat panel list is the consumer — paging buys nothing.
-ISSUES_RESPONSE_MAX = 5000
+ISSUES_RESPONSE_MAX = 100_000
 
 
 def _issue_key(issue: Issue) -> tuple[str, str, tuple[str, ...], str]:

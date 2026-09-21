@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 
 #: Cap on DISTINCT KINDS held at once (see `ScriptWarningLog.add`).
-MAX_SCRIPT_WARNINGS = 20
+MAX_SCRIPT_WARNINGS = 100
 
 
 class ScriptWarningCode(StrEnum):

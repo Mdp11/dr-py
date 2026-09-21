@@ -373,7 +373,7 @@ def batch_tree_items(
 @router.get("/model/elements/{element_id}/neighborhood")
 def get_neighborhood(
     element_id: str,
-    hops: int = Query(2, ge=1, le=5),
+    hops: int = Query(2, ge=1, le=10),
     cap: int = Query(60, ge=1, le=MAX_PAGE_LIMIT),
     session: Session = Depends(get_request_session),
 ) -> NeighborhoodOut:

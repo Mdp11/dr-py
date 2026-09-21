@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     #: non-dev deploy that still uses it.
     jwt_secret: str = "dev-insecure-secret-change-me"
     #: Session token lifetime (seconds). Default 8h.
-    jwt_ttl_seconds: int = 28800
+    jwt_ttl_seconds: int = 7 * 24 * 3600
     #: Session cookie name.
     auth_cookie_name: str = "session"
     #: Set the cookie Secure flag (HTTPS only). False for localhost dev.
@@ -103,15 +103,15 @@ class Settings(BaseSettings):
     snapshot_every: int = 200
     #: Idle sessions (no request for this many seconds) are snapshotted and
     #: evicted by the background sweeper. 0 disables the sweeper (tests).
-    idle_evict_seconds: int = 1800
+    idle_evict_seconds: int = 0
     #: lease lifetime; renewed by client heartbeat. Must be well
     #: under idle_evict_seconds so an idle session has no live leases to strand.
-    lock_ttl_seconds: int = 300
+    lock_ttl_seconds: int = 3600
     #: lifespan sweeper interval for auto-releasing expired leases. 0 disables.
     lock_sweep_seconds: int = 60
     #: bounded per-client feed queue. A client whose queue overflows is dropped
     #: and reconnects. Large enough to absorb a burst of commits.
-    feed_queue_max: int = 256
+    feed_queue_max: int = 4096
     #: Ceiling (bytes) on a raw request body the API buffers whole — POST
     #: /model/upload and POST /model/compare (see ``deps.read_capped_body``).
     #: A runaway/abuse backstop, not a tuning knob: the documented target

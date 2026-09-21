@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 #: inverses can still be large (a cascade delete snapshots every removed
 #: entity), so memory is bounded per-entry only in the typical small-batch
 #: case — an accepted tradeoff for a trivial trimming rule.
-OP_LOG_MAX = 1000
+OP_LOG_MAX = 100_000
 
 
 @dataclass

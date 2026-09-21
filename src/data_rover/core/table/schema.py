@@ -276,7 +276,7 @@ class NavigationColumn(BaseModel):
     mode: Literal["collapse", "expand"] = "collapse"
     keep_empty: bool = True
     sort_mode: Literal["value", "count"] = "value"
-    cell_cap: int = Field(default=20, ge=1)
+    cell_cap: int = Field(default=200, ge=1)
     header: str = ""
     width_px: int | None = None
     #: Presentation-only: a hidden column is still evaluated (later columns

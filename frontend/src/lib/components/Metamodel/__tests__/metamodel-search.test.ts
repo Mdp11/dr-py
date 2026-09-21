@@ -20,11 +20,11 @@ const DUP_FIXTURE = FIXTURE.replace(
 	'  - name: Building\n    extends: NamedElement\n  - name: Zone\n    extends: NamedElement\n'
 );
 
-/** The fixture plus 25 extra ELEMENT types all matching `wide` — more than
+/** The fixture plus 105 extra ELEMENT types all matching `wide` — more than
  * `TYPE_SEARCH_LIMIT`, which is the state a real 300-type metamodel reaches on
  * a two-letter query. Spliced in before `relationships:` rather than appended,
  * since appending would land them in the relationship list instead. */
-const WIDE_COUNT = 25;
+const WIDE_COUNT = 105;
 const WIDE_FIXTURE = FIXTURE.replace(
 	'relationships:',
 	Array.from(
