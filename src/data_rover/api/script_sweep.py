@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Literal
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
-from data_rover.core.script.cell_cache import inputs_digest
+from data_rover.core.script.cell_cache import CACHEABLE_ERROR_KINDS, inputs_digest
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import ScriptBudget, ScriptRunner
 from data_rover.core.table.evaluate import (
@@ -78,7 +78,9 @@ class SweepJob:
 
     ``done``/``total`` drive the client's progress readout (``total`` is None
     until the row build finishes). ``message`` carries the abort reason of a
-    ``failed`` job. ``cancel`` is set by the session invalidation hooks and by
+    ``failed`` job. ``uncached_errors`` tallies results by error kind that the
+    cell cache refuses to store — each one is a hole the sweep leaves behind
+    even when it ends ``done``. ``cancel`` is set by the session invalidation hooks and by
     eviction; the run loop checks it between cells.
 
     ``state`` has THREE terminal values. ``cancelled`` is distinct from
@@ -95,6 +97,7 @@ class SweepJob:
     done: int = 0
     total: int | None = None
     message: str | None = None
+    uncached_errors: dict[str, int] = field(default_factory=dict)
     cancel: threading.Event = field(default_factory=threading.Event)
 
 
@@ -218,9 +221,40 @@ def _aborted(session: Session, job: SweepJob) -> bool:
     return job.cancel.is_set() or session.model_rev != job.rev
 
 
+def _progress(job: SweepJob) -> str:
+    return f"{job.done}/{job.total if job.total is not None else '?'}"
+
+
 def _fail(job: SweepJob, message: str) -> None:
     job.state = "failed"
     job.message = message
+    logger.warning(
+        "script sweep failed for table %s at rev %d after %s cells: %s",
+        job.fingerprint[:12],
+        job.rev,
+        _progress(job),
+        message,
+    )
+
+
+def describe_sweep_holes(job: SweepJob) -> str:
+    """Why a terminal ``job`` left cells uncomputed, as one user-facing clause."""
+    parts = []
+    if job.state in ("failed", "cancelled") and job.message:
+        parts.append(
+            f"the background script sweep {job.state} after {_progress(job)} "
+            f"cells: {job.message}"
+        )
+    if job.uncached_errors:
+        kinds = ", ".join(f"{n} {k}" for k, n in sorted(job.uncached_errors.items()))
+        parts.append(f"script calls returned errors that are never cached ({kinds})")
+    if not parts:
+        return (
+            "the background script sweep completed, but some results were no "
+            "longer in the script cell cache (likely evicted past "
+            "snippet_cell_cache_max)"
+        )
+    return "; ".join(parts)
 
 
 def _cancelled(job: SweepJob) -> None:
@@ -235,6 +269,12 @@ def _cancelled(job: SweepJob) -> None:
     """
     job.state = "cancelled"
     job.message = "sweep cancelled"
+    logger.info(
+        "script sweep cancelled for table %s at rev %d after %s cells",
+        job.fingerprint[:12],
+        job.rev,
+        _progress(job),
+    )
 
 
 #: Process-wide bound on concurrently RUNNING sweep jobs: sweeps
@@ -359,6 +399,10 @@ def _drain(
         res = wctx.call(code, "value", list(roots), inputs=inputs)
         kind = res.error.kind if res.error is not None else None
         with guards.lock:
+            # `cancelled` is the abort itself, already the job's own message.
+            if kind not in (None, "cancelled") and kind not in CACHEABLE_ERROR_KINDS:
+                assert kind is not None
+                job.uncached_errors[kind] = job.uncached_errors.get(kind, 0) + 1
             if kind == "timeout":
                 # Timeouts are environmental and never cached, so a snippet
                 # that keeps timing out would otherwise be re-run for every
@@ -575,5 +619,13 @@ def _run_inner(
         # own terminal state (failed/cancelled) and must not be overwritten.
         if job.state == "running":
             job.state = "done"
+            if job.uncached_errors:
+                logger.warning(
+                    "script sweep for table %s at rev %d finished with "
+                    "uncached errors that leave cells uncomputed: %s",
+                    job.fingerprint[:12],
+                    job.rev,
+                    job.uncached_errors,
+                )
     finally:
         ctx.close()

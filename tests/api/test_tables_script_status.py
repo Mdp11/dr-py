@@ -787,6 +787,8 @@ def test_export_failed_sweep_ships_error_cells(
     assert r.headers["x-table-script-errors"] == "true"
     notice = _sheet(r)[-1][0]
     assert isinstance(notice, str) and "#ERROR" in notice
+    # The notice names the sweep's abort reason, not just the symptom.
+    assert "consecutive snippet timeouts" in notice
 
     # Failed-job memory: the retry is served the SAME dead job, so no second
     # grind is started (only the abort threshold's calls were ever made).
@@ -860,8 +862,10 @@ def test_export_done_sweep_with_permanent_hole_does_not_202_forever(
     # `t1` was the timed-out call: never cached, so it ships as `#ERROR`; the
     # other four were swept successfully and carry real values.
     assert [row[1] for row in rows] == ["#ERROR: not computed"] + [7] * 4
-    # ...and the degraded workbook says so (FIX 2).
+    # ...and the degraded workbook says so (FIX 2), naming the uncached kind.
     assert last.headers["x-table-script-errors"] == "true"
+    notice = _sheet(last)[-1][0]
+    assert isinstance(notice, str) and "never cached (1 timeout)" in notice
     # Exactly one sweep ran (5 guest calls): failed-job memory kept the retries
     # from re-grinding, which is also why the hole is permanent at this rev.
     assert runner.calls[0] == len(THING_IDS)
@@ -959,6 +963,7 @@ def test_export_without_runner_flags_error_cells(
     assert r.headers["x-table-script-errors"] == "true"
     notice = _sheet(r)[-1][0]
     assert isinstance(notice, str) and "#ERROR" in notice
+    assert "no script runner is available" in notice
     # No runner => no sweep was kicked (there would be nothing to sweep with).
     session = get_session()
     assert session.script_sweeps.get(_fingerprint(), session.model_rev) is None

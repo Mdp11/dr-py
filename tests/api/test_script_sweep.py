@@ -22,9 +22,11 @@ import threading
 
 import pytest
 
+from data_rover.api import script_sweep
 from data_rover.api.script_sweep import (
     ScriptSweepRegistry,
     SweepJob,
+    describe_sweep_holes,
     kick_or_join_sweep,
     sweep_fingerprint,
 )
@@ -745,3 +747,66 @@ def test_sweep_skips_arity_mismatched_column(settings_sync_sweep: Settings) -> N
     assert job.state == "done"
     assert runner.calls == 0
     assert job.total == 2 and job.done == 2
+
+
+def _capture_warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patches the module logger rather than using caplog: alembic's
+    ``fileConfig`` (test_alembic.py) disables every pre-existing logger for the
+    rest of the process — see test_snapshot_job.py."""
+    out: list[str] = []
+    monkeypatch.setattr(
+        script_sweep.logger,
+        "warning",
+        lambda msg, *a, **kw: out.append(str(msg) % a),
+    )
+    return out
+
+
+def test_failed_sweep_logs_and_describes_its_reason(
+    settings_sync_sweep: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed sweep logs its abort reason, and `describe_sweep_holes` hands
+    the same reason (with progress) to the export notice."""
+    model = _model(10)
+    session = _session_with(model)
+    runner = ScriptedRunner(lambda i, ids: timeout())
+    warnings = _capture_warnings(monkeypatch)
+
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, _defn(), runner, settings_sync_sweep, 0
+    )
+    assert job.state == "failed"
+    assert any(
+        "script sweep failed" in w and "consecutive snippet timeouts" in w
+        for w in warnings
+    )
+    reason = describe_sweep_holes(job)
+    assert "failed after" in reason
+    assert "consecutive snippet timeouts" in reason
+    assert f"({settings_sync_sweep.snippet_sweep_timeout_abort} timeout)" in reason
+
+
+def test_done_sweep_with_uncached_errors_logs_and_describes_them(
+    settings_sync_sweep: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sweep that ends `done` but left timeout holes (never consecutive
+    enough to abort) still logs them and names them for the notice."""
+    model = _model(4)
+    session = _session_with(model)
+    runner = ScriptedRunner(lambda i, ids: timeout() if i == 0 else ok(1))
+    warnings = _capture_warnings(monkeypatch)
+
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, _defn(), runner, settings_sync_sweep, 0
+    )
+    assert job.state == "done"
+    assert job.uncached_errors == {"timeout": 1}
+    assert any("uncached errors" in w for w in warnings)
+    assert describe_sweep_holes(job) == (
+        "script calls returned errors that are never cached (1 timeout)"
+    )
+
+
+def test_describe_sweep_holes_for_a_clean_done_job_blames_the_cache() -> None:
+    job = SweepJob(fingerprint="f", rev=0, state="done", done=4, total=4)
+    assert "snippet_cell_cache_max" in describe_sweep_holes(job)

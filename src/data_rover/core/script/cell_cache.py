@@ -57,7 +57,7 @@ def inputs_digest(inputs: WireInputs | None) -> str:
     return hashlib.sha256(canon.encode()).hexdigest()[:32]
 
 
-_CACHEABLE_ERROR_KINDS = frozenset({"runtime", "syntax"})
+CACHEABLE_ERROR_KINDS = frozenset({"runtime", "syntax"})
 
 #: `put` degrades an oversized incoming read-set to `None` above this many
 #: keys. Each entry can carry up to `_MAX_READS` (2000, see `runner.py`)
@@ -100,7 +100,7 @@ class ScriptCellCache:
         *,
         reads: frozenset[ReadKey] | None = None,
     ) -> None:
-        if result.error is not None and result.error.kind not in _CACHEABLE_ERROR_KINDS:
+        if result.error is not None and result.error.kind not in CACHEABLE_ERROR_KINDS:
             return
         if reads is not None and len(reads) > _MAX_STORED_READS:
             # Degrade to "depends on everything" rather than storing a huge

@@ -71,7 +71,7 @@ from .deps import Session
 from .schemas import ScriptStatusOut
 from .script_eval import close_script_context, open_script_context
 from .script_runner import run_limits_from_settings
-from .script_sweep import SweepJob, kick_or_join_sweep
+from .script_sweep import SweepJob, describe_sweep_holes, kick_or_join_sweep
 from .settings import Settings
 from .snippet_concurrency import concurrency_guard
 from .table_export import build_workbook
@@ -623,6 +623,10 @@ def run_table_export(
         ordered = order_rows(
             metamodel, model, defn, keys, sort_keys(defn), limits, script=script_ctx
         )
+        # Why pending cells will ship as `#ERROR`, when they will: surfaced in
+        # the xlsx notice and the `on_error: 'fail'` 422, since the sweep's own
+        # status never reaches a client that gets a file instead of a 202.
+        hole_reason: str | None = None
         if script_ctx is not None:
             # COMPLETENESS PROBE — do not "optimize" this pass away.
             #
@@ -749,6 +753,15 @@ def run_table_export(
                     return ExportPending(
                         status=status.model_copy(update={"state": "computing"})
                     )
+                hole_reason = describe_sweep_holes(job)
+            elif script_ctx.pending_misses > 0:
+                hole_reason = "no script runner is available"
+            if hole_reason is not None:
+                logger.warning(
+                    "export of table %r ships uncomputed script cells: %s",
+                    name,
+                    hole_reason,
+                )
             # Fall through on a terminal-but-incomplete sweep (or no runner at
             # all) and export with pending rendered as `#ERROR` — the honest
             # terminal answer.
@@ -798,13 +811,20 @@ def run_table_export(
             # reads are only fully settled once that consumption finishes, so
             # this must be a callable invoked AFTER the row loop, not a value
             # computed up front.
-            if _degraded():
-                return (
-                    "Some script cells failed, could not be computed, or "
-                    "exceeded the evaluation budget; affected cells are "
-                    "marked #ERROR."
-                )
-            return None
+            if not _degraded():
+                return None
+            text = (
+                "Some script cells failed, could not be computed, or "
+                "exceeded the evaluation budget; affected cells are "
+                "marked #ERROR."
+            )
+            rendered_pending = (
+                script_ctx is not None
+                and script_ctx.pending_misses > render_miss_baseline
+            )
+            if hole_reason is not None and rendered_pending:
+                text += f" Not computed because {hole_reason}."
+            return text
 
         if format in JSON_FAMILY:
             # `export_definition` restates inclusion as `hidden` so
@@ -831,9 +851,14 @@ def run_table_export(
                     and json_doc.on_error == "fail"
                     and any(contains_error_marker(d) for d in docs)
                 ):
+                    cause = (
+                        f" (uncomputed cells: {hole_reason})"
+                        if hole_reason is not None
+                        else ""
+                    )
                     raise ValueError(
                         f"{name}: export contains error cells and "
-                        "json_doc.on_error is 'fail'"
+                        f"json_doc.on_error is 'fail'{cause}"
                     )
 
             def _shape(
