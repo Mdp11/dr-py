@@ -79,19 +79,23 @@ describe('SnapshotCache', () => {
 	});
 
 	it('the least recently used project goes first', async () => {
+		// The cap bounds the GRAND TOTAL of stored bytes, the row just written
+		// included, so three rows of 30 (90) must stay under it until the
+		// fourth pushes the total to 120 — three of 40 would already overflow
+		// at the third `put`, evicting `a` before its `get` could save it.
 		let now = 0;
 		const c = cache({ capBytes: 100, now: () => now });
 
 		now = 1;
-		await c.put('a', 1, buf(40));
+		await c.put('a', 1, buf(30));
 		now = 2;
-		await c.put('b', 1, buf(40));
+		await c.put('b', 1, buf(30));
 		now = 3;
-		await c.put('c', 1, buf(40));
+		await c.put('c', 1, buf(30));
 		now = 4;
 		await c.get('a', 1);
 		now = 5;
-		await c.put('d', 1, buf(40));
+		await c.put('d', 1, buf(30));
 
 		await expect(c.get('b', 1)).resolves.toBeNull();
 		await expect(c.get('a', 1)).resolves.not.toBeNull();
@@ -100,21 +104,31 @@ describe('SnapshotCache', () => {
 	});
 
 	it('the project being written is never the one evicted', async () => {
+		// The clock runs backwards: `a` is written with a NEWER `used_at` than
+		// `b`, so a rule that picked the smallest `used_at` across every row —
+		// the row being written included — would evict `b`. It must evict `a`
+		// instead: the row just written is never a candidate, whatever its own
+		// recency looks like next to the others.
 		let now = 0;
 		const c = cache({ capBytes: 50, now: () => now });
 
-		now = 1;
+		now = 5;
 		await c.put('a', 1, buf(30));
-		now = 2;
+		now = 1;
 		await c.put('b', 1, buf(30));
-		// Both other rows (60 bytes) now exceed the cap; writing a third row of
-		// any size forces an eviction, but never of the row just written.
-		now = 3;
-		await c.put('c', 1, buf(45));
 
 		await expect(c.get('a', 1)).resolves.toBeNull();
 		await expect(c.get('b', 1)).resolves.not.toBeNull();
-		await expect(c.get('c', 1)).resolves.not.toBeNull();
+	});
+
+	it('a synchronous throw while evicting does not commit the write that triggered it', async () => {
+		const c = cache();
+		vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(() => {
+			throw new Error('boom');
+		});
+		await expect(c.put('p1', 1, buf(4))).resolves.toBeUndefined();
+		vi.restoreAllMocks();
+		await expect(c.get('p1', 1)).resolves.toBeNull();
 	});
 
 	it('a row larger than the cap is not stored', async () => {
@@ -165,6 +179,22 @@ describe('SnapshotCache', () => {
 		it('a put whose transaction aborts', async () => {
 			vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
 				throw new DOMException('quota exceeded', 'QuotaExceededError');
+			});
+			const c = cache();
+			await expect(c.put('p1', 1, buf(4))).resolves.toBeUndefined();
+			vi.restoreAllMocks();
+			await expect(c.get('p1', 1)).resolves.toBeNull();
+		});
+
+		it('a put whose transaction really aborts (the path a quota failure takes)', async () => {
+			const original = IDBObjectStore.prototype.put;
+			vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+				this: IDBObjectStore,
+				...args: Parameters<typeof original>
+			) {
+				const request = original.apply(this, args);
+				this.transaction.abort();
+				return request;
 			});
 			const c = cache();
 			await expect(c.put('p1', 1, buf(4))).resolves.toBeUndefined();

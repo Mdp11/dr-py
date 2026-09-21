@@ -99,6 +99,11 @@ function withStore<T>(
 				const store = tx.objectStore(STORE_NAME);
 				body(store, finish);
 			} catch {
+				try {
+					tx.abort();
+				} catch {
+					// The transaction may already be finished.
+				}
 				done();
 			}
 		});
@@ -106,11 +111,11 @@ function withStore<T>(
 }
 
 /**
- * The IndexedDB store of snapshot bytes, one row per project (D11): key
+ * The IndexedDB store of snapshot bytes, one row per project: key
  * `project_id`, value `{project_id, rev, bytes, size, used_at}` — the newest
  * `rev` a project was cached at, by construction. Every call resolves,
- * whatever the store does (AD-10): a missing `indexedDB`, a failed or
- * blocked `open`, an aborted transaction and a quota error are all a no-op
+ * whatever the store does: a missing `indexedDB`, a failed or blocked
+ * `open`, an aborted transaction and a quota error are all a no-op
  * `put`/`drop` or a `null` `get`, never a rejection.
  */
 export function createSnapshotCache(
@@ -144,18 +149,18 @@ export function createSnapshotCache(
 			return withStore<void>(factory, undefined, (store) => {
 				const row: Row = { project_id: projectId, rev, bytes, size, used_at: now() };
 				store.put(row);
-				// Evict the least-recently-used OTHER rows until they fit the cap;
-				// the row just written is never a candidate.
+				// Evict least-recently-used rows of OTHER projects — the row just
+				// written is never a candidate — until the total fits the cap.
 				const all = store.getAll();
 				all.onsuccess = () => {
 					const others = ((all.result as Row[]) ?? [])
 						.filter((other) => other.project_id !== projectId)
 						.sort((a, b) => a.used_at - b.used_at);
-					let otherBytes = others.reduce((sum, other) => sum + other.size, 0);
+					let total = size + others.reduce((sum, other) => sum + other.size, 0);
 					for (const other of others) {
-						if (otherBytes <= capBytes) break;
+						if (total <= capBytes) break;
 						store.delete(other.project_id);
-						otherBytes -= other.size;
+						total -= other.size;
 					}
 				};
 			});

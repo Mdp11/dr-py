@@ -596,10 +596,11 @@ needs the descriptor's exact `rev`; anything else (no row, another `rev`) is a
 miss. A row is written only once a download's `end` has answered and the
 bytes are the engine's own, never before — a broken download is never cached
 — and dropped when the engine refuses them. `capBytes` (default
-`SNAPSHOT_CACHE_CAP`, 64 MiB) bounds the bytes kept across every OTHER
-project's rows: a `put` never evicts the row it is writing, however large,
-only the least-recently-used rows of other projects, and only until those fit
-the cap. `get` rewrites `used_at` on a hit and hands back a copy — mutating it
+`SNAPSHOT_CACHE_CAP`, 64 MiB) bounds the TOTAL bytes stored, the row just
+written included: a `put` evicts least-recently-used rows of OTHER
+projects — never the row it is writing, however large or however its own
+`used_at` compares to theirs — until the total fits. `get` rewrites `used_at`
+on a hit and hands back a copy — mutating it
 never reaches the store, since IndexedDB clones on both write and read.
 `factory` defaults to `globalThis.indexedDB`, `now` to `Date.now`, both as
 options so a test can order rows with a fake clock and break the store with a
