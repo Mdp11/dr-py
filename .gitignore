@@ -13,6 +13,8 @@ venv/
 # frontend
 frontend/node_modules
 engine/node_modules
+sandbox/node_modules
+sandbox/dist
 frontend/.svelte-kit
 frontend/build
 frontend/.env.local

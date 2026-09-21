@@ -186,18 +186,20 @@ default-environment = "core-dev"
 depends-on = [
     { task = "frontend-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
     { task = "engine-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
+    { task = "sandbox-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
     { task = "core-tidy", args = [{ check_only = "{{ check_only }}" }] },
     { task = "backend-tidy", args = [{ check_only = "{{ check_only }}" }] },
 ]
 
 [feature.core-dev.tasks.dr-test]
-description = "Run every test suite: core pytest + frontend vitest + engine vitest"
+description = "Run every test suite: core pytest + frontend vitest + engine vitest + sandbox vitest"
 cmd = "true"
 default-environment = "core-dev"
 depends-on = [
     { task = "core-test" },
     { task = "frontend-test", environment = "frontend" },
     { task = "engine-test", environment = "frontend" },
+    { task = "sandbox-test", environment = "frontend" },
 ]
 
 [feature.frontend.dependencies]
@@ -300,6 +302,55 @@ cmd = "true"
 depends-on = [
     { task = "engine-format", args = [{ check_only = "{{ check_only }}" }] },
     { task = "engine-lint", args = [{ check_only = "{{ check_only }}" }]},
+]
+
+[feature.frontend.tasks.sandbox-install]
+description = "Install sandbox npm dependencies"
+cmd = "npm install"
+cwd = "sandbox"
+
+[feature.frontend.tasks.sandbox-build]
+description = "Build the sandbox site into sandbox/dist"
+cmd = "npm run build"
+cwd = "sandbox"
+
+[feature.frontend.tasks.sandbox-start]
+description = "Build the sandbox site, rebuild on change and serve it on localhost:5174"
+cmd = "npm run start"
+cwd = "sandbox"
+
+[feature.frontend.tasks.sandbox-test]
+description = "Run the sandbox vitest suite"
+cmd = "npm test"
+cwd = "sandbox"
+
+[feature.frontend.tasks.sandbox-check]
+description = "Type-check the sandbox page, worker and tests"
+cmd = "npm run check"
+cwd = "sandbox"
+
+[feature.frontend.tasks.sandbox-lint]
+description = "Lint + type-check the sandbox"
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = """
+npx eslint {% if check_only == 'false' %}--fix{% endif %} .
+npm run check
+"""
+cwd = "sandbox"
+
+[feature.frontend.tasks.sandbox-format]
+description = "Format the sandbox"
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
+cwd = "sandbox"
+
+[feature.frontend.tasks.sandbox-tidy]
+description = "Format + lint the sandbox"
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "true"
+depends-on = [
+    { task = "sandbox-format", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "sandbox-lint", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
 [environments]
