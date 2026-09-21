@@ -74,6 +74,15 @@ export {
 	type WireElement,
 	type WireRelationship
 } from './read/wire.ts';
+export {
+	Scheduler,
+	SLICE_TARGET_MS,
+	type BackgroundTask,
+	type HostDeps,
+	type Job,
+	type Lane,
+	type Outcome
+} from './service/scheduler.ts';
 export { entityHash, formatDigest, modelDigest, type EntityHash } from './snapshot/digest.ts';
 export { LineSplitter } from './snapshot/lines.ts';
 export {
