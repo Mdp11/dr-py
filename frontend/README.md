@@ -587,6 +587,30 @@ yields through real macrotasks. The engine's own test helpers
 (`engine/test/**`) cannot be imported from this Vite root; build fixtures from
 the engine's public exports.
 
+**The snapshot cache** (`lib/engine/cache.ts`). `createSnapshotCache(options?)`
+is an IndexedDB store of snapshot bytes, one database (`datarover-snapshots`,
+version 1), one object store (`snapshots`, key path `project_id`) and so one
+row per project — key `project_id`, value `{project_id, rev, bytes, size,
+used_at}`, the newest `rev` a project was cached at, by construction. A hit
+needs the descriptor's exact `rev`; anything else (no row, another `rev`) is a
+miss. A row is written only once a download's `end` has answered and the
+bytes are the engine's own, never before — a broken download is never cached
+— and dropped when the engine refuses them. `capBytes` (default
+`SNAPSHOT_CACHE_CAP`, 64 MiB) bounds the bytes kept across every OTHER
+project's rows: a `put` never evicts the row it is writing, however large,
+only the least-recently-used rows of other projects, and only until those fit
+the cap. `get` rewrites `used_at` on a hit and hands back a copy — mutating it
+never reaches the store, since IndexedDB clones on both write and read.
+`factory` defaults to `globalThis.indexedDB`, `now` to `Date.now`, both as
+options so a test can order rows with a fake clock and break the store with a
+fake factory. Every call resolves, whatever the store does (AD-10): no
+`indexedDB` at all, an `open` that throws, errors or is blocked, an aborted
+transaction, a quota error — each is a `null` `get` or a no-op `put`/`drop`,
+never a rejection. Each call opens and closes its own connection; none is
+kept open, so a version change elsewhere can never block on this tab. Tests
+use `new IDBFactory()` from the `fake-indexeddb` dev dependency, one per test,
+never the real `indexedDB` — happy-dom has none.
+
 ### Artifact import/export (bundle export/preview/import)
 
 The TopBar's toolbar `<nav>` (see Layout above) hosts an **Artifacts** menu
