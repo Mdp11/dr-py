@@ -54,6 +54,15 @@ export {
 } from './read/params.ts';
 export { ViewPlacements } from './read/placements.ts';
 export {
+	getTreeItemsBatch,
+	listContainmentChildren,
+	listContainmentRoots,
+	listExcludedRoots,
+	treeItem,
+	type TreeItem,
+	type TreeItemPage
+} from './read/tree.ts';
+export {
 	readOps,
 	toWire,
 	wireElement,

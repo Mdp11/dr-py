@@ -10,6 +10,12 @@ import {
 } from './elements.ts';
 import type { ReadParams } from './params.ts';
 import type { ViewPlacements } from './placements.ts';
+import {
+	getTreeItemsBatch,
+	listContainmentChildren,
+	listContainmentRoots,
+	listExcludedRoots
+} from './tree.ts';
 
 /**
  * A read surface: the response body of the route it stands for, at once or
@@ -27,7 +33,11 @@ export const READS: { readonly [method: string]: Read } = {
 	getElementsBatch,
 	listElementsPage,
 	listElementRelationships,
-	getModelSummary
+	getModelSummary,
+	getTreeItemsBatch,
+	listContainmentRoots,
+	listExcludedRoots,
+	listContainmentChildren
 };
 
 /** Whether a read with these params runs in steps: the scheduler holds a scan to other rules. */

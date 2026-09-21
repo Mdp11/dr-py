@@ -1,0 +1,3560 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Node",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "note",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "weight",
+            "datatype": "float",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "tags",
+            "datatype": "string",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "peer",
+            "datatype": "Node",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Leaf",
+        "abstract": false,
+        "extends": "Node",
+        "properties": [],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Links",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "label",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      },
+      {
+        "name": "Holds",
+        "abstract": false,
+        "extends": "Owns",
+        "containment": false,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"beta\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Alpha\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"alpha\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_4\",\"type_name\":\"Node\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_5\",\"type_name\":\"Node\",\"properties\":{\"name\":\"𐀀\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_6\",\"type_name\":\"Node\",\"properties\":{\"name\":\"￿\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_7\",\"type_name\":\"Node\",\"properties\":{\"name\":\"\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_8\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child b\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child a\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_10\",\"type_name\":\"Node\",\"properties\":{\"name\":\"shared\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_11\",\"type_name\":\"Node\",\"properties\":{\"name\":\"sub\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_12\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level1\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_13\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level2\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_14\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level3\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_15\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"leaf\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_16\",\"type_name\":\"Node\",\"properties\":{\"name\":[\"\",\"listy\"]},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_17\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Beta\"},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_1",
+            "id-1"
+          ],
+          [
+            "tmp_2",
+            "id-2"
+          ],
+          [
+            "tmp_3",
+            "id-3"
+          ],
+          [
+            "tmp_4",
+            "id-4"
+          ],
+          [
+            "tmp_5",
+            "id-5"
+          ],
+          [
+            "tmp_6",
+            "id-6"
+          ],
+          [
+            "tmp_7",
+            "id-7"
+          ],
+          [
+            "tmp_8",
+            "id-8"
+          ],
+          [
+            "tmp_9",
+            "id-9"
+          ],
+          [
+            "tmp_10",
+            "id-10"
+          ],
+          [
+            "tmp_11",
+            "id-11"
+          ],
+          [
+            "tmp_12",
+            "id-12"
+          ],
+          [
+            "tmp_13",
+            "id-13"
+          ],
+          [
+            "tmp_14",
+            "id-14"
+          ],
+          [
+            "tmp_15",
+            "id-15"
+          ],
+          [
+            "tmp_16",
+            "id-16"
+          ],
+          [
+            "tmp_17",
+            "id-17"
+          ]
+        ],
+        "changed_element_ids": [
+          "id-1",
+          "id-2",
+          "id-3",
+          "id-4",
+          "id-5",
+          "id-6",
+          "id-7",
+          "id-8",
+          "id-9",
+          "id-10",
+          "id-11",
+          "id-12",
+          "id-13",
+          "id-14",
+          "id-15",
+          "id-16",
+          "id-17"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-1",
+            null
+          ],
+          [
+            "id-2",
+            null
+          ],
+          [
+            "id-3",
+            null
+          ],
+          [
+            "id-4",
+            null
+          ],
+          [
+            "id-5",
+            null
+          ],
+          [
+            "id-6",
+            null
+          ],
+          [
+            "id-7",
+            null
+          ],
+          [
+            "id-8",
+            null
+          ],
+          [
+            "id-9",
+            null
+          ],
+          [
+            "id-10",
+            null
+          ],
+          [
+            "id-11",
+            null
+          ],
+          [
+            "id-12",
+            null
+          ],
+          [
+            "id-13",
+            null
+          ],
+          [
+            "id-14",
+            null
+          ],
+          [
+            "id-15",
+            null
+          ],
+          [
+            "id-16",
+            null
+          ],
+          [
+            "id-17",
+            null
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"id-17\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-16\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-15\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-14\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-13\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-12\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-11\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-10\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-9\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-8\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-7\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-6\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-5\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"beta\"},\"rev\":1}",
+          "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Alpha\"},\"rev\":1}",
+          "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"alpha\"},\"rev\":1}",
+          "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-5\",\"type_name\":\"Node\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+          "{\"id\":\"id-6\",\"type_name\":\"Node\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+          "{\"id\":\"id-7\",\"type_name\":\"Node\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+          "{\"id\":\"id-8\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child b\"},\"rev\":1}",
+          "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child a\"},\"rev\":1}",
+          "{\"id\":\"id-10\",\"type_name\":\"Node\",\"properties\":{\"name\":\"shared\"},\"rev\":1}",
+          "{\"id\":\"id-11\",\"type_name\":\"Node\",\"properties\":{\"name\":\"sub\"},\"rev\":1}",
+          "{\"id\":\"id-12\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level1\"},\"rev\":1}",
+          "{\"id\":\"id-13\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level2\"},\"rev\":1}",
+          "{\"id\":\"id-14\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level3\"},\"rev\":1}",
+          "{\"id\":\"id-15\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"leaf\"},\"rev\":1}",
+          "{\"id\":\"id-16\",\"type_name\":\"Node\",\"properties\":{\"name\":[\"\",\"listy\"]},\"rev\":1}",
+          "{\"id\":\"id-17\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Beta\"},\"rev\":1}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "ed7b66f902ac7f91",
+      "fingerprint": "a6b44d67a61704ef",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"beta\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Alpha\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"alpha\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Node\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Node\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Node\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child b\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child a\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Node\",\"properties\":{\"name\":\"shared\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Node\",\"properties\":{\"name\":\"sub\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level1\"},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level2\"},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level3\"},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"leaf\"},\"rev\":1}",
+        "{\"id\":\"id-16\",\"type_name\":\"Node\",\"properties\":{\"name\":[\"\",\"listy\"]},\"rev\":1}",
+        "{\"id\":\"id-17\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Beta\"},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Leaf\",[\"id-15\"]],[\"Node\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-16\",\"id-17\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-16\"],[\"id-17\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"Alpha\",\"id-2\"],[\"Beta\",\"id-17\"],[\"alpha\",\"id-3\"],[\"beta\",\"id-1\"],[\"child a\",\"id-9\"],[\"child b\",\"id-8\"],[\"id-4\",\"id-4\"],[\"leaf\",\"id-15\"],[\"level1\",\"id-12\"],[\"level2\",\"id-13\"],[\"level3\",\"id-14\"],[\"listy\",\"id-16\"],[\"shared\",\"id-10\"],[\"sub\",\"id-11\"],[\"\",\"id-7\"],[\"￿\",\"id-6\"],[\"𐀀\",\"id-5\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_1_8\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-8\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_1_8",
+            "id-18"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-18"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-18",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-18\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-8\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "0b435105630be745",
+      "fingerprint": "4184cfd4bfd8b9fc"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_1_9\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_1_9",
+            "id-19"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-19"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-19",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-19\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-19\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "c387af8597daca75",
+      "fingerprint": "ed196c21d594b751"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_3_9\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-9\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_3_9",
+            "id-20"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-20"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-20",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-20\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-20\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "4b4c87fc62dfdfdf",
+      "fingerprint": "11f67001ff2d1ec5"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_2_10\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_2_10",
+            "id-21"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-21"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-21",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-21\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-21\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "0c34d18822b19361",
+      "fingerprint": "924d94174cc2ebd8"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_2_10\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_2_10",
+            "id-22"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-22"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-22",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-22\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-22\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "04157ace4ffd2a0f",
+      "fingerprint": "77a92308744408fb",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"beta\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Alpha\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"alpha\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Node\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Node\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Node\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child b\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child a\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Node\",\"properties\":{\"name\":\"shared\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Node\",\"properties\":{\"name\":\"sub\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level1\"},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level2\"},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level3\"},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"leaf\"},\"rev\":1}",
+        "{\"id\":\"id-16\",\"type_name\":\"Node\",\"properties\":{\"name\":[\"\",\"listy\"]},\"rev\":1}",
+        "{\"id\":\"id-17\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Beta\"},\"rev\":1}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-8\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-20\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-21\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-22\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Leaf\",[\"id-15\"]],[\"Node\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-16\",\"id-17\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-19\"]],[\"id-2\",[\"id-21\",\"id-22\"]],[\"id-3\",[\"id-20\"]]],\"in\":[[\"id-10\",[\"id-21\",\"id-22\"]],[\"id-8\",[\"id-18\"]],[\"id-9\",[\"id-19\",\"id-20\"]]],\"out_count\":[[\"id-1\",\"Owns\",2],[\"id-2\",\"Owns\",2],[\"id-3\",\"Owns\",1]],\"in_count\":[[\"id-10\",\"Owns\",2],[\"id-8\",\"Owns\",1],[\"id-9\",\"Owns\",2]],\"parents\":[[\"id-10\",[\"id-2\",\"id-2\"],[\"id-21\",\"id-22\"]],[\"id-8\",[\"id-1\"],[\"id-18\"]],[\"id-9\",[\"id-1\",\"id-3\"],[\"id-19\",\"id-20\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-16\"],[\"id-17\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"Alpha\",\"id-2\"],[\"Beta\",\"id-17\"],[\"alpha\",\"id-3\"],[\"beta\",\"id-1\"],[\"id-4\",\"id-4\"],[\"leaf\",\"id-15\"],[\"level1\",\"id-12\"],[\"level2\",\"id-13\"],[\"level3\",\"id-14\"],[\"listy\",\"id-16\"],[\"sub\",\"id-11\"],[\"\",\"id-7\"],[\"￿\",\"id-6\"],[\"𐀀\",\"id-5\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_3_11\",\"type_name\":\"Holds\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_3_11",
+            "id-23"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-23"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-23",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-23\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-23\",\"type_name\":\"Holds\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "e3b8f7f1b1570d1b",
+      "fingerprint": "b263f04458f104af"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_1_12\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-12\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_1_12",
+            "id-24"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-24"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-24",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-24\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-24\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-12\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "d39ae529f9dc6ec2",
+      "fingerprint": "72db9b12f2913e53"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_12_13\",\"type_name\":\"Owns\",\"source_id\":\"id-12\",\"target_id\":\"id-13\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_12_13",
+            "id-25"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-25"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-25",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-25\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-25\",\"type_name\":\"Owns\",\"source_id\":\"id-12\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "69fdc544ebbc9501",
+      "fingerprint": "37109a3b2af86b3a"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_13_14\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_13_14",
+            "id-26"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-26"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-26",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-26\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-26\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "65ee38acda396164",
+      "fingerprint": "7a599866256422d4"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_1_15\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-15\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_1_15",
+            "id-27"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-27"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-27",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-27\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "1504444bf1817430",
+      "fingerprint": "9c9aee44f9787572",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"beta\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Alpha\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"alpha\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Node\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Node\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Node\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child b\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child a\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Node\",\"properties\":{\"name\":\"shared\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Node\",\"properties\":{\"name\":\"sub\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level1\"},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level2\"},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level3\"},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"leaf\"},\"rev\":1}",
+        "{\"id\":\"id-16\",\"type_name\":\"Node\",\"properties\":{\"name\":[\"\",\"listy\"]},\"rev\":1}",
+        "{\"id\":\"id-17\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Beta\"},\"rev\":1}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-8\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-20\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-21\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-22\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-23\",\"type_name\":\"Holds\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-24\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-12\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-25\",\"type_name\":\"Owns\",\"source_id\":\"id-12\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-26\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Leaf\",[\"id-15\"]],[\"Node\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-16\",\"id-17\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-19\",\"id-24\",\"id-27\"]],[\"id-12\",[\"id-25\"]],[\"id-13\",[\"id-26\"]],[\"id-2\",[\"id-21\",\"id-22\"]],[\"id-3\",[\"id-20\",\"id-23\"]]],\"in\":[[\"id-10\",[\"id-21\",\"id-22\"]],[\"id-11\",[\"id-23\"]],[\"id-12\",[\"id-24\"]],[\"id-13\",[\"id-25\"]],[\"id-14\",[\"id-26\"]],[\"id-15\",[\"id-27\"]],[\"id-8\",[\"id-18\"]],[\"id-9\",[\"id-19\",\"id-20\"]]],\"out_count\":[[\"id-1\",\"Owns\",4],[\"id-12\",\"Owns\",1],[\"id-13\",\"Owns\",1],[\"id-2\",\"Owns\",2],[\"id-3\",\"Holds\",1],[\"id-3\",\"Owns\",1]],\"in_count\":[[\"id-10\",\"Owns\",2],[\"id-11\",\"Holds\",1],[\"id-12\",\"Owns\",1],[\"id-13\",\"Owns\",1],[\"id-14\",\"Owns\",1],[\"id-15\",\"Owns\",1],[\"id-8\",\"Owns\",1],[\"id-9\",\"Owns\",2]],\"parents\":[[\"id-10\",[\"id-2\",\"id-2\"],[\"id-21\",\"id-22\"]],[\"id-11\",[\"id-3\"],[\"id-23\"]],[\"id-12\",[\"id-1\"],[\"id-24\"]],[\"id-13\",[\"id-12\"],[\"id-25\"]],[\"id-14\",[\"id-13\"],[\"id-26\"]],[\"id-15\",[\"id-1\"],[\"id-27\"]],[\"id-8\",[\"id-1\"],[\"id-18\"]],[\"id-9\",[\"id-1\",\"id-3\"],[\"id-19\",\"id-20\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-16\"],[\"id-17\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"Alpha\",\"id-2\"],[\"Beta\",\"id-17\"],[\"alpha\",\"id-3\"],[\"beta\",\"id-1\"],[\"id-4\",\"id-4\"],[\"listy\",\"id-16\"],[\"\",\"id-7\"],[\"￿\",\"id-6\"],[\"𐀀\",\"id-5\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_1_2\",\"type_name\":\"Links\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_1_2",
+            "id-28"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-28"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-28",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-28\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-28\",\"type_name\":\"Links\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "e99c6b9af7d75365",
+      "fingerprint": "510c6011a188eac8"
+    },
+    {
+      "do": "read",
+      "method": "listContainmentRoots",
+      "params": {},
+      "result": {
+        "items": [
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "Alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 4
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentRoots",
+      "params": {
+        "limit": 3,
+        "offset": 0
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "Alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentRoots",
+      "params": {
+        "limit": 3,
+        "offset": 3
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 4
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentRoots",
+      "params": {
+        "limit": 3,
+        "offset": 30
+      },
+      "result": {
+        "items": [],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-1"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-9",
+            "type_name": "Node",
+            "display_name": "child a",
+            "child_count": 0
+          },
+          {
+            "id": "id-8",
+            "type_name": "Node",
+            "display_name": "child b",
+            "child_count": 0
+          },
+          {
+            "id": "id-15",
+            "type_name": "Leaf",
+            "display_name": "leaf",
+            "child_count": 0
+          },
+          {
+            "id": "id-12",
+            "type_name": "Node",
+            "display_name": "level1",
+            "child_count": 1
+          }
+        ],
+        "total": 4
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-2"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-10",
+            "type_name": "Node",
+            "display_name": "shared",
+            "child_count": 0
+          }
+        ],
+        "total": 1
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-3"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-11",
+            "type_name": "Node",
+            "display_name": "sub",
+            "child_count": 0
+          }
+        ],
+        "total": 1
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-9"
+      },
+      "result": {
+        "items": [],
+        "total": 0
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-12"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-13",
+            "type_name": "Node",
+            "display_name": "level2",
+            "child_count": 1
+          }
+        ],
+        "total": 1
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-13"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-14",
+            "type_name": "Node",
+            "display_name": "level3",
+            "child_count": 0
+          }
+        ],
+        "total": 1
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-14"
+      },
+      "result": {
+        "items": [],
+        "total": 0
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "ghost"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'ghost'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-1",
+        "limit": 2,
+        "offset": 2
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-15",
+            "type_name": "Leaf",
+            "display_name": "leaf",
+            "child_count": 0
+          },
+          {
+            "id": "id-12",
+            "type_name": "Node",
+            "display_name": "level1",
+            "child_count": 1
+          }
+        ],
+        "total": 4
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "getTreeItemsBatch",
+      "params": {
+        "ids": [
+          "id-1",
+          "id-3",
+          "id-1",
+          "ghost",
+          "id-9",
+          "id-12"
+        ]
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 4
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 4
+          },
+          {
+            "id": "id-9",
+            "type_name": "Node",
+            "display_name": "child a",
+            "child_count": 0
+          },
+          {
+            "id": "id-12",
+            "type_name": "Node",
+            "display_name": "level1",
+            "child_count": 1
+          }
+        ]
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "getTreeItemsBatch",
+      "params": {
+        "ids": [
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2"
+        ]
+      },
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "too many ids: 501 (max 500)"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {},
+      "result": {
+        "items": [
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "Alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 4
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": "nope"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "Alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 4
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "view",
+      "view_id": "v1",
+      "result": [
+        "id-1",
+        "id-5",
+        "id-8"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": "v1"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "Alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          }
+        ],
+        "total": 7
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": "v1",
+        "limit": 2,
+        "offset": 1
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          }
+        ],
+        "total": 7
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": ""
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "Alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 4
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "drop_view",
+      "view_id": "v1",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": "v1"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "Alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 1
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 4
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"id-19\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "id-19"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-19",
+            "{\"id\":\"id-19\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-19\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "2158951a03067e55",
+      "fingerprint": "f4b3324cd89272eb",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"beta\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Alpha\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"alpha\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Node\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Node\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Node\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child b\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child a\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Node\",\"properties\":{\"name\":\"shared\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Node\",\"properties\":{\"name\":\"sub\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level1\"},\"rev\":1}",
+        "{\"id\":\"id-13\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level2\"},\"rev\":1}",
+        "{\"id\":\"id-14\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level3\"},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"leaf\"},\"rev\":1}",
+        "{\"id\":\"id-16\",\"type_name\":\"Node\",\"properties\":{\"name\":[\"\",\"listy\"]},\"rev\":1}",
+        "{\"id\":\"id-17\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Beta\"},\"rev\":1}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-8\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-20\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-21\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-22\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-23\",\"type_name\":\"Holds\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-24\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-12\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-25\",\"type_name\":\"Owns\",\"source_id\":\"id-12\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-26\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-28\",\"type_name\":\"Links\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Leaf\",[\"id-15\"]],[\"Node\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-13\",\"id-14\",\"id-16\",\"id-17\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-24\",\"id-27\",\"id-28\"]],[\"id-12\",[\"id-25\"]],[\"id-13\",[\"id-26\"]],[\"id-2\",[\"id-21\",\"id-22\"]],[\"id-3\",[\"id-20\",\"id-23\"]]],\"in\":[[\"id-10\",[\"id-21\",\"id-22\"]],[\"id-11\",[\"id-23\"]],[\"id-12\",[\"id-24\"]],[\"id-13\",[\"id-25\"]],[\"id-14\",[\"id-26\"]],[\"id-15\",[\"id-27\"]],[\"id-2\",[\"id-28\"]],[\"id-8\",[\"id-18\"]],[\"id-9\",[\"id-20\"]]],\"out_count\":[[\"id-1\",\"Links\",1],[\"id-1\",\"Owns\",3],[\"id-12\",\"Owns\",1],[\"id-13\",\"Owns\",1],[\"id-2\",\"Owns\",2],[\"id-3\",\"Holds\",1],[\"id-3\",\"Owns\",1]],\"in_count\":[[\"id-10\",\"Owns\",2],[\"id-11\",\"Holds\",1],[\"id-12\",\"Owns\",1],[\"id-13\",\"Owns\",1],[\"id-14\",\"Owns\",1],[\"id-15\",\"Owns\",1],[\"id-2\",\"Links\",1],[\"id-8\",\"Owns\",1],[\"id-9\",\"Owns\",1]],\"parents\":[[\"id-10\",[\"id-2\",\"id-2\"],[\"id-21\",\"id-22\"]],[\"id-11\",[\"id-3\"],[\"id-23\"]],[\"id-12\",[\"id-1\"],[\"id-24\"]],[\"id-13\",[\"id-12\"],[\"id-25\"]],[\"id-14\",[\"id-13\"],[\"id-26\"]],[\"id-15\",[\"id-1\"],[\"id-27\"]],[\"id-8\",[\"id-1\"],[\"id-18\"]],[\"id-9\",[\"id-3\"],[\"id-20\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-16\"],[\"id-17\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"Alpha\",\"id-2\"],[\"Beta\",\"id-17\"],[\"alpha\",\"id-3\"],[\"beta\",\"id-1\"],[\"id-4\",\"id-4\"],[\"listy\",\"id-16\"],[\"\",\"id-7\"],[\"￿\",\"id-6\"],[\"𐀀\",\"id-5\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":\"zeta\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "id-2"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-2",
+            "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Alpha\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":\"Alpha\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zeta\"},\"rev\":2}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "120c4b5743b5c073",
+      "fingerprint": "a1a0c633ca75a51e"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"id-12\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "id-12",
+          "id-13",
+          "id-14"
+        ],
+        "deleted_relationship_ids": [
+          "id-25",
+          "id-24",
+          "id-26"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-12",
+            "{\"id\":\"id-12\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level1\"},\"rev\":1}"
+          ],
+          [
+            "id-13",
+            "{\"id\":\"id-13\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level2\"},\"rev\":1}"
+          ],
+          [
+            "id-14",
+            "{\"id\":\"id-14\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level3\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "id-25",
+            "{\"id\":\"id-25\",\"type_name\":\"Owns\",\"source_id\":\"id-12\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-24",
+            "{\"id\":\"id-24\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-12\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "id-26",
+            "{\"id\":\"id-26\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-12\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level1\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-13\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level2\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"id-14\",\"type_name\":\"Node\",\"properties\":{\"name\":\"level3\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-25\",\"type_name\":\"Owns\",\"source_id\":\"id-12\",\"target_id\":\"id-13\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-24\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-12\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"id-26\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "bd61a58324406c3e",
+      "fingerprint": "856bb945ddd915ab"
+    },
+    {
+      "do": "restore_relationship",
+      "id": "id-19",
+      "type": "Owns",
+      "source": "id-1",
+      "target": "id-9",
+      "result": "id-19",
+      "error": null,
+      "digest": "75a55b03d091410e",
+      "fingerprint": "0d9e12050c6bd696",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"beta\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zeta\"},\"rev\":2}",
+        "{\"id\":\"id-3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"alpha\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Node\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-5\",\"type_name\":\"Node\",\"properties\":{\"name\":\"𐀀\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Node\",\"properties\":{\"name\":\"￿\"},\"rev\":1}",
+        "{\"id\":\"id-7\",\"type_name\":\"Node\",\"properties\":{\"name\":\"\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child b\"},\"rev\":1}",
+        "{\"id\":\"id-9\",\"type_name\":\"Node\",\"properties\":{\"name\":\"child a\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Node\",\"properties\":{\"name\":\"shared\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Node\",\"properties\":{\"name\":\"sub\"},\"rev\":1}",
+        "{\"id\":\"id-15\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"leaf\"},\"rev\":1}",
+        "{\"id\":\"id-16\",\"type_name\":\"Node\",\"properties\":{\"name\":[\"\",\"listy\"]},\"rev\":1}",
+        "{\"id\":\"id-17\",\"type_name\":\"Node\",\"properties\":{\"name\":\"Beta\"},\"rev\":1}",
+        "{\"id\":\"id-18\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-8\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-20\",\"type_name\":\"Owns\",\"source_id\":\"id-3\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-21\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-22\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-10\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-23\",\"type_name\":\"Holds\",\"source_id\":\"id-3\",\"target_id\":\"id-11\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-27\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-28\",\"type_name\":\"Links\",\"source_id\":\"id-1\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-19\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-9\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Leaf\",[\"id-15\"]],[\"Node\",[\"id-1\",\"id-10\",\"id-11\",\"id-16\",\"id-17\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-1\",[\"id-18\",\"id-19\",\"id-27\",\"id-28\"]],[\"id-2\",[\"id-21\",\"id-22\"]],[\"id-3\",[\"id-20\",\"id-23\"]]],\"in\":[[\"id-10\",[\"id-21\",\"id-22\"]],[\"id-11\",[\"id-23\"]],[\"id-15\",[\"id-27\"]],[\"id-2\",[\"id-28\"]],[\"id-8\",[\"id-18\"]],[\"id-9\",[\"id-19\",\"id-20\"]]],\"out_count\":[[\"id-1\",\"Links\",1],[\"id-1\",\"Owns\",3],[\"id-2\",\"Owns\",2],[\"id-3\",\"Holds\",1],[\"id-3\",\"Owns\",1]],\"in_count\":[[\"id-10\",\"Owns\",2],[\"id-11\",\"Holds\",1],[\"id-15\",\"Owns\",1],[\"id-2\",\"Links\",1],[\"id-8\",\"Owns\",1],[\"id-9\",\"Owns\",2]],\"parents\":[[\"id-10\",[\"id-2\",\"id-2\"],[\"id-21\",\"id-22\"]],[\"id-11\",[\"id-3\"],[\"id-23\"]],[\"id-15\",[\"id-1\"],[\"id-27\"]],[\"id-8\",[\"id-1\"],[\"id-18\"]],[\"id-9\",[\"id-3\",\"id-1\"],[\"id-20\",\"id-19\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-15\"],[\"id-16\"],[\"id-17\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"Beta\",\"id-17\"],[\"alpha\",\"id-3\"],[\"beta\",\"id-1\"],[\"id-4\",\"id-4\"],[\"listy\",\"id-16\"],[\"zeta\",\"id-2\"],[\"\",\"id-7\"],[\"￿\",\"id-6\"],[\"𐀀\",\"id-5\"]]}"
+    },
+    {
+      "do": "read",
+      "method": "listContainmentRoots",
+      "params": {},
+      "result": {
+        "items": [
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 2
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "zeta",
+            "child_count": 1
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentRoots",
+      "params": {
+        "limit": 3,
+        "offset": 0
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 2
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentRoots",
+      "params": {
+        "limit": 3,
+        "offset": 3
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "zeta",
+            "child_count": 1
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentRoots",
+      "params": {
+        "limit": 3,
+        "offset": 30
+      },
+      "result": {
+        "items": [],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-1"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-8",
+            "type_name": "Node",
+            "display_name": "child b",
+            "child_count": 0
+          },
+          {
+            "id": "id-15",
+            "type_name": "Leaf",
+            "display_name": "leaf",
+            "child_count": 0
+          }
+        ],
+        "total": 2
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-2"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-10",
+            "type_name": "Node",
+            "display_name": "shared",
+            "child_count": 0
+          }
+        ],
+        "total": 1
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-3"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-9",
+            "type_name": "Node",
+            "display_name": "child a",
+            "child_count": 0
+          },
+          {
+            "id": "id-11",
+            "type_name": "Node",
+            "display_name": "sub",
+            "child_count": 0
+          }
+        ],
+        "total": 2
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-9"
+      },
+      "result": {
+        "items": [],
+        "total": 0
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-12"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'id-12'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-13"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'id-13'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-14"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'id-14'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "ghost"
+      },
+      "result": null,
+      "error": {
+        "kind": "key",
+        "message": "No element with id 'ghost'"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listContainmentChildren",
+      "params": {
+        "id": "id-1",
+        "limit": 2,
+        "offset": 2
+      },
+      "result": {
+        "items": [],
+        "total": 2
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "getTreeItemsBatch",
+      "params": {
+        "ids": [
+          "id-1",
+          "id-3",
+          "id-1",
+          "ghost",
+          "id-9",
+          "id-12"
+        ]
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 2
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 2
+          },
+          {
+            "id": "id-9",
+            "type_name": "Node",
+            "display_name": "child a",
+            "child_count": 0
+          }
+        ]
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "getTreeItemsBatch",
+      "params": {
+        "ids": [
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2",
+          "id-2"
+        ]
+      },
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "too many ids: 501 (max 500)"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {},
+      "result": {
+        "items": [
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 2
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "zeta",
+            "child_count": 1
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": "nope"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 2
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "zeta",
+            "child_count": 1
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "view",
+      "view_id": "v1",
+      "result": [
+        "id-1",
+        "id-5",
+        "id-8"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": "v1"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "zeta",
+            "child_count": 1
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          }
+        ],
+        "total": 7
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": "v1",
+        "limit": 2,
+        "offset": 1
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          }
+        ],
+        "total": 7
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": ""
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 2
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "zeta",
+            "child_count": 1
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "drop_view",
+      "view_id": "v1",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "listExcludedRoots",
+      "params": {
+        "view_id": "v1"
+      },
+      "result": {
+        "items": [
+          {
+            "id": "id-17",
+            "type_name": "Node",
+            "display_name": "Beta",
+            "child_count": 0
+          },
+          {
+            "id": "id-3",
+            "type_name": "Node",
+            "display_name": "alpha",
+            "child_count": 2
+          },
+          {
+            "id": "id-1",
+            "type_name": "Node",
+            "display_name": "beta",
+            "child_count": 2
+          },
+          {
+            "id": "id-4",
+            "type_name": "Node",
+            "display_name": "id-4",
+            "child_count": 0
+          },
+          {
+            "id": "id-16",
+            "type_name": "Node",
+            "display_name": "listy",
+            "child_count": 0
+          },
+          {
+            "id": "id-2",
+            "type_name": "Node",
+            "display_name": "zeta",
+            "child_count": 1
+          },
+          {
+            "id": "id-7",
+            "type_name": "Node",
+            "display_name": "",
+            "child_count": 0
+          },
+          {
+            "id": "id-6",
+            "type_name": "Node",
+            "display_name": "￿",
+            "child_count": 0
+          },
+          {
+            "id": "id-5",
+            "type_name": "Node",
+            "display_name": "𐀀",
+            "child_count": 0
+          }
+        ],
+        "total": 9
+      },
+      "error": null,
+      "unchanged": true
+    }
+  ]
+}
