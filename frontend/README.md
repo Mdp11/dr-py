@@ -500,7 +500,9 @@ explicit user click. `GET /model/issues` is the cheap read used everywhere else.
 
 The TypeScript engine (`../engine`) runs a full replica of the model in a
 worker of the sandbox site (`../sandbox`); `lib/engine/` is the app's side of
-it. Nothing reads from the replica yet.
+it and `lib/state/replica.svelte.ts` wires it into the workspace (see
+"Wiring" below). Nothing reads from the replica yet; a status-bar indicator
+is its only face.
 
 **Aliases and the types-only rule.** `$engine` points at
 `../engine/src/index.ts` and `$sandbox` at `../sandbox/src`, in `kit.alias`
@@ -779,6 +781,62 @@ handshake), `cspViolations` (every violation the frame reported) and `reason`
 frame did not connect, or three opens failed before the first `ready`. Today
 it only shows in the status; plan 5 turns `server` into the surface flip and
 its notice, and `failed` into the blocking re-bootstrap banner.
+
+**Wiring** (`lib/state/replica.svelte.ts`). The one `ReplicaSync` of the
+tab lives in a thin store, built on the first `startReplica()` from
+`connectFrame`, `replicaApi()` (every call under `/api/v1/projects/<id>`),
+`createSnapshotCache()`, a `setTimeout` sleep and an `onStatus` that writes
+the status into `$state` — `getReplicaStatus()` is reactive. Everything else
+in the app reaches the replica through five calls, each a no-op while no sync
+exists:
+
+- **Start and stop.** The workspace page (`routes/p/[projectId]/+page.svelte`)
+  registers `onMount(() => startReplica())` BEFORE the `startRealtime` one, so
+  the replica is open (and buffering) when the feed's first frame arrives,
+  and `onDestroy(() => stopReplica())`. `startReplica` opens
+  `getActiveProjectId()`'s replica, nothing without one; a project switch is a
+  new mount, so `stop` then `open`, and the frame (and its worker) go with the
+  old page.
+- **The feed hand-over.** `handleFeedEvent(e, raw)` (`realtime.svelte.ts`)
+  calls `handReplicaFeed(e, raw)` first, before anything moves the model
+  store: a `commit` becomes `feedCommit(raw, e.rev)`, a `rebind`
+  `feedRebind(e.rev)`, a `snapshot` `feedSnapshot(e.model_rev)`. A commit
+  WITHOUT its frame text is not handed over at all — a re-serialized event
+  would have lost `1.0` and every integer past 2^53, which the replica's
+  digest sees (AD-26); a one-argument `handleFeedEvent` (every test that
+  drives the reducer by hand) keeps behaving exactly as before.
+- **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
+  drawer's revert (`HistoryDrawer.svelte::doRevert`) both call
+  `beginReplicaCommit()` right before the POST, hand `commitChanges` /
+  `revertToCommit` an `onText` that ONLY stores the body (a throw there would
+  reject a commit the server already landed), and on success call
+  `flight.settle({text, rev: model_rev, applied: prev_rev != null, rebound,
+idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
+  `flight.abandon()` and rethrows. While a flight is open the replica's feed
+  waits, so the commit's own echo cannot overtake its response.
+- **Two adoptions.** The rebind banner's Reload (`onReloadRebind`) and the
+  committer's own in-place refetch (`adoptReboundMetamodel`) call
+  `replicaMetamodelAdopted()` right after `setMetamodel(mm)`: a replica frozen
+  by the rebind re-bootstraps onto the metamodel the UI now shows (AD-27); in
+  any other phase it does nothing.
+- **The indicator** (`StatusBar.svelte`), after the live badge, hidden while
+  the phase is `off`: `<span data-testid="replica-indicator">` reading
+  `replica 42 %` (opening or resyncing, progress with a known total),
+  `replica …` (no total yet), `replica r128` (`ready`, dimmed),
+  `replica frozen`, `replica failed` or `server mode` (all three
+  `text-warning`). `data-phase`, `data-rev`, `data-source`, `data-isolated`
+  (absent before the handshake) and `data-csp-violations` mirror the status
+  for e2e; the `title` carries the reason, the attempt (`attempt 2 of 3`),
+  `not cross-origin isolated` when the frame is not, and the violation count
+  when it is not zero. It is the replica's only face: nothing reads the
+  replica yet.
+
+`configureReplica({deps?, sync?} | null)` is the tests' seam — `deps`
+replaces single dependencies of the sync built next (its `onStatus` observes
+after the store has taken the status), `sync` replaces the whole sync with a
+spy — and `resetReplica()` stops and drops the sync and returns the status to
+`OFF`. `lib/state/__tests__/replica.svelte.test.ts` is a `.svelte.test.ts` so
+that it can read the status inside `$effect.root`.
 
 **The fake project server** (`lib/engine/__tests__/support/project-server.ts`). `fakeProject({projectId, rev, metamodelId})` holds the smart-city example
 in an engine `Model` built from the engine's public exports (the engine's own
@@ -2132,7 +2190,21 @@ src/
                         metamodel-panel.svelte.ts — the form panel's PERSONAL
                         preferences (whole-column collapse + per-TOC-section
                         folds), per project in localStorage, same try/catch
-                        stance as the diagram's own view/collapse keys
+                        stance as the diagram's own view/collapse keys;
+                        replica.svelte.ts — the tab's one ReplicaSync and its
+                        status as state (see "Replica (engine shell)" →
+                        "Wiring")
+    api/replica.ts      The replica routes' client: snapshot descriptor,
+                        snapshot bytes as a raw Response, tail text + its
+                        envelope, the metamodel document + X-Metamodel-Id
+    engine/             The replica shell — plain TypeScript, no runes, no
+                        lib/state import: frame.ts (the sandbox iframe and
+                        its handshake), client.ts (the engine's message
+                        protocol over a port), cache.ts (IndexedDB snapshot
+                        bytes), sync.ts (open, follow, heal, the commit in
+                        flight, the rebind freeze), origins.ts, testing.ts
+                        (connectInProcess, tests only); __tests__/support/
+                        project-server.ts is the fake project server
     editor/completion-source.ts  dr./Element/Relationship/stereotype-name CM6 completions +
                         hover logic (vocabFromMetamodel, computeCompletions,
                         resolveDocAt); pure, CM-agnostic, unit-tested

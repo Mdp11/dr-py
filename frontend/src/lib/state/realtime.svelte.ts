@@ -25,6 +25,7 @@ import {
 	refreshSummary
 } from './model.svelte';
 import { handleArtifactFeedEvent } from './artifacts.svelte';
+import { handReplicaFeed } from './replica.svelte';
 import { isArtifactResource, isFolderResource, isViewResource } from './ops';
 import type { OpsResponse } from '$lib/api/types';
 
@@ -183,8 +184,13 @@ function cancelIssuesRefetch(): void {
 	_issuesRefetchTimer = null;
 }
 
-/** Exported for unit tests; also the single dispatch point for `connectFeed`. */
-export function handleFeedEvent(e: FeedEvent): void {
+/**
+ * Exported for unit tests; also the single dispatch point for `connectFeed`,
+ * whose transport passes the frame's text as `raw`. The replica is handed the
+ * event first, before anything here moves the model store.
+ */
+export function handleFeedEvent(e: FeedEvent, raw?: string): void {
+	handReplicaFeed(e, raw);
 	switch (e.type) {
 		case 'snapshot': {
 			_presence = e.connected;

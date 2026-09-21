@@ -41,6 +41,8 @@ import {
 	seedElements
 } from '../model.svelte';
 import { setActiveProject } from '../active-project.svelte';
+import { configureReplica, resetReplica } from '../replica.svelte';
+import { OFF, type ReplicaSync } from '$lib/engine/sync';
 
 beforeEach(() => {
 	resetRealtime();
@@ -355,5 +357,106 @@ describe('view feed events', () => {
 			leases: [{ resource_id: 'view:v1', mode: 'exclusive', holder_id: 'u1' }]
 		});
 		expect(hasModelLocks()).toBe(false);
+	});
+});
+
+describe('the replica hand-over', () => {
+	/** A sync that records each hand-over with what the store showed at that moment. */
+	function recordingSync() {
+		const seen: { call: string; args: unknown[]; modelRev: number; presence: string[] }[] = [];
+		const record =
+			(call: string) =>
+			(...args: unknown[]) => {
+				seen.push({ call, args, modelRev: getModelRev(), presence: [...getPresence()] });
+			};
+		const sync: ReplicaSync = {
+			open: vi.fn(),
+			stop: vi.fn(),
+			status: () => OFF,
+			settled: () => Promise.resolve(),
+			feedCommit: record('feedCommit'),
+			feedRebind: record('feedRebind'),
+			feedSnapshot: record('feedSnapshot'),
+			beginCommit: () => ({ settle() {}, abandon() {} }),
+			metamodelAdopted: vi.fn()
+		};
+		return { sync, seen };
+	}
+
+	const commit = (rev: number) => ({
+		type: 'commit' as const,
+		rev,
+		commit_id: `c${rev}`,
+		author_id: 'peer',
+		message: 'm',
+		validation_error_count: 0,
+		changed_elements: [{ id: 'e1', type_name: 'Node', properties: { name: 'new' }, rev: 2 }],
+		changed_relationships: [],
+		deleted_element_ids: [],
+		deleted_relationship_ids: []
+	});
+
+	beforeEach(() => resetRealtime());
+	afterEach(() => resetReplica());
+
+	it('hands a commit frame over before its own work', () => {
+		const { sync, seen } = recordingSync();
+		configureReplica({ sync });
+		seedElements([{ id: 'e1', type_name: 'Node', properties: { name: 'old' }, rev: 1 }]);
+		const raw = '{"type":"commit","rev":5,"changed_elements":[{"weight":1.0}]}';
+
+		handleFeedEvent(commit(5), raw);
+
+		expect(seen).toEqual([{ call: 'feedCommit', args: [raw, 5], modelRev: 0, presence: [] }]);
+		expect(getModelRev()).toBe(5);
+		expect(getCachedElements().get('e1')?.properties.name).toBe('new');
+	});
+
+	it('hands snapshot and rebind events over before its own work', () => {
+		const { sync, seen } = recordingSync();
+		configureReplica({ sync });
+
+		handleFeedEvent({ type: 'snapshot', model_rev: 3, locks: [], connected: ['a'] }, '{}');
+		handleFeedEvent(
+			{
+				type: 'rebind',
+				rev: 4,
+				from_metamodel_id: 'a',
+				to_metamodel_id: 'b',
+				validation_error_count: 2
+			},
+			'{}'
+		);
+
+		expect(seen).toEqual([
+			{ call: 'feedSnapshot', args: [3], modelRev: 0, presence: [] },
+			{ call: 'feedRebind', args: [4], modelRev: 0, presence: ['a'] }
+		]);
+		expect(getPresence()).toEqual(['a']);
+		expect(getPendingRebind()).toEqual({ rev: 4, count: 2 });
+	});
+
+	it('a one-argument call hands no commit over and behaves as before', () => {
+		const { sync, seen } = recordingSync();
+		configureReplica({ sync });
+		seedElements([{ id: 'e1', type_name: 'Node', properties: { name: 'old' }, rev: 1 }]);
+
+		handleFeedEvent(commit(5));
+
+		expect(seen).toEqual([]);
+		expect(getCachedElements().get('e1')?.properties.name).toBe('new');
+	});
+
+	it("the feed's onEvent passes the frame's text through", () => {
+		const { sync, seen } = recordingSync();
+		configureReplica({ sync });
+		setActiveProject('p1');
+		startRealtime();
+		const raw = '{"type":"commit","rev":6}';
+
+		lastConfig?.onEvent(commit(6), raw);
+
+		expect(seen.map((s) => s.args)).toEqual([[raw, 6]]);
+		stopRealtime();
 	});
 });

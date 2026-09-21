@@ -45,7 +45,8 @@ vi.mock('$lib/state', async (orig) => {
 		...actual,
 		getRole: vi.fn(() => 'owner'),
 		getModelRev: vi.fn(() => 2),
-		applyDelta: vi.fn()
+		applyDelta: vi.fn(),
+		beginReplicaCommit: vi.fn(() => ({ settle: vi.fn(), abandon: vi.fn() }))
 	};
 });
 vi.mock('$lib/api/history', async (orig) => {
@@ -55,7 +56,7 @@ vi.mock('$lib/api/history', async (orig) => {
 
 import { loadFirstPage, modelAt } from '$lib/state/history.svelte';
 import { getCommitDiff, revertToCommit } from '$lib/api/history';
-import { applyDelta } from '$lib/state';
+import { applyDelta, beginReplicaCommit } from '$lib/state';
 // Left real by the `...actual` spread above so the revert gate is exercised
 // against the actual stores it reads in production.
 import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
@@ -351,6 +352,87 @@ describe('HistoryDrawer revert', () => {
 		await Promise.resolve();
 		flushSync();
 		expect(revertToCommit).toHaveBeenCalled();
+		unmount(c);
+	});
+});
+
+describe("HistoryDrawer revert: the replica's flight", () => {
+	/** Opens the drawer, asks for a revert to rev 1 and confirms it. */
+	async function confirmRevert(): Promise<ReturnType<typeof mount>> {
+		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
+		flushSync();
+		await Promise.resolve();
+		flushSync();
+		Array.from(document.querySelectorAll('button'))
+			.find((b) => b.textContent?.includes('Revert to here'))!
+			.click();
+		flushSync();
+		Array.from(document.querySelectorAll('button'))
+			.find((b) => b.textContent?.trim() === 'Revert' || b.textContent?.includes('Confirm'))!
+			.click();
+		return c;
+	}
+
+	it('brackets the POST and is settled with the body before the delta is applied', async () => {
+		const log: string[] = [];
+		const text = '{"model_rev": 3, "prev_rev": 2, "id_map": {}, "commit_id": "c3"}';
+		const flight = {
+			settle: vi.fn(() => void log.push('settle')),
+			abandon: vi.fn(() => void log.push('abandon'))
+		};
+		vi.mocked(beginReplicaCommit).mockImplementation(() => {
+			log.push('begin');
+			return flight;
+		});
+		vi.mocked(applyDelta).mockImplementation(() => void log.push('applyDelta'));
+		vi.mocked(revertToCommit).mockImplementation(async (_req, _cfg, onText) => {
+			log.push('request');
+			onText?.(text);
+			return {
+				model_rev: 3,
+				prev_rev: 2,
+				id_map: {},
+				changed_elements: [],
+				changed_relationships: [],
+				deleted_element_ids: [],
+				deleted_relationship_ids: [],
+				issues_removed_owner_ids: [],
+				issues_added: [],
+				issue_counts: {},
+				commit_id: 'c3',
+				message: 'Revert to rev 1',
+				validation_error_count: 0,
+				changed_artifacts: [],
+				deleted_artifact_ids: []
+			};
+		});
+
+		const c = await confirmRevert();
+		await vi.waitFor(() => expect(log).toContain('applyDelta'));
+
+		expect(log).toEqual(['begin', 'request', 'settle', 'applyDelta']);
+		expect(flight.settle).toHaveBeenCalledExactlyOnceWith({
+			text,
+			rev: 3,
+			applied: true,
+			rebound: false,
+			idMap: {}
+		});
+		unmount(c);
+	});
+
+	it('a refused revert abandons the flight', async () => {
+		const flight = { settle: vi.fn(), abandon: vi.fn() };
+		vi.mocked(beginReplicaCommit).mockReturnValue(flight);
+		vi.mocked(revertToCommit).mockRejectedValue(
+			new ValidationError(422, { detail: 'structural validation blocker' }, 'invalid')
+		);
+
+		const c = await confirmRevert();
+		await vi.waitFor(() => expect(flight.abandon).toHaveBeenCalledOnce());
+
+		expect(flight.settle).not.toHaveBeenCalled();
+		expect(applyDelta).not.toHaveBeenCalled();
 		unmount(c);
 	});
 });

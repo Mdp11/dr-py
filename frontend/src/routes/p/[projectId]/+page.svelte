@@ -67,11 +67,16 @@
 		setHistoryDrawerOpen,
 		setMetamodel,
 		setProjectOpening,
+		replicaMetamodelAdopted,
 		startRealtime,
+		startReplica,
 		stopRealtime,
+		stopReplica,
 		trackOpenProgress
 	} from '$lib/state';
 
+	// Before the feed starts, so the replica is open to take its first frames.
+	onMount(() => startReplica());
 	onMount(() => startRealtime());
 	onMount(() => onLockEvent((action, leases) => handleRemoteLockEvent(action, leases)));
 	onMount(() => {
@@ -87,6 +92,7 @@
 		void boot();
 	});
 	onDestroy(() => stopRealtime());
+	onDestroy(() => stopReplica());
 	onDestroy(() => {
 		cancelOpenProgress();
 		cancelJourney();
@@ -280,6 +286,7 @@
 	async function onReloadRebind(): Promise<void> {
 		const mm = await fetchMetamodel();
 		setMetamodel(mm);
+		replicaMetamodelAdopted();
 		await refreshSummary();
 		// The cheap read of the server's maintained issue store — NOT
 		// runValidation(), which is POST /model/validate with no ops, i.e. the

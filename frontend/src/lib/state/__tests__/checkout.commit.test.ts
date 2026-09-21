@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, it, expect, beforeEach, vi } from 'vitest';
+import { http, HttpResponse } from 'msw';
 import {
 	ensureCheckout,
 	setProjectInfo,
@@ -17,6 +18,17 @@ import {
 	hasStagedOps
 } from '../index';
 import * as api from '$lib/api/checkout';
+import * as mmApi from '$lib/api/metamodel';
+import * as modelReadApi from '$lib/api/model-read';
+import * as validationApi from '$lib/api/validation';
+import { server } from '$lib/api/__tests__/server';
+import { ConflictError } from '$lib/api/errors';
+import type { Metamodel } from '$lib/api/types';
+import { OFF, type CommitAnswer, type ReplicaSync } from '$lib/engine/sync';
+import { setCheckoutApiConfig } from '../checkout.svelte';
+import { getMetamodel as getActiveMetamodel, clearMetamodel } from '../metamodel.svelte';
+import { getModelRev } from '../model.svelte';
+import { configureReplica, resetReplica } from '../replica.svelte';
 
 beforeEach(() => {
 	resetModelStore();
@@ -285,5 +297,175 @@ describe('commit lifecycle', () => {
 		]);
 		expect(getCachedElements().get('src')?.properties.name).toBe('a');
 		expect(getCachedElements().get('sib')?.properties.name).toBe('b2');
+	});
+});
+
+describe("the replica's flight", () => {
+	const BASE = 'http://api.test/api/v1/projects/p';
+	// Written by hand, as a server would: `1.0` and the spacing are what a
+	// re-serialized body would lose.
+	const bodyText = (over: string) =>
+		'{"model_rev": 1, "prev_rev": 0, "state_digest": "00000000000000ab", ' +
+		'"id_map": {"tmp_1": "srv-1"}, ' +
+		'"changed_elements": [{"id": "e1", "type_name": "T", "properties": {"name": "b", "weight": 1.0}, "rev": 2}], ' +
+		'"changed_relationships": [], "deleted_element_ids": [], "deleted_relationship_ids": [], ' +
+		'"issues_removed_owner_ids": [], "issues_added": [], "issue_counts": {}, ' +
+		`"commit_id": "c1", "message": "m", "validation_error_count": 0${over}}`;
+
+	/**
+	 * A sync whose flight records each call with what the model store showed
+	 * at that moment; `log` interleaves it with the request leaving.
+	 */
+	function flightSync(log: string[]) {
+		const settled: { answer: CommitAnswer; modelRev: number; e1Rev: number | undefined }[] = [];
+		const sync: ReplicaSync = {
+			open: vi.fn(),
+			stop: vi.fn(),
+			status: () => OFF,
+			settled: () => Promise.resolve(),
+			feedCommit: vi.fn(),
+			feedRebind: vi.fn(),
+			feedSnapshot: vi.fn(),
+			beginCommit: () => {
+				log.push('begin');
+				return {
+					settle: (answer) => {
+						log.push('settle');
+						settled.push({
+							answer,
+							modelRev: getModelRev(),
+							e1Rev: getCachedElements().get('e1')?.rev
+						});
+					},
+					abandon: () => void log.push('abandon')
+				};
+			},
+			metamodelAdopted: vi.fn(() => {
+				log.push(`adopted ${(getActiveMetamodel() as { name?: string } | null)?.name}`);
+			})
+		};
+		return { sync, settled };
+	}
+
+	beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+	afterAll(() => server.close());
+	beforeEach(() => {
+		vi.restoreAllMocks();
+		clearMetamodel();
+		setCheckoutApiConfig({ baseUrl: BASE });
+	});
+	afterEach(() => {
+		setCheckoutApiConfig(undefined);
+		resetReplica();
+		server.resetHandlers();
+		vi.restoreAllMocks();
+	});
+
+	it("the replica's flight brackets the POST", async () => {
+		const log: string[] = [];
+		const { sync, settled } = flightSync(log);
+		configureReplica({ sync });
+		const text = bodyText('');
+		server.use(
+			http.post(`${BASE}/commits`, () => {
+				log.push('request');
+				return new HttpResponse(text, { headers: { 'Content-Type': 'application/json' } });
+			})
+		);
+		await checkoutAndEdit();
+
+		await commitStaged('m', false);
+
+		expect(log).toEqual(['begin', 'request', 'settle']);
+		expect(settled).toEqual([
+			{
+				answer: { text, rev: 1, applied: true, rebound: false, idMap: { tmp_1: 'srv-1' } },
+				modelRev: 0,
+				e1Rev: 1
+			}
+		]);
+		expect(getModelRev()).toBe(1);
+		expect(getCachedElements().get('e1')?.rev).toBe(2);
+	});
+
+	it('a response that applied nothing is settled as such', async () => {
+		const log: string[] = [];
+		const { sync, settled } = flightSync(log);
+		configureReplica({ sync });
+		const text = bodyText('').replace('"prev_rev": 0', '"prev_rev": null');
+		server.use(
+			http.post(
+				`${BASE}/commits`,
+				() => new HttpResponse(text, { headers: { 'Content-Type': 'application/json' } })
+			)
+		);
+		await checkoutAndEdit();
+
+		await commitStaged('m', false);
+
+		expect(settled.map((s) => s.answer)).toEqual([
+			{ text, rev: 1, applied: false, rebound: false, idMap: { tmp_1: 'srv-1' } }
+		]);
+	});
+
+	it('a refused commit abandons the flight and still reaches the caller', async () => {
+		const log: string[] = [];
+		const { sync, settled } = flightSync(log);
+		configureReplica({ sync });
+		server.use(
+			http.post(`${BASE}/commits`, () => {
+				log.push('request');
+				return HttpResponse.json({ detail: 'stale' }, { status: 409 });
+			})
+		);
+		await checkoutAndEdit();
+
+		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(ConflictError);
+
+		expect(log).toEqual(['begin', 'request', 'abandon']);
+		expect(settled).toEqual([]);
+		expect(hasStagedOps()).toBe(true);
+	});
+
+	it('a rebound commit tells the replica twice', async () => {
+		const log: string[] = [];
+		const { sync, settled } = flightSync(log);
+		configureReplica({ sync });
+		server.use(
+			http.post(
+				`${BASE}/commits`,
+				() =>
+					new HttpResponse(bodyText(', "rebound": true, "to_metamodel_id": "mm-2"'), {
+						headers: { 'Content-Type': 'application/json' }
+					})
+			)
+		);
+		const MM = { name: 'after', elements: [], relationships: [] } as unknown as Metamodel;
+		vi.spyOn(mmApi, 'getMetamodel').mockImplementation(async () => {
+			log.push('refetch');
+			return MM;
+		});
+		vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 1,
+			issues: [],
+			counts: {},
+			truncated: false,
+			rules_status: null
+		});
+		vi.spyOn(modelReadApi, 'getModelSummary').mockResolvedValue({
+			model_rev: 1,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: null,
+			undo_depth: 0
+		});
+		await checkoutAndEdit();
+
+		await commitStaged('m', false);
+		await vi.waitFor(() => expect(sync.metamodelAdopted).toHaveBeenCalledOnce());
+
+		expect(settled.map((s) => s.answer.rebound)).toEqual([true]);
+		expect(log).toEqual(['begin', 'settle', 'refetch', 'adopted after']);
 	});
 });

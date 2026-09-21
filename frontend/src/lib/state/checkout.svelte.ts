@@ -47,6 +47,7 @@ import {
 // The active-metamodel mirror is a leaf store (no imports of its own beyond
 // api types), so importing it here closes no cycle.
 import { setMetamodel } from './metamodel.svelte';
+import { beginReplicaCommit, replicaMetamodelAdopted } from './replica.svelte';
 import {
 	clearStagedNodeMoves,
 	discardStagedNodeMoves,
@@ -419,10 +420,31 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 		if (artifactOnly && unneeded) kept.add(token);
 		else sent.push(token);
 	}
-	const res = await commitChanges(
-		{ baseRev: getModelRev(), ops, message, lockTokens: sent, ackErrors },
-		_clientConfig
-	);
+	// The replica holds its feed from before the POST, so the commit's own echo
+	// cannot overtake the response. `onText` only stores: a throw there would
+	// reject a commit the server already landed.
+	const flight = beginReplicaCommit();
+	let responseText = '';
+	let res: CommitResponse;
+	try {
+		res = await commitChanges(
+			{ baseRev: getModelRev(), ops, message, lockTokens: sent, ackErrors },
+			_clientConfig,
+			(text) => {
+				responseText = text;
+			}
+		);
+	} catch (error) {
+		flight.abandon();
+		throw error;
+	}
+	flight.settle({
+		text: responseText,
+		rev: res.model_rev,
+		applied: res.prev_rev != null,
+		rebound: res.rebound === true,
+		idMap: res.id_map
+	});
 	// ORDERING, all of it load-bearing. The commit has LANDED durably by this
 	// point, so everything below is local reconciliation that must not become
 	// skippable by a failure further down.
@@ -479,6 +501,7 @@ async function adoptReboundMetamodel(): Promise<void> {
 	try {
 		const mm = await getMetamodel(_clientConfig);
 		setMetamodel(mm);
+		replicaMetamodelAdopted();
 		await refetchIssues();
 		await refreshSummary();
 	} catch {

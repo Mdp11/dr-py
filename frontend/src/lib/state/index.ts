@@ -187,6 +187,13 @@ export {
 	stopRealtime
 } from './realtime.svelte';
 export {
+	beginReplicaCommit,
+	getReplicaStatus,
+	replicaMetamodelAdopted,
+	startReplica,
+	stopReplica
+} from './replica.svelte';
+export {
 	setCheckoutApiConfig,
 	setProjectInfo,
 	getRole,

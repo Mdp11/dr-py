@@ -16,9 +16,10 @@
 	import CompareDiff from './CompareDiff.svelte';
 	import { computeDiff, type Diff } from '$lib/state/diff';
 	import { getCommitDiff, revertToCommit } from '$lib/api/history';
-	import { getRole, getModelRev, isProjectQuiet, applyDelta } from '$lib/state';
+	import { getRole, getModelRev, isProjectQuiet, applyDelta, beginReplicaCommit } from '$lib/state';
 	import { ConflictError, ValidationError } from '$lib/api';
 	import { crToDiff } from '$lib/state/cr';
+	import type { CommitResponse } from '$lib/api/types';
 
 	type Props = { open: boolean };
 	let { open = $bindable(false) }: Props = $props();
@@ -123,10 +124,29 @@
 		reverting = true;
 		revertError = null;
 		try {
-			const res = await revertToCommit({
-				targetRev: confirmRev,
-				baseRev: getModelRev(),
-				message: revertMsg || undefined
+			// Bracketed like commitStaged: the flight opens before the POST and is
+			// settled with the body's own text before the delta is applied.
+			const flight = beginReplicaCommit();
+			let responseText = '';
+			let res: CommitResponse;
+			try {
+				res = await revertToCommit(
+					{ targetRev: confirmRev, baseRev: getModelRev(), message: revertMsg || undefined },
+					undefined,
+					(text) => {
+						responseText = text;
+					}
+				);
+			} catch (error) {
+				flight.abandon();
+				throw error;
+			}
+			flight.settle({
+				text: responseText,
+				rev: res.model_rev,
+				applied: res.prev_rev != null,
+				rebound: res.rebound === true,
+				idMap: res.id_map
 			});
 			applyDelta(res);
 			confirmRev = null;
