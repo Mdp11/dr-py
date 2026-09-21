@@ -53,13 +53,16 @@ cp .env.example .env                       # backend config (Postgres + GCS + ad
 pixi run services-start      # Postgres + fake-gcs (waits until ready)
 pixi run db-upgrade       # apply the Postgres schema (Alembic)
 pixi run backend-start    # http://127.0.0.1:8000  (reads .env)
-pixi run frontend-start   # http://localhost:5173  (separate terminal)
+pixi run frontend-start   # http://127.0.0.1:5173  (separate terminal)
+pixi run sandbox-start    # http://localhost:5174  (built files, separate terminal)
 ```
 
-Open <http://localhost:5173>. On first boot the backend creates the schema and
-ensures the bootstrap admin exists — it does **not** seed any project. The
-frontend opens the **login** page — sign in, then create a project with the
-**New Project** wizard.
+Open <http://127.0.0.1:5173> — not `localhost`: the sandbox site above serves
+from `localhost`, and the app and the sandbox must be different hosts for the
+cross-origin isolation handshake between them to apply. On first boot the
+backend creates the schema and ensures the bootstrap admin exists — it does
+**not** seed any project. The frontend opens the **login** page — sign in,
+then create a project with the **New Project** wizard.
 
 ### Logging in & the first admin
 
@@ -152,6 +155,7 @@ commits broadcasting, and viewer write-blocks.
 | `pixi run db-upgrade` | Apply Postgres schema (Alembic) |
 | `pixi run backend-start` | Run the API (reads `.env`) |
 | `pixi run frontend-start` | Run the SvelteKit dev server |
+| `pixi run sandbox-start` | Build + serve the sandbox site on `localhost:5174` |
 
 ### Teardown
 

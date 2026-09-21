@@ -1,9 +1,31 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, type Connect, type Plugin } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
+// COOP/COEP so the app can host the sandbox iframe cross-origin isolated
+// (CN-17): `server.headers`/`preview.headers` don't reach SvelteKit's own
+// pages, only static assets, so this sets both on every response by hand.
+// First in `plugins` so it also covers what sveltekit()'s own middleware
+// serves.
+function crossOriginIsolation(): Plugin {
+	const setHeaders: Connect.NextHandleFunction = (req, res, next) => {
+		res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+		res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+		next();
+	};
+	return {
+		name: 'cross-origin-isolation',
+		configureServer(server) {
+			server.middlewares.use(setHeaders);
+		},
+		configurePreviewServer(server) {
+			server.middlewares.use(setHeaders);
+		}
+	};
+}
+
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [crossOriginIsolation(), tailwindcss(), sveltekit()],
 	server: {
 		host: '127.0.0.1',
 		port: 5173,

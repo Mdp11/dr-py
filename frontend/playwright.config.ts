@@ -3,15 +3,18 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Playwright config for the data-rover frontend smoke suite.
  *
- * Two webServers are launched:
+ * Three webServers are launched:
  *   1. The FastAPI backend (`pixi run -e api backend-start`) on :8000. Uses a
  *      throwaway SQLite file at /tmp/data-rover-e2e.db; dev-seed creates the
  *      schema and the bootstrap admin (admin@example.com/admin12345). The
  *      "Smart City" project is created by the `setup` project (seed.setup.ts),
  *      not autoloaded.
  *   2. The Vite dev server (`npm run dev`) on :5173.
+ *   3. The sandbox site (`npm run build && npm run preview` in `../sandbox`)
+ *      on :5174 — always built files, so e2e runs the same isolation policy
+ *      dev and production ship (CN-17).
  *
- * Both are reused if already running locally to keep the iteration loop fast.
+ * All three are reused if already running locally to keep the iteration loop fast.
  */
 export default defineConfig({
 	testDir: 'e2e',
@@ -57,6 +60,13 @@ export default defineConfig({
 			command: 'npm run dev',
 			cwd: '.',
 			port: 5173,
+			timeout: 60_000,
+			reuseExistingServer: true
+		},
+		{
+			command: 'npm run build && npm run preview',
+			cwd: '../sandbox',
+			url: 'http://localhost:5174/',
 			timeout: 60_000,
 			reuseExistingServer: true
 		}

@@ -19,7 +19,8 @@ cp .env.example .env        # defaults match docker-compose + set the dev admin
 pixi run services-start        # Postgres + fake-gcs (waits until ready)
 pixi run db-upgrade         # apply Postgres schema (Alembic)
 pixi run backend-start      # http://127.0.0.1:8000
-pixi run frontend-start     # http://localhost:5173  (separate terminal)
+pixi run frontend-start     # http://127.0.0.1:5173  (separate terminal)
+pixi run sandbox-start      # http://localhost:5174  (built files, separate terminal)
 ```
 
 Redis backs the optional lease mirror; set
@@ -39,7 +40,9 @@ pixi run dr-reset    # stop everything + wipe the Postgres/fake-gcs volumes (cle
                      # next dr-start rebuilds fully fresh — does NOT restart)
 ```
 
-Open <http://localhost:5173> and log in:
+Open <http://127.0.0.1:5173> (not `localhost` — the sandbox site above serves
+from `localhost`, and the app and the sandbox must be different hosts for the
+cross-origin isolation handshake between them to apply) and log in:
 
 ```
 admin@example.com / admin12345

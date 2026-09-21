@@ -34,6 +34,13 @@ first boot the backend ensures the bootstrap admin (`admin@example.com` /
 `admin12345`) exists — no project is autoloaded; the app opens the **login**
 page and projects are created via the New Project wizard.
 
+The app is served **cross-origin isolated** — `Cross-Origin-Opener-Policy:
+same-origin` and `Cross-Origin-Embedder-Policy: require-corp` on every
+response — in both `pixi run frontend-start` and e2e, so it can host the
+sandbox site (`pixi run sandbox-start`, `http://localhost:5174`) in an
+iframe (CN-17). Any future cross-origin subresource the app loads needs
+`Cross-Origin-Resource-Policy` or CORS to match, or COEP blocks it (CN-14).
+
 ## Layout
 
 The UI is a fixed grid:
@@ -1566,7 +1573,10 @@ pixi run backend-start
 pixi run frontend-start
 ```
 
-Open http://localhost:5173, log in, and open a project — import `smart-city` via
+Open http://127.0.0.1:5173 (not `localhost` — the sandbox site serves from
+`localhost`, and the app and the sandbox must be different hosts for the
+cross-origin isolation handshake between them to apply), log in, and open a
+project — import `smart-city` via
 the New Project wizard if you have none. Then **TopBar → Edit Metamodel**, and
 click the **Diagram** toggle in the tab's toolbar.
 
