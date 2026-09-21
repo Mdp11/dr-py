@@ -3,9 +3,11 @@ import { expect } from 'vitest';
 import {
 	applyBatch,
 	cmpCodePoint,
+	drain,
 	dumpIndexes,
 	elementLine,
 	ElementRec,
+	isSteps,
 	Metamodel,
 	Model,
 	ModelError,
@@ -14,15 +16,19 @@ import {
 	OpError,
 	parseJson,
 	pyDumps,
+	ReadError,
+	READS,
 	relationshipLine,
 	RelRec,
 	shuffleAdjacency,
 	verifyConsistent,
+	ViewPlacements,
 	type BatchResult,
 	type ElementImage,
 	type MetamodelDoc,
 	type ModelOp,
 	type ModelOptions,
+	type ReadParams,
 	type RelImage,
 	type Value
 } from '../../src/index.ts';
@@ -71,7 +77,12 @@ export type Step = Partial<Observed> & {
 	restore?: boolean;
 	/** `undo`: the index of the landed batch whose inverse ops to run. */
 	of?: number;
-	result: string | string[] | BatchOutcome | null;
+	/** `read`: a method of `READS`, and its params. */
+	method?: string;
+	params?: ReadParams;
+	/** `view` / `drop_view`: the view whose placements `result` lists / to forget. */
+	view_id?: string;
+	result: string | string[] | BatchOutcome | object | null;
 	error: StepError | null;
 	unchanged?: true;
 };
@@ -155,8 +166,9 @@ export function outcome(model: Model, res: BatchResult): BatchOutcome {
 	};
 }
 
-/** What a replay carries from step to step: the batches that landed, by step index. */
+/** What a replay carries from step to step: the batches that landed, by step index, and the views. */
 type Landed = Map<number, BatchResult>;
+type Carried = { landed: Landed; placements: ViewPlacements };
 
 /**
  * `mint` stands in for the oracle's `SequentialIdGenerator`. A failed call
@@ -168,9 +180,21 @@ function apply(
 	step: Step,
 	index: number,
 	mint: () => string,
-	landed: Landed
-): Step['result'] {
+	{ landed, placements }: Carried
+): unknown {
 	switch (step.do) {
+		case 'read': {
+			const read = READS[step.method!];
+			if (read === undefined) throw new Error(`no read ${step.method}`);
+			const out = read(model, placements, step.params ?? {});
+			return isSteps(out) ? drain(out) : out;
+		}
+		case 'view':
+			placements.set(step.view_id!, step.result as string[]);
+			return step.result;
+		case 'drop_view':
+			placements.drop(step.view_id!);
+			return null;
 		case 'batch':
 		case 'undo': {
 			const ops = step.do === 'batch' ? parseOps(step.ops!) : landed.get(step.of!)!.inverseOps();
@@ -221,25 +245,29 @@ function apply(
 export function replaySteps(fixture: StepsFixture, options: ModelOptions = {}): void {
 	const model = new Model(Metamodel.fromJSON(fixture.metamodel), options);
 	const random = seededRandom(20260918);
-	const landed: Landed = new Map();
+	const carried: Carried = { landed: new Map(), placements: new ViewPlacements() };
 	let minted = 0;
 	let last = observe(model);
 	fixture.steps.forEach((step, index) => {
 		const label = `step ${index}: ${step.do}`;
 		shuffleAdjacency(model, random);
-		let result: Step['result'] = null;
+		let result: unknown = null;
 		let error: Step['error'] = null;
 		const mintedBefore = minted;
 		try {
-			result = apply(model, step, index, () => `id-${++minted}`, landed);
+			result = apply(model, step, index, () => `id-${++minted}`, carried);
 		} catch (caught) {
 			minted = mintedBefore;
 			if (caught instanceof ModelError) error = { kind: caught.kind, message: caught.message };
 			else if (caught instanceof OpError) error = { status: caught.status, detail: caught.detail };
-			else throw caught;
+			else if (caught instanceof ReadError) {
+				error = { status: caught.status, detail: caught.detail };
+			} else throw caught;
 		}
 		expect(error, label).toEqual(step.error);
-		expect(result, label).toEqual(step.result);
+		// A body is compared as text: values and key order at once.
+		if (step.do === 'read') expect(JSON.stringify(result), label).toBe(JSON.stringify(step.result));
+		else expect(result, label).toEqual(step.result);
 		const seen = observe(model);
 		if (step.unchanged) {
 			expect(seen, label).toEqual(last);

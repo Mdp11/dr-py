@@ -1,4 +1,4 @@
-import { ModelError } from '../model/errors.ts';
+import { errorDetail, ModelError } from '../model/errors.ts';
 import { findArrayIndexKey, TEMP_ID_PREFIX } from '../model/load.ts';
 import type { Model } from '../model/model.ts';
 import { getProp, setProp, type ElementRec, type Props, type RelRec } from '../model/records.ts';
@@ -223,17 +223,6 @@ function recreate(rel: RelRec): CreateRelationshipOp {
 		properties: { ...rel.props },
 		id: null
 	};
-}
-
-/** The server strips the quotes off the ends of a missing-key message, whichever they are. */
-function errorDetail(error: ModelError): string {
-	if (error.kind !== 'key') return error.message;
-	const text = pyRepr(error.message);
-	let start = 0;
-	let end = text.length;
-	while (start < end && (text[start] === "'" || text[start] === '"')) start++;
-	while (end > start && (text[end - 1] === "'" || text[end - 1] === '"')) end--;
-	return text.slice(start, end);
 }
 
 /**

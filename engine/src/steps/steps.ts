@@ -8,6 +8,11 @@ export type Progress = { done: number; total: number };
  */
 export type Steps<T> = Generator<Progress, T, void>;
 
+/** Whether `value` is a steps generator rather than a finished value. */
+export function isSteps(value: unknown): value is Steps<unknown> {
+	return Object.prototype.toString.call(value) === '[object Generator]';
+}
+
 /** Runs every step and returns the operation's value. */
 export function drain<T>(steps: Steps<T>): T {
 	for (;;) {

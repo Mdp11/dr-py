@@ -11,7 +11,7 @@ export type {
 	PropertyDef,
 	RelationshipType
 } from './metamodel/types.ts';
-export { ModelError, SnapshotError } from './model/errors.ts';
+export { errorDetail, ModelError, SnapshotError } from './model/errors.ts';
 export type { IndexSet } from './model/indexes.ts';
 export { elementLine, modelLines, relationshipLine } from './model/lines.ts';
 export { Model, type ModelOptions } from './model/model.ts';
@@ -31,6 +31,39 @@ export type {
 	UpdateElementOp,
 	UpdateRelationshipOp
 } from './ops/types.ts';
+export {
+	getElement,
+	getElementsBatch,
+	getModelSummary,
+	listElementRelationships,
+	listElementsPage,
+	type ElementPage,
+	type ModelSummary,
+	type RelationshipPage
+} from './read/elements.ts';
+export { ReadError } from './read/errors.ts';
+export { READS, readScans, type Read } from './read/index.ts';
+export {
+	directionOf,
+	idOf,
+	idsOf,
+	MAX_PAGE_LIMIT,
+	pageOf,
+	type Direction,
+	type ReadParams
+} from './read/params.ts';
+export { ViewPlacements } from './read/placements.ts';
+export {
+	readOps,
+	toWire,
+	wireElement,
+	wireElementImage,
+	wireRelationship,
+	wireRelImage,
+	type Wire,
+	type WireElement,
+	type WireRelationship
+} from './read/wire.ts';
 export { entityHash, formatDigest, modelDigest, type EntityHash } from './snapshot/digest.ts';
 export { LineSplitter } from './snapshot/lines.ts';
 export {
@@ -42,7 +75,7 @@ export {
 	type SnapshotHeader
 } from './snapshot/open.ts';
 export { sha256 } from './snapshot/sha256.ts';
-export { drain, sortedInSlices, type Progress, type Steps } from './steps/steps.ts';
+export { drain, isSteps, sortedInSlices, type Progress, type Steps } from './steps/steps.ts';
 export { cmpCodePoint } from './value/compare.ts';
 export { pyFloatRepr } from './value/float-repr.ts';
 export { pyKey } from './value/key.ts';
