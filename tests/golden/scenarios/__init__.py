@@ -18,6 +18,7 @@ from . import (  # noqa: F401
     py_lower,
     py_repr,
     read_pages,
+    read_search,
     read_tree,
     smart_city,
     snapshot_v2,

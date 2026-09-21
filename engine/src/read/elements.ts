@@ -1,9 +1,10 @@
 import type { Model } from '../model/model.ts';
 import { cmpCodePoint } from '../value/compare.ts';
-import { pyStrip } from '../value/lower.ts';
-import { ReadError } from './errors.ts';
+import type { Steps } from '../steps/steps.ts';
+import { pyLower, pyStrip } from '../value/lower.ts';
 import { directionOf, idOf, idsOf, optionalString, pageOf, type ReadParams } from './params.ts';
 import type { ViewPlacements } from './placements.ts';
+import { searchSteps } from './search.ts';
 import { wireElement, wireRelationship, type WireElement, type WireRelationship } from './wire.ts';
 
 export type ElementPage = { items: WireElement[]; total: number };
@@ -44,12 +45,17 @@ export function searchQuery(params: ReadParams): string {
 
 /**
  * `GET /model/elements`: state order, an exact-type filter, `total` counted
- * before the page.
+ * before the page. With a query that is not blank, a search in steps.
  */
-export function listElementsPage(model: Model, _: ViewPlacements, params: ReadParams): ElementPage {
+export function listElementsPage(
+	model: Model,
+	_: ViewPlacements,
+	params: ReadParams
+): ElementPage | Steps<ElementPage> {
 	const type = optionalString(params, 'type');
 	const { limit, offset } = pageOf(params);
-	if (searchQuery(params) !== '') throw new ReadError(500, 'search is not built yet');
+	const query = pyLower(searchQuery(params));
+	if (query !== '') return searchSteps(model, { type, query, limit, offset });
 	const total = type === null ? model.elementCount : (model.indexes.byType.get(type)?.size ?? 0);
 	const items: WireElement[] = [];
 	if (offset >= total) return { items, total };

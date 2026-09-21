@@ -53,6 +53,7 @@ export {
 	type ReadParams
 } from './read/params.ts';
 export { ViewPlacements } from './read/placements.ts';
+export { nameScore, searchScore, searchSteps } from './read/search.ts';
 export {
 	getTreeItemsBatch,
 	listContainmentChildren,
