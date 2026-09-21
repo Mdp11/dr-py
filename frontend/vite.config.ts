@@ -2,8 +2,8 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Connect, type Plugin } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
-// COOP/COEP so the app can host the sandbox iframe cross-origin isolated
-// (CN-17): `server.headers`/`preview.headers` don't reach SvelteKit's own
+// COOP/COEP so the app can host the sandbox iframe cross-origin isolated:
+// `server.headers`/`preview.headers` don't reach SvelteKit's own
 // pages, only static assets, so this sets both on every response by hand.
 // First in `plugins` so it also covers what sveltekit()'s own middleware
 // serves.

@@ -45,7 +45,7 @@ processes:
   frontend:
     command: "pixi run -e frontend frontend-start"
 
-  # The sandbox site (CN-17). Independent of the other two: it never talks to
+  # The sandbox site. Independent of the other two: it never talks to
   # the backend and the app frame connects to it lazily. Always built files —
   # `sandbox-start` builds then serves via `vite preview` — so local dev runs
   # under the same isolation policy production ships.

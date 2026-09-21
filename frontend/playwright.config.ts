@@ -12,7 +12,7 @@ import { defineConfig, devices } from '@playwright/test';
  *   2. The Vite dev server (`npm run dev`) on :5173.
  *   3. The sandbox site (`npm run build && npm run preview` in `../sandbox`)
  *      on :5174 — always built files, so e2e runs the same isolation policy
- *      dev and production ship (CN-17).
+ *      dev and production ship.
  *
  * All three are reused if already running locally to keep the iteration loop fast.
  */
