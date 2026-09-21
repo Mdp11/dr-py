@@ -64,7 +64,8 @@ export function commitChanges(
 		lockTokens: string[];
 		ackErrors: boolean;
 	},
-	cfg?: ClientConfig
+	cfg?: ClientConfig,
+	onText?: (text: string) => void
 ): Promise<CommitResponse> {
 	return apiFetch(
 		'/commits',
@@ -77,7 +78,8 @@ export function commitChanges(
 				lock_tokens: req.lockTokens,
 				ack_errors: req.ackErrors
 			},
-			schema: CommitResponseSchema
+			schema: CommitResponseSchema,
+			onText
 		},
 		cfg
 	);

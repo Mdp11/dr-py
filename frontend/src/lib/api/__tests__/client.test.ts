@@ -132,6 +132,59 @@ describe('apiFetch', () => {
 	});
 });
 
+describe('onText', () => {
+	it('gets the body before it is parsed, once', async () => {
+		server.use(http.get(`${BASE}/ot`, () => HttpResponse.json({ n: 1.5 })));
+		const seen: string[] = [];
+		const result = await apiFetch('/ot', { method: 'GET', onText: (t) => seen.push(t) }, cfg);
+		expect(seen).toEqual([JSON.stringify({ n: 1.5 })]);
+		expect(result).toEqual({ n: 1.5 });
+	});
+
+	it('is not called on a 204', async () => {
+		server.use(http.delete(`${BASE}/ot204`, () => new HttpResponse(null, { status: 204 })));
+		const onText = vi.fn();
+		await apiFetch('/ot204', { method: 'DELETE', onText }, cfg);
+		expect(onText).not.toHaveBeenCalled();
+	});
+
+	it('is not called on an empty body', async () => {
+		server.use(http.get(`${BASE}/otempty`, () => new HttpResponse('', { status: 200 })));
+		const onText = vi.fn();
+		await apiFetch('/otempty', { method: 'GET', onText }, cfg);
+		expect(onText).not.toHaveBeenCalled();
+	});
+
+	it('is not called on an error status', async () => {
+		server.use(
+			http.get(`${BASE}/oterr`, () => HttpResponse.json({ error: 'no' }, { status: 404 }))
+		);
+		const onText = vi.fn();
+		await expect(apiFetch('/oterr', { method: 'GET', onText }, cfg)).rejects.toBeInstanceOf(
+			NotFoundError
+		);
+		expect(onText).not.toHaveBeenCalled();
+	});
+
+	it('does not reach fetch', async () => {
+		let capturedInit: RequestInit | undefined;
+		const fakeFetch: typeof fetch = async (_input, init) => {
+			capturedInit = init;
+			return new Response(JSON.stringify({ ok: true }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			});
+		};
+		await apiFetch(
+			'/otfetch',
+			{ method: 'GET', onText: () => {} },
+			{ baseUrl: BASE, fetch: fakeFetch }
+		);
+		expect(capturedInit).toBeDefined();
+		expect(capturedInit && 'onText' in capturedInit).toBe(false);
+	});
+});
+
 describe('cookie-auth client behavior', () => {
 	it('adds the CSRF header on unsafe methods and omits it on GET', async () => {
 		let postHadCsrf: string | null = null;

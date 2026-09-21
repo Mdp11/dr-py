@@ -36,6 +36,9 @@ class FakeSocket implements WebSocketLike {
 	message(data: unknown): void {
 		this.emit('message', { data: JSON.stringify(data) });
 	}
+	raw(text: string): void {
+		this.emit('message', { data: text });
+	}
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -81,6 +84,31 @@ describe('connectFeed', () => {
 			scope: ['artifact']
 		});
 		expect(events[0]).toMatchObject({ type: 'commit', rev: 5, scope: ['artifact'] });
+	});
+
+	it("the frame's text comes with the event", () => {
+		const received: { event: FeedEvent; raw: string }[] = [];
+		connectFeed({
+			url: 'ws://x/feed',
+			socketFactory: (u) => new FakeSocket(u),
+			onEvent: (e, raw) => received.push({ event: e, raw }),
+			onStatus: () => {}
+		});
+		const sock = FakeSocket.last!;
+		sock.open();
+		const text =
+			'{"type":"commit","rev":3,"commit_id":"c1","author_id":"bob","message":"m",' +
+			'"validation_error_count":0,"changed_elements":[{"id":"a","type_name":"T",' +
+			'"properties":{"x":1.0,"n":9007199254740993},"rev":2}],"changed_relationships":[],' +
+			'"deleted_element_ids":[],"deleted_relationship_ids":[]}';
+		sock.raw(text);
+		expect(received).toHaveLength(1);
+		// byte for byte: 1.0 and the big integer survive in the raw text even
+		// though JSON.parse (the first argument) loses both.
+		expect(received[0].raw).toBe(text);
+		expect(received[0].raw).toContain('"x":1.0');
+		expect(received[0].raw).toContain('"n":9007199254740993');
+		expect(received[0].event).toEqual(JSON.parse(text));
 	});
 
 	it('reconnects after an unexpected close', () => {

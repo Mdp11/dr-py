@@ -41,14 +41,16 @@ export function getCommitDiff(rev: number, cfg?: ClientConfig): Promise<CommitDi
  * stale rev / rebind / peer lock) or ValidationError (422: structural). */
 export function revertToCommit(
 	req: { targetRev: number; baseRev: number; message?: string },
-	cfg?: ClientConfig
+	cfg?: ClientConfig,
+	onText?: (text: string) => void
 ): Promise<CommitResponse> {
 	return apiFetch(
 		'/commits/revert',
 		{
 			method: 'POST',
 			body: { target_rev: req.targetRev, base_rev: req.baseRev, message: req.message },
-			schema: CommitResponseSchema
+			schema: CommitResponseSchema,
+			onText
 		},
 		cfg
 	);

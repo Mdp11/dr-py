@@ -6,6 +6,7 @@ export * as modelOps from './model-ops';
 export * as modelRead from './model-read';
 export * as elements from './elements';
 export * as relationships from './relationships';
+export * as replica from './replica';
 export * as settings from './settings';
 export * as validation from './validation';
 export * as views from './views';

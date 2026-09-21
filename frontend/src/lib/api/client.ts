@@ -16,6 +16,11 @@ export interface ApiFetchInit extends Omit<RequestInit, 'body'> {
 	body?: unknown;
 	schema?: z.ZodType<unknown>;
 	query?: Record<string, string | number | boolean | undefined | null>;
+	/** Called by {@link apiFetch} with the response body's text, once, BEFORE
+	 * `JSON.parse` — for a non-empty 2xx body only (a 204 or an empty body
+	 * never call it; a non-2xx status throws before it is reached). Never
+	 * reaches `fetch` itself. */
+	onText?: (text: string) => void;
 }
 
 // Project-scoped base URL, set once per workspace from the [projectId] route
@@ -131,7 +136,14 @@ export async function apiFetchRaw(
 		headers.set(CSRF_HEADER, CSRF_VALUE);
 	}
 
-	const response = await doFetch(url, { ...init, body, headers, credentials: 'include' });
+	// Strip the non-RequestInit keys (schema, query, onText) before handing
+	// the init to fetch — a real fetch ignores extra properties, but onText's
+	// contract promises it never reaches fetch at all.
+	const rest: ApiFetchInit = { ...init };
+	delete rest.schema;
+	delete rest.query;
+	delete rest.onText;
+	const response = await doFetch(url, { ...rest, body, headers, credentials: 'include' });
 
 	if (!response.ok) {
 		const text = await response.text();
@@ -156,6 +168,7 @@ export async function apiFetch<T>(
 	if (!text) {
 		return undefined as T;
 	}
+	init.onText?.(text);
 	const json = JSON.parse(text);
 	if (init.schema) {
 		return init.schema.parse(json) as T;

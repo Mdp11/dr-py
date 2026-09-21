@@ -612,6 +612,36 @@ kept open, so a version change elsewhere can never block on this tab. Tests
 use `new IDBFactory()` from the `fake-indexeddb` dev dependency, one per test,
 never the real `indexedDB` — happy-dom has none.
 
+**Raw text.** The shell hands the engine three texts exactly as they arrived,
+never re-parsed and re-serialized: a feed frame, a commit/revert response body
+and a tail body. `JSON.parse` would lose what the engine's digest needs to see
+— `1.0` collapses to `1`, and an integer past 2^53 loses precision — so each
+one crosses as a string, alongside whatever the shell parses for its own use.
+
+- `lib/api/feed.ts`: `FeedConfig.onEvent(event, raw)` — `raw` is the frame's
+  text; `event` is its `JSON.parse`, unchanged. The commit variant of
+  `FeedEvent` also carries `prev_rev`, `state_digest`, `recreated_element_ids`
+  and `recreated_relationship_ids` now that the backend sends them (CLAUDE.md
+  "The commit delta (CT-2)").
+- `lib/api/client.ts`: `ApiFetchInit.onText(text)` — called by `apiFetch` with
+  the response body's text, once, before `JSON.parse`, for a non-empty 2xx
+  body only; it never reaches `fetch` itself (stripped alongside `schema` and
+  `query`). `commitChanges` (`checkout.ts`) and `revertToCommit` (`history.ts`)
+  both take an `onText` and pass it through, so the two paths that land the
+  user's own commit (see "State model" above) can hand its body to the
+  replica. `OpsResponseSchema` (and so `CommitResponseSchema`) gains `prev_rev`
+  (nullable, optional): a `null` value means the batch applied nothing, and
+  the replica is handed nothing either (D19).
+- `lib/api/replica.ts` is the client for the routes CLAUDE.md's "Replica
+  routes" describes: `getSnapshotDescriptor` (the parsed descriptor, or `null`
+  on a 404 — no model yet), `fetchSnapshot(url, signal)` (the raw `Response`
+  of the descriptor's own path, so its body can be streamed and its
+  `Content-Length` read), `fetchTail(fromRev)` (the tail body's text
+  untouched, plus the three envelope fields — `from_rev`, `head_rev`,
+  `complete` — read off it once for the shell's own bookkeeping) and
+  `fetchMetamodelDocument()` (the metamodel document as `JSON.parse` gives it,
+  no zod reshape, paired with the `X-Metamodel-Id` response header).
+
 ### Artifact import/export (bundle export/preview/import)
 
 The TopBar's toolbar `<nav>` (see Layout above) hosts an **Artifacts** menu

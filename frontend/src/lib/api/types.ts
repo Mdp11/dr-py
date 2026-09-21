@@ -270,6 +270,9 @@ export type IssueCounts = z.infer<typeof IssueCountsSchema>;
  */
 export const OpsResponseSchema = z.object({
 	model_rev: z.number().int(),
+	// The model_rev before this batch's bump; null on a response that applied
+	// nothing (D19). A replica hands it to the engine only when it is a number.
+	prev_rev: z.number().int().nullable().optional(),
 	id_map: z.record(z.string(), z.string()).default({}),
 	changed_elements: z.array(ElementSchema).default([]),
 	changed_relationships: z.array(RelationshipSchema).default([]),

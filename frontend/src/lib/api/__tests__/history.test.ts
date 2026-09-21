@@ -59,6 +59,64 @@ describe('history api', () => {
 		expect(cap.body).toMatchObject({ target_rev: 2, base_rev: 7, message: 'undo' });
 	});
 
+	it('revertToCommit hands onText the raw response body and parses prev_rev', async () => {
+		const cap: { path?: string; body?: unknown } = {};
+		let seenText: string | undefined;
+		const res = await revertToCommit(
+			{ targetRev: 2, baseRev: 7, message: 'undo' },
+			{
+				fetch: jsonFetch(cap, {
+					model_rev: 8,
+					prev_rev: 7,
+					id_map: {},
+					changed_elements: [],
+					changed_relationships: [],
+					deleted_element_ids: [],
+					deleted_relationship_ids: [],
+					issues_removed_owner_ids: [],
+					issues_added: [],
+					issue_counts: {},
+					commit_id: 'c',
+					message: 'undo',
+					validation_error_count: 0
+				})
+			},
+			(text) => {
+				seenText = text;
+			}
+		);
+		expect(seenText).toContain('"prev_rev":7');
+		expect(res.prev_rev).toBe(7);
+	});
+
+	it.each([
+		[3, 3],
+		[null, null]
+	])('revertToCommit parses prev_rev: %s', async (sent, expected) => {
+		const cap: { path?: string; body?: unknown } = {};
+		const res = await revertToCommit(
+			{ targetRev: 2, baseRev: 7, message: 'undo' },
+			{
+				fetch: jsonFetch(cap, {
+					model_rev: 8,
+					prev_rev: sent,
+					id_map: {},
+					changed_elements: [],
+					changed_relationships: [],
+					deleted_element_ids: [],
+					deleted_relationship_ids: [],
+					issues_removed_owner_ids: [],
+					issues_added: [],
+					issue_counts: {},
+					commit_id: 'c',
+					message: 'undo',
+					validation_error_count: 0
+				})
+			}
+		);
+		expect(res.prev_rev).toBe(expected);
+	});
+
 	it('getCommitDiff hits /commits/{rev}/diff and parses the model half', async () => {
 		const cap: { path?: string; body?: unknown } = {};
 		const res = await getCommitDiff(4, {

@@ -61,6 +61,88 @@ describe('checkout api', () => {
 		expect(body.ack_errors).toBe(true);
 	});
 
+	it('commitChanges hands onText the raw response body before it is parsed', async () => {
+		const cap: { path?: string; body?: unknown } = {};
+		let seenText: string | undefined;
+		const res = await commitChanges(
+			{ baseRev: 7, ops: [], message: 'm', lockTokens: ['t1'], ackErrors: true },
+			{
+				fetch: jsonFetch(cap, {
+					model_rev: 8,
+					prev_rev: 7,
+					id_map: {},
+					changed_elements: [],
+					changed_relationships: [],
+					deleted_element_ids: [],
+					deleted_relationship_ids: [],
+					issues_removed_owner_ids: [],
+					issues_added: [],
+					issue_counts: {},
+					commit_id: 'c1',
+					message: 'm',
+					validation_error_count: 0
+				})
+			},
+			(text) => {
+				seenText = text;
+			}
+		);
+		expect(seenText).toContain('"prev_rev":7');
+		expect(res.prev_rev).toBe(7);
+	});
+
+	it.each([
+		[3, 3],
+		[null, null]
+	])('commitChanges parses prev_rev: %s', async (sent, expected) => {
+		const cap: { path?: string; body?: unknown } = {};
+		const res = await commitChanges(
+			{ baseRev: 7, ops: [], message: 'm', lockTokens: ['t1'], ackErrors: true },
+			{
+				fetch: jsonFetch(cap, {
+					model_rev: 8,
+					prev_rev: sent,
+					id_map: {},
+					changed_elements: [],
+					changed_relationships: [],
+					deleted_element_ids: [],
+					deleted_relationship_ids: [],
+					issues_removed_owner_ids: [],
+					issues_added: [],
+					issue_counts: {},
+					commit_id: 'c1',
+					message: 'm',
+					validation_error_count: 0
+				})
+			}
+		);
+		expect(res.prev_rev).toBe(expected);
+	});
+
+	it('commitChanges parses a response with prev_rev absent', async () => {
+		const cap: { path?: string; body?: unknown } = {};
+		const res = await commitChanges(
+			{ baseRev: 7, ops: [], message: 'm', lockTokens: ['t1'], ackErrors: true },
+			{
+				fetch: jsonFetch(cap, {
+					model_rev: 8,
+					id_map: {},
+					changed_elements: [],
+					changed_relationships: [],
+					deleted_element_ids: [],
+					deleted_relationship_ids: [],
+					issues_removed_owner_ids: [],
+					issues_added: [],
+					issue_counts: {},
+					commit_id: 'c1',
+					message: 'm',
+					validation_error_count: 0
+				})
+			}
+		);
+		expect(res.prev_rev).toBeUndefined();
+	});
+
 	it('openProject GETs /open', async () => {
 		const cap: { path?: string; body?: unknown } = {};
 		const res = await openProject({
