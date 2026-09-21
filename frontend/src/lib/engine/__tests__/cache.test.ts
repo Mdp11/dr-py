@@ -127,7 +127,6 @@ describe('SnapshotCache', () => {
 			throw new Error('boom');
 		});
 		await expect(c.put('p1', 1, buf(4))).resolves.toBeUndefined();
-		vi.restoreAllMocks();
 		await expect(c.get('p1', 1)).resolves.toBeNull();
 	});
 
@@ -182,23 +181,29 @@ describe('SnapshotCache', () => {
 			});
 			const c = cache();
 			await expect(c.put('p1', 1, buf(4))).resolves.toBeUndefined();
-			vi.restoreAllMocks();
 			await expect(c.get('p1', 1)).resolves.toBeNull();
 		});
 
 		it('a put whose transaction really aborts (the path a quota failure takes)', async () => {
-			const original = IDBObjectStore.prototype.put;
-			vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+			// Abort from the eviction read's OWN success listener — registered
+			// via `addEventListener` so it runs before `put`'s `onsuccess`
+			// eviction logic, and firing only once that read has genuinely
+			// succeeded, i.e. once `put`'s body has already returned without
+			// throwing. Nothing here throws synchronously, so the only thing
+			// that can settle the call is a real `abort` event on the
+			// transaction — never the inline synchronous-throw catch the
+			// other two tests in this group exercise.
+			const originalGetAll = IDBObjectStore.prototype.getAll;
+			vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (
 				this: IDBObjectStore,
-				...args: Parameters<typeof original>
+				...args: Parameters<typeof originalGetAll>
 			) {
-				const request = original.apply(this, args);
-				this.transaction.abort();
+				const request = originalGetAll.apply(this, args);
+				request.addEventListener('success', () => this.transaction.abort());
 				return request;
 			});
 			const c = cache();
 			await expect(c.put('p1', 1, buf(4))).resolves.toBeUndefined();
-			vi.restoreAllMocks();
 			await expect(c.get('p1', 1)).resolves.toBeNull();
 		});
 	});
