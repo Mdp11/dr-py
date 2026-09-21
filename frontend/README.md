@@ -533,6 +533,50 @@ engine service's message protocol over a `ClientPort` (a `MessagePort` fits):
 An `EngineLink` (`client`, `isolated`, `onViolation`, `dispose`) is what the
 replica's sync logic is handed.
 
+**The frame** (`lib/engine/frame.ts`, `lib/engine/origins.ts`).
+`connectFrame(deps?)` embeds the sandbox site in a hidden `<iframe>`
+(`src = SANDBOX_ORIGIN + '/'`, `allow="cross-origin-isolated"`,
+`sandbox="allow-scripts allow-same-origin"`, `aria-hidden`, out of layout) and
+resolves to the real `EngineLink`. `SANDBOX_ORIGIN` is the build-time
+`VITE_SANDBOX_ORIGIN`, `http://localhost:5174` by default — an origin, no
+trailing slash, because it is compared with `event.origin` by `===`. Four
+messages, the types of `sandbox/src/handshake.ts`:
+
+- frame → app `{type: 'sandbox-ready', crossOriginIsolated}` once the worker
+  exists; the app answers with `{type: 'connect'}` and ONE transferred
+  `MessagePort` (target origin `SANDBOX_ORIGIN`) and keeps the other end for
+  the client. A second `sandbox-ready` connects nothing. `crossOriginIsolated:
+false` is not a failure — the link carries it as `isolated`.
+- frame → app `{type: 'csp-violation', directive, blocked}` for every
+  `securitypolicyviolation`: each reaches every `onViolation` listener, and one
+  that arrived before the link was made is replayed to each new listener.
+- frame → app `{type: 'worker-error', message}`: before `sandbox-ready` the
+  connect rejects with a `FrameError` of kind `worker`; after, it ends the
+  link — the frame goes, and every pending call rejects with `EngineGoneError`.
+
+Two checks on each side. The app takes a message only when `event.origin ===
+SANDBOX_ORIGIN` and `event.source` is the frame's `contentWindow`; anything
+else is ignored without a word. The sandbox page takes a `connect` only from
+the app's origin and `window.parent`, with exactly one port, and only once.
+No answer within 10 s is a `FrameError` of kind `timeout`, and the frame and
+its listener are removed. `dispose()` removes the frame, the listener and the
+client's port.
+
+**Two hosts.** The app and the sandbox must be different sites, so
+`connectFrame` refuses — `FrameError` of kind `same-host`, `open the app at
+http://127.0.0.1:5173`, no frame built — when the app's hostname is the
+sandbox's. That is why every doc sends people to `http://127.0.0.1:5173`,
+never `localhost:5173`: opened as `localhost` the app shares the sandbox's
+site, and the sandbox page (which answers `http://127.0.0.1:5173` only) would
+never complete the handshake.
+
+The unit tests inject the window (a bare `EventTarget`), the frame and the
+channel: under happy-dom `window.postMessage` delivers no ports, a fixed
+`origin` and a `source` that is not the sender, and an `<iframe>` pointed at
+the sandbox makes happy-dom fetch it for real. Messages are dispatched by hand
+as `MessageEvent`s with `source` set through `Object.defineProperty`; the real
+handshake is e2e's.
+
 **Tests.** `connectInProcess()` (`lib/engine/testing.ts`) is the only way a
 shell test gets an engine: the real `createService` with the worker's own host
 code (`$sandbox/host.ts`'s `createHost()` and `portOf()`) over a Node
