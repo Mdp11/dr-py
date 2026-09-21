@@ -165,45 +165,45 @@ class Settings(BaseSettings):
     #: a running sweep plus concurrent console/table evaluation would exhaust
     #: a pool of 2 and degrade those interactive calls to ``unavailable``.
     #: 4 sweep workers + 2 interactive headroom = 6.
-    snippet_pool_size: int = 6
+    snippet_pool_size: int = 16
     #: Global cap on concurrently executing snippet runs.
-    snippet_concurrency: int = 4
+    snippet_concurrency: int = 8
     #: Per-user cap on concurrently executing snippet runs.
-    snippet_per_user_concurrency: int = 1
+    snippet_per_user_concurrency: int = 4
     #: Mirrors ``RunLimits.wall_timeout_s`` (see ``run_limits_from_settings``).
-    snippet_wall_timeout_s: float = 10
+    snippet_wall_timeout_s: float = 60
     #: Mirrors ``RunLimits.memory_bytes``.
-    snippet_memory_bytes: int = 256 * 1024 * 1024
+    snippet_memory_bytes: int = 2 * 1024 * 1024 * 1024
     #: Mirrors ``RunLimits.stdout_bytes``.
-    snippet_stdout_bytes: int = 256 * 1024
+    snippet_stdout_bytes: int = 4 * 1024 * 1024
     #: Mirrors ``RunLimits.result_repr_bytes``.
-    snippet_result_repr_bytes: int = 64 * 1024
+    snippet_result_repr_bytes: int = 1024 * 1024
     #: Cap on the export-transform document, BOTH directions: the
     #: serialized doc handed to transform() and the serialized replacement it
     #: returns. Host-side (TransformHost) — deliberately NOT a RunLimits
     #: field, since the guest never enforces it. Breach -> 422 naming the
     #: entry, never a truncation: a machine consumer must not receive a
     #: silently clipped document.
-    snippet_transform_max_bytes: int = 8 * 1024 * 1024
+    snippet_transform_max_bytes: int = 256 * 1024 * 1024
     #: Mirrors ``RunLimits.max_ops``.
-    snippet_max_ops: int = 1000
+    snippet_max_ops: int = 50_000
     #: Mirrors ``RunLimits.max_op_bytes``.
-    snippet_max_op_bytes: int = 1024 * 1024
+    snippet_max_op_bytes: int = 16 * 1024 * 1024
     #: Mirrors ``RunLimits.page_limit``.
-    snippet_page_limit: int = 500
+    snippet_page_limit: int = 5000
     #: Wall budget for one ``ruff format`` subprocess (POST /snippets/format).
     #: Generous for a <=64 KiB file; a breach means something is wrong with the
     #: host, which the route reports as 503 rather than hanging the editor.
-    snippet_format_timeout_s: float = 5.0
+    snippet_format_timeout_s: float = 30.0
     #: Capacity (entries) of the guest facade's session-lifetime read memo.
     #: One entry is one memoized bridge read response (element projection /
     #: adjacency list / type info). 0 disables.
-    snippet_read_memo_max: int = 4096
+    snippet_read_memo_max: int = 100_000
     #: Total wall budget (seconds) for ALL embedded snippet work one
     #: evaluate/export request triggers (``ScriptBudget``, script
     #: columns/steps) — shared across every script column/step call the
     #: request transitively makes, not a per-call timeout.
-    snippet_eval_budget_s: float = 30.0
+    snippet_eval_budget_s: float = 300.0
     #: Capacity of each session's ``ScriptCellCache``.
     #: Consumed at ``Session`` CONSTRUCTION: the ``script_cell_cache`` field's
     #: ``default_factory`` reads this via ``get_settings()`` so every
@@ -211,21 +211,21 @@ class Settings(BaseSettings):
     #: ``Session(metamodel=..., model=...)``) gets a setting-sized cache
     #: without threading a cap argument through ``SessionRegistry``. 50k cells
     #: comfortably holds a whole large table's script column at one rev.
-    snippet_cell_cache_max: int = 50_000
+    snippet_cell_cache_max: int = 1_000_000
     #: Process-wide bound on concurrently RUNNING background sweep jobs
     #: (``script_sweep._global_slots``). Bounded across ALL sessions so N open
     #: projects cannot mean N×workers guest instances — a sweep pool separate
     #: from the interactive ``snippet_concurrency`` guard.
-    snippet_sweep_workers: int = 4
+    snippet_sweep_workers: int = 12
     #: Per-sweep wall ceiling (seconds): a ``SweepJob`` whose ``ScriptBudget``
     #: exhausts mid-grind aborts (``failed``, and NOT cached) rather than
     #: pinning a worker on one pathological table forever.
-    snippet_sweep_ceiling_s: float = 600.0
+    snippet_sweep_ceiling_s: float = 7200.0
     #: Consecutive-timeout abort threshold: a sweep that sees this many script
     #: timeouts in a row gives up (``failed``). A single slow cell resets the
     #: counter on the next success, so only a persistently-timing-out snippet
     #: trips it.
-    snippet_sweep_timeout_abort: int = 3
+    snippet_sweep_timeout_abort: int = 10
     #: Run each background sweep inline (synchronously) inside
     #: ``kick_or_join_sweep`` instead of on a daemon thread. False in
     #: production; tests pin it true (``DATA_ROVER_SNIPPET_SWEEP_SYNC``) so a

@@ -109,6 +109,8 @@ def settings_sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
     `test_parallel_*` tests in `test_script_sweep.py`."""
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_WORKERS", "1")
+    # The guard tests script exact abort sequences against this threshold.
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_TIMEOUT_ABORT", "3")
     settings = get_settings()
     assert settings.snippet_sweep_sync is True
     assert settings.snippet_sweep_workers == 1

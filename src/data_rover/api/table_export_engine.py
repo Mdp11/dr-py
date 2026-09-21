@@ -82,7 +82,7 @@ logger = logging.getLogger(__name__)
 #: inline code, so distinct code per entry (not one snippet shared across
 #: MAX_EXPORTER_ENTRIES entries) is the case to size for, against a
 #: `snippet_pool_size` of warm guests and the per-store memory cap.
-_TRANSFORM_SESSION_CACHE_MAX = 8
+_TRANSFORM_SESSION_CACHE_MAX = 32
 
 
 @dataclass(frozen=True)

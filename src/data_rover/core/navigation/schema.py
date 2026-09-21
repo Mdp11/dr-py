@@ -36,7 +36,7 @@ from data_rover.core.search.criteria import Criterion
 
 SCHEMA_VERSION = 3
 #: hard ceiling on chain length; also the recursion depth of the evaluator.
-MAX_STEPS = 10
+MAX_STEPS = 30
 
 
 class Scope(BaseModel):

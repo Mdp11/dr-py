@@ -57,8 +57,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class EvalLimits:
-    max_visited: int = 100_000
-    max_chains: int = 5_000
+    max_visited: int = 5_000_000
+    max_chains: int = 500_000
 
 
 @dataclass(frozen=True, eq=False)

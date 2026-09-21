@@ -431,16 +431,16 @@ describe('script-error recap 202 retry', () => {
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
 		await ask();
 
-		// The exact bound: 1 requested fetch + RECAP_MAX_ATTEMPTS (120) retries;
-		// the 121st is never scheduled. Same shape as the sweep poll's give-up
+		// The exact bound: 1 requested fetch + RECAP_MAX_ATTEMPTS (7200) retries;
+		// the 7201st is never scheduled. Same shape as the sweep poll's give-up
 		// test, and asserted exactly so a change to the constant has to be a
 		// deliberate edit here rather than sliding under a loose ceiling.
-		await vi.advanceTimersByTimeAsync(1000 * 400);
-		expect(recapSpy).toHaveBeenCalledTimes(121);
+		await vi.advanceTimersByTimeAsync(1000 * 7500);
+		expect(recapSpy).toHaveBeenCalledTimes(7201);
 
 		// ...and it really has stopped, not merely paused.
-		await vi.advanceTimersByTimeAsync(1000 * 400);
-		expect(recapSpy).toHaveBeenCalledTimes(121);
+		await vi.advanceTimersByTimeAsync(1000 * 7500);
+		expect(recapSpy).toHaveBeenCalledTimes(7201);
 		// Giving up is reported as a failed check, not as "no errors" — and the
 		// user can ask again.
 		expect(getScriptErrors(TAB)).toBeNull();
@@ -448,7 +448,7 @@ describe('script-error recap 202 retry', () => {
 
 		recapSpy.mockResolvedValue(RECAP);
 		await ask();
-		expect(recapSpy).toHaveBeenCalledTimes(122);
+		expect(recapSpy).toHaveBeenCalledTimes(7202);
 		expect(getScriptErrors(TAB)).toEqual(RECAP);
 	});
 

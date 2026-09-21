@@ -57,7 +57,7 @@ RowKey = tuple[Binding, ...]
 
 @dataclass(frozen=True)
 class TableLimits:
-    max_rows: int = 50_000
+    max_rows: int = 1_000_000
     max_cell_elements: int = 20
     #: Export-only: ignore each navigation column's per-column `cell_cap`
     #: display preference so a cell carries its COMPLETE reached set (bounded

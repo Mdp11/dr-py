@@ -89,7 +89,7 @@ const POLL_MS = 1_000;
  * `EXPORT_MAX_ATTEMPTS` (~2 minutes at POLL_MS). A backend that somehow keeps
  * answering `computing` must not turn into an infinite client loop — every
  * poll costs a full server-side table pass. Reset by any user-initiated load. */
-const POLL_MAX_ATTEMPTS = 120;
+const POLL_MAX_ATTEMPTS = 7200;
 /** Delay between two script-error recap retries (the recap route answers 202
  * with `Retry-After: 1` while the sweep is still filling the cache). */
 const RECAP_RETRY_MS = 1_000;
@@ -99,7 +99,7 @@ const RECAP_RETRY_MS = 1_000;
  * unbounded once-a-second request loop. Giving up reports the `error` phase —
  * "we could not check", which is the honest answer — and the user can ask
  * again. */
-const RECAP_MAX_ATTEMPTS = 120;
+const RECAP_MAX_ATTEMPTS = 7200;
 
 export interface TableDraft {
 	name: string;

@@ -7,6 +7,7 @@ from data_rover.api import content, db, hydration, importer
 from data_rover.api.db_models import Project, User
 from data_rover.api.importer import import_project
 from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store
+from data_rover.core.script.schema import SNIPPET_MAX_CODE_BYTES
 
 MM = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 MODEL = Path("examples/smart-city.model.json").read_text(encoding="utf-8")
@@ -139,9 +140,9 @@ def _untrusted_bundle() -> str:
              "payload": {"kind": "set_op", "op": "union", "operands": [{"ref": "b-snip"}]}},
             # schema-invalid table: landing it would 500 every GET /tables read
             {"id": "b-table", "kind": "table", "name": "t", "payload": {"nope": 1}},
-            # over the 64 KiB code cap the normal write path enforces
+            # over the code cap the normal write path enforces
             {"id": "b-huge", "kind": "code_snippet", "name": "big",
-             "payload": {"schema_version": 1, "language": "python", "code": "#" * (64 * 1024 + 1)}},
+             "payload": {"schema_version": 1, "language": "python", "code": "#" * (SNIPPET_MAX_CODE_BYTES + 1)}},
             # valid enum but unregistered: no adapter, so nothing can vet it
             {"id": "b-diagram", "kind": "diagram", "name": "d", "payload": {"x": 1}},
             {"id": "b-alien", "kind": "hologram", "name": "h", "payload": {}},

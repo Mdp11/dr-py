@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, TypeAdapter, model_validator
 from typing import Literal
 
 SNIPPET_SCHEMA_VERSION = 1
-SNIPPET_MAX_CODE_BYTES = 64 * 1024
+SNIPPET_MAX_CODE_BYTES = 1024 * 1024
 
 
 class SnippetDefinition(BaseModel):

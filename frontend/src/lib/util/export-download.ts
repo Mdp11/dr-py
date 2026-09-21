@@ -19,7 +19,7 @@ import type { ExportResult } from '$lib/api/tables';
 export const EXPORT_RETRY_MS = 1_000;
 /** Bound on export retries so a stuck sweep surfaces an error instead of
  * spinning silently forever (~2 minutes at EXPORT_RETRY_MS). */
-export const EXPORT_MAX_ATTEMPTS = 120;
+export const EXPORT_MAX_ATTEMPTS = 7200;
 
 /** Progress of an export that is waiting on the background script sweep. */
 export interface ExportProgress {

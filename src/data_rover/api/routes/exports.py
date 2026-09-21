@@ -602,7 +602,7 @@ def _execute_export(
 #: thousands of base elements is bounded here rather than by the eval budget
 #: alone; `truncated` reports the cut. Read as a module global at call time
 #: (never captured in a default argument) so a test can lower it.
-PREVIEW_MAX_FILES = 200
+PREVIEW_MAX_FILES = 2000
 
 
 @router.post("/exports/preview-transform")

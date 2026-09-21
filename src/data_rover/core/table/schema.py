@@ -33,7 +33,7 @@ from data_rover.core.script.schema import SnippetSource
 from data_rover.core.search.criteria import Criterion
 
 SCHEMA_VERSION = 1
-MAX_COLUMNS = 50
+MAX_COLUMNS = 200
 
 
 class NavigationSource(BaseModel):

@@ -34,7 +34,7 @@ from .schema import NavigationColumn
 
 MemoKey = tuple[int, tuple[str, ...]]
 
-DEFAULT_MAX_ENTRIES = 64
+DEFAULT_MAX_ENTRIES = 1024
 
 
 @dataclass(frozen=True)

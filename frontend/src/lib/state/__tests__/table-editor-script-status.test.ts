@@ -163,24 +163,24 @@ describe('table script-status polling', () => {
 			.mockResolvedValue(pageAt(100, 100, 300, { state: 'computing', done: 40, total: 300 }));
 		await seedComputing(spy as unknown as ReturnType<typeof vi.fn>);
 
-		// 1 seed + 120 polls; the 121st is never scheduled.
-		await vi.advanceTimersByTimeAsync(1000 * 200);
-		expect(spy).toHaveBeenCalledTimes(121);
+		// 1 seed + 7200 polls; the 7201st is never scheduled.
+		await vi.advanceTimersByTimeAsync(1000 * 7500);
+		expect(spy).toHaveBeenCalledTimes(7201);
 		const status = getTableScriptStatus(TAB);
 		expect(status).toMatchObject({ state: 'failed', done: 40, total: 300 });
 		expect(status?.message).toMatch(/giving up/i);
 
 		// ...and it really has stopped, not merely paused.
-		await vi.advanceTimersByTimeAsync(1000 * 200);
-		expect(spy).toHaveBeenCalledTimes(121);
+		await vi.advanceTimersByTimeAsync(1000 * 7500);
+		expect(spy).toHaveBeenCalledTimes(7201);
 
 		// A USER-initiated load starts a fresh budget (the sweep may have moved
 		// on), so the loop resumes rather than being wedged for the tab's life.
 		await loadTablePage(TAB, 100);
-		expect(spy).toHaveBeenCalledTimes(122);
+		expect(spy).toHaveBeenCalledTimes(7202);
 		expect(getTableScriptStatus(TAB)).toMatchObject({ state: 'computing' });
 		await vi.advanceTimersByTimeAsync(1000);
-		expect(spy).toHaveBeenCalledTimes(123);
+		expect(spy).toHaveBeenCalledTimes(7203);
 	});
 
 	it('clears the status when a page arrives without one', async () => {

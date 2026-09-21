@@ -212,7 +212,7 @@ _REFILL_POLL_S = 0.2
 #: How long `run()` waits for a warm instance before giving up. Generous
 #: relative to the measured ~110-170ms boot-to-ready so a cold pool (e.g.
 #: right after construction) still serves the first request.
-_POOL_GET_TIMEOUT_S = 10.0
+_POOL_GET_TIMEOUT_S = 60.0
 
 #: How long instance teardown waits for the guest worker thread to notice
 #: `quit`/EOF and exit before giving up (the thread is a daemon either way, so

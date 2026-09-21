@@ -33,7 +33,7 @@ from .schema import (
 #: save), NOT an export-time strictness rule. Without it, POST /exports/run's
 #: viewer-supplied draft definitions could chain unboundedly many whole-table
 #: exports (each O(model)) into one synchronous request.
-MAX_EXPORTER_ENTRIES = 50
+MAX_EXPORTER_ENTRIES = 500
 
 
 #: The four wire formats an export can ship as. One vocabulary for

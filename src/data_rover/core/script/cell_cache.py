@@ -70,7 +70,7 @@ CACHEABLE_ERROR_KINDS = frozenset({"runtime", "syntax"})
 #: extra recompute for that one cell; it can NEVER cause a stale value,
 #: only extra work. Deliberately far below `_MAX_READS`: this bounds
 #: steady-state cache memory, not a single call's worst case.
-_MAX_STORED_READS = 128
+_MAX_STORED_READS = 2000
 
 
 class ScriptCellCache:

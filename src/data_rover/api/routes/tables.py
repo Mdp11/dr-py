@@ -629,7 +629,7 @@ def export_table(
 
 #: Rows the preview renders before it stops. Read as a module global at call
 #: time (never captured in a default argument) so a test can lower it.
-PREVIEW_MAX_ROWS = 200
+PREVIEW_MAX_ROWS = 2000
 
 
 @router.post("/tables/json-preview")
@@ -730,7 +730,7 @@ def json_preview(
 #: does not ship 50 000 grid addresses to render a list nobody scrolls. Read
 #: as a module global at call time (never captured in a default argument) so a
 #: test can lower it.
-SCRIPT_ERRORS_CAP = 200
+SCRIPT_ERRORS_CAP = 5000
 
 
 def _collect_script_errors(

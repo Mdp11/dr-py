@@ -145,6 +145,7 @@ def test_run_limits_from_settings_maps_every_field() -> None:
         snippet_max_ops=444,
         snippet_max_op_bytes=555,
         snippet_page_limit=666,
+        snippet_read_memo_max=777,
     )
 
     limits = run_limits_from_settings(settings)
@@ -156,6 +157,7 @@ def test_run_limits_from_settings_maps_every_field() -> None:
     assert limits.max_ops == 444
     assert limits.max_op_bytes == 555
     assert limits.page_limit == 666
+    assert limits.read_memo_max == 777
     assert limits == RunLimits(
         wall_timeout_s=5.5,
         memory_bytes=111,
@@ -164,6 +166,7 @@ def test_run_limits_from_settings_maps_every_field() -> None:
         max_ops=444,
         max_op_bytes=555,
         page_limit=666,
+        read_memo_max=777,
     )
 
 
