@@ -13,8 +13,10 @@ export const SNAPSHOT_V2_FORMAT = 'datarover.snapshot/v2';
 const V2_PREFIX = `{"format":"${SNAPSHOT_V2_FORMAT}"`;
 const DIGEST = /^[0-9a-f]{16}$/;
 // Lines parsed and loaded at a time: enough for one native parse to pay off,
-// few enough to stay a short task between two chunks.
-const BATCH_LINES = 2000;
+// few enough to stay a short step (at 2,000 the worst batch took 36 ms at M).
+const BATCH_LINES = 500;
+// A chunk is decoded and split in pieces of at most this many bytes.
+const PIECE_BYTES = 1 << 16;
 
 /** The first line of a snapshot, in the wire's names. */
 export type SnapshotHeader = {
@@ -32,7 +34,16 @@ export type OpenedSnapshot = { header: SnapshotHeader; workingCopy: WorkingCopy 
 /** Told after every batch of entities: how many are loaded, of how many. */
 export type OpenProgress = (done: number, total: number) => void;
 
-export type OpenOptions = ModelOptions & WorkingCopyOptions;
+export type OpenOptions = ModelOptions &
+	WorkingCopyOptions & {
+		/**
+		 * Asked after every loaded batch and every step of the index build: a
+		 * returned promise is awaited before the open goes on, and a throw ends it.
+		 */
+		pause?: () => Promise<void> | undefined;
+		/** Told after every step of the index build. */
+		onIndex?: OpenProgress;
+	};
 
 function checkFormat(start: string): void {
 	if (!start.startsWith(V2_PREFIX)) throw new SnapshotError(`not a ${SNAPSHOT_V2_FORMAT} snapshot`);
@@ -109,19 +120,23 @@ class Reader {
 		return this.header === null ? 0 : this.header.elements + this.header.relationships;
 	}
 
-	take(lines: readonly string[]): void {
+	/** Takes lines; ends a step after every batch it loads. */
+	*take(lines: readonly string[]): Generator<void, void, void> {
 		for (const line of lines) {
 			if (this.header === null) this.header = readHeader(line);
 			else {
 				if (this.seen++ < this.total) this.batch.push(line);
-				if (this.batch.length >= BATCH_LINES) this.load();
+				if (this.batch.length >= BATCH_LINES) {
+					this.load();
+					yield;
+				}
 			}
 		}
 	}
 
 	/** Parses and loads the lines held: the first `elements` of a snapshot are elements. */
-	load(): void {
-		if (this.batch.length === 0) return;
+	load(): boolean {
+		if (this.batch.length === 0) return false;
 		const { model } = this;
 		const elements = this.header!.elements;
 		const first = model.elementCount + model.relationshipCount;
@@ -132,6 +147,7 @@ class Reader {
 		});
 		this.batch = [];
 		this.onProgress?.(model.elementCount + model.relationshipCount, this.total);
+		return true;
 	}
 }
 
@@ -143,6 +159,10 @@ class Reader {
  *
  * The digest is adopted, not checked: `verifyDigest()` does that, whenever the
  * caller chooses. A text that cannot be read throws `SnapshotError`.
+ *
+ * With `options.pause` the open yields between batches and between the steps
+ * of the index build, a large chunk included: awaiting the next chunk is no
+ * yield when it is already there.
  */
 export async function openSnapshot(
 	chunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
@@ -162,16 +182,25 @@ export async function openSnapshot(
 		}
 	};
 
+	// Only a returned promise is awaited: without one, going on costs no microtask.
+	const pause = options.pause ?? (() => undefined);
+	let wait: Promise<void> | undefined;
+
 	for await (const chunk of chunks) {
-		reader.take(splitter.push(decode(chunk)));
-		// Anything but a v2 snapshot may be one endless line: refuse it at its first bytes.
-		if (reader.header === null && splitter.pending.length >= V2_PREFIX.length) {
-			checkFormat(splitter.pending);
+		for (let at = 0; at < chunk.length; at += PIECE_BYTES) {
+			const batches = reader.take(splitter.push(decode(chunk.subarray(at, at + PIECE_BYTES))));
+			while (batches.next().done !== true) if ((wait = pause())) await wait;
+			// Anything but a v2 snapshot may be one endless line: refuse it at its first bytes.
+			if (reader.header === null && splitter.pending.length >= V2_PREFIX.length) {
+				checkFormat(splitter.pending);
+			}
 		}
 	}
-	reader.take(splitter.push(decode()));
 	// A last line may lack its LF; the server's own reader takes it too.
-	if (splitter.pending !== '') reader.take([splitter.pending]);
+	const rest = splitter.push(decode());
+	if (splitter.pending !== '') rest.push(splitter.pending);
+	const batches = reader.take(rest);
+	while (batches.next().done !== true) if ((wait = pause())) await wait;
 	const header = reader.header;
 	if (header === null) throw new SnapshotError(`not a ${SNAPSHOT_V2_FORMAT} snapshot`);
 	// Checked before the last lines are parsed: what a cut text gets wrong first is its length.
@@ -181,8 +210,11 @@ export async function openSnapshot(
 				`its header promises ${header.elements} + ${header.relationships}`
 		);
 	}
-	reader.load();
-	model.rebuildIndexes();
+	if (reader.load() && (wait = pause())) await wait;
+	for (const { done, total } of model.rebuildIndexSteps()) {
+		options.onIndex?.(done, total);
+		if ((wait = pause())) await wait;
+	}
 	const committed = { rev: header.rev, digest: header.state_digest };
 	return { header, workingCopy: new WorkingCopy(model, committed, options) };
 }

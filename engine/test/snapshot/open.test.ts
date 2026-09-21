@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { Model, openSnapshot } from '../../src/index.ts';
+import {
+	dumpIndexes,
+	Metamodel,
+	Model,
+	modelDigest,
+	modelLines,
+	openSnapshot,
+	type MetamodelDoc
+} from '../../src/index.ts';
+import { loadFixture } from '../golden/load.ts';
 import { observe } from '../golden/model-steps.ts';
 import { family, nodeMetamodel } from '../model/fixtures.ts';
-import { cut, headerLine, refusal, snapshotText, utf8 } from './text.ts';
+import { cut, headerLine, refusal, snapshotText, trickle, utf8 } from './text.ts';
 
 const NOT_V2 = 'not a datarover.snapshot/v2 snapshot';
 
@@ -17,10 +26,11 @@ function withLine(number: number, line: string | null): string {
 }
 
 describe('opening', () => {
-	// 2,000 lines make a batch; the elements end inside the second one.
+	// 500 lines make a batch; the elements fill the first six.
 	it.each([
-		[1500, [2000, 4000, 4500]],
-		[1000, [2000, 4000]]
+		[1500, [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500]],
+		[1000, [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000]],
+		[1250, [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4250]]
 	])('reports progress after every batch: %i relationships', async (relationships, expected) => {
 		const model = new Model(nodeMetamodel());
 		for (let i = 0; i < 3000; i++) model.createElement('Node', `n${i}`);
@@ -128,5 +138,116 @@ describe('a text that cannot be read', () => {
 		expect(await refusal(open(withLine(6, orphan)))).toBe(
 			"Relationship 'a-b' references unknown source 'x'"
 		);
+	});
+});
+
+describe('an open that yields', () => {
+	const fixture = loadFixture<{
+		metamodel: MetamodelDoc;
+		text: string;
+		refused: { name: string; text: string; error: string }[];
+	}>('snapshot_v2');
+	const mm = Metamodel.fromJSON(fixture.metamodel);
+
+	/** A model of `elements` nodes and `relationships` references between them. */
+	function nodes(elements: number, relationships: number): Model {
+		const model = new Model(nodeMetamodel());
+		for (let i = 0; i < elements; i++) model.createElement('Node', `n${i}`);
+		for (let i = 0; i < relationships; i++) model.connect('Refers', `n${i}`, `n${i + 1}`, `r${i}`);
+		return model;
+	}
+
+	it('pause is asked after every batch and every index step', async () => {
+		const log: string[] = [];
+		const { workingCopy } = await openSnapshot(
+			cut(utf8(fixture.text), 64),
+			mm,
+			() => log.push('batch'),
+			{
+				pause: () => void log.push('pause'),
+				onIndex: () => log.push('index')
+			}
+		);
+		const lines = fixture.text.split('\n').length - 2;
+		expect(log.filter((entry) => entry === 'batch')).toHaveLength(Math.ceil(lines / 500));
+		expect(log.indexOf('pause')).toBeGreaterThan(log.indexOf('batch'));
+		const indexed = log.slice(log.lastIndexOf('batch'));
+		expect(indexed.filter((entry) => entry === 'index').length).toBeGreaterThan(0);
+		expect(indexed.filter((entry) => entry === 'pause').length).toBeGreaterThan(
+			indexed.filter((entry) => entry === 'index').length - 1
+		);
+
+		const { workingCopy: plain } = await openSnapshot(cut(utf8(fixture.text), 64), mm);
+		expect(modelLines(workingCopy.model)).toEqual(modelLines(plain.model));
+		expect(dumpIndexes(workingCopy.model)).toEqual(dumpIndexes(plain.model));
+		expect(modelDigest(workingCopy.model)).toBe(modelDigest(plain.model));
+	});
+
+	it('one large chunk still pauses between its batches', async () => {
+		// Five batches of 500 lines in a single chunk.
+		const model = nodes(2000, 500);
+		const log: string[] = [];
+		await openSnapshot(
+			[utf8(snapshotText(model, 1))],
+			nodeMetamodel(),
+			(done, total) => log.push(done === total ? 'all' : 'batch'),
+			{ pause: () => void log.push('pause') }
+		);
+		const before = log.slice(0, log.indexOf('all'));
+		expect(before.filter((entry) => entry === 'pause').length).toBeGreaterThanOrEqual(4);
+	});
+
+	it('a returned promise is awaited', async () => {
+		const model = nodes(1200, 600);
+		const log: string[] = [];
+		let calls = 0;
+		const pause = () => {
+			if (++calls % 3 !== 0) return undefined;
+			log.push('paused');
+			return new Promise<void>((resume) =>
+				setTimeout(() => {
+					log.push('resumed');
+					resume();
+				}, 0)
+			);
+		};
+		await openSnapshot(
+			trickle(utf8(snapshotText(model, 1)), 1 << 15),
+			nodeMetamodel(),
+			() => log.push('progress'),
+			{ pause, onIndex: () => log.push('index') }
+		);
+		expect(log.filter((entry) => entry === 'paused').length).toBeGreaterThan(1);
+		let paused = false;
+		for (const entry of log) {
+			if (entry === 'paused') paused = true;
+			else if (entry === 'resumed') paused = false;
+			else expect(paused).toBe(false);
+		}
+		expect(paused).toBe(false);
+	});
+
+	it('onIndex ends at its total, onProgress at the entity count', async () => {
+		const model = nodes(1500, 700);
+		const progress: [number, number][] = [];
+		const index: [number, number][] = [];
+		await openSnapshot(
+			[utf8(snapshotText(model, 1))],
+			nodeMetamodel(),
+			(done, total) => progress.push([done, total]),
+			{ pause: () => undefined, onIndex: (done, total) => index.push([done, total]) }
+		);
+		expect(progress.at(-1)).toEqual([2200, 2200]);
+		const total = 2 * 1500 + 700 + 1;
+		expect(index.at(-1)).toEqual([total, total]);
+		expect(index.length).toBeGreaterThan(1);
+	});
+
+	it('a refusal still surfaces through a paused open', async () => {
+		const cutText = fixture.refused.find((each) => each.name === 'cut inside a line')!;
+		const opening = openSnapshot(cut(utf8(cutText.text), 16), mm, undefined, {
+			pause: () => Promise.resolve()
+		});
+		expect(await refusal(opening)).toBe(cutText.error);
 	});
 });
