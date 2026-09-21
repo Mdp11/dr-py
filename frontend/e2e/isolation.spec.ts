@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openDefaultProject } from './helpers/auth';
 
 // The sandbox's CSP, verbatim (sandbox/vite.config.ts): the app and the
 // sandbox both run under it, and this spec is the one place that pins the
@@ -24,4 +25,17 @@ test('the sandbox site serves its isolation headers', async ({ request }) => {
 test('a missing path on the sandbox site 404s', async ({ request }) => {
 	const res = await request.get('http://localhost:5174/no-such-path');
 	expect(res.status()).toBe(404);
+});
+
+test('the workspace embeds the sandbox once, and only the workspace', async ({ page }) => {
+	await openDefaultProject(page);
+	const frame = page.locator('iframe[title="Data Rover engine"]');
+	await expect(frame).toHaveCount(1);
+	const src = await frame.getAttribute('src');
+	expect(src === null ? null : new URL(src).origin).toBe('http://localhost:5174');
+
+	// A client-side navigation: the page is unmounted, not unloaded.
+	await page.getByRole('button', { name: 'Data Rover', exact: true }).click();
+	await page.waitForURL('**/projects');
+	await expect(frame).toHaveCount(0);
 });

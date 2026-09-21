@@ -96,6 +96,16 @@ event     {event, …}                     engine → client, unsolicited
 
 - Transport-agnostic: a `MessagePort` in the browser; an in-process call in the headless host
   and in tests.
+- Port hand-over. Four handshake messages over `window.postMessage`: the sandbox page posts
+  `{type: 'sandbox-ready', crossOriginIsolated}` once its worker exists, and
+  `{type: 'csp-violation', directive, blocked}` / `{type: 'worker-error', message}` as they
+  happen, each with the app's origin as target; the shell answers `{type: 'connect'}` carrying
+  ONE transferred `MessagePort`, with the sandbox's origin as target. Each side checks both
+  origin and source: the shell takes a message only from the sandbox's origin and its own
+  frame's window, the page a `connect` only from the app's origin, from `window.parent` and
+  with exactly one port. The page accepts one `connect` per page life, hands the port to the
+  worker and keeps no reference to it — from then on it is outside the data path, and every
+  CT-4 message runs over that port between the shell and the worker.
 - For a migrated surface, `method` names map 1:1 to the exported `lib/api` functions, and
   `params` / `result` are those functions' existing zod-validated shapes. Paging parameters
   stay.

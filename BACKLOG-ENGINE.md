@@ -26,8 +26,9 @@ A → F. A (engine foundation) has landed: package, value layer and golden-fixtu
 Python snapshot v2 and state digest; metamodel, record-graph store, indexes and mutation
 boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
 the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
-and frontend seam) is designed — six plans, listed in `architecture/program.md`, the first three
-built (exact server state; v2 snapshot writers and the replica routes; the engine service) — and
+and frontend seam) is designed — six plans, listed in `architecture/program.md`, four of them
+built (exact server state; v2 snapshot writers and the replica routes; the engine service; the
+sandbox site and the shell, the replica opening and following in the background) — and
 watches `K-32`. The freeze rule (`MR-3`)
 covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
 plan, and `routes/read.py`'s route functions and `routes/elements.py::get_element` from the
@@ -74,6 +75,14 @@ plan 2 landed. Check once against the dev stack:
 `select cast('null'::json as varchar) = 'null', cast(null::json as varchar) is null;` must
 answer `t, t`. If it does not, the descriptor and the tail would call an over-cap commit
 expressible and serve a delta with no entities.
+
+### K-37 · A `model_rev` bump with no journal row is silent to a replica · `open` · *2026-09-22*
+`POST /model/upload`, `POST /metamodel`, `DELETE /metamodel` and the legacy element routes
+bump `model_rev` and broadcast nothing. A replica hears of them at the next delta — a gap, an
+incomplete tail, a re-bootstrap — or at a reconnect. Harmless while nothing reads the replica;
+once a surface does, a read between the bump and the next delta answers from before it.
+Decide before a surface defaults to the engine: broadcast a header-only event from
+`touch_model` and `set_model`, or have the shell re-bootstrap after its own such calls.
 
 ---
 

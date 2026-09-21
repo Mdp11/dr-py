@@ -10,7 +10,7 @@ are promoted into this directory.
 |---|---|---|
 | — | Program design (this directory) | approved 2026-09-18 |
 | A | Engine foundation | done — every golden fixture passes in Node; at M the engine opens a snapshot in 2.3 s of CN-3's 3 s and one open replica holds 231 MB of heap *(measured, Node 22, `pixi run engine-bench`, 2026-09-18)* |
-| B | Replica and frontend seam | designed 2026-09-19, six plans — plans 1–3 built (exact server state: `K-30` and `K-31` closed, digest and `prev_rev` on every delta carrier; v2 snapshot writers, the snapshot descriptor, blob and tail routes, `X-Metamodel-Id`; the engine service: CT-4 dispatcher and scheduler, the index build and the digest check in steps, the five read surfaces ported and held to the read routes by fixture — at M the open is 2.4 s, the longest step 12 ms *(measured, Node 22, 2026-09-21)*) |
+| B | Replica and frontend seam | designed 2026-09-19, six plans — plans 1–4 built (exact server state: `K-30` and `K-31` closed, digest and `prev_rev` on every delta carrier; v2 snapshot writers, the snapshot descriptor, blob and tail routes, `X-Metamodel-Id`; the engine service: CT-4 dispatcher and scheduler, the index build and the digest check in steps, the five read surfaces ported and held to the read routes by fixture — at M the open is 2.4 s, the longest step 12 ms *(measured, Node 22, 2026-09-21)*; the sandbox site and the shell: the replica opens from the cache or the network and follows by delta, tail and re-bootstrap, with a status-bar indicator as its only face) |
 | C | Evaluation | not started |
 | D | Scripts in the browser | not started |
 | E | Headless host | not started |
@@ -47,8 +47,10 @@ search is C's; neighborhoods have no caller today and move when one exists.
 rollback, recreated entities, digest and `prev_rev` on every delta carrier; (2) v2 snapshot
 writers and the snapshot descriptor, blob and tail routes; (3) the engine service — CT-4
 dispatcher, scheduler, sliced index build and digest check, the reads; (4) sandbox and shell,
-the replica opening and following in the background; (5) the transport swap, surface by
-surface, with shadow comparison and the browser benchmark; (6) the forked store.
+the replica opening and following in the background, seen through an indicator; (5) the
+transport swap, surface by surface, with shadow comparison and the browser benchmark, with the
+wait for `ready`, the open-journey slices, the boot-fallback notice and the re-bootstrap
+banner; (6) the forked store.
 **Done when.** Those surfaces and staging are served by the engine by default; cold open and
 heap meet budget; divergence recovery is exercised by a test.
 
