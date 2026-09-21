@@ -1,9 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { openDefaultProject } from './helpers/auth';
 
-// The sandbox's CSP, verbatim (sandbox/vite.config.ts): the app and the
-// sandbox both run under it, and this spec is the one place that pins the
-// exact string so the two cannot drift silently.
+// The sandbox's policy, verbatim (sandbox/vite.config.ts), pinned here so a
+// change to that config fails this test. The app itself serves no CSP.
 const SANDBOX_CSP =
 	"default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self'";
 

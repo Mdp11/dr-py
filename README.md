@@ -58,8 +58,9 @@ pixi run sandbox-start    # http://localhost:5174  (built files, separate termin
 ```
 
 Open <http://127.0.0.1:5173> — not `localhost`: the sandbox site above serves
-from `localhost`, and the app and the sandbox must be different hosts for the
-cross-origin isolation handshake between them to apply. On first boot the
+from `localhost` and answers only the app at `http://127.0.0.1:5173`, and the
+two must be different sites — cookies ignore ports, so a second port on the
+app's host would be same-site with the login cookie. On first boot the
 backend creates the schema and ensures the bootstrap admin exists — it does
 **not** seed any project. The frontend opens the **login** page — sign in,
 then create a project with the **New Project** wizard.

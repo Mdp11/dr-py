@@ -41,8 +41,9 @@ pixi run dr-reset    # stop everything + wipe the Postgres/fake-gcs volumes (cle
 ```
 
 Open <http://127.0.0.1:5173> (not `localhost` — the sandbox site above serves
-from `localhost`, and the app and the sandbox must be different hosts for the
-cross-origin isolation handshake between them to apply) and log in:
+from `localhost` and answers only the app at `http://127.0.0.1:5173`, and the
+two must be different sites: cookies ignore ports, so a second port on the
+app's host would be same-site with the login cookie) and log in:
 
 ```
 admin@example.com / admin12345

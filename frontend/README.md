@@ -767,7 +767,12 @@ attempt in flight ends at its next step, and nothing is followed — no delta
 crosses a rebind anyway. `metamodelAdopted()` — the rebind banner's Reload,
 the committer's in-place refetch — re-bootstraps it onto the metamodel the
 server serves now, staged batches carried; in any other phase it does
-nothing.
+nothing. The run records the highest rev it froze at, and a rebind at or
+below it is ignored: the feed broadcasts the rebind to the committer too, and
+that echo may come after the committer's own `rebound` settle and adoption,
+where freezing again would abort the re-bootstrap with only the banner's
+Reload left to thaw it. A `ready` replica ignores a rebind at or below its
+own rev as well — it opened from a snapshot written under the new metamodel.
 
 **Status**. One `ReplicaStatus` object, replaced on every change and
 handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
@@ -1935,8 +1940,9 @@ pixi run frontend-start
 ```
 
 Open http://127.0.0.1:5173 (not `localhost` — the sandbox site serves from
-`localhost`, and the app and the sandbox must be different hosts for the
-cross-origin isolation handshake between them to apply), log in, and open a
+`localhost`, and it answers only the app at `http://127.0.0.1:5173`; the two
+must be different sites, and cookies ignore ports, so a second port on the
+app's host would be same-site with the login cookie), log in, and open a
 project — import `smart-city` via
 the New Project wizard if you have none. Then **TopBar → Edit Metamodel**, and
 click the **Diagram** toggle in the tab's toolbar.

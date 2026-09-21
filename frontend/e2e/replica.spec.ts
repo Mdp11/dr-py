@@ -98,6 +98,7 @@ test('the replica opens in the real sandbox', async ({ page }) => {
 	await expectReplicaReady(page);
 	const indicator = replica(page);
 	await expect(indicator).toHaveAttribute('data-isolated', 'true');
+	// Counts the sandbox PAGE's violations; the worker's are not reported.
 	await expect(indicator).toHaveAttribute('data-csp-violations', '0');
 	expect(await replicaRev(page)).toBe(await headRev(api, projectId));
 	expect(errors).toEqual([]);
