@@ -112,16 +112,21 @@ event     {event, …}                     engine → client, unsolicited
    touched, so committed reads need no rewind. A refused batch leaves no trace, and a rewind
    is exact: every touched entity goes back to its before-image — properties, `rev` and place
    in state order — which replaying inverse ops cannot give. The server's rollback
-   (`routes/ops.py::_rollback`) is the same operation, pass for pass.
+   (`routes/ops.py::_rollback`) is the same operation, pass for pass. A property update staged
+   alone merges into the first staged update of the same entity, which keeps its place and its
+   first before-image; the result is the state a replay of the staged ops gives.
 3. To apply a delta: rewind all staged ops in reverse order → apply the delta → drop the staged
    ops it committed → rewrite temp ids through `id_map` → replay the rest. An op that fails
-   replay is parked as a conflict and surfaced; it is never dropped silently.
+   replay is parked as a conflict and surfaced; it is never dropped silently. With the user's
+   own commit named, a delta that arrives as a duplicate still drops the batches it committed.
 4. Reads default to the working copy; `committed: true` selects committed state.
 5. The working copy covers the **model** and **artifact** families — the inputs of
    evaluation. References resolve against it, staged artifacts included. View and
    metamodel staged buffers stay in the frontend.
 6. Temp ids (`tmp_` prefix) never leave the client except as an op's `temp_id`. The server
    mints every real id.
+7. `adoptStaged` replays staged batches, under their ids, on a freshly opened replica — what a
+   re-bootstrap carries over — parking what no longer applies.
 
 ## CT-6 · Script bridge
 

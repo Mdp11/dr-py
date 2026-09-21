@@ -1,6 +1,7 @@
 import { ModelError } from '../model/errors.ts';
 import { pyRepr } from '../value/repr.ts';
 import type { Model } from '../model/model.ts';
+import type { ElementRec, RelRec } from '../model/records.ts';
 import { applyBatch } from '../ops/apply.ts';
 import { OpError } from '../ops/errors.ts';
 import { remapOp } from '../ops/remap.ts';
@@ -12,7 +13,7 @@ import {
 	type RelImage
 } from '../ops/result.ts';
 import { rewind } from '../ops/rewind.ts';
-import type { ModelOp } from '../ops/types.ts';
+import type { ModelOp, UpdateElementOp, UpdateRelationshipOp } from '../ops/types.ts';
 import { entityHash, formatDigest, type EntityHash } from '../snapshot/digest.ts';
 import { drain, type Steps } from '../steps/steps.ts';
 import { readDelta, type CommittedChange, type Delta } from './delta.ts';
@@ -27,12 +28,24 @@ export type StagedBatch = { readonly id: number; readonly ops: readonly ModelOp[
 /** A staged batch that a change underneath it made impossible to apply. */
 export type Conflict = { readonly batch: StagedBatch; readonly error: OpError };
 
-/** The ids an operation may have changed, and the ids it left absent. */
+/**
+ * The ids an operation may have changed, and the ids it left absent.
+ * `structural` says that it may have moved more than properties: it names a
+ * relationship, a deleted element, or an element that was absent when it
+ * began — or it is the user's own commit with minted ids.
+ */
 export type ChangeSet = {
 	elementIds: string[];
 	relationshipIds: string[];
 	deletedElementIds: string[];
 	deletedRelationshipIds: string[];
+	structural: boolean;
+};
+
+/** Every entity a staged batch touched: its committed image, and its record now. */
+export type StagedDiff = {
+	elements: { id: string; before: ElementImage | null; after: ElementRec | null }[];
+	relationships: { id: string; before: RelImage | null; after: RelRec | null }[];
 };
 
 /**
@@ -52,10 +65,27 @@ type Entry = { batch: StagedBatch; result: BatchResult };
 class Touched {
 	readonly elements = new Set<string>();
 	readonly relationships = new Set<string>();
+	// The elements present when the operation began, of those it may name.
+	private readonly present = new Set<string>();
+	private readonly seen = new Set<string>();
 
 	add(result: BatchResult): void {
 		for (const id of result.beforeElements.keys()) this.elements.add(id);
 		for (const id of result.beforeRelationships.keys()) this.relationships.add(id);
+	}
+
+	/** Before anything moves: which of `ids` are present. */
+	notePresent(model: Model, ids: Iterable<string>): void {
+		for (const id of ids) if (model.findElement(id) !== undefined) this.present.add(id);
+	}
+
+	/** For batches applied in turn: an element's first before-image is its state at the start. */
+	noteFirstImages(result: BatchResult): void {
+		for (const [id, image] of result.beforeElements) {
+			if (this.seen.has(id)) continue;
+			this.seen.add(id);
+			if (image !== null) this.present.add(id);
+		}
 	}
 
 	/** Present now means changed, absent means deleted: over-reporting is harmless. */
@@ -69,6 +99,7 @@ class Touched {
 				id
 			);
 		}
+		changes.structural = isStructural(changes, (id) => this.present.has(id));
 		return changes;
 	}
 }
@@ -77,8 +108,43 @@ const emptyChangeSet = (): ChangeSet => ({
 	elementIds: [],
 	relationshipIds: [],
 	deletedElementIds: [],
-	deletedRelationshipIds: []
+	deletedRelationshipIds: [],
+	structural: false
 });
+
+function isStructural(changes: ChangeSet, wasPresent: (id: string) => boolean): boolean {
+	return (
+		changes.relationshipIds.length > 0 ||
+		changes.deletedRelationshipIds.length > 0 ||
+		changes.deletedElementIds.length > 0 ||
+		changes.elementIds.some((id) => !wasPresent(id))
+	);
+}
+
+/** What one batch, applied on top, changed: exactly its result's sets. */
+function batchChanges(result: BatchResult): ChangeSet {
+	const changes: ChangeSet = {
+		elementIds: [...result.changedElementIds],
+		relationshipIds: [...result.changedRelationshipIds],
+		deletedElementIds: [...result.deletedElementIds],
+		deletedRelationshipIds: [...result.deletedRelationshipIds],
+		structural: false
+	};
+	changes.structural = isStructural(
+		changes,
+		(id) => (result.beforeElements.get(id) ?? null) !== null
+	);
+	return changes;
+}
+
+function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
+	return a.length === b.length && a.every((item, i) => item === b[i]);
+}
+
+type UpdateOp = UpdateElementOp | UpdateRelationshipOp;
+
+const isUpdate = (op: ModelOp): op is UpdateOp =>
+	op.kind === 'update_element' || op.kind === 'update_relationship';
 
 function touches(
 	op: ModelOp,
@@ -120,6 +186,7 @@ export class WorkingCopy {
 	private entries: Entry[] = [];
 	private parked: Conflict[] = [];
 	private nextBatchId = 1;
+	private version = 0;
 	private readonly entityHash: EntityHash;
 	// The first before-image of every entity a staged batch touched: its
 	// committed state, `null` when it has none.
@@ -160,6 +227,30 @@ export class WorkingCopy {
 
 	conflicts(): readonly Conflict[] {
 		return this.parked;
+	}
+
+	/**
+	 * Moves whenever `staged()` or `conflicts()` come to hold other batch
+	 * objects: a stage, a merge, a remap, a batch dropped or parked.
+	 */
+	get stagedVersion(): number {
+		return this.version;
+	}
+
+	/** One pair per entity a staged batch touched, in first-touch order. */
+	stagedDiff(): StagedDiff {
+		return {
+			elements: [...this.committedElements].map(([id, before]) => ({
+				id,
+				before,
+				after: this.model.findElement(id) ?? null
+			})),
+			relationships: [...this.committedRelationships].map(([id, before]) => ({
+				id,
+				before,
+				after: this.model.findRelationship(id) ?? null
+			}))
+		};
 	}
 
 	isStaged(id: string): boolean {
@@ -230,31 +321,95 @@ export class WorkingCopy {
 	/**
 	 * Applies `ops` on top of everything staged. Created entities live under
 	 * their temp ids. A refused batch throws `OpError` and leaves no trace.
+	 *
+	 * With `coalesce`, a single property update merges into the first staged
+	 * op of the same kind and id instead — later keys win, a `null` stays —
+	 * and the batch holding it is replayed with everything after it. It is
+	 * never merged in place: a key deleted and set again would move, and the
+	 * state would no longer be the one a replay of `staged()` gives.
 	 */
-	stage(ops: readonly ModelOp[]): { batch: StagedBatch; changes: ChangeSet } {
-		const result = applyBatch(this.model, ops);
-		const batch = { id: this.nextBatchId++, ops };
-		this.keep({ batch, result });
-		return {
-			batch,
-			changes: {
-				elementIds: [...result.changedElementIds],
-				relationshipIds: [...result.changedRelationshipIds],
-				deletedElementIds: [...result.deletedElementIds],
-				deletedRelationshipIds: [...result.deletedRelationshipIds]
+	stage(
+		ops: readonly ModelOp[],
+		options: { coalesce?: boolean } = {}
+	): { batch: StagedBatch; coalesced: boolean; changes: ChangeSet } {
+		return this.tracked(() => {
+			const merged = options.coalesce === true && ops.length === 1 ? this.coalesce(ops[0]!) : null;
+			if (merged !== null) return { ...merged, coalesced: true };
+			const result = applyBatch(this.model, ops);
+			const batch = { id: this.nextBatchId++, ops };
+			this.keep({ batch, result });
+			return { batch, coalesced: false, changes: batchChanges(result) };
+		});
+	}
+
+	private coalesce(op: ModelOp): { batch: StagedBatch; changes: ChangeSet } | null {
+		if (!isUpdate(op)) return null;
+		for (let at = 0; at < this.entries.length; at++) {
+			const { batch } = this.entries[at]!;
+			const index = batch.ops.findIndex((other) => other.kind === op.kind && other.id === op.id);
+			if (index < 0) continue;
+			// Tried alone on top first: a bad patch must not park the user's earlier edits.
+			rewind(this.model, applyBatch(this.model, [op]));
+			const found = batch.ops[index] as UpdateOp;
+			const patch = { ...found.properties_patch, ...op.properties_patch };
+			const merged = {
+				id: batch.id,
+				ops: batch.ops.with(index, { ...found, properties_patch: patch })
+			};
+			const changes = this.rebase(at, () => {
+				this.entries[0] = { ...this.entries[0]!, batch: merged };
+			});
+			return { batch: merged, changes };
+		}
+		return null;
+	}
+
+	/**
+	 * Replays batches carried over from another replica, under their ids, on
+	 * one that has none: what a re-bootstrap keeps. The ones that no longer
+	 * apply are parked.
+	 */
+	adoptStaged(batches: readonly StagedBatch[]): {
+		changes: ChangeSet;
+		conflicts: readonly Conflict[];
+	} {
+		if (this.entries.length > 0 || this.parked.length > 0) {
+			throw new ModelError(
+				'value',
+				'Staged batches can only be adopted by a replica that has none'
+			);
+		}
+		return this.tracked(() => {
+			const touched = new Touched();
+			for (const batch of batches) {
+				try {
+					const result = applyBatch(this.model, batch.ops);
+					touched.noteFirstImages(result);
+					touched.add(result);
+					this.keep({ batch, result });
+				} catch (caught) {
+					if (!(caught instanceof OpError)) throw caught;
+					this.parked.push({ batch, error: caught });
+				}
+				this.nextBatchId = Math.max(this.nextBatchId, batch.id + 1);
 			}
-		};
+			return { changes: touched.changeSet(this.model), conflicts: [...this.parked] };
+		});
 	}
 
 	unstage(what: Unstage): ChangeSet {
+		return this.tracked(() => this.unstageNow(what));
+	}
+
+	private unstageNow(what: Unstage): ChangeSet {
 		if (what === 'all') {
 			this.parked = [];
-			return this.rebase(() => (this.entries = []));
+			return this.rebase(0, () => (this.entries = []));
 		}
 		if ('batch' in what) {
 			this.parked = this.parked.filter((conflict) => conflict.batch.id !== what.batch);
 			if (!this.entries.some((entry) => entry.batch.id === what.batch)) return emptyChangeSet();
-			return this.rebase(() => {
+			return this.rebase(0, () => {
 				this.entries = this.entries.filter((entry) => entry.batch.id !== what.batch);
 			});
 		}
@@ -266,7 +421,7 @@ export class WorkingCopy {
 			)
 		}));
 		if (kept.every(({ batch, ops }) => ops.length === batch.ops.length)) return emptyChangeSet();
-		return this.rebase(() => {
+		return this.rebase(0, () => {
 			this.entries = this.entries.flatMap((entry, i) => {
 				const ops = kept[i]!.ops;
 				return ops.length === 0 ? [] : [{ ...entry, batch: { id: entry.batch.id, ops } }];
@@ -294,28 +449,62 @@ export class WorkingCopy {
 	 * the staged batches it carried: they are dropped, and the ids the server
 	 * minted replace their temp ids in what stays staged.
 	 *
+	 * A duplicate that names the user's own commit still drops its batches:
+	 * the echo of a commit can arrive before the commit's own answer.
+	 *
 	 * A delta the replica cannot hold throws `SnapshotError` before anything
 	 * moves. One that does not fit the replica, or whose digest disagrees
 	 * afterwards, sets `diverged`.
 	 */
 	applyDelta(delta: Delta, own?: OwnCommit): { status: DeltaStatus; changes: ChangeSet } {
+		return this.tracked(() => this.applyDeltaNow(delta, own));
+	}
+
+	private applyDeltaNow(
+		delta: Delta,
+		own?: OwnCommit
+	): { status: DeltaStatus; changes: ChangeSet } {
+		const minted = own !== undefined && own.idMap.size > 0;
 		if (delta.prev_rev !== this.committedRev) {
 			const status = delta.rev <= this.committedRev ? 'duplicate' : 'gap';
+			if (status === 'duplicate' && own !== undefined && this.holdsAny(own.batchIds)) {
+				const changes = this.rebase(0, () => this.adopt(own));
+				changes.structural ||= minted;
+				return { status, changes };
+			}
 			return { status, changes: emptyChangeSet() };
 		}
 		const change = readDelta(delta);
-		const changes = this.rebase((touched) => {
-			try {
-				this.commit(change, touched);
-			} catch (caught) {
-				if (!(caught instanceof ModelError)) throw caught;
-				this.hasDiverged = true;
-			}
-			if (own !== undefined) this.adopt(own);
-		});
+		const named = [
+			...change.elements.map((element) => element.id),
+			...change.deletedElementIds,
+			...change.recreatedElementIds
+		];
+		const changes = this.rebase(
+			0,
+			(touched) => {
+				try {
+					this.commit(change, touched);
+				} catch (caught) {
+					if (!(caught instanceof ModelError)) throw caught;
+					this.hasDiverged = true;
+				}
+				if (own !== undefined) this.adopt(own);
+			},
+			named
+		);
+		changes.structural ||= minted;
 		this.committedRev = delta.rev;
 		if (this.digest !== delta.state_digest) this.hasDiverged = true;
 		return { status: 'applied', changes };
+	}
+
+	private holdsAny(batchIds: readonly number[]): boolean {
+		const ids = new Set(batchIds);
+		return (
+			this.entries.some((entry) => ids.has(entry.batch.id)) ||
+			this.parked.some((conflict) => ids.has(conflict.batch.id))
+		);
 	}
 
 	/**
@@ -425,22 +614,55 @@ export class WorkingCopy {
 		}
 	}
 
+	/** Runs `action`, and moves the staged version if the batch lists hold other objects after it. */
+	private tracked<T>(action: () => T): T {
+		const staged = this.entries.map((entry) => entry.batch);
+		const parked = this.parked.map((conflict) => conflict.batch);
+		try {
+			return action();
+		} finally {
+			const same =
+				sameItems(
+					staged,
+					this.entries.map((entry) => entry.batch)
+				) &&
+				sameItems(
+					parked,
+					this.parked.map((conflict) => conflict.batch)
+				);
+			if (!same) this.version++;
+		}
+	}
+
 	/**
-	 * Rewinds every staged batch, newest first; runs `change` on committed
-	 * state, where it may also edit the staged list; replays what is left, in
-	 * order, parking each batch that is refused.
+	 * Rewinds the staged batches from the newest down to the one at `from`;
+	 * runs `change` on the state below them, where it may also edit that part
+	 * of the staged list; replays it, in order, parking each batch that is
+	 * refused. The batches below `from` stand as they are. `named` are the
+	 * element ids the change itself may touch.
 	 */
-	private rebase(change: (touched: Touched) => void): ChangeSet {
+	private rebase(
+		from: number,
+		change: (touched: Touched) => void,
+		named: Iterable<string> = []
+	): ChangeSet {
 		const touched = new Touched();
-		for (const entry of this.entries.toReversed()) {
+		const kept = this.entries.slice(0, from);
+		const rewound = this.entries.slice(from);
+		touched.notePresent(this.model, named);
+		for (const entry of rewound)
+			touched.notePresent(this.model, entry.result.beforeElements.keys());
+		for (const entry of rewound.toReversed()) {
 			rewind(this.model, entry.result);
 			touched.add(entry.result);
 		}
 		this.committedElements.clear();
 		this.committedRelationships.clear();
+		this.entries = rewound;
 		change(touched);
 		const replay = this.entries;
 		this.entries = [];
+		for (const entry of kept) this.keep(entry);
 		for (const { batch } of replay) {
 			try {
 				const result = applyBatch(this.model, batch.ops);

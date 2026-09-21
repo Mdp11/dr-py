@@ -59,6 +59,7 @@ export {
 	type DeltaStatus,
 	type OwnCommit,
 	type StagedBatch,
+	type StagedDiff,
 	type Unstage,
 	type WorkingCopyOptions
 } from './working/working-copy.ts';

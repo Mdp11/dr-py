@@ -49,7 +49,8 @@ describe('staging', () => {
 			relationshipIds: ['tmp_r'],
 			deletedElementIds: ['b', 'd'],
 			// per deleted element, its outgoing relationships, then its incoming ones
-			deletedRelationshipIds: ['b-d', 'a-b']
+			deletedRelationshipIds: ['b-d', 'a-b'],
+			structural: true
 		});
 		expect(wc.model.getElement('a').props).toEqual({ name: 'renamed' });
 		expect(wc.committedElement('a')).toMatchObject({ props: { name: 'A' }, rev: 1 });
@@ -132,7 +133,8 @@ describe('unstaging', () => {
 			elementIds: [],
 			relationshipIds: [],
 			deletedElementIds: [],
-			deletedRelationshipIds: []
+			deletedRelationshipIds: [],
+			structural: false
 		});
 	});
 
@@ -422,5 +424,185 @@ describe('verifying the digest', () => {
 		);
 		expect(wc.verifyDigest()).toBe(true);
 		expect(calls).toBe(count);
+	});
+});
+
+describe('the own commit on a duplicate', () => {
+	it("a duplicate that names the user's own batches still drops them", () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const mine = wc.stage([node('tmp_e', 'E')]).batch;
+		wc.stage([{ kind: 'update_element', id: 'a', properties_patch: { peer: 'tmp_e' } }]);
+		const { delta, result } = server.commit(mine.ops);
+		// The echo first: the staged create now exists twice, under its temp id and its real one.
+		expect(wc.applyDelta(delta).status).toBe('applied');
+		expect(wc.model.findElement('tmp_e')).toBeDefined();
+		expect(wc.model.findElement('srv-1')).toBeDefined();
+
+		const own = { batchIds: [mine.id], idMap: result.idMap };
+		const { status, changes } = wc.applyDelta(delta, own);
+		expect(status).toBe('duplicate');
+		expect(changes.structural).toBe(true);
+		expect(wc.staged()).toEqual([
+			{ id: 2, ops: [{ kind: 'update_element', id: 'a', properties_patch: { peer: 'srv-1' } }] }
+		]);
+		expect(wc.model.findElement('tmp_e')).toBeUndefined();
+		const fresh = workingCopy(clone(server.model), 1);
+		for (const batch of wc.staged()) fresh.stage(batch.ops);
+		expect(observe(wc.model)).toEqual(observe(fresh.model));
+		expect(wc.diverged).toBe(false);
+		verifyConsistent(wc.model);
+	});
+
+	it('a batch its own echo parked is dropped too', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const mine = wc.stage([{ kind: 'delete_element', id: 'c' }]).batch;
+		const { delta, result } = server.commit(mine.ops);
+		wc.applyDelta(delta);
+		expect(wc.conflicts().map(({ batch, error }) => [batch.id, error.detail])).toEqual([
+			[1, "No element with id 'c"]
+		]);
+		const { status } = wc.applyDelta(delta, { batchIds: [mine.id], idMap: result.idMap });
+		expect(status).toBe('duplicate');
+		expect(wc.conflicts()).toEqual([]);
+		expect(wc.staged()).toEqual([]);
+		expect(observe(wc.model)).toEqual(observe(server.model));
+	});
+
+	it('a duplicate without own changes nothing', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		wc.stage([rename('a', 'mine')]);
+		const { delta } = server.commit([rename('c', 'theirs')]);
+		wc.applyDelta(delta);
+		const [before, version, staged] = [observe(wc.model), wc.stagedVersion, wc.staged()];
+		const { status, changes } = wc.applyDelta(delta);
+		expect(status).toBe('duplicate');
+		expect(changes).toEqual({
+			elementIds: [],
+			relationshipIds: [],
+			deletedElementIds: [],
+			deletedRelationshipIds: [],
+			structural: false
+		});
+		expect(observe(wc.model)).toEqual(before);
+		expect(wc.stagedVersion).toBe(version);
+		expect(wc.staged()).toEqual(staged);
+	});
+});
+
+describe('structural', () => {
+	it('a property-only stage is not', () => {
+		expect(workingCopy(family()).stage([rename('a', 'x')]).changes.structural).toBe(false);
+	});
+
+	it.each<[string, ModelOp[]]>([
+		['a create', [node('tmp_e', 'E')]],
+		['a delete', [{ kind: 'delete_element', id: 'c' }]],
+		['a relationship created', [refers('tmp_r', 'a', 'd')]],
+		['a relationship updated', [{ kind: 'update_relationship', id: 'a-c', properties_patch: {} }]],
+		['a relationship deleted', [{ kind: 'delete_relationship', id: 'a-c' }]]
+	])('%s is', (_, ops) => {
+		expect(workingCopy(family()).stage(ops).changes.structural).toBe(true);
+	});
+
+	it('the unstage of a staged create and of a staged delete are', () => {
+		const created = workingCopy(family());
+		created.stage([node('tmp_e', 'E')]);
+		expect(created.unstage('all').structural).toBe(true);
+		const deleted = workingCopy(family());
+		deleted.stage([{ kind: 'delete_element', id: 'c' }]);
+		expect(deleted.unstage({ entity: 'c' }).structural).toBe(true);
+	});
+
+	it('a peer delta that only changes properties while renames are staged is not', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		wc.stage([rename('a', 'one')]);
+		wc.stage([rename('b', 'two')]);
+		wc.stage([rename('d', 'three')]);
+		const { changes } = wc.applyDelta(server.commit([rename('c', 'theirs')]).delta);
+		expect(changes.structural).toBe(false);
+	});
+
+	it('a delta that adds an element is', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		wc.stage([rename('a', 'one')]);
+		const { changes } = wc.applyDelta(server.commit([node('tmp_p', 'P')]).delta);
+		expect(changes.structural).toBe(true);
+	});
+
+	it('an own commit with an id map is', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const mine = wc.stage([rename('a', 'one'), node('tmp_e', 'E')]).batch;
+		const { delta, result } = server.commit(mine.ops);
+		const { changes } = wc.applyDelta(delta, { batchIds: [mine.id], idMap: result.idMap });
+		expect(changes.structural).toBe(true);
+	});
+});
+
+describe('the staged version', () => {
+	it('moves on stage, merge, unstage, own-commit drop and a rebase that parks', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		const moves: boolean[] = [];
+		const step = (action: () => unknown) => {
+			const version = wc.stagedVersion;
+			action();
+			moves.push(wc.stagedVersion !== version);
+		};
+		step(() => wc.stage([rename('a', 'one')]));
+		step(() => wc.stage([rename('a', 'two')], { coalesce: true }));
+		step(() => wc.stage([rename('d', 'doomed')]));
+		step(() => wc.unstage({ entity: 'a' }));
+		step(() => wc.applyDelta(server.commit([{ kind: 'delete_element', id: 'b' }]).delta));
+		const mine = wc.stage([node('tmp_e', 'E')]).batch;
+		const { delta, result } = server.commit(mine.ops);
+		step(() => wc.applyDelta(delta, { batchIds: [mine.id], idMap: result.idMap }));
+		expect(moves).toEqual([true, true, true, true, true, true]);
+	});
+
+	it('stays on a delta that leaves the lists alone and on an unstage that matched nothing', () => {
+		const committed = family();
+		const server = new Server(clone(committed));
+		const wc = workingCopy(committed);
+		wc.stage([rename('a', 'one')]);
+		const version = wc.stagedVersion;
+		wc.applyDelta(server.commit([rename('c', 'theirs')]).delta);
+		wc.unstage({ entity: 'nobody' });
+		wc.unstage({ batch: 99 });
+		expect(wc.stagedVersion).toBe(version);
+	});
+});
+
+describe('stagedDiff', () => {
+	it('pairs the committed image with the staged record, in first-touch order', () => {
+		const wc = workingCopy(family());
+		wc.stage([rename('a', 'renamed')]);
+		wc.stage([node('tmp_e', 'E'), { kind: 'delete_element', id: 'c' }]);
+		const diff = wc.stagedDiff();
+		expect(diff.elements.map(({ id, before, after }) => [id, before?.props, after?.props])).toEqual(
+			[
+				['a', { name: 'A' }, { name: 'renamed' }],
+				['tmp_e', undefined, { name: 'E' }],
+				['c', { name: 'C' }, undefined]
+			]
+		);
+		expect(diff.elements[1]!.before).toBeNull();
+		expect(diff.elements[2]!.after).toBeNull();
+		expect(diff.elements[0]!.after).toBe(wc.model.getElement('a'));
+		expect(
+			diff.relationships.map(({ id, before, after }) => [id, before?.sourceId, after])
+		).toEqual([['a-c', 'a', null]]);
 	});
 });

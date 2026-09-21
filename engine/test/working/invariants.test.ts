@@ -161,4 +161,72 @@ describe('working-copy invariants over seeded random batches', () => {
 		expect(observe(wc.model)).toEqual(observe(fresh.model));
 		verifyConsistent(wc.model);
 	});
+
+	it.each(SEEDS)(
+		'seed %i: coalescing, deltas and unstages keep the state a replay of staged() gives',
+		(seed) => {
+			const random = seededRandom(seed);
+			const server = grow(random, 30);
+			const wc = workingCopy(clone(server.model), server.rev);
+			const mine = new RandomOps(random);
+			const peer = new RandomOps(random, 'tmp_peer');
+			for (let i = 0; i < 40; i++) {
+				shuffleAdjacency(wc.model, random);
+				const roll = random();
+				try {
+					if (roll < 0.45) {
+						const update = mine.batch(wc.model).find((op) => op.kind === 'update_element');
+						if (update !== undefined) wc.stage([update], { coalesce: true });
+					} else if (roll < 0.65) {
+						wc.stage(mine.batch(wc.model));
+					} else if (roll < 0.85) {
+						wc.applyDelta(landSome(server, peer).delta);
+					} else {
+						const staged = wc.staged();
+						const ids = [...wc.model.elements()].map((element) => element.id);
+						if (random() < 0.5 && staged.length > 0) {
+							wc.unstage({ batch: staged[Math.floor(random() * staged.length)]!.id });
+						} else if (ids.length > 0) {
+							wc.unstage({ entity: ids[Math.floor(random() * ids.length)]! });
+						}
+					}
+				} catch (caught) {
+					if (!(caught instanceof OpError)) throw caught;
+				}
+				const fresh = workingCopy(clone(server.model), server.rev);
+				for (const batch of wc.staged()) fresh.stage(batch.ops);
+				expect(observe(wc.model)).toEqual(observe(fresh.model));
+				verifyConsistent(wc.model);
+			}
+			expect(wc.diverged).toBe(false);
+		}
+	);
+
+	it.each(SEEDS)('seed %i: adopting staged batches equals restaging them one by one', (seed) => {
+		const random = seededRandom(seed);
+		const server = grow(random, 30);
+		const wc = workingCopy(clone(server.model), server.rev);
+		stageSome(wc, new RandomOps(random), random, 10);
+		const batches = wc.staged();
+
+		const same = workingCopy(clone(server.model), server.rev);
+		expect(same.adoptStaged(batches).conflicts).toEqual([]);
+		expect(observe(same.model)).toEqual(observe(wc.model));
+		expect(same.staged()).toEqual(batches);
+
+		const peer = new RandomOps(random, 'tmp_peer');
+		for (let i = 0; i < 5; i++) landSome(server, peer);
+		const adopter = workingCopy(clone(server.model), server.rev);
+		const { conflicts } = adopter.adoptStaged(batches);
+		const restager = workingCopy(clone(server.model), server.rev);
+		const refused = restage(
+			restager,
+			batches.map((batch) => batch.ops)
+		);
+		expect(observe(adopter.model)).toEqual(observe(restager.model));
+		expect(conflicts.map((conflict) => conflict.batch.id)).toEqual(
+			refused.map((i) => batches[i]!.id)
+		);
+		verifyConsistent(adopter.model);
+	});
 });
