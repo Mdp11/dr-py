@@ -642,6 +642,105 @@ one crosses as a string, alongside whatever the shell parses for its own use.
   `fetchMetamodelDocument()` (the metamodel document as `JSON.parse` gives it,
   no zod reshape, paired with the `X-Metamodel-Id` response header).
 
+**Opening** (`lib/engine/sync.ts`). `createReplicaSync(deps)` is the one place
+that knows the order of things; the frame, the client, the cache and the
+replica API reach it as injected dependencies (`SyncDeps`: `connect`, `api`,
+`cache`, `sleep`, `onStatus`), which is what lets its tests run the real engine
+through `connectInProcess()`. `replicaApi(root)` is the production `api`: every
+call carries `{baseUrl: root + '/projects/<id>'}` of the sync's OWN project, so
+a late call of a stopped open can never land on the next project (the active
+base URL is a module global read at call time).
+
+`open(projectId)` runs attempts (M7). One attempt:
+
+1. The snapshot descriptor. `null` (a 404, no model) ends the open with phase
+   `off`, reason `no model` — no frame is even built.
+2. The engine link, built on first need and kept until `stop()`. A `connect()`
+   that rejects (`FrameError`: same host, timeout, worker error) is phase
+   `server` AT ONCE, its message the reason, no retry.
+3. The metamodel document (D3: before the bytes, because the engine's `open`
+   takes it). An `X-Metamodel-Id` that is not the descriptor's `metamodel_id`
+   — a rebind landed mid-open — goes back to step 1 at no charge, three times
+   per open; after that a mismatch is a counted failure.
+4. `open {project_id, metamodel}`, then the bytes. A cache hit (the
+   descriptor's exact `rev`) is one `chunk` transferring the whole buffer,
+   `source: 'cache'`. A miss streams `descriptor.url`: every chunk read off the
+   body is copied for the cache and transferred as `chunk`, EXACTLY the chunk
+   — a view into a larger buffer is copied first, since transferring its
+   `buffer` would send the whole buffer and the engine would read all of it.
+   The `chunk` calls are not awaited one by one; progress is `download`,
+   `done` in bytes, `total` the `Content-Length` (`null` without it).
+5. `end`: the header must name the descriptor's `rev` and `metamodel_id`. When
+   the cached bytes are refused (a 422, or a header that is not the
+   descriptor's) the row is dropped and the attempt runs again from step 1
+   from the network, uncounted (D9). After a good `end` on a download, the
+   bytes are `put` in the cache — never before, so a broken download is never
+   cached.
+6. (A re-bootstrap's staged batches: `adoptStaged`.)
+7. The tail from the header's `rev`. `complete: false` fails the attempt: the
+   descriptor promised a complete tail, so something moved, and the next
+   attempt's descriptor names another snapshot. The body is parsed twice, by
+   the shell for `complete` and by the engine exactly (D15).
+8. `applyTail {text}`; a `gap` or `diverged: true` fails the attempt.
+9. `ready` at the result's `rev`, and the waiting inputs drain.
+
+A failed attempt tells the engine `close` (its answer ignored), sleeps 1 s,
+then 3 s, and tries again; after the third failure the phase is `server` when
+this open was never `ready` — the link is disposed — and `failed` otherwise. A
+call rejected with `EngineGoneError` (the worker died after the handshake)
+drops the link, and the next attempt builds a new one. `stop()` aborts the
+run: every await of an attempt races the run's abort signal, the download's
+fetch is aborted by the same signal, the link is disposed, the waiting inputs
+are emptied and the status is `OFF`. A link that arrives after its open was
+stopped is disposed on arrival. `open` of the project already open is a no-op;
+of another, `stop()` first. `settled()` resolves once no attempt runs, the
+pump is idle, no sleep is pending and the cache write is done — tests await it
+instead of polling.
+
+**Feed inputs** (`feedCommit(raw, rev)`, `feedSnapshot(modelRev)`) form ONE
+queue, handled one at a time in arrival order (M8). While `opening` or
+`resyncing` they wait; at 1,000 waiting (D12) the queue is emptied and a
+catch-up is owed instead — the tail from the replica's `rev`, which covers
+everything that was waiting. In `off`, `frozen`, `failed` and `server` they
+are dropped. Once `ready`: a delta whose `rev` is not past the replica's is
+dropped without a call (unless it is the user's own), anything else is
+`applyDelta {text}`; a snapshot event ahead of the replica runs a catch-up.
+The replica's `rev` comes from the answers of `applyTail` and `applyDelta`,
+never from the shell's arithmetic. A delta answered `gap` or `diverged`, an
+incomplete catch-up tail, a failed call or the engine's `replica diverged`
+event stop the following (phase `failed`, with the reason) — healing them,
+the rebind freeze and the commit in flight are not built yet.
+
+**Status** (M11). One `ReplicaStatus` object, replaced on every change and
+handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
+`frozen`, `failed`, `server`), `rev`, `progress` (`{task, done, total}` —
+`download` from the shell; `parse`, `index` and `tail` from the engine while
+opening; `verify`, the background digest check, carried in `ready` too),
+`attempt` (1–3 while opening or resyncing, else 0), `source` (`cache` /
+`network`), `isolated` (the frame's `crossOriginIsolated`, `null` before the
+handshake), `cspViolations` (every violation the frame reported) and `reason`
+(why `off`, `frozen`, `failed` or `server`). `server` is the boot fallback: the
+frame did not connect, or three opens failed before the first `ready`. Today
+it only shows in the status; plan 5 turns `server` into the surface flip and
+its notice, and `failed` into the blocking re-bootstrap banner (D1).
+
+**The fake project server** (`lib/engine/__tests__/support/project-server.ts`,
+M12). `fakeProject({projectId, rev, metamodelId})` holds the smart-city example
+in an engine `Model` built from the engine's public exports (the engine's own
+test helpers cannot be imported from this Vite root) and stands for the
+backend: `commit(ops)` / `silentCommit(ops)` land a batch (ids `srv-1`, …) and
+return the delta, its feed frame and its commit response as texts;
+`rebind(id)` and `opaqueBump()` make every tail across them incomplete and
+take a fresh snapshot; `snapshot()` fixes the snapshot the descriptor names;
+`handlers({chunk?, hold?})` are the four MSW routes (descriptor, streamed
+snapshot bytes with `Content-Length`, tail, metamodel with `X-Metamodel-Id`),
+`hold` stopping the download after its first chunk until released;
+`requests` counts them; `fail(route, status, times)`, `corruptNextSnapshot()`
+and `wrongDigestInNextSnapshot()` script failures. `syncOver(project,
+overrides?)` is a sync over `connectInProcess()`, `replicaApi(BASE)`, a cache
+on a fresh `fake-indexeddb` and a `sleep` that records its delay and resolves
+at once, with every status, sleep, link and engine call recorded.
+
 ### Artifact import/export (bundle export/preview/import)
 
 The TopBar's toolbar `<nav>` (see Layout above) hosts an **Artifacts** menu

@@ -1,20 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-	Metamodel,
-	Model,
-	modelDigest,
-	modelLines,
-	parseJson,
-	pyDumps,
-	type MetamodelDoc,
-	type ServiceEvent,
-	type Value
-} from '$engine';
+import { pyDumps, type ServiceEvent } from '$engine';
 import { ConflictError, NotFoundError, ValidationError } from '$lib/api/errors';
 import { createEngineClient, EngineGoneError, type ClientPort, type EngineLink } from '../client';
 import { connectInProcess } from '../testing';
+import { smartCitySnapshot } from './support/project-server';
 
 const links: EngineLink[] = [];
 
@@ -51,38 +40,6 @@ async function rejection(calling: Promise<unknown>): Promise<unknown> {
 		},
 		(error: unknown) => error
 	);
-}
-
-/** The smart-city example as a gzipped v2 snapshot, cut into pieces of `size` bytes. */
-function smartCitySnapshot(size = 4096): { doc: MetamodelDoc; chunks: ArrayBuffer[] } {
-	const root = process.cwd() + '/..';
-	const fixture = JSON.parse(
-		readFileSync(`${root}/engine/fixtures/golden/smart_city.json`, 'utf-8')
-	) as { metamodel: MetamodelDoc };
-	const json = parseJson(readFileSync(`${root}/examples/smart-city.model.json`, 'utf-8')) as {
-		[key: string]: Value[];
-	};
-	const model = new Model(Metamodel.fromJSON(fixture.metamodel));
-	for (const element of json['elements']!) model.loadElement(element);
-	for (const rel of json['relationships']!) model.loadRelationship(rel);
-	model.rebuildIndexes();
-	const header = pyDumps({
-		format: 'datarover.snapshot/v2',
-		project_id: 'p',
-		rev: 0,
-		metamodel_id: 'mm-1',
-		elements: model.elementCount,
-		relationships: model.relationshipCount,
-		state_digest: modelDigest(model)
-	});
-	const text = [header, ...modelLines(model)].map((line) => line + '\n').join('');
-	const bytes = gzipSync(Buffer.from(text, 'utf8'), { level: 3 });
-	const chunks: ArrayBuffer[] = [];
-	for (let at = 0; at < bytes.length; at += size) {
-		const piece = bytes.subarray(at, at + size);
-		chunks.push(piece.buffer.slice(piece.byteOffset, piece.byteOffset + piece.length));
-	}
-	return { doc: fixture.metamodel, chunks };
 }
 
 const EMPTY_TAIL = pyDumps({ from_rev: 0, head_rev: 0, complete: true, deltas: [] });
