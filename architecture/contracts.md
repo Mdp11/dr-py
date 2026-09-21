@@ -111,6 +111,18 @@ event     {event, …}                     engine → client, unsolicited
   `ready` (the shell buffers). `close` drops the replica, and any open in flight. A delta and
   a tail cross as the text the shell received (AD-26); a commit response is a delta as it
   stands, its `model_rev` read as `rev`.
+- Staging: `stage {ops}` → `{batch, coalesced, changes, elements, relationships}` — the
+  post-state of what it changed, both lists `null` past 500 entities; a single property update
+  merges into the first staged update of the same entity (CT-5). `unstage {what}` (`'all'`,
+  `{batch}`, `{entity, incident?}`) → `{changes}`; `stagedDiff` → before / after pairs from the
+  committed images; `staged` and `conflicts` → the batches, answered in any state. Context,
+  in any state: `setViewPlacement {view_id, element_ids}`, `dropViewPlacement {view_id}` —
+  each loaded view's committed placements, which the excluded pool reads.
+- A result is the HTTP response body of the `lib/api` function the method is named after.
+- Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
+  for it — nothing is refused for arriving early. Requests are served in arrival order: a
+  transition waits for every read that arrived before it and holds everything behind it, and
+  between the slices of a long read, reads that arrived later are answered.
 - Events: `replica {state: opening|ready|diverged, rev}` (`rev` null while opening);
   `progress {task, done, total}` for the tasks `parse`, `index`, `tail` and `verify` — at most
   once per slice per task, plus a task's first and last; `changed {rev, staged_version,

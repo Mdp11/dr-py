@@ -75,3 +75,8 @@ export type StageResult = {
 	elements: WireElement[] | null;
 	relationships: WireRelationship[] | null;
 };
+export type StagedDiffResult = {
+	elements: { id: string; before: WireElement | null; after: WireElement | null }[];
+	relationships: { id: string; before: WireRelationship | null; after: WireRelationship | null }[];
+};
+export type ViewPlacementParams = { view_id: string; element_ids: string[] };

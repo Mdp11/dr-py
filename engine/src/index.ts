@@ -103,10 +103,12 @@ export type {
 	ResponseMessage,
 	ServiceDeps,
 	ServiceEvent,
+	StagedDiffResult,
 	StageParams,
 	StageResult,
 	TailParams,
 	TailResult,
+	ViewPlacementParams,
 	WireBatch,
 	WireChanges,
 	WireConflict

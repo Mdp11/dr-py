@@ -118,10 +118,10 @@ export function connect(host = autoHost()) {
 		if ('event' in (message as object)) {
 			const event = message as Event;
 			events.push(event);
-			const waiter = waiters.findIndex((w) => w.match(event));
-			if (waiter >= 0) {
+			for (const waiter of waiters.filter((w) => w.match(event))) {
 				seen = events.length;
-				waiters.splice(waiter, 1)[0]!.resolve(event);
+				waiters.splice(waiters.indexOf(waiter), 1);
+				waiter.resolve(event);
 			}
 			return;
 		}

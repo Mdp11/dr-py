@@ -7,7 +7,14 @@ import { ReadError } from '../read/errors.ts';
 import { READS, readScans } from '../read/index.ts';
 import type { ReadParams } from '../read/params.ts';
 import { ViewPlacements } from '../read/placements.ts';
-import { readOps, wireElement, wireOps, wireRelationship } from '../read/wire.ts';
+import {
+	readOps,
+	wireElement,
+	wireElementImage,
+	wireOps,
+	wireRelationship,
+	wireRelImage
+} from '../read/wire.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
 import { pyRepr } from '../value/repr.ts';
@@ -31,6 +38,7 @@ import type {
 	ReplicaState,
 	ServiceDeps,
 	ServiceEvent,
+	StagedDiffResult,
 	StageResult,
 	TailResult,
 	WireBatch,
@@ -80,6 +88,22 @@ const wireConflict = (conflict: Conflict): WireConflict => ({
 	batch: wireBatch(conflict.batch),
 	error: { status: conflict.error.status, detail: conflict.error.detail }
 });
+
+function stagedDiff(wc: WorkingCopy): StagedDiffResult {
+	const diff = wc.stagedDiff();
+	return {
+		elements: diff.elements.map(({ id, before, after }) => ({
+			id,
+			before: before === null ? null : wireElementImage(before),
+			after: after === null ? null : wireElement(after)
+		})),
+		relationships: diff.relationships.map(({ id, before, after }) => ({
+			id,
+			before: before === null ? null : wireRelImage(before),
+			after: after === null ? null : wireRelationship(after)
+		}))
+	};
+}
 
 /** Past this many changed entities, `stage` answers their ids alone. */
 const STAGE_POST_STATE_MAX = 500;
@@ -166,6 +190,12 @@ const read =
 	(service, call) =>
 		service.read(method, call);
 
+/** A read of the working copy itself, queued as a read of the model is. */
+const inspect =
+	(run: (wc: WorkingCopy) => unknown): Method =>
+	(service, call) =>
+		service.inspect(call, run);
+
 /**
  * A transition of the model: waits for a ready replica, in arrival order.
  * `accept` reads the params at arrival — a malformed request is refused
@@ -194,8 +224,23 @@ const METHODS: { readonly [method: string]: Method } = {
 		return (wc) => service.unstage(wc, what);
 	}),
 	staged: now((service) => service.wc?.staged().map(wireBatch) ?? []),
+	conflicts: now((service) => service.wc?.conflicts().map(wireConflict) ?? []),
+	stagedDiff: inspect(stagedDiff),
 
-	getElement: read('getElement')
+	setViewPlacement: now((service, params) => {
+		const elementIds = params['element_ids'];
+		if (!Array.isArray(elementIds) || !elementIds.every((id) => typeof id === 'string')) {
+			throw new Refused(422, 'element_ids must be a list of strings');
+		}
+		service.placements.set(text(params, 'view_id'), elementIds as string[]);
+		return null;
+	}),
+	dropViewPlacement: now((service, params) => {
+		service.placements.drop(text(params, 'view_id'));
+		return null;
+	}),
+
+	...Object.fromEntries(Object.keys(READS).map((method) => [method, read(method)]))
 };
 
 type Opening = {
@@ -308,6 +353,10 @@ class Service {
 				}
 			});
 		}
+	}
+
+	inspect(call: Call, run: (wc: WorkingCopy) => unknown): void {
+		this.submit(call, 'model', { kind: 'read', run: () => run(this.ready()) });
 	}
 
 	transition(call: Call, run: (wc: WorkingCopy) => unknown): void {
