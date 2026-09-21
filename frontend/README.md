@@ -631,7 +631,7 @@ one crosses as a string, alongside whatever the shell parses for its own use.
   user's own commit (see "State model" above) can hand its body to the
   replica. `OpsResponseSchema` (and so `CommitResponseSchema`) gains `prev_rev`
   (nullable, optional): a `null` value means the batch applied nothing, and
-  the replica is handed nothing either (D19).
+  the replica is handed nothing either.
 - `lib/api/replica.ts` is the client for the routes CLAUDE.md's "Replica
   routes" describes: `getSnapshotDescriptor` (the parsed descriptor, or `null`
   on a 404 — no model yet), `fetchSnapshot(url, signal)` (the raw `Response`

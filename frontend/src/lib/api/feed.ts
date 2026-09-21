@@ -30,8 +30,9 @@ export type FeedEvent =
 			/** which content families the commit touched ("model"/"artifact");
 			 * reducer treats absent as ["model"] defensively */
 			scope?: string[];
-			/** CT-2 delta fields (see CLAUDE.md "The commit delta"), carried so a
-			 * replica can fold the event without a second fetch. */
+			/** the commit delta's remaining fields (see CLAUDE.md "The commit
+			 * delta"), carried so a replica can fold the event without a second
+			 * fetch. */
 			prev_rev?: number;
 			state_digest?: string;
 			recreated_element_ids?: string[];
@@ -68,8 +69,8 @@ export interface WebSocketLike {
 
 export interface FeedConfig {
 	/** `raw` is the frame's text exactly as it arrived, JSON.parse untouched —
-	 * a replica reads it with the exact parser (AD-26) instead of trusting
-	 * `e`, which lost `1.0` and integers past 2^53 to `JSON.parse`. */
+	 * a replica reads it with the exact parser instead of trusting `e`, which
+	 * lost `1.0` and integers past 2^53 to `JSON.parse`. */
 	onEvent: (e: FeedEvent, raw: string) => void;
 	onStatus: (connected: boolean) => void;
 	url: string;

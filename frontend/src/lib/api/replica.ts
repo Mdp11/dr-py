@@ -1,7 +1,7 @@
 /**
  * The replica routes (CLAUDE.md "Replica routes"): the snapshot descriptor,
  * the snapshot bytes, the tail envelope and the metamodel document — every
- * text a replica needs, read raw where the engine reads it raw (AD-26) and
+ * text a replica needs, handed over exactly as the response carried it and
  * not re-serialized. Pure API layer: no `lib/state/*`, no `lib/engine/*`.
  */
 
@@ -23,8 +23,8 @@ export type SnapshotDescriptor = z.infer<typeof SnapshotDescriptorSchema>;
 
 export type TailBody = { text: string; fromRev: number; headRev: number; complete: boolean };
 
-// Names only the envelope fields the shell reads for itself (D15); the text
-// itself crosses to the engine untouched, parsed there by the exact parser.
+// Names only the envelope fields the shell reads for itself; the text itself
+// crosses to the engine untouched, parsed there by the exact parser.
 const TailEnvelopeSchema = z.object({
 	from_rev: z.number().int(),
 	head_rev: z.number().int(),
@@ -49,17 +49,17 @@ export async function getSnapshotDescriptor(
 }
 
 /** GET /replica/snapshots/{rev} (or wherever the descriptor's `url` points).
- * `url` is a whole path (fact 16 of the plan), so this is called with
+ * `url` is a whole path, as the backend sees it, so this is called with
  * `baseUrl: ''` — it lands on the page's own origin. Returns the raw
  * `Response`: the body is a stream of gzip bytes the caller reads in chunks. */
 export function fetchSnapshot(url: string, signal?: AbortSignal): Promise<Response> {
 	return apiFetchRaw(url, { method: 'GET', signal }, { baseUrl: '' });
 }
 
-/** GET /replica/tail?from_rev= — the text is handed to the engine untouched
- * (AD-26: `JSON.parse` would lose `1.0` and integers past 2^53, which the
- * digest cannot see); the three envelope fields are read here, separately,
- * for the shell's own bookkeeping (D15). */
+/** GET /replica/tail?from_rev= — the text is handed to the engine untouched:
+ * the exact parser keeps `1.0` and integers past 2^53 intact, which the
+ * digest needs to see and `JSON.parse` would lose. The three envelope
+ * fields are read here, separately, for the shell's own bookkeeping. */
 export async function fetchTail(fromRev: number, cfg?: ClientConfig): Promise<TailBody> {
 	const response = await apiFetchRaw(
 		'/replica/tail',
@@ -77,9 +77,8 @@ export async function fetchTail(fromRev: number, cfg?: ClientConfig): Promise<Ta
 }
 
 /** GET /metamodel, read the way the engine wants it: the document as
- * `JSON.parse` gives it (AD-22 — no zod reshape) and the `X-Metamodel-Id`
- * header the descriptor's `metamodel_id` is paired against (`''` without the
- * header). */
+ * `JSON.parse` gives it, no zod reshape, and the `X-Metamodel-Id` header the
+ * descriptor's `metamodel_id` is paired against (`''` without the header). */
 export async function fetchMetamodelDocument(
 	cfg?: ClientConfig
 ): Promise<{ doc: unknown; metamodelId: string }> {
