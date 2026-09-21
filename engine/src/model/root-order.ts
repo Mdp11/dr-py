@@ -1,3 +1,4 @@
+import { drain, sortedInSlices, type Steps } from '../steps/steps.ts';
 import { cmpCodePoint } from '../value/compare.ts';
 import type { ElementRec } from './records.ts';
 
@@ -48,7 +49,13 @@ export class RootOrder {
 
 	/** Replaces the content with `roots`, whose `rootName`s are already set. */
 	reset(roots: ElementRec[]): void {
-		this.recs = roots.sort(
+		drain(this.resetSteps(roots));
+	}
+
+	/** `reset` in steps; the order changes at the last one. */
+	*resetSteps(roots: ElementRec[]): Steps<void> {
+		this.recs = yield* sortedInSlices(
+			roots,
 			(a, b) => cmpCodePoint(a.rootName!, b.rootName!) || cmpCodePoint(a.id, b.id)
 		);
 	}

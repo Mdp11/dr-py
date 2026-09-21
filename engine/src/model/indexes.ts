@@ -1,4 +1,5 @@
 import type { KeyRel, KeySpec } from '../metamodel/key.ts';
+import { drain, type Steps } from '../steps/steps.ts';
 import { cmpCodePoint } from '../value/compare.ts';
 import { pyKey } from '../value/key.ts';
 import type { Value } from '../value/types.ts';
@@ -199,24 +200,39 @@ export class IndexSet {
 
 	/** Recomputes every index, and the adjacency arrays, from the model's entities. */
 	rebuild(): void {
+		drain(this.rebuildSteps());
+	}
+
+	/**
+	 * `rebuild` in steps of 1,024 entity visits, then the root sort in steps of
+	 * its own. Nothing may read the indexes or write the model between two
+	 * steps: they are half built, and the passes hold iterators over the model.
+	 */
+	*rebuildSteps(): Steps<void> {
+		const model = this.model;
+		const total = 2 * model.elementCount + model.relationshipCount + 1;
+		let done = 0;
+		const visited = () => (++done & 1023) === 0;
 		this.byType.clear();
 		this.buckets.clear();
 		this.refsOf.clear();
 		this.referencers.clear();
-		for (const element of this.model.elements()) {
+		for (const element of model.elements()) {
 			element.out.length = 0;
 			element.in.length = 0;
 			element.parents.length = 0;
+			if (visited()) yield { done, total };
 		}
 		// Relationships first, in order, so that owners are known before grouping.
-		for (const rel of this.model.relationships()) {
+		for (const rel of model.relationships()) {
 			attach(rel.source.out, rel, 'outAt');
 			attach(rel.target.in, rel, 'inAt');
 			this.updateRefs(rel.id, this.refsIn(rel.props, this.refProps(rel.typeName, false)));
-			if (this.model.metamodel.isContainment(rel.typeName)) rel.target.parents.push(rel);
+			if (model.metamodel.isContainment(rel.typeName)) rel.target.parents.push(rel);
+			if (visited()) yield { done, total };
 		}
 		const roots: ElementRec[] = [];
-		for (const element of this.model.elements()) {
+		for (const element of model.elements()) {
 			let ofType = this.byType.get(element.typeName);
 			if (ofType === undefined) this.byType.set(element.typeName, (ofType = new Set()));
 			ofType.add(element);
@@ -227,8 +243,11 @@ export class IndexSet {
 			);
 			element.rootName = element.parents.length === 0 ? displayName(element) : null;
 			if (element.rootName !== null) roots.push(element);
+			if (visited()) yield { done, total };
 		}
-		this.roots.reset(roots);
+		const sort = this.roots.resetSteps(roots);
+		while (sort.next().done !== true) yield { done: total - 1, total };
+		yield { done: total, total };
 	}
 
 	// -- uniqueness ----------------------------------------------------------

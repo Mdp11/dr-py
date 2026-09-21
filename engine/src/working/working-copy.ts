@@ -14,6 +14,7 @@ import {
 import { rewind } from '../ops/rewind.ts';
 import type { ModelOp } from '../ops/types.ts';
 import { entityHash, formatDigest, type EntityHash } from '../snapshot/digest.ts';
+import { drain, type Steps } from '../steps/steps.ts';
 import { readDelta, type CommittedChange, type Delta } from './delta.ts';
 
 export type WorkingCopyOptions = {
@@ -186,19 +187,40 @@ export class WorkingCopy {
 	 * and compares it with the one held. A mismatch sets `diverged`.
 	 */
 	verifyDigest(): boolean {
+		return drain(this.verifyDigestSteps());
+	}
+
+	/**
+	 * `verifyDigest` in steps of 2,048 entities; `diverged` is set, if at all,
+	 * after the last. A transition between two steps invalidates it: drop it
+	 * and start another.
+	 */
+	*verifyDigestSteps(): Steps<boolean> {
 		const hash = this.entityHash;
+		const model = this.model;
+		const total =
+			model.elementCount +
+			model.relationshipCount +
+			this.committedElements.size +
+			this.committedRelationships.size;
+		let done = 0;
+		const counted = () => (++done & 2047) === 0;
 		let value = 0n;
-		for (const element of this.model.elements()) {
+		for (const element of model.elements()) {
 			if (!this.committedElements.has(element.id)) value ^= hash(element.id, element.rev);
+			if (counted()) yield { done, total };
 		}
-		for (const rel of this.model.relationships()) {
+		for (const rel of model.relationships()) {
 			if (!this.committedRelationships.has(rel.id)) value ^= hash(rel.id, rel.rev);
+			if (counted()) yield { done, total };
 		}
 		for (const images of [this.committedElements, this.committedRelationships]) {
 			for (const image of images.values()) {
 				if (image !== null) value ^= hash(image.id, image.rev);
+				if (counted()) yield { done, total };
 			}
 		}
+		yield { done: total, total };
 		if (value !== this.committedDigest) this.hasDiverged = true;
 		return value === this.committedDigest;
 	}

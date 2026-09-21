@@ -42,6 +42,7 @@ export {
 	type SnapshotHeader
 } from './snapshot/open.ts';
 export { sha256 } from './snapshot/sha256.ts';
+export { drain, sortedInSlices, type Progress, type Steps } from './steps/steps.ts';
 export { cmpCodePoint } from './value/compare.ts';
 export { pyFloatRepr } from './value/float-repr.ts';
 export { pyKey } from './value/key.ts';

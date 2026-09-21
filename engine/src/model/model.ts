@@ -1,4 +1,5 @@
 import type { Metamodel } from '../metamodel/metamodel.ts';
+import type { Steps } from '../steps/steps.ts';
 import { pyRepr } from '../value/repr.ts';
 import type { Value } from '../value/types.ts';
 import { ModelError, SnapshotError } from './errors.ts';
@@ -348,6 +349,11 @@ export class Model {
 	/** Recomputes every index and the records' adjacency from the entities. */
 	rebuildIndexes(): void {
 		this.indexes.rebuild();
+	}
+
+	/** `rebuildIndexes` in steps; see `IndexSet.rebuildSteps` for what must hold between them. */
+	rebuildIndexSteps(): Steps<void> {
+		return this.indexes.rebuildSteps();
 	}
 }
 
