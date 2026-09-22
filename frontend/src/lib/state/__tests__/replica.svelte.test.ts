@@ -7,6 +7,7 @@ import { engineSide } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
 import { getElementsBatch } from '$lib/api/model-read';
 import { createSnapshotCache } from '$lib/engine/cache';
+import { SURFACES } from '$lib/engine/surfaces';
 import type { EngineLink } from '$lib/engine/client';
 import {
 	OFF,
@@ -452,8 +453,12 @@ describe('the engine seam', () => {
 describe('replicaGate', () => {
 	const onEngine = (surfaces: Record<string, string>) =>
 		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
+	// A default may put a surface on the engine (see `lib/engine/surfaces.ts`);
+	// force every one to `server` for a test about there being none on it.
+	const onServer = () => onEngine(Object.fromEntries(SURFACES.map((s) => [s, 'server'])));
 
 	it('resolves at once with every surface on server, even while genuinely opening', async () => {
+		onServer();
 		const project = fakeProject();
 		const held = hold();
 		server.use(...project.handlers({ hold: held }));
@@ -583,6 +588,9 @@ describe('replicaGate', () => {
 describe('the notice and the block', () => {
 	const onEngine = (surfaces: Record<string, string>) =>
 		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
+	// A default may put a surface on the engine (see `lib/engine/surfaces.ts`);
+	// force every one to `server` for a test about there being none on it.
+	const onServer = () => onEngine(Object.fromEntries(SURFACES.map((s) => [s, 'server'])));
 
 	it('the notice shows at server with a surface on the engine, not after dismiss, again after startReplica', async () => {
 		onEngine({ elements: 'engine' });
@@ -603,6 +611,7 @@ describe('the notice and the block', () => {
 	});
 
 	it('the notice never shows with no surface on the engine', async () => {
+		onServer();
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
@@ -656,6 +665,7 @@ describe('the notice and the block', () => {
 	});
 
 	it('with every surface on server, a failed replica blocks nothing', async () => {
+		onServer();
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica();

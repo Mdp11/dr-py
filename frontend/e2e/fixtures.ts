@@ -9,12 +9,14 @@ import { test as base, expect, type BrowserContext } from '@playwright/test';
 
 export { expect };
 
+// Only the surfaces not yet flipped to `engine` by default need forcing here;
+// a flipped surface runs on its default instead. Emptied out as each of the
+// five lands (Task 12), at which point `dr.surfaces` is not set at all.
 const ENGINE_SURFACES = {
 	elements: 'engine',
 	search: 'engine',
 	relationships: 'engine',
-	tree: 'engine',
-	summary: 'engine'
+	tree: 'engine'
 } as const;
 
 /**
@@ -29,7 +31,9 @@ export async function engineMode(context: BrowserContext): Promise<void> {
 			if (sessionStorage.getItem('e2e.engine-mode') !== null) return;
 			sessionStorage.setItem('e2e.engine-mode', '1');
 			localStorage.setItem('dr.shadow', '1');
-			localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
+			if (Object.keys(surfaces).length > 0) {
+				localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
+			}
 		} catch {
 			// A frame without storage has nothing to set.
 		}

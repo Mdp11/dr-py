@@ -6,6 +6,7 @@ import { ValidationError } from '$lib/api/errors';
 import { resetJourney } from '$lib/state/open-journey';
 import * as openJourney from '$lib/state/open-journey';
 import { getActiveProgress, resetProgress } from '$lib/state/progress.svelte';
+import { SURFACES } from '$lib/engine/surfaces';
 
 const createProject = vi.fn();
 vi.mock('$lib/api/projects', () => ({ createProject: (...a: unknown[]) => createProject(...a) }));
@@ -400,6 +401,10 @@ describe('NewProjectWizard', () => {
 	});
 
 	it('passes replica: false when every surface is on the server', async () => {
+		localStorage.setItem(
+			'dr.surfaces',
+			JSON.stringify(Object.fromEntries(SURFACES.map((s) => [s, 'server'])))
+		);
 		const spy = vi.spyOn(openJourney, 'beginJourney');
 		createProject.mockResolvedValue({ id: 'pS', name: 'S', role: 'owner', skipped_artifacts: [] });
 		const c = mount(NewProjectWizard, {

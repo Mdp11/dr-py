@@ -14,7 +14,7 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	search: 'server',
 	relationships: 'server',
 	tree: 'server',
-	summary: 'server'
+	summary: 'engine'
 });
 
 const STORAGE_KEY = 'dr.surfaces';
