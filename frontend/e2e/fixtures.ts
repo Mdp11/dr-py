@@ -14,7 +14,6 @@ export { expect };
 // five lands (Task 12), at which point `dr.surfaces` is not set at all.
 const ENGINE_SURFACES = {
 	search: 'engine',
-	relationships: 'engine',
 	tree: 'engine'
 } as const;
 
