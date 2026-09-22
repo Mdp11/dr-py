@@ -1,4 +1,5 @@
-import { test, expect, type Download } from '@playwright/test';
+import { test, expect } from './fixtures';
+import type { Download } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';

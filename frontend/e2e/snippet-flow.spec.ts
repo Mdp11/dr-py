@@ -6,7 +6,8 @@
  * /snippets/run 503s and the run-dependent tests self-skip via
  * runAndAwait's runner-unavailable notice check below.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './fixtures';
+import type { Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';

@@ -31,7 +31,7 @@
  * takes an `art:` exclusive and `POST /commits` verifies it, so a lease that
  * never happened would 409 at the commit below rather than pass quietly.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { openDefaultProject } from './helpers/auth';
 
 test('artifact lock → edit → commit round-trip', async ({ page }) => {

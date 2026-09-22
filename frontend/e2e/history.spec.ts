@@ -16,7 +16,7 @@
  *      value, only on the history list length increasing.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';

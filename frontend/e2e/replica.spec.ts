@@ -5,14 +5,15 @@
  * The peer is a second API client with its own cookie jar.
  */
 
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect } from './fixtures';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
 import { login, openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';
 import { commitStaged } from './helpers/commit';
-import { expectReplicaReady, replica, replicaRev } from './helpers/replica';
+import { expectReplicaReady, replica, replicaRev, watchPhases } from './helpers/replica';
 import {
 	elementIds,
 	headRev,
@@ -58,29 +59,6 @@ async function openReady(page: Page): Promise<void> {
 	await openDefaultProject(page);
 	await expectLiveFeed(page);
 	await expectReplicaReady(page);
-}
-
-/** Records every phase the indicator shows from now on, in order. */
-async function watchPhases(page: Page): Promise<() => Promise<string[]>> {
-	await page.evaluate(() => {
-		const seen: string[] = [];
-		const read = () =>
-			document.querySelector('[data-testid="replica-indicator"]')?.getAttribute('data-phase') ??
-			'none';
-		seen.push(read());
-		new MutationObserver(() => {
-			const phase = read();
-			if (seen[seen.length - 1] !== phase) seen.push(phase);
-		}).observe(document.body, {
-			subtree: true,
-			childList: true,
-			attributes: true,
-			attributeFilter: ['data-phase']
-		});
-		(window as unknown as { __replicaPhases: string[] }).__replicaPhases = seen;
-	});
-	return () =>
-		page.evaluate(() => [...(window as unknown as { __replicaPhases: string[] }).__replicaPhases]);
 }
 
 test('the replica opens in the real sandbox', async ({ page }) => {

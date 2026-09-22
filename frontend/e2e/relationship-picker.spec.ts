@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';

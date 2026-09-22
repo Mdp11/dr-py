@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { login } from './helpers/auth';
 
 test('login lands on the picker and lists the seeded project', async ({ page }) => {

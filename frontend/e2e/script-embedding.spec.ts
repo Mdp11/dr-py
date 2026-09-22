@@ -22,7 +22,8 @@
  * a spec that happens to run earlier can leave the model/artifacts in an
  * unrelated state (same rationale as table.spec.ts / snippet-flow.spec.ts).
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from './fixtures';
+import type { Locator, Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';

@@ -20,3 +20,26 @@ export async function replicaRev(page: Page): Promise<number> {
 	if (rev === null) throw new Error('the replica indicator carries no rev');
 	return Number(rev);
 }
+
+/** Records every phase the indicator shows from now on, in order. */
+export async function watchPhases(page: Page): Promise<() => Promise<string[]>> {
+	await page.evaluate(() => {
+		const seen: string[] = [];
+		const read = () =>
+			document.querySelector('[data-testid="replica-indicator"]')?.getAttribute('data-phase') ??
+			'none';
+		seen.push(read());
+		new MutationObserver(() => {
+			const phase = read();
+			if (seen[seen.length - 1] !== phase) seen.push(phase);
+		}).observe(document.body, {
+			subtree: true,
+			childList: true,
+			attributes: true,
+			attributeFilter: ['data-phase']
+		});
+		(window as unknown as { __replicaPhases: string[] }).__replicaPhases = seen;
+	});
+	return () =>
+		page.evaluate(() => [...(window as unknown as { __replicaPhases: string[] }).__replicaPhases]);
+}

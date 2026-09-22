@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { openDefaultProject } from './helpers/auth';
 
 // The sandbox's policy, verbatim (sandbox/vite.config.ts), pinned here so a
