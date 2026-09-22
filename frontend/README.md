@@ -501,8 +501,9 @@ explicit user click. `GET /model/issues` is the cheap read used everywhere else.
 The TypeScript engine (`../engine`) runs a full replica of the model in a
 worker of the sandbox site (`../sandbox`); `lib/engine/` is the app's side of
 it and `lib/state/replica.svelte.ts` wires it into the workspace (see
-"Wiring" below). Nothing reads from the replica yet; a status-bar indicator
-is its only face.
+"Wiring" below). The model reads can be answered by it, one switch per
+surface (see "Surfaces"), every switch on `server` by default; a status-bar
+indicator shows its state.
 
 **Aliases and the types-only rule.** `$engine` points at
 `../engine/src/index.ts` and `$sandbox` at `../sandbox/src`, in `kit.alias`
@@ -879,8 +880,8 @@ switch per surface:
 - `createEngineSeam(sync, surfaces, shadow?)` makes the seam of a
   `ReplicaSync`: a surface's EFFECTIVE side is `engine` iff its switch says
   so and the phase is neither `off` nor `server`; `call` is `sync.call`
-  (so the read barrier holds); `gone` is `EngineGoneError`. Nothing
-  installs it in the app yet.
+  (so the read barrier holds); `gone` is `EngineGoneError`. The replica
+  store installs it (see "Wiring").
 
 **Shadow comparison** (`lib/engine/shadow.ts`, `lib/engine/quiet.ts`). Holds
 the engine's answer to a switched-on read to the server's own, in dev only.
@@ -918,15 +919,16 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   function that drops it again; `quiet()` awaits every registered probe (none
   registered: resolves at once). A store adds a probe for whatever could
   still change what a read sees right after a difference was first seen —
-  the sync's own `settled()`, or (once views are wired in) "no `refreshView()`
-  in flight".
-- Nothing installs a `shadow` into the app's seam yet and nothing reads
-  `shadowEnabled()`; a build already holds neither the module nor its
-  `[shadow]` string, checked by building and grepping `build/` and
-  `.svelte-kit/output/client`. The store that wires this in is meant to read
-  `shadowEnabled()` once and, only then, reach `shadow.ts` through a dynamic
-  `import('./shadow')` behind the same `import.meta.env.DEV` check, so the
-  guard itself keeps the module out of a build regardless.
+  the sync's own `settled()` (the replica store) and "no `refreshView()` in
+  flight" (the view store: after a commit of view ops the server's excluded
+  pool is ahead of the registered placements until the refetch lands).
+- The replica store reaches `shadow.ts` only through a dynamic
+  `import('../engine/shadow')` behind `import.meta.env.DEV`, and only when
+  some surface is on the engine; it asks `shadowEnabled()` there, and
+  reports through `console.error`. A build holds neither the module nor its
+  `[shadow]` string — checked by building and grepping `build/` and
+  `.svelte-kit/output/client`. To turn it on in dev:
+  `localStorage.setItem('dr.shadow', '1')`, a surface on the engine, reload.
 
 **Status**. One `ReplicaStatus` object, replaced on every change and
 handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
@@ -937,17 +939,17 @@ opening; `verify`, the background digest check, carried in `ready` too),
 `network`), `isolated` (the frame's `crossOriginIsolated`, `null` before the
 handshake), `cspViolations` (every violation the frame reported) and `reason`
 (why `off`, `frozen`, `failed` or `server`). `server` is the boot fallback: the
-frame did not connect, or three opens failed before the first `ready`. Today
-it only shows in the status; plan 5 turns `server` into the surface flip and
-its notice, and `failed` into the blocking re-bootstrap banner.
+frame did not connect, or three opens failed before the first `ready`. In
+`server` (and `off`) every surface's effective side is the server's; its
+notice and the blocking banner of `failed` are not built yet.
 
 **Wiring** (`lib/state/replica.svelte.ts`). The one `ReplicaSync` of the
 tab lives in a thin store, built on the first `startReplica()` from
 `connectFrame`, `replicaApi()` (every call under `/api/v1/projects/<id>`),
 `createSnapshotCache()`, a `setTimeout` sleep and an `onStatus` that writes
 the status into `$state` — `getReplicaStatus()` is reactive. Everything else
-in the app reaches the replica through five calls, each a no-op while no sync
-exists:
+in the app reaches the replica through the calls below, each a no-op while no
+sync exists:
 
 - **Start and stop.** The workspace page (`routes/p/[projectId]/+page.svelte`)
   registers `onMount(() => startReplica())` BEFORE the `startRealtime` one, so
@@ -956,10 +958,25 @@ exists:
   `getActiveProjectId()`'s replica, nothing without one; a project switch is a
   new mount, so `stop` then `open`, and the frame (and its worker) go with the
   old page.
+- **The seam.** `startReplica()` installs `createEngineSeam(sync, surfaces)`
+  into `lib/api` (`installEngineSeam`) and registers `sync.settled()` as a
+  quiet probe; `stopReplica()` and `resetReplica()` uninstall both, so every
+  read goes to the server again. The switches are read ONCE, at the first
+  start (`readSurfaces()`); `resetReplica()` forgets them, so the next start
+  reads `dr.surfaces` again. In dev, with `dr.shadow` set and some surface on
+  the engine, the seam is installed a second time with a shadow once
+  `shadow.ts` has loaded (see "Shadow comparison"); reads in flight before
+  that are not compared. A seam replaced or uninstalled meanwhile is not
+  overwritten by a late load.
 - **The feed hand-over.** `handleFeedEvent(e, raw)` (`realtime.svelte.ts`)
   calls `handReplicaFeed(e, raw)` first, before anything moves the model
   store: a `commit` becomes `feedCommit(raw, e.rev)`, a `rebind`
-  `feedRebind(e.rev)`, a `snapshot` `feedSnapshot(e.model_rev)`. A commit
+  `feedRebind(e.rev)`, a `snapshot` `feedSnapshot(e.model_rev)`, a `reset`
+  (the server's `model_rev` moved without a journal row)
+  `feedReset(e.model_rev)`. The realtime store then treats a `reset` as it
+  treats a snapshot event, presence and leases aside (a reset carries
+  neither): `refreshSummary()` when `model_rev` is past the store's, and the
+  debounced issues refetch either way. A commit
   WITHOUT its frame text is not handed over at all — a re-serialized event
   would have lost `1.0` and every integer past 2^53, which the replica's
   digest sees (AD-26); a one-argument `handleFeedEvent` (every test that
@@ -987,8 +1004,37 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   (absent before the handshake) and `data-csp-violations` mirror the status
   for e2e; the `title` carries the reason, the attempt (`attempt 2 of 3`),
   `not cross-origin isolated` when the frame is not, and the violation count
-  when it is not zero. It is the replica's only face: nothing reads the
-  replica yet.
+  when it is not zero.
+- **The summary keeps its issue counts.** The engine's summary answers
+  `issue_counts: null`. With `summary` on the engine (`engineSide`, asked
+  before the call), `refreshSummary()` (`model.svelte.ts`) adopts the rev and
+  the counts of elements but keeps the store's own issue counts, and asks
+  `refetchIssues()` for fresh ones; on the server's side it adopts the body's
+  counts, `null` included, as it always did. `_modelRev` is the answer's on
+  both sides: an engine read waits for every `rev` the replica was told of,
+  so it is never older than the store's.
+- **View placements.** `registerViewPlacement(viewId, ids)`,
+  `forgetViewPlacement(viewId)` and `forgetViewPlacements()` hand the sync
+  what a view places (the sync keeps the lists and sends them to every new
+  link; without a sync nothing is kept — the page starts the replica before
+  the view store's first refresh). The view store calls them from
+  `refreshView()`, the one place every change of the active view's
+  COMMITTED document passes (boot, a view switch, an own or peer commit of
+  view ops, a `view` feed event, the JSON editor's save, a discard): the
+  fetched document's `placedElementIds` — never the one with the staged
+  view ops replayed on top, since the server's excluded-roots read knows
+  nothing of them — registered BEFORE `setState`, because the tree
+  refetches on `_view`'s identity and must find them posted. A view switch
+  forgets the old view's; a view that 404s, no active view or a failed load
+  forgets the one registered; `clearViewState()` (the project switch)
+  forgets them all. The view store also registers a quiet probe that is
+  pending while any `refreshView()` is in flight.
+- **Searches abort.** The three debounced searches —
+  `Sidebar/Search.svelte`, `Navigation/ElementStartPicker.svelte` and
+  `Snippet/ElementContextRow.svelte` — pass `listElementsPage` a `signal`
+  aborted by the next query (and on unmount): on the engine a search is a
+  scan and scans run one after another, so a superseded one would delay the
+  fresh one. An `AbortError` leaves the results as they were.
 
 `configureReplica({deps?, sync?} | null)` is the tests' seam — `deps`
 replaces single dependencies of the sync built next (its `onStatus` observes
@@ -2352,7 +2398,9 @@ src/
                         folds), per project in localStorage, same try/catch
                         stance as the diagram's own view/collapse keys;
                         replica.svelte.ts — the tab's one ReplicaSync and its
-                        status as state (see "Replica (engine shell)" →
+                        status as state, the engine seam it installs (and,
+                        in dev, the shadow), the reset hand-over and the
+                        view placements (see "Replica (engine shell)" →
                         "Wiring")
     api/replica.ts      The replica routes' client: snapshot descriptor,
                         snapshot bytes as a raw Response, tail text + its

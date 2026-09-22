@@ -311,6 +311,63 @@ describe('issue refetch triggers', () => {
 	});
 });
 
+describe('the reset event', () => {
+	const state = () => ({
+		presence: [...getPresence()],
+		locks: [...getLockState().keys()]
+	});
+
+	beforeEach(() => {
+		handleFeedEvent({
+			type: 'snapshot',
+			model_rev: 0,
+			locks: [{ resource_id: 'e1', mode: 'exclusive', holder_id: 'a' }],
+			connected: ['a', 'b']
+		});
+	});
+	afterEach(() => resetRealtime());
+
+	it('ahead of the store: the summary is refreshed and the issues refetched', async () => {
+		const summarySpy = vi.spyOn(modelReadApi, 'getModelSummary');
+		const issuesSpy = vi.spyOn(validationApi, 'getModelIssues');
+		await vi.waitFor(() => expect(issuesSpy).toHaveBeenCalledOnce()); // the snapshot's
+		summarySpy.mockClear();
+		issuesSpy.mockClear();
+		const before = state();
+
+		handleFeedEvent({ type: 'reset', model_rev: 4 }, '{"type":"reset","model_rev":4}');
+
+		expect(summarySpy).toHaveBeenCalledOnce();
+		expect(issuesSpy).not.toHaveBeenCalled(); // debounced
+		await vi.waitFor(() => expect(issuesSpy).toHaveBeenCalledOnce());
+		expect(state()).toEqual(before);
+		expect(before).toEqual({ presence: ['a', 'b'], locks: ['e1'] });
+	});
+
+	it('at or below the store: only the issues are refetched', async () => {
+		const summarySpy = vi.spyOn(modelReadApi, 'getModelSummary');
+		const issuesSpy = vi.spyOn(validationApi, 'getModelIssues');
+		adoptSummary({
+			model_rev: 9,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: {},
+			undo_depth: 0
+		});
+		await vi.waitFor(() => expect(issuesSpy).toHaveBeenCalledOnce());
+		summarySpy.mockClear();
+		issuesSpy.mockClear();
+		const before = state();
+
+		handleFeedEvent({ type: 'reset', model_rev: 9 });
+
+		await vi.waitFor(() => expect(issuesSpy).toHaveBeenCalledOnce());
+		expect(summarySpy).not.toHaveBeenCalled();
+		expect(state()).toEqual(before);
+	});
+});
+
 describe('feed termination state', () => {
 	beforeEach(() => {
 		lastConfig = null;

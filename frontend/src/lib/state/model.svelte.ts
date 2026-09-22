@@ -11,6 +11,7 @@ import type {
 	TreeItem
 } from '$lib/api/types';
 import { getElement } from '../api/elements';
+import { engineSide } from '../api/engine-route';
 import { NotFoundError } from '../api/errors';
 import * as modelReadApi from '../api/model-read';
 import { getModelIssues, validateModel, type RulesStatus } from '../api/validation';
@@ -957,11 +958,23 @@ export async function ensureRelationship(id: string): Promise<Relationship | nul
 // Summary / validation / lifecycle
 // ---------------------------------------------------------------------------
 
-/** Fetch GET /model/summary and adopt rev / issue counts. */
+/**
+ * Fetch GET /model/summary and adopt rev / issue counts. The engine's summary
+ * carries no issue counts: answered there, the store keeps its own and asks
+ * GET /model/issues for fresh ones. Its `rev` is never older than the store's,
+ * as an engine read waits for every `rev` the replica was told of.
+ */
 export async function refreshSummary(): Promise<ModelSummary> {
+	const fromEngine = engineSide('summary') === 'engine';
 	const s = await modelReadApi.getModelSummary(_clientConfig);
-	_summary = s;
 	_modelRev = s.model_rev;
+	if (fromEngine) {
+		const adopted = { ...s, issue_counts: _issueCounts };
+		_summary = adopted;
+		void refetchIssues();
+		return adopted;
+	}
+	_summary = s;
 	_issueCounts = s.issue_counts;
 	return s;
 }

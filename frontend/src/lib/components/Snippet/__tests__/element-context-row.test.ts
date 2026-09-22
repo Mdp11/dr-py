@@ -4,8 +4,9 @@
 // mount/flushSync Svelte-5 convention (see
 // Table/__tests__/ColumnManager.test.ts).
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as modelRead from '$lib/api/model-read';
 import type { Element } from '$lib/api/types';
 import {
 	clearSelection,
@@ -174,4 +175,70 @@ it('shows "clear all" only once >=2 elements are bound, and wires the click to o
 	} finally {
 		unmount(pair);
 	}
+});
+
+describe('a superseded search', () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	const debounce = () => new Promise((resolve) => setTimeout(resolve, 350));
+	const page = (id: string) => ({ items: [el(id, id)], total: 1 });
+
+	function typeInto(q: string): void {
+		const input = document.querySelector(
+			'[data-testid="snippet-element-search"]'
+		) as HTMLInputElement;
+		input.value = q;
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+	}
+
+	const rows = () =>
+		[...document.querySelectorAll('li button')].map((b) => b.textContent?.trim().split(/\s+/)[0]);
+
+	it('is aborted when the next query starts', async () => {
+		const signals: (AbortSignal | undefined)[] = [];
+		const spy = vi.spyOn(modelRead, 'listElementsPage').mockImplementation((query) => {
+			signals.push(query?.signal);
+			return signals.length === 1 ? new Promise(() => {}) : Promise.resolve(page('b-2'));
+		});
+		const c = render('value', [], () => {});
+		try {
+			typeInto('b-1');
+			await debounce();
+			expect(spy).toHaveBeenCalledOnce();
+			expect(signals[0]?.aborted).toBe(false);
+
+			typeInto('b-2');
+			expect(signals[0]?.aborted).toBe(true);
+			await debounce();
+			flushSync();
+
+			expect(spy).toHaveBeenCalledTimes(2);
+			expect(signals[1]?.aborted).toBe(false);
+			expect(rows()).toEqual(['b-2']);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('an AbortError leaves the results as they were', async () => {
+		vi.spyOn(modelRead, 'listElementsPage')
+			.mockResolvedValueOnce(page('b-1'))
+			.mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'));
+		const c = render('value', [], () => {});
+		try {
+			typeInto('b-1');
+			await debounce();
+			flushSync();
+			expect(rows()).toEqual(['b-1']);
+
+			typeInto('b-10');
+			await debounce();
+			flushSync();
+
+			expect(rows()).toEqual(['b-1']);
+		} finally {
+			unmount(c);
+		}
+	});
 });

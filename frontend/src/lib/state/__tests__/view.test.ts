@@ -994,3 +994,162 @@ describe('named views — feed reconciliation', () => {
 		expect(getViewDiscardNotice()).toBeNull();
 	});
 });
+
+const { configureReplica, resetReplica } = await import('../replica.svelte');
+const { OFF } = await import('$lib/engine/sync');
+const { quiet } = await import('$lib/engine/quiet');
+const { NotFoundError } = await import('$lib/api/errors');
+
+describe('the placements the replica is told of', () => {
+	/** Records each placement call with the view the store showed at that moment. */
+	function placementSync() {
+		const calls: { call: string; args: unknown[]; shown: View | null }[] = [];
+		const record =
+			(call: string) =>
+			(...args: unknown[]) =>
+				void calls.push({ call, args, shown: getView() });
+		configureReplica({
+			sync: {
+				open: vi.fn(),
+				stop: vi.fn(),
+				status: () => OFF,
+				settled: () => Promise.resolve(),
+				feedCommit: vi.fn(),
+				feedRebind: vi.fn(),
+				feedSnapshot: vi.fn(),
+				feedReset: vi.fn(),
+				retry: vi.fn(),
+				beginCommit: () => ({ settle() {}, abandon() {} }),
+				metamodelAdopted: vi.fn(),
+				call: vi.fn(),
+				setViewPlacement: record('set'),
+				dropViewPlacement: record('drop')
+			}
+		});
+		return calls;
+	}
+
+	const placing = (elements: string[], nested: string[] = []): View => ({
+		name: 'v',
+		folders: [
+			{
+				id: 'f1',
+				name: 'F1',
+				folders: [{ id: 'f1a', name: 'Nested', folders: [], elements: nested, artifacts: [] }],
+				elements,
+				artifacts: [{ id: 'art1', kind: 'navigation' }]
+			}
+		],
+		artifacts: [{ id: 'root-art', kind: 'table' }]
+	});
+
+	afterEach(() => resetReplica());
+
+	it('registers the fetched document, before the store shows it', async () => {
+		const calls = placementSync();
+		seedView(placing(['e1', 'e2'], ['e3', 'e1']));
+
+		await refreshView();
+
+		expect(calls).toEqual([{ call: 'set', args: ['v1', ['e1', 'e2', 'e3']], shown: null }]);
+		expect(getView()).not.toBeNull();
+	});
+
+	it('registers the committed list, not the one with staged ops on top', async () => {
+		const calls = placementSync();
+		seedView(placing(['e1']));
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stagePlaceElementsAt('f1', ['e9']);
+		expect(getView()!.folders[0].elements).toEqual(['e1', 'e9']);
+		calls.length = 0;
+
+		await refreshView();
+
+		expect(calls.map(({ call, args }) => ({ call, args }))).toEqual([
+			{ call: 'set', args: ['v1', ['e1']] }
+		]);
+		expect(getView()!.folders[0].elements).toEqual(['e1', 'e9']);
+	});
+
+	it("a view switch forgets the old view's and registers the new one's", async () => {
+		const calls = placementSync();
+		seedView(placing(['e1']));
+		await refreshView();
+		calls.length = 0;
+
+		setActiveViewId('v2');
+		vi.spyOn(viewApi, 'getView').mockResolvedValue({
+			view: placing(['e7']),
+			warnings: [],
+			view_rev: 0
+		});
+		await refreshView();
+
+		expect(calls.map(({ call, args }) => ({ call, args }))).toEqual([
+			{ call: 'drop', args: ['v1'] },
+			{ call: 'set', args: ['v2', ['e7']] }
+		]);
+	});
+
+	it('a view that 404s is forgotten', async () => {
+		const calls = placementSync();
+		seedView(placing(['e1']));
+		await refreshView();
+		calls.length = 0;
+
+		vi.spyOn(viewApi, 'getView').mockRejectedValue(new NotFoundError(404, {}, 'gone'));
+		await refreshView();
+
+		expect(calls.map(({ call, args }) => ({ call, args }))).toEqual([
+			{ call: 'drop', args: ['v1'] }
+		]);
+		expect(getView()).toBeNull();
+	});
+
+	it('no active view forgets the one registered', async () => {
+		const calls = placementSync();
+		seedView(placing(['e1']));
+		await refreshView();
+		calls.length = 0;
+
+		setActiveViewId(null);
+		await refreshView();
+
+		expect(calls.map(({ call, args }) => ({ call, args }))).toEqual([
+			{ call: 'drop', args: ['v1'] }
+		]);
+	});
+
+	it('clearViewState forgets them all', async () => {
+		const calls = placementSync();
+		seedView(placing(['e1']));
+		await refreshView();
+		calls.length = 0;
+
+		clearViewState();
+
+		expect(calls.map(({ call, args }) => ({ call, args }))).toEqual([
+			{ call: 'drop', args: ['v1'] }
+		]);
+	});
+
+	it('quiet() waits for a refreshView() in flight', async () => {
+		placementSync();
+		setActiveViewId('v1');
+		let answer: (value: { view: View; warnings: []; view_rev: number }) => void = () => {};
+		vi.spyOn(viewApi, 'getView').mockReturnValue(new Promise((resolve) => (answer = resolve)));
+		const refreshing = refreshView();
+		let settled = false;
+		const waiting = quiet().then(() => (settled = true));
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(settled).toBe(false);
+
+		answer({ view: placing(['e1']), warnings: [], view_rev: 0 });
+		await refreshing;
+		await waiting;
+		expect(settled).toBe(true);
+		await quiet();
+	});
+});

@@ -1,8 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { IDBFactory } from 'fake-indexeddb';
+import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
+import { engineSide } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
+import { getElementsBatch } from '$lib/api/model-read';
 import { createSnapshotCache } from '$lib/engine/cache';
 import type { EngineLink } from '$lib/engine/client';
 import {
@@ -19,8 +22,11 @@ import { clearActiveProject, setActiveProject } from '../active-project.svelte';
 import {
 	beginReplicaCommit,
 	configureReplica,
+	forgetViewPlacement,
+	forgetViewPlacements,
 	getReplicaStatus,
 	handReplicaFeed,
+	registerViewPlacement,
 	replicaMetamodelAdopted,
 	resetReplica,
 	startReplica,
@@ -37,6 +43,9 @@ afterEach(() => {
 	for (const link of links.splice(0)) link.dispose();
 	clearActiveProject();
 	server.resetHandlers();
+	localStorage.removeItem('dr.surfaces');
+	localStorage.removeItem('dr.shadow');
+	vi.restoreAllMocks();
 });
 
 /**
@@ -78,12 +87,15 @@ function realReplica(overrides: Partial<SyncDeps> = {}) {
 	};
 }
 
-/** A sync that records what it is told and does nothing. */
-function spySync(flight: CommitFlight = { settle: vi.fn(), abandon: vi.fn() }) {
+/** A sync that records what it is told and does nothing; its status is `status`. */
+function spySync(
+	flight: CommitFlight = { settle: vi.fn(), abandon: vi.fn() },
+	status: { current: ReplicaStatus } = { current: OFF }
+) {
 	return {
 		open: vi.fn(),
 		stop: vi.fn(),
-		status: vi.fn(() => OFF),
+		status: vi.fn(() => status.current),
 		settled: vi.fn(() => Promise.resolve()),
 		feedCommit: vi.fn(),
 		feedRebind: vi.fn(),
@@ -208,6 +220,32 @@ describe('the hand-over', () => {
 		expect(sync.feedSnapshot).toHaveBeenCalledExactlyOnceWith(9);
 	});
 
+	it('a reset event reaches the sync', () => {
+		const sync = spySync();
+		configureReplica({ sync });
+
+		handReplicaFeed({ type: 'reset', model_rev: 10 }, '{"type":"reset","model_rev":10}');
+
+		expect(sync.feedReset).toHaveBeenCalledExactlyOnceWith(10);
+		expect(sync.feedSnapshot).not.toHaveBeenCalled();
+	});
+
+	it('placements reach the sync, and forgetting all drops each registered view', () => {
+		const sync = spySync();
+		configureReplica({ sync });
+
+		registerViewPlacement('v1', ['a', 'b']);
+		registerViewPlacement('v2', ['c']);
+		forgetViewPlacement('v1');
+		forgetViewPlacements();
+
+		expect(sync.setViewPlacement.mock.calls).toEqual([
+			['v1', ['a', 'b']],
+			['v2', ['c']]
+		]);
+		expect(sync.dropViewPlacement.mock.calls).toEqual([['v1'], ['v2']]);
+	});
+
 	it('a commit without its text reaches nothing', () => {
 		const sync = spySync();
 		configureReplica({ sync });
@@ -238,5 +276,147 @@ describe('the hand-over', () => {
 			replicaMetamodelAdopted();
 			handReplicaFeed(commit(1), '{}');
 		}).not.toThrow();
+	});
+});
+
+describe('the engine seam', () => {
+	const READY: ReplicaStatus = { ...OFF, phase: 'ready', rev: 0 };
+	const onEngine = (surfaces: Record<string, string>) =>
+		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
+
+	it('startReplica installs a seam whose sides follow dr.surfaces and the phase', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		expect(engineSide('elements')).toBe('server');
+
+		startReplica();
+		expect(getReplicaStatus().phase).toBe('opening');
+		expect(engineSide('elements')).toBe('engine');
+		expect(engineSide('tree')).toBe('server');
+		await replica.until((s) => s.phase === 'ready');
+
+		expect(engineSide('elements')).toBe('engine');
+		expect(engineSide('search')).toBe('server');
+	});
+
+	it("a phase of off or server is the server's", () => {
+		onEngine({ summary: 'engine' });
+		const status = { current: OFF };
+		configureReplica({ sync: spySync(undefined, status) });
+		setActiveProject('p');
+		startReplica();
+
+		expect(engineSide('summary')).toBe('server');
+		status.current = READY;
+		expect(engineSide('summary')).toBe('engine');
+		status.current = { ...OFF, phase: 'server', reason: 'engine unreachable' };
+		expect(engineSide('summary')).toBe('server');
+	});
+
+	it('reads the switches once; resetReplica makes the next start read them again', () => {
+		onEngine({ tree: 'engine' });
+		configureReplica({ sync: spySync(undefined, { current: READY }) });
+		setActiveProject('p');
+		startReplica();
+		expect(engineSide('tree')).toBe('engine');
+
+		localStorage.removeItem('dr.surfaces');
+		stopReplica();
+		startReplica();
+		expect(engineSide('tree')).toBe('engine');
+
+		resetReplica();
+		configureReplica({ sync: spySync(undefined, { current: READY }) });
+		startReplica();
+		expect(engineSide('tree')).toBe('server');
+	});
+
+	it('stopReplica and resetReplica uninstall it', () => {
+		onEngine({ elements: 'engine' });
+		configureReplica({ sync: spySync(undefined, { current: READY }) });
+		setActiveProject('p');
+
+		startReplica();
+		expect(engineSide('elements')).toBe('engine');
+		stopReplica();
+		expect(engineSide('elements')).toBe('server');
+
+		startReplica();
+		expect(engineSide('elements')).toBe('engine');
+		resetReplica();
+		expect(engineSide('elements')).toBe('server');
+	});
+
+	it('a read of a surface on the engine is answered by the replica', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		realReplica();
+		setActiveProject('p');
+		startReplica();
+
+		// No read route is served: the answer can only be the engine's.
+		const items = await getElementsBatch(['e_000001', 'missing']);
+
+		expect(items.map((item) => item.id)).toEqual(['e_000001']);
+		expect(getReplicaStatus().phase).toBe('ready');
+	});
+
+	it('with dr.shadow, a server answer that differs is reported once', async () => {
+		onEngine({ elements: 'engine' });
+		localStorage.setItem('dr.shadow', '1');
+		const project = fakeProject();
+		let served = 0;
+		server.use(
+			...project.handlers(),
+			http.post('*/model/elements/batch', () => {
+				served += 1;
+				return HttpResponse.json({ items: [] });
+			})
+		);
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		await macrotask();
+
+		const items = await getElementsBatch(['e_000001']);
+		await vi.waitFor(() => expect(errors).toHaveBeenCalledOnce());
+		await macrotask();
+
+		expect(items.map((item) => item.id)).toEqual(['e_000001']);
+		expect(served).toBe(2);
+		expect(errors).toHaveBeenCalledOnce();
+		expect(String(errors.mock.calls[0][0])).toMatch(
+			/^\[shadow\] elements getElementsBatch \{"ids":\["e_000001"\]\}: engine /
+		);
+	});
+
+	it('without dr.shadow, the server is never asked', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		let served = 0;
+		server.use(
+			...project.handlers(),
+			http.post('*/model/elements/batch', () => {
+				served += 1;
+				return HttpResponse.json({ items: [] });
+			})
+		);
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		await macrotask();
+
+		await getElementsBatch(['e_000001']);
+		await macrotask();
+		await macrotask();
+
+		expect(served).toBe(0);
 	});
 });

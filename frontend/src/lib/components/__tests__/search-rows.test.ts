@@ -1,7 +1,8 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as modelRead from '../../api/model-read';
 import { server } from '../../api/__tests__/server';
 import { resetModelStore } from '../../state/model.svelte';
 import { setSearchText } from '../../state/filters.svelte';
@@ -200,4 +201,60 @@ it('Tab closes the dropdown on the way out', async () => {
 	} finally {
 		unmount(component);
 	}
+});
+
+describe('a superseded search', () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	const page = (id: string) => ({
+		items: [{ id, type_name: 'Pump', properties: { name: id }, rev: 1 }],
+		total: 1
+	});
+
+	it('is aborted when the next query starts', async () => {
+		const signals: (AbortSignal | undefined)[] = [];
+		const spy = vi.spyOn(modelRead, 'listElementsPage').mockImplementation((query) => {
+			signals.push(query?.signal);
+			return signals.length === 1 ? new Promise(() => {}) : Promise.resolve(page('P-2'));
+		});
+		const component = mount(Search, { target: document.body });
+		try {
+			typeQuery('P-1');
+			flushSync();
+			await settle();
+			expect(spy).toHaveBeenCalledOnce();
+			expect(signals[0]?.aborted).toBe(false);
+
+			typeQuery('P-2');
+			flushSync();
+			expect(signals[0]?.aborted).toBe(true);
+			await settle();
+			flushSync();
+
+			expect(spy).toHaveBeenCalledTimes(2);
+			expect(signals[1]?.aborted).toBe(false);
+			expect(options().map((row) => row.title)).toEqual(['P-2']);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('an AbortError leaves the results as they were', async () => {
+		vi.spyOn(modelRead, 'listElementsPage')
+			.mockResolvedValueOnce(page('P-1'))
+			.mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'));
+		const component = await mountWithResults();
+		try {
+			expect(options().map((row) => row.title)).toEqual(['P-1']);
+
+			typeQuery('P-10');
+			flushSync();
+			await settle();
+			flushSync();
+
+			expect(options().map((row) => row.title)).toEqual(['P-1']);
+		} finally {
+			unmount(component);
+		}
+	});
 });

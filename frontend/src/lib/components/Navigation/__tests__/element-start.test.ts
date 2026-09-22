@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../../../api/__tests__/server';
 import { setActiveBaseUrl } from '$lib/api/client';
@@ -14,7 +14,9 @@ import {
 	resetNavigationEditors,
 	setProjectInfo
 } from '$lib/state';
+import * as modelRead from '$lib/api/model-read';
 import NavigationNode from '../NavigationNode.svelte';
+import ElementStartPicker from '../ElementStartPicker.svelte';
 
 const BASE = 'http://api.test/api/v1';
 
@@ -130,4 +132,83 @@ it('switching to Element mode and picking a result writes elementStartScope(id)'
 	} finally {
 		unmount(c);
 	}
+});
+
+describe('a superseded search', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+		document.body.innerHTML = '';
+	});
+
+	const page = (id: string) => ({
+		items: [{ id, type_name: 'Sensor', properties: { name: id }, rev: 1 }],
+		total: 1
+	});
+
+	function pickerWithQuery(q: string) {
+		const component = mount(ElementStartPicker, {
+			target: document.body,
+			props: { value: null, onPick: () => {} }
+		});
+		flushSync();
+		typeInto(q);
+		return component;
+	}
+
+	function typeInto(q: string): void {
+		const input = document.querySelector(
+			'input[placeholder="Search elements…"]'
+		) as HTMLInputElement;
+		input.value = q;
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+	}
+
+	const rows = () =>
+		[...document.querySelectorAll('li button')].map((b) => b.textContent?.trim().split(/\s+/)[0]);
+
+	it('is aborted when the next query starts', async () => {
+		const signals: (AbortSignal | undefined)[] = [];
+		const spy = vi.spyOn(modelRead, 'listElementsPage').mockImplementation((query) => {
+			signals.push(query?.signal);
+			return signals.length === 1 ? new Promise(() => {}) : Promise.resolve(page('s-2'));
+		});
+		const component = pickerWithQuery('s-1');
+		try {
+			await waitForDebounce();
+			expect(spy).toHaveBeenCalledOnce();
+			expect(signals[0]?.aborted).toBe(false);
+
+			typeInto('s-2');
+			expect(signals[0]?.aborted).toBe(true);
+			await waitForDebounce();
+			flushSync();
+
+			expect(spy).toHaveBeenCalledTimes(2);
+			expect(signals[1]?.aborted).toBe(false);
+			expect(rows()).toEqual(['s-2']);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('an AbortError leaves the results as they were', async () => {
+		vi.spyOn(modelRead, 'listElementsPage')
+			.mockResolvedValueOnce(page('s-1'))
+			.mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'));
+		const component = pickerWithQuery('s-1');
+		try {
+			await waitForDebounce();
+			flushSync();
+			expect(rows()).toEqual(['s-1']);
+
+			typeInto('s-10');
+			await waitForDebounce();
+			flushSync();
+
+			expect(rows()).toEqual(['s-1']);
+		} finally {
+			unmount(component);
+		}
+	});
 });

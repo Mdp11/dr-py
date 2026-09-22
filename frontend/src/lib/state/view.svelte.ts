@@ -56,6 +56,9 @@ import {
 } from './active-view.svelte';
 import { confirm } from './confirm.svelte';
 import { elementDisplayName } from '$lib/util/element-name';
+import { placedElementIds } from '$lib/engine/placements';
+import { addQuietProbe } from '$lib/engine/quiet';
+import { forgetViewPlacement, forgetViewPlacements, registerViewPlacement } from './replica.svelte';
 
 export { cloneView } from './view-ops';
 export { getActiveViewId } from './active-view.svelte';
@@ -109,7 +112,40 @@ function setState(view: View | null, warnings: Issue[]): void {
 	_warnings = warnings;
 }
 
+/** The view whose committed placements the replica holds, if any. */
+let _placedViewId: string | null = null;
+
+/**
+ * Hands the replica what the COMMITTED document places — the server's
+ * excluded-roots read knows nothing of staged view ops — and forgets the view
+ * registered before when it is another one or has no document now.
+ */
+function registerCommitted(viewId: string | null, view: View | null): void {
+	if (_placedViewId !== null && (_placedViewId !== viewId || view === null)) {
+		forgetViewPlacement(_placedViewId);
+		_placedViewId = null;
+	}
+	if (viewId !== null && view !== null) {
+		registerViewPlacement(viewId, placedElementIds(view));
+		_placedViewId = viewId;
+	}
+}
+
+/** `refreshView()` calls in flight, and who waits for there to be none. */
+let _refreshing = 0;
+let _refreshWaiters: (() => void)[] = [];
+
+// After a commit of view ops the server's excluded pool is ahead of the
+// registered placements until the refetch lands: a shadow re-test waits.
+addQuietProbe(() =>
+	_refreshing === 0
+		? Promise.resolve()
+		: new Promise<void>((resolve) => void _refreshWaiters.push(resolve))
+);
+
 export function clearViewState(): void {
+	forgetViewPlacements();
+	_placedViewId = null;
 	setState(null, []);
 	_views = [];
 	setActiveViewId(null); // in-memory only: the per-project localStorage choice survives
@@ -183,6 +219,7 @@ export async function loadViews(): Promise<boolean> {
  * and this is a plain `setState`.
  */
 export async function refreshView(): Promise<void> {
+	_refreshing += 1;
 	try {
 		const activeId = getActiveViewId();
 		let res: { view: View | null; warnings: Issue[] };
@@ -200,6 +237,9 @@ export async function refreshView(): Promise<void> {
 				res = { view: null, warnings: [] };
 			}
 		}
+		// Before `setState`: the tree refetches on `_view`'s identity and must
+		// find these placements already posted.
+		registerCommitted(activeId, res.view);
 		const staged = getStagedViewOps();
 		let next = res.view;
 		// A null `res.view` (the project has no view at all) with a non-empty
@@ -222,9 +262,16 @@ export async function refreshView(): Promise<void> {
 		// journal is already gone by its first await).
 		if (conflicted) await dropConflictedJournal().catch(() => {});
 	} catch {
+		registerCommitted(null, null);
 		setState(null, []);
 	} finally {
 		_viewResolved = true;
+		_refreshing -= 1;
+		if (_refreshing === 0) {
+			const waiters = _refreshWaiters;
+			_refreshWaiters = [];
+			for (const resolve of waiters) resolve();
+		}
 	}
 }
 

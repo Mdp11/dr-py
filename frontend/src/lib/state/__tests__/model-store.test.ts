@@ -3,9 +3,12 @@ import { http, HttpResponse } from 'msw';
 
 import type { Element, OpsResponse, Relationship } from '$lib/api/types';
 import { server } from '../../api/__tests__/server';
+import { setActiveBaseUrl } from '$lib/api/client';
+import { installEngineSeam, type EngineSeam } from '$lib/api/engine-route';
 import { getVisitStack, resetInspectionHistory } from '../inspection-history.svelte';
 import { select } from '../selection.svelte';
 import {
+	adoptIssues,
 	applyDelta,
 	emit,
 	ensureElement,
@@ -694,5 +697,96 @@ describe('ensureElements (batched)', () => {
 
 		applyDelta(delta({ model_rev: 1, changed_elements: [el('gone')] }));
 		expect(getMissingElementIds().has('gone')).toBe(false);
+	});
+});
+
+describe('the summary on the engine', () => {
+	const engineSummary = { ...summary, model_rev: 6, issue_counts: null, undo_depth: 0 };
+
+	/** A seam that puts the summary on `side`, its engine answering without issue counts. */
+	function seam(side: 'engine' | 'server'): EngineSeam {
+		return {
+			side: (surface) => (surface === 'summary' ? side : 'server'),
+			call: <T>(method: string) => {
+				expect(method).toBe('getModelSummary');
+				return Promise.resolve(engineSummary as T);
+			},
+			gone: () => false
+		};
+	}
+
+	let issueRequests = 0;
+	/** Holds the issues answer until released, so what the refresh itself left is seen first. */
+	let release: () => void = () => {};
+
+	beforeEach(() => {
+		// A config naming its server is always answered there, so the store reads through the active base URL here.
+		setModelApiConfig(undefined);
+		setActiveBaseUrl(BASE);
+		issueRequests = 0;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		server.use(
+			http.get(`${BASE}/model/issues`, async () => {
+				issueRequests += 1;
+				await held;
+				return HttpResponse.json({
+					model_rev: 6,
+					issues: [],
+					counts: { error: 1 },
+					truncated: false,
+					rules_status: null
+				});
+			}),
+			http.get(`${BASE}/model/summary`, () => HttpResponse.json(summary))
+		);
+	});
+	afterEach(() => {
+		installEngineSeam(null);
+		setActiveBaseUrl(null);
+		setModelApiConfig({ baseUrl: BASE });
+	});
+
+	it('with the summary on the engine, the issue counts survive a refresh', async () => {
+		installEngineSeam(seam('engine'));
+		adoptIssues([], { warning: 3 }, 0);
+
+		await refreshSummary();
+
+		expect(getIssueCounts()).toEqual({ warning: 3 });
+		expect(getModelSummary()).toMatchObject({
+			model_rev: 6,
+			element_count: 10,
+			issue_counts: { warning: 3 }
+		});
+		expect(getModelRev()).toBe(6);
+		await vi.waitFor(() => expect(issueRequests).toBe(1));
+		expect(getIssueCounts()).toEqual({ warning: 3 });
+		release();
+		await vi.waitFor(() => expect(getIssueCounts()).toEqual({ error: 1 }));
+	});
+
+	it("on the server's side the body's counts are adopted", async () => {
+		installEngineSeam(seam('server'));
+		adoptIssues([], { warning: 3 }, 0);
+
+		await refreshSummary();
+
+		expect(getIssueCounts()).toEqual({ warning: 2 });
+		expect(getModelSummary()?.issue_counts).toEqual({ warning: 2 });
+		expect(getModelRev()).toBe(4);
+		expect(issueRequests).toBe(0);
+	});
+
+	it("on the server's side a null count is adopted too", async () => {
+		installEngineSeam(seam('server'));
+		server.use(
+			http.get(`${BASE}/model/summary`, () => HttpResponse.json({ ...summary, issue_counts: null }))
+		);
+		adoptIssues([], { warning: 3 }, 0);
+
+		await refreshSummary();
+
+		expect(getIssueCounts()).toBeNull();
+		expect(getModelSummary()?.issue_counts).toBeNull();
 	});
 });

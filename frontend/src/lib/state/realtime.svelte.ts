@@ -209,6 +209,12 @@ export function handleFeedEvent(e: FeedEvent, raw?: string): void {
 			scheduleIssuesRefetch();
 			break;
 		}
+		case 'reset':
+			// The model moved without a journal row: what a snapshot event does,
+			// presence and leases aside (a reset carries neither).
+			if (e.model_rev > getModelRev()) refreshSummary().catch(() => {});
+			scheduleIssuesRefetch();
+			break;
 		case 'presence':
 			_presence = e.connected;
 			break;

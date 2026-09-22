@@ -188,7 +188,10 @@ export {
 } from './realtime.svelte';
 export {
 	beginReplicaCommit,
+	forgetViewPlacement,
+	forgetViewPlacements,
 	getReplicaStatus,
+	registerViewPlacement,
 	replicaMetamodelAdopted,
 	startReplica,
 	stopReplica

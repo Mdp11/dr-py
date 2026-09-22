@@ -60,14 +60,22 @@
 			return;
 		}
 		searching = true;
+		// A superseded search is aborted: on the engine a search is a scan, and
+		// scans run one after another.
+		const controller = new AbortController();
 		const timer = setTimeout(() => {
 			void (async () => {
 				try {
-					const page = await listElementsPage({ q, limit: MAX_RESULTS });
+					const page = await listElementsPage({
+						q,
+						limit: MAX_RESULTS,
+						signal: controller.signal
+					});
 					if (seq !== requestSeq) return; // stale response
 					seedElements(page.items);
 					results = page.items;
-				} catch {
+				} catch (err) {
+					if (err instanceof DOMException && err.name === 'AbortError') return;
 					if (seq !== requestSeq) return;
 					results = [];
 				} finally {
@@ -75,7 +83,10 @@
 				}
 			})();
 		}, DEBOUNCE_MS);
-		return () => clearTimeout(timer);
+		return () => {
+			clearTimeout(timer);
+			controller.abort();
+		};
 	});
 
 	const showDropdown = $derived(isOpen && searchText.trim() !== '');
