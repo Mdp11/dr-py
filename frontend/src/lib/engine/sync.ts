@@ -113,9 +113,10 @@ export type ReplicaSync = {
 	/**
 	 * A read answered by the replica once its `rev` has reached every `rev`
 	 * the sync was handed before the call (a feed delta, an applied commit
-	 * response, a snapshot event); a frozen or failed replica answers as it
-	 * is. Rejects with `EngineGoneError` when there is no replica to ask —
-	 * no open, phase `off` or `server`, a `stop()` meanwhile, a worker gone.
+	 * response, a snapshot event, a reset event); a frozen or failed replica
+	 * answers as it is. Rejects with `EngineGoneError` when there is no replica
+	 * to ask — no open, phase `off` or `server`, a `stop()` meanwhile, a
+	 * worker gone.
 	 */
 	call<T>(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<T>;
 	/** The element ids a view places; kept, and sent to every engine the sync connects. */

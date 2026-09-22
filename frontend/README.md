@@ -884,7 +884,8 @@ held in the SHELL until the replica may answer it, never in the engine's
 queue:
 
 - The sync keeps `known`, the highest `rev` it has been handed since
-  `open()`: a `feedCommit`, a `settle` with `applied`, a `feedSnapshot` —
+  `open()`: a `feedCommit`, a `settle` with `applied`, a `feedSnapshot`, a
+  `feedReset` —
   counted even when the input itself is dropped for its phase; `open()` and
   `stop()` reset it. A read takes `known` as its target when it is asked and
   is posted once the phase is `ready` and the replica's `rev` has reached it.
@@ -1023,8 +1024,7 @@ opening; `verify`, the background digest check, carried in `ready` too),
 handshake), `cspViolations` (every violation the frame reported) and `reason`
 (why `off`, `frozen`, `failed` or `server`). `server` is the boot fallback: the
 frame did not connect, or three opens failed before the first `ready`. In
-`server` (and `off`) every surface's effective side is the server's; its
-notice and the blocking banner of `failed` are not built yet.
+`server` (and `off`) every surface's effective side is the server's.
 
 **Wiring** (`lib/state/replica.svelte.ts`). The one `ReplicaSync` of the
 tab lives in a thin store, built on the first `startReplica()` from

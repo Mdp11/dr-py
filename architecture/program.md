@@ -106,8 +106,12 @@ call both sides and log any difference. Removed in F.
 
 **MR-3 · Freeze rule.** An area of the Python core is frozen for behaviour changes from the
 start of its port until its surface defaults to the engine. After that, features for the area
-land in TypeScript only. A bug fixed during a port lands on both sides, with a fixture. Areas
-not yet being ported carry on as normal.
+land in TypeScript only. A bug fixed during a port lands on both sides, with a fixture, and so
+does a bug found after the default flips, for as long as the server path lives (MR-1, until F).
+`routes/read.py`'s route functions and `routes/elements.py::get_element` left the freeze for
+features with B's fifth plan, when the five read surfaces defaulted to the engine; `core/model`,
+`core/metamodel` and the model-op applier stay frozen. Areas not yet being ported carry on as
+normal.
 
 **MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
 engine on a small fixture model. The route-level mock tests of its server path stay while
