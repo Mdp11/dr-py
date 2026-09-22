@@ -116,8 +116,8 @@ module workers, `SharedArrayBuffer` under isolation, `Atomics.wait` in workers,
 
 **CN-17 · The sandbox has no network and no credentials.** It is served from its own
 registrable domain (SameSite cookies are scoped by site, not origin), static files only, with
-`default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self'`.
-No `'unsafe-eval'`.
+`default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self';
+frame-ancestors <app origin>`. Only the app's own origin may embed it. No `'unsafe-eval'`.
 
 **CN-18.** Pyodide is not a security boundary. In the browser the origin is; in the headless
 host the container is.
