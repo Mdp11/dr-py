@@ -882,6 +882,52 @@ switch per surface:
   (so the read barrier holds); `gone` is `EngineGoneError`. Nothing
   installs it in the app yet.
 
+**Shadow comparison** (`lib/engine/shadow.ts`, `lib/engine/quiet.ts`). Holds
+the engine's answer to a switched-on read to the server's own, in dev only.
+
+- `shadowEnabled(storage?)` is true only under `import.meta.env.DEV` (absent
+  from a build — dead code past that check is never bundled) and only when
+  `localStorage['dr.shadow'] === '1'`; no storage, a throwing one or any
+  other value are off.
+- `createShadow({rev, quiet, report})` builds the seam's `shadow`: it runs
+  `server()` beside the engine's own outcome and compares them — deep
+  equality of the parsed values (object key order ignored, array order not),
+  or the same KIND of failure (the same `status` for two `ApiError`s, else
+  the same error name); a `summary` comparison drops `issue_counts` and
+  `undo_depth` first, since the engine always answers those `null` / `0` and
+  the store keeps the server's own (see "Surfaces" — `getModelSummary`).
+  Equal: nothing happens. Different: it awaits `quiet()`, notes the
+  replica's `rev`, runs `again()` and `server()` once more, and notes `rev`
+  again — a `rev` that moved during that round makes the round's answers
+  worthless (a live model raced the comparison, not a real mismatch), and
+  the whole thing repeats, three rounds at most; past that it gives up
+  silently, since a replica that never rests cannot be held to a fixed
+  answer. A round whose `rev` held still decides it: still equal, nothing;
+  still different, ONE line — `[shadow] <surface> <method> <params>: engine
+<short> ≠ server <short>`, each `short` (the value or the error, JSON-ish)
+  cut at 300 characters, so even a huge difference stays a short line. An
+  `AbortError` from either side — the engine's own outcome, `server()`, or a
+  re-test's `again()` / `server()` — ends the comparison at once, without a
+  report: the caller aborted, not the two sides disagreeing. So does an
+  `EngineGoneError` from the ENGINE side (the engine's own outcome, or a
+  re-test's `again()`) — a `stop()` mid-re-test can drop the replica's `rev`
+  to `null` right as the worker goes, and `null === null` must never be read
+  as a round whose `rev` held still.
+- `quiet.ts` is the tiny registry the re-test's `quiet()` is built from:
+  `addQuietProbe(probe)` registers a `() => Promise<void>` and returns the
+  function that drops it again; `quiet()` awaits every registered probe (none
+  registered: resolves at once). A store adds a probe for whatever could
+  still change what a read sees right after a difference was first seen —
+  the sync's own `settled()`, or (once views are wired in) "no `refreshView()`
+  in flight".
+- Nothing installs a `shadow` into the app's seam yet and nothing reads
+  `shadowEnabled()`; a build already holds neither the module nor its
+  `[shadow]` string, checked by building and grepping `build/` and
+  `.svelte-kit/output/client`. The store that wires this in is meant to read
+  `shadowEnabled()` once and, only then, reach `shadow.ts` through a dynamic
+  `import('./shadow')` behind the same `import.meta.env.DEV` check, so the
+  guard itself keeps the module out of a build regardless.
+
 **Status**. One `ReplicaStatus` object, replaced on every change and
 handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
 `frozen`, `failed`, `server`), `rev`, `progress` (`{task, done, total}` —
@@ -2323,6 +2369,9 @@ src/
                         barrier, view placements), placements.ts (the ids
                         a view places), surfaces.ts (the per-surface
                         switches), seam.ts (the seam over a sync),
+                        shadow.ts (shadowEnabled, createShadow — see
+                        "Replica (engine shell)" → "Shadow comparison"),
+                        quiet.ts (its addQuietProbe/quiet registry),
                         origins.ts, testing.ts
                         (connectInProcess, tests only); __tests__/support/
                         project-server.ts is the fake project server
