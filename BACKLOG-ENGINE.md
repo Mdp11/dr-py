@@ -101,6 +101,22 @@ The route clears the session (`set_metamodel(None)`) and touches no row, so `Mod
 `metamodel_id` and `model_rev`, and an evict + rehydrate brings back what was deleted *(read from
 the code, not reproduced)*. Decide whether the route should clear the rows or go.
 
+### K-39 · A peer's rebind never refetches the structure · `open` · *2026-09-22*
+A peer's commit that carries `metamodel.rebind` reaches this tab as a `rebind_event`, not a
+`commit_event`, so `realtime.svelte.ts` applies no delta and bumps no structure rev, and
+`onReloadRebind` (`routes/p/[projectId]/+page.svelte`) calls `replicaMetamodelAdopted()` but never
+`markStructureChanged()`. When the peer's batch also created or deleted elements, the tree keeps
+its old shape until the next structural delta or a reload — on the server path as well as the
+replica's *(read from the code, not reproduced)*. The committer's own path bumps after
+adoption (`adoptReboundMetamodel`); the likely fix is the same one-line bump in `onReloadRebind`.
+
+### K-40 · A successful Retry does not refetch the structure · `open` · *2026-09-22*
+Reads posted while the replica is `failed` are answered by the failed replica; `retryReplica()`
+re-bootstraps it but bumps no structure rev, so a tree read answered before the Retry stays stale
+until the next structural change. The overlay blocks the workspace while `failed`, so few such
+reads exist. Likely fix: `markStructureChanged()` once a retry reaches `ready`; revisit with the
+forked store (plan 6).
+
 ---
 
 ## 3. Cleanups
