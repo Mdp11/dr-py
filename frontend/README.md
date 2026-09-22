@@ -168,10 +168,14 @@ dispatches to whichever entity half `staging` (`lib/engine/surfaces.ts`,
 concern. `lib/state/model-shared.svelte.ts` holds what every entity half
 agrees on: the summary, `model_rev`, the structure-rev counter, the live
 issue map, rules status and the store error. `lib/state/model-legacy.svelte.ts`
-is today's entity half — the fetched-subset caches and the staged-edits
-buffer described below — and is the only one the facade dispatches to today;
-it is **frozen** and deleted once an engine-backed half is the only one
-(sub-project F). `lib/state/model-caches.ts` holds the pure id-remap helpers
+is the server-mode entity half — the fetched-subset caches and the
+staged-edits buffer described below; it is **frozen** and deleted once the
+engine half is the only one (sub-project F).
+`lib/state/model-engine.svelte.ts` is the engine half, a view over the
+replica (see "The engine store" below); the facade dispatches to it while
+`getStagingSide()` is `engine`. `setModelApiConfig` is not dispatched: it
+sets the shared half's client config, which the engine half never uses.
+`lib/state/model-caches.ts` holds the pure id-remap helpers
 (`remapElement`, `remapRelationship`, `remapCaches`) an entity half's delta
 application uses to resolve temp ids to canonical ones.
 
@@ -459,6 +463,69 @@ commit** loop:
    into a File System Access writable (or writes server-side via
    `POST /model/save`), so the browser never materializes the serialized model
    as a string. Export reflects the committed model, not the staged buffer.
+
+#### The engine store
+
+`model-engine.svelte.ts` is the entity half the facade dispatches to with
+staging on the engine. The user's staged edits live in the replica's working
+copy, and every read of this half goes through the `lib/api` seam to the
+replica (staging on the engine puts every read surface there), so what it
+caches is the committed model WITH the staged edits on top. It has no
+`ClientConfig`, and none of the legacy half's guards: nothing the replica
+answers can resurrect a staged delete, and a temp id is an id like any
+other — `ensureElement('tmp_…')` asks the engine, and a 404 puts it in
+`getMissingElementIds()` whatever its prefix, since that set means "the
+engine answered it does not exist". Its seeds take no rev guard either: an
+unstaged edit puts the committed, LOWER `rev` back, and the engine's later
+answer is the newer one.
+
+- **The caches** have the legacy half's names and shapes — `_elements`,
+  `_relationships`, `_treeItems`, `_missingElementIds` — and hold only what
+  the UI asked for.
+- **The handle.** The replica store injects the engine through
+  `attachEngine({call, on, status, subscribe})` on `startReplica()` with
+  staging on the engine, and takes it back with `detachEngine()` in
+  `stopReplica()` / `resetReplica()`, which drops everything the half holds;
+  an answer that lands after a detach or a `resetModelStore()` is dropped.
+- **The mirror**: `staged`, `conflicts` and `stagedDiff` as the engine last
+  answered them — one read in flight, one owed — read whenever a `changed`
+  event's `staged_version` differs from the version the mirror reflects, and
+  whenever the replica becomes `ready` (a re-bootstrap adopts the batches
+  without a `changed` event, under versions of its own). The staged-edit
+  readers (`getStagedOps`, `getStagedOpsFor`, `getStagedNameOverride`,
+  `getStagedDepth`, `hasStagedOps`, `isStagedDeleted`) read the mirror's
+  batches in order; `getStagedDiff()` is `computeDiff` of the engine's
+  committed images against its records now. `stagedSettled()` resolves once
+  no mirror read or cache re-read is in flight or owed.
+- **`changed` is the one path that refreshes the caches after a
+  transition** — a stage, an unstage, or a delta the replica applied. Its
+  deleted ids leave `_elements` and `_treeItems`, its deleted relationship
+  ids `_relationships`; its changed element ids that are cached are read
+  again in one `getElementsBatch` (chunks of 500) and written as the engine
+  answers, an id it omits leaving the caches. A changed cached relationship
+  is left to the relationships list's refetch: there is no batch read of
+  relationships, and the event is structural whenever a relationship moved.
+  `structural` moves the structure rev, and the event's `rev` becomes
+  `getModelRev()` when it is past it (a delta's event may reach the store
+  before or after the realtime store's `applyDelta`). The event is WIDE: a
+  rebase over-reports, so a peer's delta names every entity a staged batch
+  touched, and a staged relationship makes any peer delta structural — which
+  costs a re-read or a refetch, never a stale row.
+- **`applyDelta(res)`** — the user's own commit and a peer's alike — runs
+  the shared half (`applyDeltaShared`: rev, issue splice, summary patch,
+  `clearOverlay()`) WITHOUT moving the structure rev, which on this side
+  moves on the replica's `changed` event alone, so a structural delta moves
+  it once; then re-keys the caches through `id_map` (`remapCaches`), the
+  visit history and the selection, in the legacy half's order; then upserts
+  the delta's entities EXCEPT those a staged batch touches (the mirror's
+  diff), whose cached record is the working copy's — the replica replays the
+  batch over the delta and its `changed` event re-reads them — and drops the
+  deleted ids. It never touches the mirror. The legacy half's `applyDelta`
+  is unchanged: it moves the structure rev by its own formula.
+- **Edits** — `emit` and the unstage family (`popLastStaged`,
+  `revertStagedFor`, `revertStagedForElement`, `revertAllStaged`) — throw on
+  this side; `clearStaged()` does nothing, since the engine drops the
+  committed batches itself on the commit's delta.
 
 #### Validation issues: one live map, one optional overlay
 
@@ -1100,6 +1167,15 @@ sync exists:
   `shadow.ts` has loaded (see "Shadow comparison"); reads in flight before
   that are not compared. A seam replaced or uninstalled meanwhile is not
   overwritten by a late load.
+- **The status and the engine half.** `subscribeReplicaStatus(listener)`
+  hands `listener` every status change with the status before it, and
+  returns the unsubscribe. With staging on the engine, `startReplica()`
+  attaches the model store's engine half (`attachEngine`, see "The engine
+  store") with a handle over the sync — `call`, `on('changed')`, this
+  store's status and `subscribeReplicaStatus` — and `stopReplica()` /
+  `resetReplica()` detach it before the sync stops. With staging on legacy
+  it is never attached: attached, it would move the structure rev on every
+  delta the replica applies, which the legacy half already moves.
 - **The feed hand-over.** `handleFeedEvent(e, raw)` (`realtime.svelte.ts`)
   calls `handReplicaFeed(e, raw)` first, before anything moves the model
   store: a `commit` becomes `feedCommit(raw, e.rev)`, a `rebind`

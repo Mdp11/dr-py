@@ -5,7 +5,9 @@
  * with a flight, the two metamodel-adoption paths tell it the UI moved on,
  * and the view store registers what the committed view places. While it
  * runs, the engine seam is installed: each read surface is answered by the
- * replica or the server, as `dr.surfaces` says (read once per page load).
+ * replica or the server, as `dr.surfaces` says (read once per page load);
+ * with staging on the engine, the model store's engine half follows it
+ * through a handle (`attachEngine`).
  */
 
 import { installEngineSeam } from '$lib/api/engine-route';
@@ -24,12 +26,19 @@ import {
 	createReplicaSync,
 	OFF,
 	replicaApi,
+	type CallOptions,
 	type CommitFlight,
 	type ReplicaStatus,
 	type ReplicaSync,
 	type SyncDeps
 } from '$lib/engine/sync';
 import { getActiveProjectId } from './active-project.svelte';
+import {
+	attachEngine,
+	detachEngine,
+	type EngineHandle,
+	type StatusListener
+} from './model-engine.svelte';
 import { journeyReplica } from './open-journey';
 
 let _status = $state.raw<ReplicaStatus>(OFF);
@@ -49,6 +58,8 @@ const _placedViews = new Set<string>();
 let _noticeDismissed = $state(false);
 /** Set by `retryReplica()`, cleared once the retry lands at `ready`, `failed`, `off` or `server`. */
 let _retrying = $state(false);
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
+const _statusListeners = new Set<StatusListener>();
 
 const NO_FLIGHT: CommitFlight = { settle() {}, abandon() {} };
 
@@ -62,7 +73,7 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 		onStatus: (status) => {
 			// A sync that was replaced speaks for nothing the UI shows.
 			if (_sync !== made) return;
-			_status = status;
+			setStatus(status);
 			observe?.(status);
 			// Only `opening`: `resyncing` also reports progress, but a re-bootstrap
 			// is not the journey's open, and `ready`'s own `verify` progress is not
@@ -81,6 +92,44 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 		}
 	});
 	return made;
+}
+
+/** Every status change goes through here, so each listener hears it with the one before. */
+function setStatus(status: ReplicaStatus): void {
+	const previous = _status;
+	if (status === previous) return;
+	_status = status;
+	for (const listener of [..._statusListeners]) {
+		if (!_statusListeners.has(listener)) continue;
+		try {
+			listener(status, previous);
+		} catch (error) {
+			// A failing listener must not break the sync that reported the status.
+			queueMicrotask(() => {
+				throw error;
+			});
+		}
+	}
+}
+
+/** `listener` hears every status change, with the status before it; the returned function unsubscribes. */
+export function subscribeReplicaStatus(listener: StatusListener): () => void {
+	const entry: StatusListener = (status, previous) => listener(status, previous);
+	_statusListeners.add(entry);
+	return () => {
+		_statusListeners.delete(entry);
+	};
+}
+
+/** The model store's way into `sync`: its calls and `changed` events, and this store's status. */
+function engineHandle(sync: ReplicaSync): EngineHandle {
+	return {
+		call: <T>(method: string, params?: unknown, options?: CallOptions) =>
+			sync.call<T>(method, params, options),
+		on: (event, listener) => sync.on(event, listener),
+		status: () => _status,
+		subscribe: subscribeReplicaStatus
+	};
 }
 
 function _releaseGate(): void {
@@ -149,19 +198,27 @@ export function getStagingSide(): StagingSide {
 	return phase === 'off' || phase === 'server' ? 'legacy' : 'engine';
 }
 
-/** Opens the active project's replica and installs the seam; nothing without an active project. */
+/**
+ * Opens the active project's replica and installs the seam; with staging on
+ * the engine, the model store's engine half follows it. Nothing without an
+ * active project.
+ */
 export function startReplica(): void {
 	const projectId = getActiveProjectId();
 	if (!projectId) return;
 	_noticeDismissed = false;
 	const sync = (_sync ??= build(_deps));
 	installSeam(sync);
+	// Not with staging on legacy: attached, the engine half would move the
+	// structure rev on every delta the replica applies, as the legacy half does.
+	if (_switches?.staging === 'engine') attachEngine(engineHandle(sync));
 	sync.open(projectId);
 }
 
-/** Every read goes to the server again; the sync forgets the placements. */
+/** Every read goes to the server again; the sync forgets the placements, the engine half everything. */
 export function stopReplica(): void {
 	uninstallSeam();
+	detachEngine();
 	_placedViews.clear();
 	_sync?.stop();
 	_releaseGate();
@@ -287,10 +344,11 @@ export function resetReplica(): void {
 	_sync = null;
 	_deps = undefined;
 	uninstallSeam();
+	detachEngine();
 	_switches = null;
 	_placedViews.clear();
 	sync?.stop();
-	_status = OFF;
+	setStatus(OFF);
 	_noticeDismissed = false;
 	_retrying = false;
 	_releaseGate();

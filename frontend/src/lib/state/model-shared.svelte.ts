@@ -180,9 +180,14 @@ function addIssueToOwner(issue: Issue): void {
  * doing its own structural-triggered work need not recompute it.
  *
  * Does not touch entity caches, staged ops, selection or visit history — that
- * is each entity half's own `applyDelta`.
+ * is each entity half's own `applyDelta`. `structure: false` leaves the
+ * structure rev alone, for a half that moves it on a signal of its own.
  */
-export function applyDeltaShared(d: OpsResponse, hasElement: (id: string) => boolean): boolean {
+export function applyDeltaShared(
+	d: OpsResponse,
+	hasElement: (id: string) => boolean,
+	options: { structure?: boolean } = {}
+): boolean {
 	// Structural = anything that can change paged read results (containment
 	// levels, incident-relationship pages, neighborhoods): entity creation
 	// (acked creates always carry a temp-id -> canonical-id mapping), entity
@@ -200,7 +205,7 @@ export function applyDeltaShared(d: OpsResponse, hasElement: (id: string) => boo
 	clearOverlay(); // committed truth moved; any Validate snapshot is moot
 
 	setModelRev(d.model_rev);
-	if (structural) bumpStructureRev();
+	if (structural && options.structure !== false) bumpStructureRev();
 	_issueCounts = d.issue_counts;
 	patchSummary(d.model_rev, d.issue_counts);
 

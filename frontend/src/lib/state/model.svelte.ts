@@ -2,6 +2,7 @@ import type { ClientConfig } from '$lib/api/client';
 import type { Element, Issue, OpsResponse, Relationship, TreeItem } from '$lib/api/types';
 import { validateModel } from '../api/validation';
 import type { Diff } from './diff';
+import * as engine from './model-engine.svelte';
 import * as legacy from './model-legacy.svelte';
 import { getClientConfig, getModelRev, resetSharedStore } from './model-shared.svelte';
 import type { ModelOp } from './ops';
@@ -10,21 +11,23 @@ import { getStagingSide } from './replica.svelte';
 /**
  * Staged-commit model store — the facade. `model-shared.svelte.ts` (re-
  * exported below) holds the counters and issue state every entity half
- * agrees on; `model-legacy.svelte.ts` is today's entity half (caches, staged
- * edits), frozen and kept as the server-mode fallback. Every entity-half
- * read/write below dispatches through {@link side} to whichever half
- * `staging` (see `lib/engine/surfaces.ts`, `getStagingSide()`) names;
+ * agrees on; `model-legacy.svelte.ts` is the server-mode entity half (caches,
+ * staged-edit buffer), frozen; `model-engine.svelte.ts` is the engine entity
+ * half, a view over the replica, which holds the staged edits. Every
+ * entity-half read/write below dispatches through {@link side} to whichever
+ * half `staging` (see `lib/engine/surfaces.ts`, `getStagingSide()`) names;
  * `resetModelStore` and `validateAll` touch both halves directly, since
- * neither is a single entity half's concern.
+ * neither is a single entity half's concern, and `setModelApiConfig` sets the
+ * shared half's client config, which the engine half never uses.
  */
 
 export * from './model-shared.svelte';
 
-// Both branches are the legacy half — there is no engine-backed half to
-// dispatch to yet — but the shape already reads `getStagingSide()`, so
-// wiring one in touches only the `'engine'` branch.
-function side(): typeof legacy {
-	return getStagingSide() === 'engine' ? legacy : legacy;
+/** What both entity halves answer. */
+type EntityHalf = Omit<typeof legacy, 'setModelApiConfig' | 'resetLegacyStore'>;
+
+function side(): EntityHalf {
+	return getStagingSide() === 'engine' ? engine : legacy;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +147,7 @@ export function isStagedDeleted(id: string): boolean {
 }
 
 export function setModelApiConfig(cfg: ClientConfig | undefined): void {
-	side().setModelApiConfig(cfg);
+	legacy.setModelApiConfig(cfg);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,10 +175,11 @@ export async function validateAll(): Promise<Issue[]> {
 
 /**
  * Drop every cache, counter, queue, and error — for tests and for replacing
- * the model (load/upload flows call this, then refreshSummary()). Resets the
- * legacy entity half and the shared half together.
+ * the model (load/upload flows call this, then refreshSummary()). Resets both
+ * entity halves and the shared half together.
  */
 export function resetModelStore(): void {
 	legacy.resetLegacyStore();
+	engine.resetEngineStore();
 	resetSharedStore();
 }

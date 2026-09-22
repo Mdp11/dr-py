@@ -39,8 +39,10 @@ import {
 	resetReplica,
 	retryReplica,
 	startReplica,
-	stopReplica
+	stopReplica,
+	subscribeReplicaStatus
 } from '../replica.svelte';
+import * as modelEngine from '../model-engine.svelte';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
@@ -577,6 +579,70 @@ describe('getStagingSide', () => {
 
 		expect(side!()).toBe('legacy'); // the derived re-ran on its own, without a fresh read
 		dispose();
+	});
+});
+
+describe('the status listeners and the engine handle', () => {
+	const onStaging = (staging: string) =>
+		localStorage.setItem('dr.surfaces', JSON.stringify({ staging }));
+
+	it('subscribeReplicaStatus gets (status, previous) on every change', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		const seen: [ReplicaStatus, ReplicaStatus][] = [];
+		const unsubscribe = subscribeReplicaStatus((status, previous) => {
+			seen.push([status, previous]);
+		});
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		stopReplica();
+		unsubscribe();
+
+		// stopReplica's `off` included.
+		expect(seen.map(([status]) => status)).toEqual(replica.statuses);
+		expect(seen.at(-1)![0]).toBe(OFF);
+		expect(seen[0]![1]).toBe(OFF);
+		for (let i = 1; i < seen.length; i++) expect(seen[i]![1]).toBe(seen[i - 1]![0]);
+		expect(runs(seen.map(([status]) => status.phase))).toEqual(['opening', 'ready', 'off']);
+	});
+
+	it('startReplica attaches the engine half with staging on the engine; stopReplica detaches it', async () => {
+		onStaging('engine');
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		const attach = vi.spyOn(modelEngine, 'attachEngine');
+		const detach = vi.spyOn(modelEngine, 'detachEngine');
+		setActiveProject('p');
+
+		startReplica();
+		expect(attach).toHaveBeenCalledOnce();
+		const handle = attach.mock.calls[0]![0];
+		expect(handle.status()).toBe(getReplicaStatus());
+		await replica.until((s) => s.phase === 'ready');
+		expect(handle.status()).toBe(getReplicaStatus());
+		expect(handle.status().phase).toBe('ready');
+		expect(detach).not.toHaveBeenCalled();
+
+		stopReplica();
+		expect(detach).toHaveBeenCalled();
+		expect(handle.status()).toBe(OFF);
+	});
+
+	it('with staging on legacy, the engine half is never attached', async () => {
+		onStaging('legacy');
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		const attach = vi.spyOn(modelEngine, 'attachEngine');
+		setActiveProject('p');
+
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+
+		expect(attach).not.toHaveBeenCalled();
 	});
 });
 
