@@ -99,7 +99,15 @@ export type ReplicaSync = {
 	settled(): Promise<void>;
 	feedCommit(raw: string, rev: number): void;
 	feedRebind(rev: number): void;
+	/** A snapshot event; in `off` it restarts the open, as the model may have come since. */
 	feedSnapshot(modelRev: number): void;
+	/**
+	 * The server moved to `rev` without a journal row: a replica behind it
+	 * re-bootstraps (its tail is incomplete), and `off` restarts the open.
+	 */
+	feedReset(rev: number): void;
+	/** A `failed` replica re-bootstraps, adopting the batches it held; any other phase: nothing. */
+	retry(): void;
 	beginCommit(): CommitFlight;
 	metamodelAdopted(): void;
 	/**
@@ -207,7 +215,10 @@ type Run = {
 	cycling: boolean;
 	/** A re-bootstrap was asked for while a cycle ran: it runs once more, after. */
 	again: boolean;
-	/** The staged and parked batches a re-bootstrap took, held until a replica adopted them and is ready. */
+	/**
+	 * The staged and parked batches a re-bootstrap took, held until a replica
+	 * adopted them and is ready — through a `failed` or an `off` in between.
+	 */
 	held: WireBatch[] | null;
 	connecting: Promise<EngineLink> | null;
 	/** The highest rev a rebind froze the replica at; a rebind at or below it is its echo. */
@@ -682,7 +693,8 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				r.again = false;
 				const c: Cycle = { run: r, controller: new AbortController() };
 				r.cycle = c;
-				if (kind === 'opening') await openReplica(c, 'opening', null, true);
+				// A reopen after `off` carries what a re-bootstrap before it held.
+				if (kind === 'opening') await openReplica(c, 'opening', r.held, true);
 				else await resync(c);
 				if (!r.again || run !== r) return;
 				kind = 'resyncing';
@@ -700,6 +712,20 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 			return;
 		}
 		track(cycles(r, 'resyncing'));
+	};
+
+	/**
+	 * The open again, for a run that found no model: one may have come since.
+	 * The run, its link and the batches it holds stay; a cycle still ending
+	 * runs once more instead.
+	 */
+	const wake = (r: Run) => {
+		if (r.cycling) {
+			r.again = true;
+			return;
+		}
+		set({ phase: 'opening', attempt: 1, progress: null, source: null, reason: null });
+		track(cycles(r, 'opening'));
 	};
 
 	/**
@@ -867,10 +893,21 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		}
 	};
 
-	/** The tail from the replica's rev to head, in one go; one that cannot heal re-bootstraps. */
+	/**
+	 * The tail from the replica's rev to head, in one go; one that cannot heal
+	 * re-bootstraps. A fetch that throws is tried once more, a second later.
+	 */
 	const catchUp = async (r: Run, epoch: number): Promise<void> => {
-		const from = status.rev ?? 0;
-		const tail = await guard(r, deps.api.tail(r.projectId, from));
+		const fetchTail = () => guard(r, deps.api.tail(r.projectId, status.rev ?? 0));
+		let tail: TailBody;
+		try {
+			tail = await fetchTail();
+		} catch (error) {
+			if (error instanceof Stopped) throw error;
+			await guard(r, deps.sleep(1000));
+			live(r, epoch);
+			tail = await fetchTail();
+		}
 		if (!tail.complete) {
 			ask(r, epoch);
 			return;
@@ -943,7 +980,19 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 
 		feedSnapshot(modelRev) {
 			tell(modelRev);
-			enqueue({ kind: 'snapshot', modelRev });
+			if (run !== null && status.phase === 'off') wake(run);
+			else enqueue({ kind: 'snapshot', modelRev });
+		},
+
+		feedReset(rev) {
+			tell(rev);
+			// A snapshot event ahead of the replica: the tail cannot cross the hole, so it re-bootstraps.
+			if (run !== null && status.phase === 'off') wake(run);
+			else enqueue({ kind: 'snapshot', modelRev: rev });
+		},
+
+		retry() {
+			if (run !== null && status.phase === 'failed') rebootstrap(run);
 		},
 
 		feedRebind(rev) {

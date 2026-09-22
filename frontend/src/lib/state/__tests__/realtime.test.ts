@@ -377,6 +377,8 @@ describe('the replica hand-over', () => {
 			feedCommit: record('feedCommit'),
 			feedRebind: record('feedRebind'),
 			feedSnapshot: record('feedSnapshot'),
+			feedReset: record('feedReset'),
+			retry: vi.fn(),
 			beginCommit: () => ({ settle() {}, abandon() {} }),
 			metamodelAdopted: vi.fn(),
 			call: vi.fn(),

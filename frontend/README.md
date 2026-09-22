@@ -700,8 +700,8 @@ of another, `stop()` first. `settled()` resolves once no attempt runs, the
 pump is idle, no sleep is pending and the cache write is done — tests await it
 instead of polling.
 
-**Following.** Feed inputs (`feedCommit(raw, rev)`, `feedSnapshot(modelRev)`)
-and the user's own commit responses form ONE queue, handled one at a time,
+**Following.** Feed inputs (`feedCommit(raw, rev)`, `feedSnapshot(modelRev)`,
+`feedReset(rev)`) and the user's own commit responses form ONE queue, handled one at a time,
 each to its end. Deltas wait in `rev` order (a frame that arrives out of order
 takes its place); anything else in arrival order. While `opening` or
 `resyncing` inputs wait; at 1,000 waiting the queue is emptied and a catch-up
@@ -720,6 +720,20 @@ that was waiting. In `off`, `failed` and `server` they are dropped, and in
   done.
 - A snapshot event ahead of the replica — a reconnect that missed commits —
   runs a catch-up; one that is not does nothing.
+- A `reset` (`{type: 'reset', model_rev}`: the server moved `model_rev`
+  without a journal row — a replaced model, a legacy direct write) is handed
+  over as `feedReset(model_rev)` and handled as a snapshot event ahead: its
+  catch-up tail is incomplete, so the replica re-bootstraps. One at or below
+  the replica does nothing.
+- A catch-up whose tail FETCH throws (a network error, a 5xx) sleeps 1 s and
+  fetches once more; a second throw re-bootstraps. Nothing else waits: an
+  incomplete tail, a gap after the tail, a refused engine call and a digest
+  mismatch re-bootstrap at once.
+
+In `off` (the descriptor said there is no model) a `reset` or a snapshot event
+restarts the open — phase `opening`, attempt 1, the same run and link — since
+a model may have come since; it carries the batches a re-bootstrap before the
+`off` held. `server` is terminal for the tab: neither wakes it.
 
 The replica's `rev` comes from the answers of `end`, `applyTail` and
 `applyDelta`, and from the engine's `replica` events while `ready` (before
@@ -731,7 +745,8 @@ rebind, a `rev` bump with no journal row, more than 1,000 revisions behind —
 or that does not continue the replica; a delta or a tail answered `diverged:
 true`; the engine's `replica {state: 'diverged'}` event, which is how the
 background digest check ends false. A failed call or fetch in the
-pump re-bootstraps too — the re-bootstrap has retries of its own. A
+pump re-bootstraps too (a tail fetch after its one retry) — the re-bootstrap
+has retries of its own. A
 re-bootstrap is phase `resyncing`: `staged` and `conflicts` are read from the
 engine and their batches joined by id, parked ones included; the snapshot
 cache row is dropped and not read (bytes a replica diverged from must not
@@ -740,7 +755,12 @@ adopting those batches (`adoptStaged`) — the sync holds them across the
 attempts, since after `close` the engine no longer has them, and until a
 replica is ready with them. Reads posted to the engine meanwhile wait in it
 and are answered from the new replica. Feed inputs wait in the queue. Three
-failed attempts are `failed` (not `server`: this open was ready once). A
+failed attempts are `failed` (not `server`: this open was ready once), and
+stay so until `retry()`: a re-bootstrap with a fresh budget of three attempts
+that adopts the batches the sync still holds — the engine's `close` took them
+from the worker, so a page reload would lose them. Reads asked while `failed`
+are posted and wait in the closed engine for the replica `retry()` brings;
+`retry()` in any other phase does nothing. A
 re-bootstrap asked for while one runs is remembered and runs once more after
 it, never in parallel; the divergence a delta's answer and the engine's event
 both report is one re-bootstrap, not two — every re-bootstrap and freeze

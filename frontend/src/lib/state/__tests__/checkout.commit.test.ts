@@ -326,6 +326,8 @@ describe("the replica's flight", () => {
 			feedCommit: vi.fn(),
 			feedRebind: vi.fn(),
 			feedSnapshot: vi.fn(),
+			feedReset: vi.fn(),
+			retry: vi.fn(),
 			beginCommit: () => {
 				log.push('begin');
 				return {

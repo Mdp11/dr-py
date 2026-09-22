@@ -16,6 +16,8 @@ export interface LeaseLite {
 
 export type FeedEvent =
 	| { type: 'snapshot'; model_rev: number; locks: LeaseLite[]; connected: string[] }
+	/** `model_rev` moved without a journal row: a replaced model, or a legacy direct write. */
+	| { type: 'reset'; model_rev: number }
 	| {
 			type: 'commit';
 			rev: number;

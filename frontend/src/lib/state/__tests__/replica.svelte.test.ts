@@ -88,6 +88,8 @@ function spySync(flight: CommitFlight = { settle: vi.fn(), abandon: vi.fn() }) {
 		feedCommit: vi.fn(),
 		feedRebind: vi.fn(),
 		feedSnapshot: vi.fn(),
+		feedReset: vi.fn(),
+		retry: vi.fn(),
 		beginCommit: vi.fn(() => flight),
 		metamodelAdopted: vi.fn(),
 		call: vi.fn(),
