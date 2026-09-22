@@ -11,7 +11,7 @@ export const SURFACES = [
 /** The side each surface takes unless `localStorage['dr.surfaces']` says otherwise. */
 export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	elements: 'engine',
-	search: 'server',
+	search: 'engine',
 	relationships: 'engine',
 	tree: 'engine',
 	summary: 'engine'

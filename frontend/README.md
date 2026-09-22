@@ -502,8 +502,7 @@ The TypeScript engine (`../engine`) runs a full replica of the model in a
 worker of the sandbox site (`../sandbox`); `lib/engine/` is the app's side of
 it and `lib/state/replica.svelte.ts` wires it into the workspace (see
 "Wiring" below). The model reads can be answered by it, one switch per
-surface (see "Surfaces") — `summary`, `elements`, `relationships` and
-`tree` on the engine by default, `search` on `server`; a status-bar
+surface (see "Surfaces"), every switch on `engine` by default; a status-bar
 indicator shows its state.
 
 **Aliases and the types-only rule.** `$engine` points at
@@ -955,9 +954,8 @@ switch per surface:
   surface, the method, the params, the outcome, `again()` (the same engine
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
-- The switch (`readSurfaces(storage?)`): `SURFACE_DEFAULTS` — `summary`,
-  `elements`, `relationships` and `tree` on the engine, `search` on
-  `server` — overlaid with the JSON object in `localStorage['dr.surfaces']`
+- The switch (`readSurfaces(storage?)`): `SURFACE_DEFAULTS`, all `engine`,
+  overlaid with the JSON object in `localStorage['dr.surfaces']`
   (e.g. `{"search": "engine"}`) — a known surface set to `engine` or
   `server` is taken, anything else ignored, and no storage, a throwing one or
   bad JSON give the defaults. It is honoured in a build too.

@@ -314,7 +314,7 @@ describe('the engine seam', () => {
 		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
 
 	it('startReplica installs a seam whose sides follow dr.surfaces and the phase', async () => {
-		onEngine({ elements: 'engine' });
+		onEngine({ search: 'server' });
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica();
@@ -346,21 +346,21 @@ describe('the engine seam', () => {
 	});
 
 	it('reads the switches once; resetReplica makes the next start read them again', () => {
-		onEngine({ search: 'engine' });
+		onEngine({ search: 'server' });
 		configureReplica({ sync: spySync(undefined, { current: READY }) });
 		setActiveProject('p');
 		startReplica();
-		expect(engineSide('search')).toBe('engine');
+		expect(engineSide('search')).toBe('server');
 
 		localStorage.removeItem('dr.surfaces');
 		stopReplica();
 		startReplica();
-		expect(engineSide('search')).toBe('engine');
+		expect(engineSide('search')).toBe('server');
 
 		resetReplica();
 		configureReplica({ sync: spySync(undefined, { current: READY }) });
 		startReplica();
-		expect(engineSide('search')).toBe('server');
+		expect(engineSide('search')).toBe('engine');
 	});
 
 	it('stopReplica and resetReplica uninstall it', () => {

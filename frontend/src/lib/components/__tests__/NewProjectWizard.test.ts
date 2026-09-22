@@ -373,9 +373,10 @@ describe('NewProjectWizard', () => {
 	// The other two `beginJourney('open', ...)` callers (the picker, boot())
 	// pass the same `{replica: anyEngineSurface(readSurfaces())}`; the create
 	// flow's own call must too, or a create journey never reads
-	// REPLICA_SLICES.create no matter what `dr.surfaces` says.
+	// REPLICA_SLICES.create no matter what `dr.surfaces` says. Every surface
+	// defaults to `engine` (`SURFACE_DEFAULTS`), so no override is needed to
+	// put one there.
 	it('passes replica: true to beginJourney when a surface is on the engine', async () => {
-		localStorage.setItem('dr.surfaces', JSON.stringify({ elements: 'engine' }));
 		const spy = vi.spyOn(openJourney, 'beginJourney');
 		createProject.mockResolvedValue({ id: 'pR', name: 'R', role: 'owner', skipped_artifacts: [] });
 		const c = mount(NewProjectWizard, {

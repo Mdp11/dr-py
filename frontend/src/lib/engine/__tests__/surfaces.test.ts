@@ -7,15 +7,22 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, and reads the defaults with no override', () => {
+	it('names the five read surfaces, every one on the engine by default', () => {
 		expect(SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
+		expect(SURFACE_DEFAULTS).toEqual({
+			elements: 'engine',
+			search: 'engine',
+			relationships: 'engine',
+			tree: 'engine',
+			summary: 'engine'
+		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
 
 	it('an override moves the one surface it names', () => {
-		expect(readSurfaces(storing('{"search": "engine"}'))).toEqual({
+		expect(readSurfaces(storing('{"search": "server"}'))).toEqual({
 			...SURFACE_DEFAULTS,
-			search: 'engine'
+			search: 'server'
 		});
 		expect(readSurfaces(storing('{"search": "engine", "tree": "server"}'))).toEqual({
 			...SURFACE_DEFAULTS,
@@ -50,9 +57,9 @@ describe('the surface switches', () => {
 	});
 
 	it('reads localStorage when handed no storage', () => {
-		localStorage.setItem('dr.surfaces', '{"elements": "engine"}');
+		localStorage.setItem('dr.surfaces', '{"elements": "server"}');
 		try {
-			expect(readSurfaces()).toEqual({ ...SURFACE_DEFAULTS, elements: 'engine' });
+			expect(readSurfaces()).toEqual({ ...SURFACE_DEFAULTS, elements: 'server' });
 		} finally {
 			localStorage.removeItem('dr.surfaces');
 		}
@@ -60,10 +67,9 @@ describe('the surface switches', () => {
 
 	it('returns a fresh record each time, independent of SURFACE_DEFAULTS', () => {
 		const surfaces = readSurfaces(storing(null));
-		const original = SURFACE_DEFAULTS.tree;
-		surfaces.tree = original === 'server' ? 'engine' : 'server';
-		expect(SURFACE_DEFAULTS.tree).toBe(original);
-		expect(readSurfaces(storing(null)).tree).toBe(original);
+		surfaces.tree = 'server';
+		expect(SURFACE_DEFAULTS.tree).toBe('engine');
+		expect(readSurfaces(storing(null)).tree).toBe('engine');
 	});
 
 	it('anyEngineSurface says whether one surface is on the engine', () => {
