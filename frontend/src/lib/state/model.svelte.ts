@@ -9,20 +9,20 @@ import { getStagingSide } from './replica.svelte';
 
 /**
  * Staged-commit model store — the facade. `model-shared.svelte.ts` (re-
- * exported below) holds the counters and issue state both entity halves
- * agree on; `model-legacy.svelte.ts` is today's entity half (caches, staged
- * edits), frozen and kept as the server-mode fallback; `model-engine.svelte.ts`
- * (Task 3) will be a view over the engine replica. Every entity-half read/
- * write below dispatches through {@link side} to whichever half `staging`
- * (see `lib/engine/surfaces.ts`, `getStagingSide()`) names; `resetModelStore`
- * and `validateAll` touch both halves directly, since neither is a single
- * entity half's concern.
+ * exported below) holds the counters and issue state every entity half
+ * agrees on; `model-legacy.svelte.ts` is today's entity half (caches, staged
+ * edits), frozen and kept as the server-mode fallback. Every entity-half
+ * read/write below dispatches through {@link side} to whichever half
+ * `staging` (see `lib/engine/surfaces.ts`, `getStagingSide()`) names;
+ * `resetModelStore` and `validateAll` touch both halves directly, since
+ * neither is a single entity half's concern.
  */
 
 export * from './model-shared.svelte';
 
-// The engine half lands in Task 3; until then both branches are the legacy
-// half, so the dispatch shape is already in place for the swap.
+// Both branches are the legacy half — there is no engine-backed half to
+// dispatch to yet — but the shape already reads `getStagingSide()`, so
+// wiring one in touches only the `'engine'` branch.
 function side(): typeof legacy {
 	return getStagingSide() === 'engine' ? legacy : legacy;
 }
@@ -173,7 +173,7 @@ export async function validateAll(): Promise<Issue[]> {
 /**
  * Drop every cache, counter, queue, and error — for tests and for replacing
  * the model (load/upload flows call this, then refreshSummary()). Resets the
- * entity half currently in use and the shared half together.
+ * legacy entity half and the shared half together.
  */
 export function resetModelStore(): void {
 	legacy.resetLegacyStore();

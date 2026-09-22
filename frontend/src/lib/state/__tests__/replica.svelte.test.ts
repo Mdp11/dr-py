@@ -453,60 +453,130 @@ describe('the engine seam', () => {
 });
 
 describe('getStagingSide', () => {
-	const READY: ReplicaStatus = { ...OFF, phase: 'ready', rev: 0 };
 	const onStaging = (staging: string) =>
 		localStorage.setItem('dr.surfaces', JSON.stringify({ staging }));
+
+	// Driven through a REAL sync (`realReplica()`/`fakeProject()`), not a spy:
+	// `getStagingSide()` reads the reactive `_status`, which only a sync wired
+	// through `build()`'s `onStatus` (spySync bypasses it) ever updates.
 
 	it('is legacy without a sync', () => {
 		expect(getStagingSide()).toBe('legacy');
 	});
 
-	it("is legacy with dr.surfaces {staging: 'legacy'}, even at ready", () => {
+	it("is legacy with dr.surfaces {staging: 'legacy'}, even at ready", async () => {
 		onStaging('legacy');
-		const status = { current: READY };
-		configureReplica({ sync: spySync(undefined, status) });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
 		setActiveProject('p');
 		startReplica();
+		await replica.until((s) => s.phase === 'ready');
 
 		expect(getStagingSide()).toBe('legacy');
 	});
 
-	it("is engine with {staging: 'engine'} at ready", () => {
+	it("is engine with {staging: 'engine'} at ready", async () => {
 		onStaging('engine');
-		const status = { current: READY };
-		configureReplica({ sync: spySync(undefined, status) });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
 		setActiveProject('p');
 		startReplica();
+		await replica.until((s) => s.phase === 'ready');
 
 		expect(getStagingSide()).toBe('engine');
 	});
 
-	it('is legacy at server and at off, staging on the engine', () => {
+	it('is legacy at server, staging on the engine', async () => {
 		onStaging('engine');
-		const status = { current: READY };
-		configureReplica({ sync: spySync(undefined, status) });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
 		setActiveProject('p');
 		startReplica();
+		await replica.until((s) => s.phase === 'server');
 
-		status.current = { ...OFF, phase: 'server' };
-		expect(getStagingSide()).toBe('legacy');
-
-		status.current = OFF;
 		expect(getStagingSide()).toBe('legacy');
 	});
 
-	it('is engine at failed and frozen, staging on the engine', () => {
+	it('is legacy at off, staging on the engine', async () => {
 		onStaging('engine');
-		const status = { current: READY };
-		configureReplica({ sync: spySync(undefined, status) });
+		const project = fakeProject();
+		project.fail('descriptor', 404, 1);
+		server.use(...project.handlers());
+		const replica = realReplica();
 		setActiveProject('p');
 		startReplica();
+		await replica.until((s) => s.phase === 'off');
 
-		status.current = { ...OFF, phase: 'failed' };
-		expect(getStagingSide()).toBe('engine');
+		expect(getStagingSide()).toBe('legacy');
+	});
 
-		status.current = { ...OFF, phase: 'frozen' };
+	it('is engine at failed, staging on the engine', async () => {
+		onStaging('engine');
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await failReplica(project, replica);
+
 		expect(getStagingSide()).toBe('engine');
+	});
+
+	it('is engine at frozen, staging on the engine', async () => {
+		onStaging('engine');
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+
+		// The freeze is synchronous (no queued delta), so the watcher must be
+		// registered BEFORE the event fires, or the one push it waits for is
+		// already past by the time `until` starts watching.
+		const frozen = replica.until((s) => s.phase === 'frozen');
+		handReplicaFeed(
+			{
+				type: 'rebind',
+				rev: 1,
+				from_metamodel_id: 'a',
+				to_metamodel_id: 'b',
+				validation_error_count: 0
+			},
+			'{}'
+		);
+		await frozen;
+
+		expect(getStagingSide()).toBe('engine');
+	});
+
+	it('reacts through $derived when the phase moves to server', async () => {
+		onStaging('engine');
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
+
+		let side: (() => string) | undefined;
+		const dispose = $effect.root(() => {
+			const s = $derived(getStagingSide());
+			side = () => s;
+		});
+		flushSync();
+		expect(side!()).toBe('legacy'); // no sync yet
+
+		setActiveProject('p');
+		startReplica();
+		flushSync();
+		expect(side!()).toBe('engine'); // opening: staging on the engine, phase not off/server
+
+		await replica.until((s) => s.phase === 'server');
+		flushSync();
+
+		expect(side!()).toBe('legacy'); // the derived re-ran on its own, without a fresh read
+		dispose();
 	});
 });
 

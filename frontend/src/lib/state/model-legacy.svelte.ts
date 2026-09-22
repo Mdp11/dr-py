@@ -20,13 +20,13 @@ import { remapProperties } from './remap';
 import { getSelection, select } from './selection.svelte';
 
 /**
- * Legacy entity half of the staged-commit model store — frozen: this is
- * today's code, moved verbatim, and stays the server-mode fallback behind the
- * `staging` switch (see `model.svelte.ts`, the facade). Model-wide counters
- * and issues live in `model-shared.svelte.ts`; this file holds only the
- * FETCHED SUBSET of the model (entities brought in by paged reads, searches,
- * neighborhoods, and commit deltas — never the whole model) and the staged
- * (uncommitted) edit buffer.
+ * Legacy entity half of the staged-commit model store — frozen: it is the
+ * server-mode fallback behind the `staging` switch (see `model.svelte.ts`,
+ * the facade), and does not change once an engine-backed half exists to take
+ * over. Model-wide counters and issues live in `model-shared.svelte.ts`;
+ * this file holds only the FETCHED SUBSET of the model (entities brought in
+ * by paged reads, searches, neighborhoods, and commit deltas — never the
+ * whole model) and the staged (uncommitted) edit buffer.
  *
  * Mutations keep the synchronous-optimistic `emit(op)` contract: the op is
  * applied to the local caches immediately, then pushed onto the STAGED-EDITS
@@ -844,8 +844,9 @@ export function seedRelationships(rels: readonly Relationship[]): void {
 
 /**
  * Drop every cache, counter and queue — the entity half's share of
- * `resetModelStore()` (the facade, which also resets the shared half). See
- * that function for why the Validate overlay must go too.
+ * `resetModelStore()` (the facade, which calls this and then
+ * `resetSharedStore()` — see that function for why the Validate overlay must
+ * go too).
  */
 export function resetLegacyStore(): void {
 	_pendingElementFetches.clear();

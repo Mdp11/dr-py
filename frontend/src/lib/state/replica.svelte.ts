@@ -139,11 +139,13 @@ export function getReplicaStatus(): ReplicaStatus {
  * `frozen` keep `engine`, since the sync holds the batches staged there
  * across a re-bootstrap (see `lib/engine/sync.ts`'s "a re-bootstrap carries
  * the batches"). `legacy` without a sync: nothing is open to stage into.
+ * Reads `_status` (reactive), not `_sync.status()` — the facade's `side()`
+ * calls this on every entity-half read, including from a `$derived`, and
+ * `_status` is what `onStatus` keeps current for the sync in use.
  */
 export function getStagingSide(): StagingSide {
-	if (_sync === null || _switches === null) return 'legacy';
-	if (_switches.staging !== 'engine') return 'legacy';
-	const { phase } = _sync.status();
+	if (_switches === null || _switches.staging !== 'engine') return 'legacy';
+	const { phase } = _status;
 	return phase === 'off' || phase === 'server' ? 'legacy' : 'engine';
 }
 
