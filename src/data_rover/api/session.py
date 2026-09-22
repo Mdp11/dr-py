@@ -14,7 +14,7 @@ from data_rover.core.validation.rules.compile import CompiledRules, empty_compil
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
-from .feed import FeedHub
+from .feed import FeedHub, reset_event
 from .locking import LockTable
 from .script_sweep import ScriptSweepRegistry
 from .settings import get_settings
@@ -263,8 +263,17 @@ class Session:
             self.script_cell_cache.evict_touched(touched, self.model_rev)
         self.script_sweeps.cancel_all()
 
+    def announce_reset(self) -> None:
+        """Broadcast a ``reset`` for the current ``model_rev``: the rev moved
+        without a journal row, so a replica has no delta to follow."""
+        self.hub.broadcast(reset_event(model_rev=self.model_rev))
+
     def set_model(
-        self, model: Model | None, *, validation: ValidationState | None = None
+        self,
+        model: Model | None,
+        *,
+        validation: ValidationState | None = None,
+        announce: bool = True,
     ) -> None:
         """Replace (or clear) the model and invalidate model-derived state.
 
@@ -272,6 +281,10 @@ class Session:
         ``ValidationState`` for the NEW model (the load endpoints seed at
         load time; session-mode apply-cr splices the CR's dirty set) pass it
         here so it is installed in the same step instead of cleared.
+
+        ``announce=False`` is for a caller that writes durable state after the
+        swap and calls ``announce_reset()`` once it has: a replica told
+        earlier would open from the rows the caller is about to replace.
         """
         self.model = model
         # view is intentionally untouched on model replacement
@@ -282,8 +295,10 @@ class Session:
         self.model_rev += 1
         self.state_digest_value = None
         self.invalidate_derived_caches()
+        if announce:
+            self.announce_reset()
 
-    def touch_model(self) -> None:
+    def touch_model(self, *, announce: bool = True) -> None:
         """Call when the model is mutated outside the ops protocol.
 
         Legacy mutation routes (POST/PATCH/DELETE on /model/elements and
@@ -310,8 +325,12 @@ class Session:
         self.validation = None
         self.state_digest_value = None
         self.invalidate_derived_caches()
+        if announce:
+            self.announce_reset()
 
-    def set_metamodel(self, metamodel: Metamodel | None) -> None:
+    def set_metamodel(
+        self, metamodel: Metamodel | None, *, announce: bool = True
+    ) -> None:
         """Replace (or clear) the metamodel; the model conforms to it, so the
         model and its validation baseline are cleared too.
 
@@ -324,7 +343,7 @@ class Session:
         """
         self.metamodel = metamodel
         self.compiled_rules = empty_compiled()
-        self.set_model(None)
+        self.set_model(None, announce=announce)
 
     def record_batch(self, batch: AppliedBatch) -> None:
         """Append an accepted batch to the op log, dropping the oldest entry

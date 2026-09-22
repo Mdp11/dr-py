@@ -198,12 +198,18 @@ def _install_model(
     model = build_model_from_dicts(metamodel, raw)
     # install with a PRESENT-but-EMPTY issue store: ops batches splice into it
     # immediately (no synchronous re-seed) while the background sweep fills it
-    session.set_model(model, validation=ValidationState())
+    session.set_model(model, validation=ValidationState(), announce=False)
     # make this uploaded model the durable baseline, but only if the project
     # has a model row (i.e. its metamodel was persisted) — pure in-memory unit
     # tests that skip the metamodel route keep working with no persistence.
-    if content.get_model_row(db, project_id) is not None:
-        persist_baseline(project_id, session, author_id=author_id)
+    # announced once the baseline is durable, so a replica sent to the
+    # snapshot descriptor finds it instead of writing a second one; announced
+    # all the same when persisting fails, since the rev has moved
+    try:
+        if content.get_model_row(db, project_id) is not None:
+            persist_baseline(project_id, session, author_id=author_id)
+    finally:
+        session.announce_reset()
     start_validation_sweep(session)
     start_search_index_build(session)
     return model_summary(session)

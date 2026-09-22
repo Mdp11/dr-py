@@ -78,24 +78,29 @@ async def upload_metamodel(
     else:
         blob = body
     metamodel = load_metamodel_str(blob)
-    session.set_metamodel(metamodel)  # clears the in-memory model (core semantics)
-    # `set_metamodel` resets the compiled rules to empty; the project's
-    # `validation_rules` artifacts survive this upload (`clear_history` drops
-    # commits and snapshots, not artifact rows), so recompile them against the
-    # new schema. Rules the new schema drifts are reported skipped, never
-    # evaluated against the outgoing one's closures.
-    session.compiled_rules = load_compiled_rules(db, project_id, metamodel)
-    # persist the metamodel + (re)bind the project's model row; changing the
-    # metamodel clears the model, so drop durable history too. Non-empty
-    # models go through the non-destructive `metamodel.rebind` op instead
-    # (this path is initial-bind only).
-    # Metamodel has no name field (only enums/elements/relationships); the row
-    # name is cosmetic, leave it "".
-    mm_row = content.create_metamodel(db, name="", version=1, blob=blob)
-    content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
-    content.clear_history(db, project_id)
-    content.set_model_rev(db, project_id, session.model_rev)
-    db.commit()
+    # clears the in-memory model (core semantics); announced once the rows
+    # below are committed, or when writing them fails, since the rev has moved
+    session.set_metamodel(metamodel, announce=False)
+    try:
+        # `set_metamodel` resets the compiled rules to empty; the project's
+        # `validation_rules` artifacts survive this upload (`clear_history` drops
+        # commits and snapshots, not artifact rows), so recompile them against the
+        # new schema. Rules the new schema drifts are reported skipped, never
+        # evaluated against the outgoing one's closures.
+        session.compiled_rules = load_compiled_rules(db, project_id, metamodel)
+        # persist the metamodel + (re)bind the project's model row; changing the
+        # metamodel clears the model, so drop durable history too. Non-empty
+        # models go through the non-destructive `metamodel.rebind` op instead
+        # (this path is initial-bind only).
+        # Metamodel has no name field (only enums/elements/relationships); the row
+        # name is cosmetic, leave it "".
+        mm_row = content.create_metamodel(db, name="", version=1, blob=blob)
+        content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
+        content.clear_history(db, project_id)
+        content.set_model_rev(db, project_id, session.model_rev)
+        db.commit()
+    finally:
+        session.announce_reset()
     return metamodel
 
 

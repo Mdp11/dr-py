@@ -81,13 +81,21 @@ plan 2 landed. Check once against the dev stack:
 answer `t, t`. If it does not, the descriptor and the tail would call an over-cap commit
 expressible and serve a delta with no entities.
 
-### K-37 · A `model_rev` bump with no journal row is silent to a replica · `open` · *2026-09-22*
+### K-37 · A `model_rev` bump with no journal row is silent to a replica · `done` · *2026-09-22*
 `POST /model/upload`, `POST /metamodel`, `DELETE /metamodel` and the legacy element routes
 bump `model_rev` and broadcast nothing. A replica hears of them at the next delta — a gap, an
 incomplete tail, a re-bootstrap — or at a reconnect. Harmless while nothing reads the replica;
 once a surface does, a read between the bump and the next delta answers from before it.
 Decide before a surface defaults to the engine: broadcast a header-only event from
 `touch_model` and `set_model`, or have the shell re-bootstrap after its own such calls.
+**Done:** the server broadcasts `{"type":"reset","model_rev"}` from `Session.announce_reset()` —
+`set_model`, `touch_model` and `set_metamodel` by default, the model upload and `POST /metamodel`
+after their durable writes (CT-2's **Reset**).
+
+### K-38 · `DELETE /metamodel` writes nothing durable · `open` · *2026-09-22*
+The route clears the session (`set_metamodel(None)`) and touches no row, so `ModelRow` keeps its
+`metamodel_id` and `model_rev`, and an evict + rehydrate brings back what was deleted *(read from
+the code, not reproduced)*. Decide whether the route should clear the rows or go.
 
 ---
 

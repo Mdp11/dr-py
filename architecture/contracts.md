@@ -71,6 +71,10 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
   replica, which is then diverged (AD-12).
 - Artifact, view and metamodel-layout changes stay header-only on the wire; their content is
   refetched as today.
+- **Reset.** A `model_rev` bump that writes no journal row (a model or metamodel upload or
+  delete, the legacy element and relationship routes) is broadcast as
+  `{"type":"reset","model_rev"}`. It carries no delta, the tail across it is incomplete, and a
+  replica re-bootstraps.
 
 ## CT-3 · State digest
 

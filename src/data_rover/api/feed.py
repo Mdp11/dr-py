@@ -165,6 +165,13 @@ def commit_event(
     }
 
 
+def reset_event(*, model_rev: int) -> dict[str, Any]:
+    """``model_rev`` moved without a journal row (a model or metamodel upload
+    or delete, a legacy element/relationship write): there is no delta to
+    follow, and a replica rebuilds from a snapshot at or past ``model_rev``."""
+    return {"type": "reset", "model_rev": model_rev}
+
+
 def lock_event(action: str, leases: list[dict[str, Any]]) -> dict[str, Any]:
     return {"type": "lock", "action": action, "leases": leases}
 
