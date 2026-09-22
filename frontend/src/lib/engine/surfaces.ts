@@ -13,7 +13,7 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	elements: 'engine',
 	search: 'server',
 	relationships: 'engine',
-	tree: 'server',
+	tree: 'engine',
 	summary: 'engine'
 });
 

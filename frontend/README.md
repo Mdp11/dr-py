@@ -502,9 +502,9 @@ The TypeScript engine (`../engine`) runs a full replica of the model in a
 worker of the sandbox site (`../sandbox`); `lib/engine/` is the app's side of
 it and `lib/state/replica.svelte.ts` wires it into the workspace (see
 "Wiring" below). The model reads can be answered by it, one switch per
-surface (see "Surfaces") — `summary`, `elements` and `relationships` on the
-engine by default, `search` and `tree` on `server`; a status-bar indicator
-shows its state.
+surface (see "Surfaces") — `summary`, `elements`, `relationships` and
+`tree` on the engine by default, `search` on `server`; a status-bar
+indicator shows its state.
 
 **Aliases and the types-only rule.** `$engine` points at
 `../engine/src/index.ts` and `$sandbox` at `../sandbox/src`, in `kit.alias`
@@ -956,7 +956,7 @@ switch per surface:
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switch (`readSurfaces(storage?)`): `SURFACE_DEFAULTS` — `summary`,
-  `elements` and `relationships` on the engine, `search` and `tree` on
+  `elements`, `relationships` and `tree` on the engine, `search` on
   `server` — overlaid with the JSON object in `localStorage['dr.surfaces']`
   (e.g. `{"search": "engine"}`) — a known surface set to `engine` or
   `server` is taken, anything else ignored, and no storage, a throwing one or

@@ -324,7 +324,7 @@ describe('the engine seam', () => {
 		startReplica();
 		expect(getReplicaStatus().phase).toBe('opening');
 		expect(engineSide('elements')).toBe('engine');
-		expect(engineSide('tree')).toBe('server');
+		expect(engineSide('search')).toBe('server');
 		await replica.until((s) => s.phase === 'ready');
 
 		expect(engineSide('elements')).toBe('engine');
@@ -346,21 +346,21 @@ describe('the engine seam', () => {
 	});
 
 	it('reads the switches once; resetReplica makes the next start read them again', () => {
-		onEngine({ tree: 'engine' });
+		onEngine({ search: 'engine' });
 		configureReplica({ sync: spySync(undefined, { current: READY }) });
 		setActiveProject('p');
 		startReplica();
-		expect(engineSide('tree')).toBe('engine');
+		expect(engineSide('search')).toBe('engine');
 
 		localStorage.removeItem('dr.surfaces');
 		stopReplica();
 		startReplica();
-		expect(engineSide('tree')).toBe('engine');
+		expect(engineSide('search')).toBe('engine');
 
 		resetReplica();
 		configureReplica({ sync: spySync(undefined, { current: READY }) });
 		startReplica();
-		expect(engineSide('tree')).toBe('server');
+		expect(engineSide('search')).toBe('server');
 	});
 
 	it('stopReplica and resetReplica uninstall it', () => {

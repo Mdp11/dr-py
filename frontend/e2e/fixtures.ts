@@ -13,8 +13,7 @@ export { expect };
 // a flipped surface runs on its default instead. Emptied out as each of the
 // five lands (Task 12), at which point `dr.surfaces` is not set at all.
 const ENGINE_SURFACES = {
-	search: 'engine',
-	tree: 'engine'
+	search: 'engine'
 } as const;
 
 /**
