@@ -837,6 +837,51 @@ order, unfiltered, artifacts ignored — the server's
 `read._placed_element_ids`. Its view type is structural (`FolderLike`), so
 `lib/engine` needs no `lib/api/types` value.
 
+**Surfaces** (`lib/api/engine-route.ts`, `lib/engine/surfaces.ts`,
+`lib/engine/seam.ts`). The nine model reads of `lib/api` keep their
+signatures and schemas and are answered by the engine or the server, one
+switch per surface:
+
+| surface         | functions                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| `elements`      | `getElement`, `getElementsBatch`, `listElementsPage` without a `q` that is not blank after `trim()` |
+| `search`        | `listElementsPage` with one                                                                         |
+| `relationships` | `listElementRelationships`                                                                          |
+| `tree`          | `getTreeItemsBatch`, `listContainmentRoots`, `listExcludedRoots`, `listContainmentChildren`         |
+| `summary`       | `getModelSummary`                                                                                   |
+
+- `lib/api` imports nothing of `lib/engine`: the engine is an injected seam
+  (`installEngineSeam(seam | null)`), like the 401 handler. Each function
+  calls `route(surface, cfg, engineCall, serverCall)`: no seam, the
+  surface's side `server`, or a call with an explicit `baseUrl` or `fetch`
+  goes to the server — a call that names its server keeps it, so every MSW
+  test of the server path is untouched. Otherwise the engine answers,
+  through the same zod schema as the server's body; a rejection the seam
+  calls `gone` (the link was disposed while the read waited) is answered by
+  the server instead, any other reaches the caller. `engineSide(surface)`
+  is the side now, `server` without a seam.
+- The engine's params are flat and snake_case — `{id}`, `{ids}`,
+  `{type, q, limit, offset}`, `{id, direction, limit, offset}`, `{}`,
+  `{limit, offset}`, `{limit, offset, view_id}`, `{id, limit, offset}` —
+  and an option the caller omitted is not sent. The option bags take a
+  `signal`: the engine gets it with the call (an abort cancels a search's
+  scan), the server as `init.signal`; it never reaches the query string.
+- A seam may carry a `shadow`, handed after every engine outcome the
+  surface, the method, the params, the outcome, `again()` (the same engine
+  read once more) and `server()` (the same read from the server). It is not
+  awaited, and nothing it throws or rejects reaches the caller.
+- The switch (`readSurfaces(storage?)`): `SURFACE_DEFAULTS`, all `server`
+  for now, overlaid with the JSON object in `localStorage['dr.surfaces']`
+  (e.g. `{"search": "engine"}`) — a known surface set to `engine` or
+  `server` is taken, anything else ignored, and no storage, a throwing one or
+  bad JSON give the defaults. It is honoured in a build too.
+  `anyEngineSurface(surfaces)` says whether any is on the engine.
+- `createEngineSeam(sync, surfaces, shadow?)` makes the seam of a
+  `ReplicaSync`: a surface's EFFECTIVE side is `engine` iff its switch says
+  so and the phase is neither `off` nor `server`; `call` is `sync.call`
+  (so the read barrier holds); `gone` is `EngineGoneError`. Nothing
+  installs it in the app yet.
+
 **Status**. One `ReplicaStatus` object, replaced on every change and
 handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
 `frozen`, `failed`, `server`), `rev`, `progress` (`{task, done, total}` —
@@ -2266,6 +2311,9 @@ src/
     api/replica.ts      The replica routes' client: snapshot descriptor,
                         snapshot bytes as a raw Response, tail text + its
                         envelope, the metamodel document + X-Metamodel-Id
+    api/engine-route.ts The injected engine seam: Surface, Side,
+                        installEngineSeam, engineSide, route (see "Replica
+                        (engine shell)" → "Surfaces")
     engine/             The replica shell — plain TypeScript, no runes, no
                         lib/state import: frame.ts (the sandbox iframe and
                         its handshake), client.ts (the engine's message
@@ -2273,7 +2321,9 @@ src/
                         bytes), sync.ts (open, follow, heal, the commit in
                         flight, the rebind freeze, reads behind the
                         barrier, view placements), placements.ts (the ids
-                        a view places), origins.ts, testing.ts
+                        a view places), surfaces.ts (the per-surface
+                        switches), seam.ts (the seam over a sync),
+                        origins.ts, testing.ts
                         (connectInProcess, tests only); __tests__/support/
                         project-server.ts is the fake project server
     editor/completion-source.ts  dr./Element/Relationship/stereotype-name CM6 completions +

@@ -1,4 +1,5 @@
 import { apiFetch, type ClientConfig } from './client';
+import { route } from './engine-route';
 import {
 	ElementSchema,
 	type CreateElementRequest,
@@ -14,10 +15,16 @@ export function createElement(payload: CreateElementRequest, cfg?: ClientConfig)
 }
 
 export function getElement(elementId: string, cfg?: ClientConfig): Promise<Element> {
-	return apiFetch(
-		`/model/elements/${encodeURIComponent(elementId)}`,
-		{ method: 'GET', schema: ElementSchema },
-		cfg
+	return route(
+		'elements',
+		cfg,
+		(call) => call('getElement', { id: elementId }).then((body) => ElementSchema.parse(body)),
+		() =>
+			apiFetch(
+				`/model/elements/${encodeURIComponent(elementId)}`,
+				{ method: 'GET', schema: ElementSchema },
+				cfg
+			)
 	);
 }
 

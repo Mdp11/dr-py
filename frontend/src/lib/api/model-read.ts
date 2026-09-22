@@ -1,4 +1,5 @@
 import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
+import { route, type Surface } from './engine-route';
 import {
 	ChangesDocSchema,
 	ChangesSummarySchema,
@@ -25,12 +26,27 @@ import type { AdvancedQuery } from '$lib/search/types';
 
 /**
  * Paged/on-demand read side of the delta protocol (Phase D1). All endpoints
- * are strictly read-only; the backend caps `limit` at 500.
+ * are strictly read-only; the backend caps `limit` at 500. The nine model
+ * reads are answered by the engine replica or the server, per surface
+ * (`route`); both sides' bodies pass the same schema.
  */
+
+/** `params` without its `undefined` values: an option the caller omitted is not sent. */
+function present(params: { [key: string]: unknown }): { [key: string]: unknown } {
+	return Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined));
+}
+
+/** A server read's `init.signal`, when it has one. */
+const signalOf = (signal: AbortSignal | undefined) => (signal === undefined ? {} : { signal });
 
 /** GET /model/summary — cheap whole-model statistics. */
 export function getModelSummary(cfg?: ClientConfig): Promise<ModelSummary> {
-	return apiFetch('/model/summary', { method: 'GET', schema: ModelSummarySchema }, cfg);
+	return route(
+		'summary',
+		cfg,
+		(call) => call('getModelSummary', {}).then((body) => ModelSummarySchema.parse(body)),
+		() => apiFetch('/model/summary', { method: 'GET', schema: ModelSummarySchema }, cfg)
+	);
 }
 
 /**
@@ -39,11 +55,17 @@ export function getModelSummary(cfg?: ClientConfig): Promise<ModelSummary> {
  * server. Caller must keep `ids.length <= READ_PAGE_LIMIT`.
  */
 export function getElementsBatch(ids: string[], cfg?: ClientConfig): Promise<Element[]> {
-	return apiFetch<ElementList>(
-		'/model/elements/batch',
-		{ method: 'POST', body: { ids }, schema: ElementListSchema },
-		cfg
-	).then((r) => r.items);
+	return route(
+		'elements',
+		cfg,
+		(call) => call('getElementsBatch', { ids }).then((body) => ElementListSchema.parse(body).items),
+		() =>
+			apiFetch<ElementList>(
+				'/model/elements/batch',
+				{ method: 'POST', body: { ids }, schema: ElementListSchema },
+				cfg
+			).then((r) => r.items)
+	);
 }
 
 /**
@@ -52,11 +74,18 @@ export function getElementsBatch(ids: string[], cfg?: ClientConfig): Promise<Ele
  * unknown/deleted ids are omitted. Caller must keep `ids.length <= READ_PAGE_LIMIT`.
  */
 export function getTreeItemsBatch(ids: string[], cfg?: ClientConfig): Promise<TreeItem[]> {
-	return apiFetch<TreeItemPage>(
-		'/model/elements/tree-items',
-		{ method: 'POST', body: { ids }, schema: TreeItemPageSchema },
-		cfg
-	).then((r) => r.items);
+	return route(
+		'tree',
+		cfg,
+		(call) =>
+			call('getTreeItemsBatch', { ids }).then((body) => TreeItemPageSchema.parse(body).items),
+		() =>
+			apiFetch<TreeItemPage>(
+				'/model/elements/tree-items',
+				{ method: 'POST', body: { ids }, schema: TreeItemPageSchema },
+				cfg
+			).then((r) => r.items)
+	);
 }
 
 export interface ElementsPageQuery {
@@ -66,26 +95,30 @@ export interface ElementsPageQuery {
 	q?: string;
 	limit?: number;
 	offset?: number;
+	signal?: AbortSignal;
 }
 
-/** GET /model/elements — paged listing with optional type filter + search. */
+/** GET /model/elements — paged listing with optional type filter + search.
+ * A query that is not blank is the `search` surface, anything else `elements`. */
 export function listElementsPage(
 	query?: ElementsPageQuery,
 	cfg?: ClientConfig
 ): Promise<ElementPage> {
-	return apiFetch(
-		'/model/elements',
-		{
-			method: 'GET',
-			schema: ElementPageSchema,
-			query: {
-				type: query?.type,
-				q: query?.q,
-				limit: query?.limit,
-				offset: query?.offset
-			}
-		},
-		cfg
+	const surface: Surface = query?.q?.trim() ? 'search' : 'elements';
+	const params = { type: query?.type, q: query?.q, limit: query?.limit, offset: query?.offset };
+	return route(
+		surface,
+		cfg,
+		(call) =>
+			call('listElementsPage', present(params), query?.signal).then((body) =>
+				ElementPageSchema.parse(body)
+			),
+		() =>
+			apiFetch(
+				'/model/elements',
+				{ method: 'GET', schema: ElementPageSchema, query: params, ...signalOf(query?.signal) },
+				cfg
+			)
 	);
 }
 
@@ -134,33 +167,50 @@ export function getNeighborhood(
 /** GET /model/elements/{id}/relationships — incident relationships, paged. */
 export function listElementRelationships(
 	elementId: string,
-	opts?: { direction?: 'both' | 'in' | 'out'; limit?: number; offset?: number },
+	opts?: {
+		direction?: 'both' | 'in' | 'out';
+		limit?: number;
+		offset?: number;
+		signal?: AbortSignal;
+	},
 	cfg?: ClientConfig
 ): Promise<RelationshipPage> {
-	return apiFetch(
-		`/model/elements/${encodeURIComponent(elementId)}/relationships`,
-		{
-			method: 'GET',
-			schema: RelationshipPageSchema,
-			query: { direction: opts?.direction, limit: opts?.limit, offset: opts?.offset }
-		},
-		cfg
+	const query = { direction: opts?.direction, limit: opts?.limit, offset: opts?.offset };
+	return route(
+		'relationships',
+		cfg,
+		(call) =>
+			call('listElementRelationships', present({ id: elementId, ...query }), opts?.signal).then(
+				(body) => RelationshipPageSchema.parse(body)
+			),
+		() =>
+			apiFetch(
+				`/model/elements/${encodeURIComponent(elementId)}/relationships`,
+				{ method: 'GET', schema: RelationshipPageSchema, query, ...signalOf(opts?.signal) },
+				cfg
+			)
 	);
 }
 
 /** GET /model/containment/roots — elements with no containment parent. */
 export function listContainmentRoots(
-	opts?: { limit?: number; offset?: number },
+	opts?: { limit?: number; offset?: number; signal?: AbortSignal },
 	cfg?: ClientConfig
 ): Promise<TreeItemPage> {
-	return apiFetch(
-		'/model/containment/roots',
-		{
-			method: 'GET',
-			schema: TreeItemPageSchema,
-			query: { limit: opts?.limit, offset: opts?.offset }
-		},
-		cfg
+	const query = { limit: opts?.limit, offset: opts?.offset };
+	return route(
+		'tree',
+		cfg,
+		(call) =>
+			call('listContainmentRoots', present(query), opts?.signal).then((body) =>
+				TreeItemPageSchema.parse(body)
+			),
+		() =>
+			apiFetch(
+				'/model/containment/roots',
+				{ method: 'GET', schema: TreeItemPageSchema, query, ...signalOf(opts?.signal) },
+				cfg
+			)
 	);
 }
 
@@ -203,17 +253,23 @@ export async function listContainmentRootsPaged(
 /** GET /model/containment/roots/excluded — roots not placed in view
  * `viewId` (every root when omitted: no view places anything). */
 export function listExcludedRoots(
-	opts?: { limit?: number; offset?: number; viewId?: string },
+	opts?: { limit?: number; offset?: number; viewId?: string; signal?: AbortSignal },
 	cfg?: ClientConfig
 ): Promise<TreeItemPage> {
-	return apiFetch(
-		'/model/containment/roots/excluded',
-		{
-			method: 'GET',
-			schema: TreeItemPageSchema,
-			query: { limit: opts?.limit, offset: opts?.offset, view_id: opts?.viewId }
-		},
-		cfg
+	const query = { limit: opts?.limit, offset: opts?.offset, view_id: opts?.viewId };
+	return route(
+		'tree',
+		cfg,
+		(call) =>
+			call('listExcludedRoots', present(query), opts?.signal).then((body) =>
+				TreeItemPageSchema.parse(body)
+			),
+		() =>
+			apiFetch(
+				'/model/containment/roots/excluded',
+				{ method: 'GET', schema: TreeItemPageSchema, query, ...signalOf(opts?.signal) },
+				cfg
+			)
 	);
 }
 
@@ -247,17 +303,23 @@ export async function listExcludedRootsPaged(
 /** GET /model/elements/{id}/children — containment children, paged. */
 export function listContainmentChildren(
 	elementId: string,
-	opts?: { limit?: number; offset?: number },
+	opts?: { limit?: number; offset?: number; signal?: AbortSignal },
 	cfg?: ClientConfig
 ): Promise<TreeItemPage> {
-	return apiFetch(
-		`/model/elements/${encodeURIComponent(elementId)}/children`,
-		{
-			method: 'GET',
-			schema: TreeItemPageSchema,
-			query: { limit: opts?.limit, offset: opts?.offset }
-		},
-		cfg
+	const query = { limit: opts?.limit, offset: opts?.offset };
+	return route(
+		'tree',
+		cfg,
+		(call) =>
+			call('listContainmentChildren', present({ id: elementId, ...query }), opts?.signal).then(
+				(body) => TreeItemPageSchema.parse(body)
+			),
+		() =>
+			apiFetch(
+				`/model/elements/${encodeURIComponent(elementId)}/children`,
+				{ method: 'GET', schema: TreeItemPageSchema, query, ...signalOf(opts?.signal) },
+				cfg
+			)
 	);
 }
 
