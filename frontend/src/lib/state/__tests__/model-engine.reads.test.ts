@@ -11,7 +11,11 @@ import {
 	getCachedElements,
 	getCachedTreeItems,
 	getMissingElementIds,
+	adoptSummary,
+	getIssueCounts,
+	getIssuesByOwner,
 	getModelRev,
+	getModelSummary,
 	getStagedOps,
 	getStructureRev
 } from '../model.svelte';
@@ -182,6 +186,49 @@ describe('the engine store follows the replica', () => {
 		// The working copy replayed the batch over the delta, and the re-read says so.
 		expect(nameOf('e_000002')).toBe('Staged');
 		expect(getModelRev()).toBe(1);
+	});
+
+	it('a delta older than what the replica already told the store changes neither rev nor entities', async () => {
+		const s = await open();
+		await ensureElement('e_000002');
+		// A silent commit leaves a gap; the next frame makes the sync read the tail to head.
+		s.project.silentCommit([rename('e_000002', 'One')]);
+		const second = s.project.commit([rename('e_000002', 'Two')]);
+		s.project.commit([rename('e_000002', 'Three')]);
+		handReplicaFeed(JSON.parse(second.eventText) as FeedEvent, second.eventText);
+		await settled(s);
+		expect(getModelRev()).toBe(3);
+		expect(nameOf('e_000002')).toBe('Three');
+		adoptSummary({
+			model_rev: 3,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: {},
+			undo_depth: 0
+		});
+
+		// The realtime store's delta for the frame the replica has gone past.
+		const issue = {
+			severity: 'error' as const,
+			message: 'late issue',
+			target_ids: ['e_000002'],
+			check: 'rule:x',
+			origin: 'on_server' as const
+		};
+		applyDelta({
+			...peerDelta(second),
+			issues_added: [issue],
+			issue_counts: { error: 1 }
+		});
+
+		expect(getModelRev()).toBe(3);
+		expect(getModelSummary()?.model_rev).toBe(3);
+		expect(nameOf('e_000002')).toBe('Three');
+		// Issues are the server's, not the replica's: they still land.
+		expect(getIssuesByOwner().get('e_000002')).toEqual([issue]);
+		expect(getIssueCounts()).toEqual({ error: 1 });
+		expect(getModelSummary()?.issue_counts).toEqual({ error: 1 });
 	});
 
 	it('the structure rev follows changed.structural', async () => {

@@ -320,9 +320,14 @@ function stagedIds(): Set<string> {
  * upserted — except those a staged batch touches, whose cached record is the
  * working copy's, and the replica's `changed` event re-reads them. The
  * structure rev and the mirror move on that event, not here.
+ *
+ * A delta older than the store's rev is one the replica applied already —
+ * its `changed` events moved the rev and re-read the caches past it — so its
+ * rev and entities are stale: only its issues and its id map are taken.
  */
 export function applyDelta(d: OpsResponse): void {
-	applyDeltaShared(d, (id) => _elements.has(id), { structure: false });
+	const stale = d.model_rev < getModelRev();
+	applyDeltaShared(d, (id) => _elements.has(id), { structure: false, rev: !stale });
 
 	if (Object.keys(d.id_map).length > 0) {
 		remapCaches(_elements, _relationships, _treeItems, d.id_map);
@@ -333,6 +338,7 @@ export function applyDelta(d: OpsResponse): void {
 			select({ kind: sel.kind, id: d.id_map[sel.id] });
 		}
 	}
+	if (stale) return;
 
 	const staged = stagedIds();
 	for (const e of d.changed_elements) {

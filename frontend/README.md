@@ -520,8 +520,16 @@ answer is the newer one.
   the delta's entities EXCEPT those a staged batch touches (the mirror's
   diff), whose cached record is the working copy's — the replica replays the
   batch over the delta and its `changed` event re-reads them — and drops the
-  deleted ids. It never touches the mirror. The legacy half's `applyDelta`
-  is unchanged: it moves the structure rev by its own formula.
+  deleted ids. It never touches the mirror. A delta OLDER than
+  `getModelRev()` is one the replica applied already (a tail catch-up can
+  run ahead of the feed frames the realtime store hands over): its
+  `changed` events moved the rev and re-read the caches past it, so the
+  delta moves neither `model_rev` (the store's or the summary's) nor any
+  cached entity — only its issue splice, its issue counts (the summary's
+  too), the overlay clear and its `id_map` re-keying still apply. An own
+  commit whose `changed` came first is at the store's rev, not older, and
+  applies whole. The legacy half's `applyDelta` is unchanged: it moves the
+  structure rev by its own formula, and the rev as the delta says.
 - **Edits** — `emit` and the unstage family (`popLastStaged`,
   `revertStagedFor`, `revertStagedForElement`, `revertAllStaged`) — throw on
   this side; `clearStaged()` does nothing, since the engine drops the

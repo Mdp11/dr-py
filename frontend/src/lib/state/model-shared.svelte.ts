@@ -181,12 +181,15 @@ function addIssueToOwner(issue: Issue): void {
  *
  * Does not touch entity caches, staged ops, selection or visit history — that
  * is each entity half's own `applyDelta`. `structure: false` leaves the
- * structure rev alone, for a half that moves it on a signal of its own.
+ * structure rev alone, for a half that moves it on a signal of its own;
+ * `rev: false` leaves `model_rev` (the store's and the summary's) alone, for
+ * a delta older than what the store already shows — the issue splice, the
+ * issue counts and the overlay clear still apply.
  */
 export function applyDeltaShared(
 	d: OpsResponse,
 	hasElement: (id: string) => boolean,
-	options: { structure?: boolean } = {}
+	options: { structure?: boolean; rev?: boolean } = {}
 ): boolean {
 	// Structural = anything that can change paged read results (containment
 	// levels, incident-relationship pages, neighborhoods): entity creation
@@ -204,10 +207,12 @@ export function applyDeltaShared(
 	for (const issue of d.issues_added) addIssueToOwner(issue);
 	clearOverlay(); // committed truth moved; any Validate snapshot is moot
 
-	setModelRev(d.model_rev);
+	const moveRev = options.rev !== false;
+	if (moveRev) setModelRev(d.model_rev);
 	if (structural && options.structure !== false) bumpStructureRev();
 	_issueCounts = d.issue_counts;
-	patchSummary(d.model_rev, d.issue_counts);
+	if (moveRev) patchSummary(d.model_rev, d.issue_counts);
+	else if (_summary !== null) _summary = { ..._summary, issue_counts: d.issue_counts };
 
 	return structural;
 }
