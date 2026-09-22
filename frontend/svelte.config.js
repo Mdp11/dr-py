@@ -18,6 +18,12 @@ const config = {
 		alias: {
 			$engine: '../engine/src/index.ts',
 			$sandbox: '../sandbox/src'
+		},
+		// The bench page and its driver are type-checked with the app.
+		typescript: {
+			config: (config) => {
+				config.include.push('../bench/**/*.ts');
+			}
 		}
 	}
 };

@@ -56,6 +56,11 @@ The rest of what this item held is done: the index build, the digest check, the 
 and the search now run in steps, and their longest step at M is 12, 3.8 and 5.2 ms
 (`pixi run engine-bench`, Node 22, medians of 3; the index build's is 8–13 ms across passes)
 *(measured)* — under the 16 ms chunk, with the index build over the 8 ms slice target.
+In the browser (`pixi run engine-bench-browser`, Chromium 148, WSL2, medians of 3, round
+trips through the port) a 1,000-op update batch is staged in 58 ms and unstaged in 52 ms, and
+the first read after it takes 0.2 ms — an update is rewound in place; the first read after
+unstaging one deleted element re-sorts in 20 ms; 100 single-op batches stage in 22 ms and a
+delta rebases over them in 12 ms *(measured, 2026-09-22)*.
 
 ### K-35 · The server's v2 decoder accepts a line holding two documents; the engine refuses it · `open` · *2026-09-19*
 `api/snapshot_codec.py::_decode_v2` joins the entity lines with `,` and parses the lot as one

@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 // pages, only static assets, so this sets both on every response by hand.
 // First in `plugins` so it also covers what sveltekit()'s own middleware
 // serves.
-function crossOriginIsolation(): Plugin {
+export function crossOriginIsolation(): Plugin {
 	const setHeaders: Connect.NextHandleFunction = (req, res, next) => {
 		res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
 		res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');

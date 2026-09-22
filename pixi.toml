@@ -120,8 +120,8 @@ env = { PYTHONPATH = "src" }
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.engine-bench-data]
-description = "Write benchmarks/large.model.json as the v2 snapshot that engine-bench opens"
-cmd = "python scripts/snapshot_v2.py --model benchmarks/large.model.json --metamodel examples/smart-city.metamodel.yaml --out benchmarks/large.snapshot.v2"
+description = "Write benchmarks/large.model.json as the v2 snapshot that engine-bench opens, and its gzip for engine-bench-browser"
+cmd = "python scripts/snapshot_v2.py --model benchmarks/large.model.json --metamodel examples/smart-city.metamodel.yaml --out benchmarks/large.snapshot.v2 --gzip"
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.core-lint]
@@ -294,6 +294,12 @@ cwd = "engine"
 description = "Benchmark the engine at model M (run engine-bench-data once before)"
 cmd = "npm run bench"
 cwd = "engine"
+
+[feature.frontend.tasks.engine-bench-browser]
+description = "Benchmark the replica in the browser at model M: the bench page drives the built sandbox (run engine-bench-data once before)"
+cmd = "npm run bench:browser"
+cwd = "frontend"
+depends-on = ["sandbox-build"]
 
 [feature.frontend.tasks.engine-tidy]
 description = "Format + lint the engine"
