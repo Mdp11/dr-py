@@ -135,12 +135,15 @@ event     {event, …}                     engine → client, unsolicited
   `{batch}`, `{entity, incident?}`) → `{changes}`; `stagedDiff` → before / after pairs from the
   committed images; `staged` and `conflicts` → the batches, answered in any state. Context,
   in any state: `setViewPlacement {view_id, element_ids}`, `dropViewPlacement {view_id}` —
-  each loaded view's committed placements, which the excluded pool reads.
+  each loaded view's committed placements, which the excluded pool reads. The shell remembers
+  them and sends them again to every new worker, before any read.
 - A result is the HTTP response body of the `lib/api` function the method is named after.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
-  for it — nothing is refused for arriving early. Requests are served in arrival order: a
-  transition waits for every read that arrived before it and holds everything behind it, and
-  between the slices of a long read, reads that arrived later are answered.
+  for it — nothing is refused for arriving early. The shell holds a read for the revs it has
+  been told of (AD-28): it posts it once the replica has reached every `rev` it was handed
+  before the call. Requests are served in arrival order: a transition waits for every read
+  that arrived before it and holds everything behind it, and between the slices of a long
+  read, reads that arrived later are answered.
 - Events: `replica {state: opening|ready|diverged, rev}` (`rev` null while opening);
   `progress {task, done, total}` for the tasks `parse`, `index`, `tail` and `verify` — at most
   once per slice per task, plus a task's first and last; `changed {rev, staged_version,

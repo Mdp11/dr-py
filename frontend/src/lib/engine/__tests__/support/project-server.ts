@@ -368,6 +368,8 @@ export type RecordedCall = {
 	method: string;
 	params: unknown;
 	byteLength: number | null;
+	/** The `signal` the call was handed, if any. */
+	signal?: AbortSignal;
 	result?: unknown;
 };
 
@@ -400,7 +402,8 @@ export function syncOver(project: { projectId: string }, overrides: SyncOverride
 			const entry: RecordedCall = {
 				method,
 				params,
-				byteLength: bytes instanceof ArrayBuffer ? bytes.byteLength : null
+				byteLength: bytes instanceof ArrayBuffer ? bytes.byteLength : null,
+				...(options?.signal === undefined ? {} : { signal: options.signal })
 			};
 			calls.push(entry);
 			return made.client.call<T>(method, params, options).then((result) => {

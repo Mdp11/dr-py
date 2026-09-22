@@ -207,3 +207,14 @@ UI's; while the two differ a refusal contradicts the form, and staged edits woul
 and parked — under a schema the user has not seen. Nothing is lost by waiting: no delta can
 cross a rebind anyway (CT-2).
 **Rejected.** Re-bootstrapping on the event.
+
+## AD-28 · A read waits for what the shell has been told
+**Decision.** The shell posts a read only once the replica's `rev` has reached the highest
+`rev` handed to it before the call — a feed delta, an own commit's response, a snapshot or
+reset event.
+**Why.** The shell applies deltas one at a time and holds them during a commit, so the
+engine's arrival order cannot cover a delta not yet posted; the UI acts on a commit the moment
+its response is parsed, and a read from before it would undo what the user just saw — or
+write an older `model_rev` into the store.
+**Rejected.** A `min_rev` parameter on every read (an engine change for a shell concern);
+waiting for the pump to be idle (a commit in flight would stall every read).

@@ -774,6 +774,49 @@ where freezing again would abort the re-bootstrap with only the banner's
 Reload left to thaw it. A `ready` replica ignores a rebind at or below its
 own rev as well — it opened from a snapshot written under the new metamodel.
 
+**Reading** (AD-28). `call(method, params?, {signal?})` is a read answered by
+the replica — a CT-4 read method, its result the `lib/api` function's body —
+held in the SHELL until the replica may answer it, never in the engine's
+queue:
+
+- The sync keeps `known`, the highest `rev` it has been handed since
+  `open()`: a `feedCommit`, a `settle` with `applied`, a `feedSnapshot` —
+  counted even when the input itself is dropped for its phase; `open()` and
+  `stop()` reset it. A read takes `known` as its target when it is asked and
+  is posted once the phase is `ready` and the replica's `rev` has reached it.
+  The pump posts deltas one at a time and holds them while a commit is in
+  flight, so the engine's arrival order alone would let a read asked right
+  after `settle` answer from before the commit the UI already shows. A flight
+  that is still open raises nothing: a read does not wait for a commit whose
+  response has not come.
+- `frozen` and `failed` answer as they are: a frozen replica at its `rev`, a
+  closed one keeping the read in the engine until the next replica comes.
+- No open, phase `off` or `server`, a `stop()` while it waits, or no link
+  when it is released (the worker died) reject with `EngineGoneError`. An
+  aborted `signal` rejects with an `AbortError`; a read still waiting posts
+  nothing, a posted one is cancelled by the client (`{cancel: id}`).
+- While `opening` or `resyncing` a read waits — before the link exists
+  too. A read ALREADY posted when a re-bootstrap starts stays in the engine
+  and is answered by the next replica at its tail's `rev`.
+
+The held reads are one list, examined on every status change, and released
+in arrival order.
+
+**View placements.** `setViewPlacement(viewId, elementIds)` and
+`dropViewPlacement(viewId)` keep a map in the sync and, with a link, post
+the engine's `setViewPlacement {view_id, element_ids}` / `dropViewPlacement
+{view_id}` at once, a refusal ignored. Every new link — the first, and the
+one an attempt builds after a worker died — gets the whole map BEFORE any
+held read is released, so no `listExcludedRoots` overtakes its placements; a
+re-bootstrap on the same worker needs nothing, since the engine's `close`
+keeps them. The map may be filled before the first `open()`; `stop()`, and
+an `open()` of another project, clear it. `placedElementIds(view)`
+(`lib/engine/placements.ts`) is what a view document places: the union of
+`folder.elements` over every nested folder, each id once in first-seen
+order, unfiltered, artifacts ignored — the server's
+`read._placed_element_ids`. Its view type is structural (`FolderLike`), so
+`lib/engine` needs no `lib/api/types` value.
+
 **Status**. One `ReplicaStatus` object, replaced on every change and
 handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
 `frozen`, `failed`, `server`), `rev`, `progress` (`{task, done, total}` —
@@ -2208,7 +2251,9 @@ src/
                         its handshake), client.ts (the engine's message
                         protocol over a port), cache.ts (IndexedDB snapshot
                         bytes), sync.ts (open, follow, heal, the commit in
-                        flight, the rebind freeze), origins.ts, testing.ts
+                        flight, the rebind freeze, reads behind the
+                        barrier, view placements), placements.ts (the ids
+                        a view places), origins.ts, testing.ts
                         (connectInProcess, tests only); __tests__/support/
                         project-server.ts is the fake project server
     editor/completion-source.ts  dr./Element/Relationship/stereotype-name CM6 completions +

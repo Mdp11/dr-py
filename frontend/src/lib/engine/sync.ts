@@ -102,6 +102,17 @@ export type ReplicaSync = {
 	feedSnapshot(modelRev: number): void;
 	beginCommit(): CommitFlight;
 	metamodelAdopted(): void;
+	/**
+	 * A read answered by the replica once its `rev` has reached every `rev`
+	 * the sync was handed before the call (a feed delta, an applied commit
+	 * response, a snapshot event); a frozen or failed replica answers as it
+	 * is. Rejects with `EngineGoneError` when there is no replica to ask —
+	 * no open, phase `off` or `server`, a `stop()` meanwhile, a worker gone.
+	 */
+	call<T>(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<T>;
+	/** The element ids a view places; kept, and sent to every engine the sync connects. */
+	setViewPlacement(viewId: string, elementIds: readonly string[]): void;
+	dropViewPlacement(viewId: string): void;
 };
 
 /** Every call scoped to its own project, whatever project is active by then. */
@@ -214,6 +225,15 @@ class Superseded extends Error {
 	}
 }
 
+/** A read held in the shell until the replica has reached `target`. */
+type Waiter = {
+	readonly target: number;
+	release(): void;
+	refuse(error: unknown): void;
+};
+
+const aborted = () => new DOMException('The operation was aborted.', 'AbortError');
+
 /** Transferring a view's `buffer` sends the WHOLE buffer, so a view is copied first. */
 function exactBuffer(chunk: Uint8Array): ArrayBuffer {
 	if (chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength) {
@@ -250,10 +270,46 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	const queue: Input[] = [];
 	let busy = 0;
 	const idle: (() => void)[] = [];
+	/** The highest `rev` the sync has been handed since `open()`: what a read waits for. */
+	let known = 0;
+	const waiters: Waiter[] = [];
+	const placements = new Map<string, readonly string[]>();
 
 	const set = (patch: Partial<ReplicaStatus>) => {
 		status = { ...status, ...patch };
 		deps.onStatus(status);
+		examine();
+	};
+
+	/** The one place `known` rises. */
+	const tell = (rev: number) => {
+		if (rev > known) known = rev;
+	};
+
+	/** Whether a read held for `target` may go to the engine now. */
+	const answers = (target: number): boolean => {
+		const phase = status.phase;
+		if (phase === 'frozen' || phase === 'failed') return true;
+		return phase === 'ready' && status.rev !== null && status.rev >= target;
+	};
+
+	const refuses = (): boolean => status.phase === 'off' || status.phase === 'server';
+
+	const refuseWaiters = () => {
+		for (const waiter of waiters.splice(0)) waiter.refuse(new EngineGoneError());
+	};
+
+	/** Releases, in arrival order, every held read the status now allows. */
+	const examine = () => {
+		if (waiters.length === 0) return;
+		if (refuses()) {
+			refuseWaiters();
+			return;
+		}
+		const due = waiters.filter((waiter) => answers(waiter.target));
+		if (due.length === 0) return;
+		for (const waiter of due) waiters.splice(waiters.indexOf(waiter), 1);
+		for (const waiter of due) waiter.release();
 	};
 
 	const learnRev = (rev: number) => {
@@ -312,8 +368,19 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		gone?.dispose();
 	};
 
+	/** Placements are context: a refusal, or a worker gone, changes nothing to wait for. */
+	const sendPlacement = (engine: EngineClient, viewId: string, ids: readonly string[] | null) => {
+		const sent =
+			ids === null
+				? engine.call('dropViewPlacement', { view_id: viewId })
+				: engine.call('setViewPlacement', { view_id: viewId, element_ids: ids });
+		sent.catch(() => {});
+	};
+
 	const adopt = (r: Run, made: EngineLink) => {
 		link = made;
+		// Before anything else reaches the new engine: no held read overtakes them.
+		for (const [viewId, ids] of placements) sendPlacement(made.client, viewId, ids);
 		set({ isolated: made.isolated });
 		detach = [
 			made.client.on((event) => onEngineEvent(r, event)),
@@ -825,7 +892,10 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		r?.controller.abort();
 		r?.cycle?.controller.abort();
 		queue.length = 0;
+		known = 0;
+		placements.clear();
 		dropLink();
+		refuseWaiters();
 		if (status !== OFF) {
 			status = OFF;
 			deps.onStatus(status);
@@ -835,7 +905,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	return {
 		open(projectId) {
 			if (run !== null && run.projectId === projectId) return;
-			stop();
+			// Placements registered before the first open are this project's own.
+			if (run !== null) stop();
+			known = 0;
 			const r: Run = {
 				projectId,
 				controller: new AbortController(),
@@ -865,10 +937,12 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		},
 
 		feedCommit(raw, rev) {
+			tell(rev);
 			enqueue({ kind: 'delta', raw, rev });
 		},
 
 		feedSnapshot(modelRev) {
+			tell(modelRev);
 			enqueue({ kind: 'snapshot', modelRev });
 		},
 
@@ -890,6 +964,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 			return {
 				settle(answer) {
 					if (!land()) return;
+					if (answer.applied) tell(answer.rev);
 					if (answer.rebound) {
 						freeze(r, answer.rev);
 					} else if (answer.applied) {
@@ -906,6 +981,50 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 
 		metamodelAdopted() {
 			if (run !== null && status.phase === 'frozen') rebootstrap(run);
+		},
+
+		call<T>(method: string, params?: unknown, options: { signal?: AbortSignal } = {}) {
+			const { signal } = options;
+			if (run === null || refuses()) return Promise.reject(new EngineGoneError());
+			if (signal?.aborted) return Promise.reject(aborted());
+			const post = (): Promise<T> => {
+				if (link === null) return Promise.reject(new EngineGoneError());
+				return link.client.call<T>(method, params, signal === undefined ? {} : { signal });
+			};
+			const target = known;
+			if (answers(target)) return post();
+			return new Promise<T>((resolve, reject) => {
+				const onAbort = () => {
+					const at = waiters.indexOf(waiter);
+					if (at === -1) return;
+					waiters.splice(at, 1);
+					reject(aborted());
+				};
+				const waiter: Waiter = {
+					target,
+					release() {
+						signal?.removeEventListener('abort', onAbort);
+						post().then(resolve, reject);
+					},
+					refuse(error) {
+						signal?.removeEventListener('abort', onAbort);
+						reject(error);
+					}
+				};
+				waiters.push(waiter);
+				signal?.addEventListener('abort', onAbort, { once: true });
+			});
+		},
+
+		setViewPlacement(viewId, elementIds) {
+			const ids = [...elementIds];
+			placements.set(viewId, ids);
+			if (link !== null) sendPlacement(link.client, viewId, ids);
+		},
+
+		dropViewPlacement(viewId) {
+			placements.delete(viewId);
+			if (link !== null) sendPlacement(link.client, viewId, null);
 		}
 	};
 }
