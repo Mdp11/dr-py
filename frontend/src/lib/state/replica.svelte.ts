@@ -25,6 +25,7 @@ import {
 	type SyncDeps
 } from '$lib/engine/sync';
 import { getActiveProjectId } from './active-project.svelte';
+import { journeyReplica } from './open-journey';
 
 let _status = $state.raw<ReplicaStatus>(OFF);
 let _sync: ReplicaSync | null = null;
@@ -34,6 +35,8 @@ let _surfaces: Record<Surface, Side> | null = null;
 /** Moves at every install and uninstall: a shadow that loads late lands only on its own seam. */
 let _seamToken = 0;
 let _removeQuietProbe: (() => void) | null = null;
+/** `replicaGate()` waiters, released once the phase leaves `opening`. */
+let _gateWaiters: Array<() => void> = [];
 /** The views whose placements were handed to the sync; the sync keeps the lists. */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 const _placedViews = new Set<string>();
@@ -52,9 +55,21 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			if (_sync !== made) return;
 			_status = status;
 			observe?.(status);
+			// Only `opening`: `resyncing` also reports progress, but a re-bootstrap
+			// is not the journey's open, and `ready`'s own `verify` progress is not
+			// a phase the journey has slices for either.
+			if (status.phase === 'opening' && status.progress) journeyReplica(status.progress);
+			if (status.phase !== 'opening') _releaseGate();
 		}
 	});
 	return made;
+}
+
+function _releaseGate(): void {
+	if (_gateWaiters.length === 0) return;
+	const waiters = _gateWaiters;
+	_gateWaiters = [];
+	for (const resolve of waiters) resolve();
 }
 
 /**
@@ -109,6 +124,22 @@ export function stopReplica(): void {
 	uninstallSeam();
 	_placedViews.clear();
 	_sync?.stop();
+	_releaseGate();
+}
+
+/**
+ * Resolves at once when no surface is on the engine — nothing to wait for;
+ * otherwise once the phase is no longer `opening` (`ready`, `server`,
+ * `off`, `failed` or `frozen` all answer as they are), or on `stopReplica()`.
+ * `boot()` awaits it after its own loads, so the overlay's `finishJourney()`
+ * comes after the replica, not before it.
+ */
+export function replicaGate(): Promise<void> {
+	if (_surfaces === null || !anyEngineSurface(_surfaces)) return Promise.resolve();
+	if (_status.phase !== 'opening') return Promise.resolve();
+	return new Promise<void>((resolve) => {
+		_gateWaiters.push(resolve);
+	});
 }
 
 /**
@@ -193,4 +224,5 @@ export function resetReplica(): void {
 	_placedViews.clear();
 	sync?.stop();
 	_status = OFF;
+	_releaseGate();
 }

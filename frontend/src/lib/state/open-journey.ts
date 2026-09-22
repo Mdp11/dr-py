@@ -12,11 +12,43 @@ import type { ModelStatus } from '$lib/api/model-status';
 import { startProgress, updateProgress, setProgressLabel, endProgress } from './progress.svelte';
 
 export type JourneyKind = 'create' | 'open';
-export type PhaseName = 'upload' | 'create' | 'hydrate' | 'validate' | 'finalize';
+export type PhaseName =
+	| 'upload'
+	| 'create'
+	| 'hydrate'
+	| 'validate'
+	| 'download'
+	| 'parse'
+	| 'index'
+	| 'tail'
+	| 'finalize';
 export interface StatusProgress {
 	phase: 'hydrate' | 'validate' | 'ready' | 'cold';
 	fraction: number | null;
 }
+/** A replica progress event (`lib/engine/sync.ts`'s `ReplicaProgress`); `verify`
+ * (the background digest check) is a valid task but `journeyReplica` ignores it. */
+export interface ReplicaProgressInput {
+	task: 'download' | 'parse' | 'index' | 'tail' | 'verify';
+	done: number;
+	total: number | null;
+}
+
+/** Forward-only phase order: a phase never moves back to an earlier one, so
+ * `download` and `parse` — which interleave — cannot flap the bar, and a
+ * late/superseded report (a stray `validate` poll after `download` started,
+ * a late `download` report after `parse` started) is simply ignored. */
+const PHASE_ORDER: readonly PhaseName[] = [
+	'upload',
+	'create',
+	'hydrate',
+	'validate',
+	'download',
+	'parse',
+	'index',
+	'tail',
+	'finalize'
+];
 
 /** Reticulating splines — pure flavor text; the bar tells the real story.
  * SHUFFLED once per journey (see `_order`) so every line gets a turn and no
@@ -89,12 +121,20 @@ export function clampMonotonic(candidate: number, last: number): number {
 	return Math.max(Math.min(candidate, 100), last);
 }
 
+// The four replica phases have no place in a `replica: false` journey —
+// `journeyReplica` refuses to touch one at all (see below) — but the table
+// must stay total over PhaseName, so each is pinned zero-width at
+// validate's ceiling as a placeholder no code ever reads.
 const SLICES: Record<JourneyKind, Record<PhaseName, [number, number]>> = {
 	create: {
 		upload: [0, 30],
 		create: [30, 42],
 		hydrate: [42, 80],
 		validate: [80, 96],
+		download: [96, 96],
+		parse: [96, 96],
+		index: [96, 96],
+		tail: [96, 96],
 		finalize: [96, 100]
 	},
 	// open has no upload/create phases; those slices are unused but kept so the
@@ -104,12 +144,44 @@ const SLICES: Record<JourneyKind, Record<PhaseName, [number, number]>> = {
 		create: [0, 0],
 		hydrate: [0, 72],
 		validate: [72, 95],
+		download: [95, 95],
+		parse: [95, 95],
+		index: [95, 95],
+		tail: [95, 95],
 		finalize: [95, 100]
 	}
 };
 
-export function phaseSlice(kind: JourneyKind, phase: PhaseName): [number, number] {
-	return SLICES[kind][phase];
+// The replica phases' weights are measured, not guessed — see
+// `frontend/README.md`'s "The open journey's replica phases" for the numbers
+// and the reasoning; hydrate/validate/upload/create are untouched.
+const REPLICA_SLICES: Record<JourneyKind, Record<PhaseName, [number, number]>> = {
+	create: {
+		upload: [0, 22],
+		create: [22, 32],
+		hydrate: [32, 48],
+		validate: [48, 52],
+		download: [52, 58],
+		parse: [58, 88],
+		index: [88, 96],
+		tail: [96, 97],
+		finalize: [97, 100]
+	},
+	open: {
+		upload: [0, 0],
+		create: [0, 0],
+		hydrate: [0, 28],
+		validate: [28, 34],
+		download: [34, 43],
+		parse: [43, 84],
+		index: [84, 95],
+		tail: [95, 96],
+		finalize: [96, 100]
+	}
+};
+
+export function phaseSlice(kind: JourneyKind, phase: PhaseName, replica = false): [number, number] {
+	return (replica ? REPLICA_SLICES : SLICES)[kind][phase];
 }
 
 /** Map a `/model/status` poll to a coarse phase + real fraction (null = creep). */
@@ -149,6 +221,9 @@ const MIN_VISIBLE_MS = 600; // floor so a warm open reads as a smooth fill, not 
 
 let _active = false;
 let _kind: JourneyKind = 'open';
+/** Which slice table this journey reads; also gates `journeyReplica` — a
+ * journey begun without `replica: true` never touches a replica phase. */
+let _replica = false;
 let _phase: PhaseName = 'hydrate';
 let _phaseElapsed = 0;
 let _totalElapsed = 0;
@@ -184,10 +259,14 @@ let _tick: ReturnType<typeof setInterval> | null = null;
 let _splineTick: ReturnType<typeof setInterval> | null = null;
 
 function _setPhase(phase: PhaseName, fraction: number | null): void {
+	// Forward-only: a phase earlier than the one already reached is dropped
+	// whole — fraction included — so a late/superseded report can neither
+	// move the phase back nor touch the displayed percent.
+	if (PHASE_ORDER.indexOf(phase) < PHASE_ORDER.indexOf(_phase)) return;
 	if (phase !== _phase) {
 		_phase = phase;
 		_phaseElapsed = 0; // restart the creep clock for the new slice
-		_phaseFloor = Math.max(phaseSlice(_kind, phase)[0], _last);
+		_phaseFloor = Math.max(phaseSlice(_kind, phase, _replica)[0], _last);
 		_anchorPercent = null;
 		_anchorFraction = 0;
 	}
@@ -200,7 +279,7 @@ function _setPhase(phase: PhaseName, fraction: number | null): void {
 
 /** Where the bar *wants* to be right now, before easing. */
 function _targetPercent(): number {
-	const [floor, ceil] = phaseSlice(_kind, _phase);
+	const [floor, ceil] = phaseSlice(_kind, _phase, _replica);
 	if (_fraction === null) {
 		_anchorPercent = null; // a phase can drop back to creeping
 		return easeToward(Math.max(floor, _phaseFloor), ceil, _phaseElapsed, TAU_MS);
@@ -239,6 +318,7 @@ function _stop(): void {
 	_splineTick = null;
 	_token = null;
 	_active = false;
+	_replica = false;
 	_finishing = false;
 	_finishStep = 0;
 	_phaseElapsed = 0;
@@ -281,10 +361,15 @@ function _onSplineTick(): void {
 }
 
 /** Start the journey. Idempotent: a no-op if one is already active, so the
- * create flow can start it and the workspace boot() can adopt the same one. */
-export function beginJourney(kind: JourneyKind): void {
+ * create flow can start it and the workspace boot() can adopt the same one
+ * (options included — a later idempotent call's `replica` is not applied).
+ * `options.replica` picks the slice table: pass `anyEngineSurface(readSurfaces())`
+ * — a journey begun with `replica: false` (or no options) keeps today's
+ * slices exactly, and `journeyReplica` never touches it. */
+export function beginJourney(kind: JourneyKind, options?: { replica?: boolean }): void {
 	if (_active) return;
 	_active = true;
+	_replica = options?.replica ?? false;
 	_kind = kind;
 	_phase = kind === 'create' ? 'upload' : 'hydrate';
 	_phaseElapsed = 0;
@@ -297,7 +382,7 @@ export function beginJourney(kind: JourneyKind): void {
 	_order = shuffled(SPLINES, _rand);
 	_anchorPercent = null;
 	_anchorFraction = 0;
-	_phaseFloor = phaseSlice(kind, _phase)[0];
+	_phaseFloor = phaseSlice(kind, _phase, _replica)[0];
 	_signalElapsed = 0;
 	_signalPercent = 0;
 	_token = startProgress(cycleAt(_order, 0));
@@ -325,6 +410,21 @@ export function journeyStatus(status: ModelStatus): void {
 		return;
 	}
 	_setPhase(p.phase, p.fraction);
+}
+
+/** Feed a replica progress event (`download`/`parse`/`index`/`tail`).
+ * No-op unless this journey was begun with `replica: true` — the replica
+ * opens whatever `dr.surfaces` says, so a `replica: false` journey (no
+ * surface on the engine) can still be handed a stray report, and without
+ * this guard `download` outranks `validate` in the phase order and would
+ * hijack the bar from the real `/model/status` polls. `verify` (the
+ * background digest check) is ignored too, and so is anything the
+ * forward-only phase order has already passed. */
+export function journeyReplica(progress: ReplicaProgressInput): void {
+	if (!_active || _finishing || !_replica) return;
+	if (progress.task === 'verify') return;
+	const fraction = progress.total ? progress.done / progress.total : null;
+	_setPhase(progress.task, fraction);
 }
 
 /** Ramp to 100% (honoring the min visible duration) then tear down. */

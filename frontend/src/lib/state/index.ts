@@ -192,6 +192,7 @@ export {
 	forgetViewPlacements,
 	getReplicaStatus,
 	registerViewPlacement,
+	replicaGate,
 	replicaMetamodelAdopted,
 	startReplica,
 	stopReplica

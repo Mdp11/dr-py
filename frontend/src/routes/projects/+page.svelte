@@ -5,6 +5,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
 	import { clearAccessNotice, getAccessNotice, isAdmin, beginJourney } from '$lib/state';
+	import { anyEngineSurface, readSurfaces } from '$lib/engine/surfaces';
 	import { listProjects, type ProjectSummary } from '$lib/api/projects';
 	import ProjectCard from '$lib/components/projects/ProjectCard.svelte';
 	import NewProjectWizard from '$lib/components/projects/NewProjectWizard.svelte';
@@ -41,7 +42,7 @@
 	function open(id: string): void {
 		// Start the single progress bar on the click; it survives the goto() and
 		// boot() in the workspace adopts the same journey (beginJourney is idempotent).
-		beginJourney('open');
+		beginJourney('open', { replica: anyEngineSurface(readSurfaces()) });
 		void goto(resolve(`/p/${id}`));
 	}
 	async function onCreated(id: string): Promise<void> {

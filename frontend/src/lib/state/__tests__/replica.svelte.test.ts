@@ -17,7 +17,8 @@ import {
 	type SyncDeps
 } from '$lib/engine/sync';
 import { connectInProcess } from '$lib/engine/testing';
-import { BASE, fakeProject } from '$lib/engine/__tests__/support/project-server';
+import { BASE, fakeProject, hold } from '$lib/engine/__tests__/support/project-server';
+import * as openJourney from '../open-journey';
 import { clearActiveProject, setActiveProject } from '../active-project.svelte';
 import {
 	beginReplicaCommit,
@@ -27,6 +28,7 @@ import {
 	getReplicaStatus,
 	handReplicaFeed,
 	registerViewPlacement,
+	replicaGate,
 	replicaMetamodelAdopted,
 	resetReplica,
 	startReplica,
@@ -418,5 +420,136 @@ describe('the engine seam', () => {
 		await macrotask();
 
 		expect(served).toBe(0);
+	});
+});
+
+describe('replicaGate', () => {
+	const onEngine = (surfaces: Record<string, string>) =>
+		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
+
+	it('resolves at once with every surface on server, even while genuinely opening', async () => {
+		const project = fakeProject();
+		const held = hold();
+		server.use(...project.handlers({ hold: held }));
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await held.reached;
+		expect(getReplicaStatus().phase).toBe('opening');
+
+		let resolved = false;
+		void replicaGate().then(() => {
+			resolved = true;
+		});
+		await macrotask();
+
+		expect(resolved).toBe(true);
+		held.release();
+		await replica.until((s) => s.phase === 'ready');
+	});
+
+	it('with a surface on the engine, waits for opening to end, resolving at ready', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		const held = hold();
+		server.use(...project.handlers({ hold: held }));
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await held.reached;
+		expect(getReplicaStatus().phase).toBe('opening');
+
+		let resolved = false;
+		void replicaGate().then(() => {
+			resolved = true;
+		});
+		await macrotask();
+		expect(resolved).toBe(false);
+
+		held.release();
+		await replica.until((s) => s.phase === 'ready');
+		await macrotask();
+
+		expect(resolved).toBe(true);
+	});
+
+	it('resolves at server (a rejected connect)', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'server');
+
+		let resolved = false;
+		void replicaGate().then(() => {
+			resolved = true;
+		});
+		await macrotask();
+
+		expect(resolved).toBe(true);
+	});
+
+	it('resolves at off (no model)', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		project.fail('descriptor', 404, 1);
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'off');
+
+		let resolved = false;
+		void replicaGate().then(() => {
+			resolved = true;
+		});
+		await macrotask();
+
+		expect(resolved).toBe(true);
+	});
+
+	it('resolves on stopReplica()', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		const held = hold();
+		server.use(...project.handlers({ hold: held }));
+		realReplica();
+		setActiveProject('p');
+		startReplica();
+		await held.reached;
+
+		let resolved = false;
+		void replicaGate().then(() => {
+			resolved = true;
+		});
+		await macrotask();
+		expect(resolved).toBe(false);
+
+		stopReplica();
+		await macrotask();
+
+		expect(resolved).toBe(true);
+		held.release();
+	});
+
+	it('feeds the journey (journeyReplica) while opening only', async () => {
+		onEngine({ elements: 'engine' });
+		const spy = vi.spyOn(openJourney, 'journeyReplica');
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		await macrotask();
+
+		const openingReports = replica.statuses.filter(
+			(s) => s.phase === 'opening' && s.progress !== null
+		).length;
+		expect(openingReports).toBeGreaterThan(0);
+		expect(spy).toHaveBeenCalledTimes(openingReports);
+		spy.mockRestore();
 	});
 });

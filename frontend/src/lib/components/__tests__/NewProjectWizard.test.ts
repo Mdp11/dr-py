@@ -4,6 +4,7 @@ import NewProjectWizard from '../projects/NewProjectWizard.svelte';
 import NewProjectWizardHost from './NewProjectWizardHost.svelte';
 import { ValidationError } from '$lib/api/errors';
 import { resetJourney } from '$lib/state/open-journey';
+import * as openJourney from '$lib/state/open-journey';
 import { getActiveProgress, resetProgress } from '$lib/state/progress.svelte';
 
 const createProject = vi.fn();
@@ -13,7 +14,9 @@ afterEach(() => {
 	resetJourney();
 	resetProgress();
 	document.body.innerHTML = '';
+	localStorage.removeItem('dr.surfaces');
 	vi.clearAllMocks();
+	vi.restoreAllMocks();
 });
 
 function setFile(input: HTMLInputElement, file: File) {
@@ -363,6 +366,61 @@ describe('NewProjectWizard', () => {
 		// The bar dies at close — not minutes later when (if ever) the
 		// abandoned request settles.
 		expect(getActiveProgress()).toBeNull();
+		unmount(c);
+	});
+
+	// The other two `beginJourney('open', ...)` callers (the picker, boot())
+	// pass the same `{replica: anyEngineSurface(readSurfaces())}`; the create
+	// flow's own call must too, or a create journey never reads
+	// REPLICA_SLICES.create no matter what `dr.surfaces` says.
+	it('passes replica: true to beginJourney when a surface is on the engine', async () => {
+		localStorage.setItem('dr.surfaces', JSON.stringify({ elements: 'engine' }));
+		const spy = vi.spyOn(openJourney, 'beginJourney');
+		createProject.mockResolvedValue({ id: 'pR', name: 'R', role: 'owner', skipped_artifacts: [] });
+		const c = mount(NewProjectWizard, {
+			target: document.body,
+			props: { open: true, onCreated: vi.fn() }
+		});
+		flushSync();
+		const name = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		name.value = 'R';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		setFile(
+			document.querySelector('input[data-testid="mm-input"]') as HTMLInputElement,
+			new File(['types: []'], 'mm.yaml')
+		);
+		flushSync();
+		document
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		flushSync();
+
+		expect(spy).toHaveBeenCalledWith('create', { replica: true });
+		unmount(c);
+	});
+
+	it('passes replica: false when every surface is on the server', async () => {
+		const spy = vi.spyOn(openJourney, 'beginJourney');
+		createProject.mockResolvedValue({ id: 'pS', name: 'S', role: 'owner', skipped_artifacts: [] });
+		const c = mount(NewProjectWizard, {
+			target: document.body,
+			props: { open: true, onCreated: vi.fn() }
+		});
+		flushSync();
+		const name = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		name.value = 'S';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		setFile(
+			document.querySelector('input[data-testid="mm-input"]') as HTMLInputElement,
+			new File(['types: []'], 'mm.yaml')
+		);
+		flushSync();
+		document
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		flushSync();
+
+		expect(spy).toHaveBeenCalledWith('create', { replica: false });
 		unmount(c);
 	});
 

@@ -701,6 +701,68 @@ of another, `stop()` first. `settled()` resolves once no attempt runs, the
 pump is idle, no sleep is pending and the cache write is done — tests await it
 instead of polling.
 
+**The open journey's replica phases** (`lib/state/open-journey.ts`). The
+single progress bar (`beginJourney`/`journeyStatus`/`finishJourney`) gains
+four phases — `download`, `parse`, `index`, `tail` — fed by
+`journeyReplica(progress)` from the replica's own `progress` while the phase
+is `opening` (see "Wiring" → "The gate"). `PhaseName`'s order is now
+`upload < create < hydrate < validate < download < parse < index < tail <
+finalize`, and a phase report earlier than the one already reached is
+dropped whole, fraction included: `download` and `parse` interleave (a
+chunk is parsed as it arrives, so the engine's `parse` events can start
+before the shell has posted every chunk), so without this a late `download`
+report after `parse` had begun would pull the bar back; a stray
+`/model/status` poll landing after the replica has moved the phase into
+`download` is dropped the same way. `verify` (the background digest check,
+also reported while `ready`) is ignored outright — it is never a phase this
+journey has a slice for.
+
+`startReplica()` opens the replica whatever `dr.surfaces` says (shadow needs
+it even with every switch on `server`), so a `replica: false` journey (no
+surface on the engine) can still be handed a stray `journeyReplica` call
+from that background open — and `download` outranks `validate` in the phase
+order, so an unguarded call would hijack the bar from the real
+`/model/status` polls before the model has even finished hydrating.
+`journeyReplica` therefore refuses outright unless the journey itself was
+begun with `replica: true`; the four phases stay pinned zero-width at
+validate's ceiling in the other table only so it remains total over
+`PhaseName` — no code ever reads that placeholder.
+
+The replica phases' weights (`REPLICA_SLICES`) come from a measured split of
+a cold open through the **real app** (`vite dev`, the dev proxy, the built
+sandbox), not the browser benchmark's loopback numbers (`pixi run
+engine-bench-browser`) — that is what a user's tab actually sees. One
+measured run (ms from navigation):
+
+| point                       | ms   |
+| --------------------------- | ---- |
+| snapshot asked              | 1329 |
+| snapshot first byte         | 1351 |
+| snapshot last byte          | 1639 |
+| `end` answered (tail asked) | 3541 |
+| `ready`                     | 3560 |
+
+Three spans over that 2231 ms total: **download** (asked → last byte) 310 ms,
+13.9 %; **parse + index** (last byte → `end`) 1902 ms, 85.2 %; **tail**
+(`end` → `ready`) 19 ms, 0.9 %. Streaming the 6.1 MB snapshot through the dev
+proxy took ≈ 290 ms against ≈ 20 ms from loopback on the bench page —
+download's real share is therefore much larger here than the bench's own
+"download ≈ 1 %" reading,
+which never saw proxy latency or the main-thread long task that starts as
+the bytes arrive. `parse`/`index` themselves were unaffected (the benchmark
+report calls them "equal to the bench's within noise"), so the 1902 ms span
+is split by the BENCH's own
+parse/index durations (parse 56 → 1438 ms, index 1446 → 1842 ms — 1382 ms /
+396 ms, 77.7 % / 22.3 %) to get parse ≈ 66.3 % and index ≈ 19.0 % of the
+whole span. Rounded onto a `[34, 96]` (open) and `[52, 97]` (create) budget
+for the four replica phases together — `hydrate`/`validate`/`upload`/`create`
+themselves were left as they were, only the split among `download`/`parse`/
+`index`/`tail` was tuned — this gives `download [34,43]`, `parse [43,84]`,
+`index [84,95]`, `tail [95,96]` for `open`, and the same proportions over
+the narrower `create` budget. `tail`'s real share (0.9 %) rounds to a bare
+one-point sliver rather than zero, so the phase stays visible (and
+reachable by the forward-only guard) instead of folding into `index`.
+
 **Following.** Feed inputs (`feedCommit(raw, rev)`, `feedSnapshot(modelRev)`,
 `feedReset(rev)`) and the user's own commit responses form ONE queue, handled one at a time,
 each to its end. Deltas wait in `rev` order (a frame that arrives out of order
@@ -1035,6 +1097,20 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   aborted by the next query (and on unmount): on the engine a search is a
   scan and scans run one after another, so a superseded one would delay the
   fresh one. An `AbortError` leaves the results as they were.
+- **The gate.** `replicaGate(): Promise<void>` resolves at once when no
+  surface is on the engine (`anyEngineSurface`, read at the same first start
+  as the switches) — nothing to wait for, so with every switch on `server`
+  the workspace behaves exactly as it does without a replica: an indicator
+  and nothing else. Otherwise it resolves once the phase is no
+  longer `opening` (`ready`, `server`, `off`, `failed` and `frozen` all
+  answer as they are — a frozen or failed replica is not re-opening, so the
+  overlay must not wait on it) or on `stopReplica()`. `boot()`
+  (`routes/p/[projectId]/+page.svelte`) awaits it right after `loadArtifacts()`,
+  inside the `try`, so `finally`'s `finishJourney()` — which tears the
+  overlay down — comes after the replica, not before it; the early returns
+  (a 403/404 on the metamodel fetch, a model-less project) are untouched,
+  since neither has anything the replica could speak to yet. The status
+  callback also feeds the open journey (below) while the phase is `opening`.
 
 `configureReplica({deps?, sync?} | null)` is the tests' seam — `deps`
 replaces single dependencies of the sync built next (its `onStatus` observes

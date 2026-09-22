@@ -107,6 +107,7 @@ import {
 	beginJourney,
 	journeyUpload,
 	journeyStatus,
+	journeyReplica,
 	finishJourney,
 	cancelJourney,
 	resetJourney
@@ -289,5 +290,169 @@ describe('open-journey controller', () => {
 		journeyStatus({ state: 'validating', validation: { running: true, done: 9, total: 10 } });
 		vi.advanceTimersByTime(80 * 40); // let the ticker run to teardown
 		expect(getActiveProgress()).toBeNull(); // was stuck at {done:95} before the guard
+	});
+});
+
+describe('open-journey replica phases', () => {
+	beforeEach(() => {
+		setSplineRandom(() => 0);
+		vi.useFakeTimers();
+		resetProgress();
+		resetJourney();
+	});
+	afterEach(() => {
+		resetJourney();
+		resetProgress();
+		vi.useRealTimers();
+	});
+
+	const pct = () => getActiveProgress()?.done ?? null;
+
+	it('every existing (replica: false) test above is unaffected: hydrate still creeps to its 72% ceil', () => {
+		beginJourney('open');
+		vi.advanceTimersByTime(80 * 200);
+		const p = pct()!;
+		expect(p).toBeGreaterThan(0);
+		expect(p).toBeLessThanOrEqual(72);
+	});
+
+	// The replica opens whatever `dr.surfaces` says, so a `replica: false`
+	// journey can still be handed a stray journeyReplica report; it must be a
+	// complete no-op, and a real /model/status validate poll afterward must
+	// still move the bar through the validate slice as it always did.
+	it('a replica: false journey ignores a stray journeyReplica report; validate polls still work', () => {
+		const [validateFloor, validateCeil] = phaseSlice('open', 'validate');
+		beginJourney('open'); // replica: false (the default)
+		vi.advanceTimersByTime(80 * 10); // some hydrate creep
+		const beforeStray = pct()!;
+
+		journeyReplica({ task: 'download', done: 1, total: 2 });
+		expect(pct()).toBe(beforeStray); // no tick yet: nothing at all moved
+
+		vi.advanceTimersByTime(80 * 5);
+		// Still just creeping in hydrate's own (today's) [0,72] slice, never
+		// pinned at download's zero-width placeholder slot.
+		expect(pct()!).toBeLessThanOrEqual(72);
+
+		journeyStatus({ state: 'validating', validation: { running: true, done: 5, total: 10 } });
+		vi.advanceTimersByTime(80 * 20);
+		const p = pct()!;
+		expect(p).toBeGreaterThanOrEqual(validateFloor);
+		// Close to the 5/10 poll's own mapping (validateFloor + 0.5 *
+		// (validateCeil - validateFloor) ≈ 83.5) — NOT creeping toward the
+		// non-replica table's `download` slot, which is pinned at
+		// `validateCeil` (95): a regression where the stray report moves the
+		// phase to `download` and the forward-only guard then drops this very
+		// poll (`validate` ranks below `download`) lands here instead, close
+		// to 95. `< 90` tells the two apart with room to spare.
+		expect(p).toBeLessThan(90);
+
+		// A second, later poll must still move the bar further — the guard
+		// did not silently freeze the journey at the first poll's own value
+		// (which a `validate`-can-never-move-again regression would also do).
+		journeyStatus({ state: 'validating', validation: { running: true, done: 9, total: 10 } });
+		vi.advanceTimersByTime(80 * 20);
+		const p2 = pct()!;
+		expect(p2).toBeGreaterThan(p);
+		expect(p2).toBeLessThanOrEqual(validateCeil);
+	});
+
+	it('hydrate fills 0-28 with replica: true', () => {
+		beginJourney('open', { replica: true });
+		vi.advanceTimersByTime(80 * 300); // long creep
+		const p = pct()!;
+		expect(p).toBeGreaterThan(0);
+		expect(p).toBeLessThanOrEqual(28);
+	});
+
+	it('a download report puts the target inside its own (tuned) slice, past hydrate', () => {
+		const [downloadFloor, downloadCeil] = phaseSlice('open', 'download', true);
+		beginJourney('open', { replica: true });
+		vi.advanceTimersByTime(80 * 50); // creep partway through hydrate
+		journeyReplica({ task: 'download', done: 1, total: 2 });
+		vi.advanceTimersByTime(80 * 50);
+		const p = pct()!;
+		expect(p).toBeGreaterThan(downloadFloor); // past download's own floor (this table never touched validate)
+		expect(p).toBeLessThanOrEqual(downloadCeil);
+	});
+
+	it('parse supersedes download; a later, higher-done download report is ignored — phase stays parse, percent never drops', () => {
+		const [, downloadCeil] = phaseSlice('open', 'download', true);
+		const [, parseCeil] = phaseSlice('open', 'parse', true);
+		beginJourney('open', { replica: true });
+		journeyReplica({ task: 'download', done: 1, total: 4 });
+		vi.advanceTimersByTime(80 * 50);
+		const afterDownload = pct()!;
+		journeyReplica({ task: 'parse', done: 1, total: 4 });
+		vi.advanceTimersByTime(80 * 50);
+		const afterParse = pct()!;
+		expect(afterParse).toBeGreaterThan(afterDownload);
+		// A late download report, even with a higher `done` than parse's own —
+		// forward-only drops it whole.
+		journeyReplica({ task: 'download', done: 4, total: 4 });
+		expect(pct()).toBe(afterParse); // no tick elapsed yet: nothing moved at all
+		vi.advanceTimersByTime(80 * 400); // long creep, well past download's own ceiling
+		const p = pct()!;
+		expect(p).toBeGreaterThan(afterParse); // never dropped
+		expect(p).toBeGreaterThan(downloadCeil); // proves the phase stayed 'parse', not 'download'
+		expect(p).toBeLessThanOrEqual(parseCeil);
+	});
+
+	it('a same-phase report still updates the fraction under the forward-only guard (parse advancing)', () => {
+		beginJourney('open', { replica: true });
+		journeyReplica({ task: 'parse', done: 1, total: 4 });
+		vi.advanceTimersByTime(80 * 40);
+		const first = pct()!;
+		journeyReplica({ task: 'parse', done: 3, total: 4 }); // same phase, higher fraction
+		vi.advanceTimersByTime(80 * 40);
+		const second = pct()!;
+		expect(second).toBeGreaterThan(first);
+	});
+
+	it('a validate poll after download is ignored', () => {
+		beginJourney('open', { replica: true });
+		journeyReplica({ task: 'download', done: 1, total: 2 });
+		vi.advanceTimersByTime(80 * 30);
+		const afterDownload = pct()!;
+		journeyStatus({ state: 'validating', validation: { running: true, done: 9, total: 10 } });
+		expect(pct()).toBe(afterDownload); // no tick yet: the poll touched nothing
+		vi.advanceTimersByTime(80 * 30);
+		expect(pct()!).toBeGreaterThanOrEqual(afterDownload); // still just creeping forward in download/parse
+	});
+
+	it('verify is ignored outright', () => {
+		beginJourney('open', { replica: true });
+		journeyReplica({ task: 'download', done: 1, total: 2 });
+		vi.advanceTimersByTime(80 * 30);
+		const before = pct()!;
+		journeyReplica({ task: 'verify', done: 1, total: 1 });
+		expect(pct()).toBe(before); // no tick yet: verify touched nothing at all
+		vi.advanceTimersByTime(80 * 30);
+		const [, downloadCeil] = phaseSlice('open', 'download', true);
+		expect(pct()!).toBeLessThanOrEqual(downloadCeil); // still in download's own slice, not pushed anywhere
+	});
+
+	it('total: null creeps inside its own slice', () => {
+		const [floor, ceil] = phaseSlice('open', 'index', true);
+		beginJourney('open', { replica: true });
+		journeyReplica({ task: 'index', done: 0, total: null });
+		vi.advanceTimersByTime(80 * 400); // long creep
+		const p = pct()!;
+		expect(p).toBeGreaterThan(floor);
+		expect(p).toBeLessThanOrEqual(ceil);
+	});
+
+	it('finishJourney ramps to 100 from wherever the replica phase left it', () => {
+		beginJourney('open', { replica: true });
+		journeyReplica({ task: 'tail', done: 1, total: 1 });
+		vi.advanceTimersByTime(80 * 5);
+		finishJourney();
+		vi.advanceTimersByTime(80 * 20); // past MIN_VISIBLE + fill to 100
+		expect(getActiveProgress()).toBeNull();
+	});
+
+	it('journeyReplica without a journey is a no-op', () => {
+		journeyReplica({ task: 'download', done: 1, total: 2 });
+		expect(getActiveProgress()).toBeNull();
 	});
 });

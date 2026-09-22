@@ -15,6 +15,7 @@
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import ResultsPanel from '$lib/components/ResultsPanel.svelte';
 	import { metamodel as metamodelApi } from '$lib/api';
+	import { anyEngineSurface, readSurfaces } from '$lib/engine/surfaces';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		getFeedTermination,
@@ -67,6 +68,7 @@
 		setHistoryDrawerOpen,
 		setMetamodel,
 		setProjectOpening,
+		replicaGate,
 		replicaMetamodelAdopted,
 		startRealtime,
 		startReplica,
@@ -139,7 +141,7 @@
 		// Adopt the journey started on the picker/wizard click, or start one now for
 		// a direct-URL landing. Idempotent: a create/open journey already running is
 		// preserved (kind + slice table intact).
-		beginJourney('open');
+		beginJourney('open', { replica: anyEngineSurface(readSurfaces()) });
 		try {
 			void trackOpenProgress(); // fire-and-forget: feeds the journey while the requests below hydrate
 			markViewUnresolved(); // reset the view-answered gate on every project (re)entry
@@ -221,6 +223,10 @@
 				// role/ttl best-effort; editing stays gated as viewer until it loads
 			}
 			await loadArtifacts().catch(() => {}); // artifact library is best-effort
+			// The replica's own open, if any surface is on the engine: the overlay
+			// stays up through download/parse/index/tail, not just the server-side
+			// steps above.
+			await replicaGate();
 		} finally {
 			setProjectOpening(false);
 			finishJourney(); // snap to 100% (honoring the min visible duration) and tear down; no-op if already cancelled
