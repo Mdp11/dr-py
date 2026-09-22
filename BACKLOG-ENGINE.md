@@ -10,9 +10,11 @@ this file holds only what is open. Everything else — the app as it runs today 
 (`open`, `in progress`, `done`, `won't do`), and an item closes in the commit that fixes it.
 Ids are unique across both files — a new item takes the next free number of its letter in
 either — so an id never needs to say which file it is in. The Python core is under the MR-3
-freeze: a fix that touches `core/model`, `core/metamodel`, the model-op applier or — from the
-start of B's third plan — `routes/read.py`'s route functions and `routes/elements.py::get_element`
-lands on both sides with a fixture.
+freeze: a fix that touches `core/model`, `core/metamodel` or the model-op applier lands on
+both sides with a fixture. `routes/read.py`'s route functions and
+`routes/elements.py::get_element` left the freeze for FEATURES with B's fifth plan, when the
+five read surfaces defaulted to the engine — they land in TypeScript only now; a bug there
+still lands on both sides with a fixture while the server path lives (MR-1, until F).
 
 ---
 
@@ -26,13 +28,15 @@ A → F. A (engine foundation) has landed: package, value layer and golden-fixtu
 Python snapshot v2 and state digest; metamodel, record-graph store, indexes and mutation
 boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
 the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
-and frontend seam) is designed — six plans, listed in `architecture/program.md`, four of them
+and frontend seam) is designed — six plans, listed in `architecture/program.md`, five of them
 built (exact server state; v2 snapshot writers and the replica routes; the engine service; the
-sandbox site and the shell, the replica opening and following in the background) — and
-watches `K-32`. The freeze rule (`MR-3`)
+sandbox site and the shell, the replica opening and following in the background; the transport
+swap — the five read surfaces default to the engine behind per-surface switches, the wait for
+`ready`, the fallback notice and the retry overlay, shadow comparison in dev and e2e, and the
+browser benchmark) — and watches `K-32`. The freeze rule (`MR-3`)
 covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
-plan, and `routes/read.py`'s route functions and `routes/elements.py::get_element` from the
-start of B's third. Size: very large.
+plan; `routes/read.py`'s route functions and `routes/elements.py::get_element` left it for
+features once B's fifth plan flipped the surfaces' defaults. Size: very large.
 
 ---
 
