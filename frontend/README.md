@@ -701,6 +701,14 @@ of another, `stop()` first. `settled()` resolves once no attempt runs, the
 pump is idle, no sleep is pending and the cache write is done — tests await it
 instead of polling.
 
+`server` is the boot fallback, and it says so beyond the indicator: with some
+surface on the engine, `getReplicaNotice()` is a dismissible warning row above
+the workspace (`ReplicaFallbackNotice.svelte`) — the engine could not start,
+this tab reads from the server, reload to try again — until
+`dismissReplicaNotice()` or the next `startReplica()`. With every surface on
+`server` the notice never shows; the tab behaves exactly as it does without a
+replica.
+
 **The open journey's replica phases** (`lib/state/open-journey.ts`). The
 single progress bar (`beginJourney`/`journeyStatus`/`finishJourney`) gains
 four phases — `download`, `parse`, `index`, `tail` — fed by
@@ -828,6 +836,19 @@ re-bootstrap asked for while one runs is remembered and runs once more after
 it, never in parallel; the divergence a delta's answer and the engine's event
 both report is one re-bootstrap, not two — every re-bootstrap and freeze
 moves an epoch, and whatever judged an older replica is not acted on.
+
+`failed` blocks the workspace, with some surface on the engine:
+`isReplicaBlocked()` is true, and `ReplicaFailedOverlay.svelte` — a fixed
+dialog under the progress overlay — covers it with "Model out of sync" and one
+`Retry` button, focused on mount. `retryReplica()` calls the sync's `retry()`
+above — the SAME in-place re-bootstrap, never a reload, since a reload would
+lose the edits the sync still holds — and the overlay stays up through the
+retry's `resyncing` (the button reads `Retrying…`, disabled, while
+`isReplicaRetrying()`); it clears at `ready` and comes back, `Retry` enabled
+again, if the retry itself lands on `failed`. With every surface on `server`
+`isReplicaBlocked()` is always false — `anyEngineSurface` gates it exactly as
+it gates the notice and the gate — and the indicator, which reads the phase
+unconditionally, is the only consumer of a `failed` replica there.
 
 **The commit in flight** (CT-2). `beginCommit()` is called BEFORE the POST
 (`/commits` or `/commits/revert`) and returns a flight; while any flight is
@@ -1111,6 +1132,14 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   (a 403/404 on the metamodel fetch, a model-less project) are untouched,
   since neither has anything the replica could speak to yet. The status
   callback also feeds the open journey (below) while the phase is `opening`.
+- **The notice and the block**, both gated the same way as the gate
+  (`anyEngineSurface`). `getReplicaNotice()`/`dismissReplicaNotice()` and
+  `isReplicaBlocked()`/`isReplicaRetrying()`/`retryReplica()` read and act on
+  the same reactive status the indicator does; `routes/p/[projectId]/+page.svelte`
+  renders `ReplicaFallbackNotice.svelte` in its own `auto` grid row when
+  `getReplicaNotice()` is true, and `ReplicaFailedOverlay.svelte` — outside the
+  grid, `fixed` — when `isReplicaBlocked()` is true. See "Opening" (`server`)
+  and "Following" (`failed`) above for what each looks like and when it clears.
 
 `configureReplica({deps?, sync?} | null)` is the tests' seam — `deps`
 replaces single dependencies of the sync built next (its `onStatus` observes

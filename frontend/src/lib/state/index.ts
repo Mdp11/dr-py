@@ -188,12 +188,17 @@ export {
 } from './realtime.svelte';
 export {
 	beginReplicaCommit,
+	dismissReplicaNotice,
 	forgetViewPlacement,
 	forgetViewPlacements,
+	getReplicaNotice,
 	getReplicaStatus,
+	isReplicaBlocked,
+	isReplicaRetrying,
 	registerViewPlacement,
 	replicaGate,
 	replicaMetamodelAdopted,
+	retryReplica,
 	startReplica,
 	stopReplica
 } from './replica.svelte';

@@ -14,6 +14,8 @@
 	import HistoryDrawer from '$lib/components/HistoryDrawer.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import ResultsPanel from '$lib/components/ResultsPanel.svelte';
+	import ReplicaFallbackNotice from '$lib/components/ReplicaFallbackNotice.svelte';
+	import ReplicaFailedOverlay from '$lib/components/ReplicaFailedOverlay.svelte';
 	import { metamodel as metamodelApi } from '$lib/api';
 	import { anyEngineSurface, readSurfaces } from '$lib/engine/surfaces';
 	import { Button } from '$lib/components/ui/button';
@@ -41,6 +43,7 @@
 		getDiffDrawerOpen,
 		getHistoryDrawerOpen,
 		getModelError,
+		getReplicaNotice,
 		getResultsPanelOpen,
 		getViewDiscardNotice,
 		clearViewDiscardNotice,
@@ -68,6 +71,7 @@
 		setHistoryDrawerOpen,
 		setMetamodel,
 		setProjectOpening,
+		isReplicaBlocked,
 		replicaGate,
 		replicaMetamodelAdopted,
 		startRealtime,
@@ -286,6 +290,13 @@
 	// across the interim is the whole point).
 	const viewDiscardNotice = $derived(getViewDiscardNotice());
 
+	// The engine could not start: this tab reads from the server, and the
+	// dismissible notice says so.
+	const replicaNotice = $derived(getReplicaNotice());
+	// The replica could not be rebuilt: the workspace is blocked until Retry
+	// brings it back or the phase moves on its own.
+	const replicaBlocked = $derived(isReplicaBlocked());
+
 	// Rebind is non-destructive: only the metamodel pointer and conformance issues change;
 	// element ids and properties are untouched, so the cached element subset stays valid.
 	// Unlike onReloadModel, we do NOT reset the model store — only the metamodel, issues, and rev.
@@ -434,9 +445,10 @@
 		const rebindBanner = pendingRebind !== null ? 'auto ' : '';
 		const feedBanner = feedTerminationView !== null ? 'auto ' : '';
 		const viewDiscardBanner = viewDiscardNotice !== null ? 'auto ' : '';
+		const replicaBanner = replicaNotice ? 'auto ' : '';
 		return panelOpen
-			? `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}1fr auto ${panelHeight}px auto`
-			: `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}1fr auto`;
+			? `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}${replicaBanner}1fr auto ${panelHeight}px auto`
+			: `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}${replicaBanner}1fr auto`;
 	});
 </script>
 
@@ -529,6 +541,9 @@
 			</Button>
 		</div>
 	{/if}
+	{#if replicaNotice}
+		<ReplicaFallbackNotice />
+	{/if}
 	<Sidebar />
 	<ResizeHandle value={leftWidth} side="left" onchange={(n) => (leftWidth = n)} />
 	<Workspace />
@@ -548,6 +563,10 @@
 	{/if}
 	<StatusBar />
 </div>
+
+{#if replicaBlocked}
+	<ReplicaFailedOverlay />
+{/if}
 
 <DiffDrawer bind:open={drawerOpen} />
 <HistoryDrawer bind:open={historyOpen} />

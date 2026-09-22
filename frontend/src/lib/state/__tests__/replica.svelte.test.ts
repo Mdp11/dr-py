@@ -23,14 +23,19 @@ import { clearActiveProject, setActiveProject } from '../active-project.svelte';
 import {
 	beginReplicaCommit,
 	configureReplica,
+	dismissReplicaNotice,
 	forgetViewPlacement,
 	forgetViewPlacements,
+	getReplicaNotice,
 	getReplicaStatus,
 	handReplicaFeed,
+	isReplicaBlocked,
+	isReplicaRetrying,
 	registerViewPlacement,
 	replicaGate,
 	replicaMetamodelAdopted,
 	resetReplica,
+	retryReplica,
 	startReplica,
 	stopReplica
 } from '../replica.svelte';
@@ -116,6 +121,27 @@ const runs = <T>(values: T[]): T[] =>
 	values.filter((value, i) => i === 0 || values[i - 1] !== value);
 
 const macrotask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+/** The feed frame of `committed`, its state digest flipped: the replica diverges on it. */
+function withWrongDigest(committed: { delta: Record<string, unknown>; eventText: string }): string {
+	const digest = committed.delta['state_digest'] as string;
+	const wrong = (BigInt('0x' + digest) ^ 1n).toString(16).padStart(16, '0');
+	return committed.eventText.replace(`"state_digest":"${digest}"`, `"state_digest":"${wrong}"`);
+}
+
+/** Ready, then a divergence whose re-bootstrap cannot download: `failed`. */
+async function failReplica(
+	project: ReturnType<typeof fakeProject>,
+	replica: ReturnType<typeof realReplica>
+): Promise<void> {
+	await replica.until((s) => s.phase === 'ready');
+	project.fail('snapshot', 503, 99);
+	const committed = project.commit([
+		{ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'peer' } }
+	]);
+	handReplicaFeed(JSON.parse(committed.eventText) as FeedEvent, withWrongDigest(committed));
+	await replica.until((s) => s.phase === 'failed');
+}
 
 describe('the replica store', () => {
 	it('starts nothing without an active project', async () => {
@@ -551,5 +577,173 @@ describe('replicaGate', () => {
 		expect(openingReports).toBeGreaterThan(0);
 		expect(spy).toHaveBeenCalledTimes(openingReports);
 		spy.mockRestore();
+	});
+});
+
+describe('the notice and the block', () => {
+	const onEngine = (surfaces: Record<string, string>) =>
+		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
+
+	it('the notice shows at server with a surface on the engine, not after dismiss, again after startReplica', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'server');
+
+		expect(getReplicaNotice()).toBe(true);
+
+		dismissReplicaNotice();
+		expect(getReplicaNotice()).toBe(false);
+
+		startReplica();
+		expect(getReplicaNotice()).toBe(true);
+	});
+
+	it('the notice never shows with no surface on the engine', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'server');
+
+		expect(getReplicaNotice()).toBe(false);
+	});
+
+	it("isReplicaBlocked is true at failed, stays true through the retry's resyncing, false at ready", async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await failReplica(project, replica);
+
+		expect(isReplicaBlocked()).toBe(true);
+		expect(isReplicaRetrying()).toBe(false);
+
+		project.fail('snapshot', 503, 2);
+		retryReplica();
+
+		expect(getReplicaStatus().phase).toBe('resyncing');
+		expect(isReplicaRetrying()).toBe(true);
+		expect(isReplicaBlocked()).toBe(true);
+
+		await replica.until((s) => s.phase === 'ready');
+
+		expect(isReplicaRetrying()).toBe(false);
+		expect(isReplicaBlocked()).toBe(false);
+	});
+
+	it('a retry that fails again is blocked again, with Retry enabled', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await failReplica(project, replica);
+
+		project.fail('snapshot', 503, 99);
+		retryReplica();
+		await replica.until((s) => s.phase === 'failed' && s.attempt === 0);
+
+		expect(isReplicaBlocked()).toBe(true);
+		expect(isReplicaRetrying()).toBe(false);
+	});
+
+	it('with every surface on server, a failed replica blocks nothing', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await failReplica(project, replica);
+
+		expect(isReplicaBlocked()).toBe(false);
+	});
+
+	it('retryReplica in ready leaves isReplicaRetrying false', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+
+		retryReplica();
+
+		expect(getReplicaStatus().phase).toBe('ready');
+		expect(isReplicaRetrying()).toBe(false);
+		expect(isReplicaBlocked()).toBe(false);
+	});
+});
+
+describe('the notice and the block react through $derived', () => {
+	const onEngine = (surfaces: Record<string, string>) =>
+		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
+
+	/**
+	 * `getReplicaNotice()`/`isReplicaBlocked()` short-circuit on whether some
+	 * surface is on the engine before ever reading the phase; created here,
+	 * BEFORE `startReplica()`, that first (false) answer is all a plain
+	 * variable would ever see — this is `+page.svelte`'s own shape, so a
+	 * regression there (e.g. a tracked value going back to a plain `let`)
+	 * shows up here exactly as it would in the app.
+	 */
+	function deriveBoth(): { notice(): boolean; blocked(): boolean; dispose(): void } {
+		let notice: (() => boolean) | undefined;
+		let blocked: (() => boolean) | undefined;
+		const dispose = $effect.root(() => {
+			const n = $derived(getReplicaNotice());
+			const b = $derived(isReplicaBlocked());
+			notice = () => n;
+			blocked = () => b;
+		});
+		return { notice: notice!, blocked: blocked!, dispose };
+	}
+
+	it('getReplicaNotice, derived before startReplica() and read once, still flips when the phase reaches server', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
+
+		const derived = deriveBoth();
+		flushSync();
+		expect(derived.notice()).toBe(false);
+		expect(derived.blocked()).toBe(false);
+
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'server');
+		flushSync();
+
+		expect(derived.notice()).toBe(true);
+		derived.dispose();
+	});
+
+	it('isReplicaBlocked, derived before startReplica() and read once, still flips when the phase reaches failed', async () => {
+		onEngine({ elements: 'engine' });
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+
+		const derived = deriveBoth();
+		flushSync();
+		expect(derived.notice()).toBe(false);
+		expect(derived.blocked()).toBe(false);
+
+		setActiveProject('p');
+		startReplica();
+		await failReplica(project, replica);
+		flushSync();
+
+		expect(derived.blocked()).toBe(true);
+		derived.dispose();
 	});
 });

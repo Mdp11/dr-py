@@ -30,8 +30,8 @@ import { journeyReplica } from './open-journey';
 let _status = $state.raw<ReplicaStatus>(OFF);
 let _sync: ReplicaSync | null = null;
 let _deps: Partial<SyncDeps> | undefined;
-/** The switches, read at the first start and kept until `resetReplica()`. */
-let _surfaces: Record<Surface, Side> | null = null;
+/** The switches, read at the first start and kept until `resetReplica()`; tracked so a `$derived` reading it stays live. */
+let _surfaces = $state.raw<Record<Surface, Side> | null>(null);
 /** Moves at every install and uninstall: a shadow that loads late lands only on its own seam. */
 let _seamToken = 0;
 let _removeQuietProbe: (() => void) | null = null;
@@ -40,6 +40,10 @@ let _gateWaiters: Array<() => void> = [];
 /** The views whose placements were handed to the sync; the sync keeps the lists. */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 const _placedViews = new Set<string>();
+/** Cleared on every `startReplica()`. */
+let _noticeDismissed = $state(false);
+/** Set by `retryReplica()`, cleared once the retry lands at `ready`, `failed`, `off` or `server`. */
+let _retrying = $state(false);
 
 const NO_FLIGHT: CommitFlight = { settle() {}, abandon() {} };
 
@@ -60,6 +64,15 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			// a phase the journey has slices for either.
 			if (status.phase === 'opening' && status.progress) journeyReplica(status.progress);
 			if (status.phase !== 'opening') _releaseGate();
+			if (
+				_retrying &&
+				(status.phase === 'ready' ||
+					status.phase === 'failed' ||
+					status.phase === 'off' ||
+					status.phase === 'server')
+			) {
+				_retrying = false;
+			}
 		}
 	});
 	return made;
@@ -70,6 +83,11 @@ function _releaseGate(): void {
 	const waiters = _gateWaiters;
 	_gateWaiters = [];
 	for (const resolve of waiters) resolve();
+}
+
+/** Whether some read surface is on the engine — the gate, the notice and the block all exist only then. */
+function _anyEngine(): boolean {
+	return _surfaces !== null && anyEngineSurface(_surfaces);
 }
 
 /**
@@ -114,6 +132,7 @@ export function getReplicaStatus(): ReplicaStatus {
 export function startReplica(): void {
 	const projectId = getActiveProjectId();
 	if (!projectId) return;
+	_noticeDismissed = false;
 	const sync = (_sync ??= build(_deps));
 	installSeam(sync);
 	sync.open(projectId);
@@ -135,11 +154,38 @@ export function stopReplica(): void {
  * comes after the replica, not before it.
  */
 export function replicaGate(): Promise<void> {
-	if (_surfaces === null || !anyEngineSurface(_surfaces)) return Promise.resolve();
+	if (!_anyEngine()) return Promise.resolve();
 	if (_status.phase !== 'opening') return Promise.resolve();
 	return new Promise<void>((resolve) => {
 		_gateWaiters.push(resolve);
 	});
+}
+
+/** A dismissible warning: the engine could not start, so this tab reads from the server. */
+export function getReplicaNotice(): boolean {
+	return _anyEngine() && _status.phase === 'server' && !_noticeDismissed;
+}
+
+export function dismissReplicaNotice(): void {
+	_noticeDismissed = true;
+}
+
+/** Whether the workspace is blocked: the replica cannot be rebuilt, or a retry of that is running. */
+export function isReplicaBlocked(): boolean {
+	return (
+		_anyEngine() && (_status.phase === 'failed' || (_retrying && _status.phase === 'resyncing'))
+	);
+}
+
+export function isReplicaRetrying(): boolean {
+	return _retrying;
+}
+
+/** An in-place re-bootstrap that adopts the batches the sync still holds; a no-op unless `failed`. */
+export function retryReplica(): void {
+	if (_status.phase !== 'failed') return;
+	_retrying = true;
+	_sync?.retry();
 }
 
 /**
@@ -224,5 +270,7 @@ export function resetReplica(): void {
 	_placedViews.clear();
 	sync?.stop();
 	_status = OFF;
+	_noticeDismissed = false;
+	_retrying = false;
 	_releaseGate();
 }
