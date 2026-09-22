@@ -89,6 +89,15 @@ export type CommitAnswer = {
 
 export type CommitFlight = { settle(answer: CommitAnswer): void; abandon(): void };
 
+/** The engine's `changed` event: what a transition or an applied delta moved. */
+export type ChangedEvent = Extract<ServiceEvent, { event: 'changed' }>;
+
+export type CallOptions = {
+	signal?: AbortSignal;
+	/** The call changes the replica: held for the phase alone, never for a `rev`. */
+	transition?: boolean;
+};
+
 export type ReplicaSync = {
 	/** Opens `projectId`'s replica; a no-op for the project already open, else `stop()` first. */
 	open(projectId: string): void;
@@ -114,11 +123,19 @@ export type ReplicaSync = {
 	 * A read answered by the replica once its `rev` has reached every `rev`
 	 * the sync was handed before the call (a feed delta, an applied commit
 	 * response, a snapshot event, a reset event); a frozen or failed replica
-	 * answers as it is. Rejects with `EngineGoneError` when there is no replica
-	 * to ask — no open, phase `off` or `server`, a `stop()` meanwhile, a
-	 * worker gone.
+	 * answers as it is. A `transition` waits for phase `ready` or `frozen`
+	 * alone — while opening, resyncing or failed, so the batches a
+	 * re-bootstrap carries are adopted first — and every call asked after it
+	 * is posted after it. Rejects with `EngineGoneError` when there is no
+	 * replica to ask — no open, phase `off` or `server`, a `stop()`
+	 * meanwhile, a worker gone.
 	 */
-	call<T>(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<T>;
+	call<T>(method: string, params?: unknown, options?: CallOptions): Promise<T>;
+	/**
+	 * Hands every `changed` event of every engine the sync links to `listener`,
+	 * whatever the phase; the returned function unsubscribes.
+	 */
+	on(event: 'changed', listener: (event: ChangedEvent) => void): () => void;
 	/** The element ids a view places; kept, and sent to every engine the sync connects. */
 	setViewPlacement(viewId: string, elementIds: readonly string[]): void;
 	dropViewPlacement(viewId: string): void;
@@ -237,9 +254,13 @@ class Superseded extends Error {
 	}
 }
 
-/** A read held in the shell until the replica has reached `target`. */
+/**
+ * A call held in the shell: a read until the replica has reached `target`,
+ * a transition until the phase takes it.
+ */
 type Waiter = {
 	readonly target: number;
+	readonly transition: boolean;
 	release(): void;
 	refuse(error: unknown): void;
 };
@@ -286,6 +307,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	let known = 0;
 	const waiters: Waiter[] = [];
 	const placements = new Map<string, readonly string[]>();
+	const changedListeners = new Set<(event: ChangedEvent) => void>();
 
 	const set = (patch: Partial<ReplicaStatus>) => {
 		status = { ...status, ...patch };
@@ -305,23 +327,36 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		return phase === 'ready' && status.rev !== null && status.rev >= target;
 	};
 
+	/** Whether a transition may go to the engine now: the phase alone, never the rev. */
+	const admits = (): boolean => status.phase === 'ready' || status.phase === 'frozen';
+
+	const due = (waiter: Waiter): boolean => (waiter.transition ? admits() : answers(waiter.target));
+
 	const refuses = (): boolean => status.phase === 'off' || status.phase === 'server';
 
 	const refuseWaiters = () => {
 		for (const waiter of waiters.splice(0)) waiter.refuse(new EngineGoneError());
 	};
 
-	/** Releases, in arrival order, every held read the status now allows. */
+	/**
+	 * Releases, in arrival order, every held call the status now allows. A
+	 * transition still held holds everything behind it; a read still held
+	 * holds nothing.
+	 */
 	const examine = () => {
 		if (waiters.length === 0) return;
 		if (refuses()) {
 			refuseWaiters();
 			return;
 		}
-		const due = waiters.filter((waiter) => answers(waiter.target));
-		if (due.length === 0) return;
-		for (const waiter of due) waiters.splice(waiters.indexOf(waiter), 1);
-		for (const waiter of due) waiter.release();
+		const going: Waiter[] = [];
+		for (const waiter of waiters) {
+			if (due(waiter)) going.push(waiter);
+			else if (waiter.transition) break;
+		}
+		if (going.length === 0) return;
+		for (const waiter of going) waiters.splice(waiters.indexOf(waiter), 1);
+		for (const waiter of going) waiter.release();
 	};
 
 	const learnRev = (rev: number) => {
@@ -396,6 +431,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		set({ isolated: made.isolated });
 		detach = [
 			made.client.on((event) => onEngineEvent(r, event)),
+			made.client.on((event) => {
+				if (event.event === 'changed' && link === made) forwardChanged(event);
+			}),
 			made.onViolation(() => {
 				if (link === made) set({ cspViolations: status.cspViolations + 1 });
 			})
@@ -448,6 +486,20 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		} else if (event.event === 'replica' && phase === 'ready') {
 			if (event.rev !== null) learnRev(event.rev);
 			if (event.state === 'diverged') ask(r, r.epoch);
+		}
+	};
+
+	const forwardChanged = (event: ChangedEvent) => {
+		for (const listener of [...changedListeners]) {
+			if (!changedListeners.has(listener)) continue;
+			try {
+				listener(event);
+			} catch (error) {
+				// One failing listener must not starve the others; the error still surfaces.
+				queueMicrotask(() => {
+					throw error;
+				});
+			}
 		}
 	};
 
@@ -1033,8 +1085,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 			if (run !== null && status.phase === 'frozen') rebootstrap(run);
 		},
 
-		call<T>(method: string, params?: unknown, options: { signal?: AbortSignal } = {}) {
+		call<T>(method: string, params?: unknown, options: CallOptions = {}) {
 			const { signal } = options;
+			const transition = options.transition === true;
 			if (run === null || refuses()) return Promise.reject(new EngineGoneError());
 			if (signal?.aborted) return Promise.reject(aborted());
 			const post = (): Promise<T> => {
@@ -1042,16 +1095,21 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				return link.client.call<T>(method, params, signal === undefined ? {} : { signal });
 			};
 			const target = known;
-			if (answers(target)) return post();
+			// A waiting transition is one the phase still holds, and it holds every later call.
+			const blocked = waiters.some((waiter) => waiter.transition);
+			if (!blocked && (transition ? admits() : answers(target))) return post();
 			return new Promise<T>((resolve, reject) => {
 				const onAbort = () => {
 					const at = waiters.indexOf(waiter);
 					if (at === -1) return;
 					waiters.splice(at, 1);
 					reject(aborted());
+					// A transition leaving may free the calls it held.
+					if (transition) examine();
 				};
 				const waiter: Waiter = {
 					target,
+					transition,
 					release() {
 						signal?.removeEventListener('abort', onAbort);
 						post().then(resolve, reject);
@@ -1064,6 +1122,14 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				waiters.push(waiter);
 				signal?.addEventListener('abort', onAbort, { once: true });
 			});
+		},
+
+		on(_event, listener) {
+			const entry = (event: ChangedEvent) => listener(event);
+			changedListeners.add(entry);
+			return () => {
+				changedListeners.delete(entry);
+			};
 		},
 
 		setViewPlacement(viewId, elementIds) {

@@ -141,7 +141,9 @@ event     {event, …}                     engine → client, unsolicited
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed
-  before the call. Requests are served in arrival order: a transition waits for every read
+  before the call. It holds a transition for the phase alone — until the replica is `ready`
+  (or the shell has frozen it), never for a `rev` — and posts it before any read asked after
+  it. Requests are served in arrival order: a transition waits for every read
   that arrived before it and holds everything behind it, and between the slices of a long
   read, reads that arrived later are answered.
 - Events: `replica {state: opening|ready|diverged, rev}` (`rev` null while opening);

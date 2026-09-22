@@ -17,32 +17,53 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	summary: 'engine'
 });
 
+/** Where the user's model edits are staged: the replica's working copy, or the store's own buffer. */
+export type StagingSide = 'engine' | 'legacy';
+
+export const STAGING_DEFAULT: StagingSide = 'legacy';
+
+export type Switches = { surfaces: Record<Surface, Side>; staging: StagingSide };
+
 const STORAGE_KEY = 'dr.surfaces';
 
 /**
  * The defaults, overlaid with the JSON object stored under `dr.surfaces`: a
- * known surface set to `engine` or `server` is taken, anything else ignored.
- * No storage, a storage that throws or a text that is not a JSON object give
- * the defaults.
+ * known surface set to `engine` or `server` is taken, `staging` set to
+ * `engine` or `legacy` is taken, anything else ignored. Staging on the
+ * engine puts every surface on the engine, whatever the object says of it:
+ * a staged edit is visible only in the replica's answers. No storage, a
+ * storage that throws or a text that is not a JSON object give the defaults.
  */
-export function readSurfaces(storage?: Pick<Storage, 'getItem'>): Record<Surface, Side> {
-	const surfaces: Record<Surface, Side> = { ...SURFACE_DEFAULTS };
+export function readSwitches(storage?: Pick<Storage, 'getItem'>): Switches {
+	const switches: Switches = { surfaces: { ...SURFACE_DEFAULTS }, staging: STAGING_DEFAULT };
 	let stored: unknown;
 	try {
 		const text = (storage ?? globalThis.localStorage).getItem(STORAGE_KEY);
-		if (text === null) return surfaces;
+		if (text === null) return switches;
 		stored = JSON.parse(text);
 	} catch {
-		return surfaces;
+		return switches;
 	}
-	if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return surfaces;
+	if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return switches;
 	const overrides = stored as { [key: string]: unknown };
 	for (const surface of SURFACES) {
 		if (!Object.hasOwn(overrides, surface)) continue;
 		const side = overrides[surface];
-		if (side === 'engine' || side === 'server') surfaces[surface] = side;
+		if (side === 'engine' || side === 'server') switches.surfaces[surface] = side;
 	}
-	return surfaces;
+	if (Object.hasOwn(overrides, 'staging')) {
+		const staging = overrides['staging'];
+		if (staging === 'engine' || staging === 'legacy') switches.staging = staging;
+	}
+	if (switches.staging === 'engine') {
+		for (const surface of SURFACES) switches.surfaces[surface] = 'engine';
+	}
+	return switches;
+}
+
+/** The surface half of `readSwitches`. */
+export function readSurfaces(storage?: Pick<Storage, 'getItem'>): Record<Surface, Side> {
+	return readSwitches(storage).surfaces;
 }
 
 export function anyEngineSurface(surfaces: Readonly<Record<Surface, Side>>): boolean {

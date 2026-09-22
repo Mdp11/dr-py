@@ -346,6 +346,7 @@ describe("the replica's flight", () => {
 				log.push(`adopted ${(getActiveMetamodel() as { name?: string } | null)?.name}`);
 			}),
 			call: vi.fn(),
+			on: vi.fn(() => () => {}),
 			setViewPlacement: vi.fn(),
 			dropViewPlacement: vi.fn()
 		};

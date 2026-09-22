@@ -439,6 +439,7 @@ describe('the replica hand-over', () => {
 			beginCommit: () => ({ settle() {}, abandon() {} }),
 			metamodelAdopted: vi.fn(),
 			call: vi.fn(),
+			on: vi.fn(() => () => {}),
 			setViewPlacement: vi.fn(),
 			dropViewPlacement: vi.fn()
 		};

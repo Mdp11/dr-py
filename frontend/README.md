@@ -904,8 +904,34 @@ queue:
   too. A read ALREADY posted when a re-bootstrap starts stays in the engine
   and is answered by the next replica at its tail's `rev`.
 
-The held reads are one list, examined on every status change, and released
-in arrival order.
+The held calls — reads and transitions — are one list, examined on every
+status change, and released in arrival order.
+
+**Transitions.** `call(method, params?, {signal?, transition: true})` is a
+call that changes the replica — the engine store's `stage` and `unstage`. It
+is held for the PHASE alone: posted once the phase is `ready` or `frozen`,
+never held for `known` — the engine rebases a staged batch over any delta,
+so a peer's delta still waiting (or a commit still in flight, which holds
+the pump) holds no edit. While `opening`, `resyncing` or `failed` it waits
+in the shell: the batches a re-bootstrap carries are adopted first, and a
+transition is never posted to a closed replica whose worker could die with
+it; a `failed` replica's transition goes after `retry()`. It shares the
+readers' list: a transition still held holds every call asked after it, so a
+read asked after an edit is posted after it and sees it — even in `failed`,
+where a read alone would be posted at once. A read still held (behind a
+`rev`) holds no transition. `off`, `server`, `stop()` and no link when
+released reject `EngineGoneError`; an aborted `signal` an `AbortError`, as
+for a read — and a transition aborted while held frees the calls behind it.
+
+**Events.** `on('changed', listener)` hands the listener every engine
+`changed` event (`{rev, staged_version, element_ids, relationship_ids,
+deleted_element_ids, deleted_relationship_ids, structural}`, the type
+`ChangedEvent`) and returns its unsubscribe. The listeners are the sync's,
+not a link's: they may subscribe before any link exists, and each link the
+sync adopts — the first, one rebuilt after a worker died, one after a
+`stop()` and `open()` — forwards to them until it is dropped. The event is
+forwarded whatever the shell's phase (the engine emits it only while its own
+replica is `ready`); a listener that throws does not starve the others.
 
 **View placements.** `setViewPlacement(viewId, elementIds)` and
 `dropViewPlacement(viewId)` keep a map in the sync and, with a link, post
@@ -955,11 +981,19 @@ switch per surface:
   surface, the method, the params, the outcome, `again()` (the same engine
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
-- The switch (`readSurfaces(storage?)`): `SURFACE_DEFAULTS`, all `engine`,
+- The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
+  `SURFACE_DEFAULTS`, all `engine`, and `STAGING_DEFAULT`, `legacy`,
   overlaid with the JSON object in `localStorage['dr.surfaces']`
   (e.g. `{"search": "engine"}`) — a known surface set to `engine` or
-  `server` is taken, anything else ignored, and no storage, a throwing one or
-  bad JSON give the defaults. It is honoured in a build too.
+  `server` is taken, `staging` set to `engine` or `legacy` is taken,
+  anything else ignored, and no storage, a throwing one or bad JSON give the
+  defaults. `staging` says where the user's model edits are staged: `engine`
+  in the replica's working copy, `legacy` in the model store's own buffer.
+  `staging: engine` puts all five surfaces on `engine`, whatever the object
+  says of them — a staged edit shows only in the replica's answers. It is not
+  a surface: `SURFACES` and `anyEngineSurface` do not count it. The switches
+  are read once, with the rest, and honoured in a build too.
+  `readSurfaces(storage?)` is `readSwitches(storage).surfaces`;
   `anyEngineSurface(surfaces)` says whether any is on the engine.
 - `createEngineSeam(sync, surfaces, shadow?)` makes the seam of a
   `ReplicaSync`: a surface's EFFECTIVE side is `engine` iff its switch says

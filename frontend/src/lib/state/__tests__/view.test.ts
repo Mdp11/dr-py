@@ -1022,6 +1022,7 @@ describe('the placements the replica is told of', () => {
 				beginCommit: () => ({ settle() {}, abandon() {} }),
 				metamodelAdopted: vi.fn(),
 				call: vi.fn(),
+				on: vi.fn(() => () => {}),
 				setViewPlacement: record('set'),
 				dropViewPlacement: record('drop')
 			}

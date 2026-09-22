@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { SURFACE_DEFAULTS, SURFACES, anyEngineSurface, readSurfaces } from '../surfaces';
+import {
+	STAGING_DEFAULT,
+	SURFACE_DEFAULTS,
+	SURFACES,
+	anyEngineSurface,
+	readSurfaces,
+	readSwitches
+} from '../surfaces';
 
 /** A storage holding `value` under `dr.surfaces`, and nothing else. */
 const storing = (value: string | null) => ({
@@ -70,6 +77,75 @@ describe('the surface switches', () => {
 		surfaces.tree = 'server';
 		expect(SURFACE_DEFAULTS.tree).toBe('engine');
 		expect(readSurfaces(storing(null)).tree).toBe('engine');
+	});
+
+	it('readSwitches gives the staging default beside the surface defaults', () => {
+		expect(STAGING_DEFAULT).toBe('legacy');
+		expect(readSwitches(storing(null))).toEqual({
+			surfaces: SURFACE_DEFAULTS,
+			staging: STAGING_DEFAULT
+		});
+		expect(readSwitches()).toEqual({ surfaces: SURFACE_DEFAULTS, staging: STAGING_DEFAULT });
+		localStorage.setItem('dr.surfaces', '{"staging": "engine"}');
+		try {
+			expect(readSwitches().staging).toBe('engine');
+		} finally {
+			localStorage.removeItem('dr.surfaces');
+		}
+	});
+
+	it('staging on the engine puts every surface on the engine', () => {
+		expect(readSwitches(storing('{"staging": "engine", "tree": "server"}'))).toEqual({
+			surfaces: SURFACE_DEFAULTS,
+			staging: 'engine'
+		});
+		const allServer =
+			'{"staging": "engine", "elements": "server", "search": "server", ' +
+			'"relationships": "server", "tree": "server", "summary": "server"}';
+		expect(readSwitches(storing(allServer)).surfaces).toEqual(SURFACE_DEFAULTS);
+	});
+
+	it('legacy staging leaves the surfaces as they are set', () => {
+		expect(readSwitches(storing('{"staging": "legacy", "tree": "server"}'))).toEqual({
+			surfaces: { ...SURFACE_DEFAULTS, tree: 'server' },
+			staging: 'legacy'
+		});
+	});
+
+	it('a staging value other than engine or legacy is the default', () => {
+		expect(readSwitches(storing('{"staging": "other"}'))).toEqual({
+			surfaces: SURFACE_DEFAULTS,
+			staging: STAGING_DEFAULT
+		});
+		expect(readSwitches(storing('{"staging": "server", "tree": "server"}'))).toEqual({
+			surfaces: { ...SURFACE_DEFAULTS, tree: 'server' },
+			staging: STAGING_DEFAULT
+		});
+	});
+
+	it('bad JSON, or a storage that throws, gives every default', () => {
+		const defaults = { surfaces: SURFACE_DEFAULTS, staging: STAGING_DEFAULT };
+		expect(readSwitches(storing('{staging: engine'))).toEqual(defaults);
+		expect(readSwitches(storing('["engine"]'))).toEqual(defaults);
+		const throwing = {
+			getItem: (): string | null => {
+				throw new DOMException('denied', 'SecurityError');
+			}
+		};
+		expect(readSwitches(throwing)).toEqual(defaults);
+	});
+
+	it('readSurfaces is the surfaces half of readSwitches', () => {
+		for (const text of [
+			null,
+			'{"tree": "server"}',
+			'{"staging": "engine", "tree": "server"}',
+			'{"staging": "legacy", "summary": "server"}',
+			'{"staging": "other", "search": "server"}',
+			'not json'
+		]) {
+			expect(readSurfaces(storing(text))).toEqual(readSwitches(storing(text)).surfaces);
+		}
 	});
 
 	it('anyEngineSurface says whether one surface is on the engine', () => {
