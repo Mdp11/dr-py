@@ -29,6 +29,7 @@ import {
 	forgetViewPlacements,
 	getReplicaNotice,
 	getReplicaStatus,
+	getStagingSide,
 	handReplicaFeed,
 	isReplicaBlocked,
 	isReplicaRetrying,
@@ -448,6 +449,64 @@ describe('the engine seam', () => {
 		await macrotask();
 
 		expect(served).toBe(0);
+	});
+});
+
+describe('getStagingSide', () => {
+	const READY: ReplicaStatus = { ...OFF, phase: 'ready', rev: 0 };
+	const onStaging = (staging: string) =>
+		localStorage.setItem('dr.surfaces', JSON.stringify({ staging }));
+
+	it('is legacy without a sync', () => {
+		expect(getStagingSide()).toBe('legacy');
+	});
+
+	it("is legacy with dr.surfaces {staging: 'legacy'}, even at ready", () => {
+		onStaging('legacy');
+		const status = { current: READY };
+		configureReplica({ sync: spySync(undefined, status) });
+		setActiveProject('p');
+		startReplica();
+
+		expect(getStagingSide()).toBe('legacy');
+	});
+
+	it("is engine with {staging: 'engine'} at ready", () => {
+		onStaging('engine');
+		const status = { current: READY };
+		configureReplica({ sync: spySync(undefined, status) });
+		setActiveProject('p');
+		startReplica();
+
+		expect(getStagingSide()).toBe('engine');
+	});
+
+	it('is legacy at server and at off, staging on the engine', () => {
+		onStaging('engine');
+		const status = { current: READY };
+		configureReplica({ sync: spySync(undefined, status) });
+		setActiveProject('p');
+		startReplica();
+
+		status.current = { ...OFF, phase: 'server' };
+		expect(getStagingSide()).toBe('legacy');
+
+		status.current = OFF;
+		expect(getStagingSide()).toBe('legacy');
+	});
+
+	it('is engine at failed and frozen, staging on the engine', () => {
+		onStaging('engine');
+		const status = { current: READY };
+		configureReplica({ sync: spySync(undefined, status) });
+		setActiveProject('p');
+		startReplica();
+
+		status.current = { ...OFF, phase: 'failed' };
+		expect(getStagingSide()).toBe('engine');
+
+		status.current = { ...OFF, phase: 'frozen' };
+		expect(getStagingSide()).toBe('engine');
 	});
 });
 

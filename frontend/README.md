@@ -160,9 +160,24 @@ Access is **cookie-based** and project-scoped. The shape:
 
 ### State model (staged-commit flow)
 
+The model store is four files. `lib/state/model.svelte.ts` is a thin
+**facade**: it re-exports the shared half and, for every entity read/write,
+dispatches to whichever entity half `staging` (`lib/engine/surfaces.ts`,
+`getStagingSide()` in `replica.svelte.ts`) names — `resetModelStore` and
+`validateAll` touch both halves directly, since neither is one entity half's
+concern. `lib/state/model-shared.svelte.ts` holds what every entity half
+agrees on: the summary, `model_rev`, the structure-rev counter, the live
+issue map, rules status and the store error. `lib/state/model-legacy.svelte.ts`
+is today's entity half — the fetched-subset caches and the staged-edits
+buffer described below — and is the only one the facade dispatches to today;
+it is **frozen** and deleted once an engine-backed half is the only one
+(sub-project F). `lib/state/model-caches.ts` holds the pure id-remap helpers
+(`remapElement`, `remapRelationship`, `remapCaches`) an entity half's delta
+application uses to resolve temp ids to canonical ones.
+
 The **backend session model is the source of truth**; the client never holds
-the whole model. The central store is `lib/state/model.svelte.ts`, and editing
-follows a pessimistic **check-out → stage → commit** loop:
+the whole model, and editing follows a pessimistic **check-out → stage →
+commit** loop:
 
 1. The store caches only the **fetched subset** of the model — entities
    brought in by paged reads, searches, neighborhoods, and commit deltas —

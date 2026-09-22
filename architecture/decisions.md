@@ -174,7 +174,11 @@ and never the UI; 100 ms is where a discrete action stops feeling instant. Measu
 `frontend/src/lib/state/model.svelte.ts` is a view over it. Today's store — fetched-subset
 cache, optimistic overlay, staged-delete guards — stays behind the switch as the server-mode
 implementation and is deleted in F. The engine-backed store is built last in sub-project B,
-after the read surfaces have moved as a plain transport swap.
+after the read surfaces have moved as a plain transport swap. Layout: `model.svelte.ts` is a
+thin facade dispatching every entity read/write to whichever half `staging` names;
+`model-shared.svelte.ts` holds what both halves agree on (summary, `model_rev`, structure rev,
+issues); `model-legacy.svelte.ts` is today's entity half, frozen; `model-caches.ts` holds the
+pure id-remap helpers both halves' `applyDelta` shares.
 **Why.** A server read is committed-only, so server mode cannot work without the overlay
 (MR-1); and one staged state has to exist before evaluation reads it (sub-project C).
 **Rejected.** *Transport swap only*: from C on, the engine's working copy and the store's

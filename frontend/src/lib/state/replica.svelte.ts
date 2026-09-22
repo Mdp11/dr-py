@@ -8,13 +8,18 @@
  * replica or the server, as `dr.surfaces` says (read once per page load).
  */
 
-import { installEngineSeam, type Side, type Surface } from '$lib/api/engine-route';
+import { installEngineSeam } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
 import { createSnapshotCache } from '$lib/engine/cache';
 import { connectFrame } from '$lib/engine/frame';
 import { addQuietProbe, quiet } from '$lib/engine/quiet';
 import { createEngineSeam } from '$lib/engine/seam';
-import { anyEngineSurface, readSurfaces } from '$lib/engine/surfaces';
+import {
+	anyEngineSurface,
+	readSwitches,
+	type StagingSide,
+	type Switches
+} from '$lib/engine/surfaces';
 import {
 	createReplicaSync,
 	OFF,
@@ -31,7 +36,7 @@ let _status = $state.raw<ReplicaStatus>(OFF);
 let _sync: ReplicaSync | null = null;
 let _deps: Partial<SyncDeps> | undefined;
 /** The switches, read at the first start and kept until `resetReplica()`; tracked so a `$derived` reading it stays live. */
-let _surfaces = $state.raw<Record<Surface, Side> | null>(null);
+let _switches = $state.raw<Switches | null>(null);
 /** Moves at every install and uninstall: a shadow that loads late lands only on its own seam. */
 let _seamToken = 0;
 let _removeQuietProbe: (() => void) | null = null;
@@ -87,7 +92,7 @@ function _releaseGate(): void {
 
 /** Whether some read surface is on the engine — the gate, the notice and the block all exist only then. */
 function _anyEngine(): boolean {
-	return _surfaces !== null && anyEngineSurface(_surfaces);
+	return _switches !== null && anyEngineSurface(_switches.surfaces);
 }
 
 /**
@@ -97,7 +102,7 @@ function _anyEngine(): boolean {
  */
 function installSeam(sync: ReplicaSync): void {
 	uninstallSeam();
-	const surfaces = (_surfaces ??= readSurfaces());
+	const surfaces = (_switches ??= readSwitches()).surfaces;
 	const token = _seamToken;
 	installEngineSeam(createEngineSeam(sync, surfaces));
 	_removeQuietProbe = addQuietProbe(() => sync.settled());
@@ -126,6 +131,20 @@ function uninstallSeam(): void {
 /** The replica's status; reactive. */
 export function getReplicaStatus(): ReplicaStatus {
 	return _status;
+}
+
+/**
+ * Where the user's model edits are staged. `engine` iff the `staging` switch
+ * says so AND the replica is neither `off` nor `server` — `failed` and
+ * `frozen` keep `engine`, since the sync holds the batches staged there
+ * across a re-bootstrap (see `lib/engine/sync.ts`'s "a re-bootstrap carries
+ * the batches"). `legacy` without a sync: nothing is open to stage into.
+ */
+export function getStagingSide(): StagingSide {
+	if (_sync === null || _switches === null) return 'legacy';
+	if (_switches.staging !== 'engine') return 'legacy';
+	const { phase } = _sync.status();
+	return phase === 'off' || phase === 'server' ? 'legacy' : 'engine';
 }
 
 /** Opens the active project's replica and installs the seam; nothing without an active project. */
@@ -266,7 +285,7 @@ export function resetReplica(): void {
 	_sync = null;
 	_deps = undefined;
 	uninstallSeam();
-	_surfaces = null;
+	_switches = null;
 	_placedViews.clear();
 	sync?.stop();
 	_status = OFF;
