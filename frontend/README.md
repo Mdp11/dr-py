@@ -1077,7 +1077,11 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   committer's own in-place refetch (`adoptReboundMetamodel`) call
   `replicaMetamodelAdopted()` right after `setMetamodel(mm)`: a replica frozen
   by the rebind re-bootstraps onto the metamodel the UI now shows (AD-27); in
-  any other phase it does nothing.
+  any other phase it does nothing. The committer's refetch then calls
+  `markStructureChanged()`: the commit's own `applyDelta` bumped the structure
+  rev while the replica was still frozen, so the tree re-read the old state;
+  the second bump's reads wait for the re-bootstrapped replica at the
+  commit's `rev` (a new metamodel may also reclassify containment).
 - **The indicator** (`StatusBar.svelte`), after the live badge, hidden while
   the phase is `off`: `<span data-testid="replica-indicator">` reading
   `replica 42 %` (opening or resyncing, progress with a known total),

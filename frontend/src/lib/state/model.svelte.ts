@@ -228,6 +228,15 @@ export function getStructureRev(): number {
 	return _structureRev;
 }
 
+/**
+ * Makes every structure-tracking read run again without a delta: a replica
+ * that re-bootstraps onto a new metamodel answered the delta's refetch from
+ * its frozen, older state.
+ */
+export function markStructureChanged(): void {
+	_structureRev += 1;
+}
+
 /** Bumps on every {@link resetModelStore} — i.e. whenever a different model
  * (or no model) is installed. Refresh effects track this + `getModelRev()`. */
 export function getModelGeneration(): number {

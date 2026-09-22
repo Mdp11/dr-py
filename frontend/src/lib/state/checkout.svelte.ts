@@ -38,6 +38,7 @@ import {
 	clearStaged,
 	getModelRev,
 	getStagedOps,
+	markStructureChanged,
 	refetchIssues,
 	refreshSummary,
 	revertAllStaged,
@@ -502,6 +503,10 @@ async function adoptReboundMetamodel(): Promise<void> {
 		const mm = await getMetamodel(_clientConfig);
 		setMetamodel(mm);
 		replicaMetamodelAdopted();
+		// The delta's structural refetch was answered by the frozen replica,
+		// and a new metamodel may reclassify containment. The replica is
+		// re-bootstrapping now, so these reads wait for it at the commit's rev.
+		markStructureChanged();
 		await refetchIssues();
 		await refreshSummary();
 	} catch {
