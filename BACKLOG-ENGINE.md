@@ -39,7 +39,7 @@ The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op 
 the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
 surfaces' defaults. C (evaluation) is next. Open after B: `K-29`, `K-32`, `K-35`, `K-36`,
-`K-38`, `K-41`, `K-42`, `K-43`, `C-20`, `C-21` in this file; `K-33`, `K-34` in `BACKLOG.md`.
+`K-38`, `K-41`, `K-42`, `K-44`, `C-20`, `C-21` in this file; `K-33`, `K-34` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -136,29 +136,59 @@ remapped it through `id_map` (`engine/src/working/working-copy.ts:596`), but a r
 delta is never applied, so that remap never runs. Fix: remap the dependents' temp ids through
 the rebound response's `id_map` before (or instead of) dropping the batches that minted them.
 
-### K-42 · An edit that survives a commit flight loses its lease · `open` · *2026-09-22*
-The server releases only the lock tokens it is SENT (`routes/commits.py:1376-1379`); the CLIENT
-decides which ones to send. `checkout.svelte.ts`'s token partition (:472-495) keeps an
+### K-42 · An edit that survives a commit flight can lose its lease · `open` · *2026-09-22*
+Two ways a lease outlives the POST wrongly:
+(i) **Already held, sent anyway.** `checkout.svelte.ts`'s token partition (:510-530) keeps an
 artifact-editor token only when every resource it covers is artifact-only AND unneeded by this
 batch — every element token is always sent, on the comment's own reasoning that "commit ends
-the model editing session, as before". That reasoning no longer holds for an edit staged
-DURING the POST (a batch of its own, per CT-2): it is not part of the commit being sent, yet
-its element's token is released anyway, so the next commit of that edit may 409 "required lock
-not held" until the element is touched again (which re-acquires it). The same happens to a
-proposal (a snippet or CR Stage) that took its locks before a commit landed and staged its ops
-after. Fix belongs in the token partition: keep a token whose resources are all UNNEEDED by
-the batch being sent, not just the artifact-only ones.
+the model editing session, as before". The server releases exactly what it is sent
+(`routes/commits.py:1376-1379`), correctly — but that reasoning no longer holds for an edit
+staged DURING the POST (a batch of its own, per CT-2): its element's token is sent (needed by
+nothing the batch commits, yet already held before the POST) and released with the rest, so
+the next commit of that edit may 409 "required lock not held" until the element is touched
+again (which re-acquires it). The same happens to a proposal (a snippet or CR Stage) that took
+its locks before a commit landed and staged its ops after.
+(ii) **Acquired during the POST, forgotten anyway.** A lease taken out WHILE the POST is in
+flight is in neither `sent` nor `kept` (both computed from `getHeldTokens()` before the POST);
+the answer handler's cleanup (`checkout.svelte.ts:584-587`) deletes every registry entry whose
+token is not in `kept` — including that one — so the client forgets a lease the SERVER still
+holds. The next commit omits the token, `verify_held` (`routes/commits.py:978`) 409s "required
+lock not held", and the heartbeat (which only renews registered tokens) may let the lease
+expire on the server too.
+Fix direction that covers both: after a commit lands, re-acquire leases for whatever is still
+staged (case i) and never forget a token the cleanup didn't itself send (case ii) — rather than
+widening what the token partition classifies as unneeded, which does not touch (ii) at all.
 
 ### K-43 · A property update always coalesces into the first staged batch of that id · `done` · *2026-09-22*
 The engine always merges a single property update (`emit`, or `emitMany` with ONE op) into the
 first staged batch already holding an update of the same id, including a batch that is
 mid-commit — by design (AD-29: predicting a new batch id would drift the mirror), which would
 otherwise let a keystroke land inside a batch already sent and be dropped with it if refused.
-Two things close the window: the DiffDrawer cannot be dismissed while a commit is in flight —
-no Escape, no outside click, no close button (`DiffDrawer.svelte:417-419`, a modal
-`Dialog.Content` with the interaction trap) — so nothing else can stage while the drawer that
-started the commit is open; and `stageProposedOps` (a proposal's own path in) waits for
-`commitsLanded()` before it stages, matching README "State model" step 4.
+**Done:** the DiffDrawer stays undismissable — no Escape, no outside click, no close button
+(`DiffDrawer.svelte`) — through the POST and, once it lands, until `commitApplied()` resolves
+(`checkout.svelte.ts`), not just until the POST answers: `commitApplied()` now waits for the
+replica to have actually APPLIED the commit's own delta (`commitsLanded()`), so an edit typed
+while the drawer is still open can no longer land in a batch that is committed but not yet
+drained (10bfc0c). A `failed` replica used to drop the user's own commit answer along with
+everything else on its queue and refuse new ones, so a retry's re-bootstrap re-adopted the
+committed batches and nothing dropped them (a committed create staged again); going `failed`
+now keeps the user's own answer and accepts new commits, and the rebuilt replica applies the
+kept answer on its first drain, so `commitApplied()` no longer needs to wait through a retry
+(6a5fa93). `stageProposedOps` still waits for `commitsLanded()` before staging a proposal.
+Two residual windows remain — `K-44`.
+
+### K-44 · Two windows still let a coalesced edit merge into a committed batch · `open` · *2026-09-23*
+Left after `K-43`'s fix (`commitApplied()`, `checkout.svelte.ts`): (a) a rebind that freezes
+the replica between the POST answering and the replica applying it ends `commitApplied()`'s
+wait early — the drawer closes — and keeps the answer queued until the new metamodel is
+adopted; an update staged in that window can still merge into the committed batch and be
+dropped when the queued answer finally applies. (b) At a Retry, transitions are admitted while
+`failed` (the phase is one `admits()` lets through) rather than held for `ready`, and the
+failed overlay is not INERT — nothing stops a keyboard event from reaching a still-mounted
+property field behind it — so an edit typed there can stage into (or coalesce into) a batch the
+rebuild is about to adopt, then be dropped when the kept own answer (`6a5fa93`) drains ahead of
+it. Decide whether either is worth closing (a rebind-aware wait; an inert overlay) or stays a
+known limit.
 
 ---
 

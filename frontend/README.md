@@ -209,10 +209,13 @@ engine store":
    the batch durably; on success it clears the staged buffer, installs the
    server's canonical delta (`applyDelta`), and **releases the held locks**
    — every element token is sent, on the reasoning that a commit ends the
-   model editing session; an edit staged DURING the POST is not part of the
-   batch being sent, so its element's token is released along with it and
-   the next commit of that edit may 409 until the element is touched again
-   (`K-42`, `BACKLOG-ENGINE.md`).
+   model editing session, and the client also forgets every registry entry
+   whose token was not kept. An edit staged DURING the POST is not part of
+   the batch being sent: if its element was already leased, that lease is
+   sent and released anyway; if the lease is acquired only during the POST,
+   it is forgotten client-side though the server still holds it. Either way
+   the next commit of that edit may 409 "required lock not held" until the
+   element is touched again (`K-42`, `BACKLOG-ENGINE.md`).
    A stale-rev 409 or a structural-blocker 422 is surfaced as a commit error.
    **On the engine side** (`staging: engine`, see "The engine store") the
    staged model edits are the replica's batches. `previewStaged()`,

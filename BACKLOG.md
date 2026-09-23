@@ -1191,7 +1191,7 @@ passed in (both blobs 5.83 MiB). The decode is paid once per cold hydration, the
 path. The owner accepted the cost when every writer moved to v2: watch it, do not fix it
 without a missed budget.
 
-The client-engine program's issues (`K-29` → `K-43`) are in `BACKLOG-ENGINE.md`.
+The client-engine program's issues (`K-29` → `K-44`) are in `BACKLOG-ENGINE.md`.
 
 ---
 
