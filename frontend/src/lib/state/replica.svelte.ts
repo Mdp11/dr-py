@@ -301,6 +301,11 @@ export function beginReplicaCommit(): CommitFlight {
 	return _sync?.beginCommit() ?? NO_FLIGHT;
 }
 
+/** Resolves once the replica has taken in everything it was handed (the sync's `settled()`); at once without a sync. */
+export function replicaSettled(): Promise<void> {
+	return _sync?.settled() ?? Promise.resolve();
+}
+
 /** The UI adopted the metamodel the server serves now; a frozen replica follows it. */
 export function replicaMetamodelAdopted(): void {
 	_sync?.metamodelAdopted();

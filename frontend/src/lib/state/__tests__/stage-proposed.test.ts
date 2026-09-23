@@ -1,8 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
+import { hold, PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
 import { stageProposedOps } from '../stage-proposed';
 import * as checkout from '../checkout.svelte';
 import {
+	emit,
+	ensureElement,
 	ensureElements,
 	getCachedElements,
 	getCachedTreeItems,
@@ -300,5 +304,47 @@ describe('stageProposedOps with staging on the engine', () => {
 		expect([...getCachedElements().keys()].filter(isTempId)).toEqual([]);
 		expect([...getCachedTreeItems().keys()].filter(isTempId)).toEqual([]);
 		expect(getModelError()?.kind).toBe('rejected');
+	});
+
+	it('a proposal staged while a commit is in flight waits for it, and is not merged into its batch', async () => {
+		const s = await open();
+		const held = hold();
+		const committed: unknown[] = [];
+		server.use(
+			http.post(`${PAGE_ORIGIN}/api/v1/projects/p/commits`, async ({ request }) => {
+				const body = (await request.json()) as { ops: never[] };
+				committed.push(body.ops);
+				await held.arrive();
+				const text = s.project.commit(body.ops).responseText;
+				return new HttpResponse(text.slice(0, -1) + ',"commit_id":"c-1"}', {
+					headers: { 'Content-Type': 'application/json' }
+				});
+			})
+		);
+		await ensureElement('e_000002');
+		const rename = (name: string): ModelOp => ({
+			kind: 'update_element',
+			id: 'e_000002',
+			properties_patch: { name }
+		});
+		emit(rename('Quartz'));
+		const committing = checkout.commitStaged('m', false);
+		await held.reached;
+		const call = vi.spyOn(s.sync, 'call');
+
+		// One update, which the engine would merge into the batch being committed.
+		const staging = stageProposedOps([rename('Quartzite')], getModelRev());
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(call.mock.calls.filter(([method]) => method === 'stage')).toEqual([]);
+
+		held.release();
+		await committing;
+		expect(await staging).toEqual({ ok: true, count: 1 });
+		await settled(s);
+
+		expect(committed).toEqual([[rename('Quartz')]]);
+		expect(getStagedOps()).toEqual([rename('Quartzite')]);
+		expect(getStagedBatchIds()).toEqual([2]);
+		expect(getCachedElements().get('e_000002')?.properties['name']).toBe('Quartzite');
 	});
 });

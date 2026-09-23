@@ -34,6 +34,7 @@ import {
 	seedRelationships
 } from './model.svelte';
 import { acquireLocks } from './edit-gate';
+import { commitsLanded } from './checkout.svelte';
 
 export type StageOutcome =
 	| { ok: true; count: number }
@@ -145,9 +146,12 @@ export async function stageProposedOps(
 		if (!(await acquireLocks(targets, intent))) return { ok: false, reason: 'locks' };
 	}
 
-	// 4. Stage — indistinguishable from manual edits from here on. One batch on
-	//    the engine side: a list it refuses stages none of its ops, and the
-	//    refusal is the store's error, not this outcome.
+	// 4. Stage — indistinguishable from manual edits from here on. Not while a
+	//    commit is in flight: the replica would merge a one-update list into a
+	//    batch being committed, dropped with it on the answer. One batch on the
+	//    engine side: a list it refuses stages none of its ops, and the refusal
+	//    is the store's error, not this outcome.
+	await commitsLanded();
 	emitMany(ops);
 	return { ok: true, count: ops.length };
 }

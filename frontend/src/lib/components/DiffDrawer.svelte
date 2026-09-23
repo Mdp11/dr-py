@@ -279,7 +279,13 @@
 		open = false;
 	}
 
+	/**
+	 * The dialog cannot be dismissed while a commit is in flight: an edit made
+	 * behind it could be merged by the replica into a batch being committed,
+	 * and dropped with it on the answer.
+	 */
 	function onOpenChange(next: boolean): void {
+		if (!next && committing) return;
 		open = next;
 		if (!next) {
 			loadSeq += 1; // invalidate any in-flight open-load
@@ -353,8 +359,13 @@
 	}
 </script>
 
-<Dialog.Root bind:open {onOpenChange}>
-	<Dialog.Content class="max-w-2xl">
+<Dialog.Root bind:open={() => open, onOpenChange}>
+	<Dialog.Content
+		class="max-w-2xl"
+		showCloseButton={!committing}
+		escapeKeydownBehavior={committing ? 'ignore' : 'close'}
+		interactOutsideBehavior={committing ? 'ignore' : 'close'}
+	>
 		<Dialog.Header>
 			<Dialog.Title class="font-display text-lg font-light tracking-wide"
 				>Commit changes</Dialog.Title

@@ -221,10 +221,16 @@ commit** loop:
    unstaged by id (`dropStagedBatches`), which also finds them in a replica
    that adopted them after the re-bootstrap. A revert (the History drawer)
    commits no staged batch and names none. `clearStaged()` does nothing on
-   this side. A property update staged during the POST that the engine
-   coalesces into a batch being committed (it merges a single update into
-   the first staged update of the same entity) is dropped with that batch:
-   the commit dialog is modal, so the UI cannot make one.
+   this side. The engine merges a single property update into the first
+   staged update of the same entity, so an update staged during the POST
+   could be merged into a batch being committed and dropped with it. Two
+   things keep one from being made: the drawer (`DiffDrawer`) cannot be
+   dismissed while it commits — no Escape, no outside click, no close
+   button — and `stageProposedOps` waits for `commitsLanded()` before it
+   stages, which resolves once no commit is in flight: a commit counts from
+   the call until it failed or, once it landed, until the replica has
+   applied its answer (`replicaSettled()`) and the model store has taken
+   that in.
 5. **Undo** is **client-side** over the staged buffer (`popLastStaged` reverts
    the last staged op from its per-op journal); per-element and discard-all
    reverts (`revertStagedFor` / `revertAllStaged`) work the same way. There is
@@ -509,7 +515,8 @@ answer is the newer one.
   `stopReplica()` / `resetReplica()`, which drops everything the half holds;
   an answer that lands after a detach or a `resetModelStore()` is dropped.
 - **An edit** — `emit(op)`, or `emitMany(ops)` for ONE batch (all or
-  nothing: a proposed list stages whole or not at all, and is not coalesced)
+  nothing: a proposed list stages whole or not at all; a one-op list is
+  coalesced like `emit`, a longer one is not)
   — is four steps, all synchronous but the last: (1) the op is written into
   the caches as the engine will apply it (a create cached under its temp id,
   or its `id` hint, with `rev: 0` and a lite tree item; an update patches the

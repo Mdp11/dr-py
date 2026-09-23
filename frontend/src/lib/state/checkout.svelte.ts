@@ -54,7 +54,12 @@ import {
 // The active-metamodel mirror is a leaf store (no imports of its own beyond
 // api types), so importing it here closes no cycle.
 import { setMetamodel } from './metamodel.svelte';
-import { beginReplicaCommit, getStagingSide, replicaMetamodelAdopted } from './replica.svelte';
+import {
+	beginReplicaCommit,
+	getStagingSide,
+	replicaMetamodelAdopted,
+	replicaSettled
+} from './replica.svelte';
 import {
 	clearStagedNodeMoves,
 	discardStagedNodeMoves,
@@ -378,8 +383,57 @@ export async function previewStaged(): Promise<PreviewResponse> {
  * ops in ONE batch (metamodel first, view LAST; see {@link previewStaged}). On
  * success the server releases every token it was SENT, so we apply the delta
  * and drop those tokens from the registry locally.
+ *
+ * A commit counts as in flight (see {@link commitsLanded}) from the call
+ * until it failed or, once it landed, until the replica has applied its
+ * answer and the model store has taken that in.
  */
 export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
+	_commitsInFlight += 1;
+	let landed = false;
+	try {
+		return await commitNow(message, ackErrors, () => {
+			landed = true;
+		});
+	} finally {
+		if (!landed) commitDone();
+		else {
+			void replicaSettled()
+				.then(() => (getStagingSide() === 'engine' ? stagedSettled() : undefined))
+				.then(commitDone, commitDone);
+		}
+	}
+}
+
+/** Commits running, and landed ones the replica and the model store have still to take in. */
+let _commitsInFlight = 0;
+let _commitWaiters: Array<() => void> = [];
+
+function commitDone(): void {
+	_commitsInFlight -= 1;
+	if (_commitsInFlight > 0) return;
+	const waiters = _commitWaiters;
+	_commitWaiters = [];
+	for (const resolve of waiters) resolve();
+}
+
+/**
+ * Resolves once no commit is in flight. An edit an async path stages meanwhile
+ * could be merged by the replica into a batch being committed — it merges a
+ * single property update into the first staged update of the same entity —
+ * and would be dropped with that batch on the answer; such a path waits here.
+ */
+export async function commitsLanded(): Promise<void> {
+	while (_commitsInFlight > 0) {
+		await new Promise<void>((resolve) => _commitWaiters.push(resolve));
+	}
+}
+
+async function commitNow(
+	message: string,
+	ackErrors: boolean,
+	onLanded: () => void
+): Promise<CommitResponse> {
 	// On the engine side the model ops are its staged batches, read once every
 	// edit has reached them. A staged list the engine cannot say rejects here,
 	// before anything is posted. The legacy buffer is exact at once, and its
@@ -470,6 +524,7 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	// applies it: the batches it carried are unstaged here, or the replica
 	// would keep them staged and a re-bootstrap would adopt them again.
 	if (res.rebound === true) dropStagedBatches(model.batchIds);
+	onLanded();
 	// ORDERING, all of it load-bearing. The commit has LANDED durably by this
 	// point, so everything below is local reconciliation that must not become
 	// skippable by a failure further down.
