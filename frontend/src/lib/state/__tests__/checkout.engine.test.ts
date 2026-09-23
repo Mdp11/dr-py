@@ -12,6 +12,7 @@ import {
 } from '$lib/engine/__tests__/support/project-server';
 import type { CommitAnswer } from '$lib/engine/sync';
 import {
+	commitApplied,
 	commitStaged,
 	discardConflict,
 	discardElement,
@@ -37,7 +38,7 @@ import {
 } from '../model.svelte';
 import * as model from '../model.svelte';
 import type { ModelOp } from '../ops';
-import { getReplicaStatus, handReplicaFeed } from '../replica.svelte';
+import { getReplicaStatus, handReplicaFeed, stopReplica } from '../replica.svelte';
 import { engineStore, peerDelta, type EngineStore } from './support/engine-store';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -361,6 +362,70 @@ describe('the commit on the engine side', () => {
 		expect(getStagedConflicts()).toEqual([]);
 		expect(await s.link.client.call('staged')).toEqual([]);
 		expect(getReplicaStatus()).toMatchObject({ phase: 'ready', rev: 1 });
+	});
+});
+
+describe('waiting for the replica to apply a commit', () => {
+	/** Holds every `applyDelta` the sync posts to the engine until `release`. */
+	function holdDeltas(s: EngineStore): { release(): void } {
+		const held = hold();
+		const client = s.link.client;
+		const call = client.call.bind(client);
+		vi.spyOn(client, 'call').mockImplementation((async (
+			method: string,
+			params?: unknown,
+			options?: never
+		) => {
+			if (method === 'applyDelta') await held.arrive();
+			return call(method, params, options);
+		}) as typeof client.call);
+		return { release: () => held.release() };
+	}
+
+	const pending = async (promise: Promise<void>): Promise<boolean> => {
+		let done = false;
+		void promise.then(() => (done = true));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		return !done;
+	};
+
+	it('commitApplied waits until the replica has applied the answer; an edit after it survives', async () => {
+		const s = await open();
+		routes(s);
+		await ensureElement('e_000002');
+		const deltas = holdDeltas(s);
+
+		emit(rename('e_000002', 'Quartz'));
+		await commitStaged('m', false);
+		const applied = commitApplied();
+		expect(applied).not.toBeNull();
+		expect(await pending(applied!)).toBe(true);
+
+		deltas.release();
+		await applied;
+		// The committed batch is gone: a keystroke now is a batch of its own.
+		emit(rename('e_000002', 'Quartzite'));
+		await settled(s);
+
+		expect(getStagedOps()).toEqual([rename('e_000002', 'Quartzite')]);
+		expect(getStagedBatchIds()).toEqual([2]);
+		expect(nameOf('e_000002')).toBe('Quartzite');
+	});
+
+	it('commitApplied stops waiting when the replica is gone', async () => {
+		const s = await open();
+		routes(s);
+		await ensureElement('e_000002');
+		const deltas = holdDeltas(s);
+
+		emit(rename('e_000002', 'Quartz'));
+		await commitStaged('m', false);
+		const applied = commitApplied()!;
+		expect(await pending(applied)).toBe(true);
+
+		stopReplica();
+		await applied;
+		deltas.release();
 	});
 });
 

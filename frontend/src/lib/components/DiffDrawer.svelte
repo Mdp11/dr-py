@@ -15,6 +15,7 @@
 		markEditorLockDenied,
 		previewStaged,
 		commitStaged,
+		commitApplied,
 		discardAll,
 		discardArtifact,
 		discardElement,
@@ -332,9 +333,9 @@
 	}
 
 	/**
-	 * The dialog cannot be dismissed while a commit is in flight: an edit made
-	 * behind it could be merged by the replica into a batch being committed,
-	 * and dropped with it on the answer.
+	 * The dialog cannot be dismissed while a commit is in flight, nor until the
+	 * replica has applied a landed one: an edit made behind it could be merged
+	 * by the replica into a batch being committed, and dropped with it.
 	 */
 	function onOpenChange(next: boolean): void {
 		if (!next && committing) return;
@@ -381,6 +382,10 @@
 		try {
 			// errorCount > 0 ⇒ ack_errors (the user clicked Commit anyway)
 			await commitStaged(message, errorCount > 0);
+			// Still committing, and so still undismissable, until the replica has
+			// applied the answer (see `commitApplied`); at once on the legacy side.
+			const applied = commitApplied();
+			if (applied !== null) await applied;
 			message = '';
 			open = false;
 			// `POST /commits` RELEASES every lock token it is sent, and the batch

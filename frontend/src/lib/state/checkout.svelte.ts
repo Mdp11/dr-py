@@ -56,9 +56,11 @@ import {
 import { setMetamodel } from './metamodel.svelte';
 import {
 	beginReplicaCommit,
+	getReplicaStatus,
 	getStagingSide,
 	replicaMetamodelAdopted,
-	replicaSettled
+	replicaSettled,
+	subscribeReplicaStatus
 } from './replica.svelte';
 import {
 	clearStagedNodeMoves,
@@ -427,6 +429,39 @@ export async function commitsLanded(): Promise<void> {
 	while (_commitsInFlight > 0) {
 		await new Promise<void>((resolve) => _commitWaiters.push(resolve));
 	}
+}
+
+/**
+ * What the commit drawer waits for, after a commit landed, before it lets the
+ * user edit again. On the engine side that is {@link commitsLanded}: until the
+ * replica has applied the commit's answer, an edit could be merged into a
+ * batch being committed and dropped with it. While the replica is `ready`
+ * that wait ends once it has applied the answer. It ends at once when the
+ * replica is `off` or `server`, which holds no staged batch to merge into.
+ * It also ends, the answer still queued, when the replica goes `failed` —
+ * whose overlay covers the workspace until a rebuilt replica is ready, which
+ * applies the queued answer first — or `frozen` by a peer's rebind, where
+ * the answer waits for the new metamodel and an update staged meanwhile can
+ * still merge into a committed batch. `null` on the legacy side, whose
+ * buffer merges nothing.
+ */
+export function commitApplied(): Promise<void> | null {
+	if (getStagingSide() !== 'engine') return null;
+	return new Promise<void>((resolve) => {
+		let done = false;
+		const gone = (phase: string) => phase === 'off' || phase === 'server';
+		const finish = () => {
+			if (done) return;
+			done = true;
+			unsubscribe();
+			resolve();
+		};
+		const unsubscribe = subscribeReplicaStatus((status) => {
+			if (gone(status.phase)) finish();
+		});
+		if (gone(getReplicaStatus().phase)) finish();
+		void commitsLanded().then(finish);
+	});
 }
 
 async function commitNow(

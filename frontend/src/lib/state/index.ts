@@ -228,6 +228,7 @@ export {
 	handleRemoteLockEvent,
 	previewStaged,
 	commitStaged,
+	commitApplied,
 	discardArtifact,
 	discardElement,
 	discardElementCascade,

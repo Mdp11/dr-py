@@ -26,6 +26,7 @@ vi.mock('$lib/state', async (orig) => {
 			would_block: false
 		})),
 		commitStaged: vi.fn(),
+		commitApplied: vi.fn(() => null),
 		discardAll: vi.fn(async () => {}),
 		discardElement: vi.fn(async () => {}),
 		ensureElement: vi.fn(async () => {}),
@@ -42,7 +43,7 @@ vi.mock('$lib/state', async (orig) => {
 	};
 });
 
-import { commitStaged } from '$lib/state';
+import { commitApplied, commitStaged } from '$lib/state';
 
 afterEach(() => {
 	document.body.innerHTML = '';
@@ -141,6 +142,34 @@ describe('DiffDrawer while committing', () => {
 		unmount(component);
 	});
 
+	it('stays up and undismissable until the replica has applied the landed commit', async () => {
+		let applied!: () => void;
+		vi.mocked(commitApplied).mockReturnValueOnce(
+			new Promise<void>((resolve) => (applied = resolve))
+		);
+		const { component, release } = await commitHeld('resolve');
+
+		// The POST has answered; the replica has not applied it yet.
+		await release();
+		expect(content()).not.toBeNull();
+		expect(commitApplied).toHaveBeenCalledOnce();
+		expect(commitButton()?.textContent).toMatch(/Committing/);
+		expect(commitButton()?.disabled).toBe(true);
+		expect(closeButton()).toBeNull();
+		pressEscape();
+		await tick();
+		flushSync();
+		expect(content()).not.toBeNull();
+		clickOutside();
+		await tick();
+		flushSync();
+		expect(content()).not.toBeNull();
+
+		applied();
+		await waitFor(() => content() === null);
+		unmount(component);
+	});
+
 	it('can be dismissed again once a refused commit has settled', async () => {
 		const { component, release } = await commitHeld('reject');
 		pressEscape();
@@ -150,6 +179,7 @@ describe('DiffDrawer while committing', () => {
 
 		await release();
 		expect(content()).not.toBeNull();
+		expect(commitApplied).not.toHaveBeenCalled();
 		expect(document.body.textContent).toMatch(/boom/);
 		expect(closeButton()).not.toBeNull();
 		pressEscape();

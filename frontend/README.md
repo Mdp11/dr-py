@@ -237,13 +237,24 @@ engine store":
    this side. The engine merges a single property update into the first
    staged update of the same entity, so an update staged during the POST
    could be merged into a batch being committed and dropped with it. Two
-   things keep one from being made: the drawer (`DiffDrawer`) cannot be
-   dismissed while it commits — no Escape, no outside click, no close
-   button — and `stageProposedOps` waits for `commitsLanded()` before it
-   stages, which resolves once no commit is in flight: a commit counts from
-   the call until it failed or, once it landed, until the replica has
-   applied its answer (`replicaSettled()`) and the model store has taken
-   that in.
+   things keep one from being made. `stageProposedOps` waits for
+   `commitsLanded()` before it stages, which resolves once no commit is in
+   flight: a commit counts from the call until it failed or, once it
+   landed, until the replica has applied its answer (`replicaSettled()`)
+   and the model store has taken that in. The drawer (`DiffDrawer`) stays
+   committing — Commit and Cancel disabled, no close button, Escape and
+   outside clicks ignored — through the POST and, once the commit landed,
+   until `commitApplied()` resolves: `commitsLanded()`, or the replica
+   gone (`off` / `server`, nothing staged to merge into); only then does
+   it close. While the replica is `ready` that is once it has applied the
+   answer. A replica that goes `failed` with the answer still queued ends
+   the wait, but its overlay covers the workspace until a rebuilt replica is
+   ready, which applies the queued answer first. A replica `frozen` by a
+   peer's rebind during the POST ends it too, and keeps the answer queued
+   until the new metamodel is adopted: an update staged in between can
+   still merge into a committed batch (a known limit). A refused commit
+   frees the drawer at once, and on the legacy side (`commitApplied()` is
+   `null`) it closes as soon as the POST answers.
 5. **Undo** is **client-side** over the staged buffer (`popLastStaged` reverts
    the last staged op from its per-op journal); per-element and discard-all
    reverts (`revertStagedFor` / `revertAllStaged`) work the same way. There is
