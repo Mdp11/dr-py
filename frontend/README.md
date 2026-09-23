@@ -181,10 +181,12 @@ application uses to resolve temp ids to canonical ones.
 
 The **backend session model is the source of truth**; the client never holds
 the whole model, and editing follows a pessimistic **check-out → stage →
-commit** loop. This is the **server-mode path** (`staging: legacy`,
-`model-legacy.svelte.ts`) — steps 1–3 describe the legacy buffer specifically;
-`staging: engine` is the default (`STAGING_DEFAULT`) and stages in the
-replica instead, called out inline below and detailed in "The engine store":
+commit** loop. Steps 1–2 and step 5's opening (the client-side undo buffer)
+describe the **server-mode path** (`staging: legacy`, `model-legacy.svelte.ts`)
+specifically; step 3 (the lock auto-acquire through the checkout store) holds
+on both sides. `staging: engine` is the default (`STAGING_DEFAULT`) and
+stages in the replica instead, called out inline below and detailed in "The
+engine store":
 
 1. The store caches only the **fetched subset** of the model — entities
    brought in by paged reads, searches, neighborhoods, and commit deltas —
@@ -205,7 +207,12 @@ replica instead, called out inline below and detailed in "The engine store":
    `POST /commits/preview` to validate the staged dirty set, shows the diff +
    any conformance issues / structural blockers, then `POST /commits` to apply
    the batch durably; on success it clears the staged buffer, installs the
-   server's canonical delta (`applyDelta`), and **releases the held locks**.
+   server's canonical delta (`applyDelta`), and **releases the held locks**
+   — every element token is sent, on the reasoning that a commit ends the
+   model editing session; an edit staged DURING the POST is not part of the
+   batch being sent, so its element's token is released along with it and
+   the next commit of that edit may 409 until the element is touched again
+   (`K-42`, `BACKLOG-ENGINE.md`).
    A stale-rev 409 or a structural-blocker 422 is surfaced as a commit error.
    **On the engine side** (`staging: engine`, see "The engine store") the
    staged model edits are the replica's batches. `previewStaged()`,
@@ -222,7 +229,10 @@ replica instead, called out inline below and detailed in "The engine store":
    flight and every batch stays. A commit that swapped the metamodel
    (`rebound`) freezes the replica, which never applies it: its batches are
    unstaged by id (`dropStagedBatches`), which also finds them in a replica
-   that adopted them after the re-bootstrap. A revert (the History drawer)
+   that adopted them after the re-bootstrap — a later staged batch naming one
+   of THOSE batches' temp ids parks as a conflict right there rather than
+   being remapped through the rebound response's `id_map` (`K-41`,
+   `BACKLOG-ENGINE.md`). A revert (the History drawer)
    commits no staged batch and names none. `clearStaged()` does nothing on
    this side. The engine merges a single property update into the first
    staged update of the same entity, so an update staged during the POST

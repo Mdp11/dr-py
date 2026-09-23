@@ -226,8 +226,9 @@ waiting for the pump to be idle (a commit in flight would stall every read).
 ## AD-29 · Staged edits stay under the caret
 **Decision.** The engine store writes an edit into its caches synchronously and lets no
 engine answer regress a newer edit; the engine's staged list is mirrored, never predicted.
-**Why.** The property form emits per keystroke and renders from the cache (fact 6); an
-answer that overwrote a later keystroke would move the caret; predicting batch ids and
-versions would make the mirror drift the first time an event and an answer crossed.
+**Why.** The property form emits per keystroke and renders from the cache — it keeps no
+draft of its own, so the cached value is what it shows; an answer that overwrote a later
+keystroke would move the caret; predicting batch ids and versions would make the mirror
+drift the first time an event and an answer crossed.
 **Rejected.** A per-field draft (every emitter would need one); applying `stage` answers to
 the mirror (the `changed` event, not the answer, is the engine's word on the staged list).

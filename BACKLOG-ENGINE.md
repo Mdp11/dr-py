@@ -38,7 +38,9 @@ replica's working copy, the legacy store lives behind `staging: legacy`) — and
 The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op applier from
 the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
-surfaces' defaults. C (evaluation) is next. Size: very large.
+surfaces' defaults. C (evaluation) is next. Open after B: `K-29`, `K-32`, `K-35`, `K-36`,
+`K-38`, `K-41`, `K-42`, `K-43`, `C-20`, `C-21` in this file; `K-33`, `K-34` in `BACKLOG.md`.
+Size: very large.
 
 ---
 
@@ -123,29 +125,40 @@ previous phase was `resyncing` and the new one is `ready` — a retried `failed`
 replica re-bootstraps on its own (a diverged digest check) both cross that transition; a plain
 first open (`opening` to `ready`) does not.
 
-### K-41 · A rebind's re-bootstrap does not remap later batches' temp ids · `open` · *2026-09-22*
-`sync.ts`'s `dropStagedBatches` unstages a rebound commit's own batches by id, but a later
-staged batch that named one of THOSE batches' temp ids (an update or a connect referring to
-an element the dropped batch created) is not remapped — the create is gone, so after the
-re-bootstrap the later batch parks as a conflict instead of being fixed up or dropped with it.
-Decide whether `dropStagedBatches` should walk dependents transitively.
+### K-41 · A rebind's dropped batches leave their dependents parked, unremapped · `open` · *2026-09-22*
+`checkout.svelte.ts` (:526) calls the facade's `dropStagedBatches` (`model.svelte.ts:114` →
+`model-engine.svelte.ts`'s `dropBatches`) to unstage a rebound commit's own batches by id,
+since the frozen replica never applies its delta. Each `unstage {batch}` is a rebase: a LATER
+staged batch that named one of the dropped batches' temp ids (an update or a connect referring
+to an element the dropped batch created) parks as a conflict right there, in the frozen
+replica, and stays parked through the re-bootstrap — a plain commit's `applyDelta` would have
+remapped it through `id_map` (`engine/src/working/working-copy.ts:596`), but a rebound commit's
+delta is never applied, so that remap never runs. Fix: remap the dependents' temp ids through
+the rebound response's `id_map` before (or instead of) dropping the batches that minted them.
 
 ### K-42 · An edit that survives a commit flight loses its lease · `open` · *2026-09-22*
-`POST /commits` releases every lease the caller held (`routes/commits.py`). An edit staged
-DURING the POST (a batch of its own, per CT-2) is not part of that commit, so its element's
-lease is released along with the committed batch's; the next commit of that edit may 409
-"required lock not held" until the element is edited again (which re-acquires it). The same
-happens to a proposal (a snippet or CR Stage) that took its locks before a commit landed and
-staged its ops after. Decide whether the checkout store should re-acquire locks for what is
-still staged after a commit, or whether this stays a known limit.
+The server releases only the lock tokens it is SENT (`routes/commits.py:1376-1379`); the CLIENT
+decides which ones to send. `checkout.svelte.ts`'s token partition (:472-495) keeps an
+artifact-editor token only when every resource it covers is artifact-only AND unneeded by this
+batch — every element token is always sent, on the comment's own reasoning that "commit ends
+the model editing session, as before". That reasoning no longer holds for an edit staged
+DURING the POST (a batch of its own, per CT-2): it is not part of the commit being sent, yet
+its element's token is released anyway, so the next commit of that edit may 409 "required lock
+not held" until the element is touched again (which re-acquires it). The same happens to a
+proposal (a snippet or CR Stage) that took its locks before a commit landed and staged its ops
+after. Fix belongs in the token partition: keep a token whose resources are all UNNEEDED by
+the batch being sent, not just the artifact-only ones.
 
-### K-43 · A property update staged during a commit can be dropped with it · `open` · *2026-09-22*
-The engine always coalesces a single property update (`emit`, or `emitMany` with ONE op) into
-the first staged batch already holding an update of the same id — including a batch that is
-mid-commit. The frontend narrows the window (the DiffDrawer cannot be dismissed while a commit
-is in flight, and `stageProposedOps` waits for `commitsLanded()`), but a plain `emit` from the
-property form is not gated the same way. Decide whether the engine should refuse to coalesce
-into a batch already sent, or whether the frontend's narrowing is enough.
+### K-43 · A property update always coalesces into the first staged batch of that id · `done` · *2026-09-22*
+The engine always merges a single property update (`emit`, or `emitMany` with ONE op) into the
+first staged batch already holding an update of the same id, including a batch that is
+mid-commit — by design (AD-29: predicting a new batch id would drift the mirror), which would
+otherwise let a keystroke land inside a batch already sent and be dropped with it if refused.
+Two things close the window: the DiffDrawer cannot be dismissed while a commit is in flight —
+no Escape, no outside click, no close button (`DiffDrawer.svelte:417-419`, a modal
+`Dialog.Content` with the interaction trap) — so nothing else can stage while the drawer that
+started the commit is open; and `stageProposedOps` (a proposal's own path in) waits for
+`commitsLanded()` before it stages, matching README "State model" step 4.
 
 ---
 
