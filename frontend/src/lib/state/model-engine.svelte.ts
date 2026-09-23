@@ -284,14 +284,19 @@ function isPending(id: string): boolean {
 	return (_pending.get(id) ?? 0) > 0;
 }
 
-/** Everything the engine said has been taken in, unstage requests aside. */
+/**
+ * Everything the engine said has been taken in, unstage requests aside. A
+ * deferred edit does not count: the engine has not been told of it, and it
+ * waits for the replica to drop a committed batch — which a `frozen` or
+ * `failed` replica does only once it is rebuilt. Only an edit that is not
+ * answered holds a pending count, so a posted one is `awaitingAnswer()`.
+ */
 function isQuiet(): boolean {
 	return (
 		!_mirrorReading &&
 		!_mirrorOwed &&
 		_refreshing === 0 &&
-		(_provisional.length === 0 || (_mirrorFailed && !awaitingAnswer())) &&
-		_pending.size === 0
+		(_provisional.every((entry) => entry.deferred) || (_mirrorFailed && !awaitingAnswer()))
 	);
 }
 
@@ -322,10 +327,10 @@ export class StagedUnreadableError extends Error {
 
 /**
  * Resolves once this half has taken in everything the engine told it — every
- * edit answered and covered by a mirror read, no mirror read in flight or
- * owed, no cache re-read in flight, no unstage request unanswered — so that
- * `getStagedOps()` and `getStagedBatchIds()` are exactly the engine's staged
- * batches. Rejects with {@link StagedUnreadableError} when the engine refused
+ * edit but the deferred ones answered and covered by a mirror read, no mirror
+ * read in flight or owed, no cache re-read in flight, no unstage request
+ * unanswered — so that `getStagedBatches()` are exactly the engine's staged
+ * batches, and `getStagedOps()` those plus the deferred edits. Rejects with {@link StagedUnreadableError} when the engine refused
  * the mirror read (a fresh one is tried first), since the readers then show
  * edits no read has covered.
  */

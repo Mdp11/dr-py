@@ -661,11 +661,15 @@ could not be read: …`, the readers keep showing the answered edits over
   drops them at once, and the readers leave them out until the next replica
   is `ready` — the replica before it may still name them, and the one after
   may number a new batch alike.
-- **`stagedSettled()`** resolves once every edit has been answered and
-  covered by a mirror read, no mirror read is in flight or owed, no cache
-  re-read is in flight and no unstage request is unanswered — so that, once
-  it resolves, `getStagedOps()` and `getStagedBatchIds()` are exactly the
-  engine's staged batches; a detach or a `resetModelStore()` releases it.
+- **`stagedSettled()`** resolves once every edit but the deferred ones has
+  been answered and covered by a mirror read, no mirror read is in flight or
+  owed, no cache re-read is in flight and no unstage request is unanswered —
+  so that, once it resolves, `getStagedBatchIds()` and `captureStaged()` are
+  exactly the engine's staged batches, and `getStagedOps()` those plus the
+  deferred edits; a detach or a `resetModelStore()` releases it. It does not
+  wait for a deferred edit, which waits for a rebuilt replica: a preview,
+  a validate or a discard goes on without it (a commit is refused meanwhile,
+  its answer still unapplied).
   With the mirror refused it reads it again first and, refused still,
   REJECTS with `StagedUnreadableError` (`the staged edits could not be read:
 …`), so no batch is ever built from a mirror that is not the engine's.

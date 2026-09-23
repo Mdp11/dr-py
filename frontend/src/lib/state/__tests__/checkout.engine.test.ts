@@ -163,7 +163,8 @@ function routes(
 			});
 		}),
 		http.post(`${API}/model/validate`, async ({ request }) => {
-			bodies.validate.push(await request.json());
+			const text = await request.text();
+			bodies.validate.push(text === '' ? null : JSON.parse(text));
 			return HttpResponse.json([]);
 		}),
 		http.get(`${API}/metamodel`, () =>
@@ -682,6 +683,40 @@ describe('a commit whose answer the replica holds', () => {
 		expect(getStagedOps()).toEqual([rename('e_000002', 'Quartzite')]);
 		expect(getStagedBatchIds()).toEqual([2]);
 		expect(nameOf('e_000002')).toBe('Quartzite');
+	});
+
+	it('frozen: an edit waiting for the replica to drop a landed batch holds up no preview, validate or discard', async () => {
+		const s = await open();
+		const bodies = routes(s);
+		await ensureElements(['e_000002', 'e_000003']);
+		await peerRebind(s);
+
+		emit(rename('e_000002', 'Quartz'));
+		await commitStaged('m', false);
+		await commitApplied();
+		emit(rename('e_000002', 'Quartzite'));
+		await ensureCheckout([{ resource_id: 'e_000003', mode: 'exclusive' }], 'edit');
+		emit(rename('e_000003', 'mine'));
+
+		/** `work` answers before the replica is rebuilt: nothing waits for the deferred edits. */
+		const prompt = <T>(work: Promise<T>): Promise<T | 'held'> =>
+			Promise.race([work, new Promise<'held'>((r) => setTimeout(() => r('held'), 500))]);
+
+		expect(await prompt(stagedSettled())).toBeUndefined();
+		expect(await prompt(previewStaged())).not.toBe('held');
+		expect(bodies.preview).toEqual([{ base_rev: getModelRev(), ops: [] }]);
+		expect(await prompt(validateAll())).not.toBe('held');
+		expect(bodies.validate).toEqual([null]);
+		expect(await prompt(discardElement('e_000003'))).toBeUndefined();
+		expect(getHeldTokens()).toEqual([]);
+		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);
+		expect(getStagedOps()).toEqual([rename('e_000002', 'Quartzite')]);
+
+		await adopt(s);
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 2, ops: [rename('e_000002', 'Quartzite')] }
+		]);
+		expect(getStagedOps()).toEqual([rename('e_000002', 'Quartzite')]);
 	});
 
 	it('failed: a commit whose answer lands meanwhile is not staged again by the retry, nor sent twice', async () => {
