@@ -205,7 +205,7 @@ describe('StagedSection', () => {
 
 // Proves the section needs no change for engine staging: `deriveStagedElementRows`
 // is fed by `getStagedDiff()`, which the facade already answers from the
-// engine's own diff in engine mode (D3, D14).
+// engine's own diff in engine mode.
 describe('StagedSection over the engine', () => {
 	let store: EngineStore | null = null;
 
