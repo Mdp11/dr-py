@@ -437,19 +437,21 @@ export async function commitsLanded(): Promise<void> {
  * replica has applied the commit's answer, an edit could be merged into a
  * batch being committed and dropped with it. While the replica is `ready`
  * that wait ends once it has applied the answer. It ends at once when the
- * replica is `off` or `server`, which holds no staged batch to merge into.
- * It also ends, the answer still queued, when the replica goes `failed` —
- * whose overlay covers the workspace until a rebuilt replica is ready, which
- * applies the queued answer first — or `frozen` by a peer's rebind, where
- * the answer waits for the new metamodel and an update staged meanwhile can
- * still merge into a committed batch. `null` on the legacy side, whose
- * buffer merges nothing.
+ * replica is `off` or `server`, which holds no staged batch to merge into,
+ * or `failed`: the sync keeps the answer for the replica a retry rebuilds,
+ * which applies it on its first drain, and the failed overlay covers the
+ * workspace until that replica is ready (waiting on would also wait on
+ * edits and mirror reads that a failed replica holds until then). It also
+ * ends, the answer still queued, when the replica is `frozen` by a rebind
+ * any time before the answer is applied: the answer waits for the new
+ * metamodel, and an update staged meanwhile can still merge into a
+ * committed batch. `null` on the legacy side, whose buffer merges nothing.
  */
 export function commitApplied(): Promise<void> | null {
 	if (getStagingSide() !== 'engine') return null;
 	return new Promise<void>((resolve) => {
 		let done = false;
-		const gone = (phase: string) => phase === 'off' || phase === 'server';
+		const gone = (phase: string) => phase === 'off' || phase === 'server' || phase === 'failed';
 		const finish = () => {
 			if (done) return;
 			done = true;

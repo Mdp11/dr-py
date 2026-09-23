@@ -38,7 +38,7 @@ import {
 } from '../model.svelte';
 import * as model from '../model.svelte';
 import type { ModelOp } from '../ops';
-import { getReplicaStatus, handReplicaFeed, stopReplica } from '../replica.svelte';
+import { getReplicaStatus, handReplicaFeed, replicaSettled, stopReplica } from '../replica.svelte';
 import { engineStore, peerDelta, type EngineStore } from './support/engine-store';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -194,6 +194,13 @@ const CREATE_X: ModelOp = {
 
 function nameOf(id: string): unknown {
 	return getCachedElements().get(id)?.properties['name'];
+}
+
+/** The feed frame of `committed`, its state digest flipped: the replica diverges on it. */
+function withWrongDigest(committed: Committed): string {
+	const digest = committed.delta['state_digest'] as string;
+	const wrong = (BigInt('0x' + digest) ^ 1n).toString(16).padStart(16, '0');
+	return committed.eventText.replace(`"state_digest":"${digest}"`, `"state_digest":"${wrong}"`);
 }
 
 /** A peer's commit: the feed frame to the replica, the delta to the model store. */
@@ -412,20 +419,36 @@ describe('waiting for the replica to apply a commit', () => {
 		expect(nameOf('e_000002')).toBe('Quartzite');
 	});
 
-	it('commitApplied stops waiting when the replica is gone', async () => {
+	it('commitApplied stops waiting when the replica fails, its answer still unapplied', async () => {
 		const s = await open();
 		routes(s);
 		await ensureElement('e_000002');
-		const deltas = holdDeltas(s);
+		// A peer's commit ahead of the user's: the engine is handed it directly, its digest wrong.
+		const peer = s.project.commit([
+			{ kind: 'update_element', id: 'e_000003', properties_patch: { name: 'peer' } }
+		]);
+		const direct = s.link.client.call.bind(s.link.client);
+		holdDeltas(s);
+		// A cache re-read the failed replica leaves waiting goes to the server once
+		// the replica is stopped, below.
+		server.use(http.post('*/model/elements/batch', () => HttpResponse.json({ items: [] })));
+		s.project.fail('snapshot', 503, 99);
 
 		emit(rename('e_000002', 'Quartz'));
 		await commitStaged('m', false);
 		const applied = commitApplied()!;
 		expect(await pending(applied)).toBe(true);
 
-		stopReplica();
+		// The sync still waits on the held answer when the replica diverges and
+		// its rebuild fails: the phase alone ends the wait.
+		const failed = s.until((status) => status.phase === 'failed');
+		await direct('applyDelta', { text: withWrongDigest(peer) });
+		await failed;
 		await applied;
-		deltas.release();
+		expect(await pending(replicaSettled())).toBe(true);
+
+		stopReplica();
+		await new Promise((resolve) => setTimeout(resolve, 20));
 	});
 });
 

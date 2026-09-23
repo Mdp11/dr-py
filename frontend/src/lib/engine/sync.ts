@@ -679,9 +679,16 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		}
 	};
 
-	/** Before the first ready of an open, the server serves instead; after it, the replica has failed. */
+	/**
+	 * Before the first ready of an open, the server serves instead; after it,
+	 * the replica has failed. A failed replica keeps the user's own commits for
+	 * the one a retry rebuilds: the batches it holds include the ones those
+	 * commits carried, which only their bookkeeping drops.
+	 */
 	const giveUp = (r: Run, reason: string) => {
+		const own = r.everReady ? queue.filter(isOwn) : [];
 		queue.length = 0;
+		queue.push(...own);
 		if (r.everReady) {
 			set({ phase: 'failed', attempt: 0, progress: null, reason });
 		} else {
@@ -839,10 +846,11 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		queue.splice(at, 0, input);
 	};
 
+	/** Every input waits while a replica is, or is being, followed; frozen or failed, the user's own commits alone. */
 	const waits = (input: Input): boolean => {
 		const phase = status.phase;
 		if (phase === 'opening' || phase === 'resyncing' || phase === 'ready') return true;
-		return phase === 'frozen' && isOwn(input);
+		return (phase === 'frozen' || phase === 'failed') && isOwn(input);
 	};
 
 	const enqueue = (input: Input) => {

@@ -245,14 +245,18 @@ engine store":
    committing — Commit and Cancel disabled, no close button, Escape and
    outside clicks ignored — through the POST and, once the commit landed,
    until `commitApplied()` resolves: `commitsLanded()`, or the replica
-   gone (`off` / `server`, nothing staged to merge into); only then does
-   it close. While the replica is `ready` that is once it has applied the
-   answer. A replica that goes `failed` with the answer still queued ends
-   the wait, but its overlay covers the workspace until a rebuilt replica is
-   ready, which applies the queued answer first. A replica `frozen` by a
-   peer's rebind during the POST ends it too, and keeps the answer queued
-   until the new metamodel is adopted: an update staged in between can
-   still merge into a committed batch (a known limit). A refused commit
+   gone (`off` / `server`, nothing staged to merge into) or `failed`;
+   only then does it close. While the replica is `ready` that is once it
+   has applied the answer. A `failed` replica keeps the answer for the one
+   `retry()` rebuilds, which applies it on its first drain — the committed
+   batches the rebuild adopted drop then, their temp ids rewritten — and
+   its overlay covers the workspace until that replica is ready; waiting on
+   in `failed` would also wait on edits and mirror reads it holds until
+   then. A rebind that freezes the replica between the POST and the
+   answer's application (a peer's, landing meanwhile) ends the wait too, and
+   keeps the answer queued until the new metamodel is adopted: an update
+   staged in between can still merge into a committed batch (a known
+   limit). A refused commit
    frees the drawer at once, and on the legacy side (`commitApplied()` is
    `null`) it closes as soon as the POST answers.
 5. **Undo** is **client-side** over the staged buffer (`popLastStaged` reverts
@@ -938,7 +942,10 @@ base URL is a module global read at call time).
 A failed attempt tells the engine `close` (its answer ignored), sleeps 1 s,
 then 3 s, and tries again; after the third failure the phase is `server` when
 this open was never `ready` — the link is disposed — and `failed` otherwise;
-a wait that itself rejects ends the attempts the same way. A
+a wait that itself rejects ends the attempts the same way. Going `failed`
+empties the waiting inputs but the user's own commit responses: the batches a
+re-bootstrap holds include the ones those commits carried, and only their
+bookkeeping drops them, once `retry()` has rebuilt the replica. A
 call rejected with `EngineGoneError` (the worker died after the handshake)
 drops the link, and the next attempt builds a new one. `stop()` aborts the
 run: every await of an attempt races the run's abort signal, the download's
@@ -1025,8 +1032,8 @@ each to its end. Deltas wait in `rev` order (a frame that arrives out of order
 takes its place); anything else in arrival order. While `opening` or
 `resyncing` inputs wait; at 1,000 waiting the queue is emptied and a catch-up
 is owed instead — the tail from the replica's `rev`, which covers everything
-that was waiting. In `off`, `failed` and `server` they are dropped, and in
-`frozen` too, except the user's own. Once `ready`, the pump:
+that was waiting. In `off` and `server` they are dropped, and in `frozen`
+and `failed` too, except the user's own. Once `ready`, the pump:
 
 - A delta whose `rev` is not past the replica's is dropped without a call —
   unless it is the user's own, which still has bookkeeping to do in the

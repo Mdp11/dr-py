@@ -157,6 +157,81 @@ describe('retry', () => {
 	});
 });
 
+describe("the user's own commit across a failure", () => {
+	/**
+	 * Ready, a rename and a create staged, a commit of both in flight; a peer's
+	 * delta the engine is handed directly, its digest wrong, makes the replica
+	 * diverge while every snapshot download fails. `settleAt` says whether the
+	 * commit's answer comes while the re-bootstrap still tries or once it failed.
+	 */
+	async function commitAcrossFailure(settleAt: 'resyncing' | 'failed') {
+		const project = fakeProject();
+		const over = await ready(project);
+		const client = over.link!.client;
+		const staged = [
+			...rename('e_000001', 'committed name'),
+			...createOrganization('tmp_x', 'committed org')
+		];
+		await client.call<StageResult>('stage', { ops: [staged[0]!] });
+		await client.call<StageResult>('stage', { ops: [staged[1]!] });
+		const flight = over.sync.beginCommit();
+
+		project.fail('snapshot', 503, 99);
+		const peer = project.commit(rename('e_000002', 'peer'));
+		// The server lands the commit; its answer is held back.
+		const own = project.commit(staged);
+		const body = JSON.parse(own.responseText) as { id_map: Record<string, string> };
+		const answer = {
+			text: own.responseText,
+			rev: project.rev,
+			applied: true,
+			rebound: false,
+			idMap: body.id_map,
+			batchIds: [1, 2]
+		};
+		const resyncing = over.until((status) => status.phase === 'resyncing', over.statuses.length);
+		await client.call('applyDelta', { text: withWrongDigest(peer) });
+		await resyncing;
+		if (settleAt === 'resyncing') flight.settle(answer);
+		await over.sync.settled();
+		expect(last(over.statuses)).toMatchObject({ phase: 'failed' });
+		if (settleAt === 'failed') flight.settle(answer);
+
+		project.fail('snapshot', 503, 0);
+		over.sync.retry();
+		await over.sync.settled();
+		expect(last(over.statuses)).toMatchObject({ phase: 'ready', rev: project.rev });
+		return { over, project, serverId: body.id_map['tmp_x']! };
+	}
+
+	for (const settleAt of ['resyncing', 'failed'] as const) {
+		it(`the retry applies an answer settled while ${settleAt}: the committed batches are not staged again`, async () => {
+			const { over, serverId } = await commitAcrossFailure(settleAt);
+			const client = over.link!.client;
+
+			expect(await client.call<WireBatch[]>('staged')).toEqual([]);
+			expect(await client.call('conflicts')).toEqual([]);
+			await expect(client.call('getElement', { id: serverId })).resolves.toMatchObject({
+				properties: { name: 'committed org' }
+			});
+			await expect(client.call('getElement', { id: 'tmp_x' })).rejects.toThrow();
+			const found = await client.call<{ items: { id: string }[] }>('listElementsPage', {
+				q: 'committed org'
+			});
+			expect(found.items.map((item) => item.id)).toEqual([serverId]);
+			await expect(client.call('getElement', { id: 'e_000001' })).resolves.toMatchObject({
+				properties: { name: 'committed name' }
+			});
+
+			// A later edit stages as a batch of its own.
+			await client.call<StageResult>('stage', { ops: rename(serverId, 'later') });
+			expect(await client.call<WireBatch[]>('staged')).toEqual([
+				{ id: 3, ops: rename(serverId, 'later') }
+			]);
+		});
+	}
+});
+
 describe('reset', () => {
 	it('a reset re-bootstraps', async () => {
 		const project = fakeProject();
