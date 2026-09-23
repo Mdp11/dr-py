@@ -306,8 +306,9 @@
 		setMetamodel(mm);
 		replicaMetamodelAdopted();
 		// The replica is re-bootstrapping onto the new schema now, so the tree
-		// and relationships list wait for it at the rebind's rev before their
-		// structural refetch runs.
+		// and relationships list wait for it to reach `ready` before their
+		// structural refetch runs — it lands at the rebind's rev because a
+		// rebind commit always forces a snapshot there.
 		markStructureChanged();
 		await refreshSummary();
 		// The cheap read of the server's maintained issue store — NOT

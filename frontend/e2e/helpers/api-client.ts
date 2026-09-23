@@ -63,10 +63,21 @@ export async function elementIds(
 
 export type ElementPatch = { elementId: string; patch: Record<string, unknown> };
 
+/** Best-effort `POST /locks/release` — a commit already releases its own
+ * tokens on success, so this is only load-bearing on the failure path
+ * (`peerCommit` / `peerRebind`'s `finally`), where a thrown `expect` would
+ * otherwise leave the lease held for its full TTL and 409 every later
+ * lock/commit on the same resource. */
+async function releaseLock(api: APIRequestContext, base: string, token: string): Promise<void> {
+	await api.post(`${base}/locks/release`, { data: { token } });
+}
+
 /**
  * A commit through the locked path, as another client would make it: the
  * element's exclusive lease, then `POST /commits` with one `update_element`.
- * Resolves to the new `model_rev`; the feed broadcasts the delta.
+ * Resolves to the new `model_rev`; the feed broadcasts the delta. The lease
+ * is released in a `finally` so a failed commit (a thrown `expect`) never
+ * leaves it held.
  */
 export async function peerCommit(
 	api: APIRequestContext,
@@ -80,17 +91,21 @@ export async function peerCommit(
 	});
 	expect(lock.ok(), await lock.text()).toBeTruthy();
 	const { token } = (await lock.json()) as { token: string };
-	const commit = await api.post(`${base}/commits`, {
-		data: {
-			base_rev: baseRev,
-			ops: [{ kind: 'update_element', id: elementId, properties_patch: patch }],
-			message: 'peer edit',
-			lock_tokens: [token],
-			ack_errors: true
-		}
-	});
-	expect(commit.ok(), await commit.text()).toBeTruthy();
-	return ((await commit.json()) as { model_rev: number }).model_rev;
+	try {
+		const commit = await api.post(`${base}/commits`, {
+			data: {
+				base_rev: baseRev,
+				ops: [{ kind: 'update_element', id: elementId, properties_patch: patch }],
+				message: 'peer edit',
+				lock_tokens: [token],
+				ack_errors: true
+			}
+		});
+		expect(commit.ok(), await commit.text()).toBeTruthy();
+		return ((await commit.json()) as { model_rev: number }).model_rev;
+	} finally {
+		await releaseLock(api, base, token);
+	}
 }
 
 /**
@@ -101,7 +116,10 @@ export async function peerCommit(
  * SAME batch — the migration-commit shape `POST /commits` expects, and the
  * only way a rebind's peer-visible effect on the model is observable in one
  * step. The caller must be a project owner (the rebind arm is owner-gated).
- * Resolves to the new `model_rev` and the created element's id.
+ * Resolves to the new `model_rev` and the created element's id. The singleton
+ * `mm` lease is released in a `finally` so a failed commit never leaves it
+ * held for its full TTL, which would 409 every later `mm` lock/rebind on the
+ * same project (the shared "Smart City" project's `loadFiles` included).
  */
 export async function peerRebind(
 	api: APIRequestContext,
@@ -120,21 +138,25 @@ export async function peerRebind(
 	});
 	expect(lock.ok(), await lock.text()).toBeTruthy();
 	const { token } = (await lock.json()) as { token: string };
-	const commit = await api.post(`${base}/commits`, {
-		data: {
-			base_rev: baseRev,
-			ops: [
-				{ kind: 'metamodel.rebind', blob: candidate },
-				{ kind: 'create_element', temp_id: 'tmp_rebind', type_name: typeName, properties }
-			],
-			message: 'peer rebind',
-			lock_tokens: [token],
-			ack_errors: true
-		}
-	});
-	expect(commit.ok(), await commit.text()).toBeTruthy();
-	const body = (await commit.json()) as { model_rev: number; id_map: Record<string, string> };
-	return { rev: body.model_rev, id: body.id_map.tmp_rebind };
+	try {
+		const commit = await api.post(`${base}/commits`, {
+			data: {
+				base_rev: baseRev,
+				ops: [
+					{ kind: 'metamodel.rebind', blob: candidate },
+					{ kind: 'create_element', temp_id: 'tmp_rebind', type_name: typeName, properties }
+				],
+				message: 'peer rebind',
+				lock_tokens: [token],
+				ack_errors: true
+			}
+		});
+		expect(commit.ok(), await commit.text()).toBeTruthy();
+		const body = (await commit.json()) as { model_rev: number; id_map: Record<string, string> };
+		return { rev: body.model_rev, id: body.id_map.tmp_rebind };
+	} finally {
+		await releaseLock(api, base, token);
+	}
 }
 
 /**

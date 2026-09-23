@@ -259,6 +259,13 @@ test("a peer's rebind with a new element shows after Reload", async ({ page }) =
 	const rebindBanner = page.getByRole('alert').filter({ hasText: 'metamodel was changed' });
 	await expect(rebindBanner).toBeVisible({ timeout: 15_000 });
 
+	// A marker on `window`, set before the click: a full page reload (unlike
+	// the URL, which a reload keeps too) wipes it, so its survival is what
+	// actually proves onReloadRebind never navigates.
+	await page.evaluate(() => {
+		(window as unknown as { __noReloadMarker?: string }).__noReloadMarker = 'still here';
+	});
+
 	const phases = await watchPhases(page);
 	await rebindBanner.getByRole('button', { name: 'Reload' }).click();
 
@@ -268,8 +275,9 @@ test("a peer's rebind with a new element shows after Reload", async ({ page }) =
 	expect(seen).toContain('resyncing');
 	expect(seen[seen.length - 1]).toBe('ready');
 
-	// No page reload happened: the URL is still the workspace's.
-	expect(page.url()).toContain(`/p/${projectId}`);
+	expect(
+		await page.evaluate(() => (window as unknown as { __noReloadMarker?: string }).__noReloadMarker)
+	).toBe('still here');
 
 	await scrollUntilVisible(page, pool(page), poolRow(page, 'After rebind'));
 	await expect(poolRow(page, 'After rebind')).toBeVisible({ timeout: 10_000 });
