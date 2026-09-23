@@ -403,7 +403,7 @@ describe('NewProjectWizard', () => {
 
 	it('passes replica: false when every surface is on the server', async () => {
 		// staging defaults to 'engine', which forces every surface back to it
-		// (M1) whatever this object says of them, so pin staging to 'legacy' too.
+		// whatever this object says of them, so pin staging to 'legacy' too.
 		localStorage.setItem(
 			'dr.surfaces',
 			JSON.stringify({

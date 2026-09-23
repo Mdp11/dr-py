@@ -1222,19 +1222,19 @@ switch per surface:
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
   `SURFACE_DEFAULTS`, all `engine`, and `STAGING_DEFAULT`, `engine`,
-  overlaid with the JSON object in `localStorage['dr.surfaces']`
-  (e.g. `{"search": "server"}`) — a known surface set to `engine` or
-  `server` is taken, `staging` set to `engine` or `legacy` is taken,
-  anything else ignored, and no storage, a throwing one or bad JSON give the
-  defaults. `staging` says where the user's model edits are staged: `engine`
-  in the replica's working copy, `legacy` in the model store's own buffer.
-  `staging: engine` (the default) puts all five surfaces on `engine`,
-  whatever the object says of them — a staged edit shows only in the
-  replica's answers, so a surface-only override (e.g. `{"search": "server"}`
-  alone) needs `staging: legacy` alongside it to take effect. It is not a
-  surface: `SURFACES` and `anyEngineSurface` do not count it. The switches
-  are read once, with the rest, and honoured in a build too.
-  `readSurfaces(storage?)` is `readSwitches(storage).surfaces`;
+  overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
+  surface set to `engine` or `server` is taken, `staging` set to `engine` or
+  `legacy` is taken, anything else ignored, and no storage, a throwing one or
+  bad JSON give the defaults. `staging` says where the user's model edits are
+  staged: `engine` in the replica's working copy, `legacy` in the model
+  store's own buffer. `staging: engine` (the default) puts all five surfaces
+  on `engine`, whatever the object says of them — a staged edit shows only in
+  the replica's answers, so a surface-only override on its own
+  (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
+  alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
+  take effect. It is not a surface: `SURFACES` and `anyEngineSurface` do not
+  count it. The switches are read once, with the rest, and honoured in a
+  build too. `readSurfaces(storage?)` is `readSwitches(storage).surfaces`;
   `anyEngineSurface(surfaces)` says whether any is on the engine.
 - `createEngineSeam(sync, surfaces, shadow?)` makes the seam of a
   `ReplicaSync`: a surface's EFFECTIVE side is `engine` iff its switch says

@@ -27,8 +27,8 @@ describe('the surface switches', () => {
 	});
 
 	it('an override moves the one surface it names', () => {
-		// staging defaults to 'engine', which forces every surface back to it
-		// (M1), so a surface-only override needs staging pinned to 'legacy' to
+		// staging defaults to 'engine', which forces every surface back to it,
+		// so a surface-only override needs staging pinned to 'legacy' to
 		// actually take effect.
 		expect(readSurfaces(storing('{"staging": "legacy", "search": "server"}'))).toEqual({
 			...SURFACE_DEFAULTS,
@@ -41,6 +41,12 @@ describe('the surface switches', () => {
 			search: 'engine',
 			tree: 'server'
 		});
+	});
+
+	it('a surface-only override with no staging key comes back all-engine', () => {
+		// staging is 'engine' by default with nothing to override it, which
+		// forces every surface back to it whatever this object says of them.
+		expect(readSurfaces(storing('{"search": "server"}'))).toEqual(SURFACE_DEFAULTS);
 	});
 
 	it('an unknown surface is ignored', () => {
