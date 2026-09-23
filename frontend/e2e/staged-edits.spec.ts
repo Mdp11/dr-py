@@ -6,7 +6,7 @@
  * view places), search and the Inspector without a commit — and a peer's
  * commit that invalidates a staged edit parks it as a conflict instead of
  * silently losing it. Shadow comparison is gated off while anything is
- * staged (D12), so the `shadowWatch` fixture failing on any `[shadow]` line
+ * staged, so the `shadowWatch` fixture failing on any `[shadow]` line
  * doubles as proof the gate holds.
  */
 
@@ -19,7 +19,7 @@ import { openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';
 import { changeBadge, commitStaged } from './helpers/commit';
 import { expectReplicaReady, replica } from './helpers/replica';
-import { headRev, peer, projectIdByName } from './helpers/api-client';
+import { headRev, peer, projectIdByName, snapshotRev } from './helpers/api-client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = join(__dirname, '..', '..', 'examples');
@@ -118,6 +118,21 @@ async function expandOrganizationsFolder(page: Page): Promise<void> {
 	await expect(
 		tree(page).getByRole('treeitem').filter({ hasText: 'Organization-001' })
 	).toBeVisible({ timeout: 10_000 });
+}
+
+/** Expands an already-visible element row (by its display name) to reveal its
+ * containment children, if it is not already expanded — a row that comes
+ * back after a delete is undone re-renders COLLAPSED regardless of its state
+ * before the delete, so this is never a one-shot toggle. Uses the row's own
+ * toggle button, not its "pick" button — clicking it never changes the
+ * Inspector's selection. */
+async function ensureExpanded(page: Page, name: string): Promise<void> {
+	const row = tree(page).getByRole('treeitem').filter({ hasText: name }).first();
+	await expect(row).toBeVisible({ timeout: 10_000 });
+	const toggle = row.locator('button[aria-label]').first();
+	if ((await toggle.getAttribute('aria-label')) === 'Expand') {
+		await toggle.click();
+	}
 }
 
 function searchInput(page: Page) {
@@ -236,7 +251,10 @@ test('a staged create, rename and cascading delete show before any commit, and U
 	await scrollUntilVisible(page, pool(page), poolRow(page, createName));
 	await expect(poolRow(page, createName)).toBeVisible({ timeout: 10_000 });
 
-	// search finds it, and opening the hit re-shows it in the Inspector
+	// open something else first, so re-finding the create by search and
+	// clicking it actually PROVES the Inspector switches to it, not merely
+	// that it never left showing what the create step above already selected
+	await searchAndOpen(page, 'Organization-001', 'e_000001');
 	await searchAndOpenByName(page, createName);
 
 	// ----- rename an existing element ---------------------------------------
@@ -252,14 +270,20 @@ test('a staged create, rename and cascading delete show before any commit, and U
 		timeout: 10_000
 	});
 
-	// ----- delete one with children (cascades: 5 elements + 13 relationships,
-	// see examples/smart-city.model.json's Owns/MemberOf/Responsible edges off
+	// ----- delete one with children: the whole subtree leaves the tree, not
+	// just its own row (cascades: 5 elements + 13 relationships — see
+	// examples/smart-city.model.json's Owns/MemberOf/Responsible edges off
 	// e_000004 and its four owned Teams) -------------------------------------
 	await searchAndOpen(page, 'Organization-004', 'e_000004');
+	await ensureExpanded(page, 'Organization-004');
+	await expect(tree(page).getByRole('treeitem').filter({ hasText: 'Team-004' })).toBeVisible({
+		timeout: 10_000
+	});
 	await deleteSelected(page);
 	await expect(
 		tree(page).getByRole('treeitem').filter({ hasText: 'Organization-004' })
 	).toHaveCount(0, { timeout: 10_000 });
+	await expect(tree(page).getByRole('treeitem').filter({ hasText: 'Team-004' })).toHaveCount(0);
 
 	// ----- the change badge counts: 1 created + 1 modified + 18 cascaded ----
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(20);
@@ -267,14 +291,26 @@ test('a staged create, rename and cascading delete show before any commit, and U
 	// nothing landed on the server through any of this
 	expect(await headRev(api, projectId)).toBe(startRev);
 
-	// ----- Undo removes the last (the delete) -------------------------------
+	// ----- Undo removes the last (the delete): the subtree comes back -------
 	await page.getByRole('button', { name: 'Undo', exact: true }).click();
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(2);
 	await expect(
 		tree(page).getByRole('treeitem').filter({ hasText: 'Organization-004' })
 	).toBeVisible({ timeout: 10_000 });
+	await ensureExpanded(page, 'Organization-004');
+	await expect(tree(page).getByRole('treeitem').filter({ hasText: 'Team-004' })).toBeVisible({
+		timeout: 10_000
+	});
 
-	// ----- Discard all empties the create and leaves the delete undone ------
+	// ----- stage the delete again, so Discard All below has one to unwind --
+	await searchAndOpen(page, 'Organization-004', 'e_000004');
+	await deleteSelected(page);
+	await expect(
+		tree(page).getByRole('treeitem').filter({ hasText: 'Organization-004' })
+	).toHaveCount(0, { timeout: 10_000 });
+	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(20);
+
+	// ----- Discard all empties the create and restores the delete's subtree -
 	await page.getByRole('button', { name: 'Commit', exact: true }).click();
 	const drawer = page.getByRole('dialog', { name: /commit changes/i });
 	await expect(drawer).toBeVisible({ timeout: 10_000 });
@@ -284,7 +320,13 @@ test('a staged create, rename and cascading delete show before any commit, and U
 	await expect(drawer).toBeHidden({ timeout: 10_000 });
 
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(0);
+
+	// the create is gone from both search and the pool
+	await searchInput(page).fill(createName);
 	await expect(page.getByRole('option').filter({ hasText: createName })).toHaveCount(0);
+	await expect(poolRow(page, createName)).toHaveCount(0);
+
+	// the rename reverted and the deleted subtree is back
 	await searchInput(page).fill('');
 	await expect(
 		tree(page).getByRole('treeitem').filter({ hasText: 'Organization-001' })
@@ -292,6 +334,10 @@ test('a staged create, rename and cascading delete show before any commit, and U
 	await expect(
 		tree(page).getByRole('treeitem').filter({ hasText: 'Organization-004' })
 	).toBeVisible({ timeout: 10_000 });
+	await ensureExpanded(page, 'Organization-004');
+	await expect(tree(page).getByRole('treeitem').filter({ hasText: 'Team-004' })).toBeVisible({
+		timeout: 10_000
+	});
 
 	expect(await headRev(api, projectId)).toBe(startRev);
 });
@@ -309,11 +355,9 @@ test('a committed create shows under its server id, and a peer commit parks a st
 
 	await expandPool(page);
 	await scrollUntilVisible(page, pool(page), poolRow(page, createName));
+	await expect(pool(page).getByRole('treeitem').filter({ hasText: createName })).toHaveCount(1);
 	const row = poolRow(page, createName);
-	await expect(row).toBeVisible({ timeout: 10_000 });
-	const rowId = await row.locator('button.flex-1').first().getAttribute('title');
-	expect(rowId).not.toBeNull();
-	expect(rowId).not.toMatch(/^tmp_/);
+	await expect(row.locator('button.flex-1').first()).not.toHaveAttribute('title', /^tmp_/);
 
 	await searchInput(page).fill(createName);
 	await expect(page.getByRole('option').filter({ hasText: createName })).toBeVisible({
@@ -351,17 +395,43 @@ test('a committed create shows under its server id, and a peer commit parks a st
 	await commitButton.click();
 	await expect(drawer).toBeHidden({ timeout: 20_000 });
 
-	// the rest (the surviving rename) landed
+	// the rest (the surviving rename) landed — the server rev advanced past
+	// the peer's delete by exactly the discarded commit, and the element it
+	// touched carries the new name
+	expect(await headRev(api, projectId)).toBe(peerRev + 1);
+	const restEl = await api.get(`projects/${projectId}/model/elements/${REST_ID}`);
+	expect(restEl.ok(), await restEl.text()).toBeTruthy();
+	expect(((await restEl.json()) as { properties: { name: string } }).properties.name).toBe(
+		restName
+	);
 	await searchInput(page).fill(restName);
 	await expect(page.getByRole('option').filter({ hasText: restName })).toBeVisible({
 		timeout: 10_000
 	});
 
-	// ----- reload: a fresh replica, nothing staged --------------------------
+	// ----- a staged edit does not survive a reload --------------------------
+	await searchAndOpen(page, 'Organization-004', 'e_000004');
+	const notCommittedName = `t2-not-committed-${Date.now()}`;
+	await renameSelected(page, notCommittedName);
+	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(1);
+
+	// same form as replica.spec.ts's cache-hit test: a snapshot may or may not
+	// have moved between the two opens, so the source is whichever that implies
+	const beforeReload = await snapshotRev(api, projectId);
 	await page.reload();
 	await expectLiveFeed(page);
 	await expectReplicaReady(page);
+	const afterReload = await snapshotRev(api, projectId);
+	await expect(replica(page)).toHaveAttribute(
+		'data-source',
+		afterReload === beforeReload ? 'cache' : 'network'
+	);
 
 	await expect(page.getByRole('button', { name: 'Commit', exact: true })).toBeDisabled();
 	expect(await stagedChangeCount(page)).toBe(0);
+	const afterReloadEl = await api.get(`projects/${projectId}/model/elements/e_000004`);
+	expect(afterReloadEl.ok(), await afterReloadEl.text()).toBeTruthy();
+	expect(((await afterReloadEl.json()) as { properties: { name: string } }).properties.name).toBe(
+		'Organization-004'
+	);
 });
