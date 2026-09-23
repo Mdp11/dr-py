@@ -1,7 +1,7 @@
 /**
- * A staged model edit visible in the tree before it commits: with
- * `dr.surfaces = {staging: 'engine'}`, the five read surfaces are served by
- * the replica's own working copy, so a create/rename/delete staged in the
+ * A staged model edit visible in the tree before it commits: with `staging`
+ * on the engine by default, the five read surfaces are served by the
+ * replica's own working copy, so a create/rename/delete staged in the
  * browser shows up in the tree (or the "Not in view" pool, for an element no
  * view places), search and the Inspector without a commit — and a peer's
  * commit that invalidates a staged edit parks it as a conflict instead of
@@ -50,18 +50,7 @@ test.afterAll(async () => {
 	await api?.dispose();
 });
 
-/** Forces the store's `staging` switch to `engine` for THIS page only, before
- * the app boots — `dr.surfaces` already defaults every read surface to
- * `engine` (surfaces.ts's `SURFACE_DEFAULTS`), so the one thing this spec
- * needs to add is the switch that also stages EDITS there. */
-async function useEngineStaging(page: Page): Promise<void> {
-	await page.addInitScript(() => {
-		localStorage.setItem('dr.surfaces', JSON.stringify({ staging: 'engine' }));
-	});
-}
-
 async function openReady(page: Page): Promise<void> {
-	await useEngineStaging(page);
 	await openDefaultProject(page);
 	await expectLiveFeed(page);
 	await expectReplicaReady(page);

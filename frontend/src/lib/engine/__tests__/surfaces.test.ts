@@ -27,11 +27,16 @@ describe('the surface switches', () => {
 	});
 
 	it('an override moves the one surface it names', () => {
-		expect(readSurfaces(storing('{"search": "server"}'))).toEqual({
+		// staging defaults to 'engine', which forces every surface back to it
+		// (M1), so a surface-only override needs staging pinned to 'legacy' to
+		// actually take effect.
+		expect(readSurfaces(storing('{"staging": "legacy", "search": "server"}'))).toEqual({
 			...SURFACE_DEFAULTS,
 			search: 'server'
 		});
-		expect(readSurfaces(storing('{"search": "engine", "tree": "server"}'))).toEqual({
+		expect(
+			readSurfaces(storing('{"staging": "legacy", "search": "engine", "tree": "server"}'))
+		).toEqual({
 			...SURFACE_DEFAULTS,
 			search: 'engine',
 			tree: 'server'
@@ -64,7 +69,7 @@ describe('the surface switches', () => {
 	});
 
 	it('reads localStorage when handed no storage', () => {
-		localStorage.setItem('dr.surfaces', '{"elements": "server"}');
+		localStorage.setItem('dr.surfaces', '{"staging": "legacy", "elements": "server"}');
 		try {
 			expect(readSurfaces()).toEqual({ ...SURFACE_DEFAULTS, elements: 'server' });
 		} finally {
@@ -80,15 +85,15 @@ describe('the surface switches', () => {
 	});
 
 	it('readSwitches gives the staging default beside the surface defaults', () => {
-		expect(STAGING_DEFAULT).toBe('legacy');
+		expect(STAGING_DEFAULT).toBe('engine');
 		expect(readSwitches(storing(null))).toEqual({
 			surfaces: SURFACE_DEFAULTS,
 			staging: STAGING_DEFAULT
 		});
 		expect(readSwitches()).toEqual({ surfaces: SURFACE_DEFAULTS, staging: STAGING_DEFAULT });
-		localStorage.setItem('dr.surfaces', '{"staging": "engine"}');
+		localStorage.setItem('dr.surfaces', '{"staging": "legacy"}');
 		try {
-			expect(readSwitches().staging).toBe('engine');
+			expect(readSwitches().staging).toBe('legacy');
 		} finally {
 			localStorage.removeItem('dr.surfaces');
 		}
@@ -117,8 +122,10 @@ describe('the surface switches', () => {
 			surfaces: SURFACE_DEFAULTS,
 			staging: STAGING_DEFAULT
 		});
+		// the default is 'engine', which forces every surface to it too, so an
+		// invalid staging value alongside a surface override loses the override.
 		expect(readSwitches(storing('{"staging": "server", "tree": "server"}'))).toEqual({
-			surfaces: { ...SURFACE_DEFAULTS, tree: 'server' },
+			surfaces: SURFACE_DEFAULTS,
 			staging: STAGING_DEFAULT
 		});
 	});

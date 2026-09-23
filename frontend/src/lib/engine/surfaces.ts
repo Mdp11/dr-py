@@ -20,7 +20,7 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 /** Where the user's model edits are staged: the replica's working copy, or the store's own buffer. */
 export type StagingSide = 'engine' | 'legacy';
 
-export const STAGING_DEFAULT: StagingSide = 'legacy';
+export const STAGING_DEFAULT: StagingSide = 'engine';
 
 export type Switches = { surfaces: Record<Surface, Side>; staging: StagingSide };
 

@@ -330,7 +330,7 @@ describe('the engine seam', () => {
 		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
 
 	it('startReplica installs a seam whose sides follow dr.surfaces and the phase', async () => {
-		onEngine({ search: 'server' });
+		onEngine({ staging: 'legacy', search: 'server' });
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica();
@@ -362,7 +362,7 @@ describe('the engine seam', () => {
 	});
 
 	it('reads the switches once; resetReplica makes the next start read them again', () => {
-		onEngine({ search: 'server' });
+		onEngine({ staging: 'legacy', search: 'server' });
 		configureReplica({ sync: spySync(undefined, { current: READY }) });
 		setActiveProject('p');
 		startReplica();
@@ -749,8 +749,14 @@ describe('replicaGate', () => {
 	const onEngine = (surfaces: Record<string, string>) =>
 		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
 	// A default may put a surface on the engine (see `lib/engine/surfaces.ts`);
-	// force every one to `server` for a test about there being none on it.
-	const onServer = () => onEngine(Object.fromEntries(SURFACES.map((s) => [s, 'server'])));
+	// force every one to `server` for a test about there being none on it — and
+	// pin staging to 'legacy' too, since staging on the engine (the default)
+	// forces every surface back to it whatever this object says of them.
+	const onServer = () =>
+		onEngine({
+			staging: 'legacy',
+			...Object.fromEntries(SURFACES.map((s) => [s, 'server']))
+		});
 
 	it('resolves at once with every surface on server, even while genuinely opening', async () => {
 		onServer();
@@ -884,8 +890,14 @@ describe('the notice and the block', () => {
 	const onEngine = (surfaces: Record<string, string>) =>
 		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
 	// A default may put a surface on the engine (see `lib/engine/surfaces.ts`);
-	// force every one to `server` for a test about there being none on it.
-	const onServer = () => onEngine(Object.fromEntries(SURFACES.map((s) => [s, 'server'])));
+	// force every one to `server` for a test about there being none on it — and
+	// pin staging to 'legacy' too, since staging on the engine (the default)
+	// forces every surface back to it whatever this object says of them.
+	const onServer = () =>
+		onEngine({
+			staging: 'legacy',
+			...Object.fromEntries(SURFACES.map((s) => [s, 'server']))
+		});
 
 	it('the notice shows at server with a surface on the engine, not after dismiss, again after startReplica', async () => {
 		onEngine({ elements: 'engine' });

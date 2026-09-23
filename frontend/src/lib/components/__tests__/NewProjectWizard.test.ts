@@ -402,9 +402,14 @@ describe('NewProjectWizard', () => {
 	});
 
 	it('passes replica: false when every surface is on the server', async () => {
+		// staging defaults to 'engine', which forces every surface back to it
+		// (M1) whatever this object says of them, so pin staging to 'legacy' too.
 		localStorage.setItem(
 			'dr.surfaces',
-			JSON.stringify(Object.fromEntries(SURFACES.map((s) => [s, 'server'])))
+			JSON.stringify({
+				staging: 'legacy',
+				...Object.fromEntries(SURFACES.map((s) => [s, 'server']))
+			})
 		);
 		const spy = vi.spyOn(openJourney, 'beginJourney');
 		createProject.mockResolvedValue({ id: 'pS', name: 'S', role: 'owner', skipped_artifacts: [] });
