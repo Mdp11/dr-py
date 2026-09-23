@@ -94,6 +94,50 @@ export async function peerCommit(
 }
 
 /**
+ * A peer's metamodel rebind through the locked commit path, as the live
+ * metamodel editor would make it: the current stored YAML plus one added
+ * comment line (so the candidate is a distinct, valid schema), the `mm`
+ * lease, then one commit carrying the rebind and a `create_element` in the
+ * SAME batch — the migration-commit shape `POST /commits` expects, and the
+ * only way a rebind's peer-visible effect on the model is observable in one
+ * step. The caller must be a project owner (the rebind arm is owner-gated).
+ * Resolves to the new `model_rev` and the created element's id.
+ */
+export async function peerRebind(
+	api: APIRequestContext,
+	projectId: string,
+	{ typeName, properties }: { typeName: string; properties: Record<string, unknown> }
+): Promise<{ rev: number; id: string }> {
+	const base = `projects/${projectId}`;
+	const { blob } = await json<{ blob: string }>(api, `${base}/metamodel/raw`);
+	const candidate = `# rebind ${Date.now()}\n${blob}`;
+	const baseRev = await headRev(api, projectId);
+	const lock = await api.post(`${base}/locks`, {
+		data: {
+			targets: [{ resource_id: 'mm', mode: 'exclusive', type: 'metamodel' }],
+			intent: 'edit'
+		}
+	});
+	expect(lock.ok(), await lock.text()).toBeTruthy();
+	const { token } = (await lock.json()) as { token: string };
+	const commit = await api.post(`${base}/commits`, {
+		data: {
+			base_rev: baseRev,
+			ops: [
+				{ kind: 'metamodel.rebind', blob: candidate },
+				{ kind: 'create_element', temp_id: 'tmp_rebind', type_name: typeName, properties }
+			],
+			message: 'peer rebind',
+			lock_tokens: [token],
+			ack_errors: true
+		}
+	});
+	expect(commit.ok(), await commit.text()).toBeTruthy();
+	const body = (await commit.json()) as { model_rev: number; id_map: Record<string, string> };
+	return { rev: body.model_rev, id: body.id_map.tmp_rebind };
+}
+
+/**
  * A batch through the legacy unlocked path: journaled like a commit, but the
  * feed is not told. Resolves to the new `model_rev`.
  */

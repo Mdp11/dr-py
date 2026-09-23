@@ -80,6 +80,7 @@ export {
 	getModelSummary,
 	getStructureRev,
 	getTreeElements,
+	markStructureChanged,
 	loadSummary,
 	refreshSummary,
 	resetModelStore,

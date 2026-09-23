@@ -53,6 +53,7 @@
 		loadProjectInfo,
 		markEditorLockDenied,
 		loadViews,
+		markStructureChanged,
 		markViewUnresolved,
 		onLockEvent,
 		refetchIssues,
@@ -304,6 +305,10 @@
 		const mm = await fetchMetamodel();
 		setMetamodel(mm);
 		replicaMetamodelAdopted();
+		// The replica is re-bootstrapping onto the new schema now, so the tree
+		// and relationships list wait for it at the rebind's rev before their
+		// structural refetch runs.
+		markStructureChanged();
 		await refreshSummary();
 		// The cheap read of the server's maintained issue store — NOT
 		// runValidation(), which is POST /model/validate with no ops, i.e. the

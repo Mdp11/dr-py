@@ -5,7 +5,7 @@
  */
 
 import { test, expect, engineMode, watchShadow } from './fixtures';
-import type { APIRequestContext, Page } from '@playwright/test';
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
@@ -13,7 +13,7 @@ import { login, openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';
 import { commitStaged } from './helpers/commit';
 import { expectReplicaReady, replica, watchPhases } from './helpers/replica';
-import { headRev, peer, peerCommit, projectIdByName } from './helpers/api-client';
+import { headRev, peer, peerCommit, peerRebind, projectIdByName } from './helpers/api-client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = join(__dirname, '..', '..', 'examples');
@@ -73,6 +73,36 @@ async function expandFirstRoot(page: Page): Promise<void> {
 
 function searchInput(page: Page) {
 	return page.getByPlaceholder('Filter by name, type, id…');
+}
+
+/** The "Not in view" pool panel — the smart-city view places only a handful
+ * of elements, so a freshly created, unplaced root renders here, never under
+ * the view's folders (see CLAUDE.md's Shell section on view mode). */
+function pool(page: Page) {
+	return page.getByRole('tree', { name: /excluded elements/i });
+}
+function poolRow(page: Page, text: string) {
+	return pool(page).getByRole('treeitem').filter({ hasText: text }).first();
+}
+
+/** Expands the pool panel if it is collapsed (the default). No-op otherwise. */
+async function expandPool(page: Page): Promise<void> {
+	if (await pool(page).count()) return;
+	await page.getByRole('button', { name: /not in view/i }).click();
+	await expect(pool(page)).toBeVisible();
+}
+
+/** The pool is virtualized (windowed): a row past the on-screen slice does not
+ * exist in the DOM until scrolled into range. `target` ranks low (alphabetically
+ * near the top of ~700 unplaced roots), so a handful of scroll steps suffice. */
+async function scrollUntilVisible(page: Page, container: Locator, target: Locator): Promise<void> {
+	for (let i = 0; i < 30; i++) {
+		if ((await target.count()) > 0 && (await target.isVisible())) return;
+		await container.evaluate((el) => {
+			el.scrollTop += 200;
+		});
+		await page.waitForTimeout(50);
+	}
 }
 
 /** Searches the sidebar for `name` and opens the hit whose id is `id`. */
@@ -207,6 +237,42 @@ test('a model replaced outside the journal heals', async ({ page }) => {
 	await expect(page.getByRole('option').and(page.locator(`[title="${id}"]`))).toBeVisible({
 		timeout: 10_000
 	});
+});
+
+test("a peer's rebind with a new element shows after Reload", async ({ page }) => {
+	test.setTimeout(120_000);
+	await openReady(page);
+	await expandFirstRoot(page);
+	// Establish the pool's baseline fetch BEFORE the peer's commit: it stays
+	// expanded and open through the rebind, so its later contents can only
+	// change through the reactive refetch this test is proving — not through
+	// the "first expansion always fetches fresh" path `expandPool` would take
+	// if called again afterwards.
+	await expandPool(page);
+	await expect(pool(page).getByRole('treeitem').first()).toBeVisible({ timeout: 10_000 });
+
+	const created = await peerRebind(api, projectId, {
+		typeName: 'Organization',
+		properties: { name: 'After rebind' }
+	});
+
+	const rebindBanner = page.getByRole('alert').filter({ hasText: 'metamodel was changed' });
+	await expect(rebindBanner).toBeVisible({ timeout: 15_000 });
+
+	const phases = await watchPhases(page);
+	await rebindBanner.getByRole('button', { name: 'Reload' }).click();
+
+	await expect(replica(page)).toHaveAttribute('data-rev', String(created.rev), { timeout: 30_000 });
+	await expect(replica(page)).toHaveAttribute('data-phase', 'ready');
+	const seen = await phases();
+	expect(seen).toContain('resyncing');
+	expect(seen[seen.length - 1]).toBe('ready');
+
+	// No page reload happened: the URL is still the workspace's.
+	expect(page.url()).toContain(`/p/${projectId}`);
+
+	await scrollUntilVisible(page, pool(page), poolRow(page, 'After rebind'));
+	await expect(poolRow(page, 'After rebind')).toBeVisible({ timeout: 10_000 });
 });
 
 test('the boot fallback', async ({ browser }) => {
