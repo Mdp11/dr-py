@@ -166,7 +166,9 @@ event     {event, …}                     engine → client, unsolicited
    in state order — which replaying inverse ops cannot give. The server's rollback
    (`routes/ops.py::_rollback`) is the same operation, pass for pass. A property update staged
    alone merges into the first staged update of the same entity, which keeps its place and its
-   first before-image; the result is the state a replay of the staged ops gives.
+   first before-image; the result is the state a replay of the staged ops gives. A client
+   keeps the edit under the caret while the engine answers — written into what it shows at
+   once — and never lets the engine's answer to an older edit regress a newer one.
 3. To apply a delta: rewind all staged ops in reverse order → apply the delta → drop the staged
    ops it committed → rewrite temp ids through `id_map` → replay the rest. An op that fails
    replay is parked as a conflict and surfaced; it is never dropped silently. With the user's

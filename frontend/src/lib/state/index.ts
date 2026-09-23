@@ -98,8 +98,14 @@ export {
 	revertAllStaged,
 	popLastStaged,
 	clearStaged,
+	emitMany,
+	stagedSettled,
+	getStagedBatchIds,
+	getStagedConflicts,
+	revertConflict,
 	setModelError,
-	type ModelStoreError
+	type ModelStoreError,
+	type StagedConflict
 } from './model.svelte';
 export {
 	changesDocToDiff,

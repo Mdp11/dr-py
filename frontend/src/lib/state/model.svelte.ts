@@ -5,6 +5,7 @@ import type { Diff } from './diff';
 import * as engine from './model-engine.svelte';
 import * as legacy from './model-legacy.svelte';
 import { getClientConfig, getModelRev, resetSharedStore } from './model-shared.svelte';
+import type { StagedConflict } from './model-engine.svelte';
 import type { ModelOp } from './ops';
 import { getStagingSide } from './replica.svelte';
 
@@ -22,6 +23,7 @@ import { getStagingSide } from './replica.svelte';
  */
 
 export * from './model-shared.svelte';
+export type { StagedConflict } from './model-engine.svelte';
 
 /** What both entity halves answer. */
 type EntityHalf = Omit<typeof legacy, 'setModelApiConfig' | 'resetLegacyStore'>;
@@ -68,6 +70,31 @@ export function applyDelta(d: OpsResponse): void {
 
 export function emit(op: ModelOp): void {
 	side().emit(op);
+}
+
+/** One batch on the engine side; the legacy buffer takes the ops one by one. */
+export function emitMany(ops: readonly ModelOp[]): void {
+	if (getStagingSide() === 'engine') engine.emitMany(ops);
+	else for (const op of ops) legacy.emit(op);
+}
+
+/** Resolves once the staged-edit readers show every edit made so far; at once on the legacy side. */
+export function stagedSettled(): Promise<void> {
+	return getStagingSide() === 'engine' ? engine.stagedSettled() : Promise.resolve();
+}
+
+/** The engine's staged batch ids; the legacy buffer has none. */
+export function getStagedBatchIds(): number[] {
+	return getStagingSide() === 'engine' ? engine.getStagedBatchIds() : [];
+}
+
+/** The engine's parked batches; the legacy buffer parks nothing. */
+export function getStagedConflicts(): StagedConflict[] {
+	return getStagingSide() === 'engine' ? engine.getStagedConflicts() : [];
+}
+
+export function revertConflict(batchId: number): void {
+	if (getStagingSide() === 'engine') engine.revertConflict(batchId);
 }
 
 export function getStagedOps(): ModelOp[] {

@@ -487,16 +487,61 @@ answer is the newer one.
   staging on the engine, and takes it back with `detachEngine()` in
   `stopReplica()` / `resetReplica()`, which drops everything the half holds;
   an answer that lands after a detach or a `resetModelStore()` is dropped.
+- **An edit** — `emit(op)`, or `emitMany(ops)` for ONE batch (all or
+  nothing: a proposed list stages whole or not at all, and is not coalesced)
+  — is four steps, all synchronous but the last: (1) the op is written into
+  the caches as the engine will apply it (a create cached under its temp id,
+  or its `id` hint, with `rev: 0` and a lite tree item; an update patches the
+  cached entity; a delete drops the element, its cached incident
+  relationships AND its tree item, so the row goes at once; an update or a
+  delete of what is not cached changes nothing); (2) the entity's PENDING
+  count goes up; (3) the op joins the PROVISIONAL entries; (4) it is posted
+  as `stage` (a transition: held for the phase, never for a rev, and never
+  lost to a re-bootstrap). The cache write is what keeps a field's text under
+  the caret: the property form renders the cached entity on every keystroke.
+- **The pending rule.** Nothing the engine says overwrites an entity with an
+  edit in flight — not a `changed` re-read, not a seed, not an
+  `ensureElement` answer — except the `stage` answer that brings its count
+  back to ZERO, which writes the answer's post-state (or, past 500 changed
+  entities, re-reads it). Three keystrokes on one tick are three stages the
+  engine coalesces into one batch; the first two answers write nothing, so
+  the field never bounces back to an older text. A refused stage (a
+  `ValidationError` in the engine's own words, `getModelError()` =
+  `{kind: 'rejected', message}`; an `EngineGoneError` is `kind: 'error'`)
+  takes its entry out, reads back every element its cache write changed —
+  one the engine does not know leaves the caches, so a refused create's temp
+  id goes, and a refused delete comes back — drops a created relationship,
+  and moves the structure rev unless the batch was element updates alone, so
+  the tree and the relationships list refetch what cannot be read back.
 - **The mirror**: `staged`, `conflicts` and `stagedDiff` as the engine last
   answered them — one read in flight, one owed — read whenever a `changed`
-  event's `staged_version` differs from the version the mirror reflects, and
+  event's `staged_version` differs from the version the mirror reflects,
   whenever the replica becomes `ready` (a re-bootstrap adopts the batches
-  without a `changed` event, under versions of its own). The staged-edit
-  readers (`getStagedOps`, `getStagedOpsFor`, `getStagedNameOverride`,
-  `getStagedDepth`, `hasStagedOps`, `isStagedDeleted`) read the mirror's
-  batches in order; `getStagedDiff()` is `computeDiff` of the engine's
-  committed images against its records now. `stagedSettled()` resolves once
-  no mirror read or cache re-read is in flight or owed.
+  without a `changed` event, under versions of its own), and after every
+  `stage` answer. The readers (`getStagedOps`, `getStagedOpsFor`,
+  `getStagedNameOverride`, `getStagedDepth`, `hasStagedOps`,
+  `isStagedDeleted`) read the mirror's batches in order and then the
+  provisional entries, so an edit is staged to them the moment it is made;
+  `getStagedBatchIds()` and `getStagedConflicts()` are the mirror's alone.
+  An entry leaves when a mirror read ISSUED AFTER its answer lands — one
+  issued before may have run ahead of the stage (`staged` is answered at
+  once) — and since a stage's `changed` comes before its answer, no mirror
+  read starts while an edit waits for its answer: the last answer reads it.
+  That is what keeps an op from being counted twice, once in a batch and
+  once provisionally. When the replica becomes `ready` after a
+  re-bootstrap, the cached elements the staged and parked batches touched —
+  before that mirror read and after it — are read again: an adopted batch
+  that parks puts its entities back to the committed state, and adopting
+  says nothing.
+- **`getStagedDiff()`** is `computeDiff` of the engine's committed images
+  against its records now, in first-touch order — a staged delete counts its
+  cascade, and an entity edited back to its committed value is no change
+  while its op stays staged.
+- **`stagedSettled()`** resolves once every edit has been answered and
+  covered by a mirror read, no mirror read is in flight or owed, no cache
+  re-read is in flight and no unstage request is unanswered; a detach or a
+  `resetModelStore()` releases it. Commit, preview and validate wait for it
+  and then read the engine's batches alone.
 - **`changed` is the one path that refreshes the caches after a
   transition** — a stage, an unstage, or a delta the replica applied. Its
   deleted ids leave `_elements` and `_treeItems`, its deleted relationship
@@ -530,10 +575,25 @@ answer is the newer one.
   commit whose `changed` came first is at the store's rev, not older, and
   applies whole. The legacy half's `applyDelta` is unchanged: it moves the
   structure rev by its own formula, and the rev as the delta says.
-- **Edits** — `emit` and the unstage family (`popLastStaged`,
-  `revertStagedFor`, `revertStagedForElement`, `revertAllStaged`) — throw on
-  this side; `clearStaged()` does nothing, since the engine drops the
-  committed batches itself on the commit's delta.
+- **The unstage family** waits for every edit before it to reach the mirror
+  and for every earlier unstage to be answered, posts one transition, and
+  leaves the rest to `changed` (a staged delete undone brings its elements
+  back: the event names them, and the ones the delete took out of the caches
+  are read again). `popLastStaged()` is `unstage {batch: last}` — false when
+  nothing is staged; a coalesced keystroke lives in its FIRST batch, so Undo
+  may remove an older batch than the last keystroke, as the legacy
+  coalesced queue does. `revertStagedFor(id)` is `unstage {entity}`, which
+  leaves a parked batch for the conflicts; `revertStagedForElement(id)` is
+  `unstage {entity, incident: true}` and then `unstage {batch}` for every
+  parked batch whose ops target `id` or have it as an end;
+  `revertAllStaged()` is `unstage 'all'`, parked batches included;
+  `revertConflict(batchId)` drops one parked batch. `clearStaged()` does
+  nothing, since the engine drops the committed batches itself on the
+  commit's delta.
+- **The facade** also exports `emitMany`, `stagedSettled`,
+  `getStagedBatchIds`, `getStagedConflicts`, `revertConflict` and the type
+  `StagedConflict`; on the legacy side they are a loop of `emit`, a resolved
+  promise, `[]`, `[]` and a no-op.
 
 #### Validation issues: one live map, one optional overlay
 

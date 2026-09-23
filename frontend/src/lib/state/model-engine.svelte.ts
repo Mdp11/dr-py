@@ -4,7 +4,9 @@ import type { Element, OpsResponse, Relationship, TreeItem } from '$lib/api/type
 import type { ChangedEvent, ReplicaStatus, ReplicaSync } from '$lib/engine/sync';
 import { getElement } from '../api/elements';
 import { NotFoundError } from '../api/errors';
+import { EngineGoneError } from '../engine/client';
 import * as modelReadApi from '../api/model-read';
+import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
 import { remapVisitIds } from './inspection-history.svelte';
 import { remapCaches } from './model-caches';
@@ -12,6 +14,7 @@ import {
 	applyDeltaShared,
 	bumpStructureRev,
 	getModelRev,
+	setModelError,
 	setModelRev
 } from './model-shared.svelte';
 import type { ModelOp } from './ops';
@@ -26,12 +29,20 @@ import { getSelection, select } from './selection.svelte';
  * top — a temp id is an id like any other, and nothing a read returns can
  * resurrect a staged delete. The caches hold only what the UI asked for.
  *
+ * An edit (`emit`, `emitMany`) is written into the caches at once, so the
+ * field under the caret keeps its text, and posted to the engine as a
+ * `stage`. While it is in flight its entity is PENDING: nothing the engine
+ * says overwrites it but the answer that brings its pending count back to
+ * zero, so an answer never regresses a newer edit. A refused stage puts its
+ * entities back as the engine has them.
+ *
  * The replica says what moved through its `changed` event, the one path that
  * refreshes the caches after a transition: deleted ids leave them, cached
  * changed elements are read again, a structural change moves the structure
  * rev, and a staged list that moved is read again into the mirror (`staged`,
- * `conflicts`, `stagedDiff` as the engine last answered them), which the
- * synchronous staged-edit readers read.
+ * `conflicts`, `stagedDiff` as the engine last answered them). The
+ * synchronous staged-edit readers read the mirror and, after it, the
+ * PROVISIONAL edits: those posted and not yet covered by a mirror read.
  *
  * The replica store injects the engine (`attachEngine`) and takes it back
  * (`detachEngine`); detached, this half holds nothing.
@@ -64,8 +75,21 @@ type StagedDiff = {
 	relationships: { id: string; before: Relationship | null; after: Relationship | null }[];
 };
 
-/** Ops posted to the engine and not yet covered by a mirror read. */
+/**
+ * Ops posted to the engine and not yet covered by a mirror read; `answered`
+ * is the count of mirror reads issued when the engine answered them.
+ */
 type Provisional = { seq: number; ops: ModelOp[]; answered: number | null };
+
+/** The engine's answer to a `stage`: the post-state lists are `null` past 500 entities. */
+type StageAnswer = {
+	batch: StagedBatch;
+	coalesced: boolean;
+	elements: Element[] | null;
+	relationships: Relationship[] | null;
+};
+
+type Unstage = 'all' | { batch: number } | { entity: string; incident?: boolean };
 
 const _elements = new SvelteMap<string, Element>();
 const _relationships = new SvelteMap<string, Relationship>();
@@ -73,6 +97,12 @@ const _relationships = new SvelteMap<string, Relationship>();
 const _missingElementIds = new SvelteSet<string>();
 /** Lite tree rows; a full `_elements` entry wins in `getTreeElements()`. */
 const _treeItems = new SvelteMap<string, TreeItem>();
+/**
+ * Cached elements a staged delete took out of the caches; an unstage that
+ * brings one back names it as changed, and it is read again then.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
+const _hidden = new Set<string>();
 /** Shared by concurrent `ensureElement` calls of one id; never read reactively. */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _pendingElementFetches = new Map<string, Promise<Element | null>>();
@@ -98,9 +128,20 @@ let _mirrorVersion = UNKNOWN_VERSION;
 let _reads = 0;
 let _mirrorReading = false;
 let _mirrorOwed = false;
-/** Cache re-reads a `changed` event started, still in flight. */
+/** Cache re-reads in flight. */
 let _refreshing = 0;
-let _settledWaiters: (() => void)[] = [];
+let _seq = 0;
+/** Unstage requests not yet answered, each waiting for the ones before it. */
+let _unstaging = 0;
+let _unstageChain: Promise<void> = Promise.resolve();
+/**
+ * Element ids the staged batches touched before a re-bootstrap, read again
+ * with those of the first mirror read numbered `_healFrom` or later: the
+ * adopted batches may have parked, and adopting says nothing (`changed`).
+ */
+let _healIds: Set<string> | null = null;
+let _healFrom = 0;
+let _waiters: { test: () => boolean; resolve: () => void }[] = [];
 
 let _handle: EngineHandle | null = null;
 let _unsubscribe: (() => void)[] = [];
@@ -141,6 +182,7 @@ function clearAll(): void {
 	_pendingElementFetches.clear();
 	_inFlightBatchIds.clear();
 	_missingElementIds.clear();
+	_hidden.clear();
 	_elements.clear();
 	_treeItems.clear();
 	_relationships.clear();
@@ -154,6 +196,9 @@ function clearAll(): void {
 	_mirrorReading = false;
 	_mirrorOwed = false;
 	_refreshing = 0;
+	_unstaging = 0;
+	_unstageChain = Promise.resolve();
+	_healIds = null;
 	release();
 }
 
@@ -162,6 +207,8 @@ function onStatus(status: ReplicaStatus, previous: ReplicaStatus): void {
 	// A replica ready anew may be another working copy — a re-bootstrap adopts
 	// the batches without a `changed` event, and numbers its versions afresh.
 	_seenVersion = UNKNOWN_VERSION;
+	_healIds = new Set([...(_healIds ?? []), ...mirrorElementIds()]);
+	_healFrom = _reads + 1;
 	readMirror();
 }
 
@@ -169,7 +216,8 @@ function isPending(id: string): boolean {
 	return (_pending.get(id) ?? 0) > 0;
 }
 
-function isSettled(): boolean {
+/** Everything the engine said has been taken in, unstage requests aside. */
+function isQuiet(): boolean {
 	return (
 		!_mirrorReading &&
 		!_mirrorOwed &&
@@ -179,37 +227,64 @@ function isSettled(): boolean {
 	);
 }
 
+function isSettled(): boolean {
+	return isQuiet() && _unstaging === 0;
+}
+
 function release(): void {
-	if (!isSettled() || _settledWaiters.length === 0) return;
-	const waiters = _settledWaiters;
-	_settledWaiters = [];
-	for (const resolve of waiters) resolve();
+	if (_waiters.length === 0) return;
+	const due = _waiters.filter((waiter) => waiter.test());
+	if (due.length === 0) return;
+	_waiters = _waiters.filter((waiter) => !due.includes(waiter));
+	for (const waiter of due) waiter.resolve();
+}
+
+function waitFor(test: () => boolean): Promise<void> {
+	if (test()) return Promise.resolve();
+	return new Promise<void>((resolve) => _waiters.push({ test, resolve }));
 }
 
 /**
- * Resolves once this half has taken in everything the engine told it: no
- * mirror read in flight or owed, no cache re-read in flight, no edit posted
- * and not yet covered by the mirror.
+ * Resolves once this half has taken in everything the engine told it: every
+ * edit answered and covered by a mirror read, no mirror read in flight or
+ * owed, no cache re-read in flight, no unstage request unanswered.
  */
 export function stagedSettled(): Promise<void> {
-	if (isSettled()) return Promise.resolve();
-	return new Promise<void>((resolve) => _settledWaiters.push(resolve));
+	return waitFor(isSettled);
 }
 
 // ---------------------------------------------------------------------------
 // The mirror
 // ---------------------------------------------------------------------------
 
-/**
- * Reads `staged`, `conflicts` and `stagedDiff` into the mirror; one read in
- * flight, one owed. A read issued after an edit's answer covers that edit; one
- * issued before may have run ahead of it (`staged` is answered at once).
- */
+/** Asks for a mirror read. */
 function readMirror(): void {
+	_mirrorOwed = true;
+	pumpMirror();
+}
+
+/** An edit still waits for its answer — which reads the mirror when it comes. */
+function awaitingAnswer(): boolean {
+	return _provisional.some((entry) => entry.answered === null);
+}
+
+/**
+ * Reads `staged`, `conflicts` and `stagedDiff` into the mirror when one is
+ * owed, the staged list moved since the last, or an answered edit is not
+ * covered yet; one read in flight at a time. A read issued after an edit's
+ * answer covers that edit; one issued before may have run ahead of it
+ * (`staged` is answered at once), and the `changed` a stage emits comes
+ * before its answer — so no read starts while an edit waits for its answer.
+ */
+function pumpMirror(): void {
 	const handle = _handle;
-	if (handle === null) return;
-	if (_mirrorReading) {
-		_mirrorOwed = true;
+	if (handle === null || _mirrorReading) return;
+	const due =
+		_mirrorOwed ||
+		_seenVersion !== _mirrorVersion ||
+		_provisional.some((entry) => entry.answered !== null);
+	if (!due || awaitingAnswer()) {
+		release();
 		return;
 	}
 	_mirrorReading = true;
@@ -233,8 +308,8 @@ function readMirror(): void {
 				(entry) => entry.answered === null || entry.answered >= at
 			);
 			_mirrorReading = false;
-			if (_mirrorOwed || _seenVersion !== _mirrorVersion) readMirror();
-			else release();
+			if (_healIds !== null && at >= _healFrom) heal(_healIds);
+			pumpMirror();
 		},
 		() => {
 			if (epoch !== _epoch) return;
@@ -246,15 +321,34 @@ function readMirror(): void {
 	);
 }
 
+/** The element ids the mirror's staged and parked batches touch. */
+function mirrorElementIds(): Set<string> {
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral membership check
+	const ids = new Set<string>();
+	for (const entry of _diff?.elements ?? []) ids.add(entry.id);
+	for (const conflict of _parked) {
+		for (const op of conflict.batch.ops) if (isElementOp(op)) ids.add(entityOf(op));
+	}
+	return ids;
+}
+
+/** Re-reads the cached elements a re-bootstrap's batches touched, before and after it. */
+function heal(before: Set<string>): void {
+	_healIds = null;
+	const ids = [...new Set([...before, ...mirrorElementIds()])].filter(
+		(id) => (_elements.has(id) || _treeItems.has(id) || _hidden.has(id)) && !isPending(id)
+	);
+	if (ids.length > 0) reReadElements(ids);
+}
+
 // ---------------------------------------------------------------------------
 // `changed`, and deltas
 // ---------------------------------------------------------------------------
 
 function onChanged(event: ChangedEvent): void {
 	_seenVersion = event.staged_version;
-	if (_seenVersion !== _mirrorVersion) readMirror();
 	for (const id of event.deleted_element_ids) {
-		_elements.delete(id);
+		if (_elements.delete(id)) _hidden.add(id);
 		_treeItems.delete(id);
 		_pendingElementFetches.delete(id);
 	}
@@ -262,11 +356,15 @@ function onChanged(event: ChangedEvent): void {
 	for (const id of event.element_ids) _missingElementIds.delete(id);
 	// A changed relationship is left to the relationships list, which refetches
 	// on the structure rev: the event is structural whenever one moved.
-	const reread = event.element_ids.filter((id) => _elements.has(id) && !isPending(id));
+	const reread = event.element_ids.filter(
+		(id) => (_elements.has(id) || _hidden.has(id)) && !isPending(id)
+	);
 	if (reread.length > 0) reReadElements(reread);
 	if (event.structural) bumpStructureRev();
 	// A delta's event may come before or after the store's own `applyDelta`.
 	if (event.rev > getModelRev()) setModelRev(event.rev);
+	// Last: with nothing to read, it releases the settled waiters.
+	pumpMirror();
 }
 
 /** Writes what the engine answers for `ids` over the cache; an id it omits leaves it. */
@@ -283,10 +381,13 @@ function reReadElements(ids: readonly string[]): void {
 				const returned = new Set<string>();
 				for (const e of fetched) {
 					returned.add(e.id);
-					if (!isPending(e.id)) _elements.set(e.id, e);
+					if (isPending(e.id)) continue;
+					_elements.set(e.id, e);
+					_hidden.delete(e.id);
 				}
 				for (const id of chunk) {
 					if (returned.has(id) || isPending(id)) continue;
+					_hidden.delete(id);
 					_elements.delete(id);
 					_treeItems.delete(id);
 					_missingElementIds.add(id);
@@ -309,7 +410,7 @@ function stagedIds(): Set<string> {
 	const ids = new Set<string>();
 	for (const entry of _diff?.elements ?? []) ids.add(entry.id);
 	for (const entry of _diff?.relationships ?? []) ids.add(entry.id);
-	for (const entry of _provisional) for (const op of entry.ops) ids.add(targetOf(op));
+	for (const entry of _provisional) for (const op of entry.ops) ids.add(entityOf(op));
 	return ids;
 }
 
@@ -632,31 +733,289 @@ export function getStagedChangeCount(): number {
 // Edits
 // ---------------------------------------------------------------------------
 
-function notBuilt(): never {
-	throw new Error('not built');
+/** The id the engine stages an op's entity under: a create's `id` hint, else its temp id. */
+function entityOf(op: ModelOp): string {
+	if (op.kind === 'create_element' || op.kind === 'create_relationship') {
+		return op.id ?? op.temp_id;
+	}
+	return op.id;
 }
 
+function isElementOp(op: ModelOp): boolean {
+	return (
+		op.kind === 'create_element' || op.kind === 'update_element' || op.kind === 'delete_element'
+	);
+}
+
+/** A copy the caller cannot change under the provisional mirror. */
+function copyOp(op: ModelOp): ModelOp {
+	if (op.kind === 'create_element' || op.kind === 'create_relationship') {
+		return { ...op, properties: { ...op.properties } };
+	}
+	if (op.kind === 'update_element' || op.kind === 'update_relationship') {
+		return { ...op, properties_patch: { ...op.properties_patch } };
+	}
+	return { ...op };
+}
+
+/**
+ * Writes `op` into the caches as the engine will apply it; an update or a
+ * delete of what is not cached changes nothing. Whether a cache changed.
+ */
+function applyOptimistic(op: ModelOp): boolean {
+	switch (op.kind) {
+		case 'create_element': {
+			const id = entityOf(op);
+			_elements.set(id, { id, type_name: op.type_name, properties: { ...op.properties }, rev: 0 });
+			_treeItems.set(id, {
+				id,
+				type_name: op.type_name,
+				display_name: nameProp(op.properties) ?? id,
+				child_count: 0
+			});
+			_missingElementIds.delete(id);
+			return true;
+		}
+		case 'update_element': {
+			const e = _elements.get(op.id);
+			if (e === undefined) return false;
+			_elements.set(op.id, { ...e, properties: mergePatch(e.properties, op.properties_patch) });
+			return true;
+		}
+		case 'delete_element': {
+			let touched = _elements.delete(op.id);
+			if (touched) _hidden.add(op.id);
+			if (_treeItems.delete(op.id)) touched = true;
+			// The cached incident relationships; the engine's `changed` names the rest of the cascade.
+			for (const [rid, r] of _relationships) {
+				if (r.source_id !== op.id && r.target_id !== op.id) continue;
+				_relationships.delete(rid);
+				touched = true;
+			}
+			return touched;
+		}
+		case 'create_relationship': {
+			const id = entityOf(op);
+			_relationships.set(id, {
+				id,
+				type_name: op.type_name,
+				source_id: op.source_id,
+				target_id: op.target_id,
+				properties: { ...op.properties },
+				rev: 0
+			});
+			return true;
+		}
+		case 'update_relationship': {
+			const r = _relationships.get(op.id);
+			if (r === undefined) return false;
+			_relationships.set(op.id, {
+				...r,
+				properties: mergePatch(r.properties, op.properties_patch)
+			});
+			return true;
+		}
+		case 'delete_relationship':
+			return _relationships.delete(op.id);
+	}
+}
+
+/**
+ * Stages `op` in the replica: written into the caches at once, then posted as
+ * a `stage`, which coalesces a property update into the first staged update
+ * of the same entity.
+ */
 export function emit(op: ModelOp): void {
-	void op;
-	notBuilt();
+	stage([op]);
 }
 
+/** Stages `ops` as ONE batch: all of them or, refused, none. */
+export function emitMany(ops: readonly ModelOp[]): void {
+	if (ops.length > 0) stage(ops);
+}
+
+function stage(given: readonly ModelOp[]): void {
+	const ops = given.map(copyOp);
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral membership check
+	const touched = new Set<string>();
+	for (const op of ops) if (applyOptimistic(op) && isElementOp(op)) touched.add(entityOf(op));
+	for (const op of ops) {
+		const id = entityOf(op);
+		_pending.set(id, (_pending.get(id) ?? 0) + 1);
+	}
+	_seq += 1;
+	const entry: Provisional = { seq: _seq, ops, answered: null };
+	_provisional = [..._provisional, entry];
+	void post(entry, touched);
+}
+
+async function post(entry: Provisional, touched: Set<string>): Promise<void> {
+	const epoch = _epoch;
+	const handle = _handle;
+	let answer: StageAnswer;
+	try {
+		if (handle === null) throw new EngineGoneError();
+		answer = await handle.call<StageAnswer>('stage', { ops: entry.ops }, { transition: true });
+	} catch (error) {
+		if (epoch === _epoch) refused(entry, touched, error);
+		return;
+	}
+	if (epoch === _epoch) answered(entry, answer);
+}
+
+/** Takes `entry`'s edits off the pending counts; the ids whose count reached zero. */
+function unpend(entry: Provisional): Set<string> {
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral membership check
+	const done = new Set<string>();
+	for (const op of entry.ops) {
+		const id = entityOf(op);
+		const left = (_pending.get(id) ?? 1) - 1;
+		if (left > 0) {
+			_pending.set(id, left);
+			done.delete(id);
+		} else {
+			_pending.delete(id);
+			done.add(id);
+		}
+	}
+	return done;
+}
+
+/**
+ * The engine's post-state is written for the entities no newer edit is in
+ * flight for; a newer edit's own answer writes them.
+ */
+function answered(entry: Provisional, answer: StageAnswer): void {
+	const done = unpend(entry);
+	if (answer.elements === null) {
+		const ids = [...done].filter((id) => _elements.has(id));
+		if (ids.length > 0) reReadElements(ids);
+	} else {
+		for (const e of answer.elements) {
+			if (!done.has(e.id) || !_elements.has(e.id)) continue;
+			_elements.set(e.id, e);
+			_missingElementIds.delete(e.id);
+		}
+	}
+	for (const r of answer.relationships ?? []) {
+		if (done.has(r.id) && _relationships.has(r.id)) _relationships.set(r.id, r);
+	}
+	// A mirror read issued from now on covers this edit.
+	entry.answered = _reads;
+	pumpMirror();
+}
+
+/**
+ * A refused batch left no trace in the engine: the elements its optimistic
+ * write changed are read back, an id the engine does not know leaving the
+ * caches; a relationship it created leaves them, and any other relationship
+ * change is healed by the refetch a structure-rev bump starts.
+ */
+function refused(entry: Provisional, touched: Set<string>, error: unknown): void {
+	_provisional = _provisional.filter((e) => e !== entry);
+	unpend(entry);
+	const message = error instanceof Error ? error.message : String(error);
+	setModelError({ kind: error instanceof EngineGoneError ? 'error' : 'rejected', message });
+	for (const op of entry.ops) {
+		const id = entityOf(op);
+		if (isPending(id)) continue;
+		if (op.kind === 'create_relationship') _relationships.delete(id);
+		else if (op.kind === 'create_element' || op.kind === 'delete_element') _treeItems.delete(id);
+	}
+	const reread = [...touched].filter((id) => !isPending(id));
+	if (reread.length > 0) reReadElements(reread);
+	if (entry.ops.some((op) => op.kind !== 'update_element')) bumpStructureRev();
+	pumpMirror();
+}
+
+// ---------------------------------------------------------------------------
+// Unstaging
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs `work` once every edit before it has reached the mirror and every
+ * earlier unstage request has been answered; the engine's `changed` does the
+ * rest.
+ */
+function unstageAfter(work: (handle: EngineHandle) => Promise<void>): void {
+	const epoch = _epoch;
+	_unstaging += 1;
+	_unstageChain = _unstageChain.then(async () => {
+		try {
+			await waitFor(isQuiet);
+			const handle = _handle;
+			if (epoch !== _epoch || handle === null) return;
+			await work(handle);
+		} catch (error) {
+			if (epoch !== _epoch) return;
+			setModelError({
+				kind: 'error',
+				message: error instanceof Error ? error.message : String(error)
+			});
+		} finally {
+			if (epoch === _epoch) {
+				_unstaging -= 1;
+				release();
+			}
+		}
+	});
+}
+
+async function unstage(handle: EngineHandle, what: Unstage): Promise<void> {
+	await handle.call('unstage', { what }, { transition: true });
+}
+
+/** Whether `op` targets `id` or has it as an end. */
+function touches(op: ModelOp, id: string): boolean {
+	if (entityOf(op) === id || targetOf(op) === id) return true;
+	if (op.kind === 'create_relationship') return op.source_id === id || op.target_id === id;
+	if (op.kind === 'update_relationship' || op.kind === 'delete_relationship') {
+		const r =
+			_relationships.get(op.id) ??
+			_diff?.relationships.find((entry) => entry.id === op.id)?.before ??
+			undefined;
+		return r !== undefined && r !== null && (r.source_id === id || r.target_id === id);
+	}
+	return false;
+}
+
+/** Undo: unstages the last staged batch — a coalesced keystroke lives in its first one. */
 export function popLastStaged(): boolean {
-	return notBuilt();
+	if (!hasStagedOps()) return false;
+	unstageAfter(async (handle) => {
+		const last = _batches.at(-1);
+		if (last !== undefined) await unstage(handle, { batch: last.id });
+	});
+	return true;
 }
 
+/** Unstages every staged op targeting `id`; a parked batch stays for the conflicts. */
 export function revertStagedFor(id: string): void {
-	void id;
-	notBuilt();
+	unstageAfter((handle) => unstage(handle, { entity: id }));
 }
 
+/**
+ * Unstages every staged op targeting `id` or having it as an end, and drops
+ * the parked batches that do.
+ */
 export function revertStagedForElement(id: string): void {
-	void id;
-	notBuilt();
+	unstageAfter(async (handle) => {
+		const parked = _parked
+			.filter((conflict) => conflict.batch.ops.some((op) => touches(op, id)))
+			.map((conflict) => conflict.batch.id);
+		await unstage(handle, { entity: id, incident: true });
+		for (const batch of parked) await unstage(handle, { batch });
+	});
 }
 
+/** Unstages everything, parked batches included. */
 export function revertAllStaged(): void {
-	notBuilt();
+	unstageAfter((handle) => unstage(handle, 'all'));
+}
+
+/** Drops a parked batch. */
+export function revertConflict(batchId: number): void {
+	unstageAfter((handle) => unstage(handle, { batch: batchId }));
 }
 
 /** Nothing: the engine drops the committed batches itself, on the commit's delta. */
