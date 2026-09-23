@@ -44,7 +44,16 @@ import {
 	retryReplica,
 	stopReplica
 } from '../replica.svelte';
-import { engineStore, peerDelta, type EngineStore } from './support/engine-store';
+import {
+	create,
+	engineStore,
+	forceFailed,
+	nameOf,
+	peerDelta,
+	rename,
+	settled,
+	type EngineStore
+} from './support/engine-store';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
@@ -62,30 +71,7 @@ async function open(): Promise<EngineStore> {
 	return store;
 }
 
-/** Everything the engine said has reached the store. */
-async function settled(s: EngineStore): Promise<void> {
-	await s.sync.settled();
-	await stagedSettled();
-}
-
-const rename = (id: string, name: string): ModelOp => ({
-	kind: 'update_element',
-	id,
-	properties_patch: { name }
-});
-
-const create = (tempId: string, name: string): ModelOp => ({
-	kind: 'create_element',
-	temp_id: tempId,
-	type_name: 'Organization',
-	properties: { name }
-});
-
 const CREATE_X = create('tmp_x', 'zed');
-
-function nameOf(id: string): unknown {
-	return getCachedElements().get(id)?.properties['name'];
-}
 
 /** A peer's commit: the feed frame to the replica, the delta to the model store. */
 function feedPeer(s: EngineStore, ops: readonly EngineOp[]): Committed {
@@ -93,13 +79,6 @@ function feedPeer(s: EngineStore, ops: readonly EngineOp[]): Committed {
 	handReplicaFeed(JSON.parse(committed.eventText) as FeedEvent, committed.eventText);
 	applyDelta(peerDelta(committed));
 	return committed;
-}
-
-/** The feed frame of `committed`, its state digest flipped: the replica diverges on it. */
-function withWrongDigest(committed: Committed): string {
-	const digest = committed.delta['state_digest'] as string;
-	const wrong = (BigInt('0x' + digest) ^ 1n).toString(16).padStart(16, '0');
-	return committed.eventText.replace(`"state_digest":"${digest}"`, `"state_digest":"${wrong}"`);
 }
 
 describe('an edit', () => {
@@ -520,13 +499,8 @@ describe('across a re-bootstrap', () => {
 		const ids = getStagedBatchIds();
 		expect(ids).toEqual([1, 2]);
 
-		s.project.fail('snapshot', 503, 99);
-		const committed = s.project.commit([rename('e_000002', 'peer')] as EngineOp[]);
-		const failed = s.until((status) => status.phase === 'failed');
-		const text = withWrongDigest(committed);
-		handReplicaFeed(JSON.parse(text) as FeedEvent, text);
+		const committed = await forceFailed(s, { waitForReady: false });
 		applyDelta(peerDelta(committed));
-		await failed;
 		await s.sync.settled();
 
 		s.project.fail('snapshot', 503, 0);
