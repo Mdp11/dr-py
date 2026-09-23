@@ -77,7 +77,7 @@ function searchInput(page: Page) {
 
 /** The "Not in view" pool panel — the smart-city view places only a handful
  * of elements, so a freshly created, unplaced root renders here, never under
- * the view's folders (see CLAUDE.md's Shell section on view mode). */
+ * the view's folders (see `frontend/src/lib/engine/README.md` on view mode). */
 function pool(page: Page) {
 	return page.getByRole('tree', { name: /excluded elements/i });
 }

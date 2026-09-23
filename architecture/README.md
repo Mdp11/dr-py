@@ -19,8 +19,8 @@ single-sourced.
 ## Authority
 
 1. **Where the system is going** — these documents win.
-2. **What the code does today** — the code, `CLAUDE.md` and the co-located READMEs
-   (`frontend/README.md`, `src/data_rover/core/script/README.md`, `migration/README.md`) win.
+2. **What the code does today** — the code and the co-located READMEs that
+   `CLAUDE.md` maps win.
 3. A sub-project spec or plan (local working files under the git-ignored `docs/`) refines
    these documents and MUST NOT contradict them. If it has to, change the document here
    first, in the same change.
@@ -33,7 +33,7 @@ single-sourced.
 - IDs are stable. A reversed decision is marked `superseded by AD-n` and cut to one line;
   contracts and constraints are edited in place — git history owns the past.
 - When a sub-project lands, update the status in `program.md` and move what is now current
-  behaviour into `CLAUDE.md`, in the same change.
+  behaviour into the co-located README, in the same change.
 - Cite IDs in specs, plans, commits and reviews (`per CT-2`, `violates CN-17`).
 - The two-letter prefixes are deliberate: `BACKLOG.md` and `BACKLOG-ENGINE.md` own the one-letter ids.
 

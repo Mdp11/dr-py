@@ -10,7 +10,8 @@ current code; this file holds the rules.
 | Path | Holds | Tracked |
 |---|---|---|
 | `architecture/` | Target architecture, decisions, contracts, constraints — this directory | yes |
-| `CLAUDE.md`, co-located `README.md`s | How the current code works | yes |
+| `CLAUDE.md` | Commands, the map of the docs, rules that span the codebase | yes |
+| Co-located `README.md`s | How the current code works | yes |
 | `BACKLOG.md` | Everything known but not done, with stable one-letter ids | yes |
 | `BACKLOG-ENGINE.md` | The same, for the client-engine program; ids unique across both files | yes |
 | `src/data_rover/` | Python server (`api/`), Python core (`core/`), legacy `migration/` CLI | yes |
@@ -55,9 +56,10 @@ the op applier. Nothing else writes entity state; indexes are maintained there.
 **RC-9 · Design before code.** Brainstorm → spec → plan → build. Specs and plans live under the
 git-ignored `docs/superpowers/`. Anything a later session must not rediscover is promoted: a
 decision into `architecture/`, an open item into `BACKLOG.md` (`BACKLOG-ENGINE.md` for this
-program), current behaviour into `CLAUDE.md`.
+program), current behaviour into the co-located README.
 
-**RC-10 · Docs change with the code**, in the same commit: `CLAUDE.md` for current behaviour,
+**RC-10 · Docs change with the code**, in the same commit: the co-located README for current behaviour
+(`CLAUDE.md` when a command or a cross-cutting rule changes),
 `program.md` for status, `BACKLOG.md` or `BACKLOG-ENGINE.md` when an item opens or closes.
 
 **RC-11 · Git.** Work on `feat/<topic>`, `perf/<topic>` or `chore/<topic>` and merge into

@@ -13,7 +13,7 @@ export interface ValidateOptions {
 	inline?: InlineModel;
 	scope?: string[];
 	/** Staged (uncommitted) ops to validate against the committed model.
-	 * `ModelOp`, not the full `Op` union: CLAUDE.md is explicit that
+	 * `ModelOp`, not the full `Op` union: src/data_rover/api/README.md is explicit that
 	 * `POST /model/validate` rejects artifact ops permanently. */
 	ops?: ModelOp[];
 	/** model_rev the ops were computed against; sent as base_rev (409 on stale). */

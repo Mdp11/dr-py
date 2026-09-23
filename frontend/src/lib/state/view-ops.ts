@@ -9,7 +9,7 @@ import { VIEW_ROOT_ID, type ViewOp } from './ops';
 //
 // MIRROR FIDELITY: `applyViewOp` below is the client
 // twin of the backend's `apply_view_ops` (`api/view_ops.py`, ~:198-470). The
-// backend session is the source of truth (CLAUDE.md), but the client stages
+// backend session is the source of truth (src/data_rover/api/README.md), but the client stages
 // ops optimistically before a commit round-trips, so `applyViewOp` must
 // compute EXACTLY what the server will compute replaying the same op —
 // same branch order, same index-clamping arithmetic, same error conditions —

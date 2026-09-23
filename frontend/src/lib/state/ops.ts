@@ -60,7 +60,7 @@ export type RelationshipOp =
  * `update_artifact.payload` is a FULL replacement (omitted = name-only
  * change). The backend's optional `artifact_rev` OCC precondition is
  * deliberately never sent: the art: lease is the concurrency control
- * (CLAUDE.md "Lease rule").
+ * (src/data_rover/api/README.md, "Lease rule").
  */
 export type ArtifactOp =
 	| {
@@ -87,7 +87,7 @@ export type ArtifactOp =
  * says which view an op addresses (an unknown id is a 422 at commit).
  * No `view_rev` precondition exists on any of these BY DECISION: the
  * folder:/view: lease is the concurrency control, exactly as `update_artifact`
- * never sends `artifact_rev` (CLAUDE.md "Lease rule").
+ * never sends `artifact_rev` (src/data_rover/api/README.md, "Lease rule").
  * `index` omitted = append (the server clamps + canonicalizes it).
  */
 export type ViewOp =

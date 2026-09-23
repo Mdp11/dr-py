@@ -7,8 +7,8 @@ payload schema (`schema.py`), and server-side lint (`lint.py`). It imports
 only `data_rover.core.*` + stdlib — no `wasmtime`, no `data_rover.api.*`. The
 sandbox itself (`WasmScriptRunner`) lives in `src/data_rover/api/
 script_runner.py`; the unsandboxed test double (`TrustedRunner`) lives in
-`tests/script/trusted_runner.py`. See `CLAUDE.md`'s "Code execution
-(snippets)" subsection for how these fit into the wider API.
+`tests/script/trusted_runner.py`. See `src/data_rover/api/README.md`'s "Code execution, tables
+and exports" section for how these fit into the wider API.
 
 ## The `dr` facade surface
 

@@ -1,5 +1,5 @@
 /**
- * The replica routes (CLAUDE.md "Replica routes"): the snapshot descriptor,
+ * The replica routes (src/data_rover/api/README.md, "Replica routes"): the snapshot descriptor,
  * the snapshot bytes, the tail envelope and the metamodel document — every
  * text a replica needs, handed over exactly as the response carried it and
  * not re-serialized. Pure API layer: no `lib/state/*`, no `lib/engine/*`.

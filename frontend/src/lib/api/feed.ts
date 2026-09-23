@@ -32,8 +32,8 @@ export type FeedEvent =
 			/** which content families the commit touched ("model"/"artifact");
 			 * reducer treats absent as ["model"] defensively */
 			scope?: string[];
-			/** the commit delta's remaining fields (see CLAUDE.md "The commit
-			 * delta"), carried so a replica can fold the event without a second
+			/** the commit delta's remaining fields (see src/data_rover/api/README.md,
+			 * "The commit delta"), carried so a replica can fold the event without a second
 			 * fetch. */
 			prev_rev?: number;
 			state_digest?: string;

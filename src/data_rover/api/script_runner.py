@@ -2,7 +2,7 @@
 
 This module is API-layer, not core, on purpose: it is the ONLY place in this
 repository (besides `tests/`) allowed to `import wasmtime` (see
-`CLAUDE.md`'s script-execution architecture notes). `data_rover.core.script`
+`api/README.md`'s code-execution notes). `data_rover.core.script`
 stays sandbox-agnostic; this module supplies the wasmtime sandbox.
 
 Spike provenance -- every mechanic below was proven in `spikes/code_exec/`

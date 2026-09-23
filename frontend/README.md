@@ -928,7 +928,7 @@ one crosses as a string, alongside whatever the shell parses for its own use.
 - `lib/api/feed.ts`: `FeedConfig.onEvent(event, raw)` — `raw` is the frame's
   text; `event` is its `JSON.parse`, unchanged. The commit variant of
   `FeedEvent` also carries `prev_rev`, `state_digest`, `recreated_element_ids`
-  and `recreated_relationship_ids` now that the backend sends them (CLAUDE.md
+  and `recreated_relationship_ids` now that the backend sends them (`src/data_rover/api/README.md`,
   "The commit delta (CT-2)").
 - `lib/api/client.ts`: `ApiFetchInit.onText(text)` — called by `apiFetch` with
   the response body's text, once, before `JSON.parse`, for a non-empty 2xx
@@ -939,7 +939,7 @@ one crosses as a string, alongside whatever the shell parses for its own use.
   replica. `OpsResponseSchema` (and so `CommitResponseSchema`) gains `prev_rev`
   (nullable, optional): a `null` value means the batch applied nothing, and
   the replica is handed nothing either.
-- `lib/api/replica.ts` is the client for the routes CLAUDE.md's "Replica
+- `lib/api/replica.ts` is the client for the routes `src/data_rover/api/README.md`'s "Replica
   routes" describes: `getSnapshotDescriptor` (the parsed descriptor, or `null`
   on a 404 — no model yet), `fetchSnapshot(url, signal)` (the raw `Response`
   of the descriptor's own path, so its body can be streamed and its

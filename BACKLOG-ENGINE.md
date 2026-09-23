@@ -182,7 +182,7 @@ the replica between the POST answering and the replica applying it ends `commitA
 wait early — the drawer closes — and keeps the answer queued until the new metamodel is
 adopted; an update staged in that window can still merge into the committed batch and be
 dropped when the queued answer finally applies. (b) At a Retry, a transition is HELD while
-`failed` (`sync.ts:331`'s `admits()` is true only for `ready`/`frozen`, matching CLAUDE.md), so
+`failed` (`sync.ts:331`'s `admits()` is true only for `ready`/`frozen`, matching `frontend/src/lib/engine/README.md`), so
 nothing reaches the engine while the overlay is up — but `sync.ts`'s `set({phase: 'ready', …})`
 (:602) calls `examine()` (:312-316), which releases every held transition, BEFORE the same
 function calls `pump(r)` to drain the kept own answer: a held edit that COALESCES into the

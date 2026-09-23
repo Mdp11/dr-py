@@ -13,8 +13,7 @@ layers stack on each other:
 It ships as a Python core + FastAPI backend and a SvelteKit single-page
 frontend. Everything runs through **[pixi](https://pixi.sh)** — there is no
 global `python` or `node`. Example artifacts live in `examples/`
-(`smart-city.*`). See `CLAUDE.md` for the architecture in depth, and
-`frontend/README.md` / `migration/README.md` for those subsystems.
+(`smart-city.*`). `CLAUDE.md` maps where each subsystem is documented.
 
 ## Running locally (production-faithful stack)
 

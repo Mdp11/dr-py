@@ -232,7 +232,7 @@ Layout is presentation — no `mm` lease, no commit journal entry, last-write-wi
 gated at `role != viewer` rather than owner. Spec:
 `docs/superpowers/specs/2026-08-13-metamodel-diagram-editor-design.md`; architecture
 notes in `frontend/README.md` ("Live metamodel editing" → "The diagram surface") and
-`CLAUDE.md`. **e2e coverage is still missing — see T-7.**
+`src/data_rover/api/README.md`. **e2e coverage is still missing — see T-7.**
 
 ### P-10 · Top bar restructure · `done` (2026-08-18, `feat/top-bar-restructure`) — all five sub-items shipped: the fixed Detail/Graph workspace tabs are deleted, Issues is now a closable singleton workspace tab opened from the top bar (with U-1's filter, below), the overflow menu emptied into eight flat top-bar controls (Artifacts · Issues · Compare · Apply CR · Edit Metamodel · Export · History · Settings), the command palette is deleted, and the per-artifact export button moved into each artifact editor's own toolbar.
 
@@ -258,7 +258,7 @@ rebind. As designed, rule issues are always CONFORMANCE (never block a
 commit) and a rule that drifts from the metamodel is skipped whole at
 compile and surfaced via `rules_status`, never as an ownerless issue.
 `POST /rules/lint` gives the editor a debounced, always-200 lint call.
-Architecture notes: `CLAUDE.md` ("Custom validation rules"),
+Architecture notes: `src/data_rover/core/README.md` ("Custom validation rules"),
 `frontend/README.md` ("Rules editor"). Source:
 `docs/superpowers/specs/2026-08-24-custom-validation-rules-design.md`.
 
@@ -923,7 +923,7 @@ full `Scope.all()` sweep and splices the RESULT into `Commit.issues` (JSON) at p
 the whole model's conformance issue list, with no cap. This mirrors the retired standalone
 `POST /metamodel/rebind` route exactly, so it is **not a regression** introduced by the
 metamodel commit-flow feature; it's the same precedent `ISSUES_RESPONSE_MAX` (5000) already
-exists for on the live `GET /model/issues` read path (see CLAUDE.md's note on that cap), just
+exists for on the live `GET /model/issues` read path (see `src/data_rover/api/README.md`'s note on that cap), just
 never applied to the persisted commit row. Worth revisiting alongside K-6 (history diff cost)
 since both are about a rebind-scale commit paying whole-model costs.
 
@@ -1000,7 +1000,7 @@ Closed as a side effect of the retype under-approximation fix. Dropping the per-
 `far_types` gates left the seed set independent of `(rule, path, depth)`, so it is now built
 once at the top of `expand_scope` instead of rebuilt in the innermost loop. The remaining
 cost is the reverse hops themselves — deliberately more of them than before, since the walk
-no longer prunes by far type (see the CLAUDE.md note on why that pruning was unsound).
+no longer prunes by far type (see the `src/data_rover/core/README.md` note on why that pruning was unsound).
 Re-open only if profiling shows the extra adjacency walking matters on a real model.
 
 ### K-14 · `CompiledRules.eval_errors` has a `reset_eval_errors()` with no caller · `open` · *2026-08-24*

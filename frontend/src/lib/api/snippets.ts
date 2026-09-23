@@ -16,7 +16,7 @@ import type { z } from 'zod';
  * OPS_ADAPTER server-side), so the cast is the contract, not a guess.
  * `ModelOp`, not the full `Op` union: the guest facade has no artifact
  * surface, and `POST /snippets/run` refuses a guest-proposed artifact op
- * outright (CLAUDE.md), so a dry-run batch can only ever hold model ops. */
+ * outright (src/data_rover/api/README.md), so a dry-run batch can only ever hold model ops. */
 export type SnippetRunOut = Omit<z.infer<typeof SnippetRunOutSchema>, 'ops'> & { ops: ModelOp[] };
 
 /** One named input for a two-argument `value(elements, inputs)` run — the

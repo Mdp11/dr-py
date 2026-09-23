@@ -24,7 +24,7 @@ import type { ModelOp } from '$lib/state/ops';
  * current `model_rev`) on a rev mismatch and `ValidationError` (422) when an
  * op is invalid — in both cases the server model is unchanged.
  *
- * `ModelOp`, not the full `Op` union: CLAUDE.md is explicit that `/model/ops`
+ * `ModelOp`, not the full `Op` union: src/data_rover/api/README.md is explicit that `/model/ops`
  * rejects artifact ops permanently — they flow through `POST /commits`
  * instead (see `api/artifact_ops.py`'s `split_ops`).
  */
