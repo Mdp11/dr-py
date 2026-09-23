@@ -205,10 +205,10 @@
 	// name or id, a name override): there is no before/after diff for it (the
 	// engine refused it outright), only the op it tried to apply.
 	function opTarget(op: ModelOp): string {
-		// A CR/compare proposal's create carries an `id` hint the engine stages
-		// the entity under (`op.id ?? op.temp_id` — CLAUDE.md's "Engine's staging
-		// wire"); `temp_id` alone would show the batch-internal handle instead of
-		// the id the engine actually used.
+		// A create carries an optional `id` hint (a CR/compare proposal's real
+		// id); the engine stages the entity under that id when present, `temp_id`
+		// otherwise — `temp_id` alone would show the batch-internal handle
+		// instead of the id the engine actually used.
 		return op.kind === 'create_element' || op.kind === 'create_relationship'
 			? (op.id ?? op.temp_id)
 			: op.id;

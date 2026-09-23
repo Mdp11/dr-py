@@ -145,6 +145,8 @@ describe('TopBar', () => {
 			flushSync();
 
 			expect(findButton(/commit/i)?.disabled).toBe(true);
+			// No conflict marker without a conflict.
+			expect(document.querySelector('[data-testid="commit-conflict-marker"]')).toBeNull();
 
 			unmount(c);
 		});
@@ -187,8 +189,19 @@ describe('TopBar', () => {
 			expect(commitBtn?.disabled).toBe(false);
 			// The badge counts changes only — a conflict is not one.
 			expect(document.body.textContent).toContain('● 0');
-			// A visible, accessible cue that a conflict needs attention.
-			expect(commitBtn?.textContent).toContain('staged edits no longer apply');
+			// The accessible NAME stays exactly "Commit" — e2e's shared
+			// `commitStaged` helper (and others) locate this button by that
+			// exact name, and a conflict must not break that lookup.
+			expect(commitBtn?.textContent?.trim()).toBe('Commit');
+			// The conflict text reaches assistive tech as a DESCRIPTION, not
+			// part of the name.
+			const describedBy = commitBtn?.getAttribute('aria-describedby');
+			expect(describedBy).toBeTruthy();
+			expect(document.getElementById(describedBy!)?.textContent).toContain(
+				'staged edits no longer apply'
+			);
+			// A visible marker a sighted user sees without opening the drawer.
+			expect(document.querySelector('[data-testid="commit-conflict-marker"]')).not.toBeNull();
 
 			commitBtn!.click();
 			expect(setDiffDrawerOpen).toHaveBeenCalledWith(true);

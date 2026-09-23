@@ -305,22 +305,27 @@
 				size="sm"
 				class="h-7 text-xs"
 				disabled={saveDisabled}
+				title={conflictCount > 0 ? `${conflictCount} staged edits no longer apply` : undefined}
+				aria-describedby={conflictCount > 0 ? 'commit-conflict-desc' : undefined}
 				onclick={() => setDiffDrawerOpen(true)}
 			>
 				Commit
-				{#if conflictCount > 0}
-					<span class="sr-only">, {conflictCount} staged edits no longer apply</span>
-				{/if}
 			</Button>
 			{#if conflictCount > 0}
 				<!-- Visible cue that a parked batch needs attention even though it
 				     never moves the "● N changes" count — the drawer, not this dot,
-				     names the batch and its refusal. -->
+				     names the batch and its refusal. The description text sits
+				     OUTSIDE the button (referenced by `aria-describedby`, not by
+				     being a descendant) so it never joins the button's accessible
+				     NAME — e2e specs locate this button by the exact name "Commit". -->
 				<span
+					data-testid="commit-conflict-marker"
 					class="pointer-events-none absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning"
 					aria-hidden="true"
-					title="{conflictCount} staged edits no longer apply"
 				></span>
+				<span id="commit-conflict-desc" class="sr-only">
+					{conflictCount} staged edits no longer apply
+				</span>
 			{/if}
 		</div>
 		{#if strictOn}
