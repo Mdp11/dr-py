@@ -39,7 +39,7 @@ The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op 
 the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
 surfaces' defaults. C (evaluation) is next. Open after B: `K-29`, `K-32`, `K-35`, `K-36`,
-`K-38`, `K-41`, `K-42`, `K-45`, `C-20`, `C-21` in this file; `K-33`, `K-34` in `BACKLOG.md`.
+`K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`, `C-20`, `C-21` in this file; `K-33`, `K-34` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -216,6 +216,49 @@ being rewritten to the server id. The window is a worker death between a commit 
 the replica applying its answer — a moment while `ready`, until adoption or `retry()` while
 `frozen` or `failed`. Fix direction: have the sync hand back the committed batches whose own
 answers it still holds (it knows the queue) instead of the store leaving them all out.
+
+### K-46 · A dropped own answer posts a deferred edit into the batch it drops · `open` · *2026-09-23*
+When the replica's drain fails twice on the user's own `applyDelta` with an error other than
+`EngineGoneError`, `sync.ts` (:1013) calls `forget(r, [input])` (:417), whose `onAbandoned`
+reaches `forgetBatches` (`model-engine.svelte.ts:934`). That takes the commit's batch B out of
+the mirror and calls `postDeferred()` (:949): an update deferred because it would merge into B
+no longer finds B in `_batches` (`mergesIntoCommitted`, :1116) and is posted at once — while
+the replica is still `ready` and still holds B. The engine merges the update into B, the
+`ask()` right after re-bootstraps, and the re-bootstrap leaves B out through `r.abandoned`,
+so the update is lost with it. Reached only through an own delta failing twice with a
+non-`EngineGoneError` error while an edit is deferred. Fix direction: `forgetBatches` does not
+post the deferred edits while the replica may still hold the forgotten batches; they go at the
+next `ready`, as `onStatus` already reads the mirror there.
+
+### K-47 · Two paths drop an own answer without forgetting its batches · `open` · *2026-09-23*
+`sync.ts` drops the user's own commit answer without `forget` in two places: `handle`'s
+retried-gap branch (:1039-1042, `ask()` and return) and `requeue`'s silent return when
+`waits(input)` is false (:969), reachable when the replica goes `off` while an own delta is
+being handled. The commit's batches stay in `r.held`, the next replica adopts them, the model
+store keeps them out of its readers through `_landed` — and nothing ever drops them from the
+replica. A same-entity property update then stays DEFERRED for good (`mergesIntoCommitted`
+keeps finding the committed batch): shown in the Inspector, absent from the engine's diff, and
+left out of every commit, which `stagedSettled()` no longer waits for. Fix direction:
+`forget(r, [input])` on both paths, as the drain's second failure does.
+
+### K-48 · Three rare windows around a landed commit's batches · `open` · *2026-09-23*
+(a) **A keystroke during the POST behind the failed overlay.** An edit made while the commit's
+POST is in flight and the replica is `failed` is handed to the sync before the store knows the
+batch is committed (`markLanded` runs when the POST answers), so it is held, not deferred; at
+`retry()` the held transition is released at `ready` before the kept own answer drains, merges
+into the committed batch and is dropped with it — `K-44`(b)'s mechanism, narrowed to the
+POST's own duration. The modal DiffDrawer and the `Cmd/Ctrl+S` gate make it very hard to
+reach. (b) **`unstage {entity}` can strip a committed batch.** While `frozen` or `failed`, the
+drawer's per-element discard of a newer edit on an element a committed batch also touches
+posts `unstage {entity}`, which takes that element's ops out of the committed batch in the
+engine too; the commit already landed, so nothing is lost on the server, but the replica's
+batch no longer matches what its answer drops. (c) **The committed-diff filter follows
+containment source → target only.** `committedOnly` (`model-engine.svelte.ts:881`) derives a
+committed delete's cascade along containment from source to target and keeps back only what a
+newer staged op NAMES; an element that both a committed delete and a newer staged delete
+cascade into is named by neither, so it can be hidden from the drawer. The commit still
+carries exact ops. Decide per window whether it is worth closing or stays a
+known limit.
 
 ---
 
