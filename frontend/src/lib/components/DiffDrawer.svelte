@@ -6,7 +6,9 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
 		artifactHeaderById,
+		discardConflict,
 		getStagedArtifactEntries,
+		getStagedConflicts,
 		getStagedDiff,
 		getStagedViewDepth,
 		getStagedViewEntries,
@@ -31,11 +33,14 @@
 		setViewFileHandle,
 		setViewFilename,
 		type Diff,
-		type StagedArtifactEntry
+		type ModelOp,
+		type StagedArtifactEntry,
+		type StagedConflict
 	} from '$lib/state';
 	import { ConflictError } from '$lib/api/errors';
 	import type { ArtifactKind } from '$lib/artifacts/kinds';
 	import type { PreviewResponse } from '$lib/api/types';
+	import { nameProp } from '$lib/util/element-name';
 	import { saveJsonToFile } from '$lib/util/fileSave';
 	import { AlertTriangle } from '@lucide/svelte';
 	import DiffRow from './DiffRow.svelte';
@@ -78,6 +83,11 @@
 	});
 
 	const diff = $derived<Diff>(getStagedDiff());
+	// Parked batches (engine staging only — always [] on the legacy side): the
+	// engine rebased them over a peer's commit and they no longer apply. Never
+	// part of `total` below and never sent by `commitStaged` — they are not in
+	// `getStagedOps()` either — so a conflict can only be discarded, not committed.
+	const conflicts = $derived<StagedConflict[]>(getStagedConflicts());
 	// Staged ARTIFACT ops (navigations, tables, code snippets) ride in the same
 	// `POST /commits` batch as the model ops, so they count towards the same
 	// total. This is not cosmetic: `commitStaged` throws on an empty batch (an
@@ -186,6 +196,42 @@
 		return e.kind === 'create'
 			? 'text-success'
 			: e.kind === 'update'
+				? 'text-warning'
+				: 'text-destructive';
+	}
+
+	// --- parked-conflict op rows -----------------------------------------------
+	// A parked batch's ops are summarised the way an entity row is (glyph, type
+	// name or id, a name override): there is no before/after diff for it (the
+	// engine refused it outright), only the op it tried to apply.
+	function opTarget(op: ModelOp): string {
+		return op.kind === 'create_element' || op.kind === 'create_relationship' ? op.temp_id : op.id;
+	}
+
+	function opTypeName(op: ModelOp): string | null {
+		return op.kind === 'create_element' || op.kind === 'create_relationship' ? op.type_name : null;
+	}
+
+	function opNameOverride(op: ModelOp): string | undefined {
+		const bag =
+			op.kind === 'update_element' || op.kind === 'update_relationship'
+				? op.properties_patch
+				: op.kind === 'create_element' || op.kind === 'create_relationship'
+					? op.properties
+					: undefined;
+		if (bag === undefined) return undefined;
+		const key = 'name' in bag ? 'name' : Object.keys(bag).find((k) => k.toLowerCase() === 'name');
+		return key === undefined ? undefined : nameProp({ name: bag[key] });
+	}
+
+	function opGlyph(op: ModelOp): string {
+		return op.kind.startsWith('create') ? '+' : op.kind.startsWith('update') ? '~' : '-';
+	}
+
+	function opGlyphClass(op: ModelOp): string {
+		return op.kind.startsWith('create')
+			? 'text-success'
+			: op.kind.startsWith('update')
 				? 'text-warning'
 				: 'text-destructive';
 	}
@@ -523,6 +569,61 @@
 							>
 								Discard metamodel changes
 							</button>
+						</section>
+					{/if}
+
+					<!-- Parked batches: staged edits the engine can no longer apply
+					     (a peer's commit moved under them). Never counted in `total`
+					     and never sent by Commit — the engine's `getStagedOps()`
+					     already excludes them — so the only action here is Discard. -->
+					{#if conflicts.length > 0}
+						<section class="flex flex-col gap-1" data-testid="staged-conflicts">
+							<h3 class="text-xs font-semibold text-warning">
+								{conflicts.length} staged edits no longer apply
+							</h3>
+							{#each conflicts as conflict (conflict.batch.id)}
+								<div
+									class="flex flex-col gap-1.5 rounded border border-warning/40 bg-warning/10 px-2 py-1.5 text-xs"
+									data-testid={`conflict-row-${conflict.batch.id}`}
+								>
+									<div class="flex flex-col gap-1">
+										{#each conflict.batch.ops as op, i (i)}
+											{@const nameOverride = opNameOverride(op)}
+											{@const typeName = opTypeName(op)}
+											<div class="flex items-center gap-2">
+												<span class="w-3 font-mono {opGlyphClass(op)}" aria-label={op.kind}
+													>{opGlyph(op)}</span
+												>
+												<span class="min-w-0 break-words font-mono text-foreground">
+													{nameOverride ?? typeName ?? opTarget(op)}
+												</span>
+												{#if typeName}
+													<span
+														class="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
+													>
+														{typeName}
+													</span>
+												{/if}
+												<span
+													class="ml-auto min-w-0 break-all font-mono text-[10px] text-muted-foreground/70"
+												>
+													{opTarget(op)}
+												</span>
+											</div>
+										{/each}
+									</div>
+									<p class="break-words font-mono text-[11px] text-warning">
+										{conflict.error.detail}
+									</p>
+									<button
+										type="button"
+										class="self-start rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+										onclick={() => void discardConflict(conflict.batch.id)}
+									>
+										Discard
+									</button>
+								</div>
+							{/each}
 						</section>
 					{/if}
 				</div>

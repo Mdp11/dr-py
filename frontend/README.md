@@ -244,6 +244,22 @@ commit** loop:
    element's own ops PLUS every staged relationship op incident to it — a
    surviving rel pointing at a reverted temp id would 422 the commit) and then
    releases the element's lock token when no remaining staged op still needs it.
+   It needs no engine-side branch: `getStagedDiff()` already answers from the
+   replica's own diff when `staging: engine`, cascade and all.
+   - **On the engine side, a batch can be PARKED rather than staged** — a
+     peer's commit deleted or retyped something an in-flight batch still
+     needs, and the engine refuses to replay it. `DiffDrawer` renders these
+     as a section of their own, under the entity rows
+     (`data-testid="staged-conflicts"`, headed `N staged edits no longer apply`
+     — always plural, even at one), one row per parked batch
+     (`conflict-row-<batchId>`): each op summarised the way an entity row is
+     (kind glyph, type name or id, the name override when the op carries
+     one) and the engine's `error.detail` verbatim in `text-warning`. A
+     conflict is never in the drawer's `total` and never rides a commit —
+     `getStagedOps()` already excludes parked batches — so its only action
+     is a ghost **Discard** button, `discardConflict(batchId)`
+     (`unstage {batch}` plus the lease sweep). On the legacy side
+     `getStagedConflicts()` is always `[]`, so the section never renders.
 6. **Artifacts ride the same loop.** Saved navigations, tables, code
    snippets and exporters are project artifacts rather than model
    entities, but their editing is the identical check-out → stage → commit

@@ -230,6 +230,7 @@ export {
 	discardArtifact,
 	discardElement,
 	discardElementCascade,
+	discardConflict,
 	discardAll,
 	reacquireOpenArtifactLeases,
 	releaseArtifactIfUnneeded,

@@ -1,16 +1,31 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { server } from '$lib/api/__tests__/server';
 import {
 	clearSelection,
 	emit,
+	ensureElement,
 	getCachedElements,
 	getSelection,
 	getStagedDepth,
 	resetModelStore,
-	seedElements
+	seedElements,
+	stagedSettled
 } from '$lib/state';
 import { createTempId } from '$lib/state/ops';
+import { engineStore, type EngineStore } from '../../state/__tests__/support/engine-store';
 import StagedSection from '../Sidebar/StagedSection.svelte';
+
+// `discardElementCascade` is wrapped so a per-row revert can be asserted to
+// call it, without breaking the real behavior it forwards to (both the
+// legacy tests below and the engine ones over `engineStore()` exercise the
+// real revert).
+vi.mock('$lib/state', async (orig) => {
+	const actual = await orig<typeof import('$lib/state')>();
+	return { ...actual, discardElementCascade: vi.fn(actual.discardElementCascade) };
+});
+
+import { discardElementCascade } from '$lib/state';
 
 let host: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
@@ -24,6 +39,7 @@ beforeEach(() => {
 	resetModelStore();
 	clearSelection();
 	localStorage.clear();
+	vi.mocked(discardElementCascade).mockClear();
 	host = document.createElement('div');
 	document.body.appendChild(host);
 });
@@ -184,5 +200,65 @@ describe('StagedSection', () => {
 		flushSync();
 		expect(host.querySelector(`[data-staged-id="${tmp}"]`)).toBeNull();
 		expect(localStorage.getItem('ui.stagedSectionCollapsed')).toBe('true');
+	});
+});
+
+// Proves the section needs no change for engine staging: `deriveStagedElementRows`
+// is fed by `getStagedDiff()`, which the facade already answers from the
+// engine's own diff in engine mode (D3, D14).
+describe('StagedSection over the engine', () => {
+	let store: EngineStore | null = null;
+
+	beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+	afterAll(() => server.close());
+
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+	});
+
+	it('rows are new, modified and deleted, fed by the engine diff; revert calls discardElementCascade', async () => {
+		const s = (store = await engineStore());
+		// e_000002 must be cached for the update op to write its patched name
+		// into the cache the "modified" row reads; the "deleted" row reads its
+		// name from the diff's `before` alone, so e_000003 needs no priming.
+		await ensureElement('e_000002');
+
+		emit({
+			kind: 'create_element',
+			temp_id: 'tmp_x',
+			type_name: 'Organization',
+			properties: { name: 'Fresh' }
+		});
+		emit({ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'Quartz' } });
+		emit({ kind: 'delete_element', id: 'e_000003' });
+		await s.sync.settled();
+		await stagedSettled();
+
+		mountSection();
+
+		expect(host.textContent).toContain('Staged elements');
+		expect(host.textContent).toContain('3');
+		expect(host.querySelector('[data-staged-id="tmp_x"]')?.getAttribute('data-status')).toBe('new');
+		expect(host.querySelector('[data-staged-id="e_000002"]')?.getAttribute('data-status')).toBe(
+			'modified'
+		);
+		expect(host.querySelector('[data-staged-id="e_000003"]')?.getAttribute('data-status')).toBe(
+			'deleted'
+		);
+		expect(host.textContent).toContain('Fresh');
+		expect(host.textContent).toContain('Quartz');
+		// The deleted row's name comes from the diff's committed `before`
+		// snapshot, not the (now-empty) cache.
+		expect(host.textContent).toContain('Organization-003');
+
+		const revertBtn = host.querySelector(
+			'[data-staged-id="tmp_x"] [data-testid="staged-revert"]'
+		) as HTMLButtonElement;
+		revertBtn.click();
+		flushSync();
+
+		expect(discardElementCascade).toHaveBeenCalledWith('tmp_x');
+		await vi.mocked(discardElementCascade).mock.results[0]!.value;
 	});
 });
