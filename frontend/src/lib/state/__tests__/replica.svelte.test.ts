@@ -43,7 +43,19 @@ import {
 	subscribeReplicaStatus
 } from '../replica.svelte';
 import * as modelEngine from '../model-engine.svelte';
-import { emit, getStructureRev, revertAllStaged, stagedSettled } from '../model.svelte';
+import {
+	emit,
+	ensureElements,
+	getCachedElements,
+	getStagedBatchIds,
+	getStagedConflicts,
+	getStagedOps,
+	getStructureRev,
+	revertAllStaged,
+	stagedSettled
+} from '../model.svelte';
+import type { ModelOp } from '../ops';
+import { engineStore, type EngineStore } from './support/engine-store';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
@@ -1045,5 +1057,127 @@ describe('the notice and the block react through $derived', () => {
 
 		expect(derived.blocked()).toBe(true);
 		derived.dispose();
+	});
+});
+
+describe("the overlay's promise, and the frozen replica's", () => {
+	let store: EngineStore | null = null;
+
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+	});
+
+	const rename = (id: string, name: string): ModelOp => ({
+		kind: 'update_element',
+		id,
+		properties_patch: { name }
+	});
+
+	const create = (tempId: string, name: string): ModelOp => ({
+		kind: 'create_element',
+		temp_id: tempId,
+		type_name: 'Organization',
+		properties: { name }
+	});
+
+	function nameOf(id: string): unknown {
+		return getCachedElements().get(id)?.properties['name'];
+	}
+
+	/** Everything the engine said has reached the store. */
+	async function settled(s: EngineStore): Promise<void> {
+		await s.sync.settled();
+		await stagedSettled();
+	}
+
+	it(
+		'isReplicaBlocked() holds through a failed retry, and retryReplica() lands ' +
+			'ready with the same staged batches',
+		async () => {
+			store = await engineStore();
+			const s = store;
+			await ensureElements(['e_000001']);
+			const opA = rename('e_000001', 'staged name');
+			const opB = create('tmp_x', 'staged org');
+			emit(opA);
+			emit(opB);
+			await settled(s);
+			const ops = getStagedOps();
+			const ids = getStagedBatchIds();
+			expect(ids).toEqual([1, 2]);
+			expect(isReplicaBlocked()).toBe(false);
+
+			// Task 4's pattern for forcing `failed`: a peer's commit whose feed
+			// frame carries the wrong digest, with the snapshot route down for
+			// the re-bootstrap it triggers. `engineStore()`'s `until` only
+			// awaits a FUTURE status push (unlike `realReplica()`'s, which also
+			// checks what already ran), so there is no leading "already ready"
+			// wait here — the replica is ready already.
+			s.project.fail('snapshot', 503, 99);
+			const committed = s.project.commit([
+				{ kind: 'update_element', id: 'e_000003', properties_patch: { name: 'peer' } }
+			]);
+			const failed = s.until((status) => status.phase === 'failed');
+			handReplicaFeed(JSON.parse(committed.eventText) as FeedEvent, withWrongDigest(committed));
+			await failed;
+
+			expect(isReplicaBlocked()).toBe(true);
+
+			s.project.fail('snapshot', 503, 0);
+			const ready = s.until((status) => status.phase === 'ready');
+			retryReplica();
+
+			expect(isReplicaBlocked()).toBe(true);
+			await ready;
+			await settled(s);
+
+			expect(isReplicaBlocked()).toBe(false);
+			expect(getReplicaStatus()).toMatchObject({ phase: 'ready', rev: s.project.rev });
+			// The overlay's "Your uncommitted edits are kept" is this: the same
+			// two ops, under the same batch ids, once the replica is `ready` again.
+			expect(getStagedOps()).toEqual(ops);
+			expect(getStagedBatchIds()).toEqual(ids);
+			expect(nameOf('e_000001')).toBe('staged name');
+			expect(nameOf('tmp_x')).toBe('staged org');
+		}
+	);
+
+	it('a peer rebind freezes the replica; an edit made while frozen is carried once adopted', async () => {
+		store = await engineStore();
+		const s = store;
+		await ensureElements(['e_000002']);
+
+		const frozen = s.until((status) => status.phase === 'frozen');
+		handReplicaFeed(
+			{
+				type: 'rebind',
+				rev: s.project.rev + 1,
+				from_metamodel_id: 'mm-1',
+				to_metamodel_id: 'mm-2',
+				validation_error_count: 0
+			},
+			undefined
+		);
+		await frozen;
+
+		const op = rename('e_000002', 'while frozen');
+		emit(op);
+		await settled(s);
+		expect(getReplicaStatus().phase).toBe('frozen');
+		expect(getStagedOps()).toEqual([op]);
+
+		// The fake project's rebind keeps the metamodel document, so the op
+		// still applies and the batch stays staged rather than being parked;
+		// either way it must not be dropped.
+		s.project.rebind('mm-2');
+		const ready = s.until((status) => status.phase === 'ready' && status.rev === s.project.rev);
+		replicaMetamodelAdopted();
+		await ready;
+		await settled(s);
+
+		expect(getStagedOps()).toEqual([op]);
+		expect(getStagedConflicts()).toEqual([]);
+		expect(nameOf('e_000002')).toBe('while frozen');
 	});
 });

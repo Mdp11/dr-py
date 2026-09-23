@@ -1066,7 +1066,11 @@ moves an epoch, and whatever judged an older replica is not acted on.
 dialog under the progress overlay — covers it with "Model out of sync" and one
 `Retry` button, focused on mount. `retryReplica()` calls the sync's `retry()`
 above — the SAME in-place re-bootstrap, never a reload, since a reload would
-lose the edits the sync still holds — and the overlay stays up through the
+lose the edits the sync still holds — "the edits" are the engine's staged
+batches, which the sync carries into `retry()` exactly as any other
+re-bootstrap does (above): `replica.svelte.test.ts` stages two ops, forces
+`failed`, and checks that `retryReplica()` lands `ready` with the same ops
+under the same batch ids — and the overlay stays up through the
 retry's `resyncing` (the button reads `Retrying…`, disabled, while
 `isReplicaRetrying()`); it clears at `ready` and comes back, `Retry` enabled
 again, if the retry itself lands on `failed`. With every surface on `server`
@@ -1102,7 +1106,14 @@ attempt in flight ends at its next step, and nothing is followed — no delta
 crosses a rebind anyway. `metamodelAdopted()` — the rebind banner's Reload,
 the committer's in-place refetch — re-bootstraps it onto the metamodel the
 server serves now, staged batches carried; in any other phase it does
-nothing. The run records the highest rev it froze at, and a rebind at or
+nothing. An edit made WHILE frozen still stages (a transition is held for the
+phase alone — see "Transitions" below — and `frozen` is one of the two phases
+that post it) and is carried the same way once `metamodelAdopted()` reaches
+`ready`: staged again if the new schema still accepts it, parked in
+`conflicts()` otherwise, but never dropped either way —
+`replica.svelte.test.ts`'s frozen case observes the fake project's own
+`rebind` keeping its metamodel document, so the op it stages there stays
+staged, not parked. The run records the highest rev it froze at, and a rebind at or
 below it is ignored: the feed broadcasts the rebind to the committer too, and
 that echo may come after the committer's own `rebound` settle and adoption,
 where freezing again would abort the re-bootstrap with only the banner's
