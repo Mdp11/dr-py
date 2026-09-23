@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { server } from '$lib/api/__tests__/server';
 import { getElement } from '$lib/api/elements';
-import { NotFoundError } from '$lib/api/errors';
+import { ApiError, NotFoundError } from '$lib/api/errors';
 import type { FeedEvent } from '$lib/api/feed';
 import { listContainmentRoots, listElementsPage } from '$lib/api/model-read';
 import type { Element } from '$lib/api/types';
@@ -304,6 +304,61 @@ describe('the staged readers', () => {
 		expect(getStagedBatchIds()).toEqual([1, 2]);
 		expect(getStagedOps()).toEqual([rename('e_000002', 'one'), CREATE_X]);
 		expect(getStagedDepth()).toBe(2);
+	});
+
+	it('a mirror read the engine refuses is read again', async () => {
+		const s = await open();
+		const call = s.sync.call.bind(s.sync);
+		let refusals = 1;
+		vi.spyOn(s.sync, 'call').mockImplementation(((
+			method: string,
+			params?: unknown,
+			options?: never
+		) => {
+			if (method === 'stagedDiff' && refusals-- > 0) {
+				return Promise.reject(new ApiError(500, {}, 'engine error 500'));
+			}
+			return call(method, params, options);
+		}) as typeof s.sync.call);
+
+		emit(rename('e_000002', 'once'));
+		await settled(s);
+
+		expect(getStagedOps()).toEqual([rename('e_000002', 'once')]);
+		expect(getStagedBatchIds()).toEqual([1]);
+		expect(getModelError()).toBeNull();
+	});
+
+	it('a mirror read refused twice settles, says so, and the next edit reads it again', async () => {
+		const s = await open();
+		const call = s.sync.call.bind(s.sync);
+		let refusals = 2;
+		vi.spyOn(s.sync, 'call').mockImplementation(((
+			method: string,
+			params?: unknown,
+			options?: never
+		) => {
+			if (method === 'stagedDiff' && refusals-- > 0) {
+				return Promise.reject(new ApiError(500, {}, 'engine error 500'));
+			}
+			return call(method, params, options);
+		}) as typeof s.sync.call);
+
+		emit(rename('e_000002', 'kept'));
+		await settled(s);
+		expect(getReplicaStatus().phase).toBe('ready');
+		expect(getModelError()).toEqual({
+			kind: 'error',
+			message: 'the staged edits could not be read: engine error 500'
+		});
+		// The edit still shows, as the edit made; the mirror is as it was.
+		expect(getStagedOps()).toEqual([rename('e_000002', 'kept')]);
+		expect(getStagedBatchIds()).toEqual([]);
+
+		emit(rename('e_000003', 'next'));
+		await settled(s);
+		expect(getStagedOps()).toEqual([rename('e_000002', 'kept'), rename('e_000003', 'next')]);
+		expect(getStagedBatchIds()).toEqual([1, 2]);
 	});
 
 	it('a detach releases stagedSettled and drops the answers still to come', async () => {

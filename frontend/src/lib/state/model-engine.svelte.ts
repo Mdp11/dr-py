@@ -128,6 +128,14 @@ let _mirrorVersion = UNKNOWN_VERSION;
 let _reads = 0;
 let _mirrorReading = false;
 let _mirrorOwed = false;
+/** The read in flight is the retry of one the engine refused. */
+let _mirrorRetry = false;
+/**
+ * The engine refused a mirror read and its retry: the answered edits stop
+ * waiting to be covered — the readers keep showing them — until a read
+ * succeeds.
+ */
+let _mirrorFailed = false;
 /** Cache re-reads in flight. */
 let _refreshing = 0;
 let _seq = 0;
@@ -195,6 +203,8 @@ function clearAll(): void {
 	_mirrorVersion = UNKNOWN_VERSION;
 	_mirrorReading = false;
 	_mirrorOwed = false;
+	_mirrorRetry = false;
+	_mirrorFailed = false;
 	_refreshing = 0;
 	_unstaging = 0;
 	_unstageChain = Promise.resolve();
@@ -222,7 +232,7 @@ function isQuiet(): boolean {
 		!_mirrorReading &&
 		!_mirrorOwed &&
 		_refreshing === 0 &&
-		_provisional.length === 0 &&
+		(_provisional.length === 0 || (_mirrorFailed && !awaitingAnswer())) &&
 		_pending.size === 0
 	);
 }
@@ -275,6 +285,10 @@ function awaitingAnswer(): boolean {
  * answer covers that edit; one issued before may have run ahead of it
  * (`staged` is answered at once), and the `changed` a stage emits comes
  * before its answer — so no read starts while an edit waits for its answer.
+ * The three calls go as transitions: posted in arrival order with the
+ * stages and never held for a `rev`, so a later stage cannot overtake them.
+ * Only in `ready` and `frozen`, where a transition is posted at once; the
+ * next `ready` reads what is due.
  */
 function pumpMirror(): void {
 	const handle = _handle;
@@ -282,24 +296,29 @@ function pumpMirror(): void {
 	const due =
 		_mirrorOwed ||
 		_seenVersion !== _mirrorVersion ||
-		_provisional.some((entry) => entry.answered !== null);
+		(!_mirrorFailed && _provisional.some((entry) => entry.answered !== null));
 	if (!due || awaitingAnswer()) {
 		release();
 		return;
 	}
+	const { phase } = handle.status();
+	if (phase !== 'ready' && phase !== 'frozen') return;
 	_mirrorReading = true;
 	_mirrorOwed = false;
 	_reads += 1;
 	const at = _reads;
 	const version = _seenVersion;
 	const epoch = _epoch;
+	const inOrder = { transition: true };
 	Promise.all([
-		handle.call<StagedBatch[]>('staged'),
-		handle.call<StagedConflict[]>('conflicts'),
-		handle.call<StagedDiff>('stagedDiff')
+		handle.call<StagedBatch[]>('staged', undefined, inOrder),
+		handle.call<StagedConflict[]>('conflicts', undefined, inOrder),
+		handle.call<StagedDiff>('stagedDiff', undefined, inOrder)
 	]).then(
 		([batches, parked, diff]) => {
 			if (epoch !== _epoch) return;
+			_mirrorRetry = false;
+			_mirrorFailed = false;
 			_batches = batches;
 			_parked = parked;
 			_diff = diff;
@@ -311,10 +330,24 @@ function pumpMirror(): void {
 			if (_healIds !== null && at >= _healFrom) heal(_healIds);
 			pumpMirror();
 		},
-		() => {
+		(error: unknown) => {
 			if (epoch !== _epoch) return;
-			// The mirror stays as it was; the next `ready` reads it again.
 			_mirrorReading = false;
+			if (!(error instanceof EngineGoneError) && !_mirrorRetry) {
+				_mirrorRetry = true;
+				readMirror();
+				return;
+			}
+			// The mirror stays as it was: with the engine gone, the next `ready`
+			// reads it again; refused twice, the next change or edit does.
+			if (!(error instanceof EngineGoneError)) {
+				_mirrorFailed = true;
+				setModelError({
+					kind: 'error',
+					message: `the staged edits could not be read: ${error instanceof Error ? error.message : String(error)}`
+				});
+			}
+			_mirrorRetry = false;
 			_mirrorOwed = false;
 			release();
 		}

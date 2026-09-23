@@ -528,7 +528,15 @@ answer is the newer one.
   once) — and since a stage's `changed` comes before its answer, no mirror
   read starts while an edit waits for its answer: the last answer reads it.
   That is what keeps an op from being counted twice, once in a batch and
-  once provisionally. When the replica becomes `ready` after a
+  once provisionally. For the same reason the three mirror calls go as
+  transitions — in arrival order with the stages, never held for a `rev`
+  (a read held for a peer's delta would let a later stage overtake it) — and
+  only in `ready` or `frozen`; the next `ready` reads what is due. A mirror
+  read the engine refuses (not a gone engine) is read once more; refused
+  again, `getModelError()` says `the staged edits could not be read: …`, the
+  answered edits stop waiting to be covered (the readers keep showing them
+  over the mirror as it was) so `stagedSettled()` resolves, and the next
+  change or edit reads the mirror again. When the replica becomes `ready` after a
   re-bootstrap, the cached elements the staged and parked batches touched —
   before that mirror read and after it — are read again: an adopted batch
   that parks puts its entities back to the committed state, and adopting
