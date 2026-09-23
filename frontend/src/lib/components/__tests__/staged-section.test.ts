@@ -221,7 +221,10 @@ describe('StagedSection over the engine', () => {
 		const s = (store = await engineStore());
 		// e_000002 must be cached for the update op to write its patched name
 		// into the cache the "modified" row reads; the "deleted" row reads its
-		// name from the diff's `before` alone, so e_000003 needs no priming.
+		// name from the diff's `before` alone, so e_000008 needs no priming.
+		// e_000008 (a Team, no containment children of its own — unlike an
+		// Organization, whose delete_element cascades through `Owns` and would
+		// add a deleted row per owned Team) keeps this a clean 3-row case.
 		await ensureElement('e_000002');
 
 		emit({
@@ -231,26 +234,31 @@ describe('StagedSection over the engine', () => {
 			properties: { name: 'Fresh' }
 		});
 		emit({ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'Quartz' } });
-		emit({ kind: 'delete_element', id: 'e_000003' });
+		emit({ kind: 'delete_element', id: 'e_000008' });
 		await s.sync.settled();
 		await stagedSettled();
 
 		mountSection();
 
 		expect(host.textContent).toContain('Staged elements');
-		expect(host.textContent).toContain('3');
+		// The header's own count span, not `host.textContent` at large — which
+		// would also be satisfied by "e_000008" or "Team-003" below, trivially
+		// passing even if the count itself were wrong.
+		expect(
+			host.querySelector('[data-testid="staged-header"] span.font-mono')?.textContent?.trim()
+		).toBe('3');
 		expect(host.querySelector('[data-staged-id="tmp_x"]')?.getAttribute('data-status')).toBe('new');
 		expect(host.querySelector('[data-staged-id="e_000002"]')?.getAttribute('data-status')).toBe(
 			'modified'
 		);
-		expect(host.querySelector('[data-staged-id="e_000003"]')?.getAttribute('data-status')).toBe(
+		expect(host.querySelector('[data-staged-id="e_000008"]')?.getAttribute('data-status')).toBe(
 			'deleted'
 		);
 		expect(host.textContent).toContain('Fresh');
 		expect(host.textContent).toContain('Quartz');
 		// The deleted row's name comes from the diff's committed `before`
 		// snapshot, not the (now-empty) cache.
-		expect(host.textContent).toContain('Organization-003');
+		expect(host.textContent).toContain('Team-003');
 
 		const revertBtn = host.querySelector(
 			'[data-staged-id="tmp_x"] [data-testid="staged-revert"]'

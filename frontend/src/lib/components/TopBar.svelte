@@ -17,6 +17,7 @@
 		getModelSummary,
 		getStagedArtifactDepth,
 		getStagedChangeCount,
+		getStagedConflicts,
 		getStagedDepth,
 		getStagedViewDepth,
 		getStrictMode,
@@ -81,10 +82,19 @@
 	// view-edits.svelte.ts. Mirrors the DiffDrawer's own switch to the journal.
 	const viewChanges = $derived(getStagedViewDepth());
 	const combinedChanges = $derived(totalChanges + artifactChanges + viewChanges);
+	// A parked batch (engine staging only — always `[]` on the legacy side)
+	// never counts toward `combinedChanges` (it is neither a change nor
+	// committable), but it is still the only route to the drawer's Discard —
+	// without this the gate below would strand it unreachable whenever it is
+	// the sole staged thing (a rename parked by a peer's delete, with nothing
+	// else staged).
+	const conflictCount = $derived(getStagedConflicts().length);
 	// Enabled when the model, an artifact, OR the view has uncommitted/unsaved
-	// changes — this Commit button is the ONLY way to the commit drawer, so an
-	// artifact-only batch has to enable it too.
-	const saveDisabled = $derived(summary === null || combinedChanges === 0);
+	// changes, or a batch is parked — this Commit button is the ONLY way to
+	// the commit drawer, so an artifact-only batch (and a conflicts-only one)
+	// has to enable it too. The drawer's own Commit button stays gated on
+	// `total` alone (conflicts never make it committable).
+	const saveDisabled = $derived(summary === null || (combinedChanges === 0 && conflictCount === 0));
 	const validating = $derived(isRunning());
 	const validateDisabled = $derived(validating || summary === null);
 	const undoDisabled = $derived(summary === null || getStagedDepth() === 0);
@@ -289,15 +299,30 @@
 			<RefreshCw class="h-3 w-3 {validating ? 'animate-spin' : ''}" />
 			Validate
 		</Button>
-		<Button
-			variant="outline"
-			size="sm"
-			class="h-7 text-xs"
-			disabled={saveDisabled}
-			onclick={() => setDiffDrawerOpen(true)}
-		>
-			Commit
-		</Button>
+		<div class="relative inline-flex">
+			<Button
+				variant="outline"
+				size="sm"
+				class="h-7 text-xs"
+				disabled={saveDisabled}
+				onclick={() => setDiffDrawerOpen(true)}
+			>
+				Commit
+				{#if conflictCount > 0}
+					<span class="sr-only">, {conflictCount} staged edits no longer apply</span>
+				{/if}
+			</Button>
+			{#if conflictCount > 0}
+				<!-- Visible cue that a parked batch needs attention even though it
+				     never moves the "● N changes" count — the drawer, not this dot,
+				     names the batch and its refusal. -->
+				<span
+					class="pointer-events-none absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning"
+					aria-hidden="true"
+					title="{conflictCount} staged edits no longer apply"
+				></span>
+			{/if}
+		</div>
 		{#if strictOn}
 			<span
 				class="rounded bg-warning/15 px-1.5 py-0.5 font-mono text-[10px] text-warning"

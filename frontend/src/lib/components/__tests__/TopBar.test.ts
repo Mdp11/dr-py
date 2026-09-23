@@ -26,6 +26,7 @@ vi.mock('$lib/state', async (orig) => {
 		getModelRev: vi.fn(() => 0),
 		getModelGeneration: vi.fn(() => 0),
 		getStagedChangeCount: vi.fn(() => 0),
+		getStagedConflicts: vi.fn(() => []),
 		getStagedViewDepth: vi.fn(() => 0),
 		getStagedDepth: vi.fn(() => 0),
 		isRunning: vi.fn(() => false),
@@ -55,7 +56,9 @@ vi.mock('$lib/util/fileSave', () => ({ saveResponseToFile: vi.fn(async () => {})
 import {
 	getMetamodel,
 	getModelSummary,
+	getStagedConflicts,
 	getStagedViewDepth,
+	setDiffDrawerOpen,
 	setHistoryDrawerOpen
 } from '$lib/state';
 import { downloadModel } from '$lib/api/model-read';
@@ -101,6 +104,7 @@ afterEach(() => {
 	// installed a non-null summary would leak it into the next one.
 	vi.mocked(getModelSummary).mockReturnValue(null);
 	vi.mocked(getStagedViewDepth).mockReturnValue(0);
+	vi.mocked(getStagedConflicts).mockReturnValue([]);
 	vi.mocked(getMetamodel).mockReturnValue(null);
 	vi.clearAllMocks();
 });
@@ -157,6 +161,37 @@ describe('TopBar', () => {
 
 			expect(findButton(/commit/i)?.disabled).toBe(false);
 			expect(document.body.textContent).toContain('● 1');
+
+			unmount(c);
+		});
+
+		// A parked batch is neither a change nor committable (it never moves
+		// `combinedChanges`/`● N changes`), but it is the only route to the
+		// drawer's Discard — the gate must not strand it unreachable.
+		it('a parked-conflict-only batch enables Commit, with a visible marker, but the change badge stays 0', () => {
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+			vi.mocked(getStagedConflicts).mockReturnValue([
+				{
+					batch: {
+						id: 1,
+						ops: [{ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'x' } }]
+					},
+					error: { status: 422, detail: "No element with id 'e_000002" }
+				}
+			]);
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			const commitBtn = findButton(/commit/i);
+			expect(commitBtn?.disabled).toBe(false);
+			// The badge counts changes only — a conflict is not one.
+			expect(document.body.textContent).toContain('● 0');
+			// A visible, accessible cue that a conflict needs attention.
+			expect(commitBtn?.textContent).toContain('staged edits no longer apply');
+
+			commitBtn!.click();
+			expect(setDiffDrawerOpen).toHaveBeenCalledWith(true);
 
 			unmount(c);
 		});

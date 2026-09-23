@@ -205,7 +205,13 @@
 	// name or id, a name override): there is no before/after diff for it (the
 	// engine refused it outright), only the op it tried to apply.
 	function opTarget(op: ModelOp): string {
-		return op.kind === 'create_element' || op.kind === 'create_relationship' ? op.temp_id : op.id;
+		// A CR/compare proposal's create carries an `id` hint the engine stages
+		// the entity under (`op.id ?? op.temp_id` — CLAUDE.md's "Engine's staging
+		// wire"); `temp_id` alone would show the batch-internal handle instead of
+		// the id the engine actually used.
+		return op.kind === 'create_element' || op.kind === 'create_relationship'
+			? (op.id ?? op.temp_id)
+			: op.id;
 	}
 
 	function opTypeName(op: ModelOp): string | null {
@@ -433,9 +439,9 @@
 				<div class="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
 					{#if loading}
 						<p class="text-xs text-muted-foreground/70">Loading changes…</p>
-					{:else if total === 0}
+					{:else if total === 0 && conflicts.length === 0}
 						<p class="text-xs text-muted-foreground/70">No pending changes.</p>
-					{:else if addedCount === 0 && modifiedCount === 0 && deletedCount === 0 && artifactCount === 0 && mmDepth === 0}
+					{:else if addedCount === 0 && modifiedCount === 0 && deletedCount === 0 && artifactCount === 0 && mmDepth === 0 && viewEntries.length > 0}
 						<!-- Unlike an artifact-only batch (whose Artifacts section renders
 						     right here), a view-only batch has nothing to show on THIS tab —
 						     the journal only renders on the View tab. Without this branch
@@ -444,7 +450,11 @@
 						     `mmDepth === 0` is part of the condition because the Metamodel
 						     section DOES render here: without it a metamodel-only batch
 						     would print "0 staged view changes — see the View tab." above
-						     its own rows. -->
+						     its own rows. `viewEntries.length > 0` (rather than leaning on
+						     `total > 0`, now that `total === 0` no longer implies this branch
+						     is unreachable — a conflicts-only drawer has `total === 0` too)
+						     keeps a parked-conflicts-only drawer from printing "0 staged view
+						     changes" above its own conflicts section. -->
 						<p class="text-xs text-muted-foreground/70">
 							{viewEntries.length} staged view change{viewEntries.length === 1 ? '' : 's'} — see the View
 							tab.
@@ -590,7 +600,7 @@
 										{#each conflict.batch.ops as op, i (i)}
 											{@const nameOverride = opNameOverride(op)}
 											{@const typeName = opTypeName(op)}
-											<div class="flex items-center gap-2">
+											<div class="flex items-center gap-2" data-testid="conflict-op">
 												<span class="w-3 font-mono {opGlyphClass(op)}" aria-label={op.kind}
 													>{opGlyph(op)}</span
 												>

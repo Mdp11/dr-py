@@ -103,6 +103,25 @@ const CONFLICT_B: StagedConflict = {
 	error: { status: 422, detail: 'stale base_rev' }
 };
 
+// A CR/compare proposal's create carries an `id` hint the engine stages the
+// entity under (the temp id is only a batch-internal handle) — the row must
+// show that id, not `tmp_…`.
+const CONFLICT_WITH_ID_HINT: StagedConflict = {
+	batch: {
+		id: 9,
+		ops: [
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_internal',
+				id: 'e_from_cr',
+				type_name: 'Organization',
+				properties: {}
+			}
+		]
+	},
+	error: { status: 422, detail: "id 'e_from_cr' already exists" }
+};
+
 describe('DiffDrawer conflicts section', () => {
 	it('renders no section when there are no conflicts', async () => {
 		conflicts = [];
@@ -128,15 +147,38 @@ describe('DiffDrawer conflicts section', () => {
 		expect(rowA).toBeTruthy();
 		expect(rowB).toBeTruthy();
 
-		// The engine's refusal text, verbatim.
-		expect(rowA!.textContent).toContain("No element with id 'e1");
-		expect(rowB!.textContent).toContain('stale base_rev');
+		// The engine's refusal text, verbatim — scoped to the `<p>` it renders
+		// in, not the whole row (row A's op line and its error text both
+		// legitimately contain "e1", so a whole-row match would pass even if
+		// the op summary were missing entirely).
+		const errorA = rowA!.querySelector('p')?.textContent;
+		const errorB = rowB!.querySelector('p')?.textContent;
+		expect(errorA).toContain("No element with id 'e1");
+		expect(errorB).toContain('stale base_rev');
 
-		// Each op summarised: kind glyph, type name or id, the name override.
-		expect(rowA!.textContent).toContain('e1');
-		expect(rowA!.textContent).toContain('Renamed');
-		expect(rowB!.textContent).toContain('Organization');
-		expect(rowB!.textContent).toContain('Fresh');
+		// Each op summarised: kind glyph, type name or id, the name override —
+		// scoped to the op line (`data-testid="conflict-op"`), not the row,
+		// so this fails if the op summary itself is missing.
+		const opA = rowA!.querySelector('[data-testid="conflict-op"]')?.textContent;
+		const opB = rowB!.querySelector('[data-testid="conflict-op"]')?.textContent;
+		expect(opA).toContain('e1');
+		expect(opA).toContain('Renamed');
+		expect(opB).toContain('Organization');
+		expect(opB).toContain('Fresh');
+
+		unmount(c);
+	});
+
+	it("a parked create shows the CR's id hint, not the temp id", async () => {
+		conflicts = [CONFLICT_WITH_ID_HINT];
+
+		const c = await openDrawer();
+
+		const row = document.body.querySelector('[data-testid="conflict-row-9"]');
+		expect(row).toBeTruthy();
+		const op = row!.querySelector('[data-testid="conflict-op"]')?.textContent;
+		expect(op).toContain('e_from_cr');
+		expect(op).not.toContain('tmp_internal');
 
 		unmount(c);
 	});
@@ -164,7 +206,9 @@ describe('DiffDrawer conflicts section', () => {
 
 		const c = await openDrawer();
 
-		expect(document.body.textContent).toMatch(/No pending changes/i);
+		// "No pending changes." would contradict the conflicts section sitting
+		// right below it — it must not render while a conflict does.
+		expect(document.body.textContent).not.toMatch(/No pending changes/i);
 		const commitBtn = Array.from(document.querySelectorAll('button')).find((b) =>
 			/^\s*Commit/.test(b.textContent ?? '')
 		) as HTMLButtonElement | undefined;
