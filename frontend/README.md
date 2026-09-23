@@ -1072,7 +1072,12 @@ retry's `resyncing` (the button reads `Retrying…`, disabled, while
 again, if the retry itself lands on `failed`. With every surface on `server`
 `isReplicaBlocked()` is always false — `anyEngineSurface` gates it exactly as
 it gates the notice and the gate — and the indicator, which reads the phase
-unconditionally, is the only consumer of a `failed` replica there.
+unconditionally, is the only consumer of a `failed` replica there. Whichever
+way a re-bootstrap starts — this retry, or the replica's own over a
+divergence — `onStatus` calls `markStructureChanged()` once it reaches
+`ready` from `resyncing`, so the tree, the relationships list and search
+re-read against what the rebuilt replica actually holds; a plain first open
+(`opening` to `ready`) bumps nothing.
 
 **The commit in flight** (CT-2). `beginCommit()` is called BEFORE the POST
 (`/commits` or `/commits/revert`) and returns a flight; while any flight is

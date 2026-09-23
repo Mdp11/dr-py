@@ -112,12 +112,14 @@ adoption (`adoptReboundMetamodel`); the likely fix is the same one-line bump in 
 **Done:** `onReloadRebind` calls `markStructureChanged()` after `replicaMetamodelAdopted()`, the
 same bump `adoptReboundMetamodel` already made on the committer's own path.
 
-### K-40 · A successful Retry does not refetch the structure · `open` · *2026-09-22*
+### K-40 · A successful Retry does not refetch the structure · `done` · *2026-09-22*
 Reads posted while the replica is `failed` are answered by the failed replica; `retryReplica()`
 re-bootstraps it but bumps no structure rev, so a tree read answered before the Retry stays stale
 until the next structural change. The overlay blocks the workspace while `failed`, so few such
-reads exist. Likely fix: `markStructureChanged()` once a retry reaches `ready`; revisit with the
-forked store (plan 6).
+reads exist. **Done:** `replica.svelte.ts`'s `onStatus` calls `markStructureChanged()` whenever the
+previous phase was `resyncing` and the new one is `ready` — a retried `failed` replica and one the
+replica re-bootstraps on its own (a diverged digest check) both cross that transition; a plain
+first open (`opening` to `ready`) does not.
 
 ---
 

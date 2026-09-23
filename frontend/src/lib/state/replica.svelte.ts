@@ -40,6 +40,7 @@ import {
 	type EngineHandle,
 	type StatusListener
 } from './model-engine.svelte';
+import { markStructureChanged } from './model-shared.svelte';
 import { journeyReplica } from './open-journey';
 
 let _status = $state.raw<ReplicaStatus>(OFF);
@@ -74,6 +75,7 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 		onStatus: (status) => {
 			// A sync that was replaced speaks for nothing the UI shows.
 			if (_sync !== made) return;
+			const previousPhase = _status.phase;
 			setStatus(status);
 			observe?.(status);
 			// Only `opening`: `resyncing` also reports progress, but a re-bootstrap
@@ -81,6 +83,11 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			// a phase the journey has slices for either.
 			if (status.phase === 'opening' && status.progress) journeyReplica(status.progress);
 			if (status.phase !== 'opening') _releaseGate();
+			// A re-bootstrap (a retried `failed`, or one the replica started on its
+			// own over a divergence) may have moved entities the tree, the
+			// relationships list and the search results were built from; a plain
+			// first open moves nothing, so it stays out of this.
+			if (previousPhase === 'resyncing' && status.phase === 'ready') markStructureChanged();
 			if (
 				_retrying &&
 				(status.phase === 'ready' ||

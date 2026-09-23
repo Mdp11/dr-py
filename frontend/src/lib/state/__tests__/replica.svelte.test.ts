@@ -43,7 +43,7 @@ import {
 	subscribeReplicaStatus
 } from '../replica.svelte';
 import * as modelEngine from '../model-engine.svelte';
-import { emit, revertAllStaged, stagedSettled } from '../model.svelte';
+import { emit, getStructureRev, revertAllStaged, stagedSettled } from '../model.svelte';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
@@ -63,11 +63,15 @@ afterEach(() => {
 /**
  * The real engine over a port, the real replica API against the fake
  * project's routes, a fresh cache and an instant sleep. `until` resolves on
- * the first status, from now on, that passes its test.
+ * the first status, from `from` on (default: from now on, so an already-
+ * recorded status of the same shape as an earlier call does not resolve it
+ * again), that passes its test; an explicit `from` reaches back into history
+ * — for what the engine starts on its own, such as the background digest
+ * check, which may already have run by the time a second `until` is called.
  */
 function realReplica(overrides: Partial<SyncDeps> = {}) {
 	const statuses: ReplicaStatus[] = [];
-	const watchers: { test: (s: ReplicaStatus) => boolean; resolve(): void }[] = [];
+	const watchers: { from: number; test: (s: ReplicaStatus) => boolean; resolve(): void }[] = [];
 	const connect = vi.fn(() => {
 		const link = connectInProcess();
 		links.push(link);
@@ -94,8 +98,10 @@ function realReplica(overrides: Partial<SyncDeps> = {}) {
 	return {
 		connect,
 		statuses,
-		until: (test: (s: ReplicaStatus) => boolean) =>
-			new Promise<void>((resolve) => watchers.push({ test, resolve }))
+		until: (test: (s: ReplicaStatus) => boolean, from = statuses.length) => {
+			if (statuses.slice(from).some(test)) return Promise.resolve();
+			return new Promise<void>((resolve) => watchers.push({ from, test, resolve }));
+		}
 	};
 }
 
@@ -682,6 +688,55 @@ describe('the status listeners and the engine handle', () => {
 		await replica.until((s) => s.phase === 'ready');
 
 		expect(attach).not.toHaveBeenCalled();
+	});
+});
+
+describe('the structure rev after a re-bootstrap', () => {
+	it('a plain open (opening to ready) moves it by nothing', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		const before = getStructureRev();
+
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+
+		expect(getStructureRev()).toBe(before);
+	});
+
+	it('a retry that reaches ready from failed bumps it once', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await failReplica(project, replica);
+		const before = getStructureRev();
+		project.fail('snapshot', 503, 0);
+
+		retryReplica();
+		await replica.until((s) => s.phase === 'ready');
+
+		expect(getStructureRev()).toBe(before + 1);
+	});
+
+	it('a re-bootstrap the replica starts on its own (a diverged digest check) bumps it too', async () => {
+		const project = fakeProject();
+		project.wrongDigestInNextSnapshot();
+		server.use(...project.handlers());
+		const replica = realReplica();
+		setActiveProject('p');
+
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		const before = getStructureRev();
+		await replica.until((s) => s.phase === 'resyncing');
+		const resyncing = replica.statuses.findIndex((s) => s.phase === 'resyncing');
+
+		await replica.until((s) => s.phase === 'ready', resyncing);
+
+		expect(getStructureRev()).toBe(before + 1);
 	});
 });
 
