@@ -115,6 +115,16 @@ export function dropStagedBatches(batchIds: readonly number[]): void {
 	if (getStagingSide() === 'engine') engine.dropBatches(batchIds);
 }
 
+/**
+ * The batches a commit carried, once the server has landed it: committed, so
+ * no staged-edit reader shows them and no commit sends them again, though the
+ * replica holds them until it applies the commit's answer. Nothing on the
+ * legacy side.
+ */
+export function markStagedLanded(batchIds: readonly number[]): void {
+	if (getStagingSide() === 'engine') engine.markLanded(batchIds);
+}
+
 export function getStagedOps(): ModelOp[] {
 	return side().getStagedOps();
 }
@@ -231,4 +241,16 @@ export function resetModelStore(): void {
 	legacy.resetLegacyStore();
 	engine.resetEngineStore();
 	resetSharedStore();
+}
+
+/**
+ * The model store's share of reloading the model: every staged model edit is
+ * dropped with the caches, as the lock registry is — on the engine side the
+ * replica's staged and parked batches are unstaged first, awaited, since the
+ * replica would keep them and their leases are gone. The legacy buffer goes
+ * with `resetModelStore()` alone.
+ */
+export async function reloadModelStore(): Promise<void> {
+	if (getStagingSide() === 'engine') await engine.discardAllStaged();
+	resetModelStore();
 }

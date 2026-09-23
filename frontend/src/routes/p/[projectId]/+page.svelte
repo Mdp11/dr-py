@@ -64,7 +64,7 @@
 		resetInspectionHistory,
 		resetMetamodelEditor,
 		resetViewJsonEditor,
-		resetModelStore,
+		reloadModelStore,
 		resetSnippetEditors,
 		resetSnippetDocs,
 		resetViewEdits,
@@ -329,7 +329,10 @@
 		reloading = true;
 		setProjectOpening(true); // same tree-skeleton gate as boot(): the resets below blank the tree
 		try {
-			resetModelStore();
+			// The staged model edits go with the lock registry below, as the view
+			// and metamodel edits do: on the engine side the replica's batches are
+			// unstaged first — it would keep them, and their leases are gone.
+			await reloadModelStore();
 			resetCheckout();
 			resetArtifacts();
 			resetSnippetEditors();
@@ -367,7 +370,7 @@
 			// unresolved gate.
 			await refreshView();
 			await refreshSummary();
-			// resetModelStore() above emptied the live issue map while
+			// reloadModelStore() above emptied the live issue map while
 			// refreshSummary() just restored the exact issue COUNTS — without this
 			// the StatusBar reads "12 errors" over an IssuesPanel showing a green
 			// "No issues.", and nothing in this path restarts the feed to heal it.

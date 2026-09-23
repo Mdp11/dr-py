@@ -232,6 +232,61 @@ describe("the user's own commit across a failure", () => {
 	}
 });
 
+describe("the user's own commit dropped with its answer", () => {
+	/**
+	 * Ready, a rename and a create staged; the server lands the rename as the
+	 * user's commit while the replica diverges and finds no model: `off`. The
+	 * answer is settled while the re-bootstrap runs, or once `off`; either way
+	 * no replica will apply it, and the one a wake opens must not stage the
+	 * committed batch again.
+	 */
+	for (const settleAt of ['resyncing', 'off'] as const) {
+		it(`an answer settled while ${settleAt} is dropped at off, and its batch is not adopted again`, async () => {
+			const project = fakeProject();
+			const abandoned: number[][] = [];
+			const over = await ready(project, { onAbandoned: (ids) => abandoned.push([...ids]) });
+			const client = over.link!.client;
+			const committed = rename('e_000001', 'committed name');
+			await client.call<StageResult>('stage', { ops: committed });
+			await client.call<StageResult>('stage', { ops: createOrganization('tmp_x', 'kept org') });
+			const flight = over.sync.beginCommit();
+
+			project.fail('descriptor', 404, 1);
+			const peer = project.commit(rename('e_000002', 'peer'));
+			const own = project.commit(committed);
+			const answer = {
+				text: own.responseText,
+				rev: project.rev,
+				applied: true,
+				rebound: false,
+				idMap: {},
+				batchIds: [1]
+			};
+			const resyncing = over.until((status) => status.phase === 'resyncing', over.statuses.length);
+			await client.call('applyDelta', { text: withWrongDigest(peer) });
+			await resyncing;
+			if (settleAt === 'resyncing') flight.settle(answer);
+			await over.sync.settled();
+			expect(last(over.statuses)).toMatchObject({ phase: 'off', reason: 'no model' });
+			if (settleAt === 'off') flight.settle(answer);
+
+			project.opaqueBump();
+			over.sync.feedReset(project.rev);
+			await over.sync.settled();
+
+			expect(last(over.statuses)).toMatchObject({ phase: 'ready', rev: project.rev });
+			expect(await client.call<WireBatch[]>('staged')).toEqual([
+				{ id: 2, ops: createOrganization('tmp_x', 'kept org') }
+			]);
+			await expect(client.call('getElement', { id: 'e_000001' })).resolves.toMatchObject({
+				properties: { name: 'committed name' }
+			});
+			// The model store is told: its mirror drops the batch too.
+			expect(abandoned).toEqual([[1]]);
+		});
+	}
+});
+
 describe('reset', () => {
 	it('a reset re-bootstraps', async () => {
 		const project = fakeProject();

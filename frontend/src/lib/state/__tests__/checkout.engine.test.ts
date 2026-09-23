@@ -13,6 +13,8 @@ import {
 import type { CommitAnswer } from '$lib/engine/sync';
 import {
 	commitApplied,
+	CommitPendingError,
+	commitsLanded,
 	commitStaged,
 	discardConflict,
 	discardElement,
@@ -30,15 +32,25 @@ import {
 	getCachedElements,
 	getModelRev,
 	getStagedBatchIds,
+	getStagedChangeCount,
 	getStagedConflicts,
+	getStagedDiff,
 	getStagedOps,
+	reloadModelStore,
 	StagedUnreadableError,
 	stagedSettled,
 	validateAll
 } from '../model.svelte';
 import * as model from '../model.svelte';
 import type { ModelOp } from '../ops';
-import { getReplicaStatus, handReplicaFeed, replicaSettled, stopReplica } from '../replica.svelte';
+import {
+	getReplicaStatus,
+	handReplicaFeed,
+	replicaMetamodelAdopted,
+	replicaSettled,
+	retryReplica,
+	stopReplica
+} from '../replica.svelte';
 import { engineStore, peerDelta, type EngineStore } from './support/engine-store';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -65,21 +77,35 @@ type Bodies = {
 	locks: unknown[];
 	release: unknown[];
 	preview: unknown[];
-	commits: { ops: EngineOp[] }[];
+	commits: { ops: EngineOp[]; lock_tokens: string[] }[];
 	validate: unknown[];
 };
+
+/** The resources an op needs a lease on, as the server's `required_locks` names them (temp ids need none). */
+function leased(op: EngineOp): string[] {
+	switch (op.kind) {
+		case 'create_element':
+			return [];
+		case 'create_relationship':
+			return [op.source_id, op.target_id].filter((id) => !id.startsWith('tmp_'));
+		default:
+			return [op.id];
+	}
+}
 
 /**
  * The checkout routes of the fake project: every body is recorded, and a
  * commit lands its ops on the project, answering with the project's response
  * text. `hold` stops a commit before it lands; `refuse` answers it 422;
- * `rebound` says the commit swapped the metamodel.
+ * `rebound` says the commit swapped the metamodel; `verifyLocks` answers 409
+ * "required lock not held" when an op's resource is under no token sent.
  */
 function routes(
 	s: EngineStore,
-	options: { hold?: Hold; refuse?: boolean; rebound?: boolean } = {}
+	options: { hold?: Hold; refuse?: boolean; rebound?: boolean; verifyLocks?: boolean } = {}
 ): Bodies {
 	const bodies: Bodies = { locks: [], release: [], preview: [], commits: [], validate: [] };
+	const granted = new Map<string, string[]>();
 	let tokens = 0;
 	server.use(
 		http.post(`${API}/locks`, async ({ request }) => {
@@ -89,6 +115,10 @@ function routes(
 			};
 			bodies.locks.push(body);
 			const token = `t${++tokens}`;
+			granted.set(
+				token,
+				body.targets.map((target) => target.resource_id)
+			);
 			return HttpResponse.json({
 				token,
 				leases: body.targets.map((target) => ({
@@ -115,11 +145,17 @@ function routes(
 			});
 		}),
 		http.post(`${API}/commits`, async ({ request }) => {
-			const body = (await request.json()) as { ops: EngineOp[] };
+			const body = (await request.json()) as { ops: EngineOp[]; lock_tokens: string[] };
 			bodies.commits.push(body);
 			await options.hold?.arrive();
 			if (options.refuse === true) {
 				return HttpResponse.json({ detail: 'structural blocker' }, { status: 422 });
+			}
+			if (options.verifyLocks === true) {
+				const held = new Set(body.lock_tokens.flatMap((token) => granted.get(token) ?? []));
+				if (body.ops.some((op) => leased(op).some((id) => !held.has(id)))) {
+					return HttpResponse.json({ detail: 'required lock not held' }, { status: 409 });
+				}
 			}
 			const committed = s.project.commit(body.ops);
 			return new HttpResponse(commitResponse(committed, options.rebound === true), {
@@ -519,5 +555,267 @@ describe('discarding on the engine side', () => {
 		expect(getStagedOps()).toEqual([]);
 		expect(bodies.release).toEqual([{ token: 't1' }]);
 		expect(getHeldTokens()).toEqual([]);
+	});
+});
+
+describe('a commit whose answer the replica holds', () => {
+	/** A peer's rebind as the feed hands it over: the replica freezes, the project moves past it. */
+	async function peerRebind(s: EngineStore): Promise<void> {
+		s.project.rebind('mm-2');
+		const frozen = s.until((status) => status.phase === 'frozen');
+		handReplicaFeed(
+			{
+				type: 'rebind',
+				rev: s.project.rev,
+				from_metamodel_id: 'mm-1',
+				to_metamodel_id: 'mm-2',
+				validation_error_count: 0
+			},
+			undefined
+		);
+		await frozen;
+	}
+
+	/** The replica, rebuilt onto the metamodel the UI adopts, at the project's head. */
+	async function adopt(s: EngineStore): Promise<void> {
+		const ready = s.until((status) => status.phase === 'ready' && status.rev === s.project.rev);
+		replicaMetamodelAdopted();
+		await ready;
+		await settled(s);
+	}
+
+	/** The ids of the replica's elements whose name holds `q`. */
+	async function found(s: EngineStore, q: string): Promise<string[]> {
+		const page = await s.link.client.call<{ items: { id: string }[] }>('listElementsPage', { q });
+		return page.items.map((item) => item.id);
+	}
+
+	const organization = (tempId: string, name: string): ModelOp => ({
+		kind: 'create_element',
+		temp_id: tempId,
+		type_name: 'Organization',
+		properties: { name }
+	});
+
+	const noDiff = () => {
+		const { counts } = getStagedDiff();
+		return counts.added + counts.modified + counts.deleted === 0;
+	};
+
+	it('frozen: the landed batches leave the readers, a second commit sends none of them, and the rebuilt replica holds each once', async () => {
+		const s = await open();
+		const bodies = routes(s);
+		await ensureElements(['e_000002', 'e_000003']);
+		await peerRebind(s);
+		// A peer's commit past the rebind: the frozen replica follows none of it.
+		feedPeer(s, [{ kind: 'update_element', id: 'e_000003', properties_patch: { name: 'peer' } }]);
+
+		const creates = [
+			organization('tmp_a', 'Alpha Org'),
+			organization('tmp_b', 'Beta Org'),
+			organization('tmp_c', 'Gamma Org')
+		];
+		for (const op of creates) emit(op);
+		await settled(s);
+		expect(getStagedBatchIds()).toEqual([1, 2, 3]);
+
+		const res = await commitStaged('m', false);
+		await commitApplied();
+		expect(getReplicaStatus().phase).toBe('frozen');
+		expect(bodies.commits[0]!.ops).toEqual(creates);
+
+		// The replica still holds them until it applies the answer; the store shows none.
+		expect((await s.link.client.call<{ id: number }[]>('staged')).map((b) => b.id)).toEqual([
+			1, 2, 3
+		]);
+		expect(getStagedBatchIds()).toEqual([]);
+		expect(getStagedOps()).toEqual([]);
+		expect(getStagedChangeCount()).toBe(0);
+		expect(noDiff()).toBe(true);
+
+		// A new edit stages; a commit is refused, and posts nothing, until the answer is applied.
+		emit(rename('e_000002', 'after'));
+		await settled(s);
+		expect(getStagedOps()).toEqual([rename('e_000002', 'after')]);
+		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);
+		expect(bodies.commits).toHaveLength(1);
+		await commitsLanded();
+
+		await adopt(s);
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 4, ops: [rename('e_000002', 'after')] }
+		]);
+		expect(getStagedBatchIds()).toEqual([4]);
+		for (const name of ['Alpha Org', 'Beta Org', 'Gamma Org']) {
+			const ids = await found(s, name);
+			expect(ids).toHaveLength(1);
+			expect(Object.values(res.id_map)).toContain(ids[0]);
+		}
+
+		await commitStaged('m', false);
+		expect(bodies.commits).toHaveLength(2);
+		expect(bodies.commits[1]!.ops).toEqual([rename('e_000002', 'after')]);
+	});
+
+	it('frozen: an update the engine would merge into a landed batch waits for the replica to drop it', async () => {
+		const s = await open();
+		routes(s);
+		await ensureElements(['e_000002']);
+		await peerRebind(s);
+
+		emit(rename('e_000002', 'Quartz'));
+		await commitStaged('m', false);
+		await commitApplied();
+
+		// Merged into the committed batch, the engine would drop it with the answer.
+		emit(rename('e_000002', 'Quartzite'));
+		expect(nameOf('e_000002')).toBe('Quartzite');
+		expect(getStagedOps()).toEqual([rename('e_000002', 'Quartzite')]);
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 1, ops: [rename('e_000002', 'Quartz')] }
+		]);
+
+		await adopt(s);
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 2, ops: [rename('e_000002', 'Quartzite')] }
+		]);
+		expect(getStagedOps()).toEqual([rename('e_000002', 'Quartzite')]);
+		expect(getStagedBatchIds()).toEqual([2]);
+		expect(nameOf('e_000002')).toBe('Quartzite');
+	});
+
+	it('failed: a commit whose answer lands meanwhile is not staged again by the retry, nor sent twice', async () => {
+		const s = await open();
+		const held = hold();
+		const bodies = routes(s, { hold: held });
+		await ensureElements(['e_000001']);
+		emit(rename('e_000001', 'committed name'));
+		emit(organization('tmp_x', 'Delta Org'));
+		await settled(s);
+		expect(getStagedBatchIds()).toEqual([1, 2]);
+
+		const committing = commitStaged('m', false);
+		await held.reached;
+		// While the POST is out, the replica diverges on a peer's delta and cannot be rebuilt.
+		s.project.fail('snapshot', 503, 99);
+		const peer = s.project.commit([
+			{ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'peer' } }
+		]);
+		const failed = s.until((status) => status.phase === 'failed');
+		await s.link.client.call('applyDelta', { text: withWrongDigest(peer) });
+		await failed;
+		held.release();
+		const res = await committing;
+		await commitApplied();
+
+		expect(getReplicaStatus().phase).toBe('failed');
+		expect(getStagedBatchIds()).toEqual([]);
+		expect(getStagedOps()).toEqual([]);
+		expect(getStagedChangeCount()).toBe(0);
+		// A commit waits for the retry: refused, nothing posted.
+		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);
+		expect(bodies.commits).toHaveLength(1);
+
+		s.project.fail('snapshot', 503, 0);
+		const ready = s.until((status) => status.phase === 'ready');
+		retryReplica();
+		await ready;
+		await settled(s);
+
+		expect(await s.link.client.call('staged')).toEqual([]);
+		expect(getStagedBatchIds()).toEqual([]);
+		expect(getStagedOps()).toEqual([]);
+		expect(await found(s, 'Delta Org')).toEqual([res.id_map['tmp_x']]);
+		expect(nameOf('e_000001')).toBe('committed name');
+		expect(bodies.commits).toHaveLength(1);
+	});
+	it('off: a commit whose answer no replica applies is not staged again by the replica that comes back', async () => {
+		const s = await open();
+		const held = hold();
+		const bodies = routes(s, { hold: held });
+		await ensureElements(['e_000001']);
+		emit(rename('e_000001', 'committed name'));
+		await settled(s);
+
+		// The rename is committed; a create is staged while the POST is out.
+		const committing = commitStaged('m', false);
+		await held.reached;
+		emit(organization('tmp_x', 'Kept Org'));
+		await settled(s);
+		// Meanwhile the replica diverges and its re-bootstrap finds no model: `off`.
+		s.project.fail('descriptor', 404, 1);
+		const peer = s.project.commit([
+			{ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'peer' } }
+		]);
+		const off = s.until((status) => status.phase === 'off');
+		await s.link.client.call('applyDelta', { text: withWrongDigest(peer) });
+		await off;
+		held.release();
+		await committing;
+		expect(bodies.commits).toHaveLength(1);
+
+		s.project.opaqueBump();
+		const ready = s.until((status) => status.phase === 'ready');
+		handReplicaFeed({ type: 'reset', model_rev: s.project.rev } as FeedEvent, undefined);
+		await ready;
+		await settled(s);
+
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 2, ops: [organization('tmp_x', 'Kept Org')] }
+		]);
+		expect(getStagedOps()).toEqual([organization('tmp_x', 'Kept Org')]);
+		expect(getStagedBatchIds()).toEqual([2]);
+		expect(nameOf('e_000001')).toBe('committed name');
+	});
+});
+
+describe('reloading the model on the engine side', () => {
+	it('drops the staged edits with their leases; the next edit commits with its own', async () => {
+		const s = await open();
+		const bodies = routes(s, { verifyLocks: true });
+		await ensureElements(['e_000002', 'e_000003']);
+		await ensureCheckout([{ resource_id: 'e_000002', mode: 'exclusive' }], 'edit');
+		emit(rename('e_000002', 'stale'));
+		await settled(s);
+
+		// What "Reload model" does to the model store and the lock registry.
+		await reloadModelStore();
+		resetCheckout();
+		setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
+		await settled(s);
+
+		expect(getStagedOps()).toEqual([]);
+		expect(await s.link.client.call('staged')).toEqual([]);
+
+		await ensureElements(['e_000003']);
+		await ensureCheckout([{ resource_id: 'e_000003', mode: 'exclusive' }], 'edit');
+		emit(rename('e_000003', 'fresh'));
+		await commitStaged('m', false);
+
+		expect(bodies.commits).toHaveLength(1);
+		expect(bodies.commits[0]!.ops).toEqual([rename('e_000003', 'fresh')]);
+		expect(bodies.commits[0]!.lock_tokens).toEqual(['t2']);
+	});
+});
+
+describe('the count of commits in flight', () => {
+	it('a refused POST, a POST that never answers and a commit refused before posting all leave it', async () => {
+		const s = await open();
+		await ensureElement('e_000002');
+		emit(rename('e_000002', 'Quartz'));
+		await settled(s);
+
+		routes(s, { refuse: true });
+		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(ValidationError);
+		await commitsLanded();
+
+		server.use(http.post(`${API}/commits`, () => HttpResponse.error()));
+		await expect(commitStaged('m', false)).rejects.toThrow();
+		await commitsLanded();
+
+		const flight = s.sync.beginCommit();
+		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);
+		flight.abandon();
+		await commitsLanded();
 	});
 });

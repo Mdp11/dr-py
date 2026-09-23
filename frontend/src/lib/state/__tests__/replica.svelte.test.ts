@@ -44,8 +44,10 @@ import {
 } from '../replica.svelte';
 import * as modelEngine from '../model-engine.svelte';
 import {
+	applyDelta,
 	emit,
 	ensureElements,
+	getModelError,
 	getStagedBatchIds,
 	getStagedConflicts,
 	getStagedOps,
@@ -58,6 +60,7 @@ import {
 	engineStore,
 	forceFailed,
 	nameOf,
+	peerDelta,
 	rename,
 	settled,
 	type EngineStore
@@ -1148,5 +1151,148 @@ describe("the overlay's promise, and the frozen replica's", () => {
 		expect(getStagedOps().length + getStagedConflicts().length).toBe(1);
 		expect(getStagedOps()).toEqual([op]);
 		expect(getStagedConflicts()).toEqual([]);
+	});
+});
+
+describe('a worker that dies after the handshake', () => {
+	let store: EngineStore | null = null;
+
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+	});
+
+	/** A rename and a create staged in the replica; the ops and batch ids the store shows. */
+	async function twoEdits(s: EngineStore) {
+		await ensureElements(['e_000001', 'e_000002']);
+		emit(rename('e_000001', 'staged name'));
+		emit(create('tmp_x', 'staged org'));
+		await settled(s);
+		const ops = getStagedOps();
+		expect(getStagedBatchIds()).toEqual([1, 2]);
+		return { ops, ids: [1, 2] };
+	}
+
+	/** A peer's commit: the feed frame to the replica, the delta to the model store. */
+	function feedPeer(s: EngineStore): void {
+		const committed = s.project.commit([
+			{ kind: 'update_element', id: 'e_000003', properties_patch: { name: 'peer' } }
+		]);
+		handReplicaFeed(JSON.parse(committed.eventText) as FeedEvent, committed.eventText);
+		applyDelta(peerDelta(committed));
+	}
+
+	it('a delta that finds it gone rebuilds the replica on a new one, the staged edits carried', async () => {
+		store = await engineStore();
+		const s = store;
+		const { ops, ids } = await twoEdits(s);
+		const dead = s.link;
+
+		dead.dispose();
+		const back = s.until((status) => status.phase === 'ready');
+		feedPeer(s);
+		await back;
+		await settled(s);
+
+		expect(s.link).not.toBe(dead);
+		expect(getStagingSide()).toBe('engine');
+		expect(getStagedOps()).toEqual(ops);
+		expect(getStagedBatchIds()).toEqual(ids);
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 1, ops: [ops[0]] },
+			{ id: 2, ops: [ops[1]] }
+		]);
+		expect(getReplicaStatus()).toMatchObject({ phase: 'ready', rev: s.project.rev });
+		expect(nameOf('e_000001')).toBe('staged name');
+	});
+
+	it('an edit made once it is gone reaches the replica that replaces it', async () => {
+		store = await engineStore();
+		const s = store;
+		const { ops } = await twoEdits(s);
+
+		s.link.dispose();
+		const back = s.until((status) => status.phase === 'ready');
+		emit(rename('e_000002', 'after'));
+		await back;
+		await settled(s);
+
+		expect(getStagedOps()).toEqual([...ops, rename('e_000002', 'after')]);
+		expect(getStagedBatchIds()).toEqual([1, 2, 3]);
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 1, ops: [ops[0]] },
+			{ id: 2, ops: [ops[1]] },
+			{ id: 3, ops: [rename('e_000002', 'after')] }
+		]);
+		expect(nameOf('e_000002')).toBe('after');
+	});
+
+	it('frozen, an edit is refused until the adoption rebuilds the replica, the staged edits carried', async () => {
+		store = await engineStore();
+		const s = store;
+		const { ops, ids } = await twoEdits(s);
+		s.project.rebind('mm-2');
+		const frozen = s.until((status) => status.phase === 'frozen');
+		handReplicaFeed(
+			{
+				type: 'rebind',
+				rev: s.project.rev,
+				from_metamodel_id: 'mm-1',
+				to_metamodel_id: 'mm-2',
+				validation_error_count: 0
+			},
+			undefined
+		);
+		await frozen;
+
+		s.link.dispose();
+		// The refused edit's element is read back from the server: no replica answers.
+		server.use(http.post('*/model/elements/batch', () => HttpResponse.json({ items: [] })));
+		emit(rename('e_000002', 'refused'));
+		await stagedSettled();
+		expect(getModelError()?.kind).toBe('error');
+		expect(getStagedOps()).toEqual(ops);
+
+		const ready = s.until((status) => status.phase === 'ready');
+		replicaMetamodelAdopted();
+		await ready;
+		await settled(s);
+
+		expect(getStagedOps()).toEqual(ops);
+		expect(getStagedBatchIds()).toEqual(ids);
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 1, ops: [ops[0]] },
+			{ id: 2, ops: [ops[1]] }
+		]);
+	});
+
+	it('a worker that cannot be reached again leaves the replica failed, and retry brings the edits back', async () => {
+		store = await engineStore();
+		const s = store;
+		const { ops, ids } = await twoEdits(s);
+
+		s.refuseConnects(1);
+		s.link.dispose();
+		const gaveUp = s.until((status) => status.phase === 'failed' || status.phase === 'server');
+		feedPeer(s);
+		await gaveUp;
+
+		expect(getReplicaStatus().phase).toBe('failed');
+		expect(isReplicaBlocked()).toBe(true);
+		expect(getStagingSide()).toBe('engine');
+		expect(getStagedOps()).toEqual(ops);
+
+		const ready = s.until((status) => status.phase === 'ready');
+		retryReplica();
+		await ready;
+		await settled(s);
+
+		expect(getStagedOps()).toEqual(ops);
+		expect(getStagedBatchIds()).toEqual(ids);
+		expect(await s.link.client.call('staged')).toEqual([
+			{ id: 1, ops: [ops[0]] },
+			{ id: 2, ops: [ops[1]] }
+		]);
+		expect(isReplicaBlocked()).toBe(false);
 	});
 });

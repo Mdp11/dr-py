@@ -10,6 +10,7 @@
  * through a handle (`attachEngine`).
  */
 
+import type { WireBatch } from '$engine';
 import { installEngineSeam } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
 import { createSnapshotCache } from '$lib/engine/cache';
@@ -37,6 +38,8 @@ import { getActiveProjectId } from './active-project.svelte';
 import {
 	attachEngine,
 	detachEngine,
+	forgetBatches,
+	handOverStaged,
 	type EngineHandle,
 	type StatusListener
 } from './model-engine.svelte';
@@ -72,6 +75,11 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 		api: overrides.api ?? replicaApi(),
 		cache: overrides.cache ?? createSnapshotCache(),
 		sleep: overrides.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+		// The model store's engine half: its copy of the staged batches for a
+		// worker that died (its ops are the plain objects the engine reads), and
+		// the committed batches no replica will hold. Detached, it holds none.
+		heldFallback: overrides.heldFallback ?? (() => handOverStaged() as unknown as WireBatch[]),
+		onAbandoned: overrides.onAbandoned ?? ((batchIds) => forgetBatches(batchIds)),
 		onStatus: (status) => {
 			// A sync that was replaced speaks for nothing the UI shows.
 			if (_sync !== made) return;
@@ -306,6 +314,14 @@ export function handReplicaFeed(event: FeedEvent, raw: string | undefined): void
  */
 export function beginReplicaCommit(): CommitFlight {
 	return _sync?.beginCommit() ?? NO_FLIGHT;
+}
+
+/**
+ * A commit is in flight, or the answer of one the user landed waits for the
+ * replica to apply it (the sync's `ownPending()`); false without a sync.
+ */
+export function replicaOwnPending(): boolean {
+	return _sync?.ownPending?.() ?? false;
 }
 
 /** Resolves once the replica has taken in everything it was handed (the sync's `settled()`); at once without a sync. */

@@ -39,7 +39,7 @@ The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op 
 the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
 surfaces' defaults. C (evaluation) is next. Open after B: `K-29`, `K-32`, `K-35`, `K-36`,
-`K-38`, `K-41`, `K-42`, `K-44`, `C-20`, `C-21` in this file; `K-33`, `K-34` in `BACKLOG.md`.
+`K-38`, `K-41`, `K-42`, `K-45`, `C-20`, `C-21` in this file; `K-33`, `K-34` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -126,7 +126,7 @@ replica re-bootstraps on its own (a diverged digest check) both cross that trans
 first open (`opening` to `ready`) does not.
 
 ### K-41 · A rebind's dropped batches leave their dependents parked, unremapped · `open` · *2026-09-22*
-`checkout.svelte.ts` (:526) calls the facade's `dropStagedBatches` (`model.svelte.ts:114` →
+`checkout.svelte.ts` (:589) calls the facade's `dropStagedBatches` (`model.svelte.ts:114` →
 `model-engine.svelte.ts`'s `dropBatches`) to unstage a rebound commit's own batches by id,
 since the frozen replica never applies its delta. Each `unstage {batch}` is a rebase: a LATER
 staged batch that named one of the dropped batches' temp ids (an update or a connect referring
@@ -138,19 +138,19 @@ the rebound response's `id_map` before (or instead of) dropping the batches that
 
 ### K-42 · An edit that survives a commit flight can lose its lease · `open` · *2026-09-22*
 Two ways a lease outlives the POST wrongly:
-(i) **Sent correctly, but a later edit rides on it.** `checkout.svelte.ts`'s
-token partition (:510-530) sends an element's token because the batch being committed NEEDS
-it (or the token also covers a resource the batch needs, :529-531) — an element is typically
-leased in the first place because the committed batch edits it, and the server releases
-exactly what it is sent (`routes/commits.py:1376-1379`), correctly for that batch. The gap is
-an edit staged DURING the POST on that SAME element (a batch of its own, per CT-2): it rides
-on the lease the commit's own batch is about to give up, so once the release lands, the still-
-staged edit is left without one, and its next commit may 409 "required lock not held" until
-the element is touched again (which re-acquires it). The same happens to a proposal (a snippet
+(i) **Sent, and a later edit rides on it.** `checkout.svelte.ts`'s token partition
+(:549-555) keeps back only a token whose resources are all `art:` ones the batch does not
+need; every other token — every element and folder token — is sent unconditionally, whether
+or not the batch needs it (an element is typically leased because the committed batch edits
+it), and the server releases exactly what it is sent (`routes/commits.py:1376-1379`). The gap
+is an edit staged DURING the POST on an element whose token is sent (a batch of its own, per
+CT-2): it rides on a lease the commit gives up, so once the release lands, the still-staged
+edit is left without one, and its next commit may 409 "required lock not held" until the
+element is touched again (which re-acquires it). The same happens to a proposal (a snippet
 or CR Stage) that took its locks before a commit landed and staged its ops after.
 (ii) **Acquired during the POST, forgotten anyway.** A lease taken out WHILE the POST is in
 flight is in neither `sent` nor `kept` (both computed from `getHeldTokens()` before the POST);
-the answer handler's cleanup (`checkout.svelte.ts:585-587`) deletes every registry entry whose
+the answer handler's cleanup (`checkout.svelte.ts:611-613`) deletes every registry entry whose
 token is not in `kept` — including that one — so the client forgets a lease the SERVER still
 holds. The next commit omits the token, `verify_held` (`routes/commits.py:978`) 409s "required
 lock not held", and the heartbeat (which only renews registered tokens) may let the lease
@@ -176,7 +176,7 @@ kept answer on its first drain, so `commitApplied()` no longer needs to wait thr
 (6a5fa93). `stageProposedOps` still waits for `commitsLanded()` before staging a proposal.
 Two residual windows remain — `K-44`.
 
-### K-44 · Two windows still let a coalesced edit merge into a committed batch · `open` · *2026-09-23*
+### K-44 · Two windows still let a coalesced edit merge into a committed batch · `done` · *2026-09-23*
 Left after `K-43`'s fix (`commitApplied()`, `checkout.svelte.ts`): (a) a rebind that freezes
 the replica between the POST answering and the replica applying it ends `commitApplied()`'s
 wait early — the drawer closes — and keeps the answer queued until the new metamodel is
@@ -193,6 +193,29 @@ edit queue up to be released this way, not `admits()` itself. Candidate fixes: d
 own answer before releasing held transitions at `ready`; hold transitions while an own answer
 is still queued; or make the failed overlay inert. Decide whether either window is worth
 closing or stays a known limit.
+**Done:** the model store marks a landed commit's batches COMMITTED the moment the POST
+answers (`markLanded`, `model-engine.svelte.ts`) and DEFERS a single property update the engine
+would merge into one of them (the first staged batch holding an update of that entity): cached
+and shown at once, it is posted — with every edit made after it, in order — only once a mirror
+read shows the replica has dropped that batch. Both windows are closed for an edit made after
+the answer settled: (a) the frozen replica drops the batch at adoption and the deferred edit
+stages after; (b) a deferred edit is never handed to the sync, so `ready`'s `examine()` has
+nothing of it to release before the drain. While the answer waits, a new commit is refused
+(`CommitPendingError`, the sync's `ownPending()`), and `Cmd/Ctrl+S` opens no drawer while the
+replica blocks the workspace.
+
+### K-45 · A worker that dies while a commit's answer waits leaves its dependents unremapped · `open` · *2026-09-23*
+A re-bootstrap that finds the worker gone adopts the model store's copy of the staged batches
+(`handOverStaged`, `model-engine.svelte.ts`), which leaves out the batches of a landed commit
+whose answer the replica has not applied yet — correctly, since the engine is gone and the
+store cannot tell whether it had applied the answer. The answer, applied later, is then a
+`duplicate` naming no batch the new replica holds, so it remaps nothing
+(`engine/src/working/working-copy.ts:471`): a later staged batch naming a temp id that commit
+minted (an update of, or a connect to, an element it created) parks as a conflict instead of
+being rewritten to the server id. The window is a worker death between a commit landing and
+the replica applying its answer — a moment while `ready`, until adoption or `retry()` while
+`frozen` or `failed`. Fix direction: have the sync hand back the committed batches whose own
+answers it still holds (it knows the queue) instead of the store leaving them all out.
 
 ---
 

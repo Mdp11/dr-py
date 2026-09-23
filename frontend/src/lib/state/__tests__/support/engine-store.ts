@@ -37,6 +37,8 @@ export type EngineStore = {
 	statuses: ReplicaStatus[];
 	/** Resolves on the first status, from now on, that passes `test`. */
 	until: UntilFn;
+	/** The next `times` connects reject, as a frame that does not load. */
+	refuseConnects(times: number): void;
 	dispose(): void;
 };
 
@@ -50,6 +52,7 @@ export async function engineStore(options: { project?: FakeProject } = {}): Prom
 	server.use(...project.handlers());
 	localStorage.setItem('dr.surfaces', JSON.stringify({ staging: 'engine' }));
 	const links: EngineLink[] = [];
+	let refusals = 0;
 	const statuses: ReplicaStatus[] = [];
 	const watchers: { test: (s: ReplicaStatus) => boolean; resolve(): void }[] = [];
 	const until = (test: (s: ReplicaStatus) => boolean) =>
@@ -57,6 +60,10 @@ export async function engineStore(options: { project?: FakeProject } = {}): Prom
 	configureReplica({
 		deps: {
 			connect: () => {
+				if (refusals > 0) {
+					refusals -= 1;
+					return Promise.reject(new Error('the engine frame did not load'));
+				}
 				const link = connectInProcess();
 				links.push(link);
 				return Promise.resolve(link);
@@ -94,6 +101,9 @@ export async function engineStore(options: { project?: FakeProject } = {}): Prom
 		},
 		statuses,
 		until,
+		refuseConnects(times) {
+			refusals = times;
+		},
 		dispose() {
 			resetReplica();
 			resetModelStore();

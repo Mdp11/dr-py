@@ -378,6 +378,8 @@ export type SyncOverrides = {
 	api?: Partial<SyncApi>;
 	cache?: SnapshotCache;
 	sleep?: (ms: number) => Promise<void>;
+	heldFallback?: SyncDeps['heldFallback'];
+	onAbandoned?: SyncDeps['onAbandoned'];
 };
 
 /**
@@ -429,6 +431,8 @@ export function syncOver(project: { projectId: string }, overrides: SyncOverride
 				sleeps.push(ms);
 				return Promise.resolve();
 			}),
+		...(overrides.heldFallback === undefined ? {} : { heldFallback: overrides.heldFallback }),
+		...(overrides.onAbandoned === undefined ? {} : { onAbandoned: overrides.onAbandoned }),
 		onStatus: (status) => {
 			statuses.push(status);
 			for (const watcher of [...watchers]) {

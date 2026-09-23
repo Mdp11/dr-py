@@ -84,6 +84,7 @@ export {
 	loadSummary,
 	refreshSummary,
 	resetModelStore,
+	reloadModelStore,
 	seedElements,
 	seedRelationships,
 	seedTreeItems,

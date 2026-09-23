@@ -45,6 +45,12 @@ import { getSelection, select } from './selection.svelte';
  * synchronous staged-edit readers read the mirror and, after it, the
  * PROVISIONAL edits: those posted and not yet covered by a mirror read.
  *
+ * A commit of the user's names the batches it carried; once it has landed
+ * they are COMMITTED, and leave the readers at once, though the replica holds
+ * them until it applies the commit's answer — a `frozen` or `failed` replica
+ * only once it is rebuilt. An edit the engine would merge into one of them
+ * waits, DEFERRED, until the replica has dropped it.
+ *
  * The replica store injects the engine (`attachEngine`) and takes it back
  * (`detachEngine`); detached, this half holds nothing.
  */
@@ -78,9 +84,19 @@ type StagedDiff = {
 
 /**
  * Ops posted to the engine and not yet covered by a mirror read; `answered`
- * is the count of mirror reads issued when the engine answered them.
+ * is the count of mirror reads issued when the engine answered them, and
+ * `batch` the batch the answer put them in. A DEFERRED entry is not posted
+ * yet: it waits for the replica to drop a committed batch it would merge into.
  */
-type Provisional = { seq: number; ops: ModelOp[]; answered: number | null };
+type Provisional = {
+	seq: number;
+	ops: ModelOp[];
+	answered: number | null;
+	batch: StagedBatch | null;
+	deferred: boolean;
+	/** The elements its cache write changed. */
+	touched: Set<string>;
+};
 
 /** The engine's answer to a `stage`: the post-state lists are `null` past 500 entities. */
 type StageAnswer = {
@@ -112,9 +128,31 @@ const _pendingElementFetches = new Map<string, Promise<Element | null>>();
 const _inFlightBatchIds = new Set<string>();
 
 let _batches = $state.raw<StagedBatch[]>([]);
+/**
+ * The mirror's batches a commit of the user's carried, until a mirror read no
+ * longer holds them: they are committed, so no reader shows them and no
+ * commit sends them again, though the replica keeps them staged until it
+ * applies the commit's answer — which a `frozen` or `failed` replica does only
+ * once it is rebuilt.
+ */
+let _landed = $state.raw<ReadonlySet<number>>(landedOf([]));
+/**
+ * Committed batches no replica will hold — the answer of the commit that
+ * carried them was dropped, or a worker gone could not be asked — kept out of
+ * the readers like `_landed` until the next replica is ready without them: a
+ * mirror read of the replica before it may still name them, and one after it
+ * may number a new batch alike.
+ */
+let _abandoned = $state.raw<ReadonlySet<number>>(landedOf([]));
 let _parked = $state.raw<StagedConflict[]>([]);
 let _diff = $state.raw<StagedDiff | null>(null);
 let _provisional = $state.raw<Provisional[]>([]);
+/** A value for `_landed` or `_abandoned`, which are replaced whole and never mutated. */
+function landedOf(ids: Iterable<number>): ReadonlySet<number> {
+	return new Set(ids);
+}
+/** The deferred provisional entries, in the order they are posted once free. */
+let _deferred: Provisional[] = [];
 /** Entity id → edits in flight; a re-read never overwrites such an entity. */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _pending = new Map<string, number>();
@@ -172,7 +210,7 @@ let _epoch = 0;
 export function attachEngine(handle: EngineHandle): void {
 	detachEngine();
 	_handle = handle;
-	setStagedProbe(hasStagedOps);
+	setStagedProbe(replicaHoldsStaged);
 	_unsubscribe = [handle.on('changed', onChanged), handle.subscribe(onStatus)];
 	const { phase } = handle.status();
 	if (phase === 'ready' || phase === 'frozen') readMirror();
@@ -184,9 +222,15 @@ export function detachEngine(): void {
 	_handle = null;
 	setStagedProbe(null);
 	clearAll();
+	_landed = landedOf([]);
+	_abandoned = landedOf([]);
 }
 
-/** The entity half's share of `resetModelStore()`: everything dropped, the mirror read again. */
+/**
+ * The entity half's share of `resetModelStore()`: everything dropped, the
+ * mirror read again — but the batches committed that the replica still
+ * holds stay out of the readers.
+ */
 export function resetEngineStore(): void {
 	clearAll();
 	const handle = _handle;
@@ -208,6 +252,7 @@ function clearAll(): void {
 	_parked = [];
 	_diff = null;
 	_provisional = [];
+	_deferred = [];
 	_pending.clear();
 	_seenVersion = UNKNOWN_VERSION;
 	_mirrorVersion = UNKNOWN_VERSION;
@@ -230,6 +275,8 @@ function onStatus(status: ReplicaStatus, previous: ReplicaStatus): void {
 	_seenVersion = UNKNOWN_VERSION;
 	_healIds = new Set([...(_healIds ?? []), ...mirrorElementIds()]);
 	_healFrom = _reads + 1;
+	// It adopted none of the abandoned batches: an id alike is a new batch's.
+	if (_abandoned.size > 0) _abandoned = landedOf([]);
 	readMirror();
 }
 
@@ -301,7 +348,7 @@ function readMirror(): void {
 
 /** An edit still waits for its answer — which reads the mirror when it comes. */
 function awaitingAnswer(): boolean {
-	return _provisional.some((entry) => entry.answered === null);
+	return _provisional.some((entry) => entry.answered === null && !entry.deferred);
 }
 
 /**
@@ -352,8 +399,17 @@ function pumpMirror(): void {
 			_provisional = _provisional.filter(
 				(entry) => entry.answered === null || entry.answered >= at
 			);
+			// A committed batch the replica no longer holds is gone for good.
+			if (_landed.size > 0) {
+				const held = new Set([
+					...batches.map((batch) => batch.id),
+					...parked.map((conflict) => conflict.batch.id)
+				]);
+				_landed = landedOf([..._landed].filter((id) => held.has(id)));
+			}
 			_mirrorReading = false;
 			if (_healIds !== null && at >= _healFrom) heal(_healIds);
+			postDeferred();
 			pumpMirror();
 		},
 		(error: unknown) => {
@@ -709,10 +765,24 @@ function targetOf(op: ModelOp): string {
 	return op.kind === 'create_element' || op.kind === 'create_relationship' ? op.temp_id : op.id;
 }
 
+/** A committed batch the replica may still hold: no reader shows it. */
+function isCommitted(batchId: number): boolean {
+	return _landed.has(batchId) || _abandoned.has(batchId);
+}
+
+function anyCommitted(): boolean {
+	return _landed.size > 0 || _abandoned.size > 0;
+}
+
+/** The mirror's batches but the committed ones. */
+function stagedBatches(): StagedBatch[] {
+	return anyCommitted() ? _batches.filter((batch) => !isCommitted(batch.id)) : _batches;
+}
+
 /** Every staged op: the mirror's batches in order, then the provisional ones. */
 function stagedOps(): ModelOp[] {
 	const ops: ModelOp[] = [];
-	for (const batch of _batches) ops.push(...batch.ops);
+	for (const batch of stagedBatches()) ops.push(...batch.ops);
 	for (const entry of _provisional) ops.push(...entry.ops);
 	return ops;
 }
@@ -754,16 +824,16 @@ export function hasStagedOps(): boolean {
 }
 
 export function getStagedBatchIds(): number[] {
-	return _batches.map((batch) => batch.id);
+	return stagedBatches().map((batch) => batch.id);
 }
 
 /** The mirror's batches alone: the ops of each are exactly what naming its id commits. */
 export function getStagedBatches(): readonly StagedBatch[] {
-	return _batches;
+	return stagedBatches();
 }
 
 export function getStagedConflicts(): StagedConflict[] {
-	return _parked;
+	return anyCommitted() ? _parked.filter((c) => !isCommitted(c.batch.id)) : _parked;
 }
 
 /** A staged `delete_element` targets `id`. */
@@ -775,11 +845,14 @@ export function isStagedDeleted(id: string): boolean {
 export function getStagedDiff(): Diff {
 	const elements = { before: [] as Element[], after: [] as Element[] };
 	const relationships = { before: [] as Relationship[], after: [] as Relationship[] };
+	const committed = committedOnly(landedOf([..._landed, ..._abandoned]));
 	for (const entry of _diff?.elements ?? []) {
+		if (committed.has(entry.id)) continue;
 		if (entry.before !== null) elements.before.push(entry.before);
 		if (entry.after !== null) elements.after.push(entry.after);
 	}
 	for (const entry of _diff?.relationships ?? []) {
+		if (committed.has(entry.id)) continue;
 		if (entry.before !== null) relationships.before.push(entry.before);
 		if (entry.after !== null) relationships.after.push(entry.after);
 	}
@@ -792,6 +865,108 @@ export function getStagedDiff(): Diff {
 export function getStagedChangeCount(): number {
 	const c = getStagedDiff().counts;
 	return c.added + c.modified + c.deleted;
+}
+
+/**
+ * The diff's entity ids only the batches `ids` account for: what their ops
+ * name, and the cascade of a delete among them — the deleted relationships
+ * incident to a deleted element of it, and the deleted elements those
+ * relationships contain — less anything another staged edit names.
+ */
+function committedOnly(ids: ReadonlySet<number>): Set<string> {
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral membership check
+	const out = new Set<string>();
+	if (ids.size === 0 || _diff === null) return out;
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral membership check
+	const deleted = new Set<string>();
+	for (const batch of [..._batches, ..._parked.map((conflict) => conflict.batch)]) {
+		if (!ids.has(batch.id)) continue;
+		for (const op of batch.ops) {
+			out.add(entityOf(op));
+			if (op.kind === 'delete_element') deleted.add(op.id);
+		}
+	}
+	const gone = new Set(_diff.elements.filter((e) => e.after === null).map((e) => e.id));
+	for (let grew = deleted.size > 0; grew; ) {
+		grew = false;
+		for (const entry of _diff.relationships) {
+			if (entry.after !== null || entry.before === null || out.has(entry.id)) continue;
+			const { source_id: source, target_id: target } = entry.before;
+			if (!deleted.has(source) && !deleted.has(target)) continue;
+			out.add(entry.id);
+			// A delete cascades from a container, the source, to what it contains.
+			if (deleted.has(source) && gone.has(target) && !deleted.has(target)) {
+				deleted.add(target);
+				out.add(target);
+			}
+			grew = true;
+		}
+	}
+	for (const op of stagedOps()) out.delete(entityOf(op));
+	for (const conflict of getStagedConflicts()) {
+		for (const op of conflict.batch.ops) out.delete(entityOf(op));
+	}
+	return out;
+}
+
+/**
+ * The batches a commit of the user's carried, once the server has landed it:
+ * no reader shows them and no commit sends them again, from now until a
+ * mirror read no longer holds them.
+ */
+export function markLanded(batchIds: readonly number[]): void {
+	if (batchIds.length === 0) return;
+	_landed = landedOf([..._landed, ...batchIds]);
+}
+
+/**
+ * The batches `batchIds` will not be in the replica that comes next — the
+ * answer of the commit that carried them was dropped, or they are committed
+ * and a worker gone could not be asked: they leave the mirror now, with what
+ * the diff owes them alone, and stay out of the readers until that replica
+ * is ready.
+ */
+export function forgetBatches(batchIds: readonly number[]): void {
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral membership check
+	const ids = new Set(batchIds);
+	if (ids.size === 0) return;
+	const committed = committedOnly(ids);
+	if (_diff !== null && committed.size > 0) {
+		_diff = {
+			elements: _diff.elements.filter((entry) => !committed.has(entry.id)),
+			relationships: _diff.relationships.filter((entry) => !committed.has(entry.id))
+		};
+	}
+	_batches = _batches.filter((batch) => !ids.has(batch.id));
+	_parked = _parked.filter((conflict) => !ids.has(conflict.batch.id));
+	_landed = landedOf([..._landed].filter((id) => !ids.has(id)));
+	_abandoned = landedOf([..._abandoned, ...ids]);
+	postDeferred();
+	release();
+}
+
+/**
+ * What a re-bootstrap adopts when the worker is gone and cannot be asked: the
+ * staged and parked batches as this half last knew them — the mirror's, each
+ * replaced by a later stage answer's — less the committed ones, which leave
+ * the mirror as they are handed over. An edit not answered yet is not among
+ * them: the sync holds it and posts it to the replica that adopts them.
+ */
+export function handOverStaged(): StagedBatch[] {
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral lookup
+	const byId = new Map<number, StagedBatch>();
+	for (const batch of _batches) byId.set(batch.id, batch);
+	for (const conflict of _parked) byId.set(conflict.batch.id, conflict.batch);
+	for (const entry of _provisional) if (entry.batch !== null) byId.set(entry.batch.id, entry.batch);
+	const committed = [..._landed, ..._abandoned];
+	const out = [...byId.values()].filter((batch) => !isCommitted(batch.id));
+	forgetBatches(committed);
+	return out.sort((a, b) => a.id - b.id);
+}
+
+/** Anything is staged in the replica, the committed batches it still holds included. */
+function replicaHoldsStaged(): boolean {
+	return _batches.some((batch) => batch.ops.length > 0) || _provisional.length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -909,9 +1084,47 @@ function stage(given: readonly ModelOp[]): void {
 		_pending.set(id, (_pending.get(id) ?? 0) + 1);
 	}
 	_seq += 1;
-	const entry: Provisional = { seq: _seq, ops, answered: null };
+	const entry: Provisional = {
+		seq: _seq,
+		ops,
+		answered: null,
+		batch: null,
+		deferred: false,
+		touched
+	};
 	_provisional = [..._provisional, entry];
+	// Behind a deferred edit, every later one waits too: they reach the engine in order.
+	if (_deferred.length > 0 || mergesIntoCommitted(ops)) {
+		entry.deferred = true;
+		_deferred.push(entry);
+		return;
+	}
 	void post(entry, touched);
+}
+
+/**
+ * Whether the engine would merge `ops` into a committed batch it still
+ * holds: a single property update merges into the first staged batch
+ * holding an update of the same entity, and such a batch is dropped whole
+ * once the replica applies the commit's answer.
+ */
+function mergesIntoCommitted(ops: readonly ModelOp[]): boolean {
+	if (!anyCommitted() || ops.length !== 1) return false;
+	const op = ops[0]!;
+	if (op.kind !== 'update_element' && op.kind !== 'update_relationship') return false;
+	const first = _batches.find((batch) =>
+		batch.ops.some((other) => other.kind === op.kind && other.id === op.id)
+	);
+	return first !== undefined && isCommitted(first.id);
+}
+
+/** Posts the deferred edits, in order, up to one that would still merge into a committed batch. */
+function postDeferred(): void {
+	while (_deferred.length > 0 && !mergesIntoCommitted(_deferred[0]!.ops)) {
+		const entry = _deferred.shift()!;
+		entry.deferred = false;
+		void post(entry, entry.touched);
+	}
 }
 
 async function post(entry: Provisional, touched: Set<string>): Promise<void> {
@@ -951,6 +1164,7 @@ function unpend(entry: Provisional): Set<string> {
  * flight for; a newer edit's own answer writes them.
  */
 function answered(entry: Provisional, answer: StageAnswer): void {
+	entry.batch = answer.batch;
 	const done = unpend(entry);
 	if (answer.elements === null) {
 		const ids = [...done].filter((id) => _elements.has(id));
@@ -977,10 +1191,18 @@ function answered(entry: Provisional, answer: StageAnswer): void {
  * change is healed by the refetch a structure-rev bump starts.
  */
 function refused(entry: Provisional, touched: Set<string>, error: unknown): void {
-	_provisional = _provisional.filter((e) => e !== entry);
-	unpend(entry);
 	const message = error instanceof Error ? error.message : String(error);
 	setModelError({ kind: error instanceof EngineGoneError ? 'error' : 'rejected', message });
+	withdraw(entry, touched);
+}
+
+/**
+ * Takes an edit the engine does not hold out of this half: the elements its
+ * cache write changed are read back, as the engine has them.
+ */
+function withdraw(entry: Provisional, touched: Set<string>): void {
+	_provisional = _provisional.filter((e) => e !== entry);
+	unpend(entry);
 	for (const op of entry.ops) {
 		const id = entityOf(op);
 		if (isPending(id)) continue;
@@ -1053,19 +1275,34 @@ function touches(op: ModelOp, id: string): boolean {
 	return false;
 }
 
+/** Withdraws the deferred edits `test` picks: the engine never had them. */
+function withdrawDeferred(test: (entry: Provisional) => boolean): void {
+	const picked = _deferred.filter(test);
+	if (picked.length === 0) return;
+	_deferred = _deferred.filter((entry) => !picked.includes(entry));
+	for (const entry of picked) withdraw(entry, entry.touched);
+	postDeferred();
+}
+
 /**
  * Undo: unstages the last staged batch — a coalesced keystroke lives in its
- * first one. False, undoing nothing, when nothing is staged or the mirror is
- * refused (which reads it again for the next try).
+ * first one — or withdraws the last deferred edit, the newest of all. False,
+ * undoing nothing, when nothing is staged or the mirror is refused (which
+ * reads it again for the next try).
  */
 export function popLastStaged(): boolean {
+	const deferred = _deferred.at(-1);
+	if (deferred !== undefined) {
+		withdrawDeferred((entry) => entry === deferred);
+		return true;
+	}
 	if (_mirrorFailed) {
 		readMirror();
 		return false;
 	}
 	if (!hasStagedOps()) return false;
 	unstageAfter(async (handle) => {
-		const last = _batches.at(-1);
+		const last = stagedBatches().at(-1);
 		if (last !== undefined) await unstage(handle, { batch: last.id });
 	});
 	return true;
@@ -1073,6 +1310,7 @@ export function popLastStaged(): boolean {
 
 /** Unstages every staged op targeting `id`; a parked batch stays for the conflicts. */
 export function revertStagedFor(id: string): void {
+	withdrawDeferred((entry) => entry.ops.some((op) => targetOf(op) === id));
 	unstageAfter((handle) => unstage(handle, { entity: id }));
 }
 
@@ -1081,6 +1319,7 @@ export function revertStagedFor(id: string): void {
  * the parked batches that do.
  */
 export function revertStagedForElement(id: string): void {
+	withdrawDeferred((entry) => entry.ops.some((op) => touches(op, id)));
 	unstageAfter(async (handle) => {
 		const parked = _parked
 			.filter((conflict) => conflict.batch.ops.some((op) => touches(op, id)))
@@ -1092,7 +1331,20 @@ export function revertStagedForElement(id: string): void {
 
 /** Unstages everything, parked batches included. */
 export function revertAllStaged(): void {
+	withdrawDeferred(() => true);
 	unstageAfter((handle) => unstage(handle, 'all'));
+}
+
+/**
+ * Unstages everything, parked batches included, whether or not the mirror
+ * can be read; resolves once the engine has answered and this half has taken
+ * it in. What a reload of the model does before it drops the caches: the
+ * leases of the edits go with the reload.
+ */
+export function discardAllStaged(): Promise<void> {
+	withdrawDeferred(() => true);
+	unstageAfter((handle) => unstage(handle, 'all'), { readsMirror: false });
+	return waitFor(isSettled);
 }
 
 /** Drops a parked batch. */

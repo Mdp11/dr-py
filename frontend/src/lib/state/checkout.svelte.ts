@@ -41,6 +41,7 @@ import {
 	getModelRev,
 	getStagedConflicts,
 	getStagedOps,
+	markStagedLanded,
 	markStructureChanged,
 	refetchIssues,
 	refreshSummary,
@@ -59,6 +60,7 @@ import {
 	getReplicaStatus,
 	getStagingSide,
 	replicaMetamodelAdopted,
+	replicaOwnPending,
 	replicaSettled,
 	subscribeReplicaStatus
 } from './replica.svelte';
@@ -444,8 +446,11 @@ export async function commitsLanded(): Promise<void> {
  * edits and mirror reads that a failed replica holds until then). It also
  * ends, the answer still queued, when the replica is `frozen` by a rebind
  * any time before the answer is applied: the answer waits for the new
- * metamodel, and an update staged meanwhile can still merge into a
- * committed batch. `null` on the legacy side, whose buffer merges nothing.
+ * metamodel. Either way the committed batches have left the staged-edit
+ * readers, an update the engine would merge into one of them waits in the
+ * model store until the replica has dropped it, and a new commit is refused
+ * until then ({@link CommitPendingError}). `null` on the legacy side, whose
+ * buffer merges nothing.
  */
 export function commitApplied(): Promise<void> | null {
 	if (getStagingSide() !== 'engine') return null;
@@ -466,6 +471,21 @@ export function commitApplied(): Promise<void> | null {
 	});
 }
 
+/**
+ * A commit refused, posting nothing, while the replica has not applied the
+ * answer of the user's previous one — it waits for the new metamodel, or for
+ * the replica a retry rebuilds. Until then the batches still staged may name
+ * the temp ids that commit gave server ids to.
+ */
+export class CommitPendingError extends Error {
+	constructor() {
+		super(
+			'Your previous commit has not reached the replica yet. Adopt the new metamodel, or retry the replica, then commit again.'
+		);
+		this.name = 'CommitPendingError';
+	}
+}
+
 async function commitNow(
 	message: string,
 	ackErrors: boolean,
@@ -475,7 +495,10 @@ async function commitNow(
 	// edit has reached them. A staged list the engine cannot say rejects here,
 	// before anything is posted. The legacy buffer is exact at once, and its
 	// commit is posted in the tick it is called.
-	if (getStagingSide() === 'engine') await stagedSettled();
+	if (getStagingSide() === 'engine') {
+		if (replicaOwnPending()) throw new CommitPendingError();
+		await stagedSettled();
+	}
 	// The ops sent and the batches named, read together: the response drops
 	// exactly the named batches, so an edit staged while the POST is in flight
 	// is in neither and stays staged.
@@ -548,6 +571,9 @@ async function commitNow(
 		flight.abandon();
 		throw error;
 	}
+	// Committed: out of the staged-edit readers and of every later commit from
+	// now on, though the replica holds them until it applies this answer.
+	if (res.prev_rev != null || res.rebound === true) markStagedLanded(model.batchIds);
 	flight.settle({
 		text: responseText,
 		rev: res.model_rev,

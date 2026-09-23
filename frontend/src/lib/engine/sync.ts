@@ -75,6 +75,17 @@ export type SyncDeps = {
 	cache: SnapshotCache;
 	sleep(ms: number): Promise<void>;
 	onStatus(status: ReplicaStatus): void;
+	/**
+	 * The staged and parked batches as the model store last read them, handed
+	 * over when a re-bootstrap finds the worker gone and cannot ask it. The
+	 * store leaves out the batches its own commits carried: they are committed.
+	 */
+	heldFallback?(): WireBatch[];
+	/**
+	 * The batches of the user's own commits whose answers no replica will
+	 * apply now: the next replica does not hold them.
+	 */
+	onAbandoned?(batchIds: readonly number[]): void;
 };
 
 /** What the server answered to the user's own commit. */
@@ -118,6 +129,12 @@ export type ReplicaSync = {
 	/** A `failed` replica re-bootstraps, adopting the batches it held; any other phase: nothing. */
 	retry(): void;
 	beginCommit(): CommitFlight;
+	/**
+	 * A commit is in flight, or the answer of one the user landed waits for a
+	 * replica to apply it — while `frozen` or `failed`, until the replica
+	 * after them does. Optional for a stand-in sync; `createReplicaSync`'s has it.
+	 */
+	ownPending?(): boolean;
 	metamodelAdopted(): void;
 	/**
 	 * A read answered by the replica once its `rev` has reached every `rev`
@@ -126,9 +143,11 @@ export type ReplicaSync = {
 	 * answers as it is. A `transition` waits for phase `ready` or `frozen`
 	 * alone — while opening, resyncing or failed, so the batches a
 	 * re-bootstrap carries are adopted first — and every call asked after it
-	 * is posted after it. Rejects with `EngineGoneError` when there is no
-	 * replica to ask — no open, phase `off` or `server`, a `stop()`
-	 * meanwhile, a worker gone.
+	 * is posted after it. A call that finds the worker gone rebuilds a ready
+	 * replica on a new one; a transition then waits for it, a read rejects.
+	 * Rejects with `EngineGoneError` when there is no replica to ask — no
+	 * open, phase `off` or `server`, a `stop()` meanwhile, a worker gone
+	 * under a read.
 	 */
 	call<T>(method: string, params?: unknown, options?: CallOptions): Promise<T>;
 	/**
@@ -238,6 +257,13 @@ type Run = {
 	 * adopted them and is ready — through a `failed` or an `off` in between.
 	 */
 	held: WireBatch[] | null;
+	/**
+	 * The batches of the user's own commits whose answers were dropped: no
+	 * replica applies them, so none adopts them either.
+	 */
+	abandoned: Set<number>;
+	/** The input the pump is handling. */
+	handling: Input | null;
 	connecting: Promise<EngineLink> | null;
 	/** The highest rev a rebind froze the replica at; a rebind at or below it is its echo. */
 	frozenAt: number;
@@ -259,6 +285,8 @@ class Superseded extends Error {
  * a transition until the phase takes it.
  */
 type Waiter = {
+	/** Arrival order: a transition held again after its worker died keeps its place. */
+	readonly seq: number;
 	readonly target: number;
 	readonly transition: boolean;
 	release(): void;
@@ -306,6 +334,8 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	/** The highest `rev` the sync has been handed since `open()`: what a read waits for. */
 	let known = 0;
 	const waiters: Waiter[] = [];
+	/** Calls asked so far: a held call's place in arrival order. */
+	let calls = 0;
 	const placements = new Map<string, readonly string[]>();
 	const changedListeners = new Set<(event: ChangedEvent) => void>();
 
@@ -327,12 +357,25 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		return phase === 'ready' && status.rev !== null && status.rev >= target;
 	};
 
-	/** Whether a transition may go to the engine now: the phase alone, never the rev. */
-	const admits = (): boolean => status.phase === 'ready' || status.phase === 'frozen';
+	/**
+	 * Whether a transition may go to the engine now: the phase alone, never
+	 * the rev — and a worker to take it, since one gone is replaced by a
+	 * re-bootstrap that adopts the batches first.
+	 */
+	const admits = (): boolean =>
+		(status.phase === 'ready' || status.phase === 'frozen') && link !== null;
 
 	const due = (waiter: Waiter): boolean => (waiter.transition ? admits() : answers(waiter.target));
 
-	const refuses = (): boolean => status.phase === 'off' || status.phase === 'server';
+	/**
+	 * No replica to ask: none, or a frozen one whose worker is gone — the
+	 * adoption rebuilds it, with the batches it held, and until then an edit
+	 * waiting for it would hold every commit and read behind it.
+	 */
+	const refuses = (): boolean =>
+		status.phase === 'off' ||
+		status.phase === 'server' ||
+		(status.phase === 'frozen' && link === null);
 
 	const refuseWaiters = () => {
 		for (const waiter of waiters.splice(0)) waiter.refuse(new EngineGoneError());
@@ -357,6 +400,38 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		if (going.length === 0) return;
 		for (const waiter of going) waiters.splice(waiters.indexOf(waiter), 1);
 		for (const waiter of going) waiter.release();
+	};
+
+	/** Holds `waiter` at its place in arrival order. */
+	const hold = (waiter: Waiter) => {
+		let at = waiters.length;
+		while (at > 0 && waiters[at - 1]!.seq > waiter.seq) at -= 1;
+		waiters.splice(at, 0, waiter);
+	};
+
+	/**
+	 * The answers of the user's own commits in `dropped` will be applied by
+	 * no replica: their batches leave what the run holds and stay out of
+	 * every replica it opens, and the model store is told.
+	 */
+	const forget = (r: Run, dropped: readonly Input[]) => {
+		const ids: number[] = [];
+		for (const input of dropped) {
+			if (input.kind !== 'delta' || input.own === undefined) continue;
+			for (const id of input.own.batch_ids) {
+				r.abandoned.add(id);
+				ids.push(id);
+			}
+		}
+		if (ids.length === 0) return;
+		if (r.held !== null) r.held = r.held.filter((batch) => !r.abandoned.has(batch.id));
+		deps.onAbandoned?.(ids);
+	};
+
+	/** Empties the waiting inputs, the user's own answers with them. */
+	const dropQueue = (r: Run) => {
+		const dropped = queue.splice(0);
+		forget(r, dropped);
 	};
 
 	const learnRev = (rev: number) => {
@@ -401,6 +476,17 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				}
 			);
 		});
+	};
+
+	/**
+	 * The worker behind `made` is gone: the link goes, and a replica being
+	 * followed is rebuilt on a new one. A frozen replica is rebuilt by the
+	 * adoption, a failed one by `retry()`, the same way.
+	 */
+	const lost = (r: Run, made: EngineLink) => {
+		if (link !== made) return;
+		dropLink();
+		ask(r, r.epoch);
 	};
 
 	const current = (c: Cycle): boolean =>
@@ -599,6 +685,8 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		}
 		r.everReady = true;
 		r.held = null;
+		// The replica holds none of them: a batch numbered alike from now on is a new one.
+		r.abandoned.clear();
 		set({ phase: 'ready', rev: result.rev, attempt: 0, progress: null, reason: null });
 		pump(r);
 		return 'ready';
@@ -632,9 +720,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				outcome = await attempt(c, cacheAllowed, batches);
 			} catch (error) {
 				if (error instanceof Stopped || !current(c)) return;
+				// A frame that did not load will not load a second later.
 				if (error instanceof LinkFailed) {
-					queue.length = 0;
-					set({ phase: 'server', attempt: 0, progress: null, reason: error.message });
+					giveUp(r, error.message);
 					return;
 				}
 				if (error instanceof CachedBytesRefused) {
@@ -665,7 +753,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				continue;
 			}
 			if (outcome === 'no model') {
-				queue.length = 0;
+				dropQueue(r);
 				set({
 					phase: 'off',
 					rev: null,
@@ -681,17 +769,20 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 
 	/**
 	 * Before the first ready of an open, the server serves instead; after it,
-	 * the replica has failed. A failed replica keeps the user's own commits for
-	 * the one a retry rebuilds: the batches it holds include the ones those
-	 * commits carried, which only their bookkeeping drops.
+	 * the replica has failed — a worker that cannot be reached again included —
+	 * and `retry()` rebuilds it with the batches the run holds. A failed
+	 * replica keeps the user's own commits for the one a retry rebuilds: the
+	 * batches it holds include the ones those commits carried, which only
+	 * their bookkeeping drops.
 	 */
 	const giveUp = (r: Run, reason: string) => {
-		const own = r.everReady ? queue.filter(isOwn) : [];
-		queue.length = 0;
-		queue.push(...own);
 		if (r.everReady) {
+			const own = queue.filter(isOwn);
+			queue.length = 0;
+			queue.push(...own);
 			set({ phase: 'failed', attempt: 0, progress: null, reason });
 		} else {
+			dropQueue(r);
 			dropLink();
 			set({ phase: 'server', attempt: 0, progress: null, reason });
 		}
@@ -702,15 +793,16 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	/**
 	 * A fresh replica from a fresh snapshot, on the same worker: the staged and
 	 * parked batches are read first and held — once the engine is told `close`
-	 * it no longer has them — and every attempt adopts them. The cache is not
-	 * read, and its row is dropped: bytes a replica diverged from must not
-	 * open the next one.
+	 * it no longer has them — and every attempt adopts them. A worker that is
+	 * gone cannot be asked: the model store's copy of them is held instead.
+	 * The cache is not read, and its row is dropped: bytes a replica diverged
+	 * from must not open the next one.
 	 */
 	const resync = async (c: Cycle): Promise<void> => {
 		const r = c.run;
 		set({ phase: 'resyncing', attempt: 1, progress: null, source: null, reason: null });
 		if (r.held === null) {
-			let batches: WireBatch[] = [];
+			let batches: WireBatch[] | null = null;
 			if (link !== null) {
 				const engine = link.client;
 				try {
@@ -722,10 +814,8 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 						])
 					);
 					batches = [...staged, ...conflicts.map((conflict) => conflict.batch)];
-					batches.sort((a, b) => a.id - b.id);
 				} catch (error) {
 					if (error instanceof Stopped || !current(c)) return;
-					// The worker is gone, and its batches with it.
 					if (!(error instanceof EngineGoneError)) {
 						giveUp(r, reasonOf(error));
 						return;
@@ -733,7 +823,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 					dropLink();
 				}
 			}
-			r.held = batches;
+			batches ??= [...(deps.heldFallback?.() ?? [])];
+			batches.sort((a, b) => a.id - b.id);
+			r.held = batches.filter((batch) => !r.abandoned.has(batch.id));
 		}
 		try {
 			await guard(c, deps.cache.drop(r.projectId));
@@ -855,7 +947,11 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 
 	const enqueue = (input: Input) => {
 		const r = run;
-		if (r === null || !waits(input)) return;
+		if (r === null) return;
+		if (!waits(input)) {
+			forget(r, [input]);
+			return;
+		}
 		if (queue.length >= WAITING_MAX) {
 			// The tail brings the replica to head, past whatever was waiting.
 			const own = queue.filter(isOwn);
@@ -897,6 +993,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		try {
 			while (following(r, epoch) && r.flights === 0 && queue.length > 0) {
 				const input = queue.shift()!;
+				r.handling = input;
 				try {
 					await handle(r, epoch, input);
 				} catch (error) {
@@ -912,8 +1009,12 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 					if (error instanceof EngineGoneError) dropLink();
 					if (input.kind === 'delta' && input.retried !== true) {
 						requeue({ ...input, retried: true });
+					} else {
+						forget(r, [input]);
 					}
 					ask(r, epoch);
+				} finally {
+					if (r.handling === input) r.handling = null;
 				}
 			}
 		} finally {
@@ -1017,6 +1118,8 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 				cycling: false,
 				again: false,
 				held: null,
+				abandoned: new Set(),
+				handling: null,
 				connecting: null,
 				frozenAt: -1
 			};
@@ -1089,6 +1192,12 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 			};
 		},
 
+		ownPending() {
+			const r = run;
+			if (r === null) return false;
+			return r.flights > 0 || queue.some(isOwn) || (r.handling !== null && isOwn(r.handling));
+		},
+
 		metamodelAdopted() {
 			if (run !== null && status.phase === 'frozen') rebootstrap(run);
 		},
@@ -1096,40 +1205,60 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		call<T>(method: string, params?: unknown, options: CallOptions = {}) {
 			const { signal } = options;
 			const transition = options.transition === true;
-			if (run === null || refuses()) return Promise.reject(new EngineGoneError());
+			const r = run;
+			if (r === null || refuses()) return Promise.reject(new EngineGoneError());
 			if (signal?.aborted) return Promise.reject(aborted());
-			const post = (): Promise<T> => {
-				if (link === null) return Promise.reject(new EngineGoneError());
-				return link.client.call<T>(method, params, signal === undefined ? {} : { signal });
-			};
 			const target = known;
+			const seq = (calls += 1);
+			const post = (): Promise<T> => {
+				const made = link;
+				if (made === null) return Promise.reject(new EngineGoneError());
+				const sent = made.client.call<T>(method, params, signal === undefined ? {} : { signal });
+				return sent.catch((error: unknown) => {
+					if (!(error instanceof EngineGoneError) || run !== r) throw error;
+					// The worker died under the call: the replica is rebuilt on a new one,
+					// and a transition waits for it, behind the batches it adopts.
+					lost(r, made);
+					if (!transition || refuses()) throw error;
+					return wait(true);
+				});
+			};
+			/** `again`: a transition held once more, which the status may admit already. */
+			const wait = (again = false): Promise<T> =>
+				new Promise<T>((resolve, reject) => {
+					if (signal?.aborted) {
+						reject(aborted());
+						return;
+					}
+					const onAbort = () => {
+						const at = waiters.indexOf(waiter);
+						if (at === -1) return;
+						waiters.splice(at, 1);
+						reject(aborted());
+						// A transition leaving may free the calls it held.
+						if (transition) examine();
+					};
+					const waiter: Waiter = {
+						seq,
+						target,
+						transition,
+						release() {
+							signal?.removeEventListener('abort', onAbort);
+							post().then(resolve, reject);
+						},
+						refuse(error) {
+							signal?.removeEventListener('abort', onAbort);
+							reject(error);
+						}
+					};
+					hold(waiter);
+					signal?.addEventListener('abort', onAbort, { once: true });
+					if (again) examine();
+				});
 			// A waiting transition is one the phase still holds, and it holds every later call.
 			const blocked = waiters.some((waiter) => waiter.transition);
 			if (!blocked && (transition ? admits() : answers(target))) return post();
-			return new Promise<T>((resolve, reject) => {
-				const onAbort = () => {
-					const at = waiters.indexOf(waiter);
-					if (at === -1) return;
-					waiters.splice(at, 1);
-					reject(aborted());
-					// A transition leaving may free the calls it held.
-					if (transition) examine();
-				};
-				const waiter: Waiter = {
-					target,
-					transition,
-					release() {
-						signal?.removeEventListener('abort', onAbort);
-						post().then(resolve, reject);
-					},
-					refuse(error) {
-						signal?.removeEventListener('abort', onAbort);
-						reject(error);
-					}
-				};
-				waiters.push(waiter);
-				signal?.addEventListener('abort', onAbort, { once: true });
-			});
+			return wait();
 		},
 
 		on(_event, listener) {

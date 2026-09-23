@@ -6,7 +6,7 @@
  * destroy.
  *
  * Shortcuts:
- *   Cmd/Ctrl+S      open the diff drawer (save)
+ *   Cmd/Ctrl+S      open the diff drawer (save); nothing while the replica blocks the workspace
  *   Cmd/Ctrl+E      run validation
  *
  * When focus is inside an <input>, <textarea>, or [contenteditable], most
@@ -17,7 +17,7 @@
  * without dragging the Svelte rune compiler into vitest.
  */
 
-import { setDiffDrawerOpen } from './state';
+import { isReplicaBlocked, setDiffDrawerOpen } from './state';
 import { isEditableTarget, matchShortcut, shortcutWorksInInputs } from './keyboard';
 import { runValidation } from './state/validate-action';
 
@@ -34,6 +34,8 @@ function handle(e: KeyboardEvent): void {
 
 	switch (action.kind) {
 		case 'save':
+			// The failed overlay covers the workspace, the commit drawer included.
+			if (isReplicaBlocked()) return;
 			setDiffDrawerOpen(true);
 			return;
 		case 'validate':

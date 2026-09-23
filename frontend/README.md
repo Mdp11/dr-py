@@ -119,7 +119,9 @@ The UI is a fixed grid:
 
 There is no command palette; these are the only global shortcuts
 (`keyboard.ts` / `keyboard.svelte.ts`). `Cmd+S` fires even when focus is
-inside an input; `Cmd+E` is suppressed while typing.
+inside an input, but opens nothing while the replica blocks the workspace
+(`isReplicaBlocked()`: the failed overlay covers the drawer too); `Cmd+E` is
+suppressed while typing.
 
 ## Architecture
 
@@ -229,7 +231,16 @@ engine store":
    the response's delta and rewrites the temp ids of the rest through its
    `id_map`, so an edit staged while the POST is in flight — in neither
    list — stays staged, a batch of its own. A refused POST abandons the
-   flight and every batch stays. A commit that swapped the metamodel
+   flight and every batch stays. Once the POST has landed (`prev_rev` set,
+   or `rebound`) the batches it named are COMMITTED (`markStagedLanded`):
+   they leave every staged-edit reader, the badge, the drawer and
+   `captureStaged()` at once, though the replica holds them until it applies
+   the commit's answer — while `ready` a moment later, while `frozen` or
+   `failed` only once it is rebuilt — so they are never shown as staged nor
+   sent again. A new commit is refused (`CommitPendingError`, nothing
+   posted) while the sync's `ownPending()` holds — a flight open, or an own
+   answer still waiting for a replica — since the batches still staged may
+   name temp ids that commit minted. A commit that swapped the metamodel
    (`rebound`) freezes the replica, which never applies it: its batches are
    unstaged by id (`dropStagedBatches`), which also finds them in a replica
    that adopted them after the re-bootstrap — a later staged batch naming one
@@ -257,9 +268,9 @@ engine store":
    in `failed` would also wait on edits and mirror reads it holds until
    then. A rebind that freezes the replica between the POST and the
    answer's application (a peer's, landing meanwhile) ends the wait too, and
-   keeps the answer queued until the new metamodel is adopted: an update
-   staged in between can still merge into a committed batch (a known
-   limit). A refused commit
+   keeps the answer queued until the new metamodel is adopted; meanwhile an
+   update the engine would merge into a committed batch is DEFERRED by the
+   store (see "The engine store") rather than dropped with it. A refused commit
    frees the drawer at once, and on the legacy side (`commitApplied()` is
    `null`) it closes as soon as the POST answers.
 5. **Undo** is **client-side** over the staged buffer (`popLastStaged` reverts
@@ -572,7 +583,8 @@ answer is the newer one.
   delete of what is not cached changes nothing); (2) the entity's PENDING
   count goes up; (3) the op joins the PROVISIONAL entries; (4) it is posted
   as `stage` (a transition: held for the phase, never for a rev, and never
-  lost to a re-bootstrap). The cache write is what keeps a field's text under
+  lost to a re-bootstrap or to a worker that dies) — unless it is DEFERRED
+  (see "Committed batches" below). The cache write is what keeps a field's text under
   the caret: the property form renders the cached entity on every keystroke.
 - **The pending rule.** Nothing the engine says overwrites an entity with an
   edit in flight — not a `changed` re-read, not a seed, not an
@@ -623,6 +635,32 @@ could not be read: …`, the readers keep showing the answered edits over
   against its records now, in first-touch order — a staged delete counts its
   cascade, and an entity edited back to its committed value is no change
   while its op stays staged.
+- **Committed batches.** Once a commit has landed, checkout marks the
+  batches it named (`markLanded`, through the facade's `markStagedLanded`):
+  they are COMMITTED, and every reader above, `captureStaged()` and
+  `getStagedDiff()` leave them out — the diff drops the entities only they
+  name and the cascade of a committed delete (the deleted relationships
+  incident to a deleted element of it, and the deleted elements those
+  contain) — until a mirror read no longer holds them. The replica keeps
+  them staged until it applies the commit's answer, which it drops them on:
+  a moment later while `ready`, only once it is rebuilt while `frozen` or
+  `failed`, where the answer waits. A single property update the engine
+  would merge into one of them — it merges into the first staged batch
+  holding an update of that entity — would be dropped with it, so the store
+  DEFERS it: cached, pending and shown by the readers at once, it is posted,
+  with every edit made after it (in order), only once a mirror read shows
+  the replica has dropped that batch. Undo (`popLastStaged`) withdraws the
+  last deferred edit before anything else; the reverts withdraw the deferred
+  edits they match, and a withdrawn edit's elements are read back from the
+  replica. The sync tells the store of committed batches NO replica will
+  hold (`forgetBatches`, its `onAbandoned`: the commit's answer was dropped),
+  and asks it for the staged batches when the worker is gone
+  (`handOverStaged`, its `heldFallback`: the mirror's staged and parked
+  batches, each replaced by a later stage answer's, less the committed ones,
+  which leave the mirror as they are handed over); either way the mirror
+  drops them at once, and the readers leave them out until the next replica
+  is `ready` — the replica before it may still name them, and the one after
+  may number a new batch alike.
 - **`stagedSettled()`** resolves once every edit has been answered and
   covered by a mirror read, no mirror read is in flight or owed, no cache
   re-read is in flight and no unstage request is unanswered — so that, once
@@ -679,6 +717,11 @@ could not be read: …`, the readers keep showing the answered edits over
   `unstage {entity, incident: true}` and then `unstage {batch}` for every
   parked batch whose ops target `id` or have it as an end;
   `revertAllStaged()` is `unstage 'all'`, parked batches included;
+  `discardAllStaged()` is the same whatever the mirror's state, and resolves
+  once the store has taken it in — the facade's `reloadModelStore()` awaits
+  it before `resetModelStore()`, so "Reload model", which drops the lock
+  registry, drops the batches those leases covered too (the legacy side is
+  `resetModelStore()` alone, which empties its buffer);
   `revertConflict(batchId)` drops one parked batch. `clearStaged()` does
   nothing, since the engine drops the committed batches itself on the
   commit's delta; `dropBatches(ids)` unstages the batches of a commit that
@@ -693,12 +736,14 @@ could not be read: …`, the readers keep showing the answered edits over
   cannot say what is staged.
 - **The facade** also exports `emitMany`, `stagedSettled`,
   `getStagedBatchIds`, `getStagedConflicts`, `revertConflict`,
-  `captureStaged`, `dropStagedBatches` and the type `StagedConflict`; on the
-  legacy side they are a loop of `emit`, a resolved promise, `[]`, `[]`, a
-  no-op, the buffer's ops with no batch id, and a no-op. The staged probe
-  (`lib/engine/staged-probe.ts`) asks `hasStagedOps` while the engine half
-  is attached (`attachEngine` sets it, `detachEngine` clears it); the dev
-  shadow reads it (see "Shadow comparison").
+  `captureStaged`, `dropStagedBatches`, `markStagedLanded`,
+  `reloadModelStore` and the type `StagedConflict`; on the legacy side they
+  are a loop of `emit`, a resolved promise, `[]`, `[]`, a no-op, the
+  buffer's ops with no batch id, a no-op, a no-op and `resetModelStore()`.
+  The staged probe (`lib/engine/staged-probe.ts`) asks whether the replica
+  holds anything staged — committed batches it still holds included — while
+  the engine half is attached (`attachEngine` sets it, `detachEngine` clears
+  it); the dev shadow reads it (see "Shadow comparison").
 
 #### Validation issues: one live map, one optional overlay
 
@@ -903,7 +948,8 @@ one crosses as a string, alongside whatever the shell parses for its own use.
 **Opening** (`lib/engine/sync.ts`). `createReplicaSync(deps)` is the one place
 that knows the order of things; the frame, the client, the cache and the
 replica API reach it as injected dependencies (`SyncDeps`: `connect`, `api`,
-`cache`, `sleep`, `onStatus`), which is what lets its tests run the real engine
+`cache`, `sleep`, `onStatus`, and the model store's `heldFallback` and
+`onAbandoned`, below), which is what lets its tests run the real engine
 through `connectInProcess()`. `replicaApi(root)` is the production `api`: every
 call carries `{baseUrl: root + '/projects/<id>'}` of the sync's OWN project, so
 a late call of a stopped open can never land on the next project (the active
@@ -914,8 +960,11 @@ base URL is a module global read at call time).
 1. The snapshot descriptor. `null` (a 404, no model) ends the open with phase
    `off`, reason `no model` — no frame is even built.
 2. The engine link, built on first need and kept until `stop()`. A `connect()`
-   that rejects (`FrameError`: same host, timeout, worker error) is phase
-   `server` AT ONCE, its message the reason, no retry.
+   that rejects (`FrameError`: same host, timeout, worker error) ends the
+   attempts AT ONCE, its message the reason, no retry: phase `server` when
+   this open was never `ready`, `failed` otherwise (a worker that died and
+   whose replacement does not load — `retry()` tries again, with the batches
+   the sync holds).
 3. The metamodel document (before the bytes, because the engine's `open`
    takes it). An `X-Metamodel-Id` that is not the descriptor's `metamodel_id`
    — a rebind landed mid-open — goes back to step 1 at no charge, three times
@@ -949,8 +998,11 @@ a wait that itself rejects ends the attempts the same way. Going `failed`
 empties the waiting inputs but the user's own commit responses: the batches a
 re-bootstrap holds include the ones those commits carried, and only their
 bookkeeping drops them, once `retry()` has rebuilt the replica. A
-call rejected with `EngineGoneError` (the worker died after the handshake)
-drops the link, and the next attempt builds a new one. `stop()` aborts the
+call rejected with `EngineGoneError` (the worker died after the handshake —
+the frame disposes the link on its `worker-error`) drops the link, and the
+next attempt builds a new one; so does a call posted through `call()` while
+the replica is `ready`, which then re-bootstraps it (a `frozen` replica is
+rebuilt by the adoption, a `failed` one by `retry()`, the same way). `stop()` aborts the
 run: every await of an attempt races the run's abort signal, the download's
 fetch is aborted by the same signal, the link is disposed, the waiting inputs
 are emptied and the status is `OFF`. A link that arrives after its open was
@@ -1062,7 +1114,8 @@ and `failed` too, except the user's own. Once `ready`, the pump:
 In `off` (the descriptor said there is no model) a `reset` or a snapshot event
 restarts the open — phase `opening`, attempt 1, the same run and link — since
 a model may have come since; it carries the batches a re-bootstrap before the
-`off` held. `server` is terminal for the tab: neither wakes it.
+`off` held, less those of the user's own commits whose answers the `off`
+dropped (below). `server` is terminal for the tab: neither wakes it.
 
 The replica's `rev` comes from the answers of `end`, `applyTail` and
 `applyDelta`, and from the engine's `replica` events while `ready` (before
@@ -1077,7 +1130,10 @@ background digest check ends false. A failed call or fetch in the
 pump re-bootstraps too (a tail fetch after its one retry) — the re-bootstrap
 has retries of its own. A
 re-bootstrap is phase `resyncing`: `staged` and `conflicts` are read from the
-engine and their batches joined by id, parked ones included; the snapshot
+engine and their batches joined by id, parked ones included — or, when the
+worker is gone and cannot be asked, `heldFallback()` gives the model store's
+copy of them (its mirror, each batch replaced by a later stage answer's,
+less the batches its landed commits carried: those are committed); the snapshot
 cache row is dropped and not read (bytes a replica diverged from must not
 open the next one); `close`; then the attempts above on the SAME worker, each
 adopting those batches (`adoptStaged`) — the sync holds them across the
@@ -1130,7 +1186,15 @@ before the commit, the commit, the rest; the echo, no longer past the
 replica, drops without a call. `flight.abandon()` (the POST failed) just lets
 the pump go. Settling or abandoning twice is a no-op. A response settled while
 the replica is not `ready` waits like any delta, and still reaches the engine
-when the tail already covered it.
+when the tail already covered it. A response no replica will apply — settled
+in `off` or `server`, emptied with the queue when a re-bootstrap finds no
+model or an open gives up to `server`, or dropped by the pump after its one
+retry — takes the batches it names with it: they leave the batches the run
+holds, every re-bootstrap's read leaves them out until a replica is `ready`
+without them, and `onAbandoned(batchIds)` tells the model store, so a
+committed batch is never staged again. `ownPending()` is true while a flight
+is open or an own response waits in the queue or is being applied —
+checkout refuses a new commit meanwhile.
 
 **The freeze** (AD-27). A peer's rebind (`feedRebind(rev)`) and the user's own
 (`settle` with `rebound`) set phase `frozen`, reason `metamodel changed at rev
@@ -1170,7 +1234,9 @@ queue:
 - `frozen` and `failed` answer as they are: a frozen replica at its `rev`, a
   closed one keeping the read in the engine until the next replica comes.
 - No open, phase `off` or `server`, a `stop()` while it waits, or no link
-  when it is released (the worker died) reject with `EngineGoneError`. An
+  when it is released (the worker died) reject with `EngineGoneError` — and
+  so does a read whose worker turns out gone, which re-bootstraps a `ready`
+  replica on a new one. An
   aborted `signal` rejects with an `AbortError`; a read still waiting posts
   nothing, a posted one is cancelled by the client (`{cancel: id}`).
 - While `opening` or `resyncing` a read waits — before the link exists
@@ -1192,8 +1258,14 @@ it; a `failed` replica's transition goes after `retry()`. It shares the
 readers' list: a transition still held holds every call asked after it, so a
 read asked after an edit is posted after it and sees it — even in `failed`,
 where a read alone would be posted at once. A read still held (behind a
-`rev`) holds no transition. `off`, `server`, `stop()` and no link when
-released reject `EngineGoneError`; an aborted `signal` an `AbortError`, as
+`rev`) holds no transition. A transition is also held while there is no
+link, and one posted to a worker that turns out gone is held AGAIN, at its
+place in arrival order, for the replica that replaces it — which adopts the
+batches first — so a worker that dies loses no staged edit. A `frozen`
+replica whose worker is gone is rebuilt only by the adoption, so until then
+it refuses every call as `off` does — an edit held that long would hold every
+commit and read behind it. `off`, `server` and `stop()` reject
+`EngineGoneError`; an aborted `signal` an `AbortError`, as
 for a read — and a transition aborted while held frees the calls behind it.
 
 **Events.** `on('changed', listener)` hands the listener every engine
@@ -1339,7 +1411,7 @@ opening; `verify`, the background digest check, carried in `ready` too),
 `network`), `isolated` (the frame's `crossOriginIsolated`, `null` before the
 handshake), `cspViolations` (every violation the frame reported) and `reason`
 (why `off`, `frozen`, `failed` or `server`). `server` is the boot fallback: the
-frame did not connect, or three opens failed before the first `ready`. In
+frame did not connect, or three opens failed, before the first `ready`. In
 `server` (and `off`) every surface's effective side is the server's.
 
 **Wiring** (`lib/state/replica.svelte.ts`). The one `ReplicaSync` of the
