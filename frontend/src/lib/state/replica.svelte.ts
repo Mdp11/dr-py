@@ -16,6 +16,7 @@ import { createSnapshotCache } from '$lib/engine/cache';
 import { connectFrame } from '$lib/engine/frame';
 import { addQuietProbe, quiet } from '$lib/engine/quiet';
 import { createEngineSeam } from '$lib/engine/seam';
+import { anyStaged } from '$lib/engine/staged-probe';
 import {
 	anyEngineSurface,
 	readSwitches,
@@ -146,8 +147,9 @@ function _anyEngine(): boolean {
 
 /**
  * Routes the read surfaces through `sync`. In dev, with `dr.shadow` set, the
- * seam is installed again with a shadow once that module has loaded; a build
- * holds none of it.
+ * seam is installed again with a shadow once that module has loaded, idle
+ * while the model store's engine half has an edit staged; a build holds none
+ * of it.
  */
 function installSeam(sync: ReplicaSync): void {
 	uninstallSeam();
@@ -162,6 +164,7 @@ function installSeam(sync: ReplicaSync): void {
 				const shadow = createShadow({
 					rev: () => sync.status().rev,
 					quiet,
+					staged: anyStaged,
 					report: (line) => console.error(line)
 				});
 				installEngineSeam(createEngineSeam(sync, surfaces, shadow));

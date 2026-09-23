@@ -26,7 +26,7 @@ import type { ModelOp } from './ops';
 import { createTempId, isTempId } from './ops';
 import { remapProperties } from './remap';
 import {
-	emit,
+	emitMany,
 	ensureElement,
 	ensureRelationship,
 	getModelRev,
@@ -145,7 +145,9 @@ export async function stageProposedOps(
 		if (!(await acquireLocks(targets, intent))) return { ok: false, reason: 'locks' };
 	}
 
-	// 4. Stage — indistinguishable from manual edits from here on.
-	for (const op of ops) emit(op);
+	// 4. Stage — indistinguishable from manual edits from here on. One batch on
+	//    the engine side: a list it refuses stages none of its ops, and the
+	//    refusal is the store's error, not this outcome.
+	emitMany(ops);
 	return { ok: true, count: ops.length };
 }

@@ -35,20 +35,26 @@ import {
 import { getActiveViewId } from './active-view.svelte';
 import {
 	applyDelta,
+	captureStaged,
 	clearStaged,
+	dropStagedBatches,
 	getModelRev,
+	getStagedConflicts,
 	getStagedOps,
 	markStructureChanged,
 	refetchIssues,
 	refreshSummary,
 	revertAllStaged,
+	revertConflict,
 	revertStagedFor,
-	revertStagedForElement
+	revertStagedForElement,
+	stagedSettled,
+	StagedUnreadableError
 } from './model.svelte';
 // The active-metamodel mirror is a leaf store (no imports of its own beyond
 // api types), so importing it here closes no cycle.
 import { setMetamodel } from './metamodel.svelte';
-import { beginReplicaCommit, replicaMetamodelAdopted } from './replica.svelte';
+import { beginReplicaCommit, getStagingSide, replicaMetamodelAdopted } from './replica.svelte';
 import {
 	clearStagedNodeMoves,
 	discardStagedNodeMoves,
@@ -350,13 +356,16 @@ function _onTokenExpired(token: string): void {
  * the backend seeds the view applier's id_map from the earlier halves, so a
  * view op naming a temp id can only resolve if it comes after the create that
  * mints it. One mixed batch, exactly as it will be committed (the backend
- * splits the union itself). */
-export function previewStaged(): Promise<PreviewResponse> {
+ * splits the union itself): the model ops are the engine's staged batches
+ * once every edit has reached them, and a staged list the engine cannot say
+ * rejects with `StagedUnreadableError`, posting nothing. */
+export async function previewStaged(): Promise<PreviewResponse> {
+	if (getStagingSide() === 'engine') await stagedSettled();
 	return previewCommit(
 		getModelRev(),
 		[
 			...getStagedMetamodelOps(),
-			...getStagedOps(),
+			...captureStaged().ops,
 			...getStagedArtifactOps(),
 			...getStagedViewOps()
 		],
@@ -371,7 +380,16 @@ export function previewStaged(): Promise<PreviewResponse> {
  * and drop those tokens from the registry locally.
  */
 export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
-	// Captured ONCE, here at the top, and never re-read below. The metamodel
+	// On the engine side the model ops are its staged batches, read once every
+	// edit has reached them. A staged list the engine cannot say rejects here,
+	// before anything is posted. The legacy buffer is exact at once, and its
+	// commit is posted in the tick it is called.
+	if (getStagingSide() === 'engine') await stagedSettled();
+	// The ops sent and the batches named, read together: the response drops
+	// exactly the named batches, so an edit staged while the POST is in flight
+	// is in neither and stays staged.
+	const model = captureStaged();
+	// Captured ONCE, here, and never re-read below. The metamodel
 	// half is a live VIEW of the editor's buffer (the stage module reads it
 	// through a provider), so `getStagedMetamodelOps()` can return DIFFERENT
 	// text after the await — a straggler keystroke, a Discard. Everything
@@ -381,7 +399,7 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	// path nothing below runs at all, so a commit that never landed can never
 	// clear a buffer it did not adopt.
 	const mmOps = getStagedMetamodelOps();
-	const ops: Op[] = [...mmOps, ...getStagedOps(), ...getStagedArtifactOps(), ...getStagedViewOps()];
+	const ops: Op[] = [...mmOps, ...model.ops, ...getStagedArtifactOps(), ...getStagedViewOps()];
 	if (ops.length === 0) {
 		// Never send an empty commit: the backend's empty-batch early return
 		// (routes/commits.py) skips its lock-release step, so lock_tokens sent
@@ -444,8 +462,14 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 		rev: res.model_rev,
 		applied: res.prev_rev != null,
 		rebound: res.rebound === true,
-		idMap: res.id_map
+		idMap: res.id_map,
+		// None named is the key left out.
+		...(model.batchIds.length > 0 ? { batchIds: model.batchIds } : {})
 	});
+	// A commit that swapped the metamodel freezes the replica, which never
+	// applies it: the batches it carried are unstaged here, or the replica
+	// would keep them staged and a re-bootstrap would adopt them again.
+	if (res.rebound === true) dropStagedBatches(model.batchIds);
 	// ORDERING, all of it load-bearing. The commit has LANDED durably by this
 	// point, so everything below is local reconciliation that must not become
 	// skippable by a failure further down.
@@ -851,12 +875,31 @@ function lockedResourcesNeededBy(ops: Op[]): Set<string> {
  * an explicit user intent and expires on its own TTL, whereas eagerly
  * releasing every now-unneeded token would silently drop check-outs the user
  * still believes they hold.
+ *
+ * On the engine side the revert is an unstage the engine answers later, so
+ * the remaining ops are read once it has reached the staged-edit readers; a
+ * staged list the engine cannot say keeps every lease (the revert did
+ * nothing then, and the store reports it).
  */
-async function _discardWith(id: string, revert: (id: string) => void): Promise<void> {
-	const token = getHeldToken(id);
-	revert(id);
-	if (token !== undefined) {
-		const stillNeeded = lockedResourcesNeededBy(getStagedOps());
+async function _discardWith(ids: readonly string[], revert: () => void): Promise<void> {
+	// ephemeral dedup of token strings, not reactive state
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const tokens = new Set<string>();
+	for (const id of ids) {
+		const token = getHeldToken(id);
+		if (token !== undefined) tokens.add(token);
+	}
+	revert();
+	if (getStagingSide() === 'engine') {
+		try {
+			await stagedSettled();
+		} catch (error) {
+			if (error instanceof StagedUnreadableError) return;
+			throw error;
+		}
+	}
+	const stillNeeded = lockedResourcesNeededBy(getStagedOps());
+	for (const token of tokens) {
 		const tokenResources = [..._registry].filter(([, l]) => l.token === token).map(([rid]) => rid);
 		const tokenStillNeeded = tokenResources.some((rid) => stillNeeded.has(rid));
 		if (!tokenStillNeeded) {
@@ -868,8 +911,8 @@ async function _discardWith(id: string, revert: (id: string) => void): Promise<v
 		// else: a remaining op still needs a resource this token covers — keep the
 		// lease and its registry entries so the lock stays held and is sent at commit.
 	}
-	// Its staged edits were abandoned; the resource is no longer stale-blocked.
-	_stale.delete(id);
+	// Their staged edits were abandoned; the resources are no longer stale-blocked.
+	for (const id of ids) _stale.delete(id);
 	if (_registry.size === 0) _stopHeartbeat();
 }
 
@@ -878,7 +921,7 @@ async function _discardWith(id: string, revert: (id: string) => void): Promise<v
  * the diff drawer and the inspector's lock control, where a co-acquired
  * relationship op must survive the discard (see {@link _discardWith}). */
 export function discardElement(id: string): Promise<void> {
-	return _discardWith(id, revertStagedFor);
+	return _discardWith([id], () => revertStagedFor(id));
 }
 
 /** Cascading per-element abandon: like {@link discardElement} but also reverts
@@ -890,7 +933,18 @@ export function discardElement(id: string): Promise<void> {
  * would otherwise keep `id`'s token needed, this reliably releases the lease
  * instead of leaking it for the full TTL. */
 export function discardElementCascade(id: string): Promise<void> {
-	return _discardWith(id, revertStagedForElement);
+	return _discardWith([id], () => revertStagedForElement(id));
+}
+
+/**
+ * Drops a staged batch that no longer applies (a conflict: it is never part
+ * of a commit) and releases the lease of every resource its ops needed that
+ * no remaining staged op still needs, by the rule of {@link discardElement}.
+ */
+export function discardConflict(batchId: number): Promise<void> {
+	const conflict = getStagedConflicts().find((c) => c.batch.id === batchId);
+	const resources = conflict === undefined ? [] : [...lockedResourcesNeededBy(conflict.batch.ops)];
+	return _discardWith(resources, () => revertConflict(batchId));
 }
 
 /**

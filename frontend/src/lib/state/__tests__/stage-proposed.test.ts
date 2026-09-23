@@ -1,15 +1,23 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { server } from '$lib/api/__tests__/server';
 import { stageProposedOps } from '../stage-proposed';
 import * as checkout from '../checkout.svelte';
 import {
+	ensureElements,
 	getCachedElements,
+	getCachedTreeItems,
+	getModelError,
+	getModelRev,
+	getStagedBatchIds,
 	getStagedOps,
 	resetModelStore,
 	seedElements,
-	seedRelationships
+	seedRelationships,
+	stagedSettled
 } from '../model.svelte';
 import { isTempId, type ModelOp } from '../ops';
 import { EL, EL2, REL } from './fixtures';
+import { engineStore, type EngineStore } from './support/engine-store';
 
 beforeEach(() => {
 	seedElements([EL, EL2]);
@@ -200,5 +208,97 @@ describe('stageProposedOps', () => {
 		const res = await stageProposedOps(ops, 0, prestate);
 		expect(res).toEqual({ ok: true, count: 1 });
 		expect(getCachedElements().get('e9')?.properties.name).toBe('Renamed');
+	});
+});
+
+describe('stageProposedOps with staging on the engine', () => {
+	beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+	afterAll(() => server.close());
+
+	let store: EngineStore | null = null;
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+	});
+
+	async function open(): Promise<EngineStore> {
+		store = await engineStore();
+		return store;
+	}
+
+	async function settled(s: EngineStore): Promise<void> {
+		await s.sync.settled();
+		await stagedSettled();
+	}
+
+	it('stages the whole list as one batch, id hints kept', async () => {
+		const s = await open();
+		const call = vi.spyOn(s.sync, 'call');
+		const ops: ModelOp[] = [
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_1',
+				id: 'org-hint',
+				type_name: 'Organization',
+				properties: { name: 'Hinted' }
+			},
+			{ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'Renamed' } },
+			{ kind: 'delete_element', id: 'e_000003' }
+		];
+
+		const res = await stageProposedOps(ops, getModelRev());
+		expect(res).toEqual({ ok: true, count: 3 });
+		await settled(s);
+
+		const stages = call.mock.calls.filter(([method]) => method === 'stage');
+		expect(stages).toHaveLength(1);
+		const sent = (stages[0]![1] as { ops: ModelOp[] }).ops;
+		expect(sent.map((op) => op.kind)).toEqual([
+			'create_element',
+			'update_element',
+			'delete_element'
+		]);
+		const created = sent[0] as Extract<ModelOp, { kind: 'create_element' }>;
+		expect(created.id).toBe('org-hint');
+		expect(isTempId(created.temp_id)).toBe(true);
+		expect(created.temp_id).not.toBe('tmp_1');
+		expect(getStagedBatchIds()).toEqual([1]);
+		expect(getStagedOps()).toEqual(sent);
+		expect(getCachedElements().get('org-hint')?.properties['name']).toBe('Hinted');
+		expect(getCachedElements().get('e_000002')?.properties['name']).toBe('Renamed');
+		expect(getCachedElements().has('e_000003')).toBe(false);
+	});
+
+	it('a refused list stages nothing and gives every entity back', async () => {
+		const s = await open();
+		await ensureElements(['e_000002', 'e_000003']);
+		const before2 = getCachedElements().get('e_000002');
+		const before3 = getCachedElements().get('e_000003');
+
+		const res = await stageProposedOps(
+			[
+				{
+					kind: 'create_element',
+					temp_id: 'tmp_1',
+					type_name: 'Organization',
+					properties: { name: 'Never' }
+				},
+				{ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'Gone' } },
+				{ kind: 'delete_element', id: 'e_000003' },
+				{ kind: 'update_element', id: 'e_000002', properties_patch: { nope: 1 } }
+			],
+			getModelRev()
+		);
+		// `emit` answers nothing on either side: the refusal is the store's error.
+		expect(res).toEqual({ ok: true, count: 4 });
+		await settled(s);
+
+		expect(getStagedOps()).toEqual([]);
+		expect(getStagedBatchIds()).toEqual([]);
+		expect(getCachedElements().get('e_000002')).toEqual(before2);
+		expect(getCachedElements().get('e_000003')).toEqual(before3);
+		expect([...getCachedElements().keys()].filter(isTempId)).toEqual([]);
+		expect([...getCachedTreeItems().keys()].filter(isTempId)).toEqual([]);
+		expect(getModelError()?.kind).toBe('rejected');
 	});
 });

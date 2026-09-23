@@ -43,6 +43,7 @@ import {
 	subscribeReplicaStatus
 } from '../replica.svelte';
 import * as modelEngine from '../model-engine.svelte';
+import { emit, revertAllStaged, stagedSettled } from '../model.svelte';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
@@ -629,6 +630,44 @@ describe('the status listeners and the engine handle', () => {
 		stopReplica();
 		expect(detach).toHaveBeenCalled();
 		expect(handle.status()).toBe(OFF);
+	});
+
+	it('the shadow compares nothing while the engine half has an edit staged', async () => {
+		onStaging('engine');
+		localStorage.setItem('dr.shadow', '1');
+		const project = fakeProject();
+		let served = 0;
+		server.use(
+			...project.handlers(),
+			http.post('*/model/elements/batch', () => {
+				served += 1;
+				return HttpResponse.json({ items: [] });
+			})
+		);
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		await macrotask();
+		const shadowLines = () =>
+			errors.mock.calls.filter(([line]) =>
+				String(line).startsWith('[shadow] elements getElementsBatch {"ids":["e_000001"]}')
+			);
+
+		emit({ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'staged' } });
+		await stagedSettled();
+		await getElementsBatch(['e_000001']);
+		await macrotask();
+		await macrotask();
+		expect(served).toBe(0);
+		expect(shadowLines()).toEqual([]);
+
+		revertAllStaged();
+		await stagedSettled();
+		await getElementsBatch(['e_000001']);
+		await vi.waitFor(() => expect(shadowLines()).toHaveLength(1));
+		expect(served).toBe(2);
 	});
 
 	it('with staging on legacy, the engine half is never attached', async () => {

@@ -141,6 +141,9 @@
 				flight.abandon();
 				throw error;
 			}
+			// No `batchIds`: a revert commits none of the staged batches, so the
+			// replica replays whatever is staged over it — an edit staged while the
+			// POST was in flight included.
 			flight.settle({
 				text: responseText,
 				rev: res.model_rev,

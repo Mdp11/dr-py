@@ -204,6 +204,27 @@ commit** loop:
    the batch durably; on success it clears the staged buffer, installs the
    server's canonical delta (`applyDelta`), and **releases the held locks**.
    A stale-rev 409 or a structural-blocker 422 is surfaced as a commit error.
+   **On the engine side** (`staging: engine`, see "The engine store") the
+   staged model edits are the replica's batches. `previewStaged()`,
+   `commitStaged()` and `validateAll()` first wait for `stagedSettled()` —
+   while the engine cannot say what is staged they refuse with
+   `StagedUnreadableError` and post nothing — and then take the model ops
+   with `captureStaged()`: the ops of the mirror's batches and those
+   batches' ids, read together, so no op is sent without its batch named
+   and no batch is named without its ops sent. The commit's flight is
+   settled with those `batchIds`; the replica drops exactly those batches on
+   the response's delta and rewrites the temp ids of the rest through its
+   `id_map`, so an edit staged while the POST is in flight — in neither
+   list — stays staged, a batch of its own. A refused POST abandons the
+   flight and every batch stays. A commit that swapped the metamodel
+   (`rebound`) freezes the replica, which never applies it: its batches are
+   unstaged by id (`dropStagedBatches`), which also finds them in a replica
+   that adopted them after the re-bootstrap. A revert (the History drawer)
+   commits no staged batch and names none. `clearStaged()` does nothing on
+   this side. A property update staged during the POST that the engine
+   coalesces into a batch being committed (it merges a single update into
+   the first staged update of the same entity) is dropped with that batch:
+   the commit dialog is modal, so the UI cannot make one.
 5. **Undo** is **client-side** over the staged buffer (`popLastStaged` reverts
    the last staged op from its per-op journal); per-element and discard-all
    reverts (`revertStagedFor` / `revertAllStaged`) work the same way. There is
@@ -606,11 +627,24 @@ could not be read: …`, the readers keep showing the answered edits over
   `revertAllStaged()` is `unstage 'all'`, parked batches included;
   `revertConflict(batchId)` drops one parked batch. `clearStaged()` does
   nothing, since the engine drops the committed batches itself on the
-  commit's delta.
+  commit's delta; `dropBatches(ids)` unstages the batches of a commit that
+  swapped the metamodel, whose delta the frozen replica never applies — by
+  id, so it does not wait for the mirror to be readable.
+- **The checkout store** (`checkout.svelte.ts`) commits the engine's batches
+  (see "State model" step 4). `discardConflict(batchId)` drops one parked
+  batch and releases the lease of every resource its ops needed that no
+  remaining staged op still needs; the element discards (`discardElement`,
+  `discardElementCascade`) read the remaining ops only once the unstage has
+  reached the staged-edit readers, and keep every lease while the engine
+  cannot say what is staged.
 - **The facade** also exports `emitMany`, `stagedSettled`,
-  `getStagedBatchIds`, `getStagedConflicts`, `revertConflict` and the type
-  `StagedConflict`; on the legacy side they are a loop of `emit`, a resolved
-  promise, `[]`, `[]` and a no-op.
+  `getStagedBatchIds`, `getStagedConflicts`, `revertConflict`,
+  `captureStaged`, `dropStagedBatches` and the type `StagedConflict`; on the
+  legacy side they are a loop of `emit`, a resolved promise, `[]`, `[]`, a
+  no-op, the buffer's ops with no batch id, and a no-op. The staged probe
+  (`lib/engine/staged-probe.ts`) asks `hasStagedOps` while the engine half
+  is attached (`attachEngine` sets it, `detachEngine` clears it); the dev
+  shadow reads it (see "Shadow comparison").
 
 #### Validation issues: one live map, one optional overlay
 
@@ -1024,7 +1058,9 @@ wait. `flight.settle({text, rev, applied, rebound, idMap, batchIds?})` after
 the response: `rebound` freezes the replica and applies nothing; `applied:
 false` (the batch applied nothing, `prev_rev` null) queues nothing; otherwise
 the response body's text is queued as a delta at its place by `rev` — before
-its echo — with `own: {batch_ids, id_map}`, and the pump goes: what landed
+its echo — with `own: {batch_ids, id_map}` (`batchIds` is the ids of the
+staged batches the POST sent: `commitStaged` passes them on the engine side,
+the revert none), and the pump goes: what landed
 before the commit, the commit, the rest; the echo, no longer past the
 replica, drops without a call. `flight.abandon()` (the POST failed) just lets
 the pump go. Settling or abandoning twice is a no-op. A response settled while
@@ -1175,7 +1211,7 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   from a build — dead code past that check is never bundled) and only when
   `localStorage['dr.shadow'] === '1'`; no storage, a throwing one or any
   other value are off.
-- `createShadow({rev, quiet, report})` builds the seam's `shadow`: it runs
+- `createShadow({rev, quiet, staged, report})` builds the seam's `shadow`: it runs
   `server()` beside the engine's own outcome and compares them — deep
   equality of the parsed values (object key order ignored, array order not),
   or the same KIND of failure (the same `status` for two `ApiError`s, else
@@ -1199,6 +1235,13 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   re-test's `again()`) — a `stop()` mid-re-test can drop the replica's `rev`
   to `null` right as the worker goes, and `null === null` must never be read
   as a round whose `rev` held still.
+- Nothing is compared while `staged()` is true: the replica's answers then
+  hold edits the server has not seen. It is asked before `server()` is
+  called, after each `quiet()` and after each re-test round, so a
+  comparison under way when an edit is staged ends silently. The replica
+  store hands it `anyStaged` of `lib/engine/staged-probe.ts`, which asks the
+  model store's engine half `hasStagedOps()` while it is attached; with
+  staging on legacy nothing is staged in the replica, and it is false.
 - `quiet.ts` is the tiny registry the re-test's `quiet()` is built from:
   `addQuietProbe(probe)` registers a `() => Promise<void>` and returns the
   function that drops it again; `quiet()` awaits every registered probe (none
@@ -1445,7 +1488,8 @@ a button:
   `stageProposedOps(ops, modelRev, prestate)` — the snippet-run primitive
   generalized: temp-id remap that keeps each create's `id` hint,
   `crPrestate(cr)` seeded into the caches so a large Replace fetches nothing,
-  per-intent lock groups, then `emit`. From there the edits are ordinary staged
+  per-intent lock groups, then `emitMany` — ONE batch on the engine side, all
+  or nothing. From there the edits are ordinary staged
   edits (DiffDrawer, Ctrl+S, commit).
 - **Gates**: Replace / Stage edits need `canEdit()` AND an empty model staged
   buffer (`hasStagedOps()` false — the proposal is computed against the
@@ -2739,6 +2783,8 @@ src/
                         shadow.ts (shadowEnabled, createShadow — see
                         "Replica (engine shell)" → "Shadow comparison"),
                         quiet.ts (its addQuietProbe/quiet registry),
+                        staged-probe.ts (anyStaged: whether the model
+                        store's engine half has anything staged),
                         origins.ts, testing.ts
                         (connectInProcess, tests only); __tests__/support/
                         project-server.ts is the fake project server

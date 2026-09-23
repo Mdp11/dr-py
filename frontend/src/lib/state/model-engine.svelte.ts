@@ -5,6 +5,7 @@ import type { ChangedEvent, ReplicaStatus, ReplicaSync } from '$lib/engine/sync'
 import { getElement } from '../api/elements';
 import { NotFoundError } from '../api/errors';
 import { EngineGoneError } from '../engine/client';
+import { setStagedProbe } from '../engine/staged-probe';
 import * as modelReadApi from '../api/model-read';
 import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
@@ -163,10 +164,15 @@ let _epoch = 0;
 // The engine handle
 // ---------------------------------------------------------------------------
 
-/** Follows the engine behind `handle`: its `changed` events and its status. */
+/**
+ * Follows the engine behind `handle`: its `changed` events and its status.
+ * Meanwhile the staged probe (`lib/engine/staged-probe.ts`) asks this half
+ * whether anything is staged.
+ */
 export function attachEngine(handle: EngineHandle): void {
 	detachEngine();
 	_handle = handle;
+	setStagedProbe(hasStagedOps);
 	_unsubscribe = [handle.on('changed', onChanged), handle.subscribe(onStatus)];
 	const { phase } = handle.status();
 	if (phase === 'ready' || phase === 'frozen') readMirror();
@@ -176,6 +182,7 @@ export function attachEngine(handle: EngineHandle): void {
 export function detachEngine(): void {
 	for (const off of _unsubscribe.splice(0)) off();
 	_handle = null;
+	setStagedProbe(null);
 	clearAll();
 }
 
@@ -750,6 +757,11 @@ export function getStagedBatchIds(): number[] {
 	return _batches.map((batch) => batch.id);
 }
 
+/** The mirror's batches alone: the ops of each are exactly what naming its id commits. */
+export function getStagedBatches(): readonly StagedBatch[] {
+	return _batches;
+}
+
 export function getStagedConflicts(): StagedConflict[] {
 	return _parked;
 }
@@ -989,20 +1001,24 @@ function refused(entry: Provisional, touched: Set<string>, error: unknown): void
  * Runs `work` once every edit before it has reached the mirror and every
  * earlier unstage request has been answered; the engine's `changed` does the
  * rest. A refused mirror is read once more first, and `work` does not run
- * while it stays refused: the mirror is not the engine's staged list then.
+ * while it stays refused: the mirror is not the engine's staged list then —
+ * unless `work` reads nothing of the mirror (`readsMirror: false`).
  */
-function unstageAfter(work: (handle: EngineHandle) => Promise<void>): void {
+function unstageAfter(
+	work: (handle: EngineHandle) => Promise<void>,
+	{ readsMirror = true }: { readsMirror?: boolean } = {}
+): void {
 	const epoch = _epoch;
 	_unstaging += 1;
 	_unstageChain = _unstageChain.then(async () => {
 		try {
 			await waitFor(isQuiet);
-			if (_mirrorFailed && epoch === _epoch) {
+			if (readsMirror && _mirrorFailed && epoch === _epoch) {
 				readMirror();
 				await waitFor(isQuiet);
 			}
 			const handle = _handle;
-			if (epoch !== _epoch || handle === null || _mirrorFailed) return;
+			if (epoch !== _epoch || handle === null || (readsMirror && _mirrorFailed)) return;
 			await work(handle);
 		} catch (error) {
 			if (epoch !== _epoch) return;
@@ -1082,6 +1098,23 @@ export function revertAllStaged(): void {
 /** Drops a parked batch. */
 export function revertConflict(batchId: number): void {
 	unstageAfter((handle) => unstage(handle, { batch: batchId }));
+}
+
+/**
+ * Unstages batches a commit carried that the replica does not drop itself:
+ * one that swapped the metamodel freezes the replica, which never applies
+ * it. Held by id, the drop also finds them in a replica that adopted them
+ * after a re-bootstrap; an id no longer staged is nothing to the engine.
+ */
+export function dropBatches(batchIds: readonly number[]): void {
+	if (batchIds.length === 0) return;
+	const ids = [...batchIds];
+	unstageAfter(
+		async (handle) => {
+			for (const batch of ids) await unstage(handle, { batch });
+		},
+		{ readsMirror: false }
+	);
 }
 
 /** Nothing: the engine drops the committed batches itself, on the commit's delta. */

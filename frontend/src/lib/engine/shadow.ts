@@ -23,6 +23,8 @@ export type ShadowDeps = {
 	rev(): number | null;
 	/** Resolves once nothing that could still change what a read sees is in flight. */
 	quiet(): Promise<void>;
+	/** Whether the user has edits staged in the replica: its answers then differ from the server's by them. */
+	staged(): boolean;
 	report(line: string): void;
 };
 
@@ -31,7 +33,9 @@ export type ShadowDeps = {
  * engine's, and reports a difference that a re-test — after `quiet()`, with
  * the replica's `rev` held still — still shows. A `rev` that moves during a
  * re-test is retried, up to three rounds, then given up on silently: a
- * replica that never rests is not a mismatch. An `AbortError` from either
+ * replica that never rests is not a mismatch. Nothing is compared while an
+ * edit is staged in the replica — the server has not seen it — and a
+ * comparison under way ends silently once one is. An `AbortError` from either
  * side, or an `EngineGoneError` from the engine side (the worker died, or a
  * `stop()` while a re-test was mid-flight), ends the comparison without a
  * report — a comparison the caller can no longer see through is not a
@@ -40,7 +44,7 @@ export type ShadowDeps = {
 export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']> {
 	return async function shadow(probe): Promise<void> {
 		const { surface, method, params, engine, again, server } = probe;
-		if (isTerminal(engine)) return;
+		if (isTerminal(engine) || deps.staged()) return;
 
 		let serverOutcome: Outcome;
 		try {
@@ -52,6 +56,7 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 
 		for (let round = 0; round < MAX_ROUNDS; round++) {
 			await deps.quiet();
+			if (deps.staged()) return;
 			const before = deps.rev();
 			let retested: [Outcome, Outcome];
 			try {
@@ -60,6 +65,7 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 				return;
 			}
 			const [retestedEngine, retestedServer] = retested;
+			if (deps.staged()) return;
 			if (before !== deps.rev()) continue;
 			if (same(surface, retestedEngine, retestedServer)) return;
 			deps.report(reportLine(surface, method, params, retestedEngine, retestedServer));

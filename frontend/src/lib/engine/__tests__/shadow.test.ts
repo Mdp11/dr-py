@@ -18,17 +18,18 @@ import { createShadow, shadowEnabled } from '../shadow';
 import { SURFACES } from '../surfaces';
 import { fakeProject, syncOver, type FakeProject } from './support/project-server';
 
-/** Runs `createShadow`'s probe with `rev` fixed and `quiet` resolving at once,
- * unless the test overrides them. */
+/** Runs `createShadow`'s probe with `rev` fixed, `quiet` resolving at once and
+ * nothing staged, unless the test overrides them. */
 function run(
 	probe: Omit<ShadowProbe, 'surface' | 'method' | 'params'> &
 		Partial<Pick<ShadowProbe, 'surface' | 'method' | 'params'>>,
-	deps: Partial<{ rev(): number | null; quiet(): Promise<void> }> = {},
+	deps: Partial<{ rev(): number | null; quiet(): Promise<void>; staged(): boolean }> = {},
 	report: (line: string) => void = () => undefined
 ): Promise<void> {
 	const shadow = createShadow({
 		rev: deps.rev ?? (() => 1),
 		quiet: deps.quiet ?? (() => Promise.resolve()),
+		staged: deps.staged ?? (() => false),
 		report
 	});
 	// `EngineSeam['shadow']` is typed `void` (nothing it returns reaches the caller);
@@ -133,6 +134,59 @@ describe('createShadow', () => {
 		);
 		expect(lines).toHaveLength(1);
 		expect(lines[0]).toMatch(/^\[shadow\] tree listContainmentRoots \{"limit":500\}:/);
+	});
+
+	it('with something staged nothing is compared: the server is never asked', async () => {
+		const report = vi.fn();
+		const again = vi.fn(() => Promise.resolve({ total: 2 }));
+		const serverCall = vi.fn(() => Promise.resolve({ total: 9 }));
+		await run(
+			{ engine: { ok: true, value: { total: 1 } }, again, server: serverCall },
+			{ staged: () => true },
+			report
+		);
+		expect(serverCall).not.toHaveBeenCalled();
+		expect(again).not.toHaveBeenCalled();
+		expect(report).not.toHaveBeenCalled();
+	});
+
+	it('a difference found with nothing staged ends silently when an edit is staged before the re-test', async () => {
+		let staged = false;
+		const report = vi.fn();
+		const again = vi.fn(() => Promise.resolve({ total: 1 }));
+		const serverCall = vi.fn(() => Promise.resolve({ total: 9 }));
+		await run(
+			{ engine: { ok: true, value: { total: 1 } }, again, server: serverCall },
+			{
+				staged: () => staged,
+				quiet: () => {
+					staged = true;
+					return Promise.resolve();
+				}
+			},
+			report
+		);
+		expect(serverCall).toHaveBeenCalledOnce();
+		expect(again).not.toHaveBeenCalled();
+		expect(report).not.toHaveBeenCalled();
+	});
+
+	it('an edit staged during a re-test round ends it silently', async () => {
+		let staged = false;
+		const report = vi.fn();
+		await run(
+			{
+				engine: { ok: true, value: { total: 1 } },
+				again: () => {
+					staged = true;
+					return Promise.resolve({ total: 1 });
+				},
+				server: () => Promise.resolve({ total: 9 })
+			},
+			{ staged: () => staged },
+			report
+		);
+		expect(report).not.toHaveBeenCalled();
 	});
 
 	it('a rev that moves during the re-test is retried; a stable round decides it', async () => {
@@ -402,6 +456,7 @@ describe('shadow over the real engine', () => {
 				createShadow({
 					rev: () => over.sync.status().rev,
 					quiet: () => Promise.resolve(),
+					staged: () => false,
 					report: (line) => lines.push(line)
 				})(probe)
 			);

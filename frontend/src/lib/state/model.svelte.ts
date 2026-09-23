@@ -98,6 +98,23 @@ export function revertConflict(batchId: number): void {
 	if (getStagingSide() === 'engine') engine.revertConflict(batchId);
 }
 
+/**
+ * The staged model ops a batch sends, and the ids of the engine batches
+ * holding exactly them — read together from the mirror's batches, so an edit
+ * not yet in them is neither sent nor named. Exact once `stagedSettled()`
+ * has resolved. The legacy buffer's ops name no batch.
+ */
+export function captureStaged(): { ops: ModelOp[]; batchIds: number[] } {
+	if (getStagingSide() !== 'engine') return { ops: legacy.getStagedOps(), batchIds: [] };
+	const batches = engine.getStagedBatches();
+	return { ops: batches.flatMap((batch) => batch.ops), batchIds: batches.map((batch) => batch.id) };
+}
+
+/** Unstages batches a landed commit carried that the replica does not drop itself; nothing on the legacy side. */
+export function dropStagedBatches(batchIds: readonly number[]): void {
+	if (getStagingSide() === 'engine') engine.dropBatches(batchIds);
+}
+
 export function getStagedOps(): ModelOp[] {
 	return side().getStagedOps();
 }
@@ -188,6 +205,9 @@ export function setModelApiConfig(cfg: ClientConfig | undefined): void {
  * /model/validate, which applies them against the committed model, validates,
  * rolls back, and tags each issue's origin (on_server / uncommitted / resolved).
  * With an empty buffer it is a plain committed-model validation (all on_server).
+ * On the engine side the ops are the engine's staged batches, once every edit
+ * has reached them; rejects with `StagedUnreadableError`, posting nothing,
+ * while they cannot be read.
  *
  * A pure fetch: it does NOT mutate the live issue map (see `adoptIssues`/
  * `applyDelta`). The caller (`validate-action.ts`'s `runValidation`) stores
@@ -196,7 +216,8 @@ export function setModelApiConfig(cfg: ClientConfig | undefined): void {
  * surface in the panel.
  */
 export async function validateAll(): Promise<Issue[]> {
-	const staged = side().getStagedOps();
+	if (getStagingSide() === 'engine') await engine.stagedSettled();
+	const staged = captureStaged().ops;
 	const options = staged.length > 0 ? { ops: staged, baseRev: getModelRev() } : undefined;
 	return validateModel(options, getClientConfig());
 }
