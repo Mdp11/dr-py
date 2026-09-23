@@ -532,11 +532,14 @@ answer is the newer one.
   transitions — in arrival order with the stages, never held for a `rev`
   (a read held for a peer's delta would let a later stage overtake it) — and
   only in `ready` or `frozen`; the next `ready` reads what is due. A mirror
-  read the engine refuses (not a gone engine) is read once more; refused
-  again, `getModelError()` says `the staged edits could not be read: …`, the
-  answered edits stop waiting to be covered (the readers keep showing them
-  over the mirror as it was) so `stagedSettled()` resolves, and the next
-  change or edit reads the mirror again. When the replica becomes `ready` after a
+  read the engine refuses (not a gone engine) is read once more. Refused
+  again, the mirror is REFUSED: `getModelError()` says `the staged edits
+could not be read: …`, the readers keep showing the answered edits over
+  the mirror as it was — which is then not the engine's staged list, its
+  batch ids least of all — and nothing waits on it, so nothing hangs; but
+  `stagedSettled()` rejects and the unstage family does nothing (below)
+  until a mirror read lands, which the next change, edit, `stagedSettled()`
+  or unstage request tries. When the replica becomes `ready` after a
   re-bootstrap, the cached elements the staged and parked batches touched —
   before that mirror read and after it — are read again: an adopted batch
   that parks puts its entities back to the committed state, and adopting
@@ -547,9 +550,12 @@ answer is the newer one.
   while its op stays staged.
 - **`stagedSettled()`** resolves once every edit has been answered and
   covered by a mirror read, no mirror read is in flight or owed, no cache
-  re-read is in flight and no unstage request is unanswered; a detach or a
-  `resetModelStore()` releases it. Commit, preview and validate wait for it
-  and then read the engine's batches alone.
+  re-read is in flight and no unstage request is unanswered — so that, once
+  it resolves, `getStagedOps()` and `getStagedBatchIds()` are exactly the
+  engine's staged batches; a detach or a `resetModelStore()` releases it.
+  With the mirror refused it reads it again first and, refused still,
+  REJECTS with `StagedUnreadableError` (`the staged edits could not be read:
+…`), so no batch is ever built from a mirror that is not the engine's.
 - **`changed` is the one path that refreshes the caches after a
   transition** — a stage, an unstage, or a delta the replica applied. Its
   deleted ids leave `_elements` and `_treeItems`, its deleted relationship
@@ -584,11 +590,14 @@ answer is the newer one.
   applies whole. The legacy half's `applyDelta` is unchanged: it moves the
   structure rev by its own formula, and the rev as the delta says.
 - **The unstage family** waits for every edit before it to reach the mirror
-  and for every earlier unstage to be answered, posts one transition, and
+  and for every earlier unstage to be answered — with the mirror refused, it
+  reads it once more and, refused still, does nothing — posts one
+  transition, and
   leaves the rest to `changed` (a staged delete undone brings its elements
   back: the event names them, and the ones the delete took out of the caches
   are read again). `popLastStaged()` is `unstage {batch: last}` — false when
-  nothing is staged; a coalesced keystroke lives in its FIRST batch, so Undo
+  nothing is staged or the mirror is refused (it reads it again for the
+  next try); a coalesced keystroke lives in its FIRST batch, so Undo
   may remove an older batch than the last keystroke, as the legacy
   coalesced queue does. `revertStagedFor(id)` is `unstage {entity}`, which
   leaves a parked batch for the conflicts; `revertStagedForElement(id)` is

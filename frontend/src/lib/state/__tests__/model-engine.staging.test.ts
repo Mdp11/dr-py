@@ -33,6 +33,7 @@ import {
 	revertConflict,
 	revertStagedFor,
 	revertStagedForElement,
+	StagedUnreadableError,
 	stagedSettled
 } from '../model.svelte';
 import type { ModelOp } from '../ops';
@@ -329,36 +330,54 @@ describe('the staged readers', () => {
 		expect(getModelError()).toBeNull();
 	});
 
-	it('a mirror read refused twice settles, says so, and the next edit reads it again', async () => {
+	it('a refused mirror rejects stagedSettled until a read lands, and nothing unstages a guess', async () => {
 		const s = await open();
 		const call = s.sync.call.bind(s.sync);
-		let refusals = 2;
-		vi.spyOn(s.sync, 'call').mockImplementation(((
+		let refusing = true;
+		const spy = vi.spyOn(s.sync, 'call').mockImplementation(((
 			method: string,
 			params?: unknown,
 			options?: never
 		) => {
-			if (method === 'stagedDiff' && refusals-- > 0) {
+			if (method === 'stagedDiff' && refusing) {
 				return Promise.reject(new ApiError(500, {}, 'engine error 500'));
 			}
 			return call(method, params, options);
 		}) as typeof s.sync.call);
+		const unstages = () => spy.mock.calls.filter(([method]) => method === 'unstage');
 
-		emit(rename('e_000002', 'kept'));
-		await settled(s);
+		emit(CREATE_X);
+		await s.sync.settled();
+		await expect(stagedSettled()).rejects.toThrow(StagedUnreadableError);
+		// Each call tries a fresh read first, and is refused again.
+		await expect(stagedSettled()).rejects.toThrow(
+			'the staged edits could not be read: engine error 500'
+		);
 		expect(getReplicaStatus().phase).toBe('ready');
 		expect(getModelError()).toEqual({
 			kind: 'error',
 			message: 'the staged edits could not be read: engine error 500'
 		});
-		// The edit still shows, as the edit made; the mirror is as it was.
-		expect(getStagedOps()).toEqual([rename('e_000002', 'kept')]);
+		// The mirror is not the engine's: its batch ids say nothing is staged.
 		expect(getStagedBatchIds()).toEqual([]);
 
-		emit(rename('e_000003', 'next'));
+		// Neither undo nor a revert acts on it: undo says it undid nothing, and the
+		// revert reads the mirror first, is refused, and does nothing.
+		expect(popLastStaged()).toBe(false);
+		revertAllStaged();
+		await expect(stagedSettled()).rejects.toThrow(StagedUnreadableError);
+		expect(unstages()).toEqual([]);
+
+		// A read that lands ends it.
+		refusing = false;
+		await expect(stagedSettled()).resolves.toBeUndefined();
+		expect(getStagedOps()).toEqual([CREATE_X]);
+		expect(getStagedBatchIds()).toEqual([1]);
+		expect(unstages()).toEqual([]);
+
+		expect(popLastStaged()).toBe(true);
 		await settled(s);
-		expect(getStagedOps()).toEqual([rename('e_000002', 'kept'), rename('e_000003', 'next')]);
-		expect(getStagedBatchIds()).toEqual([1, 2]);
+		expect(getStagedOps()).toEqual([]);
 	});
 
 	it('a detach releases stagedSettled and drops the answers still to come', async () => {

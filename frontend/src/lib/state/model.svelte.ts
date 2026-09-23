@@ -24,6 +24,7 @@ import { getStagingSide } from './replica.svelte';
 
 export * from './model-shared.svelte';
 export type { StagedConflict } from './model-engine.svelte';
+export { StagedUnreadableError } from './model-engine.svelte';
 
 /** What both entity halves answer. */
 type EntityHalf = Omit<typeof legacy, 'setModelApiConfig' | 'resetLegacyStore'>;

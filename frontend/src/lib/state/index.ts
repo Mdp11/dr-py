@@ -103,6 +103,7 @@ export {
 	getStagedBatchIds,
 	getStagedConflicts,
 	revertConflict,
+	StagedUnreadableError,
 	setModelError,
 	type ModelStoreError,
 	type StagedConflict

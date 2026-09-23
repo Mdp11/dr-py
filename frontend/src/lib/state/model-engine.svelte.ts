@@ -132,10 +132,13 @@ let _mirrorOwed = false;
 let _mirrorRetry = false;
 /**
  * The engine refused a mirror read and its retry: the answered edits stop
- * waiting to be covered — the readers keep showing them — until a read
- * succeeds.
+ * waiting to be covered — the readers keep showing them — so nothing hangs,
+ * but `stagedSettled()` rejects and the unstage family does nothing until a
+ * read succeeds, since the mirror is not the engine's staged list.
  */
 let _mirrorFailed = false;
+/** What the engine said when it refused the mirror read. */
+let _mirrorError = '';
 /** Cache re-reads in flight. */
 let _refreshing = 0;
 let _seq = 0;
@@ -205,6 +208,7 @@ function clearAll(): void {
 	_mirrorOwed = false;
 	_mirrorRetry = false;
 	_mirrorFailed = false;
+	_mirrorError = '';
 	_refreshing = 0;
 	_unstaging = 0;
 	_unstageChain = Promise.resolve();
@@ -254,13 +258,28 @@ function waitFor(test: () => boolean): Promise<void> {
 	return new Promise<void>((resolve) => _waiters.push({ test, resolve }));
 }
 
+/** The engine refused to say what is staged: the mirror is not its staged list. */
+export class StagedUnreadableError extends Error {
+	constructor(detail: string) {
+		super(`the staged edits could not be read: ${detail}`);
+		this.name = 'StagedUnreadableError';
+	}
+}
+
 /**
- * Resolves once this half has taken in everything the engine told it: every
+ * Resolves once this half has taken in everything the engine told it — every
  * edit answered and covered by a mirror read, no mirror read in flight or
- * owed, no cache re-read in flight, no unstage request unanswered.
+ * owed, no cache re-read in flight, no unstage request unanswered — so that
+ * `getStagedOps()` and `getStagedBatchIds()` are exactly the engine's staged
+ * batches. Rejects with {@link StagedUnreadableError} when the engine refused
+ * the mirror read (a fresh one is tried first), since the readers then show
+ * edits no read has covered.
  */
 export function stagedSettled(): Promise<void> {
-	return waitFor(isSettled);
+	if (_mirrorFailed) readMirror();
+	return waitFor(isSettled).then(() => {
+		if (_mirrorFailed) throw new StagedUnreadableError(_mirrorError);
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -342,9 +361,10 @@ function pumpMirror(): void {
 			// reads it again; refused twice, the next change or edit does.
 			if (!(error instanceof EngineGoneError)) {
 				_mirrorFailed = true;
+				_mirrorError = error instanceof Error ? error.message : String(error);
 				setModelError({
 					kind: 'error',
-					message: `the staged edits could not be read: ${error instanceof Error ? error.message : String(error)}`
+					message: new StagedUnreadableError(_mirrorError).message
 				});
 			}
 			_mirrorRetry = false;
@@ -968,7 +988,8 @@ function refused(entry: Provisional, touched: Set<string>, error: unknown): void
 /**
  * Runs `work` once every edit before it has reached the mirror and every
  * earlier unstage request has been answered; the engine's `changed` does the
- * rest.
+ * rest. A refused mirror is read once more first, and `work` does not run
+ * while it stays refused: the mirror is not the engine's staged list then.
  */
 function unstageAfter(work: (handle: EngineHandle) => Promise<void>): void {
 	const epoch = _epoch;
@@ -976,8 +997,12 @@ function unstageAfter(work: (handle: EngineHandle) => Promise<void>): void {
 	_unstageChain = _unstageChain.then(async () => {
 		try {
 			await waitFor(isQuiet);
+			if (_mirrorFailed && epoch === _epoch) {
+				readMirror();
+				await waitFor(isQuiet);
+			}
 			const handle = _handle;
-			if (epoch !== _epoch || handle === null) return;
+			if (epoch !== _epoch || handle === null || _mirrorFailed) return;
 			await work(handle);
 		} catch (error) {
 			if (epoch !== _epoch) return;
@@ -1012,8 +1037,16 @@ function touches(op: ModelOp, id: string): boolean {
 	return false;
 }
 
-/** Undo: unstages the last staged batch — a coalesced keystroke lives in its first one. */
+/**
+ * Undo: unstages the last staged batch — a coalesced keystroke lives in its
+ * first one. False, undoing nothing, when nothing is staged or the mirror is
+ * refused (which reads it again for the next try).
+ */
 export function popLastStaged(): boolean {
+	if (_mirrorFailed) {
+		readMirror();
+		return false;
+	}
 	if (!hasStagedOps()) return false;
 	unstageAfter(async (handle) => {
 		const last = _batches.at(-1);
