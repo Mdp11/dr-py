@@ -28,15 +28,17 @@ A → F. A (engine foundation) has landed: package, value layer and golden-fixtu
 Python snapshot v2 and state digest; metamodel, record-graph store, indexes and mutation
 boundary; op applier and working copy; snapshot reader, the engine's own SHA-256 digest and
 the benchmark at model M (`pixi run engine-bench`: open 2.3 s of the 3 s budget). B (replica
-and frontend seam) is designed — six plans, listed in `architecture/program.md`, five of them
-built (exact server state; v2 snapshot writers and the replica routes; the engine service; the
-sandbox site and the shell, the replica opening and following in the background; the transport
-swap — the five read surfaces default to the engine behind per-surface switches, the wait for
-`ready`, the fallback notice and the retry overlay, shadow comparison in dev and e2e, and the
-browser benchmark) — and watches `K-32`. The freeze rule (`MR-3`)
-covers `core/model`, `core/metamodel` and the model-op applier from the start of A's second
-plan; `routes/read.py`'s route functions and `routes/elements.py::get_element` left it for
-features once B's fifth plan flipped the surfaces' defaults. Size: very large.
+and frontend seam) is done — six plans, listed in `architecture/program.md` (exact server
+state; v2 snapshot writers and the replica routes; the engine service; the sandbox site and
+the shell, the replica opening and following in the background; the transport swap — the five
+read surfaces default to the engine behind per-surface switches, the wait for `ready`, the
+fallback notice and the retry overlay, shadow comparison in dev and e2e, and the browser
+benchmark; the forked store — `staging` defaults to `engine`, the user's edits stage in the
+replica's working copy, the legacy store lives behind `staging: legacy`) — and watches `K-32`.
+The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op applier from
+the start of A's second plan; `routes/read.py`'s route functions and
+`routes/elements.py::get_element` left it for features once B's fifth plan flipped the
+surfaces' defaults. C (evaluation) is next. Size: very large.
 
 ---
 
@@ -120,6 +122,30 @@ reads exist. **Done:** `replica.svelte.ts`'s `onStatus` calls `markStructureChan
 previous phase was `resyncing` and the new one is `ready` — a retried `failed` replica and one the
 replica re-bootstraps on its own (a diverged digest check) both cross that transition; a plain
 first open (`opening` to `ready`) does not.
+
+### K-41 · A rebind's re-bootstrap does not remap later batches' temp ids · `open` · *2026-09-22*
+`sync.ts`'s `dropStagedBatches` unstages a rebound commit's own batches by id, but a later
+staged batch that named one of THOSE batches' temp ids (an update or a connect referring to
+an element the dropped batch created) is not remapped — the create is gone, so after the
+re-bootstrap the later batch parks as a conflict instead of being fixed up or dropped with it.
+Decide whether `dropStagedBatches` should walk dependents transitively.
+
+### K-42 · An edit that survives a commit flight loses its lease · `open` · *2026-09-22*
+`POST /commits` releases every lease the caller held (`routes/commits.py`). An edit staged
+DURING the POST (a batch of its own, per CT-2) is not part of that commit, so its element's
+lease is released along with the committed batch's; the next commit of that edit may 409
+"required lock not held" until the element is edited again (which re-acquires it). The same
+happens to a proposal (a snippet or CR Stage) that took its locks before a commit landed and
+staged its ops after. Decide whether the checkout store should re-acquire locks for what is
+still staged after a commit, or whether this stays a known limit.
+
+### K-43 · A property update staged during a commit can be dropped with it · `open` · *2026-09-22*
+The engine always coalesces a single property update (`emit`, or `emitMany` with ONE op) into
+the first staged batch already holding an update of the same id — including a batch that is
+mid-commit. The frontend narrows the window (the DiffDrawer cannot be dismissed while a commit
+is in flight, and `stageProposedOps` waits for `commitsLanded()`), but a plain `emit` from the
+property form is not gated the same way. Decide whether the engine should refuse to coalesce
+into a batch already sent, or whether the frontend's narrowing is enough.
 
 ---
 

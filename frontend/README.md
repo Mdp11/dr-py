@@ -181,7 +181,10 @@ application uses to resolve temp ids to canonical ones.
 
 The **backend session model is the source of truth**; the client never holds
 the whole model, and editing follows a pessimistic **check-out → stage →
-commit** loop:
+commit** loop. This is the **server-mode path** (`staging: legacy`,
+`model-legacy.svelte.ts`) — steps 1–3 describe the legacy buffer specifically;
+`staging: engine` is the default (`STAGING_DEFAULT`) and stages in the
+replica instead, called out inline below and detailed in "The engine store":
 
 1. The store caches only the **fetched subset** of the model — entities
    brought in by paged reads, searches, neighborhoods, and commit deltas —
@@ -1078,9 +1081,9 @@ it gates the notice and the gate — and the indicator, which reads the phase
 unconditionally, is the only consumer of a `failed` replica there. Whichever
 way a re-bootstrap starts — this retry, or the replica's own over a
 divergence — `onStatus` calls `markStructureChanged()` once it reaches
-`ready` from `resyncing`, so the tree, the relationships list and search
-re-read against what the rebuilt replica actually holds; a plain first open
-(`opening` to `ready`) bumps nothing.
+`ready` from `resyncing`, so the tree and the relationships list (the two
+consumers of `getStructureRev`) re-read against what the rebuilt replica
+actually holds; a plain first open (`opening` to `ready`) bumps nothing.
 
 **The commit in flight** (CT-2). `beginCommit()` is called BEFORE the POST
 (`/commits` or `/commits/revert`) and returns a flight; while any flight is

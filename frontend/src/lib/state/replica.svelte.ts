@@ -84,9 +84,9 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			if (status.phase === 'opening' && status.progress) journeyReplica(status.progress);
 			if (status.phase !== 'opening') _releaseGate();
 			// A re-bootstrap (a retried `failed`, or one the replica started on its
-			// own over a divergence) may have moved entities the tree, the
-			// relationships list and the search results were built from; a plain
-			// first open moves nothing, so it stays out of this.
+			// own over a divergence) may have moved entities the tree and the
+			// relationships list were built from; a plain first open moves
+			// nothing, so it stays out of this.
 			if (previousPhase === 'resyncing' && status.phase === 'ready') markStructureChanged();
 			if (
 				_retrying &&

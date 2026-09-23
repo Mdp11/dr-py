@@ -173,10 +173,13 @@ event     {event, …}                     engine → client, unsolicited
    ops it committed → rewrite temp ids through `id_map` → replay the rest. An op that fails
    replay is parked as a conflict and surfaced; it is never dropped silently. With the user's
    own commit named, a delta that arrives as a duplicate still drops the batches it committed.
-4. Reads default to the working copy; `committed: true` selects committed state.
+4. Reads default to the working copy; `committed: true` selects committed state. *Not built
+   in B: no read takes `committed: true`; the committed image crosses through `stagedDiff`
+   instead.*
 5. The working copy covers the **model** and **artifact** families — the inputs of
    evaluation. References resolve against it, staged artifacts included. View and
-   metamodel staged buffers stay in the frontend.
+   metamodel staged buffers stay in the frontend. *B built the model family; the artifact
+   family is C's.*
 6. Temp ids (`tmp_` prefix) never leave the client except as an op's `temp_id`. The server
    mints every real id.
 7. `adoptStaged` replays staged batches, under their ids, on a freshly opened replica — what a

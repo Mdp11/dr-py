@@ -1244,7 +1244,14 @@ with no testid anchor, so an unrelated layout tweak breaks it. Adding a testid t
 component is now an option (it wasn't when the finding was raised).
 
 ### T-4 · Known flakes · `open` · *re-run and move on*
-- e2e auth/session family — `frontend/e2e/helpers/auth.ts:33`.
+- e2e auth/session family — `frontend/e2e/helpers/auth.ts:33`. One confirmed cause,
+  environmental to some dev machines: a WSL host whose wall clock runs fast and gets
+  stepped back by `timesyncd` (here, ~5.6% fast, corrected ~1.7 s every ~30 s) can mint a
+  session JWT whose `iat` lands in the future by the time the next request decodes it;
+  `auth.decode_token` (`src/data_rover/api/auth.py`) has no leeway, so PyJWT raises
+  `ImmatureSignatureError` and the request gets 401 `invalid session` — a different spec
+  each run, at the clock's fixed intervals rather than a fixed point in the suite. Fix:
+  give `decode_token` a small `leeway` (proposed, not yet landed).
 - `tests/model/test_search_index.py::test_string_properties_indexed_non_strings_ignored`
   (~0.8% failure rate; **root cause confirmed 2026-08-16, pre-existing on the tree before
   the metamodel commit-flow branch**: the test's `"123"` trigram probe is all-hex, so it

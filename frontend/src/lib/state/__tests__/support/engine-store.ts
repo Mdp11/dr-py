@@ -162,9 +162,10 @@ export function withWrongDigest(committed: Committed): string {
  * Forces `failed`: a peer's commit whose feed frame carries the wrong state
  * digest, with the snapshot route down so the re-bootstrap it triggers
  * cannot download. `waitForReady` (default true) awaits `ready` first; skip
- * it when the caller already knows the replica is there — a plain status
- * list (`engineStore()`'s `until`) has no history to check, unlike
- * `realReplica()`'s, which also matches a status already recorded.
+ * it when the caller's `until` is forward-only and the replica already
+ * reached `ready` before this call — `engineStore()`'s own `await ready`
+ * already resolved on it, so a second wait for the same status would never
+ * see it happen again and would hang.
  */
 export async function forceFailed(
 	s: { project: FakeProject; until: UntilFn },
