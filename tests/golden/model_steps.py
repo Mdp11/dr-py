@@ -13,7 +13,10 @@ the issues as the server's routes send them. ``seed`` gives the recorder a
 session over its model, its issue store filled by the server's own sweep; from
 then on every landed batch bumps ``model_rev`` and is finalized as
 ``POST /model/ops`` finalizes it, and ``issues`` records ``GET /model/issues``.
-A batch with ``record_dirty`` adds its dirty ids to its result.
+``preview`` and ``validate_staged`` send their ops to ``POST /commits/preview``
+and to the staged branch of ``POST /model/validate``, which apply them, validate
+and roll back: the recorder holds both to leaving the model and the store as
+they were. A batch with ``record_dirty`` adds its dirty ids to its result.
 ``insert_element`` and ``insert_relationship`` put an entity in as committed
 state arrives, its type unchecked. After every step the recorder
 adds the outcome (``result`` or ``error``) and what the step left behind: the
@@ -43,19 +46,22 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, TypeAdapter
 
-from data_rover.api.db_models import ArtifactKind, ArtifactRow
+from data_rover.api.db_models import ArtifactKind, ArtifactRow, Role
 from data_rover.api.deps import Session
 from data_rover.api.routes import artifacts as artifact_routes
 from data_rover.api.routes import read
+from data_rover.api.routes.commits import preview_commit
 from data_rover.api.routes.elements import get_element
 from data_rover.api.routes.ops import _apply_batch, _BatchResult, _finalize
-from data_rover.api.routes.validation import list_issues
+from data_rover.api.routes.validation import list_issues, validate_model
 from data_rover.api.schemas import (
     ElementOut,
     EvaluateNavigationIn,
     IssueOut,
     ModelOpIn,
+    PreviewRequest,
     RelationshipOut,
+    ValidateRequest,
 )
 from data_rover.api.search import SearchQueryIn
 from data_rover.api.serialize import iter_entity_lines
@@ -377,6 +383,55 @@ class Recorder:
             )
         return outcome
 
+    def _staged(self, step: dict[str, Any]) -> Any:
+        """``preview`` or ``validate_staged``: the route over staged ops, which
+        must leave the model and the store as they were. The ids a preview
+        mints for its creates go back to the generator."""
+        session = self._session
+        assert session is not None and session.validation is not None, (
+            f"{step['do']} needs a seeded recorder"
+        )
+        ops = _MODEL_OPS.validate_python(step["_ops"])
+        store = [
+            (owner, list(issues))
+            for owner, issues in session.validation.issues_by_owner.items()
+        ]
+        before = observe(self.model)
+        drawn = self._ids.drawn
+        try:
+            if step["do"] == "preview":
+                session.strict_mode = bool(step["strict"])
+                body = preview_commit(
+                    PreviewRequest(base_rev=session.model_rev, ops=list(ops)),
+                    project_id="p",
+                    session=session,
+                    db=None,  # type: ignore[arg-type]
+                    membership=SimpleNamespace(role=Role.editor),  # type: ignore[arg-type]
+                )
+                assert isinstance(body, BaseModel), body
+                result: Any = body.model_dump(mode="json")
+            else:
+                assert ops, "an empty validate_staged takes the full branch"
+                issues = validate_model(
+                    ValidateRequest(ops=list(ops), base_rev=session.model_rev),
+                    session=session,
+                )
+                assert isinstance(issues, list), issues
+                result = [i.model_dump(mode="json") for i in issues]
+        finally:
+            self._ids.drawn = drawn
+        if observe(self.model) != before:
+            raise AssertionError(f"step {len(self._steps)}: {step['do']} left a trace")
+        after = [
+            (owner, list(issues))
+            for owner, issues in session.validation.issues_by_owner.items()
+        ]
+        if after != store:
+            raise AssertionError(
+                f"step {len(self._steps)}: {step['do']} changed the store"
+            )
+        return result
+
     def _apply(self, step: dict[str, Any]) -> Any:
         model = self.model
         match step["do"]:
@@ -405,6 +460,8 @@ class Recorder:
             case "issues":
                 assert self._session is not None, "issues needs a seeded recorder"
                 return list_issues(session=self._session).model_dump(mode="json")
+            case "preview" | "validate_staged":
+                return self._staged(step)
             case "read":
                 session = Session(
                     metamodel=self.metamodel, model=model, views=self._views

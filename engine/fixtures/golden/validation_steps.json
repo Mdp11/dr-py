@@ -2600,24 +2600,7 @@
       },
       "error": null,
       "digest": "7cc129c7b0424765",
-      "fingerprint": "5dba1a01345c87f0",
-      "state": [
-        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":8,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":19}",
-        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}",
-        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
-        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
-        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}",
-        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
-        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
-        "{\"id\":\"nope\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"nope\",\"req\":\"z\"},\"rev\":2}",
-        "{\"id\":\"d-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}",
-        "{\"id\":\"d-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"e\"},\"rev\":2}",
-        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
-        "{\"id\":\"n-1\",\"type_name\":\"Needs\",\"source_id\":\"car-1\",\"target_id\":\"wheel-1\",\"properties\":{},\"rev\":0}",
-        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{\"lbl\":\"x\"},\"rev\":1}",
-        "{\"id\":\"own-a\",\"type_name\":\"Owns\",\"source_id\":\"o-1\",\"target_id\":\"o-2\",\"properties\":{},\"rev\":0}"
-      ],
-      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\",\"nope\"]],[\"Car\",[\"car-1\"]],[\"Other\",[\"d-2\",\"d-3\",\"o-1\",\"o-2\",\"p-2\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\",\"l-3\"]],[\"car-1\",[\"n-1\"]],[\"o-1\",[\"own-a\"]]],\"in\":[[\"o-1\",[\"l-1\"]],[\"o-2\",[\"l-3\",\"own-a\"]],[\"wheel-1\",[\"n-1\"]]],\"out_count\":[[\"b-1\",\"Link\",2],[\"car-1\",\"Needs\",1],[\"o-1\",\"Owns\",1]],\"in_count\":[[\"o-1\",\"Link\",1],[\"o-2\",\"Link\",1],[\"o-2\",\"Owns\",1],[\"wheel-1\",\"Needs\",1]],\"parents\":[[\"o-2\",[\"o-1\"],[\"own-a\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"d-2\"],[\"d-3\"],[\"nope\"],[\"o-1\"],[\"o-2\"],[\"p-2\"],[\"wheel-1\"]],\"duplicates\":[],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1b\",\"car-1\"],[\"d\",\"d-2\"],[\"e\",\"d-3\"],[\"nope\",\"nope\"],[\"o1\",\"o-1\"],[\"p2\",\"p-2\"],[\"wheel1\",\"wheel-1\"]]}"
+      "fingerprint": "5dba1a01345c87f0"
     },
     {
       "do": "issues",
@@ -2644,6 +2627,959 @@
           "skipped": [],
           "eval_errors": {}
         }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_q-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"id\":\"q-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_q-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"id\":\"q-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_q-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"id\":\"q-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_k-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"k\"},\"id\":\"k-1\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_own-k\",\"type_name\":\"Owns\",\"source_id\":\"q-1\",\"target_id\":\"k-1\",\"properties\":{},\"id\":\"own-k\"}",
+        "{\"kind\":\"update_element\",\"id\":\"b-2\",\"properties_patch\":{\"c\":\"blue\"}}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_q-1",
+            "q-1"
+          ],
+          [
+            "tmp_q-2",
+            "q-2"
+          ],
+          [
+            "tmp_q-3",
+            "q-3"
+          ],
+          [
+            "tmp_k-1",
+            "k-1"
+          ],
+          [
+            "tmp_own-k",
+            "own-k"
+          ]
+        ],
+        "changed_element_ids": [
+          "q-1",
+          "q-2",
+          "q-3",
+          "k-1",
+          "b-2"
+        ],
+        "changed_relationship_ids": [
+          "own-k"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "q-1",
+            null
+          ],
+          [
+            "q-2",
+            null
+          ],
+          [
+            "q-3",
+            null
+          ],
+          [
+            "k-1",
+            null
+          ],
+          [
+            "b-2",
+            "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "own-k",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-2\",\"properties_patch\":{\"c\":null}}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"own-k\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"k-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"q-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"q-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"q-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"q-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"rev\":1}",
+          "{\"id\":\"q-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"rev\":1}",
+          "{\"id\":\"q-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"rev\":1}",
+          "{\"id\":\"k-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"k\"},\"rev\":1}",
+          "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\",\"c\":\"blue\"},\"rev\":5}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"own-k\",\"type_name\":\"Owns\",\"source_id\":\"q-1\",\"target_id\":\"k-1\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "a54cb27f2a137f41",
+      "fingerprint": "99d99591227a2da8",
+      "state": [
+        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":8,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":19}",
+        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\",\"c\":\"blue\"},\"rev\":5}",
+        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}",
+        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+        "{\"id\":\"nope\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"nope\",\"req\":\"z\"},\"rev\":2}",
+        "{\"id\":\"d-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}",
+        "{\"id\":\"d-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"e\"},\"rev\":2}",
+        "{\"id\":\"q-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"rev\":1}",
+        "{\"id\":\"q-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"rev\":1}",
+        "{\"id\":\"q-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"rev\":1}",
+        "{\"id\":\"k-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"k\"},\"rev\":1}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+        "{\"id\":\"n-1\",\"type_name\":\"Needs\",\"source_id\":\"car-1\",\"target_id\":\"wheel-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{\"lbl\":\"x\"},\"rev\":1}",
+        "{\"id\":\"own-a\",\"type_name\":\"Owns\",\"source_id\":\"o-1\",\"target_id\":\"o-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"own-k\",\"type_name\":\"Owns\",\"source_id\":\"q-1\",\"target_id\":\"k-1\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\",\"nope\"]],[\"Car\",[\"car-1\"]],[\"Other\",[\"d-2\",\"d-3\",\"k-1\",\"o-1\",\"o-2\",\"p-2\",\"q-1\",\"q-2\",\"q-3\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\",\"l-3\"]],[\"car-1\",[\"n-1\"]],[\"o-1\",[\"own-a\"]],[\"q-1\",[\"own-k\"]]],\"in\":[[\"k-1\",[\"own-k\"]],[\"o-1\",[\"l-1\"]],[\"o-2\",[\"l-3\",\"own-a\"]],[\"wheel-1\",[\"n-1\"]]],\"out_count\":[[\"b-1\",\"Link\",2],[\"car-1\",\"Needs\",1],[\"o-1\",\"Owns\",1],[\"q-1\",\"Owns\",1]],\"in_count\":[[\"k-1\",\"Owns\",1],[\"o-1\",\"Link\",1],[\"o-2\",\"Link\",1],[\"o-2\",\"Owns\",1],[\"wheel-1\",\"Needs\",1]],\"parents\":[[\"k-1\",[\"q-1\"],[\"own-k\"]],[\"o-2\",[\"o-1\"],[\"own-a\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"d-2\"],[\"d-3\"],[\"k-1\"],[\"nope\"],[\"o-1\"],[\"o-2\"],[\"p-2\"],[\"q-1\",\"q-2\",\"q-3\"],[\"wheel-1\"]],\"duplicates\":[[\"q-1\",\"q-2\",\"q-3\"]],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1b\",\"car-1\"],[\"d\",\"d-2\"],[\"e\",\"d-3\"],[\"nope\",\"nope\"],[\"o1\",\"o-1\"],[\"p2\",\"p-2\"],[\"q\",\"q-1\"],[\"q\",\"q-2\"],[\"q\",\"q-3\"],[\"wheel1\",\"wheel-1\"]]}"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 27,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 8 above max 5.0",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Blk.c: value 'blue' is not a valid Color",
+            "target_ids": [
+              "b-2"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+            "target_ids": [
+              "q-2",
+              "q-1"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+            "target_ids": [
+              "q-3",
+              "q-1"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 4
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "validate_staged",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":2}}"
+      ],
+      "result": [
+        {
+          "severity": "error",
+          "message": "Blk.c: value 'blue' is not a valid Color",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "type_conformance",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-2",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "n: 8 above max 5.0",
+          "target_ids": [
+            "b-1"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "resolved"
+        }
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": true,
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":2}}"
+      ],
+      "result": {
+        "conformance_error_count": 0,
+        "structural_blockers": [],
+        "issues": [],
+        "would_block": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "validate_staged",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-9\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b9\",\"n\":7,\"req\":\"r\"},\"id\":\"b-9\"}"
+      ],
+      "result": [
+        {
+          "severity": "error",
+          "message": "n: 8 above max 5.0",
+          "target_ids": [
+            "b-1"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Blk.c: value 'blue' is not a valid Color",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "type_conformance",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-2",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "n: 7 above max 5.0",
+          "target_ids": [
+            "b-9"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "uncommitted"
+        }
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": true,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-9\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b9\",\"n\":7,\"req\":\"r\"},\"id\":\"b-9\"}"
+      ],
+      "result": {
+        "conformance_error_count": 1,
+        "structural_blockers": [],
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 7 above max 5.0",
+            "target_ids": [
+              "b-9"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          }
+        ],
+        "would_block": true
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "validate_staged",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-9\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b9\",\"n\":7,\"req\":\"r\"},\"id\":\"b-9\"}"
+      ],
+      "result": [
+        {
+          "severity": "error",
+          "message": "n: 8 above max 5.0",
+          "target_ids": [
+            "b-1"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Blk.c: value 'blue' is not a valid Color",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "type_conformance",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-2",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "n: 7 above max 5.0",
+          "target_ids": [
+            "b-9"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "uncommitted"
+        }
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": false,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-9\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b9\",\"n\":7,\"req\":\"r\"},\"id\":\"b-9\"}"
+      ],
+      "result": {
+        "conformance_error_count": 1,
+        "structural_blockers": [],
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 7 above max 5.0",
+            "target_ids": [
+              "b-9"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          }
+        ],
+        "would_block": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "validate_staged",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_q-9\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"id\":\"q-9\"}"
+      ],
+      "result": [
+        {
+          "severity": "error",
+          "message": "n: 8 above max 5.0",
+          "target_ids": [
+            "b-1"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Blk.c: value 'blue' is not a valid Color",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "type_conformance",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-9: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-9",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "uncommitted"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-2",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        }
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": false,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_q-9\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"id\":\"q-9\"}"
+      ],
+      "result": {
+        "conformance_error_count": 3,
+        "structural_blockers": [],
+        "issues": [
+          {
+            "severity": "error",
+            "message": "Duplicate Other element q-9: matches q-1 (no key — all properties match)",
+            "target_ids": [
+              "q-9",
+              "q-1"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+            "target_ids": [
+              "q-2",
+              "q-1"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+            "target_ids": [
+              "q-3",
+              "q-1"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          }
+        ],
+        "would_block": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "validate_staged",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"q-1\"}"
+      ],
+      "result": [
+        {
+          "severity": "error",
+          "message": "n: 8 above max 5.0",
+          "target_ids": [
+            "b-1"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Blk.c: value 'blue' is not a valid Color",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "type_conformance",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-2 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-2"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "uncommitted"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-2",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "resolved"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "resolved"
+        }
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": true,
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"q-1\"}"
+      ],
+      "result": {
+        "conformance_error_count": 1,
+        "structural_blockers": [],
+        "issues": [
+          {
+            "severity": "error",
+            "message": "Duplicate Other element q-3: matches q-2 (no key — all properties match)",
+            "target_ids": [
+              "q-3",
+              "q-2"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          }
+        ],
+        "would_block": true
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "validate_staged",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"name\":\"b1x\"}}"
+      ],
+      "result": [
+        {
+          "severity": "error",
+          "message": "Blk.c: value 'blue' is not a valid Color",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "type_conformance",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-2",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "n: 8 above max 5.0",
+          "target_ids": [
+            "b-1"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "on_server"
+        }
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": true,
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"name\":\"b1x\"}}"
+      ],
+      "result": {
+        "conformance_error_count": 1,
+        "structural_blockers": [],
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 8 above max 5.0",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          }
+        ],
+        "would_block": true
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "validate_staged",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_own-z\",\"type_name\":\"Owns\",\"source_id\":\"o-2\",\"target_id\":\"k-1\",\"properties\":{},\"id\":\"own-z\"}"
+      ],
+      "result": [
+        {
+          "severity": "error",
+          "message": "n: 8 above max 5.0",
+          "target_ids": [
+            "b-1"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Blk.c: value 'blue' is not a valid Color",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "type_conformance",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-2",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "Element k-1 has 2 containment parents (must have at most one)",
+          "target_ids": [
+            "k-1"
+          ],
+          "category": "structural",
+          "check": "containment",
+          "origin": "uncommitted"
+        }
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": true,
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_own-z\",\"type_name\":\"Owns\",\"source_id\":\"o-2\",\"target_id\":\"k-1\",\"properties\":{},\"id\":\"own-z\"}"
+      ],
+      "result": {
+        "conformance_error_count": 0,
+        "structural_blockers": [
+          {
+            "severity": "error",
+            "message": "Element k-1 has 2 containment parents (must have at most one)",
+            "target_ids": [
+              "k-1"
+            ],
+            "category": "structural",
+            "check": "containment",
+            "origin": "on_server"
+          }
+        ],
+        "issues": [
+          {
+            "severity": "error",
+            "message": "Element k-1 has 2 containment parents (must have at most one)",
+            "target_ids": [
+              "k-1"
+            ],
+            "category": "structural",
+            "check": "containment",
+            "origin": "on_server"
+          }
+        ],
+        "would_block": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "validate_staged",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":2,\"name\":\"b1y\"}}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_q-9\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"id\":\"q-9\"}",
+        "{\"kind\":\"update_element\",\"id\":\"b-2\",\"properties_patch\":{\"n\":6}}",
+        "{\"kind\":\"delete_element\",\"id\":\"q-2\"}"
+      ],
+      "result": [
+        {
+          "severity": "error",
+          "message": "Blk.c: value 'blue' is not a valid Color",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "type_conformance",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "n: 6 above max 5.0",
+          "target_ids": [
+            "b-2"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "uncommitted"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-9: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-9",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "uncommitted"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-3",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "on_server"
+        },
+        {
+          "severity": "error",
+          "message": "n: 8 above max 5.0",
+          "target_ids": [
+            "b-1"
+          ],
+          "category": "conformance",
+          "check": "facets",
+          "origin": "resolved"
+        },
+        {
+          "severity": "error",
+          "message": "Duplicate Other element q-2: matches q-1 (no key — all properties match)",
+          "target_ids": [
+            "q-2",
+            "q-1"
+          ],
+          "category": "conformance",
+          "check": "uniqueness",
+          "origin": "resolved"
+        }
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": true,
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":2,\"name\":\"b1y\"}}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_q-9\",\"type_name\":\"Other\",\"properties\":{\"name\":\"q\"},\"id\":\"q-9\"}",
+        "{\"kind\":\"update_element\",\"id\":\"b-2\",\"properties_patch\":{\"n\":6}}",
+        "{\"kind\":\"delete_element\",\"id\":\"q-2\"}"
+      ],
+      "result": {
+        "conformance_error_count": 4,
+        "structural_blockers": [],
+        "issues": [
+          {
+            "severity": "error",
+            "message": "Blk.c: value 'blue' is not a valid Color",
+            "target_ids": [
+              "b-2"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "n: 6 above max 5.0",
+            "target_ids": [
+              "b-2"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Duplicate Other element q-9: matches q-1 (no key — all properties match)",
+            "target_ids": [
+              "q-9",
+              "q-1"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Duplicate Other element q-3: matches q-1 (no key — all properties match)",
+            "target_ids": [
+              "q-3",
+              "q-1"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          }
+        ],
+        "would_block": true
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "preview",
+      "strict": true,
+      "ops": [],
+      "result": {
+        "conformance_error_count": 0,
+        "structural_blockers": [],
+        "issues": [],
+        "would_block": false
       },
       "error": null,
       "unchanged": true

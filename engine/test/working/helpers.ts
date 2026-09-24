@@ -8,13 +8,14 @@ import {
 	WorkingCopy,
 	type BatchResult,
 	type Delta,
-	type ModelOp
+	type ModelOp,
+	type ModelOptions
 } from '../../src/index.ts';
 import { stateDigest } from '../golden/digest.ts';
 
 /** A second model holding the same state, entity order and `rev`s included, loaded from its lines. */
-export function clone(model: Model): Model {
-	const copy = new Model(model.metamodel);
+export function clone(model: Model, options: ModelOptions = {}): Model {
+	const copy = new Model(model.metamodel, options);
 	const lines = modelLines(model);
 	lines.slice(0, model.elementCount).forEach((line) => copy.loadElement(parseJson(line)));
 	lines.slice(model.elementCount).forEach((line) => copy.loadRelationship(parseJson(line)));

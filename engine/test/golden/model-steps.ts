@@ -14,6 +14,7 @@ import {
 	FacetPatterns,
 	isSteps,
 	IssueStore,
+	LiveIssues,
 	Metamodel,
 	Model,
 	ModelError,
@@ -26,6 +27,7 @@ import {
 	OpError,
 	parseJson,
 	PyFloat,
+	previewBody,
 	pyDumps,
 	ReadError,
 	readNavigation,
@@ -35,6 +37,7 @@ import {
 	resolveRefs,
 	shuffleAdjacency,
 	storeListBody,
+	validateBody,
 	validateScoped,
 	Validators,
 	verifyConsistent,
@@ -53,6 +56,7 @@ import {
 	type StagedArtifact,
 	type Value
 } from '../../src/index.ts';
+import { clone, workingCopy } from '../working/helpers.ts';
 import { untag, type Tagged } from './load.ts';
 
 /**
@@ -112,6 +116,8 @@ export type Step = Partial<Observed> & {
 	definition?: unknown;
 	limits?: { max_visited: number; max_chains: number };
 	row_elements?: string[] | null;
+	/** `preview`: the session's strict mode. */
+	strict?: boolean;
 	/** `validate`: the ids to validate, in order, or every id in state order. */
 	scope?: string[] | 'all_ids';
 	/** `insert_element` / `insert_relationship`: the entity's `rev`; `value` holds its properties. */
@@ -217,6 +223,7 @@ type Carried = {
 	layer: ArtifactLayer;
 	validation: Validation | null;
 	session: { store: IssueStore; rev: number } | null;
+	options: ModelOptions;
 };
 
 function validationOf(carried: Carried, model: Model): Validation {
@@ -311,6 +318,18 @@ function apply(
 		case 'issues': {
 			const { store, rev } = carried.session!;
 			return storeListBody(store, rev);
+		}
+		case 'preview':
+		case 'validate_staged': {
+			// A replica of the session's state, its store seeded with the session's,
+			// the ops staged on it as one batch.
+			const { store, rev } = carried.session!;
+			const seed = new IssueStore();
+			seed.replace([...store.owners()], [...store.iter()]);
+			const live = new LiveIssues(workingCopy(clone(model, carried.options), rev), { seed });
+			const ops = parseOps(step.ops!);
+			if (ops.length > 0) live.stage(ops);
+			return step.do === 'preview' ? previewBody(live, step.strict!) : validateBody(live);
 		}
 		case 'artifacts':
 			setArtifacts(carried, step);
@@ -407,7 +426,15 @@ function apply(
 }
 
 /** Steps whose result is compared as JSON text. */
-const READ_LIKE = new Set(['read', 'navigate', 'has_script', 'validate', 'issues']);
+const READ_LIKE = new Set([
+	'read',
+	'navigate',
+	'has_script',
+	'validate',
+	'issues',
+	'preview',
+	'validate_staged'
+]);
 
 /**
  * Replays a recorded scenario through the engine, comparing every outcome and
@@ -429,7 +456,8 @@ export function replaySteps(
 		artifacts: new ArtifactSet(),
 		layer,
 		validation: null,
-		session: null
+		session: null,
+		options
 	};
 	let minted = 0;
 	let last = observe(model);

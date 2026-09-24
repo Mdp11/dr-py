@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+	drain,
+	LiveIssues,
 	Metamodel,
 	Model,
 	OpError,
@@ -10,6 +12,7 @@ import {
 } from '../../src/index.ts';
 import { loadFixture } from '../golden/load.ts';
 import { observe, seededRandom, type StepsFixture } from '../golden/model-steps.ts';
+import { byOwner, sweptFresh } from '../validation/helpers.ts';
 import { clone, Server, workingCopy } from './helpers.ts';
 import { RandomOps } from './random-ops.ts';
 
@@ -163,11 +166,13 @@ describe('working-copy invariants over seeded random batches', () => {
 	});
 
 	it.each(SEEDS)(
-		'seed %i: coalescing, deltas and unstages keep the state a replay of staged() gives',
+		'seed %i: coalescing, deltas and unstages keep the state a replay of staged() gives, and the issues a sweep finds',
 		(seed) => {
 			const random = seededRandom(seed);
 			const server = grow(random, 30);
 			const wc = workingCopy(clone(server.model), server.rev);
+			const live = new LiveIssues(wc);
+			drain(live.sweepSteps());
 			const mine = new RandomOps(random);
 			const peer = new RandomOps(random, 'tmp_peer');
 			for (let i = 0; i < 40; i++) {
@@ -176,18 +181,18 @@ describe('working-copy invariants over seeded random batches', () => {
 				try {
 					if (roll < 0.45) {
 						const update = mine.batch(wc.model).find((op) => op.kind === 'update_element');
-						if (update !== undefined) wc.stage([update], { coalesce: true });
+						if (update !== undefined) live.stage([update], { coalesce: true });
 					} else if (roll < 0.65) {
-						wc.stage(mine.batch(wc.model));
+						live.stage(mine.batch(wc.model));
 					} else if (roll < 0.85) {
-						wc.applyDelta(landSome(server, peer).delta);
+						live.applyDelta(landSome(server, peer).delta);
 					} else {
 						const staged = wc.staged();
 						const ids = [...wc.model.elements()].map((element) => element.id);
 						if (random() < 0.5 && staged.length > 0) {
-							wc.unstage({ batch: staged[Math.floor(random() * staged.length)]!.id });
+							live.unstage({ batch: staged[Math.floor(random() * staged.length)]!.id });
 						} else if (ids.length > 0) {
-							wc.unstage({ entity: ids[Math.floor(random() * ids.length)]! });
+							live.unstage({ entity: ids[Math.floor(random() * ids.length)]! });
 						}
 					}
 				} catch (caught) {
@@ -195,8 +200,15 @@ describe('working-copy invariants over seeded random batches', () => {
 				}
 				const fresh = workingCopy(clone(server.model), server.rev);
 				for (const batch of wc.staged()) fresh.stage(batch.ops);
-				expect(observe(wc.model)).toEqual(observe(fresh.model));
+				const seen = observe(wc.model);
+				expect(seen).toEqual(observe(fresh.model));
 				verifyConsistent(wc.model);
+				expect(byOwner(live.store), `action ${i}`).toEqual(byOwner(sweptFresh(wc)));
+				wc.probeStaged(
+					() => null,
+					() => null
+				);
+				expect(observe(wc.model)).toEqual(seen);
 			}
 			expect(wc.diverged).toBe(false);
 		}

@@ -192,7 +192,15 @@ export type {
 	WireChanges,
 	WireConflict
 } from './service/types.ts';
-export { ISSUES_RESPONSE_MAX, storeListBody, type IssueListBody } from './validation/bodies.ts';
+export {
+	issueListBody,
+	ISSUES_RESPONSE_MAX,
+	previewBody,
+	storeListBody,
+	validateBody,
+	type IssueListBody,
+	type PreviewBody
+} from './validation/bodies.ts';
 export { addNeighbourhood, DirtyCollector } from './validation/dirty.ts';
 export {
 	issueKey,
@@ -204,6 +212,7 @@ export {
 	type Origin,
 	type Severity
 } from './validation/issue.ts';
+export { LiveIssues, SWEEP_STEP, type LiveIssuesOptions, type Origins } from './validation/live.ts';
 export {
 	FacetPatterns,
 	PatternUnusable,

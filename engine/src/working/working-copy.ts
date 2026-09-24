@@ -16,6 +16,7 @@ import { rewind } from '../ops/rewind.ts';
 import type { ModelOp, UpdateElementOp, UpdateRelationshipOp } from '../ops/types.ts';
 import { entityHash, formatDigest, type EntityHash } from '../snapshot/digest.ts';
 import { drain, type Steps } from '../steps/steps.ts';
+import { DirtyCollector } from '../validation/dirty.ts';
 import { readDelta, type CommittedChange, type Delta } from './delta.ts';
 
 export type WorkingCopyOptions = {
@@ -257,6 +258,35 @@ export class WorkingCopy {
 		return this.committedElements.has(id) || this.committedRelationships.has(id);
 	}
 
+	/**
+	 * Every id a staged batch touched, elements then relationships, each in
+	 * first-touch order; with `from`, only the batches from that index on.
+	 */
+	touchedIds(from = 0): string[] {
+		if (from === 0) {
+			return [...this.committedElements.keys(), ...this.committedRelationships.keys()];
+		}
+		const elements = new Set<string>();
+		const relationships = new Set<string>();
+		for (const { result } of this.entries.slice(from)) {
+			for (const id of result.beforeElements.keys()) elements.add(id);
+			for (const id of result.beforeRelationships.keys()) relationships.add(id);
+		}
+		return [...elements, ...relationships];
+	}
+
+	/**
+	 * The index of the staged batch `stage([op], {coalesce: true})` would merge
+	 * `op` into, the batches from there on being the ones it replays; -1 when
+	 * it would stage `op` as a batch of its own.
+	 */
+	mergePoint(op: ModelOp): number {
+		if (!isUpdate(op)) return -1;
+		return this.entries.findIndex(({ batch }) =>
+			batch.ops.some((other) => other.kind === op.kind && other.id === op.id)
+		);
+	}
+
 	/** The element as committed, whatever is staged on top; `null` when it has no committed state. */
 	committedElement(id: string): ElementImage | null {
 		const image = this.committedElements.get(id);
@@ -328,29 +358,37 @@ export class WorkingCopy {
 	 * and the batch holding it is replayed with everything after it. It is
 	 * never merged in place: a key deleted and set again would move, and the
 	 * state would no longer be the one a replay of `staged()` gives.
+	 *
+	 * `dirty` receives the dirty-set hooks of the batch applied, or of a merged
+	 * op's trial run on top: the same op on the same state. A refused batch
+	 * leaves it holding ids of a batch that never happened.
 	 */
 	stage(
 		ops: readonly ModelOp[],
-		options: { coalesce?: boolean } = {}
+		options: { coalesce?: boolean; dirty?: DirtyCollector } = {}
 	): { batch: StagedBatch; coalesced: boolean; changes: ChangeSet } {
+		const dirty = options.dirty;
 		return this.tracked(() => {
-			const merged = options.coalesce === true && ops.length === 1 ? this.coalesce(ops[0]!) : null;
+			const merged =
+				options.coalesce === true && ops.length === 1 ? this.coalesce(ops[0]!, dirty) : null;
 			if (merged !== null) return { ...merged, coalesced: true };
-			const result = applyBatch(this.model, ops);
+			const result = applyBatch(this.model, ops, { dirty });
 			const batch = { id: this.nextBatchId++, ops };
 			this.keep({ batch, result });
 			return { batch, coalesced: false, changes: batchChanges(result) };
 		});
 	}
 
-	private coalesce(op: ModelOp): { batch: StagedBatch; changes: ChangeSet } | null {
-		if (!isUpdate(op)) return null;
-		for (let at = 0; at < this.entries.length; at++) {
+	private coalesce(
+		op: ModelOp,
+		dirty: DirtyCollector | undefined
+	): { batch: StagedBatch; changes: ChangeSet } | null {
+		const at = this.mergePoint(op);
+		if (at >= 0 && isUpdate(op)) {
 			const { batch } = this.entries[at]!;
 			const index = batch.ops.findIndex((other) => other.kind === op.kind && other.id === op.id);
-			if (index < 0) continue;
 			// Tried alone on top first: a bad patch must not park the user's earlier edits.
-			rewind(this.model, applyBatch(this.model, [op]));
+			rewind(this.model, applyBatch(this.model, [op], { dirty }));
 			const found = batch.ops[index] as UpdateOp;
 			const patch = { ...found.properties_patch, ...op.properties_patch };
 			const merged = {
@@ -439,6 +477,85 @@ export class WorkingCopy {
 			if (image) return [image.sourceId, image.targetId];
 		}
 		return [];
+	}
+
+	/**
+	 * Looks at the staged batches as the server would take them, and leaves no
+	 * trace: rewinds them, replays them in order into one dirty collector —
+	 * the dirty set of the staged ops applied as one batch to the committed
+	 * state — and runs `onWorking` over it; rewinds again and runs
+	 * `onCommitted` on the committed state; replays once more. The entries
+	 * and committed images are rebuilt from the replays, `staged()`,
+	 * `conflicts()` and `stagedVersion` stay as they were. Neither callback may
+	 * write to the model.
+	 */
+	probeStaged<W, C>(
+		onWorking: (dirty: readonly string[]) => W,
+		onCommitted: () => C
+	): { dirty: string[]; working: W; committed: C } {
+		const model = this.model;
+		for (const entry of this.entries.toReversed()) rewind(model, entry.result);
+		const collector = new DirtyCollector();
+		this.replayInPlace(collector);
+		const dirty = [...collector.ids];
+		const working = onWorking(dirty);
+		for (const entry of this.entries.toReversed()) rewind(model, entry.result);
+		let committed: C;
+		try {
+			committed = onCommitted();
+		} finally {
+			this.replayInPlace();
+		}
+		return { dirty, working, committed };
+	}
+
+	/**
+	 * Applies every staged batch again, the state below them being the one they
+	 * were applied to, and keeps the new results. It cannot be refused: these
+	 * are the batches that applied there. If one is all the same, a plain
+	 * `Error` is thrown with the staged batches put back as they stood, or,
+	 * when even that fails, still listed and the replica diverged.
+	 */
+	private replayInPlace(dirty?: DirtyCollector): void {
+		const batches = this.entries.map((entry) => entry.batch);
+		let replayed: Entry[];
+		try {
+			replayed = this.applyAll(batches, dirty);
+		} catch (caught) {
+			try {
+				this.reinstate(this.applyAll(batches));
+			} catch {
+				// The model stands below the batches, which the next replica adopts.
+				this.hasDiverged = true;
+			}
+			const reason = caught instanceof Error ? caught.message : String(caught);
+			throw new Error(`a staged batch did not replay where it applied: ${reason}`, {
+				cause: caught
+			});
+		}
+		this.reinstate(replayed);
+	}
+
+	/** Applies `batches` in order; a refusal rewinds what they applied and propagates. */
+	private applyAll(batches: readonly StagedBatch[], dirty?: DirtyCollector): Entry[] {
+		const applied: Entry[] = [];
+		try {
+			for (const batch of batches) {
+				applied.push({ batch, result: applyBatch(this.model, batch.ops, { dirty }) });
+			}
+		} catch (caught) {
+			for (const entry of applied.toReversed()) rewind(this.model, entry.result);
+			throw caught;
+		}
+		return applied;
+	}
+
+	/** Takes `entries` as the staged ones, rebuilding the committed images from them. */
+	private reinstate(entries: readonly Entry[]): void {
+		this.entries = [];
+		this.committedElements.clear();
+		this.committedRelationships.clear();
+		for (const entry of entries) this.keep(entry);
 	}
 
 	// -- committed state -----------------------------------------------------

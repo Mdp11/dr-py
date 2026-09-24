@@ -2,7 +2,11 @@
 spliced by every batch as ``POST /model/ops`` splices it, and read back
 through ``GET /model/issues`` after each. The batches make and mend every
 kind of issue — a duplicate, a cycle, a dangling reference among them — and
-one is refused, which leaves the store as it was."""
+one is refused, which leaves the store as it was. Then staged ops go through
+``POST /commits/preview`` and the staged branch of ``POST /model/validate``:
+they fix, make and duplicate issues, cascade-delete a primary, touch an
+entity whose issue stands, and run strict and not, which leave the model and
+the store as they were."""
 
 from __future__ import annotations
 
@@ -148,6 +152,53 @@ _BATCHES: list[list[dict[str, Any]]] = [
     [_update("b-1", n=8), _delete("p-1")],
 ]
 
+
+def _preview(ops: list[dict[str, Any]], *, strict: bool) -> dict[str, Any]:
+    return {"do": "preview", "_ops": ops, "strict": strict}
+
+
+def _validate_staged(ops: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"do": "validate_staged", "_ops": ops}
+
+
+#: committed issues for the staged cases to meet: a duplicate group whose
+#: primary contains an element, and an enum issue beside the facet one
+_SETUP: list[dict[str, Any]] = [
+    _el("q-1", "Other", name="q"),
+    _el("q-2", "Other", name="q"),
+    _el("q-3", "Other", name="q"),
+    _el("k-1", "Other", name="k"),
+    _rel("own-k", "Owns", "q-1", "k-1"),
+    _update("b-2", c="blue"),
+]
+
+#: staged ops, each sent to both routes, strict or not
+_STAGED: list[tuple[list[dict[str, Any]], bool]] = [
+    # a committed issue fixed
+    ([_update("b-1", n=2)], True),
+    # a new one made, attributable
+    ([_el("b-9", "Blk", name="b9", n=7, req="r")], True),
+    ([_el("b-9", "Blk", name="b9", n=7, req="r")], False),
+    # an existing element duplicated through a hinted create
+    ([_el("q-9", "Other", name="q")], False),
+    # the group's primary deleted with what it contains
+    ([_delete("q-1")], True),
+    # an entity whose issue stands touched: attributable all the same
+    ([_update("b-1", name="b1x")], True),
+    # a structural issue alone blocks nothing
+    ([_rel("own-z", "Owns", "o-2", "k-1")], True),
+    # all of it at once, owners interleaved
+    (
+        [
+            _update("b-1", n=2, name="b1y"),
+            _el("q-9", "Other", name="q"),
+            _update("b-2", n=6),
+            _delete("q-2"),
+        ],
+        True,
+    ),
+]
+
 _STEPS: list[dict[str, Any]] = [
     batch(
         [
@@ -174,6 +225,15 @@ _STEPS: list[dict[str, Any]] = [
     {"do": "seed"},
     _ISSUES,
     *(step for ops in _BATCHES for step in (batch(ops), _ISSUES)),
+    batch(_SETUP),
+    _ISSUES,
+    *(
+        step
+        for ops, strict in _STAGED
+        for step in (_validate_staged(ops), _preview(ops, strict=strict))
+    ),
+    # nothing staged at all
+    _preview([], strict=True),
 ]
 
 

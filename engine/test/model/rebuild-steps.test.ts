@@ -56,7 +56,8 @@ const MODELS: [string, () => Model][] = [
 ];
 
 describe('the index build in steps', () => {
-	it.each(MODELS)('%s: builds what the one-shot build builds', (_, make) => {
+	// Growing the model of thousands takes seconds alone, more beside the rest of the suite.
+	it.each(MODELS)('%s: builds what the one-shot build builds', { timeout: 20_000 }, (_, make) => {
 		const model = make();
 		shuffleAdjacency(model, seededRandom(3));
 		const reference = clone(model);

@@ -57,8 +57,8 @@ for tables and exports, on the server until plans 4–5, and `api/artifact_kinds
 every committed navigation payload against them; `core/table/resolve.py` (ref resolution and
 script reach) is frozen from this plan on too.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
-`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `C-21`, `C-22` in this
-file; `K-33`, `K-34` in `BACKLOG.md`.
+`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `C-21`, `C-22`, `C-23` in
+this file; `K-33`, `K-34` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -355,3 +355,4 @@ row. Suggested fix: add the inputs to `tests/golden/scenarios/py_coerce.py` and 
 | C-20 | `done` (2026-09-24, feat/eval-navigation) — `check_metamodel` refuses a property that redeclares an ancestor's, so the two readings never differ on a metamodel that reaches the engine; `_effective_props`' comment now says so. | 2026-09-18 |
 | C-21 | `api/routes/commits.py:785` and `:923` list "apply-cr baseline reset" among what bumps `model_rev` opaquely; apply-CR is a dry run that stages a batch and never resets the baseline. Drop it from both comments (C-12 applies: reword only, no reshaping). | 2026-09-19 |
 | C-22 | `api/routes/artifacts.py::evaluate_navigation`'s `except LookupError` also catches the evaluator's `KeyError`: an unknown `row_element_id` behind a filter or a property step answers 422 `unknown navigation artifact 'x'`, and with no steps the page's `_tree_item` answers 404 `x`. The top-level `artifact_id` refusal names the id unquoted (`unknown navigation artifact n1`, `LookupError` formatted with `str`) where a nested ref's is quoted. The engine mirrors all three (fixture `nav_eval`). Fix on both sides with a fixture. | 2026-09-24 |
+| C-23 | A containment cycle has two readings. `POST /model/validate` with nothing staged runs `Scope.all()` on the server, which names ONE representative of a cycle; the engine ports scoped runs only, so its store (the sweep's, as the server's own store is) reports every element whose first-parent chain reaches the cycle, those hanging below it included, and the engine's `validateModel` answers that store. The server already disagrees with itself the same way (its sweep and its full branch). Pick one reading on both sides when the candidate validation is decided. | 2026-09-24 |
