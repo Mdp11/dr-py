@@ -1,8 +1,27 @@
 import type { ClientConfig } from './client';
+import { ApiError } from './errors';
 
-/** A model read surface: the reads that move between server and engine together. */
-export type Surface = 'elements' | 'search' | 'relationships' | 'tree' | 'summary';
+/**
+ * A surface: the reads that move between server and engine together — the
+ * five model reads, the navigation evaluation and the criteria search.
+ */
+export type Surface =
+	| 'elements'
+	| 'search'
+	| 'relationships'
+	| 'tree'
+	| 'summary'
+	| 'navigation'
+	| 'criteria';
 export type Side = 'engine' | 'server';
+
+/** Why the server answered a call the engine refused: it reaches a script, or a pattern. */
+export type Fallback = 'script' | 'pattern';
+
+export type RouteOptions<T> = {
+	/** Marks the server's answer to a call the engine sent it. */
+	mark?: (value: T, reason: Fallback) => T;
+};
 
 /** One read method of the engine, answered with the route's response body. */
 export type EngineCall = <T>(method: string, params: unknown, signal?: AbortSignal) => Promise<T>;
@@ -46,16 +65,36 @@ export function engineSide(surface: Surface): Side {
 	return installed === null ? 'server' : installed.side(surface);
 }
 
+const FALLBACKS: { readonly [detail: string]: Fallback } = {
+	'reaches a script': 'script',
+	'reaches an unsupported pattern': 'pattern'
+};
+
+/** The engine's refusal that sends a call to the server, if `error` is one. */
+function fallbackOf(error: unknown): Fallback | null {
+	if (!(error instanceof ApiError) || error.status !== 501) return null;
+	return Object.hasOwn(FALLBACKS, error.message) ? FALLBACKS[error.message]! : null;
+}
+
+/** `body` as the server is sent it: plain JSON, which a `$state` proxy is not, `undefined` left out. */
+export function asSent(body: object): unknown {
+	return JSON.parse(JSON.stringify(body));
+}
+
 /**
  * Answers a read from the engine or the server. A call that names its server
  * (`baseUrl` or `fetch`) goes there. `engineCall` makes exactly one engine
- * call and parses its body with the server's schema.
+ * call and parses its body with the server's schema. A 501 the engine
+ * refuses a script or a pattern with is answered by the server, handed to
+ * `options.mark` with its reason, and not shadowed; any other 501 is the
+ * caller's.
  */
 export function route<T>(
 	surface: Surface,
 	cfg: ClientConfig | undefined,
 	engineCall: (call: EngineCall) => Promise<T>,
-	serverCall: () => Promise<T>
+	serverCall: () => Promise<T>,
+	options: RouteOptions<T> = {}
 ): Promise<T> {
 	const seam = installed;
 	if (
@@ -103,6 +142,13 @@ export function route<T>(
 		},
 		(error: unknown) => {
 			if (seam.gone(error)) return serverCall();
+			const reason = fallbackOf(error);
+			if (reason !== null) {
+				const { mark } = options;
+				return mark === undefined
+					? serverCall()
+					: serverCall().then((value) => mark(value, reason));
+			}
 			probe({ ok: false, error });
 			throw error;
 		}

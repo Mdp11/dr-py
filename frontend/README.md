@@ -805,8 +805,9 @@ explicit user click. `GET /model/issues` is the cheap read used everywhere else.
 The TypeScript engine (`../engine`) runs a full replica of the model in a
 worker of the sandbox site (`../sandbox`); `lib/engine/` is the app's side of
 it and `lib/state/replica.svelte.ts` wires it into the workspace (see
-"Wiring" below). The model reads can be answered by it, one switch per
-surface (see "Surfaces"), every switch on `engine` by default; a status-bar
+"Wiring" below). The model reads, navigations and criteria searches can be
+answered by it, one switch per surface (see "Surfaces"), the read surfaces on
+`engine` by default and the two evaluations on `server`; a status-bar
 indicator shows its state.
 
 **Aliases and the types-only rule.** `$engine` points at
@@ -1298,9 +1299,9 @@ order, unfiltered, artifacts ignored — the server's
 `lib/engine` needs no `lib/api/types` value.
 
 **Surfaces** (`lib/api/engine-route.ts`, `lib/engine/surfaces.ts`,
-`lib/engine/seam.ts`). The nine model reads of `lib/api` keep their
-signatures and schemas and are answered by the engine or the server, one
-switch per surface:
+`lib/engine/seam.ts`). The nine model reads of `lib/api` and its two
+evaluations keep their signatures and schemas and are answered by the
+engine or the server, one switch per surface:
 
 | surface         | functions                                                                                           |
 | --------------- | --------------------------------------------------------------------------------------------------- |
@@ -1309,6 +1310,8 @@ switch per surface:
 | `relationships` | `listElementRelationships`                                                                          |
 | `tree`          | `getTreeItemsBatch`, `listContainmentRoots`, `listExcludedRoots`, `listContainmentChildren`         |
 | `summary`       | `getModelSummary`                                                                                   |
+| `navigation`    | `evaluateNavigation`                                                                                |
+| `criteria`      | `searchModel`                                                                                       |
 
 - `lib/api` imports nothing of `lib/engine`: the engine is an injected seam
   (`installEngineSeam(seam | null)`), like the 401 handler. Each function
@@ -1320,10 +1323,26 @@ switch per surface:
   calls `gone` (the link was disposed while the read waited) is answered by
   the server instead, any other reaches the caller. `engineSide(surface)`
   is the side now, `server` without a seam.
+- The engine refuses an evaluation it must not answer with a 501 —
+  `reaches a script` (a navigation reaching a configured script step) or
+  `reaches an unsupported pattern` (a criterion pattern its regex
+  translator cannot vouch for). `route`'s optional fifth argument,
+  `{mark?(value, reason)}`, is for those: exactly those two (an `ApiError`
+  of status 501 with that message) are answered by the server, the value
+  handed to `mark` with `'script'` or `'pattern'`, and no shadow probe
+  runs; any other 501 reaches the caller. `evaluateNavigation` marks its
+  page `fallback: 'script' | 'pattern'`, which the navigation editor's
+  preview keeps from its first page and `Navigation/ResultsDock.svelte`
+  shows above the chains as a muted note (`data-testid="nav-fallback"`,
+  "Reads committed state: …"); `searchModel` passes no mark.
 - The engine's params are flat and snake_case — `{id}`, `{ids}`,
   `{type, q, limit, offset}`, `{id, direction, limit, offset}`, `{}`,
   `{limit, offset}`, `{limit, offset, view_id}`, `{id, limit, offset}` —
-  and an option the caller omitted is not sent. The option bags take a
+  and an option the caller omitted is not sent. The evaluations' params
+  are the server's body as plain JSON (`asSent`, since a `$state` proxy
+  cannot cross a `MessagePort`): `evaluateNavigation`'s `{definition |
+artifact_id, row_element_id, limit, offset}`, `searchModel`'s
+  `{target, criteria, limit, offset}`. The option bags take a
   `signal`: the engine gets it with the call (an abort cancels a search's
   scan), the server as `init.signal`; it never reaches the query string.
 - A seam may carry a `shadow`, handed after every engine outcome the
@@ -1331,18 +1350,21 @@ switch per surface:
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS`, all `engine`, and `STAGING_DEFAULT`, `engine`,
+  `SURFACE_DEFAULTS` — `engine` for the five read surfaces
+  (`READ_SURFACES`), `server` for `navigation` and `criteria` — and
+  `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
   `legacy` is taken, anything else ignored, and no storage, a throwing one or
   bad JSON give the defaults. `staging` says where the user's model edits are
   staged: `engine` in the replica's working copy, `legacy` in the model
-  store's own buffer. `staging: engine` (the default) puts all five surfaces
-  on `engine`, whatever the object says of them — a staged edit shows only in
-  the replica's answers, so a surface-only override on its own
-  (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
+  store's own buffer. `staging: engine` (the default) puts all five read
+  surfaces on `engine`, whatever the object says of them — a staged edit
+  shows only in the replica's answers, so a read-surface-only override on its
+  own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
   alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
-  take effect. It is not a surface: `SURFACES` and `anyEngineSurface` do not
+  take effect. `navigation` and `criteria` are never forced: the server
+  never evaluated staged edits in either mode. It is not a surface: `SURFACES` and `anyEngineSurface` do not
   count it. The switches are read once, with the rest, and honoured in a
   build too. `readSurfaces(storage?)` is `readSwitches(storage).surfaces`;
   `anyEngineSurface(surfaces)` says whether any is on the engine.
@@ -1387,9 +1409,12 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   hold edits the server has not seen. It is asked before `server()` is
   called, after each `quiet()` and after each re-test round, so a
   comparison under way when an edit is staged ends silently. The replica
-  store hands it `anyStaged` of `lib/engine/staged-probe.ts`, which asks the
-  model store's engine half `hasStagedOps()` while it is attached; with
-  staging on legacy nothing is staged in the replica, and it is false.
+  store hands it `anyStaged() || getStagedArtifactDepth() > 0`: `anyStaged`
+  of `lib/engine/staged-probe.ts` asks the model store's engine half
+  `hasStagedOps()` while it is attached (with staging on legacy nothing is
+  staged in the replica, and it is false), and an entry in the staged
+  artifact buffer is mirrored into the engine's artifact set, which the
+  server has not seen either.
 - `quiet.ts` is the tiny registry the re-test's `quiet()` is built from:
   `addQuietProbe(probe)` registers a `() => Promise<void>` and returns the
   function that drops it again; `quiet()` awaits every registered probe (none

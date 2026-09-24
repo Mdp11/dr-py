@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	READ_SURFACES,
 	STAGING_DEFAULT,
 	SURFACE_DEFAULTS,
 	SURFACES,
@@ -14,16 +15,35 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, every one on the engine by default', () => {
-		expect(SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
+	it('names the five read surfaces on the engine and the two evaluations on the server by default', () => {
+		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
+		expect(SURFACES).toEqual([...READ_SURFACES, 'navigation', 'criteria']);
 		expect(SURFACE_DEFAULTS).toEqual({
 			elements: 'engine',
 			search: 'engine',
 			relationships: 'engine',
 			tree: 'engine',
-			summary: 'engine'
+			summary: 'engine',
+			navigation: 'server',
+			criteria: 'server'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
+	});
+
+	it('dr.surfaces sets navigation and criteria, each on its own, whatever staging says', () => {
+		for (const staging of ['engine', 'legacy']) {
+			expect(
+				readSurfaces(storing(`{"staging": "${staging}", "navigation": "engine"}`))
+			).toMatchObject({ navigation: 'engine', criteria: 'server' });
+			expect(
+				readSurfaces(storing(`{"staging": "${staging}", "criteria": "engine"}`))
+			).toMatchObject({ navigation: 'server', criteria: 'engine' });
+		}
+		expect(readSurfaces(storing('{"navigation": "engine", "criteria": "engine"}'))).toEqual({
+			...SURFACE_DEFAULTS,
+			navigation: 'engine',
+			criteria: 'engine'
+		});
 	});
 
 	it('an override moves the one surface it names', () => {
@@ -105,15 +125,19 @@ describe('the surface switches', () => {
 		}
 	});
 
-	it('staging on the engine puts every surface on the engine', () => {
+	it('staging on the engine puts every read surface on the engine and leaves the two evaluations alone', () => {
 		expect(readSwitches(storing('{"staging": "engine", "tree": "server"}'))).toEqual({
 			surfaces: SURFACE_DEFAULTS,
 			staging: 'engine'
 		});
 		const allServer =
 			'{"staging": "engine", "elements": "server", "search": "server", ' +
-			'"relationships": "server", "tree": "server", "summary": "server"}';
+			'"relationships": "server", "tree": "server", "summary": "server", ' +
+			'"navigation": "server", "criteria": "server"}';
 		expect(readSwitches(storing(allServer)).surfaces).toEqual(SURFACE_DEFAULTS);
+		const surfaces = readSwitches(storing('{"staging": "engine"}')).surfaces;
+		for (const surface of READ_SURFACES) expect(surfaces[surface]).toBe('engine');
+		expect(surfaces).toMatchObject({ navigation: 'server', criteria: 'server' });
 	});
 
 	it('legacy staging leaves the surfaces as they are set', () => {
@@ -167,9 +191,13 @@ describe('the surface switches', () => {
 			search: 'server',
 			relationships: 'server',
 			tree: 'server',
-			summary: 'server'
+			summary: 'server',
+			navigation: 'server',
+			criteria: 'server'
 		} as const;
 		expect(anyEngineSurface(allServer)).toBe(false);
 		expect(anyEngineSurface({ ...allServer, summary: 'engine' })).toBe(true);
+		expect(anyEngineSurface({ ...allServer, navigation: 'engine' })).toBe(true);
+		expect(anyEngineSurface({ ...allServer, criteria: 'engine' })).toBe(true);
 	});
 });

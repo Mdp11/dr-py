@@ -1,11 +1,18 @@
 import type { Side, Surface } from '$lib/api/engine-route';
 
-export const SURFACES = [
+/** The model reads: what staging on the engine puts on the engine. */
+export const READ_SURFACES = [
 	'elements',
 	'search',
 	'relationships',
 	'tree',
 	'summary'
+] as const satisfies readonly Surface[];
+
+export const SURFACES = [
+	...READ_SURFACES,
+	'navigation',
+	'criteria'
 ] as const satisfies readonly Surface[];
 
 /** The side each surface takes unless `localStorage['dr.surfaces']` says otherwise. */
@@ -14,7 +21,9 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	search: 'engine',
 	relationships: 'engine',
 	tree: 'engine',
-	summary: 'engine'
+	summary: 'engine',
+	navigation: 'server',
+	criteria: 'server'
 });
 
 /** Where the user's model edits are staged: the replica's working copy, or the store's own buffer. */
@@ -30,9 +39,11 @@ const STORAGE_KEY = 'dr.surfaces';
  * The defaults, overlaid with the JSON object stored under `dr.surfaces`: a
  * known surface set to `engine` or `server` is taken, `staging` set to
  * `engine` or `legacy` is taken, anything else ignored. Staging on the
- * engine puts every surface on the engine, whatever the object says of it:
- * a staged edit is visible only in the replica's answers. No storage, a
- * storage that throws or a text that is not a JSON object give the defaults.
+ * engine puts every read surface on the engine, whatever the object says of
+ * it: a staged edit is visible only in the replica's answers. The server
+ * never evaluates staged edits, so `navigation` and `criteria` keep their
+ * own switches. No storage, a storage that throws or a text that is not a
+ * JSON object give the defaults.
  */
 export function readSwitches(storage?: Pick<Storage, 'getItem'>): Switches {
 	const switches: Switches = { surfaces: { ...SURFACE_DEFAULTS }, staging: STAGING_DEFAULT };
@@ -56,7 +67,7 @@ export function readSwitches(storage?: Pick<Storage, 'getItem'>): Switches {
 		if (staging === 'engine' || staging === 'legacy') switches.staging = staging;
 	}
 	if (switches.staging === 'engine') {
-		for (const surface of SURFACES) switches.surfaces[surface] = 'engine';
+		for (const surface of READ_SURFACES) switches.surfaces[surface] = 'engine';
 	}
 	return switches;
 }

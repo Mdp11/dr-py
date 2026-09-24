@@ -395,3 +395,72 @@ it('Load more pages the selected node’s chains', async () => {
 		unmount(c);
 	}
 });
+
+it('a preview the server answered for a script shows the fallback note above the chains', async () => {
+	const tabId = 'nav:draft:fallback-script';
+	await ensureDraft(tabId);
+	vi.spyOn(artifactsApi, 'evaluateNavigation')
+		.mockResolvedValueOnce({ ...PAGE_1, fallback: 'script' })
+		.mockResolvedValueOnce(PAGE_2);
+	updateDefinition(tabId, runnablePath());
+	await runPreview(tabId, []).catch(() => {});
+	await flushEvaluate();
+	const c = render(tabId);
+	try {
+		const note = document.querySelector('[data-testid="nav-fallback"]');
+		expect(note?.textContent?.trim()).toBe(
+			'Reads committed state: this navigation runs a script on the server.'
+		);
+		const table = document.querySelector('table');
+		expect(note!.compareDocumentPosition(table!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+		// A later page keeps the first page's mark.
+		const loadMore = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Load more'
+		) as HTMLButtonElement;
+		loadMore.click();
+		flushSync();
+		await flushEvaluate();
+		flushSync();
+		expect([...document.querySelectorAll('tbody tr')]).toHaveLength(2);
+		expect(document.querySelector('[data-testid="nav-fallback"]')).toBeTruthy();
+	} finally {
+		unmount(c);
+	}
+});
+
+it('a preview the server answered for a pattern names the pattern', async () => {
+	const tabId = 'nav:draft:fallback-pattern';
+	await ensureDraft(tabId);
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue({
+		...CHAIN_PAGE,
+		fallback: 'pattern'
+	});
+	updateDefinition(tabId, runnablePath());
+	await runPreview(tabId, []).catch(() => {});
+	await flushEvaluate();
+	const c = render(tabId);
+	try {
+		expect(document.querySelector('[data-testid="nav-fallback"]')?.textContent?.trim()).toBe(
+			'Reads committed state: a pattern here runs on the server.'
+		);
+	} finally {
+		unmount(c);
+	}
+});
+
+it('a preview with no fallback shows no note', async () => {
+	const tabId = 'nav:draft:no-fallback';
+	await ensureDraft(tabId);
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+	updateDefinition(tabId, runnablePath());
+	await runPreview(tabId, []).catch(() => {});
+	await flushEvaluate();
+	const c = render(tabId);
+	try {
+		expect(document.querySelector('table')).toBeTruthy();
+		expect(document.querySelector('[data-testid="nav-fallback"]')).toBeNull();
+	} finally {
+		unmount(c);
+	}
+});

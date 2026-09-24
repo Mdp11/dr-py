@@ -704,6 +704,47 @@ describe('the status listeners and the engine handle', () => {
 		expect(served).toBe(2);
 	});
 
+	it('the shadow compares nothing while an artifact entry is staged', async () => {
+		onStaging('engine');
+		localStorage.setItem('dr.shadow', '1');
+		const project = fakeProject();
+		let served = 0;
+		server.use(
+			...project.handlers(),
+			http.post('*/model/elements/batch', () => {
+				served += 1;
+				return HttpResponse.json({ items: [] });
+			})
+		);
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		await macrotask();
+		const shadowLines = () =>
+			errors.mock.calls.filter(([line]) =>
+				String(line).startsWith('[shadow] elements getElementsBatch {"ids":["e_000001"]}')
+			);
+
+		try {
+			stageArtifactCreate('navigation', 'Staged', { kind: 'path' }, null);
+			expect(getStagedArtifactDepth()).toBe(1);
+			await getElementsBatch(['e_000001']);
+			await macrotask();
+			await macrotask();
+			expect(served).toBe(0);
+			expect(shadowLines()).toEqual([]);
+
+			clearStagedArtifacts();
+			await getElementsBatch(['e_000001']);
+			await vi.waitFor(() => expect(shadowLines()).toHaveLength(1));
+			expect(served).toBe(2);
+		} finally {
+			resetArtifactEdits();
+		}
+	});
+
 	it('with staging on legacy, the engine half is never attached', async () => {
 		onStaging('legacy');
 		const project = fakeProject();

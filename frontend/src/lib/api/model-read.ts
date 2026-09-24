@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
-import { route, type Surface } from './engine-route';
+import { asSent, route, type Surface } from './engine-route';
 import {
 	ChangesDocSchema,
 	ChangesSummarySchema,
@@ -123,23 +123,29 @@ export function listElementsPage(
 }
 
 /**
- * POST /model/search — server-side advanced search over the WHOLE model
- * (not the client's fetched subset). Returns a hydrated, paged result set;
- * `total` is the full match count before limit/offset paging.
+ * POST /model/search — advanced search over the WHOLE model (not the
+ * client's fetched subset), the `criteria` surface. Returns a hydrated, paged
+ * result set; `total` is the full match count before limit/offset paging.
  */
 export function searchModel(
 	query: AdvancedQuery,
 	opts?: { limit?: number; offset?: number },
 	cfg?: ClientConfig
 ): Promise<SearchResultPage> {
-	return apiFetch(
-		'/model/search',
-		{
-			method: 'POST',
-			body: { ...query, limit: opts?.limit, offset: opts?.offset },
-			schema: SearchResultPageSchema
-		},
-		cfg
+	const page = { limit: opts?.limit, offset: opts?.offset };
+	return route(
+		'criteria',
+		cfg,
+		(call) =>
+			call('searchModel', asSent({ target: query.target, criteria: query.criteria, ...page })).then(
+				(body) => SearchResultPageSchema.parse(body)
+			),
+		() =>
+			apiFetch(
+				'/model/search',
+				{ method: 'POST', body: { ...query, ...page }, schema: SearchResultPageSchema },
+				cfg
+			)
 	);
 }
 

@@ -128,6 +128,8 @@ export interface NavPreview {
 	 * policy as the table's `mergePage` — rather than overwriting with a later
 	 * page's (possibly empty) warnings. */
 	warnings: ScriptWarning[];
+	/** Why the server answered the first page instead of the replica, if it did. */
+	fallback: 'script' | 'pattern' | null;
 }
 
 const _drafts = new SvelteMap<string, NavDraft>();
@@ -922,7 +924,8 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 		total: 0,
 		truncated: false,
 		loading: true,
-		warnings: []
+		warnings: [],
+		fallback: null
 	});
 	try {
 		const page = await api.evaluateNavigation({
@@ -938,7 +941,8 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 			total: page.total,
 			truncated: page.truncated,
 			loading: false,
-			warnings: page.warnings
+			warnings: page.warnings,
+			fallback: page.fallback ?? null
 		});
 	} catch (err) {
 		if (isCurrent(tabId, key, gen)) {

@@ -663,7 +663,9 @@ export const ChainPageSchema = z.object({
 	chains: z.array(z.array(ChainNodeSchema)).default([]),
 	total: z.number().int().default(0),
 	truncated: z.boolean().default(false),
-	warnings: z.array(ScriptWarningSchema).default([])
+	warnings: z.array(ScriptWarningSchema).default([]),
+	/** Set when the engine refused the call and the server answered it, on committed state. */
+	fallback: z.enum(['script', 'pattern']).optional()
 });
 export type ChainPage = z.infer<typeof ChainPageSchema>;
 

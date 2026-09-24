@@ -9,6 +9,7 @@ import {
 	type Side,
 	type Surface
 } from '../engine-route';
+import { errorForStatus } from '../errors';
 
 class Gone extends Error {}
 
@@ -220,6 +221,102 @@ describe('route', () => {
 		const read = route('summary', undefined, engineRead({}), serverOf());
 		installEngineSeam(null);
 		await expect(read).resolves.toBe(1);
+	});
+});
+
+describe('the server fallback', () => {
+	/** An engine refusal as the engine client makes it: the detail is the message. */
+	const refusal = (status: number, detail: string) => errorForStatus(status, { detail }, detail);
+
+	const mark = <T>(value: T, reason: 'script' | 'pattern') => ({ value, reason }) as T;
+
+	it('a 501 "reaches a script" is answered by the server, marked script, with no shadow', async () => {
+		const shadow = vi.fn();
+		const { seam, calls } = seamOf(
+			() => Promise.reject(refusal(501, 'reaches a script')),
+			{},
+			shadow
+		);
+		installEngineSeam(seam);
+		const server = serverOf('from server');
+		await expect(
+			route('navigation', undefined, engineRead({ definition: {} }), server, { mark })
+		).resolves.toEqual({ value: 'from server', reason: 'script' });
+		expect(calls).toHaveLength(1);
+		expect(server).toHaveBeenCalledOnce();
+		await flush();
+		expect(shadow).not.toHaveBeenCalled();
+	});
+
+	it('a 501 "reaches an unsupported pattern" is answered by the server, marked pattern', async () => {
+		const shadow = vi.fn();
+		const { seam } = seamOf(
+			() => Promise.reject(refusal(501, 'reaches an unsupported pattern')),
+			{},
+			shadow
+		);
+		installEngineSeam(seam);
+		const server = serverOf('from server');
+		await expect(route('criteria', undefined, engineRead({}), server, { mark })).resolves.toEqual({
+			value: 'from server',
+			reason: 'pattern'
+		});
+		expect(server).toHaveBeenCalledOnce();
+		await flush();
+		expect(shadow).not.toHaveBeenCalled();
+	});
+
+	it("without a mark the server's value is the answer as it is", async () => {
+		const { seam } = seamOf(() => Promise.reject(refusal(501, 'reaches a script')));
+		installEngineSeam(seam);
+		await expect(route('navigation', undefined, engineRead({}), serverOf())).resolves.toBe(
+			'server'
+		);
+	});
+
+	it("the server's error on a fallback reaches the caller", async () => {
+		const { seam } = seamOf(() => Promise.reject(refusal(501, 'reaches a script')));
+		installEngineSeam(seam);
+		const failed = new Error('server failed');
+		const server = vi.fn(() => Promise.reject(failed));
+		await expect(route('navigation', undefined, engineRead({}), server, { mark })).rejects.toBe(
+			failed
+		);
+	});
+
+	it("any other 501, or the same words under another status, is the caller's error", async () => {
+		for (const error of [
+			refusal(501, 'not implemented'),
+			refusal(501, 'Reaches a script'),
+			refusal(422, 'reaches a script'),
+			refusal(500, 'reaches an unsupported pattern'),
+			new Error('reaches a script')
+		]) {
+			const shadow = vi.fn();
+			const { seam } = seamOf(() => Promise.reject(error), {}, shadow);
+			installEngineSeam(seam);
+			const server = serverOf();
+			const marker = vi.fn(mark);
+			await expect(
+				route('navigation', undefined, engineRead({}), server, { mark: marker })
+			).rejects.toBe(error);
+			expect(server).not.toHaveBeenCalled();
+			expect(marker).not.toHaveBeenCalled();
+			expect(shadow).toHaveBeenCalledOnce();
+		}
+	});
+
+	it('an engine answer and a server side are never marked', async () => {
+		const marker = vi.fn(mark);
+		const { seam } = seamOf(() => Promise.resolve({ n: 5 }), { criteria: 'server' });
+		installEngineSeam(seam);
+		await expect(
+			route('navigation', undefined, engineRead({}), serverOf(), { mark: marker })
+		).resolves.toBe(5);
+		await expect(
+			route('criteria', undefined, engineRead({}), serverOf(), { mark: marker })
+		).resolves.toBe('server');
+		expect(marker).not.toHaveBeenCalled();
 	});
 });
 

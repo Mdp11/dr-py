@@ -59,6 +59,11 @@
 		if (entry) selectNode(tabId, entry.path);
 	}
 
+	const FALLBACK_NOTE = {
+		script: 'Reads committed state: this navigation runs a script on the server.',
+		pattern: 'Reads committed state: a pattern here runs on the server.'
+	} as const;
+
 	function indentFor(depth: number): string {
 		return '  '.repeat(depth ? depth - (rootIsPath ? 0 : 1) : 0);
 	}
@@ -110,6 +115,11 @@
 				{/if}
 			</p>
 		{:else if preview}
+			{#if preview.fallback}
+				<p data-testid="nav-fallback" class="mb-1 text-[11px] text-muted-foreground/70">
+					{FALLBACK_NOTE[preview.fallback]}
+				</p>
+			{/if}
 			<table class="w-full text-xs">
 				<thead>
 					<tr class="text-left text-muted-foreground/70">

@@ -1,4 +1,5 @@
 import { apiFetch, type ClientConfig } from './client';
+import { asSent, route } from './engine-route';
 import {
 	ArtifactListSchema,
 	ArtifactPayloadListSchema,
@@ -50,6 +51,10 @@ export async function listArtifactPayloads(
  * DiffDrawer, no `Commit` row would carry it, and undo could not replay it.
  */
 
+/**
+ * POST /navigations/evaluate, the `navigation` surface. A page the server
+ * answers because the engine refused the call carries `fallback`.
+ */
 export function evaluateNavigation(
 	body: {
 		definition?: NavigationDefinition;
@@ -61,5 +66,11 @@ export function evaluateNavigation(
 	},
 	cfg?: ClientConfig
 ): Promise<ChainPage> {
-	return apiFetch('/navigations/evaluate', { method: 'POST', body, schema: ChainPageSchema }, cfg);
+	return route(
+		'navigation',
+		cfg,
+		(call) => call('evaluateNavigation', asSent(body)).then((page) => ChainPageSchema.parse(page)),
+		() => apiFetch('/navigations/evaluate', { method: 'POST', body, schema: ChainPageSchema }, cfg),
+		{ mark: (page, reason) => ({ ...page, fallback: reason }) }
+	);
 }
