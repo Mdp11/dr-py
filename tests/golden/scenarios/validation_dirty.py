@@ -2,7 +2,9 @@
 over a model where every hook has something to add — uniqueness groups of
 two or more, referencers, containment re-parenting, a cascade three levels
 deep with relationships at every level, several keys in one update, a create
-whose properties move it through two groups, id hints and restore mode."""
+whose properties move it through two groups, id hints and restore mode, and a
+relationship type named in a key, which re-keys its ends when it is connected,
+disconnected or deleted with a cascade."""
 
 from __future__ import annotations
 
@@ -31,6 +33,13 @@ _METAMODEL = {
             ],
             "key": ["code"],
         },
+        # keyed on its wires as well: connecting one re-keys both ends
+        {
+            "name": "Port",
+            "extends": "Thing",
+            "properties": [{"name": "code", "datatype": "string"}],
+            "key": ["code", "out:Wire", "in:Wire"],
+        },
         # keyless: every property is its identity
         {
             "name": "Tag",
@@ -43,6 +52,7 @@ _METAMODEL = {
     ],
     "relationships": [
         {"name": "Has", "containment": True, "source": "Thing", "target": "Thing"},
+        {"name": "Wire", "source": "Port", "target": "Port"},
         {
             "name": "Link",
             "source": "Node",
@@ -198,6 +208,25 @@ _STEPS: list[dict[str, Any]] = [
     ),
     # a-1 leaves r-1 for the top level, where n-new shares its key
     _dirty([_delete_rel("h-1")]),
+    # ports: p-1 and p-2 alike, p-4 alike to p-3 but inside a box
+    _dirty(
+        [
+            _el("p-1", "Port", code="a"),
+            _el("p-2", "Port", code="a"),
+            _el("p-3", "Port", code="z"),
+            _el("p-5", "Port", code="z"),
+            _el("box", "Tag", v="box"),
+            _el("p-4", "Port", code="z"),
+            _rel("h-9", "Has", "box", "p-4"),
+        ]
+    ),
+    # a wire takes p-1 out of p-2's group and p-3 out of p-5's
+    _dirty([_rel("w-1", "Wire", "p-1", "p-3")]),
+    # and back
+    _dirty([_delete_rel("w-1")]),
+    _dirty([_rel("w-2", "Wire", "p-2", "p-4")]),
+    # the box goes with p-4 and its wire: p-2 rejoins p-1's group
+    _dirty([_delete("box")]),
 ]
 
 

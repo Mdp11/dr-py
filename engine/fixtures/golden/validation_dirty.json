@@ -66,6 +66,27 @@
         ]
       },
       {
+        "name": "Port",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [
+          {
+            "name": "code",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": [
+          "code",
+          "out:Wire",
+          "in:Wire"
+        ]
+      },
+      {
         "name": "Tag",
         "abstract": false,
         "extends": "Thing",
@@ -104,6 +125,23 @@
           {
             "source": "Thing",
             "target": "Thing"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Wire",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Port",
+        "target": "Port",
+        "mappings": [
+          {
+            "source": "Port",
+            "target": "Port"
           }
         ],
         "source_multiplicity": "0..*",
@@ -1493,7 +1531,219 @@
       },
       "error": null,
       "digest": "8b3c2fce93c0fe10",
-      "fingerprint": "57000c4f43673fcc",
+      "fingerprint": "57000c4f43673fcc"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p-1\",\"type_name\":\"Port\",\"properties\":{\"code\":\"a\"},\"id\":\"p-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p-2\",\"type_name\":\"Port\",\"properties\":{\"code\":\"a\"},\"id\":\"p-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p-3\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"id\":\"p-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p-5\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"id\":\"p-5\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_box\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"box\"},\"id\":\"box\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p-4\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"id\":\"p-4\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h-9\",\"type_name\":\"Has\",\"source_id\":\"box\",\"target_id\":\"p-4\",\"properties\":{},\"id\":\"h-9\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_p-1",
+            "p-1"
+          ],
+          [
+            "tmp_p-2",
+            "p-2"
+          ],
+          [
+            "tmp_p-3",
+            "p-3"
+          ],
+          [
+            "tmp_p-5",
+            "p-5"
+          ],
+          [
+            "tmp_box",
+            "box"
+          ],
+          [
+            "tmp_p-4",
+            "p-4"
+          ],
+          [
+            "tmp_h-9",
+            "h-9"
+          ]
+        ],
+        "changed_element_ids": [
+          "p-1",
+          "p-2",
+          "p-3",
+          "p-5",
+          "box",
+          "p-4"
+        ],
+        "changed_relationship_ids": [
+          "h-9"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "p-1",
+            null
+          ],
+          [
+            "p-2",
+            null
+          ],
+          [
+            "p-3",
+            null
+          ],
+          [
+            "p-5",
+            null
+          ],
+          [
+            "box",
+            null
+          ],
+          [
+            "p-4",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "h-9",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-9\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"p-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"box\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"p-5\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"p-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"p-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"p-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"p-1\",\"type_name\":\"Port\",\"properties\":{\"code\":\"a\"},\"rev\":1}",
+          "{\"id\":\"p-2\",\"type_name\":\"Port\",\"properties\":{\"code\":\"a\"},\"rev\":1}",
+          "{\"id\":\"p-3\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}",
+          "{\"id\":\"p-5\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}",
+          "{\"id\":\"box\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"box\"},\"rev\":1}",
+          "{\"id\":\"p-4\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"h-9\",\"type_name\":\"Has\",\"source_id\":\"box\",\"target_id\":\"p-4\",\"properties\":{},\"rev\":0}"
+        ],
+        "dirty": [
+          "p-1",
+          "p-2",
+          "p-3",
+          "p-5",
+          "box",
+          "t-0",
+          "p-4",
+          "h-9"
+        ]
+      },
+      "error": null,
+      "digest": "cb82ec49563b9842",
+      "fingerprint": "3b12c22a0bb021e3"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_w-1\",\"type_name\":\"Wire\",\"source_id\":\"p-1\",\"target_id\":\"p-3\",\"properties\":{},\"id\":\"w-1\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_w-1",
+            "w-1"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "w-1"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "w-1",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"w-1\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"w-1\",\"type_name\":\"Wire\",\"source_id\":\"p-1\",\"target_id\":\"p-3\",\"properties\":{},\"rev\":0}"
+        ],
+        "dirty": [
+          "p-1",
+          "p-3",
+          "p-2",
+          "p-5",
+          "w-1"
+        ]
+      },
+      "error": null,
+      "digest": "17373f1b001b0276",
+      "fingerprint": "a365e0946d8b7b9d"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"w-1\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "w-1"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "w-1",
+            "{\"id\":\"w-1\",\"type_name\":\"Wire\",\"source_id\":\"p-1\",\"target_id\":\"p-3\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"w-1\",\"type_name\":\"Wire\",\"source_id\":\"p-1\",\"target_id\":\"p-3\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [],
+        "dirty": [
+          "w-1",
+          "p-1",
+          "p-3",
+          "p-2",
+          "p-5"
+        ]
+      },
+      "error": null,
+      "digest": "cb82ec49563b9842",
+      "fingerprint": "3b12c22a0bb021e3",
       "state": [
         "{\"id\":\"r-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R1\"},\"rev\":1}",
         "{\"id\":\"r-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R2\"},\"rev\":1}",
@@ -1518,6 +1768,160 @@
         "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
         "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
         "{\"id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"p-1\",\"type_name\":\"Port\",\"properties\":{\"code\":\"a\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Port\",\"properties\":{\"code\":\"a\"},\"rev\":1}",
+        "{\"id\":\"p-3\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}",
+        "{\"id\":\"p-5\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}",
+        "{\"id\":\"box\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"box\"},\"rev\":1}",
+        "{\"id\":\"p-4\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}",
+        "{\"id\":\"id-1\",\"type_name\":\"Link\",\"source_id\":\"n-4\",\"target_id\":\"n-5\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+        "{\"id\":\"h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"d\",\"to\":\"n-1\"},\"rev\":2}",
+        "{\"id\":\"l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-9\",\"type_name\":\"Has\",\"source_id\":\"box\",\"target_id\":\"p-4\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"a-1\",\"c-1\",\"c-2\",\"c-3\",\"c-4\",\"n-0\",\"n-1\",\"n-2\",\"n-3\",\"n-4\",\"n-5\",\"n-6\",\"n-7\",\"n-8\",\"n-9\",\"n-new\",\"r-1\",\"r-2\"]],[\"Port\",[\"p-1\",\"p-2\",\"p-3\",\"p-4\",\"p-5\"]],[\"Tag\",[\"box\",\"id-2\",\"t-0\",\"t-1\",\"t-2\",\"t-3\"]]],\"out\":[[\"box\",[\"h-9\"]],[\"c-1\",[\"h-2\",\"l-1\"]],[\"c-2\",[\"h-3\",\"h-4\"]],[\"c-3\",[\"l-3\",\"l-5\"]],[\"c-4\",[\"l-4\"]],[\"n-4\",[\"id-1\"]],[\"r-2\",[\"h-7\",\"l-7\"]]],\"in\":[[\"c-2\",[\"h-2\"]],[\"c-3\",[\"h-3\"]],[\"c-4\",[\"h-4\",\"l-4\",\"l-5\"]],[\"n-1\",[\"l-7\"]],[\"n-2\",[\"l-3\"]],[\"n-3\",[\"h-7\"]],[\"n-4\",[\"l-1\"]],[\"n-5\",[\"id-1\"]],[\"p-4\",[\"h-9\"]]],\"out_count\":[[\"box\",\"Has\",1],[\"c-1\",\"Has\",1],[\"c-1\",\"Link\",1],[\"c-2\",\"Has\",2],[\"c-3\",\"Link\",2],[\"c-4\",\"Link\",1],[\"n-4\",\"Link\",1],[\"r-2\",\"Has\",2]],\"in_count\":[[\"c-2\",\"Has\",1],[\"c-3\",\"Has\",1],[\"c-4\",\"Has\",1],[\"c-4\",\"Link\",2],[\"n-1\",\"Has\",1],[\"n-2\",\"Link\",1],[\"n-3\",\"Has\",1],[\"n-4\",\"Link\",1],[\"n-5\",\"Link\",1],[\"p-4\",\"Has\",1]],\"parents\":[[\"c-2\",[\"c-1\"],[\"h-2\"]],[\"c-3\",[\"c-2\"],[\"h-3\"]],[\"c-4\",[\"c-2\"],[\"h-4\"]],[\"n-1\",[\"r-2\"],[\"l-7\"]],[\"n-3\",[\"r-2\"],[\"h-7\"]],[\"p-4\",[\"box\"],[\"h-9\"]]],\"refs\":[[\"l-3\",[\"n-1\"]],[\"n-2\",[\"n-3\"]],[\"n-6\",[\"n-1\",\"n-2\"]],[\"n-7\",[\"n-new\"]],[\"n-8\",[\"c-2\"]],[\"n-9\",[\"c-3\",\"c-4\"]]],\"referencers\":[[\"c-2\",[\"n-8\"]],[\"c-3\",[\"n-9\"]],[\"c-4\",[\"n-9\"]],[\"n-1\",[\"l-3\",\"n-6\"]],[\"n-2\",[\"n-6\"]],[\"n-3\",[\"n-2\"]],[\"n-new\",[\"n-7\"]]],\"uniq_groups\":[[\"a-1\",\"n-new\"],[\"box\"],[\"c-1\"],[\"c-2\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-0\"],[\"n-1\",\"n-3\"],[\"n-2\",\"n-4\"],[\"n-5\"],[\"n-6\"],[\"n-7\"],[\"n-8\"],[\"n-9\"],[\"p-1\",\"p-2\"],[\"p-3\",\"p-5\"],[\"p-4\"],[\"r-1\"],[\"r-2\"],[\"t-0\"],[\"t-2\"]],\"duplicates\":[[\"a-1\",\"n-new\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-1\",\"n-3\"],[\"n-2\",\"n-4\"],[\"p-1\",\"p-2\"],[\"p-3\",\"p-5\"]],\"roots\":[[\"a-1\",\"a-1\"],[\"box\",\"box\"],[\"c-1\",\"c-1\"],[\"id-2\",\"id-2\"],[\"n-2\",\"n-2\"],[\"n-4\",\"n-4\"],[\"n-5\",\"n-5\"],[\"n-6\",\"n-6\"],[\"n-7\",\"n-7\"],[\"n-8\",\"n-8\"],[\"n-9\",\"n-9\"],[\"new\",\"n-new\"],[\"p-1\",\"p-1\"],[\"p-2\",\"p-2\"],[\"p-3\",\"p-3\"],[\"p-5\",\"p-5\"],[\"r-1\",\"r-1\"],[\"r-2\",\"r-2\"],[\"t-0\",\"t-0\"],[\"t-1\",\"t-1\"],[\"t-2\",\"t-2\"],[\"t-3\",\"t-3\"],[\"zero\",\"n-0\"]]}"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_w-2\",\"type_name\":\"Wire\",\"source_id\":\"p-2\",\"target_id\":\"p-4\",\"properties\":{},\"id\":\"w-2\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_w-2",
+            "w-2"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "w-2"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "w-2",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"w-2\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"w-2\",\"type_name\":\"Wire\",\"source_id\":\"p-2\",\"target_id\":\"p-4\",\"properties\":{},\"rev\":0}"
+        ],
+        "dirty": [
+          "p-2",
+          "p-4",
+          "p-1",
+          "w-2"
+        ]
+      },
+      "error": null,
+      "digest": "6bada65e9bf2bb04",
+      "fingerprint": "da16b09ac60c222a"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"box\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "box",
+          "p-4"
+        ],
+        "deleted_relationship_ids": [
+          "h-9",
+          "w-2"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "box",
+            "{\"id\":\"box\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"box\"},\"rev\":1}"
+          ],
+          [
+            "p-4",
+            "{\"id\":\"p-4\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "h-9",
+            "{\"id\":\"h-9\",\"type_name\":\"Has\",\"source_id\":\"box\",\"target_id\":\"p-4\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "w-2",
+            "{\"id\":\"w-2\",\"type_name\":\"Wire\",\"source_id\":\"p-2\",\"target_id\":\"p-4\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"box\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"box\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"p-4\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"h-9\",\"type_name\":\"Has\",\"source_id\":\"box\",\"target_id\":\"p-4\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"w-2\",\"type_name\":\"Wire\",\"source_id\":\"p-2\",\"target_id\":\"p-4\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [],
+        "dirty": [
+          "box",
+          "h-9",
+          "p-4",
+          "w-2",
+          "p-2",
+          "p-1"
+        ]
+      },
+      "error": null,
+      "digest": "e2a0b3d15412ec12",
+      "fingerprint": "cbb5412ead1f27c8",
+      "state": [
+        "{\"id\":\"r-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R1\"},\"rev\":1}",
+        "{\"id\":\"r-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R2\"},\"rev\":1}",
+        "{\"id\":\"n-0\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zero\"},\"rev\":1}",
+        "{\"id\":\"n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\",\"note\":\"moved\",\"ref\":\"n-3\"},\"rev\":4}",
+        "{\"id\":\"n-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\"},\"rev\":1}",
+        "{\"id\":\"n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\"},\"rev\":3}",
+        "{\"id\":\"n-6\",\"type_name\":\"Node\",\"properties\":{\"code\":\"D\",\"refs\":[\"n-1\",\"n-2\"]},\"rev\":2}",
+        "{\"id\":\"n-7\",\"type_name\":\"Node\",\"properties\":{\"code\":\"E\",\"ref\":\"n-new\"},\"rev\":2}",
+        "{\"id\":\"a-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-8\",\"type_name\":\"Node\",\"properties\":{\"code\":\"F\",\"ref\":\"c-2\"},\"rev\":2}",
+        "{\"id\":\"n-9\",\"type_name\":\"Node\",\"properties\":{\"code\":\"G\",\"refs\":[\"c-3\",\"c-4\"]},\"rev\":2}",
+        "{\"id\":\"t-0\",\"type_name\":\"Tag\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"t-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}",
+        "{\"id\":\"t-3\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"n-new\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\",\"name\":\"new\"},\"rev\":2}",
+        "{\"id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"rev\":1}",
+        "{\"id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"rev\":1}",
+        "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"p-1\",\"type_name\":\"Port\",\"properties\":{\"code\":\"a\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Port\",\"properties\":{\"code\":\"a\"},\"rev\":1}",
+        "{\"id\":\"p-3\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}",
+        "{\"id\":\"p-5\",\"type_name\":\"Port\",\"properties\":{\"code\":\"z\"},\"rev\":1}",
         "{\"id\":\"id-1\",\"type_name\":\"Link\",\"source_id\":\"n-4\",\"target_id\":\"n-5\",\"properties\":{},\"rev\":0}",
         "{\"id\":\"h-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}",
         "{\"id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
@@ -1529,7 +1933,7 @@
         "{\"id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
         "{\"id\":\"l-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-1\",\"properties\":{},\"rev\":0}"
       ],
-      "indexes": "{\"by_type\":[[\"Node\",[\"a-1\",\"c-1\",\"c-2\",\"c-3\",\"c-4\",\"n-0\",\"n-1\",\"n-2\",\"n-3\",\"n-4\",\"n-5\",\"n-6\",\"n-7\",\"n-8\",\"n-9\",\"n-new\",\"r-1\",\"r-2\"]],[\"Tag\",[\"id-2\",\"t-0\",\"t-1\",\"t-2\",\"t-3\"]]],\"out\":[[\"c-1\",[\"h-2\",\"l-1\"]],[\"c-2\",[\"h-3\",\"h-4\"]],[\"c-3\",[\"l-3\",\"l-5\"]],[\"c-4\",[\"l-4\"]],[\"n-4\",[\"id-1\"]],[\"r-2\",[\"h-7\",\"l-7\"]]],\"in\":[[\"c-2\",[\"h-2\"]],[\"c-3\",[\"h-3\"]],[\"c-4\",[\"h-4\",\"l-4\",\"l-5\"]],[\"n-1\",[\"l-7\"]],[\"n-2\",[\"l-3\"]],[\"n-3\",[\"h-7\"]],[\"n-4\",[\"l-1\"]],[\"n-5\",[\"id-1\"]]],\"out_count\":[[\"c-1\",\"Has\",1],[\"c-1\",\"Link\",1],[\"c-2\",\"Has\",2],[\"c-3\",\"Link\",2],[\"c-4\",\"Link\",1],[\"n-4\",\"Link\",1],[\"r-2\",\"Has\",2]],\"in_count\":[[\"c-2\",\"Has\",1],[\"c-3\",\"Has\",1],[\"c-4\",\"Has\",1],[\"c-4\",\"Link\",2],[\"n-1\",\"Has\",1],[\"n-2\",\"Link\",1],[\"n-3\",\"Has\",1],[\"n-4\",\"Link\",1],[\"n-5\",\"Link\",1]],\"parents\":[[\"c-2\",[\"c-1\"],[\"h-2\"]],[\"c-3\",[\"c-2\"],[\"h-3\"]],[\"c-4\",[\"c-2\"],[\"h-4\"]],[\"n-1\",[\"r-2\"],[\"l-7\"]],[\"n-3\",[\"r-2\"],[\"h-7\"]]],\"refs\":[[\"l-3\",[\"n-1\"]],[\"n-2\",[\"n-3\"]],[\"n-6\",[\"n-1\",\"n-2\"]],[\"n-7\",[\"n-new\"]],[\"n-8\",[\"c-2\"]],[\"n-9\",[\"c-3\",\"c-4\"]]],\"referencers\":[[\"c-2\",[\"n-8\"]],[\"c-3\",[\"n-9\"]],[\"c-4\",[\"n-9\"]],[\"n-1\",[\"l-3\",\"n-6\"]],[\"n-2\",[\"n-6\"]],[\"n-3\",[\"n-2\"]],[\"n-new\",[\"n-7\"]]],\"uniq_groups\":[[\"a-1\",\"n-new\"],[\"c-1\"],[\"c-2\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-0\"],[\"n-1\",\"n-3\"],[\"n-2\",\"n-4\"],[\"n-5\"],[\"n-6\"],[\"n-7\"],[\"n-8\"],[\"n-9\"],[\"r-1\"],[\"r-2\"],[\"t-0\"],[\"t-2\"]],\"duplicates\":[[\"a-1\",\"n-new\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-1\",\"n-3\"],[\"n-2\",\"n-4\"]],\"roots\":[[\"a-1\",\"a-1\"],[\"c-1\",\"c-1\"],[\"id-2\",\"id-2\"],[\"n-2\",\"n-2\"],[\"n-4\",\"n-4\"],[\"n-5\",\"n-5\"],[\"n-6\",\"n-6\"],[\"n-7\",\"n-7\"],[\"n-8\",\"n-8\"],[\"n-9\",\"n-9\"],[\"new\",\"n-new\"],[\"r-1\",\"r-1\"],[\"r-2\",\"r-2\"],[\"t-0\",\"t-0\"],[\"t-1\",\"t-1\"],[\"t-2\",\"t-2\"],[\"t-3\",\"t-3\"],[\"zero\",\"n-0\"]]}"
+      "indexes": "{\"by_type\":[[\"Node\",[\"a-1\",\"c-1\",\"c-2\",\"c-3\",\"c-4\",\"n-0\",\"n-1\",\"n-2\",\"n-3\",\"n-4\",\"n-5\",\"n-6\",\"n-7\",\"n-8\",\"n-9\",\"n-new\",\"r-1\",\"r-2\"]],[\"Port\",[\"p-1\",\"p-2\",\"p-3\",\"p-5\"]],[\"Tag\",[\"id-2\",\"t-0\",\"t-1\",\"t-2\",\"t-3\"]]],\"out\":[[\"c-1\",[\"h-2\",\"l-1\"]],[\"c-2\",[\"h-3\",\"h-4\"]],[\"c-3\",[\"l-3\",\"l-5\"]],[\"c-4\",[\"l-4\"]],[\"n-4\",[\"id-1\"]],[\"r-2\",[\"h-7\",\"l-7\"]]],\"in\":[[\"c-2\",[\"h-2\"]],[\"c-3\",[\"h-3\"]],[\"c-4\",[\"h-4\",\"l-4\",\"l-5\"]],[\"n-1\",[\"l-7\"]],[\"n-2\",[\"l-3\"]],[\"n-3\",[\"h-7\"]],[\"n-4\",[\"l-1\"]],[\"n-5\",[\"id-1\"]]],\"out_count\":[[\"c-1\",\"Has\",1],[\"c-1\",\"Link\",1],[\"c-2\",\"Has\",2],[\"c-3\",\"Link\",2],[\"c-4\",\"Link\",1],[\"n-4\",\"Link\",1],[\"r-2\",\"Has\",2]],\"in_count\":[[\"c-2\",\"Has\",1],[\"c-3\",\"Has\",1],[\"c-4\",\"Has\",1],[\"c-4\",\"Link\",2],[\"n-1\",\"Has\",1],[\"n-2\",\"Link\",1],[\"n-3\",\"Has\",1],[\"n-4\",\"Link\",1],[\"n-5\",\"Link\",1]],\"parents\":[[\"c-2\",[\"c-1\"],[\"h-2\"]],[\"c-3\",[\"c-2\"],[\"h-3\"]],[\"c-4\",[\"c-2\"],[\"h-4\"]],[\"n-1\",[\"r-2\"],[\"l-7\"]],[\"n-3\",[\"r-2\"],[\"h-7\"]]],\"refs\":[[\"l-3\",[\"n-1\"]],[\"n-2\",[\"n-3\"]],[\"n-6\",[\"n-1\",\"n-2\"]],[\"n-7\",[\"n-new\"]],[\"n-8\",[\"c-2\"]],[\"n-9\",[\"c-3\",\"c-4\"]]],\"referencers\":[[\"c-2\",[\"n-8\"]],[\"c-3\",[\"n-9\"]],[\"c-4\",[\"n-9\"]],[\"n-1\",[\"l-3\",\"n-6\"]],[\"n-2\",[\"n-6\"]],[\"n-3\",[\"n-2\"]],[\"n-new\",[\"n-7\"]]],\"uniq_groups\":[[\"a-1\",\"n-new\"],[\"c-1\"],[\"c-2\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-0\"],[\"n-1\",\"n-3\"],[\"n-2\",\"n-4\"],[\"n-5\"],[\"n-6\"],[\"n-7\"],[\"n-8\"],[\"n-9\"],[\"p-1\",\"p-2\"],[\"p-3\",\"p-5\"],[\"r-1\"],[\"r-2\"],[\"t-0\"],[\"t-2\"]],\"duplicates\":[[\"a-1\",\"n-new\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-1\",\"n-3\"],[\"n-2\",\"n-4\"],[\"p-1\",\"p-2\"],[\"p-3\",\"p-5\"]],\"roots\":[[\"a-1\",\"a-1\"],[\"c-1\",\"c-1\"],[\"id-2\",\"id-2\"],[\"n-2\",\"n-2\"],[\"n-4\",\"n-4\"],[\"n-5\",\"n-5\"],[\"n-6\",\"n-6\"],[\"n-7\",\"n-7\"],[\"n-8\",\"n-8\"],[\"n-9\",\"n-9\"],[\"new\",\"n-new\"],[\"p-1\",\"p-1\"],[\"p-2\",\"p-2\"],[\"p-3\",\"p-3\"],[\"p-5\",\"p-5\"],[\"r-1\",\"r-1\"],[\"r-2\",\"r-2\"],[\"t-0\",\"t-0\"],[\"t-1\",\"t-1\"],[\"t-2\",\"t-2\"],[\"t-3\",\"t-3\"],[\"zero\",\"n-0\"]]}"
     }
   ]
 }

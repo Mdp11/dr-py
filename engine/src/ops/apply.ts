@@ -200,8 +200,9 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 				res.noteRelationshipBefore(rel.id, rel);
 				unit.push(recreate(rel));
 			}
-			dirty?.beforeElementDelete(model, id, closure);
+			const keyed = dirty?.beforeElementDelete(model, id, closure);
 			model.deleteElement(id);
+			if (keyed !== undefined) dirty!.afterElementDelete(model, keyed);
 			res.inverseUnits.push(unit);
 			for (const element of closure) res.markElementDeleted(element.id);
 			for (const rel of removed) res.markRelationshipDeleted(rel.id);
@@ -245,7 +246,7 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 			const unit = [recreate(rel)];
 			dirty?.beforeDisconnect(model, id);
 			model.disconnect(id);
-			dirty?.afterDisconnect(model, rel.typeName, rel.target.id);
+			dirty?.afterDisconnect(model, rel.typeName, rel.source.id, rel.target.id);
 			res.inverseUnits.push(unit);
 			res.markRelationshipDeleted(id);
 			return;

@@ -27,7 +27,8 @@ Two entry points:
   ``connect``                (``before_connect``, ``after_connect``)    ``connect``
   ``disconnect``             (``before_disconnect``,                    ``disconnect``
                              ``after_disconnect``)
-  ``delete_element``         (``before_element_delete``, —)             ``delete_element``
+  ``delete_element``         (``before_element_delete``,                ``delete_element``
+                             ``after_element_delete``)
   =========================  =========================================  ========================
 
   The raw hooks stay public (the CR diff path and callers that mutate
@@ -108,6 +109,20 @@ def containment_closure(model: Model, element_id: str) -> list[str]:
     return order
 
 
+def keys_on(model: Model, element_id: str, rel_type_name: str, direction: str) -> bool:
+    """Whether the element's uniqueness key names ``rel_type_name`` in
+    ``direction`` (``out:`` / ``in:``), which makes connecting or
+    disconnecting such a relationship re-key it. Exact type, as the key does."""
+    element = model.elements.get(element_id)
+    if element is None:
+        return False
+    spec = model.metamodel.effective_element_key_spec(element.type_name)
+    return spec is not None and any(
+        kr.rel_type == rel_type_name and kr.direction == direction
+        for kr in spec.relationships
+    )
+
+
 class DirtyCollector:
     """Ordered accumulator of entity ids whose verdict may have changed."""
 
@@ -130,6 +145,17 @@ class DirtyCollector:
 
     def to_scope(self) -> Scope:
         return Scope(self._ids)
+
+    def _add_keyed_ends(
+        self, model: Model, rel_type_name: str, source_id: str, target_id: str
+    ) -> None:
+        """The CURRENT groups of the ends whose uniqueness key names the
+        relationship type: the source through ``out:``, the target through
+        ``in:``. Connecting or disconnecting one re-keys them."""
+        if keys_on(model, source_id, rel_type_name, "out"):
+            self.add_uniqueness_group_of(model, source_id)
+        if keys_on(model, target_id, rel_type_name, "in"):
+            self.add_uniqueness_group_of(model, target_id)
 
     def add_uniqueness_group_of(self, model: Model, element_id: str) -> None:
         """All CURRENT uniqueness-group members of ``element_id`` (incl.
@@ -162,7 +188,7 @@ class DirtyCollector:
         """AFTER an element's properties changed: the NEW group."""
         self.add_uniqueness_group_of(model, element_id)
 
-    def before_element_delete(self, model: Model, element_id: str) -> None:
+    def before_element_delete(self, model: Model, element_id: str) -> list[str]:
         """BEFORE ``Model.delete_element``: contributions of the whole
         containment cascade, captured while the state still exists.
 
@@ -171,9 +197,13 @@ class DirtyCollector:
         its referencers (their references dangle), its containment parents,
         and its uniqueness-group members. Transient regroupings during the
         cascade are net-zero (every intermediate group both gains and loses
-        the deleted element), so pre-delete groups suffice.
+        the deleted element), so pre-delete groups suffice — except for an
+        other endpoint whose uniqueness key names the relationship: the
+        delete re-keys it, so its OLD group is added here, and the ids of
+        such endpoints are returned for ``after_element_delete``.
         """
         indexes = model.indexes
+        keyed: list[str] = []
         for eid in containment_closure(model, element_id):
             self.add(eid)
             for rid in sorted(indexes.outgoing_ids(eid)):
@@ -185,6 +215,23 @@ class DirtyCollector:
             # are sources of incoming relationships, i.e. a subset of the
             # incoming-endpoint ids already added above.
             self.add_uniqueness_group_of(model, eid)
+            for rid in sorted(indexes.outgoing_ids(eid)):
+                rel = model.relationships[rid]
+                if keys_on(model, rel.target_id, rel.type_name, "in"):
+                    self.add_uniqueness_group_of(model, rel.target_id)
+                    keyed.append(rel.target_id)
+            for rid in sorted(indexes.incoming_ids(eid)):
+                rel = model.relationships[rid]
+                if keys_on(model, rel.source_id, rel.type_name, "out"):
+                    self.add_uniqueness_group_of(model, rel.source_id)
+                    keyed.append(rel.source_id)
+        return keyed
+
+    def after_element_delete(self, model: Model, keyed: Iterable[str]) -> None:
+        """AFTER ``Model.delete_element``: the NEW groups of the endpoints
+        ``before_element_delete`` returned (the cascade's own are gone)."""
+        for eid in keyed:
+            self.add_uniqueness_group_of(model, eid)
 
     # -- relationship hooks --------------------------------------------------
 
@@ -192,34 +239,41 @@ class DirtyCollector:
         self, model: Model, rel_type_name: str, source_id: str, target_id: str
     ) -> None:
         """BEFORE ``Model.connect``: both endpoints; for containment also the
-        target's OLD uniqueness group (re-parenting changes owner context)."""
+        target's OLD uniqueness group (re-parenting changes owner context);
+        the OLD groups of the ends whose key names the relationship type."""
         self.add(source_id, target_id)
         if model.metamodel.is_containment(rel_type_name):
             self.add_uniqueness_group_of(model, target_id)
+        self._add_keyed_ends(model, rel_type_name, source_id, target_id)
 
     def after_connect(self, model: Model, rel_id: str) -> None:
         """AFTER ``Model.connect``: the relationship; for containment also the
-        target's NEW uniqueness group."""
+        target's NEW uniqueness group; the NEW groups of the keyed ends."""
         self.add(rel_id)
         rel = model.relationships[rel_id]
         if model.metamodel.is_containment(rel.type_name):
             self.add_uniqueness_group_of(model, rel.target_id)
+        self._add_keyed_ends(model, rel.type_name, rel.source_id, rel.target_id)
 
     def before_disconnect(self, model: Model, rel_id: str) -> None:
         """BEFORE ``Model.disconnect``: the relationship, both endpoints, and
-        for containment the target's OLD uniqueness group."""
+        for containment the target's OLD uniqueness group; the OLD groups of
+        the keyed ends."""
         rel = model.relationships[rel_id]
         self.add(rel.id, rel.source_id, rel.target_id)
         if model.metamodel.is_containment(rel.type_name):
             self.add_uniqueness_group_of(model, rel.target_id)
+        self._add_keyed_ends(model, rel.type_name, rel.source_id, rel.target_id)
 
     def after_disconnect(
-        self, model: Model, rel_type_name: str, target_id: str
+        self, model: Model, rel_type_name: str, source_id: str, target_id: str
     ) -> None:
         """AFTER ``Model.disconnect``: for containment the target's NEW
-        uniqueness group (it may have re-keyed to another owner/None)."""
+        uniqueness group (it may have re-keyed to another owner/None); the
+        NEW groups of the keyed ends."""
         if model.metamodel.is_containment(rel_type_name):
             self.add_uniqueness_group_of(model, target_id)
+        self._add_keyed_ends(model, rel_type_name, source_id, target_id)
 
     def after_relationship_props_change(self, rel_id: str) -> None:
         """A relationship's properties changed: only its own verdict moves."""
@@ -275,16 +329,22 @@ class DirtyCollector:
         ``after_disconnect`` (the relationship's type/target are snapshotted
         first — the after-hook needs them and the mutation destroys them)."""
         rel = model.get_relationship(rel_id)
-        rel_type_name, target_id = rel.type_name, rel.target_id
+        rel_type_name, source_id, target_id = (
+            rel.type_name,
+            rel.source_id,
+            rel.target_id,
+        )
         self.before_disconnect(model, rel_id)
         model.disconnect(rel_id)
-        self.after_disconnect(model, rel_type_name, target_id)
+        self.after_disconnect(model, rel_type_name, source_id, target_id)
 
     def delete_element(self, model: Model, element_id: str) -> None:
-        """``Model.delete_element`` after ``before_element_delete`` (which
-        captures the whole containment cascade's contributions)."""
-        self.before_element_delete(model, element_id)
+        """``Model.delete_element`` between ``before_element_delete`` (which
+        captures the whole containment cascade's contributions) and
+        ``after_element_delete``."""
+        keyed = self.before_element_delete(model, element_id)
         model.delete_element(element_id)
+        self.after_element_delete(model, keyed)
 
 
 # ---------------------------------------------------------------------------

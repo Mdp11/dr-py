@@ -6,6 +6,26 @@ import { cmpCodePoint } from '../value/compare.ts';
 const byId = (a: RelRec, b: RelRec) => cmpCodePoint(a.id, b.id);
 
 /**
+ * Whether the element's uniqueness key names the relationship type in that
+ * direction (`out:` / `in:`), which makes connecting or disconnecting such a
+ * relationship re-key it. Exact type, as the key does.
+ */
+export function keysOn(
+	model: Model,
+	elementId: string,
+	relType: string,
+	direction: 'out' | 'in'
+): boolean {
+	const element = model.findElement(elementId);
+	if (element === undefined) return false;
+	const spec = model.metamodel.effectiveElementKeySpec(element.typeName);
+	return (
+		spec !== null &&
+		spec.relationships.some((key) => key.relType === relType && key.direction === direction)
+	);
+}
+
+/**
  * The ids whose verdict a mutation may have changed, in first-insertion order,
  * with the Python core's hooks (`core/validation/dirty.py`). Each hook adds
  * exactly what the core's does, in its order, and sorts every set it reads
@@ -48,6 +68,12 @@ export class DirtyCollector {
 		this.update(sortedIds(model.indexes.uniqGroupOf(element)));
 	}
 
+	/** The current groups of the ends whose key names the relationship type: re-keyed by it. */
+	private addKeyedEnds(model: Model, relType: string, sourceId: string, targetId: string): void {
+		if (keysOn(model, sourceId, relType, 'out')) this.addUniquenessGroupOf(model, sourceId);
+		if (keysOn(model, targetId, relType, 'in')) this.addUniquenessGroupOf(model, targetId);
+	}
+
 	/** After an element is created: it, its group, and whoever referenced its id while it dangled. */
 	afterElementCreate(model: Model, elementId: string): void {
 		this.add(elementId);
@@ -69,49 +95,79 @@ export class DirtyCollector {
 	/**
 	 * Before an element is deleted, for every element of its cascade: the
 	 * element, each incident relationship with its other end, its referencers
-	 * and its group, read while they still exist.
+	 * and its group, read while they still exist; then the old group of each
+	 * other end whose key names the relationship, which the delete re-keys.
+	 * Returns those ends, for `afterElementDelete`.
 	 */
 	beforeElementDelete(
 		model: Model,
 		elementId: string,
 		closure: readonly ElementRec[] = containmentClosure(model, elementId)
-	): void {
+	): string[] {
+		const keyed: string[] = [];
 		for (const element of closure) {
+			const out = element.out.toSorted(byId);
+			const into = element.in.toSorted(byId);
 			this.add(element.id);
-			for (const rel of element.out.toSorted(byId)) this.add(rel.id, rel.target.id);
-			for (const rel of element.in.toSorted(byId)) this.add(rel.id, rel.source.id);
+			for (const rel of out) this.add(rel.id, rel.target.id);
+			for (const rel of into) this.add(rel.id, rel.source.id);
 			this.update([...model.indexes.referencersOf(element.id)].sort(cmpCodePoint));
 			this.addUniquenessGroupOf(model, element.id);
+			for (const rel of out) {
+				if (keysOn(model, rel.target.id, rel.typeName, 'in')) {
+					this.addUniquenessGroupOf(model, rel.target.id);
+					keyed.push(rel.target.id);
+				}
+			}
+			for (const rel of into) {
+				if (keysOn(model, rel.source.id, rel.typeName, 'out')) {
+					this.addUniquenessGroupOf(model, rel.source.id);
+					keyed.push(rel.source.id);
+				}
+			}
 		}
+		return keyed;
 	}
 
-	/** Before a connect: both ends, and for containment the target's old group. */
+	/** After an element is deleted: the new groups of the ends `beforeElementDelete` returned. */
+	afterElementDelete(model: Model, keyed: readonly string[]): void {
+		for (const id of keyed) this.addUniquenessGroupOf(model, id);
+	}
+
+	/** Before a connect: both ends, for containment the target's old group, and the keyed ends' old groups. */
 	beforeConnect(model: Model, relType: string, sourceId: string, targetId: string): void {
 		this.add(sourceId, targetId);
 		if (model.metamodel.isContainment(relType)) this.addUniquenessGroupOf(model, targetId);
+		this.addKeyedEnds(model, relType, sourceId, targetId);
 	}
 
-	/** After a connect: the relationship, and for containment the target's new group. */
+	/** After a connect: the relationship, for containment the target's new group, and the keyed ends' new groups. */
 	afterConnect(model: Model, relId: string): void {
 		this.add(relId);
 		const rel = model.getRelationship(relId);
 		if (model.metamodel.isContainment(rel.typeName)) {
 			this.addUniquenessGroupOf(model, rel.target.id);
 		}
+		this.addKeyedEnds(model, rel.typeName, rel.source.id, rel.target.id);
 	}
 
-	/** Before a disconnect: the relationship, both ends, and for containment the target's old group. */
+	/**
+	 * Before a disconnect: the relationship, both ends, for containment the
+	 * target's old group, and the keyed ends' old groups.
+	 */
 	beforeDisconnect(model: Model, relId: string): void {
 		const rel = model.getRelationship(relId);
 		this.add(rel.id, rel.source.id, rel.target.id);
 		if (model.metamodel.isContainment(rel.typeName)) {
 			this.addUniquenessGroupOf(model, rel.target.id);
 		}
+		this.addKeyedEnds(model, rel.typeName, rel.source.id, rel.target.id);
 	}
 
-	/** After a disconnect: for containment the target's new group. */
-	afterDisconnect(model: Model, relType: string, targetId: string): void {
+	/** After a disconnect: for containment the target's new group, and the keyed ends' new groups. */
+	afterDisconnect(model: Model, relType: string, sourceId: string, targetId: string): void {
 		if (model.metamodel.isContainment(relType)) this.addUniquenessGroupOf(model, targetId);
+		this.addKeyedEnds(model, relType, sourceId, targetId);
 	}
 
 	/** A relationship's properties changed: only its own verdict moves. */

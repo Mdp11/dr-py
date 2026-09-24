@@ -218,7 +218,7 @@ def test_disconnect_containment_dirties_endpoints_rel_and_both_groups():
     collector = DirtyCollector()
     collector.before_disconnect(model, rel.id)
     model.disconnect(rel.id)
-    collector.after_disconnect(model, "HasPart", e.id)
+    collector.after_disconnect(model, "HasPart", p.id, e.id)
 
     assert set(collector.ids) == {rel.id, p.id, e.id, e3.id, e2.id}
 
