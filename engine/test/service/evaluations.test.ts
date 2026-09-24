@@ -147,7 +147,21 @@ describe('searchModel', () => {
 		expect(answered).toBe(false);
 	});
 
-	it('never lets a slice of a 5,000-element scan pass 16 ms', async () => {
+	it('answers a pattern V8 will not compile with 501, never its source', async () => {
+		const client = await ready();
+		for (const pattern of ['k'.repeat(50_000), '(?i)' + 'k'.repeat(40_000)]) {
+			expect(
+				await refusal(
+					client.call('searchModel', {
+						target: 'element',
+						criteria: [{ type: 'property', name: 'name', op: 'matches', value: pattern }]
+					})
+				)
+			).toEqual(UNSUPPORTED);
+		}
+	});
+
+	it('never lets a slice of a 5,000-element scan pass 16 ms, and pages 500 by default', async () => {
 		const host = autoHost(1);
 		const client = connect(host);
 		const done = verified(client);
@@ -159,6 +173,10 @@ describe('searchModel', () => {
 			criteria: [{ type: 'property', name: 'name', op: 'contains', value: '9' }]
 		});
 		expect(page.total).toBe(1_355);
+		const matching = Array.from({ length: 5_000 }, (_, i) => i).filter((i) => `${i}`.includes('9'));
+		expect(page.elements.map((element) => element.id)).toEqual(
+			matching.slice(0, 500).map((i) => `n${i}`)
+		);
 		expect(host.slices.length).toBeGreaterThan(0);
 		expect(Math.max(...host.slices)).toBeLessThanOrEqual(16);
 	});

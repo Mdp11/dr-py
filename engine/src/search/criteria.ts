@@ -9,7 +9,7 @@ import { getProp, type ElementRec, type Props, type RelRec } from '../model/reco
 import { ReadError } from '../read/errors.ts';
 import { jsStr, toNumber } from '../value/coerce.ts';
 import { pyLower } from '../value/lower.ts';
-import { translatePyRegex, type PyRegex } from '../value/regex.ts';
+import { translatePyRegex } from '../value/regex.ts';
 import type { Value } from '../value/types.ts';
 
 export type CriterionDirection = 'outgoing' | 'incoming' | 'either';
@@ -216,30 +216,48 @@ const UNSUPPORTED = 'reaches an unsupported pattern';
 /** Every `matches` pattern of a call, by its text: a test, or `null` where `re` refuses it. */
 export type CompiledCriteria = ReadonlyMap<string, ((subject: string) => boolean) | null>;
 
-// A pattern nested past the translator's stack, or a subject past the
-// backtracking stack of the translated `RegExp`, throws a `RangeError`: the
-// engine cannot answer, and the server can.
-function translated(pattern: string): PyRegex {
+/**
+ * What the host cannot run although Python can: a pattern nested past the
+ * translator's stack or a subject past the translated `RegExp`'s backtracking
+ * stack (a `RangeError`), and a translation V8 will not compile (a
+ * `SyntaxError`, thrown on first run, since V8 compiles lazily and apart for
+ * one-byte and two-byte subjects). Nothing else: any other error is a bug.
+ */
+function beyondHost(error: unknown): boolean {
+	return (
+		error instanceof RangeError ||
+		(error instanceof SyntaxError && error.message.endsWith('Regular expression too large'))
+	);
+}
+
+/** Runs `work`, turning what the host cannot run into the 501 that sends the call to the server. */
+function onHost<T>(work: () => T): T {
 	try {
-		return translatePyRegex(pattern, 'search');
+		return work();
 	} catch (error) {
-		if (error instanceof RangeError) throw new ReadError(501, UNSUPPORTED);
+		if (beyondHost(error)) throw new ReadError(501, UNSUPPORTED);
 		throw error;
 	}
 }
 
 /**
  * Translates every `matches` pattern, group members included, before any
- * entity is matched. A pattern the translator cannot vouch for refuses the
- * whole call with 501, so that it goes to the server.
+ * entity is matched, and runs each once on a one-byte and a two-byte subject
+ * so that a translation V8 will not compile refuses here rather than
+ * mid-scan. A pattern the translator cannot vouch for refuses the whole call
+ * with 501, so that it goes to the server.
  */
 export function compileCriteria(criteria: readonly Criterion[]): CompiledCriteria {
 	const patterns = new Map<string, ((subject: string) => boolean) | null>();
 	const compile = (c: LeafCriterion) => {
 		if ((c.type !== 'property' && c.type !== 'name_id') || c.op !== 'matches') return;
 		if (patterns.has(c.value)) return;
-		const regex = translated(c.value);
+		const regex = onHost(() => translatePyRegex(c.value, 'search'));
 		if (regex.kind === 'unsupported') throw new ReadError(501, UNSUPPORTED);
+		if (regex.kind === 'ok') {
+			onHost(() => regex.test(''));
+			onHost(() => regex.test('\u0100'));
+		}
 		patterns.set(c.value, regex.kind === 'ok' ? regex.test : null);
 	};
 	for (const c of criteria) {
@@ -254,12 +272,7 @@ function search(compiled: CompiledCriteria, pattern: string, subject: string): b
 	const test = compiled.get(pattern);
 	if (test === undefined) throw new Error(`pattern ${JSON.stringify(pattern)} was not compiled`);
 	if (test === null) return false;
-	try {
-		return test(subject);
-	} catch (error) {
-		if (error instanceof RangeError) throw new ReadError(501, UNSUPPORTED);
-		throw error;
-	}
+	return onHost(() => test(subject));
 }
 
 // -- matching ------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	compileCriteria,
+	drain,
 	matchElement,
 	matchRelationship,
 	Model,
@@ -9,6 +10,8 @@ import {
 	PyOverflowError,
 	readCriteria,
 	ReadError,
+	searchModel,
+	ViewPlacements,
 	type Criterion
 } from '../../src/index.ts';
 import { nodeMetamodel } from '../model/fixtures.ts';
@@ -179,6 +182,27 @@ describe('compileCriteria', () => {
 			status: 501,
 			detail: 'reaches an unsupported pattern'
 		});
+	});
+
+	it('refuses with 501 a translation V8 will not compile, before any entity is matched', () => {
+		const unsupported = { status: 501, detail: 'reaches an unsupported pattern' };
+		for (const pattern of ['k'.repeat(50_000), '(?i)' + 'k'.repeat(40_000)]) {
+			expect(refusal(() => compileCriteria(matches(pattern)))).toEqual(unsupported);
+			// An empty model refuses too: the answer never depends on the data.
+			const empty = new Model(nodeMetamodel());
+			const params = {
+				target: 'element',
+				criteria: [{ type: 'property', name: 'name', op: 'matches', value: pattern }]
+			};
+			const ctx = { model: empty, artifacts: null, placements: new ViewPlacements() };
+			expect(refusal(() => drain(searchModel(ctx, params)))).toEqual(unsupported);
+		}
+		// Short of V8's limit, the same literal compiles and runs.
+		const model = new Model(nodeMetamodel());
+		const element = model.createElement('Node', 'a');
+		model.setProperty(element, 'name', 'k'.repeat(30_000));
+		const criteria = matches('k'.repeat(30_000));
+		expect(matchElement(model, element, criteria[0]!, compileCriteria(criteria))).toBe(true);
 	});
 
 	it('accepts an invalid pattern, which then never matches', () => {
