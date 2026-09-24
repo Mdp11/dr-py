@@ -2,3 +2,4 @@ package-lock.json
 /fixtures/
 /src/value/lower-tables.ts
 /src/value/digit-tables.ts
+/src/value/regex-tables.ts

@@ -17,6 +17,7 @@ from . import (  # noqa: F401
     ops_refused,
     py_coerce,
     py_lower,
+    py_regex,
     py_repr,
     read_pages,
     read_search,

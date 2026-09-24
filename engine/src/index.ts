@@ -131,6 +131,7 @@ export { pyFloatRepr } from './value/float-repr.ts';
 export { pyKey } from './value/key.ts';
 export { pyLower, pyStrip } from './value/lower.ts';
 export { needsExactParse, parseExact, parseJson, parseLines } from './value/parse.ts';
+export { translatePyRegex, type PyRegex } from './value/regex.ts';
 export { pyRepr, pyReprValue } from './value/repr.ts';
 export { pyDumps } from './value/serialize.ts';
 export { PyFloat, type Value } from './value/types.ts';
