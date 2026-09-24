@@ -712,7 +712,11 @@ function translate(pattern: string, mode: 'search' | 'fullmatch'): PyRegex {
 		if (error instanceof Refusal) return error.answer;
 		throw error;
 	}
-	const source = mode === 'fullmatch' ? `${START}(?:${body})${END_OF_TEXT}` : body;
+	// V8 also tries a `u` search between the halves of a surrogate pair, where
+	// every look-around sees no neighbour. Anchored natively, a match starts at
+	// the text's start and moves a code point at a time, so the body only ever
+	// stands on code point boundaries.
+	const source = mode === 'fullmatch' ? `^(?:${body})$` : `^[\\s\\S]*?(?:${body})`;
 	let compiled: RegExp;
 	try {
 		compiled = new RegExp(source, 'u');

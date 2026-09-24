@@ -18,6 +18,12 @@ _LONG_S = "ſ"
 _ARABIC_3 = "٣"
 _LINE_SEP = "\u2028"
 _PARA_SEP = "\u2029"
+_EMOJI = chr(0x1F600)
+_DESERET = chr(0x10400)
+_ADLAM = chr(0x1E900)
+# Subjects holding astral code points: a JavaScript search may try a start
+# between the two halves of a pair, where a look-around sees no neighbour.
+_ASTRAL = [_EMOJI, "x" + _EMOJI, _EMOJI + "x", "abc" + _EMOJI + "def", _DESERET, _ADLAM]
 
 _CASES: list[tuple[str, list[str]]] = [
     # Python-only syntax a naive translation gets wrong.
@@ -92,20 +98,29 @@ _CASES: list[tuple[str, list[str]]] = [
         ["foo", "a foo b", "foobar", "éfoo", "fooé", "foo_", _ARABIC_3 + "foo"],
     ),
     (r"\bcaf\b", ["café", "caf", "caf!"]),
-    (r"\b", ["", "a", " "]),
-    (r"\B", ["", "a", " ", "ab"]),
+    (r"\b", ["", "a", " ", *_ASTRAL]),
+    (r"\B", ["", "a", " ", "ab", *_ASTRAL]),
     (r"é\b", ["é", "éa", "é "]),
     (r"\Bé", ["aé", "é", " é"]),
     (r"x\b", ["x" + _KELVIN, "x²", "x" + _ARABIC_3, "x-"]),
     # Anchors.
     (r"^a", ["a", "ba", "\na", "b\na"]),
-    (r"^$", ["", "\n", "\n\n", "a"]),
-    (r"$", ["", "a"]),
+    (r"^$", ["", "\n", "\n\n", "a", *_ASTRAL]),
+    (r"$", ["", "a", *_ASTRAL]),
+    (r"^", ["", *_ASTRAL]),
+    (r"\A\Z", ["", "\n", *_ASTRAL]),
+    (r"(?!a)", ["a", *_ASTRAL]),
+    (r"(?<!a)", ["a", *_ASTRAL]),
+    (r"a|^", ["b", "a", *_ASTRAL]),
+    (r"a|\b", ["", *_ASTRAL]),
+    (r"a|\B", [" ", *_ASTRAL]),
+    (r"(?m)^x|$", ["", "y", *_ASTRAL]),
+    (r"(?m)a|^", ["b", *_ASTRAL]),
     (r"a\n$", ["a\n", "a\n\n"]),
     (r"^a\Z", ["a", "a\n"]),
     (r"(?m)^b", ["a\nb", "ab", "b"]),
     (r"(?m)a$", ["a\nb", "ab", "a", "a\n", "a\r\n"]),
-    (r"(?m)^$", ["", "\n", "a\n\nb", "a", "a\n"]),
+    (r"(?m)^$", ["", "\n", "a\n\nb", "a", "a\n", *_ASTRAL]),
     (r"(?m)\Aa", ["b\na", "a"]),
     (r"(?m)a\Z", ["a\nb", "a", "a\n"]),
     # Classes.
@@ -149,7 +164,7 @@ _CASES: list[tuple[str, list[str]]] = [
     (r"[a||b]", ["|", "b"]),
     (r"[a~~b]", ["~", "b"]),
     # Quantifiers.
-    (r"a*", ["", "b", "aaa"]),
+    (r"a*", ["", "b", "aaa", *_ASTRAL]),
     (r"a+", ["", "a", "baab"]),
     (r"a?b", ["b", "ab", "aab"]),
     (r"a{2}", ["a", "aa", "aaa"]),
@@ -303,7 +318,8 @@ _CASES: list[tuple[str, list[str]]] = [
     (r"((a)", []),
     # Alternation.
     (r"cat|dog", ["cat", "dog", "cow", "hotdog"]),
-    (r"a|", ["", "b"]),
+    (r"a|", ["", "b", *_ASTRAL]),
+    (r"x|", ["", "x", "Ünïcødé " + _EMOJI, *_ASTRAL]),
     (r"|", [""]),
     (r"(?:a|ab)c", ["abc", "ac"]),
     (r"^(?:a|ab)$", ["ab", "a", "b"]),
@@ -311,7 +327,7 @@ _CASES: list[tuple[str, list[str]]] = [
     (r"^Pump-\d{3}$", ["Pump-001", "Pump-٠٠١", "Pump-01", "Pump-001\n"]),
     (r"^[A-Z][a-z]+$", ["Sensor", "sensor", "Élan"]),
     (r"\.json$", ["a.json", "a.json\n", "a.jsonx"]),
-    (r"^\s*$", ["", "  ", "\x1c", "\ufeff", "\xa0"]),
+    (r"^\s*$", ["", "  ", "\x1c", "\ufeff", "\xa0", "Café ☕ " + _EMOJI, *_ASTRAL]),
     (r"^\w+@\w+\.\w+$", ["a@b.c", "é@ü.ç", "a@b"]),
     (r"\$\d+(?:\.\d{2})?", ["$12.50", "$", "12"]),
     (r"^[^\s]+$", ["abc", "a c", "a\u3000c"]),
@@ -321,6 +337,8 @@ _CASES: list[tuple[str, list[str]]] = [
 # Patterns matched against every code point (after the prefix), whole.
 _CODE_POINT_CASES: list[tuple[str, str]] = [
     (r".", ""),
+    (r"x?", ""),
+    (r"\B", ""),
     (r"\w", ""),
     (r"\d", ""),
     (r"\s", ""),

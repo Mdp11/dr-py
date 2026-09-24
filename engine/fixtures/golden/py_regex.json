@@ -1208,6 +1208,36 @@
           " ",
           false,
           false
+        ],
+        [
+          "😀",
+          false,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
         ]
       ]
     },
@@ -1232,6 +1262,36 @@
         [
           "ab",
           true,
+          false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          false,
+          false
+        ],
+        [
+          "𞤀",
+          false,
           false
         ]
       ]
@@ -1348,6 +1408,36 @@
           "a",
           false,
           false
+        ],
+        [
+          "😀",
+          false,
+          false
+        ],
+        [
+          "x😀",
+          false,
+          false
+        ],
+        [
+          "😀x",
+          false,
+          false
+        ],
+        [
+          "abc😀def",
+          false,
+          false
+        ],
+        [
+          "𐐀",
+          false,
+          false
+        ],
+        [
+          "𞤀",
+          false,
+          false
         ]
       ]
     },
@@ -1361,6 +1451,411 @@
         ],
         [
           "a",
+          true,
+          false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "^",
+      "subjects": [
+        [
+          "",
+          true,
+          true
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "\\A\\Z",
+      "subjects": [
+        [
+          "",
+          true,
+          true
+        ],
+        [
+          "\n",
+          false,
+          false
+        ],
+        [
+          "😀",
+          false,
+          false
+        ],
+        [
+          "x😀",
+          false,
+          false
+        ],
+        [
+          "😀x",
+          false,
+          false
+        ],
+        [
+          "abc😀def",
+          false,
+          false
+        ],
+        [
+          "𐐀",
+          false,
+          false
+        ],
+        [
+          "𞤀",
+          false,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "(?!a)",
+      "subjects": [
+        [
+          "a",
+          true,
+          false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "(?<!a)",
+      "subjects": [
+        [
+          "a",
+          true,
+          false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "a|^",
+      "subjects": [
+        [
+          "b",
+          true,
+          false
+        ],
+        [
+          "a",
+          true,
+          true
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "a|\\b",
+      "subjects": [
+        [
+          "",
+          false,
+          false
+        ],
+        [
+          "😀",
+          false,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "a|\\B",
+      "subjects": [
+        [
+          " ",
+          true,
+          false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          false,
+          false
+        ],
+        [
+          "𞤀",
+          false,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "(?m)^x|$",
+      "subjects": [
+        [
+          "",
+          true,
+          true
+        ],
+        [
+          "y",
+          true,
+          false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "(?m)a|^",
+      "subjects": [
+        [
+          "b",
+          true,
+          false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
           true,
           false
         ]
@@ -1472,6 +1967,36 @@
         [
           "a\n",
           true,
+          false
+        ],
+        [
+          "😀",
+          false,
+          false
+        ],
+        [
+          "x😀",
+          false,
+          false
+        ],
+        [
+          "😀x",
+          false,
+          false
+        ],
+        [
+          "abc😀def",
+          false,
+          false
+        ],
+        [
+          "𐐀",
+          false,
+          false
+        ],
+        [
+          "𞤀",
+          false,
           false
         ]
       ]
@@ -2010,6 +2535,36 @@
           "aaa",
           true,
           true
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
         ]
       ]
     },
@@ -4179,6 +4734,86 @@
           "b",
           true,
           false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "pattern": "x|",
+      "subjects": [
+        [
+          "",
+          true,
+          true
+        ],
+        [
+          "x",
+          true,
+          true
+        ],
+        [
+          "Ünïcødé 😀",
+          true,
+          false
+        ],
+        [
+          "😀",
+          true,
+          false
+        ],
+        [
+          "x😀",
+          true,
+          false
+        ],
+        [
+          "😀x",
+          true,
+          false
+        ],
+        [
+          "abc😀def",
+          true,
+          false
+        ],
+        [
+          "𐐀",
+          true,
+          false
+        ],
+        [
+          "𞤀",
+          true,
+          false
         ]
       ]
     },
@@ -4319,6 +4954,41 @@
           " ",
           true,
           true
+        ],
+        [
+          "Café ☕ 😀",
+          false,
+          false
+        ],
+        [
+          "😀",
+          false,
+          false
+        ],
+        [
+          "x😀",
+          false,
+          false
+        ],
+        [
+          "😀x",
+          false,
+          false
+        ],
+        [
+          "abc😀def",
+          false,
+          false
+        ],
+        [
+          "𐐀",
+          false,
+          false
+        ],
+        [
+          "𞤀",
+          false,
+          false
         ]
       ]
     },
@@ -4413,6 +5083,19 @@
         11,
         1114111
       ]
+    },
+    {
+      "pattern": "x?",
+      "prefix": "",
+      "ranges": [
+        120,
+        120
+      ]
+    },
+    {
+      "pattern": "\\B",
+      "prefix": "",
+      "ranges": []
     },
     {
       "pattern": "\\w",
