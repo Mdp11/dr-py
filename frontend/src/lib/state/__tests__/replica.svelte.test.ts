@@ -1941,7 +1941,7 @@ describe('the issues on the engine', () => {
 			http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] }))
 		);
 		const spy = vi.spyOn(validationApi, 'getModelIssues');
-		store = await engineStore();
+		store = await engineStore({ surfaces: { issues: 'server' } });
 		const s = store;
 		if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
 		await ensureElements(['e_000001']);

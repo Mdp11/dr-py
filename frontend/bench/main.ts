@@ -95,6 +95,7 @@ async function open(): Promise<OpenReport> {
 	const ended = new Map<string, number>();
 	const ready = deferred();
 	const verified = deferred();
+	const seeded = deferred();
 	client.on((event) => {
 		const at = now();
 		if (event.event === 'progress') {
@@ -102,6 +103,7 @@ async function open(): Promise<OpenReport> {
 			if (event.done === event.total && !ended.has(event.task)) {
 				ended.set(event.task, at);
 				if (event.task === 'verify') verified.resolve(at);
+				if (event.task === 'sweep') seeded.resolve(at);
 			}
 		} else if (event.event === 'replica' && event.state === 'ready') {
 			ready.resolve(at);
@@ -142,9 +144,16 @@ async function open(): Promise<OpenReport> {
 	const readyAt = await ready.promise;
 	const openTrips = await stopOpenPings();
 
+	// The digest check and the sweep run in their own scheduler slots, taking
+	// turns: each gets its own ping loop, stopped the moment ITS task ends, so
+	// neither's "longest slice" picks up the other's tail.
 	const stopVerifyPings = ping(client);
-	const verifiedAt = await verified.promise;
-	const verifyTrips = await stopVerifyPings();
+	const stopSweepPings = ping(client);
+	const [{ at: verifiedAt, trips: verifyTrips }, { at: seededAt, trips: sweepTrips }] =
+		await Promise.all([
+			verified.promise.then(async (at) => ({ at, trips: await stopVerifyPings() })),
+			seeded.promise.then(async (at) => ({ at, trips: await stopSweepPings() }))
+		]);
 
 	const idle: number[] = [];
 	for (let i = 0; i < IDLE_PINGS; i++) {
@@ -158,6 +167,7 @@ async function open(): Promise<OpenReport> {
 	const parseBegan = began.get('parse') ?? Infinity;
 	const steadyWorst = longest(openTrips.filter((trip) => trip.start >= parseBegan));
 	const verifyWorst = longest(verifyTrips);
+	const sweepWorst = longest(sweepTrips);
 	return {
 		measures: {
 			'cold open: first byte asked to replica ready': readyAt - start,
@@ -176,7 +186,10 @@ async function open(): Promise<OpenReport> {
 			[`staged round trip when idle (median of ${IDLE_PINGS})`]: median(idle),
 			'digest check: ready to its last progress': verifiedAt - readyAt,
 			'longest staged round trip during it (slice bound)': verifyWorst.ms,
-			'  posted at, after ready': verifyWorst.start - readyAt
+			'  posted at, after ready': verifyWorst.start - readyAt,
+			'sweep (ready → seeded)': seededAt - readyAt,
+			'longest slice while sweeping': sweepWorst.ms,
+			'  posted at, after ready (sweep)': sweepWorst.start - readyAt
 		},
 		header,
 		gzipBytes,

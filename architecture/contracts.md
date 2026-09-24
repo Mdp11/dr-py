@@ -144,12 +144,18 @@ event     {event, …}                     engine → client, unsolicited
   Evaluations are reads over the working copy: `searchModel {target, criteria, limit,
   offset}` and `evaluateNavigation {definition | artifact_id, row_element_id, limit,
   offset}`, each resolving every artifact it names — staged ones included — before its first
-  step.
-- An evaluation the engine must not answer is refused with 501 before any work: `reaches a
-  script` (a navigation that reaches a configured script step) or `reaches an unsupported
-  pattern` (a criterion pattern the engine cannot match exactly as Python's `re` does). The
-  client answers exactly those two from the server — a navigation's page marked with the
-  reason (AD-31); any other 501 is an error.
+  step. `getModelIssues {}`, `validateModel {batch_ids}` and `previewCommit {base_rev,
+  batch_ids, strict}` (the model half only — artifact, view and `metamodel.move_node` ops
+  stay a server call the shell merges in) answer the one live issue store over the working
+  copy (AD-32).
+- An evaluation, or an `issues` call, the engine must not answer is refused with 501 before any
+  work: `reaches a script` (a navigation that reaches a configured script step), `reaches an
+  unsupported pattern` (a criterion or facet pattern the engine cannot match exactly as
+  Python's `re` does) or `reaches validation rules` (an `issues` call while any
+  `validation_rules` artifact resolves — until rules are ported). The client answers exactly
+  those three from the server — a navigation's page marked with the reason (AD-31), an
+  `issues` call's answer unmarked, exactly as the server always gave it; any other 501 is an
+  error.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed
@@ -159,12 +165,15 @@ event     {event, …}                     engine → client, unsolicited
   that arrived before it and holds everything behind it, and between the slices of a long
   read, reads that arrived later are answered.
 - Events: `replica {state: opening|ready|diverged, rev}` (`rev` null while opening);
-  `progress {task, done, total}` for the tasks `parse`, `index`, `tail` and `verify` — at most
-  once per slice per task, plus a task's first and last; `changed {rev, staged_version,
-  element_ids, relationship_ids, deleted_element_ids, deleted_relationship_ids, structural}`
-  after every transition of a `ready` replica that changed something. `structural` says the
-  element set or a relationship may have moved; `staged_version` moves whenever the staged
-  batches do.
+  `progress {task, done, total}` for the tasks `parse`, `index`, `tail`, `verify` and `sweep`
+  (AD-32's background revalidation, resumable, one background slot each with the digest check)
+  — at most once per slice per task, plus a task's first and last; `changed {rev,
+  staged_version, issues_version, element_ids, relationship_ids, deleted_element_ids,
+  deleted_relationship_ids, structural}` after every transition of a `ready` replica that
+  changed something. `structural` says the element set or a relationship may have moved;
+  `staged_version` moves whenever the staged batches do; `issues_version` moves whenever the
+  issue store's content changes or `rev` does (origins can change under it), and the sweep
+  posts it bare — no ids, `structural: false` — at most once per slice.
 - Every request is cancellable. The engine client rejects a cancelled call with an
   `AbortError`, as an aborted `fetch` does.
 

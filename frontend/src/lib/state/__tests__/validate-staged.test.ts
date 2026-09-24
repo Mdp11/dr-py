@@ -193,7 +193,7 @@ describe('validateAll on the engine side', () => {
 	});
 
 	it('with the issues on the server, the server is sent the ops', async () => {
-		const { bodies } = await open();
+		const { bodies } = await open({ issues: 'server' });
 		const op = rename('e_000001', 'x'.repeat(201));
 		emit(op);
 		await stagedSettled();

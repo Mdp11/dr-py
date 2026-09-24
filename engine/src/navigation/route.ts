@@ -93,11 +93,11 @@ function chainItem(model: Model, node: ChainNode): TreeItem | ChainValueOut {
 
 /**
  * `POST .../artifacts/navigation/evaluate` in steps. Before the first step it
- * reads its params, resolves every ref through the working copy's artifacts
- * and translates every pattern; a definition that reaches a script refuses
- * with 501, for the server to run. An id no element has, read where the core
- * indexes the model raw, is answered as the route's `LookupError` handler
- * answers it: `unknown navigation artifact 'x'`.
+ * reads its params and resolves every ref through the working copy's
+ * artifacts; a definition that reaches a script refuses with 501, for the
+ * server to run, before any pattern is translated. An id no element has,
+ * read where the core indexes the model raw, is answered as the route's
+ * `LookupError` handler answers it: `unknown navigation artifact 'x'`.
  */
 export function evaluateNavigation(ctx: EvalContext, params: ReadParams): Steps<ChainPageOut> {
 	const source = sourceOf(params);

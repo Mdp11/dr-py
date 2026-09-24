@@ -17,10 +17,18 @@ five read surfaces defaulted to the engine. `core/search`, `core/navigation`, `a
 `routes/read.py::search_model` and `routes/artifacts.py::evaluate_navigation` stay frozen past
 C's first plan flipping navigation and criteria search to the engine: `core/table`'s evaluator
 and `api/routes/{tables,exports}.py` still read them for tables and exports, which stay on the
-server until plans 4–5, and `api/artifact_kinds.py` validates every committed navigation
-payload against them. A bug found in any of them still lands on both sides with a fixture
-until tables and exports default to the engine (MR-1, until F). `core/table/resolve.py` (ref
-resolution and script reach) is frozen from C's first plan on.
+server until C's plans 4–5, and `api/search.py` and the route functions are also the 501
+fallback's server side (AD-31); `api/artifact_kinds.py` validates every committed navigation
+payload against them. The freeze lifts for FEATURES once tables and exports default to the
+engine; a bug found in any of them still lands on both sides with a fixture until F (MR-1)
+regardless. `core/table/resolve.py` (ref resolution and script reach) is frozen from C's
+first plan on. `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's
+conformance half (`routes/commits.py::preview_commit`'s model half,
+`api/rules.py::attributable_issues`) stay frozen for behaviour past C's second plan flipping
+`issues` to the engine, and left it for FEATURES with that flip. Two bugs landed on both sides
+under it: `value_conforms`'s float branch, which raised `TypeError` on an unhashable value and
+now answers `False`, and the dirty hooks, which missed a key relationship's endpoints'
+uniqueness groups on connect, disconnect and cascade delete until 6b3cdb6.
 
 ---
 
@@ -41,24 +49,40 @@ read surfaces default to the engine behind per-surface switches, the wait for `r
 fallback notice and the retry overlay, shadow comparison in dev and e2e, and the browser
 benchmark; the forked store — `staging` defaults to `engine`, the user's edits stage in the
 replica's working copy, the legacy store lives behind `staging: legacy`) — and watches `K-32`.
-C (evaluation) is in progress, plan 1 of 8 built: the engine holds the project's artifacts —
+C (evaluation) is in progress, C's plan 2 of 8 built: the engine holds the project's artifacts —
 the committed payloads the shell fetches and follows, the staged entries mirrored from the
 frontend's buffer (AD-30) — and serves navigation and criteria search over the working copy,
 by default (`navigation` and `criteria` surfaces, held to the routes by fixture and by shadow
 comparison); a call that reaches a script, or a pattern the regex translator cannot vouch
 for, is refused with 501 and answered by the server, a navigation's page marked so (AD-31).
+C's plan 2 adds one live issue store over the working copy (AD-32) — a resumable background
+sweep, incremental revalidation inside every transition, origins by a rewind probe — and
+serves `getModelIssues`, `validateModel` and the model half of `previewCommit` from it, behind
+the `issues` surface, which now defaults to the engine too, gated on the replica's first sweep
+completing; a call that also reaches validation rules is refused with 501 and answered by the
+server (plan 3 deletes this refusal once rules are ported).
 The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op applier from
 the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
 surfaces' defaults. `core/search`, `core/navigation`, `api/search.py` and the `search_model`
-and `evaluate_navigation` route functions stay frozen past this plan's flip of navigation and
-criteria search: `core/table`'s evaluator and `api/routes/{tables,exports}.py` still read them
-for tables and exports, on the server until plans 4–5, and `api/artifact_kinds.py` validates
+and `evaluate_navigation` route functions stay frozen past C's first plan's flip of navigation
+and criteria search: `core/table`'s evaluator and `api/routes/{tables,exports}.py` still read
+them for tables and exports, on the server until C's plans 4–5, and `api/search.py` and the
+route functions are also the 501 fallback's server side; `api/artifact_kinds.py` validates
 every committed navigation payload against them; `core/table/resolve.py` (ref resolution and
-script reach) is frozen from this plan on too.
+script reach) is frozen from C's first plan on too. `core/validation` minus `rules/`,
+`api/validation_sweep.py` and the preview's conformance half
+(`routes/commits.py::preview_commit`'s model half, `api/rules.py::attributable_issues`) are
+frozen for behaviour from C's plan 2 on, and left it for FEATURES with C's plan 2's flip of
+`issues` to the engine. A bug fixed during a port, or found in any of these areas afterward,
+lands on both sides with a fixture until F (MR-1), whether or not the feature freeze has
+lifted for that area. Two landed by C's plan 2: `value_conforms`'s float branch, which raised
+`TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed
+a key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete
+until 6b3cdb6.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
-`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `C-21`, `C-22`, `C-23` in
-this file; `K-33`, `K-34` in `BACKLOG.md`.
+`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `C-21`, `C-22`,
+`C-23` in this file; `K-33`, `K-34` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -299,7 +323,7 @@ can then be duplicated or skipped.
 (`frontend/src/lib/engine/artifacts.ts:183`), while `sync.call` posts a read to the engine at
 once whenever it is ready. During a commit's refresh, an artifact staged meanwhile reaches the
 engine only when the refresh lands. Now that a commit's creates are aliased under their real
-ids during that refresh (`bcae61e`), the hold may no longer be needed. Suggested fix: push the
+ids during that refresh (`bcae61e`), the hold may no longer be needed. Fix direction: push the
 composed overlay during the hold too, and add a test that a read issued right after
 `stageArtifactUpdate` sees the staged update.
 
@@ -309,42 +333,56 @@ once, and `now` handlers run inside one host turn (CN-3's ≤16 ms). Measured co
 5 ms/MB without floats, and 30–50 ms/MB once any payload holds a float, because the whole list
 then goes through the exact parser: 2.8 MB of snippets plus one `1.5` took 74–102 ms. Every
 project open pays this twice — `startReplica`'s `load()` and the first feed `snapshot`'s
-`load()` both fetch and set all payloads. Suggested fix: read and set per artifact, and drop
+`load()` both fetch and set all payloads. Fix direction: read and set per artifact, and drop
 the duplicate initial load.
 
 ### K-52 · Superseded navigation previews are never cancelled · `open` · *2026-09-24*
 `evaluateNavigation` passes no `AbortSignal` (`frontend/src/lib/api/artifacts.ts:72`), so each
 debounced auto-run while editing a definition queues a full model-lane scan that runs to
-completion even after a newer edit supersedes it. Suggested fix: abort on the editor's
+completion even after a newer edit supersedes it. Fix direction: abort on the editor's
 generation bump, as B's scans do.
 
 ### K-53 · The artifact follower's fetch chain has no timeout · `open` · *2026-09-24*
-`artifacts.ts:125-134` awaits `/artifacts/payloads` with no timeout. One hung request stalls
-every later feed event and refresh, and the staged mirror with them if a commit's hold sits
-behind it. Suggested fix: a fetch timeout, or a way for a later fetch not to wait on a stuck
-one holding the staged mirror.
+`frontend/src/lib/engine/artifacts.ts:125-134` awaits `/artifacts/payloads` with no timeout.
+One hung request stalls every later feed event and refresh, and the staged mirror with them if
+a commit's hold sits behind it. Fix direction: a fetch timeout, or a way for a later fetch not
+to wait on a stuck one holding the staged mirror.
 
 ### K-54 · A pattern fallback in Advanced Search reads committed state silently · `open` · *2026-09-24*
 `frontend/src/lib/api/model-read.ts:134-150` falls back to the server for a pattern the engine
 cannot vouch for, with no mark on the result. A user with a staged rename gets different
 results depending only on the regex syntax used, with nothing telling them the run read
-committed state. Suggested fix: a one-line note like the navigation dock's `nav-fallback`.
+committed state. Fix direction: a one-line note like the navigation dock's `nav-fallback`.
 
 ### K-55 · The criteria warm-up can freeze the worker on a catastrophic pattern · `open` · *2026-09-24*
-`compileCriteria`'s warm-up (`engine/src/search/criteria.ts:124-125`) runs every translated
+`compileCriteria`'s warm-up (`engine/src/search/criteria.ts:244-245`) runs every translated
 pattern before the first step. A catastrophic-backtracking pattern (e.g. `'(?:a?|b?)'` repeated
 22 times plus `'x'`) freezes the worker for about 4.5 s, and the scheduler has no way to
-interrupt a warm-up run. Suggested fix: bound or step the warm-up.
+interrupt a warm-up run. Fix direction: bound or step the warm-up.
 
 ### K-56 · `sendArtifacts` swallows an engine refusal silently · `open` · *2026-09-24*
 `frontend/src/lib/engine/sync.ts`'s `sendArtifacts` drops an engine refusal without surfacing
-it, so an engine holding no artifacts can still look "loaded". Suggested fix: a dev-mode
+it, so an engine holding no artifacts can still look "loaded". Fix direction: a dev-mode
 `console.error` on refusal.
 
 ### K-57 · `py_coerce`'s `to_number` rows miss several `toNumber` branches · `open` · *2026-09-24*
 The fixture's `to_number` rows lack a plain int, a finite bigint, a float, a dict, `""` and
 `"   "`, so those branches of `toNumber` (`engine/src/value/coerce.ts:110-128`) have no oracle
-row. Suggested fix: add the inputs to `tests/golden/scenarios/py_coerce.py` and regenerate.
+row. Fix direction: add the inputs to `tests/golden/scenarios/py_coerce.py` and regenerate.
+
+### K-58 · `change_request_dirty_ids` is dead outside tests and shares the key-relationship dirty gap · `open` · *2026-09-24*
+`change_request_dirty_ids` (`src/data_rover/core/validation/dirty.py:355-434`) has no
+production caller at HEAD: apply-CR has proposed an op batch since `be3bcb9` (pre-dating this
+branch), translated by `api/change_request_ops.py::ops_for_change` and staged and committed
+like a manual edit, through the ops route's hooks — the same ones 6b3cdb6 fixed. Only
+`tests/validation/test_dirty.py:246` and `tests/validation/rules/test_reach.py:363` still call
+it, and it still adds a relationship's endpoints' uniqueness groups only when the relationship
+type is containment (the same gap `after_connect`/`before_disconnect`/`after_element_delete`
+had before 6b3cdb6 fixed them for staged ops), so any caller that appeared would leave the
+issue store holding a duplicate that is gone, or missing one that appeared, after a CR built
+through it applies. Fix direction: fix it — mirror 6b3cdb6's hooks, adding the keyed other
+ends' old and new groups for every added, modified or deleted relationship of a keyed type —
+or delete it with its two tests.
 
 ---
 

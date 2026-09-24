@@ -205,8 +205,8 @@ function flights(s: EngineStore): { answers: CommitAnswer[]; abandoned: number }
 	return seen;
 }
 
-async function open(): Promise<EngineStore> {
-	store = await engineStore();
+async function open(surfaces: { [surface: string]: string } = {}): Promise<EngineStore> {
+	store = await engineStore({ surfaces });
 	return store;
 }
 
@@ -491,7 +491,8 @@ describe('waiting for the replica to apply a commit', () => {
 
 describe('preview and validate on the engine side', () => {
 	it('preview waits for the engine', async () => {
-		const s = await open();
+		// Issues on the server: this exercises the ops the engine's staging sends over the wire.
+		const s = await open({ issues: 'server' });
 		const bodies = routes(s);
 		await ensureElement('e_000002');
 
@@ -505,7 +506,8 @@ describe('preview and validate on the engine side', () => {
 	});
 
 	it("validateAll sends the engine's ops", async () => {
-		const s = await open();
+		// Issues on the server: this exercises the ops the engine's staging sends over the wire.
+		const s = await open({ issues: 'server' });
 		const bodies = routes(s);
 		await ensureElement('e_000002');
 
