@@ -13,13 +13,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import lower_tables
+from . import coerce_tables, lower_tables
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = ROOT / "engine" / "fixtures" / "golden"
 
 GENERATED: dict[Path, Callable[[], str]] = {
     Path("engine/src/value/lower-tables.ts"): lower_tables.render,
+    Path("engine/src/value/digit-tables.ts"): coerce_tables.render,
 }
 
 Scenario = Callable[[], Any]
