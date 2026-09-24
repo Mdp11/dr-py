@@ -9,6 +9,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import {
+	ArtifactSet,
 	entityHash,
 	EVALUATIONS,
 	formatDigest,
@@ -109,7 +110,7 @@ const search = (model: Model, q: string) =>
 
 const criteriaScan = (model: Model) =>
 	EVALUATIONS['searchModel']!(
-		{ model, artifacts: null, placements: new ViewPlacements() },
+		{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements() },
 		{
 			target: 'element',
 			criteria: [{ type: 'property', name: 'name', op: 'contains', value: 'a' }],

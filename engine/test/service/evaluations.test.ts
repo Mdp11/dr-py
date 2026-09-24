@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	EVALUATIONS,
 	Model,
+	PyFloat,
 	READS,
+	type Evaluation,
+	type ResolvedArtifact,
 	type SearchResultPage,
 	type WireElement
 } from '../../src/index.ts';
@@ -179,5 +182,121 @@ describe('searchModel', () => {
 		);
 		expect(host.slices.length).toBeGreaterThan(0);
 		expect(Math.max(...host.slices)).toBeLessThanOrEqual(16);
+	});
+});
+
+describe('the artifact context', () => {
+	const artifact = (id: string, name: string, payload: object = {}) => ({
+		id,
+		kind: 'navigation',
+		name,
+		artifact_rev: 1,
+		payload
+	});
+
+	/** What each `searchModel` resolved `ids` to, through the context the service handed it. */
+	function watch(ids: readonly string[]) {
+		const seen: (ResolvedArtifact | null)[][] = [];
+		const evaluations = EVALUATIONS as { searchModel: Evaluation };
+		const original = evaluations.searchModel;
+		const spy = vi.spyOn(evaluations, 'searchModel').mockImplementation((ctx, params) => {
+			seen.push(ids.map((id) => ctx.artifacts.resolve(id)));
+			return original(ctx, params);
+		});
+		return { seen, restore: () => spy.mockRestore() };
+	}
+
+	const search = (client: Client) =>
+		client.call<SearchResultPage>('searchModel', { target: 'element', limit: 1 });
+
+	it('answers null at once while the replica is opening', async () => {
+		const client = connect();
+		const answer = async () => [
+			await client.call('setArtifacts', { artifacts: [artifact('n1', 'One')] }),
+			await client.call('putArtifacts', { changed: [artifact('n2', 'Two')], deleted_ids: ['n1'] }),
+			await client.call('putArtifacts', {
+				changed: [],
+				deleted_ids: [],
+				staged: [{ op: 'delete', id: 'n2' }]
+			}),
+			await client.call('setStagedArtifacts', {
+				entries: [{ op: 'create', id: 'tmp_x', kind: 'table', name: 'X', payload: {} }]
+			})
+		];
+		expect(await answer()).toEqual([null, null, null, null]);
+		await client.call('open', { project_id: 'demo', metamodel: NODE_DOC });
+		expect(client.eventsOf('replica').at(-1)).toMatchObject({ state: 'opening' });
+		expect(await answer()).toEqual([null, null, null, null]);
+	});
+
+	it('reach every evaluation, and survive close and open', async () => {
+		const { seen, restore } = watch(['n1', 'n2', 'tmp_a']);
+		try {
+			const client = connect();
+			await client.call('setArtifacts', { artifacts: [artifact('n1', 'One', { v: 1.5 })] });
+			await client.call('setStagedArtifacts', {
+				entries: [{ op: 'create', id: 'tmp_a', kind: 'navigation', name: 'A', payload: {} }]
+			});
+			await openReplica(client, family(), NODE_DOC);
+			await search(client);
+			expect(seen.at(-1)).toEqual([
+				{ id: 'n1', kind: 'navigation', name: 'One', payload: { v: new PyFloat(1.5) } },
+				null,
+				{ id: 'tmp_a', kind: 'navigation', name: 'A', payload: {} }
+			]);
+
+			await client.call('putArtifacts', {
+				changed: [artifact('n2', 'Two')],
+				deleted_ids: ['n1'],
+				staged: [{ op: 'update', id: 'n2', name: 'Two, staged' }]
+			});
+			await client.call('close');
+			await openReplica(client, family(), NODE_DOC);
+			await search(client);
+			expect(seen.at(-1)).toEqual([
+				null,
+				{ id: 'n2', kind: 'navigation', name: 'Two, staged', payload: {} },
+				null
+			]);
+		} finally {
+			restore();
+		}
+	});
+
+	it('refuses a malformed call with 422 and keeps what it held', async () => {
+		const { seen, restore } = watch(['n1', 'n2']);
+		try {
+			const client = await ready();
+			await client.call('setArtifacts', { artifacts: [artifact('n1', 'One')] });
+			const good = { changed: [artifact('n2', 'Two')], deleted_ids: ['n1'] };
+			for (const [params, detail] of [
+				[{ deleted_ids: [] }, 'changed: must be a list'],
+				[
+					{ ...good, changed: [{ ...artifact('n2', 'Two'), id: 2 }] },
+					'changed[0].id: must be a string'
+				],
+				[{ ...good, deleted_ids: 'n1' }, 'deleted_ids must be a list of strings'],
+				[{ ...good, deleted_ids: [1] }, 'deleted_ids must be a list of strings'],
+				[{ ...good, staged: [{ op: 'delete' }] }, 'staged[0].id: must be a string'],
+				[{ ...good, staged: {} }, 'staged: must be a list']
+			] as const) {
+				expect(await refusal(client.call('putArtifacts', params))).toEqual({ status: 422, detail });
+			}
+			expect(
+				await refusal(client.call('setArtifacts', { artifacts: [artifact('n2', 'Two'), null] }))
+			).toEqual({ status: 422, detail: 'artifacts[1]: must be an object' });
+			expect(
+				await refusal(
+					client.call('setStagedArtifacts', { entries: [{ op: 'delete', id: 'n1' }, 7] })
+				)
+			).toEqual({ status: 422, detail: 'entries[1]: must be an object' });
+			await search(client);
+			expect(seen.at(-1)).toEqual([
+				{ id: 'n1', kind: 'navigation', name: 'One', payload: {} },
+				null
+			]);
+		} finally {
+			restore();
+		}
 	});
 });

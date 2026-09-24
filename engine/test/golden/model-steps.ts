@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { expect } from 'vitest';
 import {
 	applyBatch,
+	ArtifactSet,
 	cmpCodePoint,
 	drain,
 	dumpIndexes,
@@ -192,7 +193,9 @@ function apply(
 				return isSteps(out) ? drain(out) : out;
 			}
 			if (Object.hasOwn(EVALUATIONS, method)) {
-				return drain(EVALUATIONS[method]!({ model, artifacts: null, placements }, params));
+				return drain(
+					EVALUATIONS[method]!({ model, artifacts: new ArtifactSet(), placements }, params)
+				);
 			}
 			throw new Error(`no read ${method}`);
 		}

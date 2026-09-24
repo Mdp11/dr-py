@@ -1,3 +1,4 @@
+import { ArtifactSet, readArtifacts, readStagedArtifacts } from '../artifacts/artifact-set.ts';
 import { EVALUATIONS } from '../evaluate/index.ts';
 import { Metamodel } from '../metamodel/metamodel.ts';
 import type { MetamodelDoc } from '../metamodel/types.ts';
@@ -123,6 +124,14 @@ function text(params: ReadParams, key: string): string {
 	return value;
 }
 
+function strings(params: ReadParams, key: string): string[] {
+	const value = params[key];
+	if (!Array.isArray(value) || !value.every((id) => typeof id === 'string')) {
+		throw new Refused(422, `${key} must be a list of strings`);
+	}
+	return value as string[];
+}
+
 function readBatches(raw: unknown): StagedBatch[] {
 	if (!Array.isArray(raw)) throw new Refused(422, 'batches must be a list');
 	return raw.map((batch: unknown, i) => {
@@ -235,15 +244,31 @@ const METHODS: { readonly [method: string]: Method } = {
 	stagedDiff: inspect(stagedDiff),
 
 	setViewPlacement: now((service, params) => {
-		const elementIds = params['element_ids'];
-		if (!Array.isArray(elementIds) || !elementIds.every((id) => typeof id === 'string')) {
-			throw new Refused(422, 'element_ids must be a list of strings');
-		}
-		service.placements.set(text(params, 'view_id'), elementIds as string[]);
+		const elementIds = strings(params, 'element_ids');
+		service.placements.set(text(params, 'view_id'), elementIds);
 		return null;
 	}),
 	dropViewPlacement: now((service, params) => {
 		service.placements.drop(text(params, 'view_id'));
+		return null;
+	}),
+
+	setArtifacts: now((service, params) => {
+		service.artifacts.setCommitted(readArtifacts(params['artifacts']));
+		return null;
+	}),
+	putArtifacts: now((service, params) => {
+		const changed = readArtifacts(params['changed'], 'changed');
+		const deletedIds = strings(params, 'deleted_ids');
+		const staged = params['staged'];
+		const entries =
+			staged === undefined || staged === null ? null : readStagedArtifacts(staged, 'staged');
+		service.artifacts.put(changed, deletedIds);
+		if (entries !== null) service.artifacts.setStaged(entries);
+		return null;
+	}),
+	setStagedArtifacts: now((service, params) => {
+		service.artifacts.setStaged(readStagedArtifacts(params['entries']));
 		return null;
 	}),
 
@@ -261,6 +286,7 @@ type Opening = {
 
 class Service {
 	readonly placements = new ViewPlacements();
+	readonly artifacts = new ArtifactSet();
 	state: ReplicaState = 'opening';
 	wc: WorkingCopy | null = null;
 
@@ -368,7 +394,7 @@ class Service {
 			kind: 'scan',
 			run: () =>
 				EVALUATIONS[method]!(
-					{ model: this.ready().model, artifacts: null, placements: this.placements },
+					{ model: this.ready().model, artifacts: this.artifacts, placements: this.placements },
 					call.params
 				)
 		});

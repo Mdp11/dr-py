@@ -1,3 +1,13 @@
+export {
+	ArtifactSet,
+	readArtifacts,
+	readStagedArtifacts,
+	type CommittedArtifact,
+	type ResolvedArtifact,
+	type StagedArtifact,
+	type WireArtifact,
+	type WireStagedArtifact
+} from './artifacts/artifact-set.ts';
 export { dumpIndexes, type IndexDump } from './debug/dump-indexes.ts';
 export { shuffleAdjacency } from './debug/shuffle-adjacency.ts';
 export { verifyConsistent } from './debug/verify-consistent.ts';
@@ -119,12 +129,15 @@ export type {
 	ErrorBody,
 	OpenParams,
 	Port,
+	PutArtifactsParams,
 	ProgressTask,
 	ReplicaState,
 	RequestMessage,
 	ResponseMessage,
 	ServiceDeps,
 	ServiceEvent,
+	SetArtifactsParams,
+	SetStagedArtifactsParams,
 	StagedDiffResult,
 	StageParams,
 	StageResult,

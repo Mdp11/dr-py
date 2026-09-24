@@ -1,3 +1,4 @@
+import type { WireArtifact, WireStagedArtifact } from '../artifacts/artifact-set.ts';
 import type { SnapshotHeader } from '../snapshot/open.ts';
 import type { Wire, WireElement, WireRelationship } from '../read/wire.ts';
 import type { HostDeps } from './scheduler.ts';
@@ -80,3 +81,11 @@ export type StagedDiffResult = {
 	relationships: { id: string; before: WireRelationship | null; after: WireRelationship | null }[];
 };
 export type ViewPlacementParams = { view_id: string; element_ids: string[] };
+export type SetArtifactsParams = { artifacts: WireArtifact[] };
+export type PutArtifactsParams = {
+	changed: WireArtifact[];
+	deleted_ids: string[];
+	/** When given, replaces the staged overlay after the committed layer moves. */
+	staged?: WireStagedArtifact[];
+};
+export type SetStagedArtifactsParams = { entries: WireStagedArtifact[] };

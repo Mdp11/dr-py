@@ -1,3 +1,4 @@
+import type { ArtifactSet } from '../artifacts/artifact-set.ts';
 import type { Model } from '../model/model.ts';
 import type { ReadParams } from '../read/params.ts';
 import type { ViewPlacements } from '../read/placements.ts';
@@ -5,7 +6,7 @@ import { searchModel } from '../search/search-model.ts';
 import type { Steps } from '../steps/steps.ts';
 
 /** What an evaluation reads: the working model, the project's artifacts and the view placements. */
-export type EvalContext = { model: Model; artifacts: unknown; placements: ViewPlacements };
+export type EvalContext = { model: Model; artifacts: ArtifactSet; placements: ViewPlacements };
 
 /**
  * An evaluation: the response body of the route it stands for, always in

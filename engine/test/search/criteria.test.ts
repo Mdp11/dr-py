@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	ArtifactSet,
 	compileCriteria,
 	drain,
 	matchElement,
@@ -194,7 +195,7 @@ describe('compileCriteria', () => {
 				target: 'element',
 				criteria: [{ type: 'property', name: 'name', op: 'matches', value: pattern }]
 			};
-			const ctx = { model: empty, artifacts: null, placements: new ViewPlacements() };
+			const ctx = { model: empty, artifacts: new ArtifactSet(), placements: new ViewPlacements() };
 			expect(refusal(() => drain(searchModel(ctx, params)))).toEqual(unsupported);
 		}
 		// Short of V8's limit, the same literal compiles and runs.
