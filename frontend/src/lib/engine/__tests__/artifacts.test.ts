@@ -383,7 +383,61 @@ describe('the artifact follower', () => {
 		);
 	});
 
-	it("a failed refresh keeps the commit's entries under the buffer until a load lands", async () => {
+	/**
+	 * A follower whose committed `n1` (Organization) and staged create `tmp_c`
+	 * (EdgeGateway) went into a commit whose refresh failed, and the one reload
+	 * after it too: the committed layer lacks what the commit brought.
+	 */
+	async function afterFailedRefresh() {
+		const over = await ready();
+		const f = follow(over.sync);
+		f.committed.set('n1', artifact('n1', 1, 'Organization'));
+		f.follower.load();
+		await f.follower.settled();
+		const totals = {
+			organizations: await totalOf(over, 'Organization'),
+			projects: await totalOf(over, 'Project'),
+			gateways: await totalOf(over, 'EdgeGateway')
+		};
+		expect(new Set(Object.values(totals)).size).toBe(3);
+		const created: WireStagedArtifact = {
+			op: 'create',
+			id: 'tmp_c',
+			kind: 'navigation',
+			name: 'c',
+			payload: scope('EdgeGateway')
+		};
+		const updated: WireStagedArtifact = { op: 'update', id: 'n1', payload: scope('Project') };
+		f.setStaged([created, updated]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+
+		f.committed.set('n1', artifact('n1', 2, 'Project'));
+		f.committed.set('n7', artifact('n7', 1, 'EdgeGateway'));
+		const refresh = f.gate();
+		const reload = f.gate();
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: { tmp_c: 'n7' },
+			changed: [header(f.committed.get('n1')!), header(f.committed.get('n7')!)],
+			deletedIds: []
+		});
+		refresh.reject(new Error('offline'));
+		reload.reject(new Error('offline'));
+		await f.follower.settled();
+		expect(f.fetches).toEqual([undefined, ['n1', 'n7'], undefined]);
+		// The commit's entries stand in for what the refresh could not bring.
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [created, updated, { ...created, id: 'n7' }]
+		});
+		expect((await evaluate(over, { artifact_id: 'n1' })).total).toBe(totals.projects);
+		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(totals.gateways);
+		return { over, f, totals, created };
+	}
+
+	it('a failed refresh reloads once at once', async () => {
 		const over = await ready();
 		const f = follow(over.sync);
 		f.follower.load();
@@ -398,8 +452,8 @@ describe('the artifact follower', () => {
 		f.setStaged([created]);
 		f.follower.stagedChanged();
 		await f.follower.settled();
-		const gate = f.gate();
 		f.committed.set('n7', artifact('n7', 1, 'Project'));
+		const refresh = f.gate();
 		f.setStaged([]);
 		f.follower.stagedChanged();
 		f.follower.onCommit({
@@ -407,38 +461,93 @@ describe('the artifact follower', () => {
 			changed: [header(f.committed.get('n7')!)],
 			deletedIds: []
 		});
-		const entry: WireStagedArtifact = { op: 'delete', id: 'n5' };
-		f.setStaged([entry]);
-		f.follower.stagedChanged();
-		await macrotask();
 
-		gate.reject(new Error('offline'));
+		refresh.reject(new Error('offline'));
 		await f.follower.settled();
 
-		expect(f.methods()).toEqual([
-			'setArtifacts',
-			'setStagedArtifacts',
-			'setStagedArtifacts',
-			'setStagedArtifacts'
-		]);
-		expect(f.posted.at(-1)).toEqual({
-			method: 'setStagedArtifacts',
-			entries: [created, { ...created, id: 'n7' }, entry]
-		});
-		const organizations = await totalOf(over, 'Organization');
-		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(organizations);
-
-		// A load brings what the refresh could not; the entries go.
-		f.follower.load();
-		await f.follower.settled();
+		expect(f.fetches).toEqual([undefined, ['n7'], undefined]);
 		expect(f.methods().slice(-2)).toEqual(['setArtifacts', 'setStagedArtifacts']);
-		expect(f.posted.at(-1)).toEqual({ method: 'setStagedArtifacts', entries: [entry] });
+		expect(f.posted.at(-1)).toEqual({ method: 'setStagedArtifacts', entries: [] });
 		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(
 			await totalOf(over, 'Project')
 		);
 		await expect(evaluate(over, { artifact_id: 'tmp_c' })).rejects.toThrow(
 			'unknown navigation artifact tmp_c'
 		);
+	});
+
+	it("a failed refresh's entries give way to a later load", async () => {
+		const { over, f, totals } = await afterFailedRefresh();
+
+		f.follower.load();
+		await f.follower.settled();
+
+		expect(f.posted.at(-1)).toEqual({ method: 'setStagedArtifacts', entries: [] });
+		expect((await evaluate(over, { artifact_id: 'n1' })).total).toBe(totals.projects);
+		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(totals.gateways);
+		await expect(evaluate(over, { artifact_id: 'tmp_c' })).rejects.toThrow(
+			'unknown navigation artifact tmp_c'
+		);
+	});
+
+	it("a failed refresh's entries give way to a later commit of the same artifact", async () => {
+		const { over, f, totals } = await afterFailedRefresh();
+		const edited: WireStagedArtifact = { op: 'update', id: 'n1', payload: scope('EdgeGateway') };
+		f.setStaged([edited]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+
+		f.committed.set('n1', artifact('n1', 3, 'EdgeGateway'));
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({ idMap: {}, changed: [header(f.committed.get('n1')!)], deletedIds: [] });
+		await f.follower.settled();
+
+		expect(f.posted.at(-1)).toMatchObject({
+			method: 'putArtifacts',
+			staged: [
+				{ op: 'create', id: 'tmp_c', kind: 'navigation', name: 'c' },
+				{ op: 'create', id: 'n7' }
+			]
+		});
+		expect((await evaluate(over, { artifact_id: 'n1' })).total).toBe(totals.gateways);
+		// n7 had no news: its carried entry still stands in for it.
+		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(totals.gateways);
+	});
+
+	it("a failed refresh's entries give way to a peer's update event", async () => {
+		const { over, f, totals } = await afterFailedRefresh();
+
+		f.committed.set('n1', artifact('n1', 3, 'Organization'));
+		f.follower.onEvent('updated', header(f.committed.get('n1')!));
+		await f.follower.settled();
+
+		expect(f.posted.at(-1)).toMatchObject({ method: 'putArtifacts', deletedIds: [] });
+		expect(f.posted.at(-1)).toHaveProperty('staged');
+		expect((await evaluate(over, { artifact_id: 'n1' })).total).toBe(totals.organizations);
+	});
+
+	it("a failed refresh's entries give way to a delete, an update staged over them merged in until then", async () => {
+		const { over, f, totals } = await afterFailedRefresh();
+		// A rename staged over the created artifact merges into its carried create.
+		f.setStaged([{ op: 'update', id: 'n7', payload: scope('Organization') }]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(totals.organizations);
+
+		f.committed.delete('n7');
+		f.follower.onEvent('deleted', header(artifact('n7', 1, 'EdgeGateway')));
+		await f.follower.settled();
+
+		expect(f.posted.at(-1)).toMatchObject({ method: 'putArtifacts', deletedIds: ['n7'] });
+		await expect(evaluate(over, { artifact_id: 'n7' })).rejects.toThrow(
+			'unknown navigation artifact n7'
+		);
+		await expect(evaluate(over, { artifact_id: 'tmp_c' })).rejects.toThrow(
+			'unknown navigation artifact tmp_c'
+		);
+		// n1 had no news: its carried update still stands in for it.
+		expect((await evaluate(over, { artifact_id: 'n1' })).total).toBe(totals.projects);
 	});
 
 	it('a commit with nothing to fetch still carries the buffer', async () => {

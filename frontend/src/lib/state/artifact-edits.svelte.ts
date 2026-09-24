@@ -289,9 +289,9 @@ export function resetArtifactEdits(): void {
 /**
  * The buffer is `projectId`'s from now on; one staged in another project is
  * dropped, or it would be committed into this one and mirrored into its
- * engine. Silently, like `clearStagedArtifacts`: a discard listener would
- * release the other project's locks at this project's URL. The same project
- * again keeps the buffer.
+ * engine. Silently, like `clearStagedArtifacts`: the discard listeners would
+ * re-dirty and repoint the other project's editor drafts, which are not being
+ * undone. The same project again keeps the buffer.
  */
 export function bindStagedArtifacts(projectId: string): void {
 	const previous = _project;

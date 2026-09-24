@@ -44,6 +44,9 @@ const wire = ({ id, kind, name, artifact_rev, payload }: Artifact): WireArtifact
 	payload
 });
 
+/** A staged entry a commit carried, and the committed id it stands for: a create's real one. */
+type Held = { entry: WireStagedArtifact; stands: string };
+
 /**
  * `buffer` laid over `base` as the buffer coalesces its own entries: an
  * update over a create or an update merges into it, anything else replaces it.
@@ -79,8 +82,9 @@ function compose(
  * real id, with the buffer over them: until one `putArtifacts` brings the
  * payloads with the buffer as it is then, the engine reads the working copy
  * the commit came from under either id. A failed refresh keeps its entries
- * in the overlay until the next `load()` lands, which brings what it could
- * not; any other failed fetch leaves the context as it was until then.
+ * in the overlay, each only until a fetch brings newer committed news of the
+ * artifact it stands for, and asks one `load()` at once; any other failed
+ * fetch leaves the context as it was until the next `load()`.
  */
 export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFollower {
 	const { sync } = deps;
@@ -92,9 +96,9 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 	/** The buffer as last read: at a commit, the entries it carried. */
 	let latest: WireStagedArtifact[] = [];
 	/** Per commit refresh not yet landed, the entries it lays under the buffer. */
-	const holds = new Set<WireStagedArtifact[]>();
-	/** The entries of refreshes that failed, laid under the buffer until a `load()` lands. */
-	let carried: WireStagedArtifact[] = [];
+	const holds = new Set<Held[]>();
+	/** The entries of refreshes that failed, laid under the buffer until newer committed news. */
+	let carried: Held[] = [];
 	let pushQueued = false;
 	const idle: (() => void)[] = [];
 
@@ -136,7 +140,21 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 	const overlay = (): WireStagedArtifact[] => {
 		const buffer = read();
 		if (holds.size === 0 && carried.length === 0) return buffer;
-		return compose([...carried, ...[...holds].flat()], buffer);
+		const base = [...carried, ...[...holds].flat()].map((held) => held.entry);
+		return compose(base, buffer);
+	};
+
+	/**
+	 * Committed news of `ids` came: the carried entries standing for them go.
+	 * Whether any went, so the call bringing the news also carries the overlay.
+	 */
+	const drop = (ids: Iterable<string>): boolean => {
+		if (carried.length === 0) return false;
+		const brought = new Set(ids);
+		const kept = carried.filter((held) => !brought.has(held.stands));
+		const dropped = kept.length !== carried.length;
+		carried = kept;
+		return dropped;
 	};
 
 	const pushStaged = () => {
@@ -159,23 +177,26 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 		});
 	};
 
+	const load = () => {
+		enqueue(async () => {
+			const list = await deps.payloads();
+			if (stopped) return;
+			sync.setArtifacts(list.map(wire));
+			revs = new Map(list.map((artifact) => [artifact.id, artifact.artifact_rev]));
+			if (carried.length === 0) return;
+			carried = [];
+			pushStaged();
+		});
+	};
+
 	return {
-		load() {
-			enqueue(async () => {
-				const list = await deps.payloads();
-				if (stopped) return;
-				sync.setArtifacts(list.map(wire));
-				revs = new Map(list.map((artifact) => [artifact.id, artifact.artifact_rev]));
-				if (carried.length === 0) return;
-				carried = [];
-				if (holds.size === 0) pushStaged();
-			});
-		},
+		load,
 
 		onEvent(action, header) {
 			if (action === 'deleted') {
 				enqueue(async () => {
-					sync.putArtifacts([], [header.id]);
+					if (drop([header.id])) sync.putArtifacts([], [header.id], overlay());
+					else sync.putArtifacts([], [header.id]);
 					remember([], [header.id]);
 				});
 				return;
@@ -183,8 +204,15 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 			enqueue(async () => {
 				if (!newer(header)) return;
 				const got = await deps.payloads([header.id]);
-				if (stopped || got.length === 0) return;
-				sync.putArtifacts(got.map(wire), []);
+				if (stopped) return;
+				// Answered without it: gone since, and a `deleted` event follows.
+				const corrected = drop([header.id]);
+				if (got.length === 0) {
+					if (corrected) pushStaged();
+					return;
+				}
+				if (corrected) sync.putArtifacts(got.map(wire), [], overlay());
+				else sync.putArtifacts(got.map(wire), []);
 				remember(got, []);
 			});
 		},
@@ -197,11 +225,14 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 				return;
 			}
 			// The buffer's clear has not been read yet: `latest` is what the commit carried.
-			const aliases = latest.flatMap((entry) => {
+			const held: Held[] = [];
+			const aliases: Held[] = [];
+			for (const entry of latest) {
 				const realId = entry.op === 'create' ? idMap[entry.id] : undefined;
-				return realId === undefined ? [] : [{ ...entry, id: realId }];
-			});
-			const held = [...latest, ...aliases];
+				held.push({ entry, stands: realId ?? entry.id });
+				if (realId !== undefined) aliases.push({ entry: { ...entry, id: realId }, stands: realId });
+			}
+			held.push(...aliases);
 			holds.add(held);
 			pushStaged();
 			enqueue(async () => {
@@ -211,6 +242,7 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 					const got = ids.length === 0 ? [] : await fetchNamed(ids);
 					if (stopped) return;
 					holds.delete(held);
+					drop([...changed.map((mark) => mark.id), ...deletedIds]);
 					sync.putArtifacts(got.map(wire), deletedIds, overlay());
 					remember(got, deletedIds);
 					landed = true;
@@ -219,6 +251,8 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 						holds.delete(held);
 						carried = [...carried, ...held];
 						if (holds.size === 0) pushStaged();
+						// One reload at once, not a loop: a reconnect's `snapshot` event reloads too.
+						load();
 					}
 				}
 			});
