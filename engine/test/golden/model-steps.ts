@@ -10,6 +10,7 @@ import {
 	ElementRec,
 	evaluateNavigationCore,
 	EVALUATIONS,
+	FacetPatterns,
 	isSteps,
 	Metamodel,
 	Model,
@@ -31,8 +32,11 @@ import {
 	RelRec,
 	resolveRefs,
 	shuffleAdjacency,
+	validateScoped,
+	Validators,
 	verifyConsistent,
 	ViewPlacements,
+	wireIssue,
 	type BatchResult,
 	type ChainNode,
 	type CommittedArtifact,
@@ -40,6 +44,7 @@ import {
 	type MetamodelDoc,
 	type ModelOp,
 	type ModelOptions,
+	type Props,
 	type ReadParams,
 	type RelImage,
 	type StagedArtifact,
@@ -101,6 +106,10 @@ export type Step = Partial<Observed> & {
 	definition?: unknown;
 	limits?: { max_visited: number; max_chains: number };
 	row_elements?: string[] | null;
+	/** `validate`: the ids to validate, in order, or every id in state order. */
+	scope?: string[] | 'all_ids';
+	/** `insert_element` / `insert_relationship`: the entity's `rev`; `value` holds its properties. */
+	rev?: number;
 	result: string | string[] | BatchOutcome | object | boolean | null;
 	error: StepError | null;
 	unchanged?: true;
@@ -198,6 +207,7 @@ type Carried = {
 	placements: ViewPlacements;
 	artifacts: ArtifactSet;
 	layer: ArtifactLayer;
+	validation: { validators: Validators; patterns: FacetPatterns } | null;
 };
 
 /** `tests/golden/tagged.py`'s rendering of a scalar. */
@@ -259,6 +269,19 @@ function apply(
 			}
 			throw new Error(`no read ${method}`);
 		}
+		case 'validate': {
+			const ids =
+				step.scope === 'all_ids'
+					? [
+							...[...model.elements()].map((el) => el.id),
+							...[...model.relationships()].map((rel) => rel.id)
+						]
+					: step.scope!;
+			const mm = model.metamodel;
+			carried.validation ??= { validators: new Validators(mm), patterns: new FacetPatterns(mm) };
+			const { validators, patterns } = carried.validation;
+			return validateScoped(model, ids, validators, patterns).map((i) => wireIssue(i, 'on_server'));
+		}
 		case 'artifacts':
 			setArtifacts(carried, step);
 			return null;
@@ -301,6 +324,17 @@ function apply(
 			return model.createElement(step.type!, mint()).id;
 		case 'restore_element':
 			return model.restoreElement(step.id!, step.type!).id;
+		case 'insert_element':
+			return model.insertElement(step.id!, step.type!, untag(step.value!) as Props, step.rev!).id;
+		case 'insert_relationship':
+			return model.insertRelationship(
+				step.id!,
+				step.type!,
+				step.source!,
+				step.target!,
+				untag(step.value!) as Props,
+				step.rev!
+			).id;
 		case 'get_element':
 			return model.getElement(step.id!).id;
 		case 'get_relationship':
@@ -332,7 +366,7 @@ function apply(
 }
 
 /** Steps whose result is compared as JSON text. */
-const READ_LIKE = new Set(['read', 'navigate', 'has_script']);
+const READ_LIKE = new Set(['read', 'navigate', 'has_script', 'validate']);
 
 /**
  * Replays a recorded scenario through the engine, comparing every outcome and
@@ -352,7 +386,8 @@ export function replaySteps(
 		landed: new Map(),
 		placements: new ViewPlacements(),
 		artifacts: new ArtifactSet(),
-		layer
+		layer,
+		validation: null
 	};
 	let minted = 0;
 	let last = observe(model);

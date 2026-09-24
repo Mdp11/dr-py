@@ -728,6 +728,20 @@ function translate(pattern: string, mode: 'search' | 'fullmatch'): PyRegex {
 
 const memo = new Map<string, PyRegex>();
 
+/**
+ * What the host cannot run although Python can: a pattern nested past the
+ * translator's stack or a subject past the translated `RegExp`'s backtracking
+ * stack (a `RangeError`), and a translation V8 will not compile (a
+ * `SyntaxError`, thrown on first run, since V8 compiles lazily and apart for
+ * one-byte and two-byte subjects). Nothing else: any other error is a bug.
+ */
+export function beyondHost(error: unknown): boolean {
+	return (
+		error instanceof RangeError ||
+		(error instanceof SyntaxError && error.message.endsWith('Regular expression too large'))
+	);
+}
+
 /** `re.search` / `re.fullmatch` of `pattern` as a JavaScript test, `invalid`
  * where `re` refuses the pattern, or `unsupported` where the translation
  * cannot vouch for Python's answer. Memoized per pattern and mode. */

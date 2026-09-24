@@ -23,7 +23,7 @@ def value_conforms(value, datatype: str, metamodel: Metamodel) -> bool:
             return True
         # the infinite floats travel as canonical string tokens (JSON has no
         # infinity literal); accept those alongside real numbers
-        return value in FLOAT_INFINITIES
+        return isinstance(value, str) and value in FLOAT_INFINITIES
     if datatype == "date":
         if isinstance(value, datetime.date):
             return True

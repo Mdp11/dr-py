@@ -8,6 +8,7 @@ from data_rover.core.model.model import Model
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.validators.type_conformance import (
     TypeConformanceValidator,
+    value_conforms,
 )
 
 
@@ -53,6 +54,19 @@ def test_float_rejects_non_canonical_infinity_string():
     issues = TypeConformanceValidator().validate(model, Scope.all())
     assert len(issues) == 1
     assert el.id in issues[0].target_ids
+
+
+def test_float_rejects_unhashable_values():
+    model = _model()
+    assert not value_conforms({"a": 1}, "float", model.metamodel)
+    assert not value_conforms([1], "float", model.metamodel)
+    el = model.create_element("Block")
+    model.set_property(el, "mass", [{"a": 1}, [1]])
+    issues = TypeConformanceValidator().validate(model, Scope.all())
+    assert [i.message for i in issues] == [
+        "Block.mass: value {'a': 1} is not a valid float",
+        "Block.mass: value [1] is not a valid float",
+    ]
 
 
 def test_wrong_primitive_type_is_error():

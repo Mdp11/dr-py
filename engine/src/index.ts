@@ -192,6 +192,25 @@ export type {
 	WireChanges,
 	WireConflict
 } from './service/types.ts';
+export {
+	issueKey,
+	issueOwner,
+	wireIssue,
+	type Category,
+	type Issue,
+	type IssueOut,
+	type Origin,
+	type Severity
+} from './validation/issue.ts';
+export {
+	FacetPatterns,
+	PatternUnusable,
+	validateScoped,
+	Validators,
+	type Run,
+	type Validator
+} from './validation/pipeline.ts';
+export { pyIsoDate, pyReprFrozen, pyStrNumber, valueConforms } from './validation/values.ts';
 export { entityHash, formatDigest, modelDigest, type EntityHash } from './snapshot/digest.ts';
 export { LineSplitter } from './snapshot/lines.ts';
 export {

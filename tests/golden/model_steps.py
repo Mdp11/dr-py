@@ -7,7 +7,11 @@ inverse ops of an earlier batch in restore mode. ``read`` calls a read route
 function on the recorder's model and records the response body; ``view`` and
 ``drop_view`` keep the views a read may name, ``artifacts`` the project
 artifacts it may fetch. ``navigate`` and ``has_script`` run the navigation
-core itself on a definition whose refs resolve against those artifacts. After every step the recorder
+core itself on a definition whose refs resolve against those artifacts.
+``validate`` runs the six built-in validators over a scope of ids and records
+the issues as the server's routes send them. ``insert_element`` and
+``insert_relationship`` put an entity in as committed state arrives, its type
+unchecked. After every step the recorder
 adds the outcome (``result`` or ``error``) and what the step left behind: the
 state digest and a fingerprint of the entity lines plus the index dump. Every
 ``full_every``-th step, and the last, carries the lines and the dump
@@ -25,6 +29,7 @@ generator, which is the recorder's scaffolding and no part of the state.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Iterable
@@ -43,6 +48,7 @@ from data_rover.api.routes.ops import _apply_batch, _BatchResult
 from data_rover.api.schemas import (
     ElementOut,
     EvaluateNavigationIn,
+    IssueOut,
     ModelOpIn,
     RelationshipOut,
 )
@@ -57,6 +63,8 @@ from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.evaluate import EvalLimits, evaluate
 from data_rover.core.navigation.resolve import navigation_has_script, resolve_refs
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
+from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
+from data_rover.core.validation.scope import Scope
 from data_rover.core.view.schema import View
 
 from .index_dump import dump_indexes
@@ -118,6 +126,13 @@ def read_step(method: str, **params: Any) -> dict[str, Any]:
     """A ``read`` step: a method of the engine's read or evaluation table, with
     its params."""
     return {"do": "read", "method": method, "params": params}
+
+
+def validate_step(scope: list[str] | str) -> dict[str, Any]:
+    """A ``validate`` step over the ids of ``scope``, in its order, or over
+    ``"all_ids"``: every element id in state order, then every relationship
+    id."""
+    return {"do": "validate", "scope": scope}
 
 
 def view_step(view_id: str, folders: list[dict[str, Any]]) -> dict[str, Any]:
@@ -348,6 +363,17 @@ class Recorder:
                 )
                 body = _read(session, self._artifacts, step["method"], step["params"])
                 return body.model_dump(mode="json")
+            case "validate":
+                scope = step["scope"]
+                ids = (
+                    [*model.elements, *model.relationships]
+                    if scope == "all_ids"
+                    else scope
+                )
+                issues = ValidationPipeline(default_validators()).validate(
+                    model, Scope(ids)
+                )
+                return [IssueOut.from_core(i).model_dump(mode="json") for i in issues]
             case "artifacts":
                 self._artifacts = dict(step["_artifacts"])
                 return None
@@ -370,6 +396,19 @@ class Recorder:
                 return model.create_element(step["type"]).id
             case "restore_element":
                 return model.restore_element(step["id"], step["type"]).id
+            case "insert_element":
+                return model.insert_element(
+                    step["id"], step["type"], copy.deepcopy(step["_value"]), step["rev"]
+                ).id
+            case "insert_relationship":
+                return model.insert_relationship(
+                    step["id"],
+                    step["type"],
+                    step["source"],
+                    step["target"],
+                    copy.deepcopy(step["_value"]),
+                    step["rev"],
+                ).id
             case "get_element":
                 return model.get_element(step["id"]).id
             case "get_relationship":

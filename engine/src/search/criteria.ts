@@ -9,7 +9,7 @@ import { getProp, type ElementRec, type Props, type RelRec } from '../model/reco
 import { ReadError } from '../read/errors.ts';
 import { jsStr, toNumber } from '../value/coerce.ts';
 import { pyLower } from '../value/lower.ts';
-import { translatePyRegex } from '../value/regex.ts';
+import { beyondHost, translatePyRegex } from '../value/regex.ts';
 import type { Value } from '../value/types.ts';
 
 export type CriterionDirection = 'outgoing' | 'incoming' | 'either';
@@ -215,20 +215,6 @@ const UNSUPPORTED = 'reaches an unsupported pattern';
 
 /** Every `matches` pattern of a call, by its text: a test, or `null` where `re` refuses it. */
 export type CompiledCriteria = ReadonlyMap<string, ((subject: string) => boolean) | null>;
-
-/**
- * What the host cannot run although Python can: a pattern nested past the
- * translator's stack or a subject past the translated `RegExp`'s backtracking
- * stack (a `RangeError`), and a translation V8 will not compile (a
- * `SyntaxError`, thrown on first run, since V8 compiles lazily and apart for
- * one-byte and two-byte subjects). Nothing else: any other error is a bug.
- */
-function beyondHost(error: unknown): boolean {
-	return (
-		error instanceof RangeError ||
-		(error instanceof SyntaxError && error.message.endsWith('Regular expression too large'))
-	);
-}
 
 /** Runs `work`, turning what the host cannot run into the 501 that sends the call to the server. */
 function onHost<T>(work: () => T): T {
