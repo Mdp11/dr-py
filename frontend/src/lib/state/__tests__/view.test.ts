@@ -1024,7 +1024,10 @@ describe('the placements the replica is told of', () => {
 				call: vi.fn(),
 				on: vi.fn(() => () => {}),
 				setViewPlacement: record('set'),
-				dropViewPlacement: record('drop')
+				dropViewPlacement: record('drop'),
+				setArtifacts: vi.fn(),
+				putArtifacts: vi.fn(),
+				setStagedArtifacts: vi.fn()
 			}
 		});
 		return calls;

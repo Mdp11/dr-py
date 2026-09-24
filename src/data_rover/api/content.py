@@ -7,6 +7,7 @@ takes a live ``Session`` and does NOT commit — callers own the unit of work
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import String, and_, cast, delete, select
@@ -447,11 +448,18 @@ def find_artifacts_by_name(
 
 
 def list_artifacts(
-    db: Session, project_id: str, kind: ArtifactKind | None = None
+    db: Session,
+    project_id: str,
+    kind: ArtifactKind | None = None,
+    *,
+    ids: Collection[str] | None = None,
 ) -> list[ArtifactRow]:
+    """`ids` keeps only those rows; an id the project lacks is left out."""
     q = select(ArtifactRow).where(ArtifactRow.project_id == project_id)
     if kind is not None:
         q = q.where(ArtifactRow.kind == kind)
+    if ids is not None:
+        q = q.where(ArtifactRow.id.in_(ids))
     q = q.order_by(ArtifactRow.kind, ArtifactRow.name)
     return list(db.execute(q).scalars())
 

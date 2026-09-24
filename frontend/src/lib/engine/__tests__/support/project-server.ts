@@ -216,8 +216,12 @@ export function fakeProject(
 		} as unknown as Value);
 	};
 
+	/** The artifacts `GET /artifacts/payloads` serves, by id; none by default. */
+	const artifacts = new Map<string, { id: string; [key: string]: unknown }>();
+
 	const project = {
 		projectId,
+		artifacts,
 		get rev() {
 			return rev;
 		},
@@ -353,7 +357,18 @@ export function fakeProject(
 					return HttpResponse.json(doc as unknown as Record<string, unknown>, {
 						headers: { 'X-Metamodel-Id': metamodelId }
 					});
-				})
+				}),
+				// The replica store's artifact follower asks the active project's own base.
+				http.get(
+					`${PAGE_ORIGIN}/api/v1/projects/${projectId}/artifacts/payloads`,
+					({ request }) => {
+						const ids = new URL(request.url).searchParams.getAll('id');
+						const items = [...artifacts.values()].filter(
+							(artifact) => ids.length === 0 || ids.includes(artifact.id)
+						);
+						return HttpResponse.json({ items });
+					}
+				)
 			];
 		}
 	};

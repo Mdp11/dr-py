@@ -4,8 +4,10 @@ import type {
 	ProgressTask,
 	ServiceEvent,
 	TailResult,
+	WireArtifact,
 	WireBatch,
-	WireConflict
+	WireConflict,
+	WireStagedArtifact
 } from '$engine';
 import { ValidationError } from '$lib/api/errors';
 import {
@@ -158,6 +160,19 @@ export type ReplicaSync = {
 	/** The element ids a view places; kept, and sent to every engine the sync connects. */
 	setViewPlacement(viewId: string, elementIds: readonly string[]): void;
 	dropViewPlacement(viewId: string): void;
+	/**
+	 * The project's committed artifacts, replacing those kept; kept, and sent
+	 * with the staged entries to every engine the sync connects.
+	 */
+	setArtifacts(artifacts: readonly WireArtifact[]): void;
+	/** Upserts `changed`, drops `deletedIds` and, when given, replaces the staged entries, in one call. */
+	putArtifacts(
+		changed: readonly WireArtifact[],
+		deletedIds: readonly string[],
+		staged?: readonly WireStagedArtifact[]
+	): void;
+	/** The frontend's staged artifact buffer, replacing the entries kept. */
+	setStagedArtifacts(entries: readonly WireStagedArtifact[]): void;
 };
 
 /** Every call scoped to its own project, whatever project is active by then. */
@@ -337,6 +352,8 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	/** Calls asked so far: a held call's place in arrival order. */
 	let calls = 0;
 	const placements = new Map<string, readonly string[]>();
+	const artifacts = new Map<string, WireArtifact>();
+	let stagedArtifacts: readonly WireStagedArtifact[] = [];
 	const changedListeners = new Set<(event: ChangedEvent) => void>();
 
 	const set = (patch: Partial<ReplicaStatus>) => {
@@ -510,10 +527,21 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		sent.catch(() => {});
 	};
 
+	/** Artifacts are context as placements are; a new worker starts with none. */
+	const sendArtifacts = (engine: EngineClient, method: string, params: object) => {
+		engine.call(method, params).catch(() => {});
+	};
+
 	const adopt = (r: Run, made: EngineLink) => {
 		link = made;
 		// Before anything else reaches the new engine: no held read overtakes them.
 		for (const [viewId, ids] of placements) sendPlacement(made.client, viewId, ids);
+		if (artifacts.size > 0) {
+			sendArtifacts(made.client, 'setArtifacts', { artifacts: [...artifacts.values()] });
+		}
+		if (stagedArtifacts.length > 0) {
+			sendArtifacts(made.client, 'setStagedArtifacts', { entries: stagedArtifacts });
+		}
 		set({ isolated: made.isolated });
 		detach = [
 			made.client.on((event) => onEngineEvent(r, event)),
@@ -1093,6 +1121,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		queue.length = 0;
 		known = 0;
 		placements.clear();
+		// The link goes with its worker, and with it the engine's own copy.
+		artifacts.clear();
+		stagedArtifacts = [];
 		dropLink();
 		refuseWaiters();
 		if (status !== OFF) {
@@ -1278,6 +1309,32 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		dropViewPlacement(viewId) {
 			placements.delete(viewId);
 			if (link !== null) sendPlacement(link.client, viewId, null);
+		},
+
+		setArtifacts(list) {
+			artifacts.clear();
+			for (const artifact of list) artifacts.set(artifact.id, artifact);
+			if (link !== null) sendArtifacts(link.client, 'setArtifacts', { artifacts: [...list] });
+		},
+
+		putArtifacts(changed, deletedIds, staged) {
+			for (const artifact of changed) artifacts.set(artifact.id, artifact);
+			for (const id of deletedIds) artifacts.delete(id);
+			if (staged !== undefined) stagedArtifacts = [...staged];
+			if (link === null) return;
+			const params = { changed: [...changed], deleted_ids: [...deletedIds] };
+			sendArtifacts(
+				link.client,
+				'putArtifacts',
+				staged === undefined ? params : { ...params, staged: stagedArtifacts }
+			);
+		},
+
+		setStagedArtifacts(entries) {
+			stagedArtifacts = [...entries];
+			if (link !== null) {
+				sendArtifacts(link.client, 'setStagedArtifacts', { entries: stagedArtifacts });
+			}
 		}
 	};
 }

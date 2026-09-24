@@ -1465,6 +1465,16 @@ sync exists:
   would have lost `1.0` and every integer past 2^53, which the replica's
   digest sees (AD-26); a one-argument `handleFeedEvent` (every test that
   drives the reducer by hand) keeps behaving exactly as before.
+- **The artifacts.** `startReplica()` builds an artifact follower
+  (`lib/engine/artifacts.ts`) for the project it opens: it loads every
+  payload into the sync's artifact context, follows each `artifact` feed
+  event, reloads on a `snapshot` event, and refreshes the payloads the
+  user's own commit changed (`onArtifactCommit`). The staged artifact buffer
+  is mirrored too: `artifact-edits.svelte.ts` fires
+  `onStagedArtifactsChanged` on every change and `stagedArtifactsForEngine()`
+  hands the entries as `$state.snapshot` copies. `stopReplica()` /
+  `resetReplica()` stop the follower, so a payload answer for the old
+  project is dropped (see `lib/engine/README.md`).
 - **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
   drawer's revert (`HistoryDrawer.svelte::doRevert`) both call
   `beginReplicaCommit()` right before the POST, hand `commitChanges` /

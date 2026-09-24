@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { IDBFactory } from 'fake-indexeddb';
 import { http, HttpResponse } from 'msw';
@@ -18,9 +18,16 @@ import {
 	type SyncDeps
 } from '$lib/engine/sync';
 import { connectInProcess } from '$lib/engine/testing';
-import { BASE, fakeProject, hold } from '$lib/engine/__tests__/support/project-server';
+import { BASE, fakeProject, hold, PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
 import * as openJourney from '../open-journey';
 import { clearActiveProject, setActiveProject } from '../active-project.svelte';
+import {
+	clearStagedArtifacts,
+	notifyArtifactCommit,
+	resetArtifactEdits,
+	stageArtifactCreate,
+	stageArtifactUpdate
+} from '../artifact-edits.svelte';
 import {
 	beginReplicaCommit,
 	configureReplica,
@@ -146,7 +153,10 @@ function spySync(
 		call: vi.fn(),
 		on: vi.fn(() => () => {}),
 		setViewPlacement: vi.fn(),
-		dropViewPlacement: vi.fn()
+		dropViewPlacement: vi.fn(),
+		setArtifacts: vi.fn(),
+		putArtifacts: vi.fn(),
+		setStagedArtifacts: vi.fn()
 	} satisfies ReplicaSync;
 }
 
@@ -329,6 +339,15 @@ describe('the hand-over', () => {
 
 describe('the engine seam', () => {
 	const READY: ReplicaStatus = { ...OFF, phase: 'ready', rev: 0 };
+
+	// A started replica's artifact follower asks for the project's artifacts.
+	beforeEach(() => {
+		server.use(
+			http.get(`${PAGE_ORIGIN}/api/v1/projects/p/artifacts/payloads`, () =>
+				HttpResponse.json({ items: [] })
+			)
+		);
+	});
 	const onEngine = (surfaces: Record<string, string>) =>
 		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
 
@@ -1294,5 +1313,182 @@ describe('a worker that dies after the handshake', () => {
 			{ id: 2, ops: [ops[1]] }
 		]);
 		expect(isReplicaBlocked()).toBe(false);
+	});
+});
+
+describe('the artifact follower', () => {
+	const scope = (type: string) => ({
+		kind: 'path',
+		start: { kind: 'scope', types: [type] },
+		steps: []
+	});
+	const nav = (id: string, rev: number, type: string) => ({
+		id,
+		kind: 'navigation',
+		name: `nav ${id}`,
+		artifact_rev: rev,
+		updated_at: '2026-09-24T00:00:00Z',
+		updated_by: null,
+		entry_points: null,
+		payload: scope(type)
+	});
+	const wire = ({ id, kind, name, artifact_rev, payload }: ReturnType<typeof nav>) => ({
+		id,
+		kind,
+		name,
+		artifact_rev,
+		payload
+	});
+	const header = ({
+		id,
+		kind,
+		name,
+		artifact_rev,
+		updated_at,
+		updated_by,
+		entry_points
+	}: ReturnType<typeof nav>) => ({
+		id,
+		kind,
+		name,
+		artifact_rev,
+		updated_at,
+		updated_by,
+		entry_points
+	});
+
+	/** Serves `artifacts` as project `p`'s payloads; each request's ids are recorded, `null` for all. */
+	function servePayloads(artifacts: Map<string, ReturnType<typeof nav>>, gate?: Promise<void>) {
+		const requests: (string[] | null)[] = [];
+		server.use(
+			http.get(`${PAGE_ORIGIN}/api/v1/projects/p/artifacts/payloads`, async ({ request }) => {
+				const ids = new URL(request.url).searchParams.getAll('id');
+				requests.push(ids.length === 0 ? null : ids);
+				if (gate !== undefined) await gate;
+				const items = [...artifacts.values()].filter(
+					(artifact) => ids.length === 0 || ids.includes(artifact.id)
+				);
+				return HttpResponse.json({ items });
+			})
+		);
+		return requests;
+	}
+
+	afterEach(() => {
+		resetArtifactEdits();
+	});
+
+	it('the feed, a commit and a staged change reach it', async () => {
+		const sync = spySync();
+		configureReplica({ sync });
+		const artifacts = new Map([['n1', nav('n1', 1, 'Organization')]]);
+		const requests = servePayloads(artifacts);
+		setActiveProject('p');
+
+		startReplica();
+		await vi.waitFor(() => expect(sync.setArtifacts).toHaveBeenCalledOnce());
+		expect(sync.setArtifacts).toHaveBeenCalledWith([wire(nav('n1', 1, 'Organization'))]);
+		expect(requests).toEqual([null]);
+
+		artifacts.set('n1', nav('n1', 2, 'Project'));
+		handReplicaFeed(
+			{ type: 'artifact', action: 'updated', artifact: header(artifacts.get('n1')!) },
+			'{}'
+		);
+		await vi.waitFor(() => expect(sync.putArtifacts).toHaveBeenCalledOnce());
+		expect(sync.putArtifacts).toHaveBeenCalledWith([wire(nav('n1', 2, 'Project'))], []);
+		expect(requests).toEqual([null, ['n1']]);
+
+		handReplicaFeed(
+			{ type: 'artifact', action: 'deleted', artifact: header(artifacts.get('n1')!) },
+			'{}'
+		);
+		await vi.waitFor(() => expect(sync.putArtifacts).toHaveBeenCalledTimes(2));
+		expect(sync.putArtifacts).toHaveBeenLastCalledWith([], ['n1']);
+
+		// A snapshot event loads everything again.
+		artifacts.set('n1', nav('n1', 3, 'Organization'));
+		handReplicaFeed({ type: 'snapshot', model_rev: 0, locks: [], connected: [] }, '{}');
+		expect(sync.feedSnapshot).toHaveBeenCalledWith(0);
+		await vi.waitFor(() => expect(sync.setArtifacts).toHaveBeenCalledTimes(2));
+		expect(sync.setArtifacts).toHaveBeenLastCalledWith([wire(nav('n1', 3, 'Organization'))]);
+
+		const tempId = stageArtifactCreate('navigation', 'b', scope('Project'), null);
+		await vi.waitFor(() => expect(sync.setStagedArtifacts).toHaveBeenCalledOnce());
+		expect(sync.setStagedArtifacts).toHaveBeenCalledWith([
+			{ op: 'create', id: tempId, kind: 'navigation', name: 'b', payload: scope('Project') }
+		]);
+
+		// The commit clears the buffer and is announced in one run: one put carries both.
+		artifacts.set('n2', nav('n2', 1, 'Project'));
+		clearStagedArtifacts();
+		notifyArtifactCommit({
+			idMap: { [tempId]: 'n2' },
+			changed: [header(artifacts.get('n2')!)],
+			deletedIds: []
+		});
+		await vi.waitFor(() => expect(sync.putArtifacts).toHaveBeenCalledTimes(3));
+		expect(sync.putArtifacts).toHaveBeenLastCalledWith([wire(nav('n2', 1, 'Project'))], [], []);
+		await macrotask();
+		expect(sync.setStagedArtifacts).toHaveBeenCalledOnce();
+	});
+
+	it('a buffer staged before the start reaches the sync', async () => {
+		const sync = spySync();
+		configureReplica({ sync });
+		servePayloads(new Map());
+		const tempId = stageArtifactCreate('navigation', 'b', scope('Project'), null);
+		setActiveProject('p');
+
+		startReplica();
+		await vi.waitFor(() => expect(sync.setStagedArtifacts).toHaveBeenCalledOnce());
+		expect(sync.setStagedArtifacts).toHaveBeenCalledWith([
+			{ op: 'create', id: tempId, kind: 'navigation', name: 'b', payload: scope('Project') }
+		]);
+	});
+
+	it('stopReplica drops a payload answer that comes after it', async () => {
+		const sync = spySync();
+		configureReplica({ sync });
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		const requests = servePayloads(new Map([['n1', nav('n1', 1, 'Organization')]]), gate);
+		setActiveProject('p');
+		startReplica();
+		await vi.waitFor(() => expect(requests).toEqual([null]));
+
+		stopReplica();
+		release();
+		await macrotask();
+		await macrotask();
+
+		expect(sync.setArtifacts).not.toHaveBeenCalled();
+		stageArtifactCreate('navigation', 'b', scope('Project'), null);
+		await macrotask();
+		expect(sync.setStagedArtifacts).not.toHaveBeenCalled();
+	});
+
+	it('a staged payload held in $state reaches the engine as a plain copy', async () => {
+		const project = fakeProject();
+		project.artifacts.set('n1', nav('n1', 1, 'Organization'));
+		server.use(...project.handlers());
+		realReplica();
+		setActiveProject('p');
+		startReplica();
+		await vi.waitFor(() => expect(getReplicaStatus().phase).toBe('ready'));
+		const client = links[0]!.client;
+		const totalOf = async (params: object) =>
+			(await client.call<{ total: number }>('evaluateNavigation', params)).total;
+		const organizations = await totalOf({ definition: scope('Organization') });
+		const projects = await totalOf({ definition: scope('Project') });
+		expect(organizations).not.toBe(projects);
+		await vi.waitFor(async () => expect(await totalOf({ artifact_id: 'n1' })).toBe(organizations));
+
+		const draft = $state(scope('Project'));
+		const tempId = stageArtifactCreate('navigation', 'b', draft, null);
+		stageArtifactUpdate('n1', { payload: draft });
+
+		await vi.waitFor(async () => expect(await totalOf({ artifact_id: tempId })).toBe(projects));
+		expect(await totalOf({ artifact_id: 'n1' })).toBe(projects);
 	});
 });

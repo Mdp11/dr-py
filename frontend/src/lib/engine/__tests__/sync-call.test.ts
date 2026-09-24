@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { ModelOp, ModelSummary, TreeItemPage } from '$engine';
-import { NotFoundError } from '$lib/api/errors';
+import type {
+	ModelOp,
+	ModelSummary,
+	TreeItemPage,
+	WireArtifact,
+	WireStagedArtifact
+} from '$engine';
+import { NotFoundError, ValidationError } from '$lib/api/errors';
 import { server } from '$lib/api/__tests__/server';
 import { EngineGoneError } from '../client';
 import { FrameError } from '../frame';
@@ -352,5 +358,141 @@ describe('view placements', () => {
 			view_id: 'v1',
 			element_ids: [root]
 		});
+	});
+});
+
+describe('the artifact context', () => {
+	const scope = (type: string) => ({
+		kind: 'path',
+		start: { kind: 'scope', types: [type] },
+		steps: []
+	});
+	const committed = (id: string, type: string): WireArtifact => ({
+		id,
+		kind: 'navigation',
+		name: `nav ${id}`,
+		artifact_rev: 1,
+		payload: scope(type)
+	});
+	const stagedCreate = (id: string, type: string): WireStagedArtifact => ({
+		op: 'create',
+		id,
+		kind: 'navigation',
+		name: `nav ${id}`,
+		payload: scope(type)
+	});
+	const evaluate = (over: ReturnType<typeof syncOver>, params: object) =>
+		over.sync.call<{ total: number }>('evaluateNavigation', params);
+	const totalOf = async (over: ReturnType<typeof syncOver>, type: string) =>
+		(await evaluate(over, { definition: scope(type) })).total;
+
+	it('a new worker gets the artifacts, then the staged entries, before a held evaluation', async () => {
+		const project = fakeProject();
+		const over = await ready(project);
+		over.sync.setArtifacts([committed('n1', 'Organization')]);
+		over.sync.setStagedArtifacts([stagedCreate('tmp_b', 'Project')]);
+		const organizations = await totalOf(over, 'Organization');
+		const projects = await totalOf(over, 'Project');
+		expect(organizations).not.toBe(projects);
+		await expect(evaluate(over, { artifact_id: 'n1' })).resolves.toMatchObject({
+			total: organizations
+		});
+
+		// The worker dies; a read finds it gone and the replica is rebuilt on a new one.
+		over.links[0]!.dispose();
+		const before = over.calls.length;
+		await expect(summaryOf(over)).rejects.toBeInstanceOf(EngineGoneError);
+		expect(over.sync.status().phase).toBe('resyncing');
+		const held = evaluate(over, { artifact_id: 'n1' });
+		const heldStaged = evaluate(over, { artifact_id: 'tmp_b' });
+
+		await expect(held).resolves.toMatchObject({ total: organizations });
+		await expect(heldStaged).resolves.toMatchObject({ total: projects });
+		expect(over.connects).toBe(2);
+		const methods = over.methods().slice(before);
+		const artifacts = methods.indexOf('setArtifacts');
+		const staged = methods.indexOf('setStagedArtifacts');
+		expect(artifacts).toBeGreaterThan(-1);
+		expect(staged).toBeGreaterThan(artifacts);
+		expect(methods.indexOf('open')).toBeGreaterThan(staged);
+		expect(methods.indexOf('evaluateNavigation')).toBeGreaterThan(staged);
+		expect(over.calls[before + artifacts]!.params).toEqual({
+			artifacts: [committed('n1', 'Organization')]
+		});
+		expect(over.calls[before + staged]!.params).toEqual({
+			entries: [stagedCreate('tmp_b', 'Project')]
+		});
+	});
+
+	it('a put reaches the engine at once and is what the next worker gets', async () => {
+		const project = fakeProject();
+		const over = await ready(project);
+		over.sync.setArtifacts([committed('n1', 'Organization'), committed('n2', 'Organization')]);
+		over.sync.setStagedArtifacts([stagedCreate('tmp_b', 'Project')]);
+		over.sync.putArtifacts([committed('n3', 'Project')], ['n1'], []);
+		expect(over.calls.at(-1)).toMatchObject({
+			method: 'putArtifacts',
+			params: { changed: [committed('n3', 'Project')], deleted_ids: ['n1'], staged: [] }
+		});
+		over.sync.putArtifacts([committed('n2', 'Project')], []);
+		expect(over.calls.at(-1)!.params).toEqual({
+			changed: [committed('n2', 'Project')],
+			deleted_ids: []
+		});
+
+		over.links[0]!.dispose();
+		const before = over.calls.length;
+		await expect(summaryOf(over)).rejects.toBeInstanceOf(EngineGoneError);
+		await over.sync.settled();
+		expect(over.sync.status().phase).toBe('ready');
+
+		const sent = over.calls.slice(before);
+		expect(sent.find((call) => call.method === 'setArtifacts')!.params).toEqual({
+			artifacts: [committed('n2', 'Project'), committed('n3', 'Project')]
+		});
+		expect(sent.map((call) => call.method)).not.toContain('setStagedArtifacts');
+		await expect(evaluate(over, { artifact_id: 'n1' })).rejects.toThrow(
+			'unknown navigation artifact n1'
+		);
+		await expect(evaluate(over, { artifact_id: 'tmp_b' })).rejects.toThrow(
+			'unknown navigation artifact tmp_b'
+		);
+	});
+
+	it('stop forgets both, and no artifact of one project reaches the next', async () => {
+		const first = fakeProject({ projectId: 'a' });
+		const second = fakeProject({ projectId: 'b' });
+		server.use(...first.handlers(), ...second.handlers());
+		const over = syncOver(first);
+		made.push(over);
+		over.sync.setArtifacts([committed('n1', 'Organization')]);
+		over.sync.setStagedArtifacts([stagedCreate('tmp_b', 'Project')]);
+		over.sync.open(first.projectId);
+		await over.sync.settled();
+		await expect(evaluate(over, { artifact_id: 'n1' })).resolves.toBeDefined();
+		await expect(evaluate(over, { artifact_id: 'tmp_b' })).resolves.toBeDefined();
+
+		over.sync.stop();
+		const before = over.calls.length;
+		over.sync.open(second.projectId);
+		// Asked before the next project's own artifacts could land.
+		const other = evaluate(over, { artifact_id: 'n1' });
+		const otherStaged = evaluate(over, { artifact_id: 'tmp_b' });
+		await expect(other).rejects.toBeInstanceOf(ValidationError);
+		await expect(other).rejects.toThrow('unknown navigation artifact n1');
+		await expect(otherStaged).rejects.toThrow('unknown navigation artifact tmp_b');
+		expect(over.sync.status()).toMatchObject({ phase: 'ready' });
+		expect(over.connects).toBe(2);
+		const methods = over.methods().slice(before);
+		expect(methods).not.toContain('setArtifacts');
+		expect(methods).not.toContain('setStagedArtifacts');
+
+		// A switch through `open` alone forgets them too.
+		over.sync.setArtifacts([committed('n2', 'Organization')]);
+		await expect(evaluate(over, { artifact_id: 'n2' })).resolves.toBeDefined();
+		over.sync.open(first.projectId);
+		await expect(evaluate(over, { artifact_id: 'n2' })).rejects.toThrow(
+			'unknown navigation artifact n2'
+		);
 	});
 });

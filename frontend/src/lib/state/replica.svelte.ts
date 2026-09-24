@@ -7,12 +7,15 @@
  * runs, the engine seam is installed: each read surface is answered by the
  * replica or the server, as `dr.surfaces` says (read once per page load);
  * with staging on the engine, the model store's engine half follows it
- * through a handle (`attachEngine`).
+ * through a handle (`attachEngine`). An artifact follower keeps the project's
+ * artifacts, committed and staged, in the sync's context.
  */
 
 import type { WireBatch } from '$engine';
+import { listArtifactPayloads } from '$lib/api/artifacts';
 import { installEngineSeam } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
+import { createArtifactFollower, type ArtifactFollower } from '$lib/engine/artifacts';
 import { createSnapshotCache } from '$lib/engine/cache';
 import { connectFrame } from '$lib/engine/frame';
 import { addQuietProbe, quiet } from '$lib/engine/quiet';
@@ -35,6 +38,12 @@ import {
 	type SyncDeps
 } from '$lib/engine/sync';
 import { getActiveProjectId } from './active-project.svelte';
+import {
+	getStagedArtifactDepth,
+	onArtifactCommit,
+	onStagedArtifactsChanged,
+	stagedArtifactsForEngine
+} from './artifact-edits.svelte';
 import {
 	attachEngine,
 	detachEngine,
@@ -65,6 +74,13 @@ let _noticeDismissed = $state(false);
 let _retrying = $state(false);
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 const _statusListeners = new Set<StatusListener>();
+/** The started replica's artifact follower, and the project it follows. */
+let _follower: { projectId: string; follower: ArtifactFollower } | null = null;
+
+onArtifactCommit(({ changed, deletedIds }) =>
+	_follower?.follower.onCommit({ changed, deletedIds })
+);
+onStagedArtifactsChanged(() => _follower?.follower.stagedChanged());
 
 const NO_FLIGHT: CommitFlight = { settle() {}, abandon() {} };
 
@@ -231,6 +247,31 @@ export function startReplica(): void {
 	// structure rev on every delta the replica applies, as the legacy half does.
 	if (_switches?.staging === 'engine') attachEngine(engineHandle(sync));
 	sync.open(projectId);
+	follow(sync, projectId);
+}
+
+/**
+ * A follower for `projectId`, unless one follows it already. Its fetches are
+ * scoped to that project whatever project is active by the time they go.
+ */
+function follow(sync: ReplicaSync, projectId: string): void {
+	if (_follower?.projectId === projectId) return;
+	stopFollower();
+	const follower = createArtifactFollower({
+		sync,
+		payloads: (ids) => listArtifactPayloads(ids, { baseUrl: `/api/v1/projects/${projectId}` }),
+		staged: stagedArtifactsForEngine
+	});
+	_follower = { projectId, follower };
+	follower.load();
+	// The sync forgot the buffer at its last stop; a buffer kept since goes again.
+	if (getStagedArtifactDepth() > 0) follower.stagedChanged();
+}
+
+/** A payload answer after this is dropped: it speaks for a replica no longer followed. */
+function stopFollower(): void {
+	_follower?.follower.stop();
+	_follower = null;
 }
 
 /** Every read goes to the server again; the sync forgets the placements, the engine half everything. */
@@ -238,6 +279,7 @@ export function stopReplica(): void {
 	uninstallSeam();
 	detachEngine();
 	_placedViews.clear();
+	stopFollower();
 	_sync?.stop();
 	_releaseGate();
 }
@@ -287,7 +329,8 @@ export function retryReplica(): void {
 /**
  * Called first for every feed event. A commit is handed over only with the
  * frame's own text: a re-serialized event would have lost what the replica's
- * digest sees (`1.0`, integers past 2^53).
+ * digest sees (`1.0`, integers past 2^53). A snapshot event, sent at every
+ * (re)connect, loads the artifacts again: an event missed meanwhile is healed.
  */
 export function handReplicaFeed(event: FeedEvent, raw: string | undefined): void {
 	const sync = _sync;
@@ -301,9 +344,13 @@ export function handReplicaFeed(event: FeedEvent, raw: string | undefined): void
 			break;
 		case 'snapshot':
 			sync.feedSnapshot(event.model_rev);
+			_follower?.follower.load();
 			break;
 		case 'reset':
 			sync.feedReset(event.model_rev);
+			break;
+		case 'artifact':
+			_follower?.follower.onEvent(event.action, event.artifact);
 			break;
 	}
 }
@@ -378,6 +425,7 @@ export function resetReplica(): void {
 	detachEngine();
 	_switches = null;
 	_placedViews.clear();
+	stopFollower();
 	sync?.stop();
 	setStatus(OFF);
 	_noticeDismissed = false;

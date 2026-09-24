@@ -1238,6 +1238,10 @@ class ArtifactListOut(BaseModel):
     items: list[ArtifactHeaderOut] = Field(default_factory=list)
 
 
+class ArtifactPayloadListOut(BaseModel):
+    items: list[ArtifactOut] = Field(default_factory=list)
+
+
 class ArtifactCreateIn(BaseModel):
     kind: Literal[
         "navigation",

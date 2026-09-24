@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from './server';
-import { evaluateNavigation, getArtifact, listArtifacts } from '../artifacts';
+import { evaluateNavigation, getArtifact, listArtifactPayloads, listArtifacts } from '../artifacts';
 
 const BASE = 'http://api.test/api/v1/projects/p1';
 const CFG = { baseUrl: BASE };
@@ -45,6 +45,22 @@ describe('artifacts api', () => {
 		);
 		const res = await getArtifact('a1', CFG);
 		expect(res.payload.kind).toBe('path');
+	});
+
+	it('lists payloads, every one or the ids named, each id its own parameter', async () => {
+		const asked: string[][] = [];
+		server.use(
+			http.get(`${BASE}/artifacts/payloads`, ({ request }) => {
+				asked.push(new URL(request.url).searchParams.getAll('id'));
+				return HttpResponse.json({ items: [{ ...HEADER, payload: { kind: 'path' } }] });
+			})
+		);
+		const all = await listArtifactPayloads(undefined, CFG);
+		expect(all[0]!.payload).toEqual({ kind: 'path' });
+		expect(all[0]!.entry_points).toBeNull();
+		await listArtifactPayloads(['a1', 'a&b'], CFG);
+		expect(await listArtifactPayloads([], CFG)).toEqual([]);
+		expect(asked).toEqual([[], ['a1', 'a&b']]);
 	});
 
 	it('evaluates and parses a chain page', async () => {

@@ -441,7 +441,10 @@ describe('the replica hand-over', () => {
 			call: vi.fn(),
 			on: vi.fn(() => () => {}),
 			setViewPlacement: vi.fn(),
-			dropViewPlacement: vi.fn()
+			dropViewPlacement: vi.fn(),
+			setArtifacts: vi.fn(),
+			putArtifacts: vi.fn(),
+			setStagedArtifacts: vi.fn()
 		};
 		return { sync, seen };
 	}

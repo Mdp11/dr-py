@@ -37,7 +37,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session as DbSession
 
@@ -64,6 +64,7 @@ from ..schemas import (
     ArtifactCreateIn,
     ArtifactListOut,
     ArtifactOut,
+    ArtifactPayloadListOut,
     ArtifactUpdateIn,
     ChainPageOut,
     ChainValueOut,
@@ -152,6 +153,20 @@ def list_artifacts(
 ) -> ArtifactListOut:
     rows = content.list_artifacts(db, project_id, kind)
     return ArtifactListOut(items=[_header(r) for r in rows])
+
+
+@router.get("/artifacts/payloads")
+def list_artifact_payloads(
+    project_id: str,
+    ids: list[str] | None = Query(None, alias="id"),
+    _session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> ArtifactPayloadListOut:
+    """Every artifact with its payload, or the named ids the project has, in
+    `list_artifacts` order. Declared before `/artifacts/{artifact_id}`, which
+    would read `payloads` as an id."""
+    rows = content.list_artifacts(db, project_id, ids=ids)
+    return ArtifactPayloadListOut(items=[_full(r) for r in rows])
 
 
 @router.get("/artifacts/{artifact_id}")

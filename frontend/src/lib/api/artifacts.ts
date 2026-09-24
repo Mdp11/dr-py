@@ -1,10 +1,12 @@
 import { apiFetch, type ClientConfig } from './client';
 import {
 	ArtifactListSchema,
+	ArtifactPayloadListSchema,
 	ArtifactSchema,
 	ChainPageSchema,
 	type Artifact,
 	type ArtifactList,
+	type ArtifactPayloadList,
 	type ChainPage,
 	type NavigationDefinition
 } from './types';
@@ -19,6 +21,22 @@ export function listArtifacts(kind?: string, cfg?: ClientConfig): Promise<Artifa
 
 export function getArtifact(id: string, cfg?: ClientConfig): Promise<Artifact> {
 	return apiFetch(`/artifacts/${id}`, { method: 'GET', schema: ArtifactSchema }, cfg);
+}
+
+/** Every artifact of the project with its payload, or the named ids it has; none for `[]`. */
+export async function listArtifactPayloads(
+	ids?: readonly string[],
+	cfg?: ClientConfig
+): Promise<Artifact[]> {
+	if (ids !== undefined && ids.length === 0) return [];
+	const query =
+		ids === undefined ? '' : `?${new URLSearchParams(ids.map((id) => ['id', id])).toString()}`;
+	const list = await apiFetch<ArtifactPayloadList>(
+		`/artifacts/payloads${query}`,
+		{ method: 'GET', schema: ArtifactPayloadListSchema },
+		cfg
+	);
+	return list.items;
 }
 
 /*

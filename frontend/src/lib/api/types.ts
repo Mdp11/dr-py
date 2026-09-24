@@ -623,6 +623,11 @@ export const ArtifactSchema = ArtifactHeaderSchema.extend({
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
+export const ArtifactPayloadListSchema = z.object({
+	items: z.array(ArtifactSchema).default([])
+});
+export type ArtifactPayloadList = z.infer<typeof ArtifactPayloadListSchema>;
+
 /** Terminal VALUE node in a chain: a scalar property step — or a script step
  * whose `step()` returned something that names no element — ends its chain at
  * that value instead of an element (discriminated from TreeItem by the `kind`

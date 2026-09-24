@@ -38,6 +38,7 @@
  */
 
 import { SvelteMap } from 'svelte/reactivity';
+import type { WireStagedArtifact } from '$engine';
 import { createTempId } from './ops';
 import type { ArtifactOp } from './ops';
 import type { ArtifactHeader } from '$lib/api/types';
@@ -124,6 +125,22 @@ export function onArtifactStagedDelete(cb: (id: string) => void): () => void {
 	};
 }
 
+const _stagedChangedListeners: (() => void)[] = [];
+
+/** Fired by every function that changes the buffer, the silent
+ * `clearStagedArtifacts` included: the engine mirrors the buffer as it is. */
+export function onStagedArtifactsChanged(cb: () => void): () => void {
+	_stagedChangedListeners.push(cb);
+	return () => {
+		const i = _stagedChangedListeners.indexOf(cb);
+		if (i !== -1) _stagedChangedListeners.splice(i, 1);
+	};
+}
+
+function stagedChanged(): void {
+	for (const cb of [..._stagedChangedListeners]) cb();
+}
+
 // ---------------------------------------------------------------------------
 // Staging
 // ---------------------------------------------------------------------------
@@ -140,6 +157,7 @@ export function stageArtifactCreate(
 ): string {
 	const tempId = createTempId();
 	_staged.set(tempId, { kind: 'create', tempId, artifactKind: kind, name, payload, sourceTabId });
+	stagedChanged();
 	return tempId;
 }
 
@@ -157,6 +175,7 @@ export function repointStagedArtifactSourceTab(tempId: string, sourceTabId: stri
 	const existing = _staged.get(tempId);
 	if (existing?.kind !== 'create') return;
 	_staged.set(tempId, { ...existing, sourceTabId });
+	stagedChanged();
 }
 
 /**
@@ -186,6 +205,7 @@ export function stageArtifactUpdate(
 			name: patch.name ?? existing.name,
 			payload: patch.payload ?? existing.payload
 		});
+		stagedChanged();
 		return;
 	}
 	_staged.set(id, {
@@ -195,6 +215,7 @@ export function stageArtifactUpdate(
 		payload: patch.payload ?? existing?.payload,
 		header: existing?.header ?? null
 	});
+	stagedChanged();
 }
 
 /**
@@ -215,6 +236,7 @@ export function stageArtifactDelete(id: string, header: ArtifactHeader): void {
 	} else {
 		_staged.set(id, { kind: 'delete', id, header });
 	}
+	stagedChanged();
 	for (const cb of [..._stagedDeleteListeners]) cb(id);
 }
 
@@ -226,13 +248,16 @@ export function stageArtifactDelete(id: string, header: ArtifactHeader): void {
  * discard listeners. No-op (and no notification) if nothing is staged. */
 export function revertStagedArtifact(id: string): void {
 	if (!_staged.delete(id)) return;
+	stagedChanged();
 	for (const cb of [..._discardListeners]) cb(id);
 }
 
 /** Commit-success path: wipe the buffer SILENTLY. See module docstring for
  * why this must not fire discard listeners. */
 export function clearStagedArtifacts(): void {
+	if (_staged.size === 0) return;
 	_staged.clear();
+	stagedChanged();
 }
 
 /** User-discard path: wipe the buffer, notifying discard listeners once per
@@ -240,6 +265,7 @@ export function clearStagedArtifacts(): void {
 export function discardAllStagedArtifacts(): void {
 	const ids = [..._staged.keys()];
 	_staged.clear();
+	if (ids.length > 0) stagedChanged();
 	const listeners = [..._discardListeners];
 	for (const id of ids) {
 		for (const cb of listeners) cb(id);
@@ -252,7 +278,9 @@ export function discardAllStagedArtifacts(): void {
  * permanent for the life of the app (vitest isolates modules per test file,
  * so this never leaks subscriptions across suites either). */
 export function resetArtifactEdits(): void {
+	if (_staged.size === 0) return;
 	_staged.clear();
+	stagedChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +327,35 @@ export function getStagedArtifactOps(): ArtifactOp[] {
 				};
 			case 'delete':
 				return { kind: 'delete_artifact', id: e.id };
+		}
+	});
+}
+
+/**
+ * The buffer as the engine's `setStagedArtifacts` reads it, in insertion
+ * order. Names and payloads are `$state.snapshot` copies: an editor's draft
+ * may be a proxy, which a `MessagePort` cannot clone.
+ */
+export function stagedArtifactsForEngine(): WireStagedArtifact[] {
+	return [..._staged.values()].map((e): WireStagedArtifact => {
+		switch (e.kind) {
+			case 'create':
+				return {
+					op: 'create',
+					id: e.tempId,
+					kind: e.artifactKind,
+					name: $state.snapshot(e.name),
+					payload: $state.snapshot(e.payload)
+				};
+			case 'update':
+				return {
+					op: 'update',
+					id: e.id,
+					...(e.name !== undefined ? { name: $state.snapshot(e.name) } : {}),
+					...(e.payload !== undefined ? { payload: $state.snapshot(e.payload) } : {})
+				};
+			case 'delete':
+				return { op: 'delete', id: e.id };
 		}
 	});
 }
