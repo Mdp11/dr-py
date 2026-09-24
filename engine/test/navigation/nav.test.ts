@@ -197,6 +197,82 @@ describe('readNavigation', () => {
 		}
 	});
 
+	it('checks schema_version, a path’s name and every step’s comment, and keeps none but a script’s', () => {
+		const set = { kind: 'set_op', op: 'union', operands: [{ ref: 'a' }] };
+		const steps = [
+			{ ...hop('Links'), comment: 'c' },
+			{ kind: 'filter', comment: null },
+			{ kind: 'property', property_name: 'p', comment: 'c' },
+			{ kind: 'script', comment: 'label' }
+		];
+		expect(
+			readNavigation(
+				{
+					kind: 'path',
+					schema_version: 3,
+					name: 'n',
+					start: { ...set, schema_version: 2n },
+					steps
+				},
+				'd'
+			)
+		).toEqual({
+			kind: 'path',
+			start: {
+				kind: 'set_op',
+				op: 'union',
+				operands: [{ ref: 'a', definition: null, step_index: null }]
+			},
+			steps: [
+				{ kind: 'relationship', relationship_type: 'Links', direction: 'out', target_types: [] },
+				{ kind: 'filter', criteria: [] },
+				{ kind: 'property', property_name: 'p' },
+				{ kind: 'script', snippet: { ref: null, definition: null }, comment: 'label' }
+			],
+			exclude_visited: true
+		});
+		// A set has no name: pydantic ignores one, and so does the reader.
+		expect(readNavigation({ ...set, name: 5, schema_version: 1 }, 'd')).toMatchObject({
+			kind: 'set_op'
+		});
+
+		const path = (extra: object) => ({ kind: 'path', start: scope, ...extra });
+		const cases: [unknown, string][] = [
+			[path({ name: 5 }), 'd.name: must be a string or null'],
+			[path({ name: ['x'] }), 'd.name: must be a string or null'],
+			[path({ name: true }), 'd.name: must be a string or null'],
+			...(['x', 1.5, null, true, '3', new PyFloat(1)] as const).flatMap(
+				(version): [unknown, string][] => [
+					[path({ schema_version: version }), 'd.schema_version: must be an integer'],
+					[{ ...set, schema_version: version }, 'd.schema_version: must be an integer'],
+					[
+						path({ start: { ...set, schema_version: version } }),
+						'd.start.schema_version: must be an integer'
+					]
+				]
+			),
+			[
+				path({ steps: [{ ...hop('Links'), comment: 5 }] }),
+				'd.steps[0].comment: must be a string or null'
+			],
+			[
+				path({ steps: [{ kind: 'filter', comment: ['x'] }] }),
+				'd.steps[0].comment: must be a string or null'
+			],
+			[
+				path({ steps: [{ kind: 'property', property_name: 'p', comment: false }] }),
+				'd.steps[0].comment: must be a string or null'
+			],
+			[
+				path({ steps: [{ kind: 'script', comment: 5 }] }),
+				'd.steps[0].comment: must be a string or null'
+			]
+		];
+		for (const [raw, detail] of cases) {
+			expect(refusal(() => readNavigation(raw, 'd'))).toEqual({ status: 422, detail });
+		}
+	});
+
 	it('requires the kind on every definition, start and step', () => {
 		for (const [raw, where] of [
 			[{ start: scope }, 'definition.kind'],

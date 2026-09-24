@@ -121,12 +121,22 @@ function list(d: Doc, key: string, where: string): readonly unknown[] {
 	return value;
 }
 
+/** Checked, not kept: an int when present. */
+function checkSchemaVersion(d: Doc, where: string): void {
+	const value = field(d, 'schema_version', 0);
+	if (!((typeof value === 'number' && Number.isInteger(value)) || typeof value === 'bigint')) {
+		refuse(`${where}.schema_version`, 'must be an integer');
+	}
+}
+
 const criteriaOf = (d: Doc, where: string): Criterion[] =>
 	readCriteria(field(d, 'criteria', []), `${where}.criteria`);
 
 function readStep(raw: unknown, where: string): NavigationStep {
 	const d = doc(raw, where);
 	const kind = oneOf(d, 'kind', where, ['relationship', 'filter', 'property', 'script'] as const);
+	// Every step's comment is checked; only a script step's labels its column.
+	const comment = optionalStr(d, 'comment', where);
 	switch (kind) {
 		case 'relationship': {
 			const step: RelationshipStep = {
@@ -155,7 +165,7 @@ function readStep(raw: unknown, where: string): NavigationStep {
 			if (ref !== null && definition !== null) {
 				refuse(at, 'provide at most one of `ref` / `definition`');
 			}
-			return { kind, snippet: { ref, definition }, comment: optionalStr(d, 'comment', where) };
+			return { kind, snippet: { ref, definition }, comment };
 		}
 	}
 }
@@ -181,6 +191,7 @@ function readOperand(raw: unknown, where: string): Operand {
 const SET_OPS: readonly SetOp[] = ['union', 'intersection', 'difference', 'symmetric_difference'];
 
 function readSet(d: Doc, where: string): SetExpression {
+	checkSchemaVersion(d, where);
 	const op = oneOf(d, 'op', where, SET_OPS);
 	const raw = field(d, 'operands');
 	if (!Array.isArray(raw)) refuse(`${where}.operands`, 'must be a list');
@@ -204,6 +215,8 @@ function readDefinition(raw: unknown, where: string): NavigationDefinition {
 	const d = doc(raw, where);
 	const kind = oneOf(d, 'kind', where, ['path', 'set_op'] as const);
 	if (kind === 'set_op') return readSet(d, where);
+	checkSchemaVersion(d, where);
+	optionalStr(d, 'name', where);
 	const start = readStart(field(d, 'start'), `${where}.start`);
 	const steps = list(d, 'steps', where).map((step, i) => readStep(step, `${where}.steps[${i}]`));
 	if (steps.length > MAX_STEPS) {
@@ -217,7 +230,9 @@ function readDefinition(raw: unknown, where: string): NavigationDefinition {
 /**
  * A definition as a client sends it or an artifact holds it, read as pydantic
  * reads it in canonical JSON: every `kind`, `op` and criterion `type`
- * required, the defaults filled, unknown keys ignored. What pydantic would
+ * required, the defaults filled, unknown keys ignored. `schema_version`, a
+ * path's `name` and a step's `comment` are checked, never kept, bar a script
+ * step's comment. What pydantic would
  * coerce is refused, in the engine's words where the core has none.
  */
 export function readNavigation(raw: unknown, path: string): NavigationDefinition {
