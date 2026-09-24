@@ -13,11 +13,14 @@ either — so an id never needs to say which file it is in. The Python core is u
 freeze: a fix that touches `core/model`, `core/metamodel` or the model-op applier lands on
 both sides with a fixture. `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left the freeze for FEATURES with B's fifth plan, when the
-five read surfaces defaulted to the engine, and `core/search`, `core/navigation`,
-`api/search.py`, `routes/read.py::search_model` and `routes/artifacts.py::evaluate_navigation`
-with C's first plan, when navigation and criteria search did — they land in TypeScript only
-now; a bug there still lands on both sides with a fixture while the server path lives (MR-1,
-until F).
+five read surfaces defaulted to the engine. `core/search`, `core/navigation`, `api/search.py`,
+`routes/read.py::search_model` and `routes/artifacts.py::evaluate_navigation` stay frozen past
+C's first plan flipping navigation and criteria search to the engine: `core/table`'s evaluator
+and `api/routes/{tables,exports}.py` still read them for tables and exports, which stay on the
+server until plans 4–5, and `api/artifact_kinds.py` validates every committed navigation
+payload against them. A bug found in any of them still lands on both sides with a fixture
+until tables and exports default to the engine (MR-1, until F). `core/table/resolve.py` (ref
+resolution and script reach) is frozen from C's first plan on.
 
 ---
 
@@ -47,11 +50,15 @@ for, is refused with 501 and answered by the server, a navigation's page marked 
 The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op applier from
 the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
-surfaces' defaults; `core/search`, `core/navigation`, `api/search.py` and the
-`search_model` and `evaluate_navigation` route functions were frozen from C's first plan on
-and left it for features once that plan flipped navigation and criteria search to the engine.
+surfaces' defaults. `core/search`, `core/navigation`, `api/search.py` and the `search_model`
+and `evaluate_navigation` route functions stay frozen past this plan's flip of navigation and
+criteria search: `core/table`'s evaluator and `api/routes/{tables,exports}.py` still read them
+for tables and exports, on the server until plans 4–5, and `api/artifact_kinds.py` validates
+every committed navigation payload against them; `core/table/resolve.py` (ref resolution and
+script reach) is frozen from this plan on too.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
-`K-49`, `C-21`, `C-22` in this file; `K-33`, `K-34` in `BACKLOG.md`.
+`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `C-21`, `C-22` in this
+file; `K-33`, `K-34` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -282,7 +289,62 @@ startup window is closed: the `navigation` surface is the server's until the fol
 first `load()` lands (`loaded()`, a gate on the engine seam), a failed load is asked once
 more after a second, and a shadow re-test waits for the follower's fetches (a quiet probe),
 so this window cannot log a false `[shadow]` line. Decide whether an evaluation should wait
-for the fetches out, or the window stays a known limit.
+for the fetches out, or the window stays a known limit. It is also AD-31's known gap: a
+preview whose first page came from the server before the follower's load and whose "Load
+more" runs after it can mix committed and working state, and with staged model edits a chain
+can then be duplicated or skipped.
+
+### K-50 · A staged artifact edit can miss a read issued in the same synchronous run · `open` · *2026-09-24*
+`stagedChanged()` defers its push of the composed overlay to the engine by a microtask
+(`frontend/src/lib/engine/artifacts.ts:183`), while `sync.call` posts a read to the engine at
+once whenever it is ready. During a commit's refresh, an artifact staged meanwhile reaches the
+engine only when the refresh lands. Now that a commit's creates are aliased under their real
+ids during that refresh (`bcae61e`), the hold may no longer be needed. Suggested fix: push the
+composed overlay during the hold too, and add a test that a read issued right after
+`stageArtifactUpdate` sees the staged update.
+
+### K-51 · `setArtifacts` in a `now` handler can exceed the chunk budget · `open` · *2026-09-24*
+`engine/src/artifacts/artifact-set.ts:70-82` stringifies and parses the whole artifact list at
+once, and `now` handlers run inside one host turn (CN-3's ≤16 ms). Measured cost is about
+5 ms/MB without floats, and 30–50 ms/MB once any payload holds a float, because the whole list
+then goes through the exact parser: 2.8 MB of snippets plus one `1.5` took 74–102 ms. Every
+project open pays this twice — `startReplica`'s `load()` and the first feed `snapshot`'s
+`load()` both fetch and set all payloads. Suggested fix: read and set per artifact, and drop
+the duplicate initial load.
+
+### K-52 · Superseded navigation previews are never cancelled · `open` · *2026-09-24*
+`evaluateNavigation` passes no `AbortSignal` (`frontend/src/lib/api/artifacts.ts:72`), so each
+debounced auto-run while editing a definition queues a full model-lane scan that runs to
+completion even after a newer edit supersedes it. Suggested fix: abort on the editor's
+generation bump, as B's scans do.
+
+### K-53 · The artifact follower's fetch chain has no timeout · `open` · *2026-09-24*
+`artifacts.ts:125-134` awaits `/artifacts/payloads` with no timeout. One hung request stalls
+every later feed event and refresh, and the staged mirror with them if a commit's hold sits
+behind it. Suggested fix: a fetch timeout, or a way for a later fetch not to wait on a stuck
+one holding the staged mirror.
+
+### K-54 · A pattern fallback in Advanced Search reads committed state silently · `open` · *2026-09-24*
+`frontend/src/lib/api/model-read.ts:134-150` falls back to the server for a pattern the engine
+cannot vouch for, with no mark on the result. A user with a staged rename gets different
+results depending only on the regex syntax used, with nothing telling them the run read
+committed state. Suggested fix: a one-line note like the navigation dock's `nav-fallback`.
+
+### K-55 · The criteria warm-up can freeze the worker on a catastrophic pattern · `open` · *2026-09-24*
+`compileCriteria`'s warm-up (`engine/src/search/criteria.ts:124-125`) runs every translated
+pattern before the first step. A catastrophic-backtracking pattern (e.g. `'(?:a?|b?)'` repeated
+22 times plus `'x'`) freezes the worker for about 4.5 s, and the scheduler has no way to
+interrupt a warm-up run. Suggested fix: bound or step the warm-up.
+
+### K-56 · `sendArtifacts` swallows an engine refusal silently · `open` · *2026-09-24*
+`frontend/src/lib/engine/sync.ts`'s `sendArtifacts` drops an engine refusal without surfacing
+it, so an engine holding no artifacts can still look "loaded". Suggested fix: a dev-mode
+`console.error` on refusal.
+
+### K-57 · `py_coerce`'s `to_number` rows miss several `toNumber` branches · `open` · *2026-09-24*
+The fixture's `to_number` rows lack a plain int, a finite bigint, a float, a dict, `""` and
+`"   "`, so those branches of `toNumber` (`engine/src/value/coerce.ts:110-128`) have no oracle
+row. Suggested fix: add the inputs to `tests/golden/scenarios/py_coerce.py` and regenerate.
 
 ---
 

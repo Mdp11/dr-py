@@ -255,7 +255,12 @@ no evaluation reads a committed artifact as missing.
 script step — and a criterion pattern it cannot match exactly as Python's `re` does — with 501
 before any work, and the client asks the server instead, whole.
 **Why.** One table or navigation never mixes committed and working state: a result is either
-all the engine's over the working copy or all the server's over committed state.
+all the engine's over the working copy or all the server's over committed state. Until the
+shell's artifact follower has loaded the project's artifacts once, navigations are answered by
+the server, over committed state and unmarked; a preview whose first page came from the server
+before that load and whose "Load more" runs after it can mix the two sides, and with staged
+model edits a chain can then be duplicated or skipped. The window is one payload fetch, plus
+about 1 s after a failed fetch.
 **Rejected.** Forwarding each script call from the engine to the server: its inputs would be
 working-copy elements the server has never seen. Placeholder cells for script results: a
 result that is neither side's.

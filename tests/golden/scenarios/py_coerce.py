@@ -25,8 +25,9 @@ _JS_STR_VALUES: list[Any] = [
     {"k": "v", "n": list(_CONTAINER_SCALARS), "esc": _ESCAPED},
 ]  # fmt: skip
 
-# Fact 2's own probe: what settled the design.
-_FACT_2_TEXTS = [
+# Texts that show float()'s grammar: underscores, whitespace and non-ASCII digits,
+# infinities and NaN, a base prefix and a stray thousands separator.
+_FLOAT_GRAMMAR_TEXTS = [
     "1_000", " 1.5 ", "inf", "-Infinity", "nan", "٣", "１２", "\xa01\xa0",
     ".5", "5.", "+1", "0x10", "1__0", "1 000",
 ]  # fmt: skip
@@ -54,7 +55,7 @@ _INF_NAN_TEXTS = [
 _WHITESPACE_TEXTS = [chr(cp) + "1" + chr(cp) for cp in space_points()]
 
 _TEXT_CASES = (
-    _FACT_2_TEXTS
+    _FLOAT_GRAMMAR_TEXTS
     + _SCRIPT_DIGITS
     + _UNDERSCORE_TEXTS
     + _EXPONENT_TEXTS

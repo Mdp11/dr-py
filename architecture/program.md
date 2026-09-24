@@ -109,11 +109,17 @@ start of its port until its surface defaults to the engine. After that, features
 land in TypeScript only. A bug fixed during a port lands on both sides, with a fixture, and so
 does a bug found after the default flips, for as long as the server path lives (MR-1, until F).
 `routes/read.py`'s route functions and `routes/elements.py::get_element` left the freeze for
-features with B's fifth plan, when the five read surfaces defaulted to the engine; `core/search`,
-`core/navigation`, `api/search.py`, `routes/read.py::search_model` and
-`routes/artifacts.py::evaluate_navigation` left it with C's first plan, when navigation and
-criteria search defaulted to the engine; `core/model`, `core/metamodel` and the model-op
-applier stay frozen. Areas not yet being ported carry on as normal.
+features with B's fifth plan, when the five read surfaces defaulted to the engine; `core/model`,
+`core/metamodel` and the model-op applier stay frozen. `core/navigation`, `core/search`,
+`api/search.py` and the `search_model` and `evaluate_navigation` route functions stay frozen
+too, past C's first plan flipping navigation and criteria search to the engine: `core/table`'s
+evaluator (`core/table/{evaluate,cells,nav_memo,resolve,schema}.py`) and
+`api/routes/{tables,exports}.py` still read them for tables and exports, which stay on the
+server until plans 4–5, and `api/artifact_kinds.py` validates every committed navigation
+payload with `NAVIGATION_ADAPTER`. A bug found in any of them lands on both sides, with a
+fixture, until tables and exports default to the engine and the freeze lifts for features.
+`core/table/resolve.py` (ref resolution and script reach) is frozen from plan 1 on. Areas not
+yet being ported carry on as normal.
 
 **MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
 engine on a small fixture model. The route-level mock tests of its server path stay while
