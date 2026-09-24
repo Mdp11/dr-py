@@ -272,16 +272,17 @@ cascade into is named by neither, so it can be hidden from the drawer. The commi
 carries exact ops. Decide per window whether it is worth closing or stays a
 known limit.
 
-### K-49 · An evaluation can reach the engine before the artifacts it names · `open` · *2026-09-24*
-The shell's artifact follower (`frontend/src/lib/engine/artifacts.ts`) loads every payload
-when the replica starts and fetches a peer's created or updated artifact when its feed event
-arrives; the sync holds a read for the replica's phase and `rev` (AD-28) but not for those
-fetches. A navigation that names an artifact evaluated before its payload lands — the first
-`load()` of a page whose replica opened quickly from the cache, or a peer's artifact
-referenced between its event and its fetch — is answered 422 `unknown navigation artifact`
-by the engine where the server finds it. The workspace's wait for `ready` usually covers the
-first load (it starts with the open). Decide whether evaluations wait for the first load
-and for the fetches out, or the window stays a known limit.
+### K-49 · A peer's new navigation can be named before its payload reaches the engine · `open` · *2026-09-24*
+The shell's artifact follower (`frontend/src/lib/engine/artifacts.ts`) fetches a peer's
+created or updated artifact when its `artifact` feed event arrives, and the artifact list the
+editors offer takes the same event at once. A navigation that names the new artifact in the
+moment between the two is answered 422 `unknown navigation artifact 'x'` by the engine where
+the server finds it; the preview shows a failed run until the next edit re-runs it. The
+startup window is closed: the `navigation` surface is the server's until the follower's
+first `load()` lands (`loaded()`, a gate on the engine seam), a failed load is asked once
+more after a second, and a shadow re-test waits for the follower's fetches (a quiet probe),
+so this window cannot log a false `[shadow]` line. Decide whether an evaluation should wait
+for the fetches out, or the window stays a known limit.
 
 ---
 

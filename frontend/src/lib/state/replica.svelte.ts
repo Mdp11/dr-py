@@ -75,8 +75,12 @@ let _noticeDismissed = $state(false);
 let _retrying = $state(false);
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 const _statusListeners = new Set<StatusListener>();
-/** The started replica's artifact follower, and the project it follows. */
-let _follower: { projectId: string; follower: ArtifactFollower } | null = null;
+/** The started replica's artifact follower, the project it follows, and its quiet probe's remover. */
+let _follower: {
+	projectId: string;
+	follower: ArtifactFollower;
+	removeQuiet: () => void;
+} | null = null;
 
 onArtifactCommit(({ idMap, changed, deletedIds }) =>
 	_follower?.follower.onCommit({ idMap, changed, deletedIds })
@@ -84,6 +88,9 @@ onArtifactCommit(({ idMap, changed, deletedIds }) =>
 onStagedArtifactsChanged(() => _follower?.follower.stagedChanged());
 
 const NO_FLIGHT: CommitFlight = { settle() {}, abandon() {} };
+
+/** Before a failed artifact load's one retry. */
+const LOAD_RETRY_MS = 1_000;
 
 function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 	const observe = overrides.onStatus;
@@ -178,7 +185,8 @@ function _anyEngine(): boolean {
 }
 
 /**
- * Routes the read surfaces through `sync`. In dev, with `dr.shadow` set, the
+ * Routes the read surfaces through `sync`; navigations only once the
+ * follower has loaded the artifacts. In dev, with `dr.shadow` set, the
  * seam is installed again with a shadow once that module has loaded, idle
  * while the model store's engine half has an edit staged, an artifact entry
  * is staged, or the follower still lays a commit's entries over the
@@ -188,7 +196,9 @@ function installSeam(sync: ReplicaSync): void {
 	uninstallSeam();
 	const surfaces = (_switches ??= readSwitches()).surfaces;
 	const token = _seamToken;
-	installEngineSeam(createEngineSeam(sync, surfaces));
+	// A navigation may name artifacts: the engine answers once it holds them.
+	const gates = { navigation: () => _follower?.follower.loaded() ?? false };
+	installEngineSeam(createEngineSeam(sync, surfaces, undefined, gates));
 	_removeQuietProbe = addQuietProbe(() => sync.settled());
 	if (import.meta.env.DEV && anyEngineSurface(surfaces)) {
 		void import('../engine/shadow')
@@ -203,7 +213,7 @@ function installSeam(sync: ReplicaSync): void {
 						(_follower?.follower.hasOverlay() ?? false),
 					report: (line) => console.error(line)
 				});
-				installEngineSeam(createEngineSeam(sync, surfaces, shadow));
+				installEngineSeam(createEngineSeam(sync, surfaces, shadow, gates));
 			})
 			.catch(() => {});
 	}
@@ -267,9 +277,11 @@ function follow(sync: ReplicaSync, projectId: string): void {
 	const follower = createArtifactFollower({
 		sync,
 		payloads: (ids) => listArtifactPayloads(ids, { baseUrl: `/api/v1/projects/${projectId}` }),
-		staged: stagedArtifactsForEngine
+		staged: stagedArtifactsForEngine,
+		pause: () => new Promise<void>((resolve) => setTimeout(resolve, LOAD_RETRY_MS))
 	});
-	_follower = { projectId, follower };
+	// A shadow re-test waits out a payload fetch in flight, which may change what it reads.
+	_follower = { projectId, follower, removeQuiet: addQuietProbe(() => follower.settled()) };
 	follower.load();
 	// The sync forgot the buffer at its last stop; the project's own, kept since, goes again.
 	if (getStagedArtifactDepth() > 0) follower.stagedChanged();
@@ -278,6 +290,7 @@ function follow(sync: ReplicaSync, projectId: string): void {
 /** A payload answer after this is dropped: it speaks for a replica no longer followed. */
 function stopFollower(): void {
 	_follower?.follower.stop();
+	_follower?.removeQuiet();
 	_follower = null;
 }
 

@@ -8,14 +8,21 @@ export type ArtifactFollowerDeps = {
 	payloads(ids?: readonly string[]): Promise<Artifact[]>;
 	/** The staged buffer as plain copies, in staging order. */
 	staged(): WireStagedArtifact[];
+	/** Waited out before a failed load's one retry; absent, the retry goes at once. */
+	pause?(): Promise<void>;
 };
 
 /** What a feed event or a commit says of one artifact. */
 export type ArtifactMark = Pick<ArtifactHeader, 'id' | 'artifact_rev'>;
 
 export type ArtifactFollower = {
-	/** Every committed artifact again: at the start, and after a feed reconnect. */
+	/**
+	 * Every committed artifact again: at the start, and after a feed reconnect.
+	 * A failed fetch is asked once more, after `pause()`; the retry's own failure is final.
+	 */
 	load(): void;
+	/** Whether a load has landed since the follower was made, and it is not stopped. */
+	loaded(): boolean;
 	onEvent(action: 'created' | 'updated' | 'deleted', header: ArtifactMark): void;
 	/**
 	 * The user's own commit landed; its staged buffer was cleared in the same
@@ -89,12 +96,14 @@ function compose(
  * payloads with the buffer as it is then, the engine reads the working copy
  * the commit came from under either id. A failed refresh keeps its entries
  * in the overlay, each only until a fetch brings newer committed news of the
- * artifact it stands for, and asks one `load()` at once; any other failed
- * fetch leaves the context as it was until the next `load()`.
+ * artifact it stands for, and asks one `load()` at once. A failed load asks
+ * once more after `pause()`; any other failed fetch leaves the context as it
+ * was until the next `load()`.
  */
 export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFollower {
 	const { sync } = deps;
 	let stopped = false;
+	let loadedOnce = false;
 	/** The rev of every committed artifact the engine was handed. */
 	let revs = new Map<string, number>();
 	let chain: Promise<void> = Promise.resolve();
@@ -185,9 +194,18 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 
 	const load = () => {
 		enqueue(async () => {
-			const list = await deps.payloads();
+			let list: Artifact[];
+			try {
+				list = await deps.payloads();
+			} catch {
+				// One retry, in the same queue slot, so later answers still land after it.
+				await deps.pause?.();
+				if (stopped) return;
+				list = await deps.payloads();
+			}
 			if (stopped) return;
 			sync.setArtifacts(list.map(wire));
+			loadedOnce = true;
 			revs = new Map(list.map((artifact) => [artifact.id, artifact.artifact_rev]));
 			if (carried.length === 0) return;
 			carried = [];
@@ -268,6 +286,10 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 
 		hasOverlay() {
 			return holds.size > 0 || carried.length > 0;
+		},
+
+		loaded() {
+			return loadedOnce && !stopped;
 		},
 
 		stop() {

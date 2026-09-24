@@ -1367,9 +1367,10 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   count it. The switches are read once, with the rest, and honoured in a
   build too. `readSurfaces(storage?)` is `readSwitches(storage).surfaces`;
   `anyEngineSurface(surfaces)` says whether any is on the engine.
-- `createEngineSeam(sync, surfaces, shadow?)` makes the seam of a
+- `createEngineSeam(sync, surfaces, shadow?, gates?)` makes the seam of a
   `ReplicaSync`: a surface's EFFECTIVE side is `engine` iff its switch says
-  so and the phase is neither `off` nor `server`; `call` is `sync.call`
+  so, its gate (when given) answers true, and the phase is neither `off`
+  nor `server`; `call` is `sync.call`
   (so the read barrier holds); `gone` is `EngineGoneError`. The replica
   store installs it (see "Wiring").
 
@@ -1505,7 +1506,10 @@ sync exists:
   project it was staged in (`bindStagedArtifacts`, from `startReplica()` and
   `boot()`): opening another project drops it, the same project keeps it.
   `stopReplica()` / `resetReplica()` stop the follower, so a payload answer
-  for the old project is dropped (see `lib/engine/README.md`).
+  for the old project is dropped (see `lib/engine/README.md`). Until the
+  follower's first load lands (`loaded()`; a failed load is asked once more
+  after a second) the seam's `navigation` gate is closed and navigations go
+  to the server, and while it runs its `settled()` is a quiet probe.
 - **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
   drawer's revert (`HistoryDrawer.svelte::doRevert`) both call
   `beginReplicaCommit()` right before the POST, hand `commitChanges` /

@@ -76,9 +76,9 @@ type Posted =
 /**
  * A follower over `sync`; `server` holds the committed artifacts its
  * `payloads` answers from. A fetch answers at once, unless `gate` holds a
- * deferred for it, which the test settles.
+ * deferred for it, which the test settles. `pause` is the follower's own.
  */
-function follow(sync: ReplicaSync) {
+function follow(sync: ReplicaSync, pause?: () => Promise<void>) {
 	const committed = new Map<string, Artifact>();
 	const fetches: (readonly string[] | undefined)[] = [];
 	const gates: Deferred<void>[] = [];
@@ -111,7 +111,8 @@ function follow(sync: ReplicaSync) {
 			const all = [...committed.values()];
 			return ids === undefined ? all : all.filter((a) => ids.includes(a.id));
 		},
-		staged: () => staged
+		staged: () => staged,
+		...(pause === undefined ? {} : { pause })
 	});
 	followers.push(follower);
 	return {
@@ -416,6 +417,7 @@ describe('the artifact follower', () => {
 		f.committed.set('n7', artifact('n7', 1, 'EdgeGateway'));
 		const refresh = f.gate();
 		const reload = f.gate();
+		const retry = f.gate();
 		f.setStaged([]);
 		f.follower.stagedChanged();
 		f.follower.onCommit({
@@ -425,8 +427,9 @@ describe('the artifact follower', () => {
 		});
 		refresh.reject(new Error('offline'));
 		reload.reject(new Error('offline'));
+		retry.reject(new Error('offline'));
 		await f.follower.settled();
-		expect(f.fetches).toEqual([undefined, ['n1', 'n7'], undefined]);
+		expect(f.fetches).toEqual([undefined, ['n1', 'n7'], undefined, undefined]);
 		// The commit's entries stand in for what the refresh could not bring.
 		expect(f.posted.at(-1)).toEqual({
 			method: 'setStagedArtifacts',
@@ -436,6 +439,61 @@ describe('the artifact follower', () => {
 		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(totals.gateways);
 		return { over, f, totals, created };
 	}
+
+	it('loaded holds once a load lands, and not after stop; a new follower starts unloaded', async () => {
+		const over = await ready();
+		const f = follow(over.sync);
+		expect(f.follower.loaded()).toBe(false);
+		const loading = f.gate();
+		f.follower.load();
+		await macrotask();
+		expect(f.follower.loaded()).toBe(false);
+
+		loading.resolve();
+		await f.follower.settled();
+		expect(f.follower.loaded()).toBe(true);
+
+		f.follower.stop();
+		expect(f.follower.loaded()).toBe(false);
+		expect(follow(over.sync).follower.loaded()).toBe(false);
+	});
+
+	it('a failed load asks once more after the pause, and lands', async () => {
+		const over = await ready();
+		let paused = 0;
+		const f = follow(over.sync, async () => {
+			paused += 1;
+		});
+		f.committed.set('n1', artifact('n1', 1, 'Organization'));
+		const first = f.gate();
+		f.follower.load();
+		first.reject(new Error('offline'));
+		await f.follower.settled();
+
+		expect(f.fetches).toEqual([undefined, undefined]);
+		expect(paused).toBe(1);
+		expect(f.follower.loaded()).toBe(true);
+		expect((await evaluate(over, { artifact_id: 'n1' })).total).toBe(
+			await totalOf(over, 'Organization')
+		);
+	});
+
+	it("a failed load's retry that fails too is final", async () => {
+		const over = await ready();
+		const f = follow(over.sync);
+		f.committed.set('n1', artifact('n1', 1, 'Organization'));
+		const first = f.gate();
+		const retry = f.gate();
+		f.follower.load();
+		first.reject(new Error('offline'));
+		retry.reject(new Error('offline'));
+		await f.follower.settled();
+		await macrotask();
+
+		expect(f.fetches).toEqual([undefined, undefined]);
+		expect(f.posted).toEqual([]);
+		expect(f.follower.loaded()).toBe(false);
+	});
 
 	it('a failed refresh reloads once at once', async () => {
 		const over = await ready();
@@ -629,6 +687,7 @@ describe('the artifact follower', () => {
 		f.committed.set('n2', artifact('n2', 1, 'Organization'));
 		const failed = f.gate();
 		const reload = f.gate();
+		const retry = f.gate();
 		f.setStaged([]);
 		f.follower.stagedChanged();
 		f.follower.onCommit({
@@ -638,6 +697,7 @@ describe('the artifact follower', () => {
 		});
 		failed.reject(new Error('offline'));
 		reload.reject(new Error('offline'));
+		retry.reject(new Error('offline'));
 		await f.follower.settled();
 		expect(f.follower.hasOverlay()).toBe(true);
 

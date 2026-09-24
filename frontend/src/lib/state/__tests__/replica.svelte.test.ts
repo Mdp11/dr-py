@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
 import { engineSide } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
+import { evaluateNavigation } from '$lib/api/artifacts';
 import { getElementsBatch } from '$lib/api/model-read';
 import { createSnapshotCache } from '$lib/engine/cache';
 import { SURFACES } from '$lib/engine/surfaces';
@@ -1625,6 +1626,184 @@ describe('the artifact follower', () => {
 		} finally {
 			release();
 		}
+	});
+
+	describe('the navigation surface waits for the artifacts', () => {
+		const refUnion = (id: string) => ({
+			kind: 'set_op',
+			op: 'union',
+			operands: [{ ref: id, step_index: null }]
+		});
+		const inlineUnion = (type: string) => ({
+			kind: 'set_op',
+			op: 'union',
+			operands: [{ definition: scope(type), step_index: null }]
+		});
+
+		/**
+		 * The project's payloads, whole loads answered through `loads` in turn
+		 * (a status, or a promise to wait for first; past the list, at once) and
+		 * named fetches held while `named` is set. The navigation route answers
+		 * `answer()`, each call counted in `served`.
+		 */
+		function serve(
+			project: ReturnType<typeof fakeProject>,
+			loads: (number | Promise<void>)[],
+			answer: () => Promise<object>
+		) {
+			const state = { served: 0, named: null as Promise<void> | null };
+			server.use(
+				http.get(`${PAGE_ORIGIN}/api/v1/projects/p/artifacts/payloads`, async ({ request }) => {
+					const ids = new URL(request.url).searchParams.getAll('id');
+					if (ids.length === 0) {
+						const next = loads.shift();
+						if (typeof next === 'number') return new HttpResponse(null, { status: next });
+						if (next !== undefined) await next;
+					} else if (state.named !== null) {
+						await state.named;
+					}
+					const items = [...project.artifacts.values()].filter(
+						(artifact) => ids.length === 0 || ids.includes(artifact.id)
+					);
+					return HttpResponse.json({ items });
+				}),
+				...project.handlers(),
+				http.post('*/navigations/evaluate', async () => {
+					state.served += 1;
+					return HttpResponse.json(await answer());
+				})
+			);
+			return state;
+		}
+
+		it("is the server's until the first load lands, then the engine's; criteria never wait", async () => {
+			const project = fakeProject();
+			project.artifacts.set('n1', nav('n1', 1, 'Organization'));
+			let release!: () => void;
+			const first = new Promise<void>((resolve) => (release = resolve));
+			const served = serve(project, [first], async () => ({
+				step_types: [],
+				chains: [],
+				total: 999,
+				truncated: false,
+				warnings: []
+			}));
+			const replica = realReplica();
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.phase === 'ready');
+			await macrotask();
+			const organizations = (
+				await links[0]!.client.call<{ total: number }>('evaluateNavigation', {
+					definition: inlineUnion('Organization')
+				})
+			).total;
+
+			try {
+				expect(engineSide('navigation')).toBe('server');
+				expect(engineSide('criteria')).toBe('engine');
+				const early = await evaluateNavigation({ definition: refUnion('n1') as never });
+				expect(early.total).toBe(999);
+				expect(served.served).toBe(1);
+			} finally {
+				release();
+			}
+
+			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+			const late = await evaluateNavigation({ definition: refUnion('n1') as never });
+			expect(late.total).toBe(organizations);
+			expect(served.served).toBe(1);
+		});
+
+		it('a failed first load is asked once more, then the engine answers', async () => {
+			const project = fakeProject();
+			project.artifacts.set('n1', nav('n1', 1, 'Organization'));
+			const served = serve(project, [503], () => Promise.reject(new Error('not asked')));
+			const replica = realReplica();
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.phase === 'ready');
+
+			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'), { timeout: 5_000 });
+			expect((await evaluateNavigation({ definition: refUnion('n1') as never })).total).toBe(
+				(
+					await links[0]!.client.call<{ total: number }>('evaluateNavigation', {
+						definition: inlineUnion('Organization')
+					})
+				).total
+			);
+			expect(served.served).toBe(0);
+		});
+
+		it("a restarted replica's new follower waits for its own load", async () => {
+			const project = fakeProject();
+			let release!: () => void;
+			const second = new Promise<void>((resolve) => (release = resolve));
+			serve(project, [Promise.resolve(), second], () => Promise.reject(new Error('not asked')));
+			const replica = realReplica();
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.phase === 'ready');
+			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+
+			stopReplica();
+			startReplica();
+			await replica.until((s) => s.phase === 'ready');
+			try {
+				expect(engineSide('elements')).toBe('engine');
+				expect(engineSide('navigation')).toBe('server');
+			} finally {
+				release();
+			}
+			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+		});
+
+		it('a shadow re-test waits for a payload fetch in flight', async () => {
+			localStorage.setItem('dr.shadow', '1');
+			const project = fakeProject();
+			// The server holds n2 all along: it answers as the inlined definition does.
+			const served = serve(project, [], () =>
+				links[0]!.client.call<object>('evaluateNavigation', { definition: inlineUnion('Project') })
+			);
+			const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const replica = realReplica();
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.phase === 'ready');
+			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+			await macrotask();
+
+			// A peer's navigation is announced; its payload is held on the way.
+			let release!: () => void;
+			served.named = new Promise<void>((resolve) => (release = resolve));
+			project.artifacts.set('n2', nav('n2', 1, 'Project'));
+			handReplicaFeed(
+				{
+					type: 'artifact',
+					action: 'created',
+					artifact: header(project.artifacts.get('n2') as ReturnType<typeof nav>)
+				},
+				'{}'
+			);
+
+			try {
+				// The engine does not hold n2 yet; the server does.
+				await expect(evaluateNavigation({ definition: refUnion('n2') as never })).rejects.toThrow(
+					"unknown navigation artifact 'n2'"
+				);
+				await vi.waitFor(() => expect(served.served).toBe(1));
+				await macrotask();
+				await macrotask();
+				expect(served.served).toBe(1);
+			} finally {
+				release();
+			}
+
+			await vi.waitFor(() => expect(served.served).toBe(2));
+			await macrotask();
+			await macrotask();
+			expect(errors.mock.calls.filter(([line]) => String(line).startsWith('[shadow]'))).toEqual([]);
+		});
 	});
 
 	it('a staged payload held in $state reaches the engine as a plain copy', async () => {
