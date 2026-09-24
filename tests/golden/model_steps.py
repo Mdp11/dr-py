@@ -36,6 +36,7 @@ from data_rover.api.routes import read
 from data_rover.api.routes.elements import get_element
 from data_rover.api.routes.ops import _apply_batch, _BatchResult
 from data_rover.api.schemas import ElementOut, ModelOpIn, RelationshipOut
+from data_rover.api.search import SearchQueryIn
 from data_rover.api.serialize import iter_entity_lines
 from data_rover.api.state_digest import model_digest
 from data_rover.core.metamodel.schema import Metamodel
@@ -100,7 +101,8 @@ def batch(ops: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
 
 
 def read_step(method: str, **params: Any) -> dict[str, Any]:
-    """A ``read`` step: a method of the engine's read table, with its params."""
+    """A ``read`` step: a method of the engine's read or evaluation table, with
+    its params."""
     return {"do": "read", "method": method, "params": params}
 
 
@@ -158,6 +160,10 @@ def _read(session: Session, method: str, params: dict[str, Any]) -> BaseModel:
         case "listContainmentChildren":
             return read.list_containment_children(
                 params["id"], limit=limit, offset=offset, session=session
+            )
+        case "searchModel":
+            return read.search_model(
+                SearchQueryIn.model_validate(params), session=session
             )
     raise AssertionError(f"unknown read {method!r}")
 

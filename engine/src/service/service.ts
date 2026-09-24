@@ -1,3 +1,4 @@
+import { EVALUATIONS } from '../evaluate/index.ts';
 import { Metamodel } from '../metamodel/metamodel.ts';
 import type { MetamodelDoc } from '../metamodel/types.ts';
 import { errorDetail, ModelError, SnapshotError } from '../model/errors.ts';
@@ -190,6 +191,12 @@ const read =
 	(service, call) =>
 		service.read(method, call);
 
+/** An evaluation: always a scan of the model, waiting for a ready replica in arrival order. */
+const evaluate =
+	(method: string): Method =>
+	(service, call) =>
+		service.evaluate(method, call);
+
 /** A read of the working copy itself, queued as a read of the model is. */
 const inspect =
 	(run: (wc: WorkingCopy) => unknown): Method =>
@@ -240,7 +247,8 @@ const METHODS: { readonly [method: string]: Method } = {
 		return null;
 	}),
 
-	...Object.fromEntries(Object.keys(READS).map((method) => [method, read(method)]))
+	...Object.fromEntries(Object.keys(READS).map((method) => [method, read(method)])),
+	...Object.fromEntries(Object.keys(EVALUATIONS).map((method) => [method, evaluate(method)]))
 };
 
 type Opening = {
@@ -353,6 +361,17 @@ class Service {
 				}
 			});
 		}
+	}
+
+	evaluate(method: string, call: Call): void {
+		this.submit(call, 'model', {
+			kind: 'scan',
+			run: () =>
+				EVALUATIONS[method]!(
+					{ model: this.ready().model, artifacts: null, placements: this.placements },
+					call.params
+				)
+		});
 	}
 
 	inspect(call: Call, run: (wc: WorkingCopy) => unknown): void {

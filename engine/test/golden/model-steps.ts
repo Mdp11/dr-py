@@ -7,6 +7,7 @@ import {
 	dumpIndexes,
 	elementLine,
 	ElementRec,
+	EVALUATIONS,
 	isSteps,
 	Metamodel,
 	Model,
@@ -77,7 +78,7 @@ export type Step = Partial<Observed> & {
 	restore?: boolean;
 	/** `undo`: the index of the landed batch whose inverse ops to run. */
 	of?: number;
-	/** `read`: a method of `READS`, and its params. */
+	/** `read`: a method of `READS` or of `EVALUATIONS`, and its params. */
 	method?: string;
 	params?: ReadParams;
 	/** `view` / `drop_view`: the view whose placements `result` lists / to forget. */
@@ -184,10 +185,16 @@ function apply(
 ): unknown {
 	switch (step.do) {
 		case 'read': {
-			const read = READS[step.method!];
-			if (read === undefined) throw new Error(`no read ${step.method}`);
-			const out = read(model, placements, step.params ?? {});
-			return isSteps(out) ? drain(out) : out;
+			const method = step.method!;
+			const params = step.params ?? {};
+			if (Object.hasOwn(READS, method)) {
+				const out = READS[method]!(model, placements, params);
+				return isSteps(out) ? drain(out) : out;
+			}
+			if (Object.hasOwn(EVALUATIONS, method)) {
+				return drain(EVALUATIONS[method]!({ model, artifacts: null, placements }, params));
+			}
+			throw new Error(`no read ${method}`);
 		}
 		case 'view':
 			placements.set(step.view_id!, step.result as string[]);

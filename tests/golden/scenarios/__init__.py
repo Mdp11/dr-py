@@ -22,6 +22,7 @@ from . import (  # noqa: F401
     read_pages,
     read_search,
     read_tree,
+    search_criteria,
     smart_city,
     snapshot_v2,
     string_order,

@@ -12,8 +12,8 @@ const isInteger = (value: unknown): value is number =>
 	typeof value === 'number' && Number.isInteger(value);
 
 // FastAPI, not the route, bounds a page: these texts are the engine's own.
-export function pageOf(params: ReadParams): { limit: number; offset: number } {
-	const { limit = 100, offset = 0 } = params;
+export function pageOf(params: ReadParams, defaultLimit = 100): { limit: number; offset: number } {
+	const { limit = defaultLimit, offset = 0 } = params;
 	if (!isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT) {
 		throw new ReadError(422, `limit must be an integer from 1 to ${MAX_PAGE_LIMIT}`);
 	}

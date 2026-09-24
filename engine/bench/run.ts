@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import {
 	entityHash,
+	EVALUATIONS,
 	formatDigest,
 	Metamodel,
 	Model,
@@ -62,6 +63,8 @@ const ROWS = {
 	scan: "search q='a', the broadest: every element scored, the hits sorted",
 	scanLongest: '  its longest step',
 	scanRare: "search q='sensor'",
+	criteria: "criteria scan (property contains 'a'): every element matched",
+	criteriaLongest: '  its longest step',
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -103,6 +106,16 @@ function stepped<T>(total: Row, longest: Row | null, steps: Steps<T>): T {
 
 const search = (model: Model, q: string) =>
 	READS['listElementsPage']!(model, new ViewPlacements(), { q, limit: 100 }) as Steps<unknown>;
+
+const criteriaScan = (model: Model) =>
+	EVALUATIONS['searchModel']!(
+		{ model, artifacts: null, placements: new ViewPlacements() },
+		{
+			target: 'element',
+			criteria: [{ type: 'property', name: 'name', op: 'contains', value: 'a' }],
+			limit: 100
+		}
+	);
 
 const count = (n: number) => n.toLocaleString('en-US');
 
@@ -274,6 +287,7 @@ async function pass(): Promise<void> {
 	}
 	stepped('scan', 'scanLongest', search(workingCopy.model, 'a'));
 	stepped('scanRare', null, search(workingCopy.model, 'sensor'));
+	stepped('criteria', 'criteriaLongest', criteriaScan(workingCopy.model));
 	counts = `${count(header.elements)} elements, ${count(header.relationships)} relationships`;
 	// Weighed before the document is read: the last text a regular expression
 	// ran over stays reachable, and further down that is the whole document.

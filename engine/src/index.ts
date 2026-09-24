@@ -1,6 +1,7 @@
 export { dumpIndexes, type IndexDump } from './debug/dump-indexes.ts';
 export { shuffleAdjacency } from './debug/shuffle-adjacency.ts';
 export { verifyConsistent } from './debug/verify-consistent.ts';
+export { EVALUATIONS, type EvalContext, type Evaluation } from './evaluate/index.ts';
 export { parseKey, parseKeyEntry, type KeyRel, type KeySpec } from './metamodel/key.ts';
 export { Metamodel, type EndConstraint } from './metamodel/metamodel.ts';
 export { Multiplicity } from './metamodel/multiplicity.ts';
@@ -75,6 +76,27 @@ export {
 	type WireElement,
 	type WireRelationship
 } from './read/wire.ts';
+export {
+	compileCriteria,
+	matchElement,
+	matchRelationship,
+	nameProp,
+	readCriteria,
+	type AnyOfCriterion,
+	type CompiledCriteria,
+	type ConnectedToTypeCriterion,
+	type Criterion,
+	type CriterionDirection,
+	type EndpointTypeCriterion,
+	type EntityTypeCriterion,
+	type LeafCriterion,
+	type NameIdCriterion,
+	type OrphanCriterion,
+	type PropertyCriterion,
+	type PropertyOp,
+	type RelationCountCriterion
+} from './search/criteria.ts';
+export { searchModel, type SearchResultPage } from './search/search-model.ts';
 export { ByteQueue } from './service/byte-queue.ts';
 export {
 	Scheduler,
