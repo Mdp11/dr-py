@@ -13,8 +13,11 @@ either — so an id never needs to say which file it is in. The Python core is u
 freeze: a fix that touches `core/model`, `core/metamodel` or the model-op applier lands on
 both sides with a fixture. `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left the freeze for FEATURES with B's fifth plan, when the
-five read surfaces defaulted to the engine — they land in TypeScript only now; a bug there
-still lands on both sides with a fixture while the server path lives (MR-1, until F).
+five read surfaces defaulted to the engine, and `core/search`, `core/navigation`,
+`api/search.py`, `routes/read.py::search_model` and `routes/artifacts.py::evaluate_navigation`
+with C's first plan, when navigation and criteria search did — they land in TypeScript only
+now; a bug there still lands on both sides with a fixture while the server path lives (MR-1,
+until F).
 
 ---
 
@@ -35,11 +38,20 @@ read surfaces default to the engine behind per-surface switches, the wait for `r
 fallback notice and the retry overlay, shadow comparison in dev and e2e, and the browser
 benchmark; the forked store — `staging` defaults to `engine`, the user's edits stage in the
 replica's working copy, the legacy store lives behind `staging: legacy`) — and watches `K-32`.
+C (evaluation) is in progress, plan 1 of 8 built: the engine holds the project's artifacts —
+the committed payloads the shell fetches and follows, the staged entries mirrored from the
+frontend's buffer (AD-30) — and serves navigation and criteria search over the working copy,
+by default (`navigation` and `criteria` surfaces, held to the routes by fixture and by shadow
+comparison); a call that reaches a script, or a pattern the regex translator cannot vouch
+for, is refused with 501 and answered by the server, a navigation's page marked so (AD-31).
 The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op applier from
 the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
-surfaces' defaults. C (evaluation) is next. Open after B: `K-29`, `K-32`, `K-35`, `K-36`,
-`K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`, `C-20`, `C-21` in this file; `K-33`, `K-34` in `BACKLOG.md`.
+surfaces' defaults; `core/search`, `core/navigation`, `api/search.py` and the
+`search_model` and `evaluate_navigation` route functions were frozen from C's first plan on
+and left it for features once that plan flipped navigation and criteria search to the engine.
+Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
+`K-49`, `C-21`, `C-22` in this file; `K-33`, `K-34` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -260,12 +272,23 @@ cascade into is named by neither, so it can be hidden from the drawer. The commi
 carries exact ops. Decide per window whether it is worth closing or stays a
 known limit.
 
+### K-49 · An evaluation can reach the engine before the artifacts it names · `open` · *2026-09-24*
+The shell's artifact follower (`frontend/src/lib/engine/artifacts.ts`) loads every payload
+when the replica starts and fetches a peer's created or updated artifact when its feed event
+arrives; the sync holds a read for the replica's phase and `rev` (AD-28) but not for those
+fetches. A navigation that names an artifact evaluated before its payload lands — the first
+`load()` of a page whose replica opened quickly from the cache, or a peer's artifact
+referenced between its event and its fetch — is answered 422 `unknown navigation artifact`
+by the engine where the server finds it. The workspace's wait for `ready` usually covers the
+first load (it starts with the open). Decide whether evaluations wait for the first load
+and for the fetches out, or the window stays a known limit.
+
 ---
 
 ## 3. Cleanups
 
 | ID | Item | Source |
 |---|---|---|
-| C-20 | `core/metamodel/schema.py::_effective_props`' comment says definitions by closer types win; the code keeps the FIRST name seen walking root → leaf, so on a redeclared property the ancestor's definition stays (fixture `metamodel_caches`, type `Mid`). The engine mirrors the code. Decide which was meant; frozen under MR-3 until the metamodel surface defaults to the engine. | 2026-09-18 |
+| C-20 | `done` (2026-09-24, feat/eval-navigation) — `check_metamodel` refuses a property that redeclares an ancestor's, so the two readings never differ on a metamodel that reaches the engine; `_effective_props`' comment now says so. | 2026-09-18 |
 | C-21 | `api/routes/commits.py:785` and `:923` list "apply-cr baseline reset" among what bumps `model_rev` opaquely; apply-CR is a dry run that stages a batch and never resets the baseline. Drop it from both comments (C-12 applies: reword only, no reshaping). | 2026-09-19 |
 | C-22 | `api/routes/artifacts.py::evaluate_navigation`'s `except LookupError` also catches the evaluator's `KeyError`: an unknown `row_element_id` behind a filter or a property step answers 422 `unknown navigation artifact 'x'`, and with no steps the page's `_tree_item` answers 404 `x`. The top-level `artifact_id` refusal names the id unquoted (`unknown navigation artifact n1`, `LookupError` formatted with `str`) where a nested ref's is quoted. The engine mirrors all three (fixture `nav_eval`). Fix on both sides with a fixture. | 2026-09-24 |

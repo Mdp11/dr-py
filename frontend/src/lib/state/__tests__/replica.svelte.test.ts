@@ -1555,6 +1555,78 @@ describe('the artifact follower', () => {
 		expect(sync.setStagedArtifacts).not.toHaveBeenCalled();
 	});
 
+	it("the shadow compares nothing while a commit's refresh is out, and again once it lands", async () => {
+		localStorage.setItem('dr.shadow', '1');
+		const project = fakeProject();
+		let served = 0;
+		let release!: () => void;
+		const refresh = new Promise<void>((resolve) => (release = resolve));
+		server.use(
+			// Ahead of the project's own: the first handler that matches answers.
+			http.get(`${PAGE_ORIGIN}/api/v1/projects/p/artifacts/payloads`, async ({ request }) => {
+				const ids = new URL(request.url).searchParams.getAll('id');
+				if (ids.length > 0) await refresh;
+				const items = [...project.artifacts.values()].filter(
+					(artifact) => ids.length === 0 || ids.includes(artifact.id)
+				);
+				return HttpResponse.json({ items });
+			}),
+			...project.handlers(),
+			http.post('*/model/elements/batch', () => {
+				served += 1;
+				return HttpResponse.json({ items: [] });
+			})
+		);
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		await macrotask();
+		const shadowLines = () =>
+			errors.mock.calls.filter(([line]) =>
+				String(line).startsWith('[shadow] elements getElementsBatch {"ids":["e_000001"]}')
+			);
+		const client = links[0]!.client;
+
+		try {
+			const tempId = stageArtifactCreate('navigation', 'b', scope('Project'), null);
+			await vi.waitFor(async () =>
+				expect(
+					(await client.call<{ total: number }>('evaluateNavigation', { artifact_id: tempId }))
+						.total
+				).toBeGreaterThan(0)
+			);
+
+			// The commit clears the buffer and is announced in one run; its payloads are held.
+			project.artifacts.set('n2', nav('n2', 1, 'Project'));
+			clearStagedArtifacts();
+			notifyArtifactCommit({
+				idMap: { [tempId]: 'n2' },
+				changed: [header(project.artifacts.get('n2') as ReturnType<typeof nav>)],
+				deletedIds: []
+			});
+			expect(getStagedArtifactDepth()).toBe(0);
+			await getElementsBatch(['e_000001']);
+			await macrotask();
+			await macrotask();
+			expect(served).toBe(0);
+			expect(shadowLines()).toEqual([]);
+
+			release();
+			await vi.waitFor(() =>
+				expect(client.call('evaluateNavigation', { artifact_id: tempId })).rejects.toThrow(
+					`unknown navigation artifact ${tempId}`
+				)
+			);
+			await getElementsBatch(['e_000001']);
+			await vi.waitFor(() => expect(shadowLines()).toHaveLength(1));
+			expect(served).toBe(2);
+		} finally {
+			release();
+		}
+	});
+
 	it('a staged payload held in $state reaches the engine as a plain copy', async () => {
 		const project = fakeProject();
 		project.artifacts.set('n1', nav('n1', 1, 'Organization'));

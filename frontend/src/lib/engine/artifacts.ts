@@ -27,6 +27,12 @@ export type ArtifactFollower = {
 		deletedIds: string[];
 	}): void;
 	stagedChanged(): void;
+	/**
+	 * Whether the engine's staged overlay holds entries the buffer does not:
+	 * a commit's, while its refresh is out, or a failed refresh's, until
+	 * newer committed news of what they stand for.
+	 */
+	hasOverlay(): boolean;
 	/** Every answer that comes after it is dropped, and nothing more is asked. */
 	stop(): void;
 	/** Resolves once no fetch is out and no staged push waits. */
@@ -259,6 +265,10 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 		},
 
 		stagedChanged,
+
+		hasOverlay() {
+			return holds.size > 0 || carried.length > 0;
+		},
 
 		stop() {
 			stopped = true;

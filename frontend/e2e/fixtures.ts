@@ -1,9 +1,9 @@
 /**
- * The test every workspace spec runs under: all five read surfaces on the
- * engine (now every one by default — see `lib/engine/surfaces.ts`) and
- * shadow comparison on, set in `localStorage` before the app boots, and a
- * test fails on any `[shadow]` console line — the engine and the server
- * answered one read differently.
+ * The test every workspace spec runs under: every surface on the engine
+ * (the defaults — see `lib/engine/surfaces.ts`) and shadow comparison on,
+ * set in `localStorage` before the app boots, and a test fails on any
+ * `[shadow]` console line — the engine and the server answered one read
+ * differently.
  */
 
 import { test as base, expect, type BrowserContext } from '@playwright/test';

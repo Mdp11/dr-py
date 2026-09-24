@@ -200,8 +200,8 @@ def _effective_props(
 ) -> list[PropertyDef]:
     props: list[PropertyDef] = []
     seen: set[str] = set()
-    # walk root -> leaf so overrides by closer types win; here child appends
-    # after parent
+    # root -> leaf; check_metamodel refuses a redeclared property, so the
+    # first definition seen is the only one
     for type_name in reversed(chain):
         t = types[type_name]
         for p in t.properties:

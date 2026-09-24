@@ -585,6 +585,65 @@ describe('the artifact follower', () => {
 		expect(f.fetches).toEqual([undefined]);
 		expect(f.methods()).toEqual(['setArtifacts', 'setStagedArtifacts']);
 		expect(f.posted.at(-1)).toEqual({ method: 'setStagedArtifacts', entries: [entry] });
+		expect(f.follower.hasOverlay()).toBe(false);
+	});
+
+	it("hasOverlay holds while a commit's entries lie under the buffer, and only then", async () => {
+		const over = await ready();
+		const f = follow(over.sync);
+		f.follower.load();
+		await f.follower.settled();
+		const created = (id: string): WireStagedArtifact => ({
+			op: 'create',
+			id,
+			kind: 'navigation',
+			name: id,
+			payload: scope('Organization')
+		});
+		// Entries still in the buffer are not an overlay: the buffer's depth counts them.
+		f.setStaged([created('tmp_a')]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		expect(f.follower.hasOverlay()).toBe(false);
+
+		f.committed.set('n1', artifact('n1', 1, 'Organization'));
+		const refresh = f.gate();
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: { tmp_a: 'n1' },
+			changed: [header(f.committed.get('n1')!)],
+			deletedIds: []
+		});
+		expect(f.follower.hasOverlay()).toBe(true);
+		await macrotask();
+		expect(f.follower.hasOverlay()).toBe(true);
+		refresh.resolve();
+		await f.follower.settled();
+		expect(f.follower.hasOverlay()).toBe(false);
+
+		// A failed refresh's entries stay until newer committed news: here, a load.
+		f.setStaged([created('tmp_b')]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		f.committed.set('n2', artifact('n2', 1, 'Organization'));
+		const failed = f.gate();
+		const reload = f.gate();
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: { tmp_b: 'n2' },
+			changed: [header(f.committed.get('n2')!)],
+			deletedIds: []
+		});
+		failed.reject(new Error('offline'));
+		reload.reject(new Error('offline'));
+		await f.follower.settled();
+		expect(f.follower.hasOverlay()).toBe(true);
+
+		f.follower.load();
+		await f.follower.settled();
+		expect(f.follower.hasOverlay()).toBe(false);
 	});
 
 	it('a commit whose payloads an event brought first fetches nothing again', async () => {

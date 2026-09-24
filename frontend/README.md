@@ -806,9 +806,8 @@ The TypeScript engine (`../engine`) runs a full replica of the model in a
 worker of the sandbox site (`../sandbox`); `lib/engine/` is the app's side of
 it and `lib/state/replica.svelte.ts` wires it into the workspace (see
 "Wiring" below). The model reads, navigations and criteria searches can be
-answered by it, one switch per surface (see "Surfaces"), the read surfaces on
-`engine` by default and the two evaluations on `server`; a status-bar
-indicator shows its state.
+answered by it, one switch per surface (see "Surfaces"), every one on
+`engine` by default; a status-bar indicator shows its state.
 
 **Aliases and the types-only rule.** `$engine` points at
 `../engine/src/index.ts` and `$sandbox` at `../sandbox/src`, in `kit.alias`
@@ -1351,7 +1350,7 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
   `SURFACE_DEFAULTS` — `engine` for the five read surfaces
-  (`READ_SURFACES`), `server` for `navigation` and `criteria` — and
+  (`READ_SURFACES`) and for `navigation` and `criteria` — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
@@ -1409,12 +1408,17 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   hold edits the server has not seen. It is asked before `server()` is
   called, after each `quiet()` and after each re-test round, so a
   comparison under way when an edit is staged ends silently. The replica
-  store hands it `anyStaged() || getStagedArtifactDepth() > 0`: `anyStaged`
-  of `lib/engine/staged-probe.ts` asks the model store's engine half
-  `hasStagedOps()` while it is attached (with staging on legacy nothing is
-  staged in the replica, and it is false), and an entry in the staged
-  artifact buffer is mirrored into the engine's artifact set, which the
-  server has not seen either.
+  store hands it
+  `anyStaged() || getStagedArtifactDepth() > 0 || hasOverlay()`:
+  `anyStaged` of `lib/engine/staged-probe.ts` asks the model store's engine
+  half `hasStagedOps()` while it is attached (with staging on
+  legacy nothing is staged in the replica, and it is false); an entry in the
+  staged artifact buffer is mirrored into the engine's artifact set, which
+  the server has not seen either; and the artifact follower's `hasOverlay()`
+  holds from a commit's announcement until its payload refresh lands (or,
+  for a failed refresh, until newer committed news): the buffer is empty
+  then, but the engine still reads the commit's entries over the committed
+  artifacts.
 - `quiet.ts` is the tiny registry the re-test's `quiet()` is built from:
   `addQuietProbe(probe)` registers a `() => Promise<void>` and returns the
   function that drops it again; `quiet()` awaits every registered probe (none

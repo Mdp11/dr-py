@@ -11,7 +11,7 @@ are promoted into this directory.
 | — | Program design (this directory) | approved 2026-09-18 |
 | A | Engine foundation | done — every golden fixture passes in Node; at M the engine opens a snapshot in 2.3 s of CN-3's 3 s and one open replica holds 231 MB of heap *(measured, Node 22, `pixi run engine-bench`, 2026-09-18)* |
 | B | Replica and frontend seam | done — six plans built (exact server state: `K-30` and `K-31` closed, digest and `prev_rev` on every delta carrier; v2 snapshot writers, the snapshot descriptor, blob and tail routes, `X-Metamodel-Id`; the engine service: CT-4 dispatcher and scheduler, the index build and the digest check in steps, the five read surfaces ported and held to the read routes by fixture — at M the open is 2.4 s, the longest step 12 ms *(measured, Node 22, 2026-09-21)*; the sandbox site and the shell: the replica opens from the cache or the network and follows by delta, tail and re-bootstrap, with a status-bar indicator as its only face; the transport swap: the five read surfaces default to the engine, each behind its own `dr.surfaces` switch with the server as fallback, the workspace waits for `ready` behind an honest progress bar, a tab whose engine could not start shows a dismissible fallback notice and reads from the server, a replica that cannot be rebuilt blocks the workspace behind a `Retry` overlay that keeps uncommitted edits, and shadow comparison holds the engine to the server in dev and in every e2e spec; in the browser (`engine-bench-browser`) the cold open is 1.84 s, the worker's heap 115 MB, the longest slice bounded from outside 51 ms (27 ms once parsing runs), `stage` of 1,000 ops 58 ms and `unstage` 52 ms through the port *(measured, Chromium 148, WSL2, 2026-09-22)*; the forked store: the model store forks into `model-legacy.svelte.ts` and `model-engine.svelte.ts` over a shared half, `staging` defaults to `engine`, the user's edits stage in the replica's working copy and mirror for the synchronous readers, the legacy store stays reachable behind `staging: legacy`, the DiffDrawer gains a conflicts section, and a divergence-recovery test is green) |
-| C | Evaluation | not started |
+| C | Evaluation | in progress — plan 1 of 8 built (artifacts in the engine, navigation and criteria search served by it) |
 | D | Scripts in the browser | not started |
 | E | Headless host | not started |
 | F | Thin server and deploy | not started |
@@ -109,9 +109,11 @@ start of its port until its surface defaults to the engine. After that, features
 land in TypeScript only. A bug fixed during a port lands on both sides, with a fixture, and so
 does a bug found after the default flips, for as long as the server path lives (MR-1, until F).
 `routes/read.py`'s route functions and `routes/elements.py::get_element` left the freeze for
-features with B's fifth plan, when the five read surfaces defaulted to the engine; `core/model`,
-`core/metamodel` and the model-op applier stay frozen. Areas not yet being ported carry on as
-normal.
+features with B's fifth plan, when the five read surfaces defaulted to the engine; `core/search`,
+`core/navigation`, `api/search.py`, `routes/read.py::search_model` and
+`routes/artifacts.py::evaluate_navigation` left it with C's first plan, when navigation and
+criteria search defaulted to the engine; `core/model`, `core/metamodel` and the model-op
+applier stay frozen. Areas not yet being ported carry on as normal.
 
 **MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
 engine on a small fixture model. The route-level mock tests of its server path stay while

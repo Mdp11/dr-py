@@ -232,3 +232,34 @@ keystroke would move the caret; predicting batch ids and versions would make the
 drift the first time an event and an answer crossed.
 **Rejected.** A per-field draft (every emitter would need one); applying `stage` answers to
 the mirror (the `changed` event, not the answer, is the engine's word on the staged list).
+
+## AD-30 · The staged artifact buffer stays in the frontend; the engine mirrors it
+**Decision.** Staged artifact edits stay in the frontend's buffer, which the commit posts.
+The engine holds the committed payloads the shell hands in and a copy of the buffer, sent
+again on every change (`setArtifacts`, `putArtifacts`, `setStagedArtifacts`: context methods,
+CT-4); evaluation resolves references against both, staged entries first (CT-5).
+**Why.** A payload is checked on the server at commit (its schema, the name clash, derived
+metadata such as a snippet's entry points), and none of that is in the engine. An artifact
+entry replaces its payload whole and meets no model op, so there is nothing to rebase: a copy
+is exact. Checkout, leases and the commit path stay as they are.
+**Rejected.** An engine-owned buffer: a second implementation of staging, checkout and the
+commit's artifact ops for no reader that needs it. A closure per call (the frontend resolving
+every artifact a call names and sending them with it): every caller would have to know what an
+evaluation reaches.
+**Consequences.** The shell follows the committed payloads by feed event and after each own
+commit; while a commit's payloads are fetched, the entries it carried stay in the overlay, so
+no evaluation reads a committed artifact as missing.
+
+## AD-31 · Before scripts run in the browser, a call that reaches a script is the server's
+**Decision.** Until sub-project D, the engine refuses a navigation that reaches a configured
+script step — and a criterion pattern it cannot match exactly as Python's `re` does — with 501
+before any work, and the client asks the server instead, whole.
+**Why.** One table or navigation never mixes committed and working state: a result is either
+all the engine's over the working copy or all the server's over committed state.
+**Rejected.** Forwarding each script call from the engine to the server: its inputs would be
+working-copy elements the server has never seen. Placeholder cells for script results: a
+result that is neither side's.
+**Consequences.** The 501 (`reaches a script`, `reaches an unsupported pattern`) and the
+fallback marker (`fallback: 'script' | 'pattern'` on a navigation page, a note in the results
+dock) say that a result reads committed state. D deletes both for scripts; the pattern
+refusal stays while the engine's regex translator covers a subset of Python's syntax.

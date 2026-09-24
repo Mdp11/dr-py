@@ -1,7 +1,8 @@
 /**
- * The workspace read by the engine: every surface answered by the replica in
- * the real sandbox, against the real backend, with a second API client as
- * the peer — and a tab whose engine cannot start reads from the server.
+ * The workspace read by the engine: every read surface answered by the
+ * replica in the real sandbox, against the real backend, with a second API
+ * client as the peer — and a tab whose engine cannot start reads from the
+ * server. The evaluations are `eval-navigation.spec.ts`'s.
  */
 
 import { test, expect, engineMode, watchShadow } from './fixtures';

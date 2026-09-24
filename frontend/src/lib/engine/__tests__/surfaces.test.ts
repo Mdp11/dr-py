@@ -15,7 +15,7 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces on the engine and the two evaluations on the server by default', () => {
+	it('names the five read surfaces and the two evaluations, every one on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
 		expect(SURFACES).toEqual([...READ_SURFACES, 'navigation', 'criteria']);
 		expect(SURFACE_DEFAULTS).toEqual({
@@ -24,8 +24,8 @@ describe('the surface switches', () => {
 			relationships: 'engine',
 			tree: 'engine',
 			summary: 'engine',
-			navigation: 'server',
-			criteria: 'server'
+			navigation: 'engine',
+			criteria: 'engine'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
@@ -33,16 +33,16 @@ describe('the surface switches', () => {
 	it('dr.surfaces sets navigation and criteria, each on its own, whatever staging says', () => {
 		for (const staging of ['engine', 'legacy']) {
 			expect(
-				readSurfaces(storing(`{"staging": "${staging}", "navigation": "engine"}`))
-			).toMatchObject({ navigation: 'engine', criteria: 'server' });
-			expect(
-				readSurfaces(storing(`{"staging": "${staging}", "criteria": "engine"}`))
+				readSurfaces(storing(`{"staging": "${staging}", "navigation": "server"}`))
 			).toMatchObject({ navigation: 'server', criteria: 'engine' });
+			expect(
+				readSurfaces(storing(`{"staging": "${staging}", "criteria": "server"}`))
+			).toMatchObject({ navigation: 'engine', criteria: 'server' });
 		}
-		expect(readSurfaces(storing('{"navigation": "engine", "criteria": "engine"}'))).toEqual({
+		expect(readSurfaces(storing('{"navigation": "server", "criteria": "server"}'))).toEqual({
 			...SURFACE_DEFAULTS,
-			navigation: 'engine',
-			criteria: 'engine'
+			navigation: 'server',
+			criteria: 'server'
 		});
 	});
 
@@ -134,8 +134,14 @@ describe('the surface switches', () => {
 			'{"staging": "engine", "elements": "server", "search": "server", ' +
 			'"relationships": "server", "tree": "server", "summary": "server", ' +
 			'"navigation": "server", "criteria": "server"}';
-		expect(readSwitches(storing(allServer)).surfaces).toEqual(SURFACE_DEFAULTS);
-		const surfaces = readSwitches(storing('{"staging": "engine"}')).surfaces;
+		expect(readSwitches(storing(allServer)).surfaces).toEqual({
+			...SURFACE_DEFAULTS,
+			navigation: 'server',
+			criteria: 'server'
+		});
+		const surfaces = readSwitches(
+			storing('{"staging": "engine", "navigation": "server", "criteria": "server"}')
+		).surfaces;
 		for (const surface of READ_SURFACES) expect(surfaces[surface]).toBe('engine');
 		expect(surfaces).toMatchObject({ navigation: 'server', criteria: 'server' });
 	});

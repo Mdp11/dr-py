@@ -180,8 +180,9 @@ function _anyEngine(): boolean {
 /**
  * Routes the read surfaces through `sync`. In dev, with `dr.shadow` set, the
  * seam is installed again with a shadow once that module has loaded, idle
- * while the model store's engine half has an edit staged or an artifact entry
- * is staged; a build holds none of it.
+ * while the model store's engine half has an edit staged, an artifact entry
+ * is staged, or the follower still lays a commit's entries over the
+ * committed artifacts; a build holds none of it.
  */
 function installSeam(sync: ReplicaSync): void {
 	uninstallSeam();
@@ -196,7 +197,10 @@ function installSeam(sync: ReplicaSync): void {
 				const shadow = createShadow({
 					rev: () => sync.status().rev,
 					quiet,
-					staged: () => anyStaged() || getStagedArtifactDepth() > 0,
+					staged: () =>
+						anyStaged() ||
+						getStagedArtifactDepth() > 0 ||
+						(_follower?.follower.hasOverlay() ?? false),
 					report: (line) => console.error(line)
 				});
 				installEngineSeam(createEngineSeam(sync, surfaces, shadow));

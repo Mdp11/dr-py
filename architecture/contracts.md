@@ -135,9 +135,21 @@ event     {event, …}                     engine → client, unsolicited
   `{batch}`, `{entity, incident?}`) → `{changes}`; `stagedDiff` → before / after pairs from the
   committed images; `staged` and `conflicts` → the batches, answered in any state. Context,
   in any state: `setViewPlacement {view_id, element_ids}`, `dropViewPlacement {view_id}` —
-  each loaded view's committed placements, which the excluded pool reads. The shell remembers
-  them and sends them again to every new worker, before any read.
+  each loaded view's committed placements, which the excluded pool reads; `setArtifacts
+  {artifacts}`, `putArtifacts {changed, deleted_ids, staged?}`, `setStagedArtifacts
+  {entries}` — the project's committed artifacts with their payloads, and the staged entries
+  mirrored from the frontend's buffer (AD-30). The shell remembers both and sends them again
+  to every new worker, before any read; the engine keeps them across `close` and `open`.
 - A result is the HTTP response body of the `lib/api` function the method is named after.
+  Evaluations are reads over the working copy: `searchModel {target, criteria, limit,
+  offset}` and `evaluateNavigation {definition | artifact_id, row_element_id, limit,
+  offset}`, each resolving every artifact it names — staged ones included — before its first
+  step.
+- An evaluation the engine must not answer is refused with 501 before any work: `reaches a
+  script` (a navigation that reaches a configured script step) or `reaches an unsupported
+  pattern` (a criterion pattern the engine cannot match exactly as Python's `re` does). The
+  client answers exactly those two from the server — a navigation's page marked with the
+  reason (AD-31); any other 501 is an error.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed
@@ -177,9 +189,11 @@ event     {event, …}                     engine → client, unsolicited
    in B: no read takes `committed: true`; the committed image crosses through `stagedDiff`
    instead.*
 5. The working copy covers the **model** and **artifact** families — the inputs of
-   evaluation. References resolve against it, staged artifacts included. View and
-   metamodel staged buffers stay in the frontend. *B built the model family; the artifact
-   family is C's.*
+   evaluation. The artifact family is the committed payloads the shell hands in plus the
+   staged entries mirrored from the frontend's buffer; references resolve against it,
+   staged artifacts included. View and metamodel staged buffers stay in the frontend
+   (AD-30). A call that reaches a script reads committed state on the server until scripts
+   run in the browser (AD-31).
 6. Temp ids (`tmp_` prefix) never leave the client except as an op's `temp_id`. The server
    mints every real id.
 7. `adoptStaged` replays staged batches, under their ids, on a freshly opened replica — what a
