@@ -23,6 +23,7 @@ import * as openJourney from '../open-journey';
 import { clearActiveProject, setActiveProject } from '../active-project.svelte';
 import {
 	clearStagedArtifacts,
+	getStagedArtifactDepth,
 	notifyArtifactCommit,
 	resetArtifactEdits,
 	stageArtifactCreate,
@@ -1419,7 +1420,8 @@ describe('the artifact follower', () => {
 			{ op: 'create', id: tempId, kind: 'navigation', name: 'b', payload: scope('Project') }
 		]);
 
-		// The commit clears the buffer and is announced in one run: one put carries both.
+		// The commit clears the buffer and is announced in one run: the created
+		// artifact goes under its real id at once, and one put carries both.
 		artifacts.set('n2', nav('n2', 1, 'Project'));
 		clearStagedArtifacts();
 		notifyArtifactCommit({
@@ -1427,24 +1429,68 @@ describe('the artifact follower', () => {
 			changed: [header(artifacts.get('n2')!)],
 			deletedIds: []
 		});
+		const create = {
+			op: 'create',
+			id: tempId,
+			kind: 'navigation',
+			name: 'b',
+			payload: scope('Project')
+		};
+		expect(sync.setStagedArtifacts).toHaveBeenCalledTimes(2);
+		expect(sync.setStagedArtifacts).toHaveBeenLastCalledWith([create, { ...create, id: 'n2' }]);
 		await vi.waitFor(() => expect(sync.putArtifacts).toHaveBeenCalledTimes(3));
 		expect(sync.putArtifacts).toHaveBeenLastCalledWith([wire(nav('n2', 1, 'Project'))], [], []);
 		await macrotask();
-		expect(sync.setStagedArtifacts).toHaveBeenCalledOnce();
+		expect(sync.setStagedArtifacts).toHaveBeenCalledTimes(2);
 	});
 
-	it('a buffer staged before the start reaches the sync', async () => {
+	it("a restart of the same project's replica mirrors the buffer kept since", async () => {
 		const sync = spySync();
 		configureReplica({ sync });
 		servePayloads(new Map());
-		const tempId = stageArtifactCreate('navigation', 'b', scope('Project'), null);
 		setActiveProject('p');
-
 		startReplica();
-		await vi.waitFor(() => expect(sync.setStagedArtifacts).toHaveBeenCalledOnce());
-		expect(sync.setStagedArtifacts).toHaveBeenCalledWith([
+		const tempId = stageArtifactCreate('navigation', 'b', scope('Project'), null);
+		const entries = [
 			{ op: 'create', id: tempId, kind: 'navigation', name: 'b', payload: scope('Project') }
-		]);
+		];
+		await vi.waitFor(() => expect(sync.setStagedArtifacts).toHaveBeenCalledOnce());
+
+		stopReplica();
+		startReplica();
+
+		await vi.waitFor(() => expect(sync.setStagedArtifacts).toHaveBeenCalledTimes(2));
+		expect(sync.setStagedArtifacts).toHaveBeenLastCalledWith(entries);
+		expect(getStagedArtifactDepth()).toBe(1);
+	});
+
+	it("another project's replica gets none of the buffer, and the buffer is emptied", async () => {
+		const first = fakeProject({ projectId: 'a' });
+		const second = fakeProject({ projectId: 'b' });
+		server.use(...first.handlers(), ...second.handlers());
+		realReplica();
+		setActiveProject('a');
+		startReplica();
+		await vi.waitFor(() => expect(getReplicaStatus().phase).toBe('ready'));
+		const tempId = stageArtifactCreate('navigation', 'x', scope('Organization'), null);
+		const inA = links[0]!.client;
+		await vi.waitFor(async () =>
+			expect(
+				(await inA.call<{ total: number }>('evaluateNavigation', { artifact_id: tempId })).total
+			).toBeGreaterThan(0)
+		);
+
+		stopReplica();
+		setActiveProject('b');
+		startReplica();
+		await vi.waitFor(() => expect(getReplicaStatus().phase).toBe('ready'));
+		await macrotask();
+
+		expect(getStagedArtifactDepth()).toBe(0);
+		expect(links).toHaveLength(2);
+		await expect(
+			links[1]!.client.call('evaluateNavigation', { artifact_id: tempId })
+		).rejects.toThrow(`unknown navigation artifact ${tempId}`);
 	});
 
 	it('stopReplica drops a payload answer that comes after it', async () => {

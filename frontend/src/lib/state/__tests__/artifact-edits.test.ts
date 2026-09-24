@@ -17,7 +17,10 @@ import {
 	notifyArtifactCommit,
 	onArtifactStageDiscarded,
 	onArtifactStagedDelete,
-	resetArtifactEdits
+	resetArtifactEdits,
+	bindStagedArtifacts,
+	onStagedArtifactsChanged,
+	stagedArtifactsForEngine
 } from '../artifact-edits.svelte';
 import { isTempId } from '../ops';
 import type { ArtifactHeader } from '$lib/api/types';
@@ -228,5 +231,60 @@ describe('additional coalescing + edge cases', () => {
 				entry_points: null
 			})
 		]);
+	});
+});
+
+describe('the engine mirror and the project binding', () => {
+	it('every change is announced, and the entries read as plain copies in staging order', () => {
+		const heard = vi.fn();
+		const off = onStagedArtifactsChanged(heard);
+		const draft = { kind: 'path', steps: [] as unknown[] };
+		stageArtifactCreate('navigation', 'n', draft, null);
+		stageArtifactUpdate('a1', { name: 'renamed' });
+		stageArtifactDelete('a2', header('a2'));
+		clearStagedArtifacts();
+		clearStagedArtifacts();
+		off();
+		stageArtifactCreate('navigation', 'unheard', {}, null);
+
+		expect(heard).toHaveBeenCalledTimes(4);
+		resetArtifactEdits();
+		stageArtifactCreate('navigation', 'n', draft, null);
+		const [entry] = stagedArtifactsForEngine();
+		expect(entry).toEqual({
+			op: 'create',
+			id: expect.any(String),
+			kind: 'navigation',
+			name: 'n',
+			payload: draft
+		});
+		expect((entry as { payload: unknown }).payload).not.toBe(draft);
+		stageArtifactUpdate('a1', { payload: { kind: 'path' } });
+		stageArtifactDelete('a2', header('a2'));
+		expect(stagedArtifactsForEngine().slice(1)).toEqual([
+			{ op: 'update', id: 'a1', payload: { kind: 'path' } },
+			{ op: 'delete', id: 'a2' }
+		]);
+	});
+
+	it("a buffer staged in another project is dropped silently; the same project's is kept", () => {
+		const discarded = vi.fn();
+		const heard = vi.fn();
+		const offDiscard = onArtifactStageDiscarded(discarded);
+		const offHeard = onStagedArtifactsChanged(heard);
+		bindStagedArtifacts('a');
+		stageArtifactCreate('navigation', 'n', {}, null);
+		heard.mockClear();
+
+		bindStagedArtifacts('a');
+		expect(getStagedArtifactDepth()).toBe(1);
+		expect(heard).not.toHaveBeenCalled();
+
+		bindStagedArtifacts('b');
+		expect(getStagedArtifactDepth()).toBe(0);
+		expect(heard).toHaveBeenCalledOnce();
+		expect(discarded).not.toHaveBeenCalled();
+		offDiscard();
+		offHeard();
 	});
 });

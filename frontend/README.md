@@ -1472,9 +1472,11 @@ sync exists:
   user's own commit changed (`onArtifactCommit`). The staged artifact buffer
   is mirrored too: `artifact-edits.svelte.ts` fires
   `onStagedArtifactsChanged` on every change and `stagedArtifactsForEngine()`
-  hands the entries as `$state.snapshot` copies. `stopReplica()` /
-  `resetReplica()` stop the follower, so a payload answer for the old
-  project is dropped (see `lib/engine/README.md`).
+  hands the entries as `$state.snapshot` copies. The buffer is bound to the
+  project it was staged in (`bindStagedArtifacts`, from `startReplica()` and
+  `boot()`): opening another project drops it, the same project keeps it.
+  `stopReplica()` / `resetReplica()` stop the follower, so a payload answer
+  for the old project is dropped (see `lib/engine/README.md`).
 - **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
   drawer's revert (`HistoryDrawer.svelte::doRevert`) both call
   `beginReplicaCommit()` right before the POST, hand `commitChanges` /

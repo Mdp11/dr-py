@@ -39,6 +39,7 @@ import {
 } from '$lib/engine/sync';
 import { getActiveProjectId } from './active-project.svelte';
 import {
+	bindStagedArtifacts,
 	getStagedArtifactDepth,
 	onArtifactCommit,
 	onStagedArtifactsChanged,
@@ -77,8 +78,8 @@ const _statusListeners = new Set<StatusListener>();
 /** The started replica's artifact follower, and the project it follows. */
 let _follower: { projectId: string; follower: ArtifactFollower } | null = null;
 
-onArtifactCommit(({ changed, deletedIds }) =>
-	_follower?.follower.onCommit({ changed, deletedIds })
+onArtifactCommit(({ idMap, changed, deletedIds }) =>
+	_follower?.follower.onCommit({ idMap, changed, deletedIds })
 );
 onStagedArtifactsChanged(() => _follower?.follower.stagedChanged());
 
@@ -247,6 +248,8 @@ export function startReplica(): void {
 	// structure rev on every delta the replica applies, as the legacy half does.
 	if (_switches?.staging === 'engine') attachEngine(engineHandle(sync));
 	sync.open(projectId);
+	// Before the follower mirrors the buffer: one staged in another project is dropped.
+	bindStagedArtifacts(projectId);
 	follow(sync, projectId);
 }
 
@@ -264,7 +267,7 @@ function follow(sync: ReplicaSync, projectId: string): void {
 	});
 	_follower = { projectId, follower };
 	follower.load();
-	// The sync forgot the buffer at its last stop; a buffer kept since goes again.
+	// The sync forgot the buffer at its last stop; the project's own, kept since, goes again.
 	if (getStagedArtifactDepth() > 0) follower.stagedChanged();
 }
 

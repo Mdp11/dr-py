@@ -29,6 +29,7 @@
 	import { hasUnsavedWork } from '$lib/state/unsaved';
 	import {
 		beginJourney,
+		bindStagedArtifacts,
 		cancelJourney,
 		cancelOpenProgress,
 		clearModelError,
@@ -157,6 +158,13 @@
 			// nulls `_view` AND resets the journal; the boot sequence's own
 			// refreshView() below repopulates it for this project.
 			clearViewState();
+			// Same leak, artifact side: the staged artifact buffer is a module-scope
+			// singleton `commitStaged` reads too. Bound to the project it was staged
+			// in, it is dropped only when that project is not this one, so a
+			// re-entry of the same project keeps it. (`startReplica()`, mounted
+			// first, binds it already, so the replica never mirrors a foreign one.)
+			const projectId = getActiveProjectId();
+			if (projectId) bindStagedArtifacts(projectId);
 			// Same leak, metamodel side: the staged-move store is
 			// a module-scope singleton too, and `commitStaged` reads it
 			// unconditionally. It is re-pointed only by `initMetamodelStage`, which

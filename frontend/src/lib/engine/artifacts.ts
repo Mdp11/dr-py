@@ -17,8 +17,15 @@ export type ArtifactFollower = {
 	/** Every committed artifact again: at the start, and after a feed reconnect. */
 	load(): void;
 	onEvent(action: 'created' | 'updated' | 'deleted', header: ArtifactMark): void;
-	/** The user's own commit landed; its staged buffer was cleared in the same run. */
-	onCommit(info: { changed: ArtifactMark[]; deletedIds: string[] }): void;
+	/**
+	 * The user's own commit landed; its staged buffer was cleared in the same
+	 * run. `idMap` names each created artifact's real id by its temp id.
+	 */
+	onCommit(info: {
+		idMap: Readonly<Record<string, string>>;
+		changed: ArtifactMark[];
+		deletedIds: string[];
+	}): void;
 	stagedChanged(): void;
 	/** Every answer that comes after it is dropped, and nothing more is asked. */
 	stop(): void;
@@ -38,13 +45,42 @@ const wire = ({ id, kind, name, artifact_rev, payload }: Artifact): WireArtifact
 });
 
 /**
+ * `buffer` laid over `base` as the buffer coalesces its own entries: an
+ * update over a create or an update merges into it, anything else replaces it.
+ */
+function compose(
+	base: readonly WireStagedArtifact[],
+	buffer: readonly WireStagedArtifact[]
+): WireStagedArtifact[] {
+	const out = new Map<string, WireStagedArtifact>();
+	for (const entry of base) out.set(entry.id, entry);
+	for (const entry of buffer) {
+		const prior = out.get(entry.id);
+		if (entry.op !== 'update' || prior === undefined || prior.op === 'delete') {
+			out.set(entry.id, entry);
+			continue;
+		}
+		out.set(entry.id, {
+			...prior,
+			...(entry.name === undefined ? {} : { name: entry.name }),
+			...(entry.payload === undefined ? {} : { payload: entry.payload })
+		});
+	}
+	return [...out.values()];
+}
+
+/**
  * Keeps the sync's artifact context the project's: its committed payloads
  * and the frontend's staged buffer. Fetches run one at a time in the order
- * asked, so a later answer never lands under an earlier one. A commit's
- * refresh holds the staged pushes: the engine reads the working copy the
- * commit came from until one `putArtifacts` brings its payloads with the
- * buffer as it is then. A failed fetch leaves the context as it was; the
- * next `load()` heals it.
+ * asked, so a later answer never lands under an earlier one.
+ *
+ * A commit's refresh holds the staged pushes. At once, the staged overlay
+ * becomes the entries the commit carried, each created one ALSO under its
+ * real id, with the buffer over them: until one `putArtifacts` brings the
+ * payloads with the buffer as it is then, the engine reads the working copy
+ * the commit came from under either id. A failed refresh keeps its entries
+ * in the overlay until the next `load()` lands, which brings what it could
+ * not; any other failed fetch leaves the context as it was until then.
  */
 export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFollower {
 	const { sync } = deps;
@@ -53,8 +89,12 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 	let revs = new Map<string, number>();
 	let chain: Promise<void> = Promise.resolve();
 	let running = 0;
-	/** Commit refreshes asked and not yet landed. */
-	let holding = 0;
+	/** The buffer as last read: at a commit, the entries it carried. */
+	let latest: WireStagedArtifact[] = [];
+	/** Per commit refresh not yet landed, the entries it lays under the buffer. */
+	const holds = new Set<WireStagedArtifact[]>();
+	/** The entries of refreshes that failed, laid under the buffer until a `load()` lands. */
+	let carried: WireStagedArtifact[] = [];
 	let pushQueued = false;
 	const idle: (() => void)[] = [];
 
@@ -87,8 +127,20 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 		for (const id of deletedIds) revs.delete(id);
 	};
 
+	const read = (): WireStagedArtifact[] => {
+		latest = deps.staged();
+		return latest;
+	};
+
+	/** What the engine's staged overlay should be: the buffer over every held or carried entry. */
+	const overlay = (): WireStagedArtifact[] => {
+		const buffer = read();
+		if (holds.size === 0 && carried.length === 0) return buffer;
+		return compose([...carried, ...[...holds].flat()], buffer);
+	};
+
 	const pushStaged = () => {
-		sync.setStagedArtifacts(deps.staged());
+		sync.setStagedArtifacts(overlay());
 	};
 
 	const stagedChanged = () => {
@@ -98,7 +150,9 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 		queueMicrotask(() => {
 			pushQueued = false;
 			try {
-				if (!stopped && holding === 0) pushStaged();
+				if (stopped) return;
+				if (holds.size === 0) pushStaged();
+				else read();
 			} finally {
 				release();
 			}
@@ -112,6 +166,9 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 				if (stopped) return;
 				sync.setArtifacts(list.map(wire));
 				revs = new Map(list.map((artifact) => [artifact.id, artifact.artifact_rev]));
+				if (carried.length === 0) return;
+				carried = [];
+				if (holds.size === 0) pushStaged();
 			});
 		},
 
@@ -132,27 +189,37 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 			});
 		},
 
-		onCommit({ changed, deletedIds }) {
+		onCommit({ idMap, changed, deletedIds }) {
 			if (stopped) return;
 			// A commit that moved no artifact changed nothing a staged entry stands for.
 			if (changed.length === 0 && deletedIds.length === 0) {
 				stagedChanged();
 				return;
 			}
-			holding += 1;
+			// The buffer's clear has not been read yet: `latest` is what the commit carried.
+			const aliases = latest.flatMap((entry) => {
+				const realId = entry.op === 'create' ? idMap[entry.id] : undefined;
+				return realId === undefined ? [] : [{ ...entry, id: realId }];
+			});
+			const held = [...latest, ...aliases];
+			holds.add(held);
+			pushStaged();
 			enqueue(async () => {
 				let landed = false;
 				try {
 					const ids = changed.filter(newer).map((mark) => mark.id);
 					const got = ids.length === 0 ? [] : await fetchNamed(ids);
 					if (stopped) return;
-					sync.putArtifacts(got.map(wire), deletedIds, deps.staged());
+					holds.delete(held);
+					sync.putArtifacts(got.map(wire), deletedIds, overlay());
 					remember(got, deletedIds);
 					landed = true;
 				} finally {
-					holding -= 1;
-					// A buffer the failed refresh did not carry goes on its own.
-					if (!landed && !stopped && holding === 0) pushStaged();
+					if (!landed && !stopped) {
+						holds.delete(held);
+						carried = [...carried, ...held];
+						if (holds.size === 0) pushStaged();
+					}
 				}
 			});
 		},

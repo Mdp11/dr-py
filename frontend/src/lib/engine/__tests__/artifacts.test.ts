@@ -231,44 +231,59 @@ describe('the artifact follower', () => {
 			id: 'tmp_b',
 			kind: 'navigation',
 			name: 'b',
-			payload: scope('Organization')
+			payload: scope('EdgeGateway')
 		};
-		f.setStaged([created, { op: 'update', id: 'n1', payload: scope('Project') }]);
+		const updated: WireStagedArtifact = { op: 'update', id: 'n1', payload: scope('Project') };
+		f.setStaged([created, updated]);
 		f.follower.stagedChanged();
 		await f.follower.settled();
 		expect(f.methods()).toEqual(['setArtifacts', 'setStagedArtifacts']);
+		const organizations = await totalOf(over, 'Organization');
+		const projects = await totalOf(over, 'Project');
+		const gateways = await totalOf(over, 'EdgeGateway');
+		expect(new Set([organizations, projects, gateways]).size).toBe(3);
 
 		// The commit lands: the buffer is cleared, then the commit is announced, in one run.
+		// The server answers the create under `n9`, with a payload of its own writing.
 		f.committed.set('n1', artifact('n1', 2, 'Project'));
 		f.committed.set('n9', artifact('n9', 1, 'Organization'));
 		const gate = f.gate();
 		f.setStaged([]);
 		f.follower.stagedChanged();
 		f.follower.onCommit({
+			idMap: { tmp_b: 'n9', tmp_model: 'e_9' },
 			changed: [header(f.committed.get('n1')!), header(f.committed.get('n9')!)],
 			deletedIds: []
+		});
+		// At once, the created artifact also under its real id.
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [created, updated, { ...created, id: 'n9' }]
 		});
 		await macrotask();
 		expect(f.fetches.at(-1)).toEqual(['n1', 'n9']);
 
-		// While the fetch is out, the engine still reads the working copy the commit came from.
-		expect((await evaluate(over, { artifact_id: 'n1' })).total).toBe(
-			await totalOf(over, 'Project')
-		);
-		expect((await evaluate(over, { artifact_id: 'tmp_b' })).total).toBe(
-			await totalOf(over, 'Organization')
-		);
+		// While the fetch is out, the engine reads the working copy the commit came from,
+		// the created artifact under either id.
+		expect((await evaluate(over, { artifact_id: 'n1' })).total).toBe(projects);
+		expect((await evaluate(over, { artifact_id: 'tmp_b' })).total).toBe(gateways);
+		expect((await evaluate(over, { artifact_id: 'n9' })).total).toBe(gateways);
 
 		// An edit staged during the fetch is not pushed on its own.
 		const edited: WireStagedArtifact = { op: 'update', id: 'n9', payload: scope('Project') };
 		f.setStaged([edited]);
 		f.follower.stagedChanged();
 		await macrotask();
-		expect(f.methods()).toEqual(['setArtifacts', 'setStagedArtifacts']);
+		expect(f.methods()).toEqual(['setArtifacts', 'setStagedArtifacts', 'setStagedArtifacts']);
 
 		gate.resolve();
 		await f.follower.settled();
-		expect(f.methods()).toEqual(['setArtifacts', 'setStagedArtifacts', 'putArtifacts']);
+		expect(f.methods()).toEqual([
+			'setArtifacts',
+			'setStagedArtifacts',
+			'setStagedArtifacts',
+			'putArtifacts'
+		]);
 		expect(f.posted.at(-1)).toEqual({
 			method: 'putArtifacts',
 			changed: [
@@ -290,27 +305,108 @@ describe('the artifact follower', () => {
 			deletedIds: [],
 			staged: [edited]
 		});
-		expect((await evaluate(over, { artifact_id: 'n9' })).total).toBe(
-			await totalOf(over, 'Project')
-		);
+		expect((await evaluate(over, { artifact_id: 'n9' })).total).toBe(projects);
 		await expect(evaluate(over, { artifact_id: 'tmp_b' })).rejects.toThrow(
 			'unknown navigation artifact tmp_b'
 		);
 
-		// Released, a staged change goes on its own again.
+		// Released, a staged change goes on its own again; the real id reads the committed payload.
 		f.setStaged([]);
 		f.follower.stagedChanged();
 		await f.follower.settled();
 		expect(f.posted.at(-1)).toEqual({ method: 'setStagedArtifacts', entries: [] });
+		expect((await evaluate(over, { artifact_id: 'n9' })).total).toBe(organizations);
 	});
 
-	it('a failed refresh releases the hold and pushes the buffer', async () => {
+	it('a second commit during a refresh keeps the first one held', async () => {
 		const over = await ready();
 		const f = follow(over.sync);
 		f.follower.load();
 		await f.follower.settled();
+		const first: WireStagedArtifact = {
+			op: 'create',
+			id: 'tmp_a',
+			kind: 'navigation',
+			name: 'a',
+			payload: scope('Organization')
+		};
+		f.setStaged([first]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
 		const gate = f.gate();
-		f.follower.onCommit({ changed: [header(artifact('n1', 1, 'Organization'))], deletedIds: [] });
+		f.committed.set('n1', artifact('n1', 1, 'Organization'));
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: { tmp_a: 'n1' },
+			changed: [header(f.committed.get('n1')!)],
+			deletedIds: []
+		});
+
+		// Staged and committed while the first refresh is out.
+		const second: WireStagedArtifact = { ...first, id: 'tmp_c', payload: scope('Project') };
+		f.setStaged([second]);
+		f.follower.stagedChanged();
+		await macrotask();
+		const secondGate = f.gate();
+		f.committed.set('n2', artifact('n2', 1, 'Project'));
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: { tmp_c: 'n2' },
+			changed: [header(f.committed.get('n2')!)],
+			deletedIds: []
+		});
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [first, { ...first, id: 'n1' }, second, { ...second, id: 'n2' }]
+		});
+
+		gate.resolve();
+		await macrotask();
+		expect(f.posted.at(-1)).toMatchObject({
+			method: 'putArtifacts',
+			staged: [second, { ...second, id: 'n2' }]
+		});
+		expect((await evaluate(over, { artifact_id: 'n2' })).total).toBe(
+			await totalOf(over, 'Project')
+		);
+
+		secondGate.resolve();
+		await f.follower.settled();
+		expect(f.posted.at(-1)).toMatchObject({ method: 'putArtifacts', staged: [] });
+		expect((await evaluate(over, { artifact_id: 'n2' })).total).toBe(
+			await totalOf(over, 'Project')
+		);
+		await expect(evaluate(over, { artifact_id: 'tmp_c' })).rejects.toThrow(
+			'unknown navigation artifact tmp_c'
+		);
+	});
+
+	it("a failed refresh keeps the commit's entries under the buffer until a load lands", async () => {
+		const over = await ready();
+		const f = follow(over.sync);
+		f.follower.load();
+		await f.follower.settled();
+		const created: WireStagedArtifact = {
+			op: 'create',
+			id: 'tmp_c',
+			kind: 'navigation',
+			name: 'c',
+			payload: scope('Organization')
+		};
+		f.setStaged([created]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		const gate = f.gate();
+		f.committed.set('n7', artifact('n7', 1, 'Project'));
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: { tmp_c: 'n7' },
+			changed: [header(f.committed.get('n7')!)],
+			deletedIds: []
+		});
 		const entry: WireStagedArtifact = { op: 'delete', id: 'n5' };
 		f.setStaged([entry]);
 		f.follower.stagedChanged();
@@ -319,8 +415,30 @@ describe('the artifact follower', () => {
 		gate.reject(new Error('offline'));
 		await f.follower.settled();
 
-		expect(f.methods()).toEqual(['setArtifacts', 'setStagedArtifacts']);
+		expect(f.methods()).toEqual([
+			'setArtifacts',
+			'setStagedArtifacts',
+			'setStagedArtifacts',
+			'setStagedArtifacts'
+		]);
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [created, { ...created, id: 'n7' }, entry]
+		});
+		const organizations = await totalOf(over, 'Organization');
+		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(organizations);
+
+		// A load brings what the refresh could not; the entries go.
+		f.follower.load();
+		await f.follower.settled();
+		expect(f.methods().slice(-2)).toEqual(['setArtifacts', 'setStagedArtifacts']);
 		expect(f.posted.at(-1)).toEqual({ method: 'setStagedArtifacts', entries: [entry] });
+		expect((await evaluate(over, { artifact_id: 'n7' })).total).toBe(
+			await totalOf(over, 'Project')
+		);
+		await expect(evaluate(over, { artifact_id: 'tmp_c' })).rejects.toThrow(
+			'unknown navigation artifact tmp_c'
+		);
 	});
 
 	it('a commit with nothing to fetch still carries the buffer', async () => {
@@ -331,7 +449,7 @@ describe('the artifact follower', () => {
 		await f.follower.settled();
 
 		f.committed.delete('n1');
-		f.follower.onCommit({ changed: [], deletedIds: ['n1'] });
+		f.follower.onCommit({ idMap: {}, changed: [], deletedIds: ['n1'] });
 		await f.follower.settled();
 
 		expect(f.fetches).toEqual([undefined]);
@@ -352,7 +470,7 @@ describe('the artifact follower', () => {
 		f.setStaged([entry]);
 
 		f.follower.stagedChanged();
-		f.follower.onCommit({ changed: [], deletedIds: [] });
+		f.follower.onCommit({ idMap: {}, changed: [], deletedIds: [] });
 		await f.follower.settled();
 
 		expect(f.fetches).toEqual([undefined]);
@@ -368,7 +486,7 @@ describe('the artifact follower', () => {
 		f.committed.set('n1', artifact('n1', 1, 'Organization'));
 
 		f.follower.onEvent('created', header(f.committed.get('n1')!));
-		f.follower.onCommit({ changed: [header(f.committed.get('n1')!)], deletedIds: [] });
+		f.follower.onCommit({ idMap: {}, changed: [header(f.committed.get('n1')!)], deletedIds: [] });
 		await f.follower.settled();
 
 		expect(f.fetches).toEqual([undefined, ['n1']]);
@@ -397,7 +515,7 @@ describe('the artifact follower', () => {
 		await f.follower.settled();
 		expect(f.posted).toEqual([]);
 
-		f.follower.onCommit({ changed: [header(f.committed.get('n1')!)], deletedIds: [] });
+		f.follower.onCommit({ idMap: {}, changed: [header(f.committed.get('n1')!)], deletedIds: [] });
 		f.follower.onEvent('updated', header(artifact('n1', 5, 'Organization')));
 		f.follower.stagedChanged();
 		f.follower.load();
@@ -416,7 +534,7 @@ describe('the artifact follower', () => {
 		await f.follower.settled();
 		f.committed.set('n1', artifact('n1', 1, 'Organization'));
 		const gate = f.gate();
-		f.follower.onCommit({ changed: [header(f.committed.get('n1')!)], deletedIds: [] });
+		f.follower.onCommit({ idMap: {}, changed: [header(f.committed.get('n1')!)], deletedIds: [] });
 		await macrotask();
 		expect(f.fetches.at(-1)).toEqual(['n1']);
 
@@ -424,7 +542,8 @@ describe('the artifact follower', () => {
 		gate.resolve();
 		await f.follower.settled();
 
-		expect(f.methods()).toEqual(['setArtifacts']);
+		// The hold's own push went at the commit; nothing after the stop.
+		expect(f.methods()).toEqual(['setArtifacts', 'setStagedArtifacts']);
 		await expect(evaluate(over, { artifact_id: 'n1' })).rejects.toThrow(
 			'unknown navigation artifact n1'
 		);

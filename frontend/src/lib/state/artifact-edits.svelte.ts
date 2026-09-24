@@ -65,6 +65,8 @@ export type StagedArtifactEntry =
 /** artifact id (temp or real) -> its ONE staged entry. See the module
  * docstring's "ONE STAGED ENTRY PER ARTIFACT ID" invariant. */
 const _staged = new SvelteMap<string, StagedArtifactEntry>();
+/** The project the buffer was staged in; `null` until one is bound. */
+let _project: string | null = null;
 
 // ---------------------------------------------------------------------------
 // Listener registries (plain arrays; onX returns an unsubscribe function)
@@ -272,13 +274,29 @@ export function discardAllStagedArtifacts(): void {
 	}
 }
 
-/** Test/dev reset: clears staged state only. Listener registries are NOT
+/** Test/dev reset: clears the staged state and the project it belongs to only. Listener registries are NOT
  * touched — module-scope `onArtifactCommit`/`onArtifactStageDiscarded`/
  * `onArtifactStagedDelete` subscriptions registered by other stores are
  * permanent for the life of the app (vitest isolates modules per test file,
  * so this never leaks subscriptions across suites either). */
 export function resetArtifactEdits(): void {
+	_project = null;
 	if (_staged.size === 0) return;
+	_staged.clear();
+	stagedChanged();
+}
+
+/**
+ * The buffer is `projectId`'s from now on; one staged in another project is
+ * dropped, or it would be committed into this one and mirrored into its
+ * engine. Silently, like `clearStagedArtifacts`: a discard listener would
+ * release the other project's locks at this project's URL. The same project
+ * again keeps the buffer.
+ */
+export function bindStagedArtifacts(projectId: string): void {
+	const previous = _project;
+	_project = projectId;
+	if (previous === null || previous === projectId || _staged.size === 0) return;
 	_staged.clear();
 	stagedChanged();
 }

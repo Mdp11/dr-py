@@ -609,6 +609,7 @@ export {
 	resetEditorSize
 } from './editor-size.svelte';
 export {
+	bindStagedArtifacts,
 	clearStagedArtifacts,
 	discardAllStagedArtifacts,
 	getStagedArtifactDepth,
