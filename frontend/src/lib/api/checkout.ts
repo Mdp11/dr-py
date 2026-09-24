@@ -1,4 +1,5 @@
 import { apiFetch, type ClientConfig } from './client';
+import { comparableWhileStaged, route } from './engine-route';
 import type { Op } from '$lib/state/ops';
 import {
 	CommitResponseSchema,
@@ -39,18 +40,67 @@ export function renewLock(token: string, cfg?: ClientConfig): Promise<RenewRespo
 	);
 }
 
-/** POST /commits/preview — apply→validate→rollback. Throws ConflictError on
- * stale base_rev (409). */
+const MODEL_OP_KINDS = new Set<string>([
+	'create_element',
+	'update_element',
+	'delete_element',
+	'create_relationship',
+	'update_relationship',
+	'delete_relationship'
+]);
+
+/**
+ * POST /commits/preview — apply→validate→rollback. Throws ConflictError on
+ * stale base_rev (409).
+ *
+ * With `local` — the engine's staged batches the model ops are, and the
+ * strict mode — and the `issues` surface on the engine, the engine previews
+ * the model half; the server previews the other ops alone, and the two
+ * halves are summed. A rebind, which revalidates everything under a new
+ * metamodel, is the server's whole.
+ */
 export function previewCommit(
 	baseRev: number,
 	ops: readonly Op[],
-	cfg?: ClientConfig
+	cfg?: ClientConfig,
+	local?: { strict: boolean; batchIds: readonly number[] }
 ): Promise<PreviewResponse> {
-	return apiFetch(
-		'/commits/preview',
-		{ method: 'POST', body: { base_rev: baseRev, ops }, schema: PreviewResponseSchema },
-		cfg
+	const serverPreview = (sent: readonly Op[]) =>
+		apiFetch<PreviewResponse>(
+			'/commits/preview',
+			{ method: 'POST', body: { base_rev: baseRev, ops: sent }, schema: PreviewResponseSchema },
+			cfg
+		);
+	if (local === undefined || ops.some((op) => op.kind === 'metamodel.rebind')) {
+		return serverPreview(ops);
+	}
+	const rest = ops.filter((op) => !MODEL_OP_KINDS.has(op.kind));
+	return route(
+		'issues',
+		cfg,
+		async (call) => {
+			const model = PreviewResponseSchema.parse(
+				await call<unknown>('previewCommit', {
+					base_rev: baseRev,
+					batch_ids: [...local.batchIds],
+					strict: local.strict
+				})
+			);
+			return rest.length === 0 ? model : mergePreviews(model, await serverPreview(rest));
+		},
+		() => serverPreview(ops),
+		{ shadow: comparableWhileStaged(ops) }
 	);
+}
+
+/** The engine's model half, then the server's half of the other ops. */
+function mergePreviews(model: PreviewResponse, rest: PreviewResponse): PreviewResponse {
+	return {
+		conformance_error_count: model.conformance_error_count + rest.conformance_error_count,
+		structural_blockers: [...model.structural_blockers, ...rest.structural_blockers],
+		issues: [...model.issues, ...rest.issues],
+		would_block: model.would_block || rest.would_block
+	};
 }
 
 /** POST /commits — lock-verified, structural-gated commit. Throws

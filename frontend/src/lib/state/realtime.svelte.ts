@@ -19,10 +19,11 @@ import {
 import { getActiveProjectId } from '$lib/state/active-project.svelte';
 import {
 	applyDelta,
+	cancelIssuesRefetch,
 	getIssueCounts,
 	getModelRev,
-	refetchIssues,
-	refreshSummary
+	refreshSummary,
+	scheduleIssuesRefetch
 } from './model.svelte';
 import { handleArtifactFeedEvent } from './artifacts.svelte';
 import { handReplicaFeed } from './replica.svelte';
@@ -160,28 +161,6 @@ function setLeases(leases: LeaseLite[]): void {
 
 function clearLeases(leases: LeaseLite[]): void {
 	for (const le of leases) _lockState.delete(le.resource_id);
-}
-
-// Debounce for issue refetches: peer commits and reconnect snapshots can
-// arrive in bursts (a multi-op batch, a flaky connection reconnecting
-// several times); the GET is cheap but one call per burst is enough. The
-// refetch corrects what the synthesized peer-commit delta below cannot know
-// — the feed event carries no issue delta by design: refetch is preferred
-// over shipping deltas on the wire because reconnect needs the refetch
-// path anyway.
-let _issuesRefetchTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleIssuesRefetch(): void {
-	if (_issuesRefetchTimer !== null) clearTimeout(_issuesRefetchTimer);
-	_issuesRefetchTimer = setTimeout(() => {
-		_issuesRefetchTimer = null;
-		void refetchIssues();
-	}, 300);
-}
-
-function cancelIssuesRefetch(): void {
-	if (_issuesRefetchTimer !== null) clearTimeout(_issuesRefetchTimer);
-	_issuesRefetchTimer = null;
 }
 
 /**

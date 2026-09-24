@@ -24,11 +24,20 @@ import * as validationApi from '$lib/api/validation';
 import { server } from '$lib/api/__tests__/server';
 import { ConflictError } from '$lib/api/errors';
 import type { Metamodel } from '$lib/api/types';
+import type { ModelOp as EngineOp } from '$engine';
+import { PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
 import { OFF, type CommitAnswer, type ReplicaSync } from '$lib/engine/sync';
-import { setCheckoutApiConfig } from '../checkout.svelte';
+import { commitApplied, setCheckoutApiConfig } from '../checkout.svelte';
 import { getMetamodel as getActiveMetamodel, clearMetamodel } from '../metamodel.svelte';
-import { getModelRev } from '../model.svelte';
+import {
+	cancelIssuesRefetch,
+	ensureElements,
+	getLiveIssues,
+	getModelRev,
+	stagedSettled
+} from '../model.svelte';
 import { configureReplica, resetReplica } from '../replica.svelte';
+import { engineStore, type EngineStore } from './support/engine-store';
 
 beforeEach(() => {
 	resetModelStore();
@@ -476,5 +485,92 @@ describe("the replica's flight", () => {
 
 		expect(settled.map((s) => s.answer.rebound)).toEqual([true]);
 		expect(log).toEqual(['begin', 'settle', 'refetch', 'adopted after']);
+	});
+});
+
+describe('the issues on the engine across an own commit', () => {
+	const API = `${PAGE_ORIGIN}/api/v1/projects/p`;
+	const TOO_LONG = 'x'.repeat(201);
+	const issue = (origin: string, check = 'facets') => ({
+		severity: 'error',
+		message: 'name: length 201 exceeds max_length 200',
+		target_ids: ['e_000001'],
+		check,
+		origin
+	});
+	let store: EngineStore | null = null;
+
+	beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+	afterAll(() => server.close());
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+		cancelIssuesRefetch();
+		resetCheckout();
+		vi.restoreAllMocks();
+	});
+
+	/**
+	 * The locks and commit routes of `s.project`: a commit lands its ops and
+	 * answers with the server's issue delta, whose issue carries `check`
+	 * `'delta'` so a list spliced from it can be told from the engine's.
+	 */
+	function routes(s: EngineStore): { issuesAsked: number } {
+		const counts = { issuesAsked: 0 };
+		server.use(
+			http.post(`${API}/locks`, async ({ request }) => {
+				const body = (await request.json()) as { targets: { resource_id: string }[] };
+				return HttpResponse.json({
+					token: 't1',
+					leases: body.targets.map((target) => ({
+						resource_id: target.resource_id,
+						mode: 'exclusive',
+						holder: 'u-1',
+						token: 't1',
+						intent: 'edit',
+						expires_at: 1
+					}))
+				});
+			}),
+			http.post(`${API}/locks/release`, () => new HttpResponse(null, { status: 204 })),
+			http.post(`${API}/commits`, async ({ request }) => {
+				const body = (await request.json()) as { ops: EngineOp[] };
+				const committed = s.project.commit(body.ops);
+				const delta = {
+					issues_removed_owner_ids: ['e_000001'],
+					issues_added: [issue('on_server', 'delta')],
+					issue_counts: { error: 1 },
+					commit_id: `c-${s.project.rev}`,
+					message: 'm'
+				};
+				const text = committed.responseText.slice(0, -1) + ',' + JSON.stringify(delta).slice(1);
+				return new HttpResponse(text, { headers: { 'Content-Type': 'application/json' } });
+			}),
+			http.get(`${API}/model/issues`, () => {
+				counts.issuesAsked += 1;
+				return HttpResponse.json({ model_rev: s.project.rev, issues: [], counts: {} });
+			})
+		);
+		return counts;
+	}
+
+	it("the panel's list after the refetch is the engine's, each issue once and on_server", async () => {
+		store = await engineStore({ surfaces: { issues: 'engine' } });
+		const s = store;
+		const counts = routes(s);
+		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
+		await ensureElements(['e_000001']);
+		emit({ kind: 'update_element', id: 'e_000001', properties_patch: { name: TOO_LONG } });
+		await stagedSettled();
+		await vi.waitFor(() => expect(getLiveIssues()).toEqual([issue('uncommitted')]));
+
+		await commitStaged('m', false);
+		// The server's delta is spliced in at once: a transient.
+		expect(getLiveIssues()).toEqual([issue('on_server', 'delta')]);
+		await commitApplied();
+
+		await vi.waitFor(() => expect(getLiveIssues()).toEqual([issue('on_server')]));
+		expect(getModelRev()).toBe(1);
+		expect(counts.issuesAsked).toBe(0);
 	});
 });

@@ -1,7 +1,20 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
-import { validateModel } from '../validation';
+import { fakeProject } from '$lib/engine/__tests__/support/project-server';
+import { createShadow } from '$lib/engine/shadow';
+import { previewCommit } from '../checkout';
+import { getModelIssues, validateModel } from '../validation';
+import {
+	ALSO_TOO_LONG,
+	commitNames,
+	issuesEngine,
+	rename,
+	TOO_LONG,
+	TOO_LONG_MESSAGE,
+	uninstallIssuesEngine,
+	unsupportedPatternDoc
+} from './issues-engine';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -86,5 +99,163 @@ describe('validateModel', () => {
 		);
 		const result = await validateModel(undefined, cfg);
 		expect(result[0].origin).toBe('on_server');
+	});
+});
+
+describe('the issues on the engine', () => {
+	const made: { dispose(): void }[] = [];
+
+	afterEach(() => {
+		uninstallIssuesEngine();
+		for (const over of made.splice(0)) over.dispose();
+	});
+
+	const tooLong = (origin: string) => ({
+		severity: 'error',
+		message: TOO_LONG_MESSAGE,
+		target_ids: ['e_000001'],
+		check: 'facets',
+		origin
+	});
+
+	it("getModelIssues answers the engine's list, a staged violation uncommitted; the server is never asked", async () => {
+		const engine = await issuesEngine(made);
+		await expect(getModelIssues()).resolves.toEqual({
+			model_rev: 0,
+			issues: [],
+			counts: {},
+			truncated: false,
+			rules_status: { total: 0, skipped: [], eval_errors: {} }
+		});
+
+		await engine.stage([rename('e_000001', TOO_LONG)]);
+		const list = await getModelIssues();
+
+		expect(list.issues).toEqual([tooLong('uncommitted')]);
+		expect(list.counts).toEqual({ error: 1 });
+		expect(engine.requests).toEqual([]);
+	});
+
+	it('getModelIssues goes to the server while the replica is not seeded', async () => {
+		const engine = await issuesEngine(made, { seeded: () => false });
+		await engine.stage([rename('e_000001', TOO_LONG)]);
+
+		await expect(getModelIssues()).resolves.toMatchObject({ issues: [] });
+		expect(engine.requests.map((request) => request.route)).toEqual(['issues']);
+	});
+
+	it("validateModel with the staged batches answers the engine's list, a fixed issue resolved", async () => {
+		const project = fakeProject();
+		commitNames(project, { e_000001: TOO_LONG, e_000002: ALSO_TOO_LONG });
+		const engine = await issuesEngine(made, { project });
+		const ops = [rename('e_000001', 'fixed')];
+		const batch = await engine.stage(ops);
+
+		const issues = await validateModel({ ops, baseRev: project.rev, batchIds: [batch] });
+
+		expect(issues).toEqual([
+			{ ...tooLong('on_server'), target_ids: ['e_000002'] },
+			tooLong('resolved')
+		]);
+		expect(engine.requests).toEqual([]);
+	});
+
+	it("validateModel with nothing staged is the engine's too", async () => {
+		const project = fakeProject();
+		commitNames(project, { e_000002: TOO_LONG });
+		const engine = await issuesEngine(made, { project });
+
+		await expect(validateModel()).resolves.toEqual([
+			{ ...tooLong('on_server'), target_ids: ['e_000002'] }
+		]);
+		expect(engine.requests).toEqual([]);
+	});
+
+	it('a nothing-staged validateModel over a containment cycle logs no shadow line', async () => {
+		const project = fakeProject();
+		// e_000001 owns e_000006 already: the reverse closes a cycle.
+		project.commit([
+			{
+				kind: 'create_relationship',
+				temp_id: 'tmp_r',
+				type_name: 'Owns',
+				source_id: 'e_000006',
+				target_id: 'e_000001',
+				properties: {}
+			}
+		]);
+		const report = vi.fn();
+		const shadow = createShadow({
+			rev: () => project.rev,
+			quiet: () => Promise.resolve(),
+			staged: () => false,
+			report
+		});
+		await issuesEngine(made, { project, shadow });
+
+		const issues = await validateModel();
+		expect(issues.some((issue) => issue.message.startsWith('Containment cycle'))).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(report).not.toHaveBeenCalled();
+
+		// The shadow is live: the unstaged list is compared, and differs from MSW's empty one.
+		await getModelIssues();
+		await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
+		expect(report.mock.calls[0]![0]).toMatch(/^\[shadow\] issues getModelIssues /);
+	});
+
+	it('an inline model or a scope, and ops no batch names, go to the server', async () => {
+		const engine = await issuesEngine(made);
+		const inline = { elements: [], relationships: [] };
+		const ops = [rename('e_000001', TOO_LONG)];
+
+		await validateModel({ inline });
+		await validateModel({ scope: ['e_000001'] });
+		await validateModel({ ops, baseRev: 0 });
+
+		expect(engine.requests).toEqual([
+			{ route: 'validate', body: { inline } },
+			{ route: 'validate', body: { scope: ['e_000001'] } },
+			{ route: 'validate', body: { ops, base_rev: 0 } }
+		]);
+	});
+
+	it('a batch the engine does not stage sends validateModel to the server whole', async () => {
+		const engine = await issuesEngine(made);
+		const ops = [rename('e_000001', TOO_LONG)];
+		const batch = await engine.stage(ops);
+
+		await validateModel({ ops, baseRev: 0, batchIds: [batch + 1] });
+
+		expect(engine.requests).toEqual([{ route: 'validate', body: { ops, base_rev: 0 } }]);
+	});
+
+	it('an engine whose metamodel holds a pattern it cannot vouch for never seeds', async () => {
+		const project = fakeProject();
+		project.rebind('mm-2', unsupportedPatternDoc(project.doc));
+		const engine = await issuesEngine(made, { project, seeded: () => false });
+		await engine.over.link!.client.call('validateModel', { batch_ids: [] }).catch(() => null);
+
+		expect(engine.over.sync.status()).toMatchObject({ phase: 'ready', seeded: false });
+	});
+
+	it('an engine whose metamodel holds a pattern it cannot vouch for sends all three to the server', async () => {
+		const project = fakeProject();
+		project.rebind('mm-2', unsupportedPatternDoc(project.doc));
+		// The gate held open: the engine's own refusal is what sends them.
+		const engine = await issuesEngine(made, { project, seeded: () => true });
+		const ops = [rename('e_000001', 'staged')];
+		const batch = await engine.stage(ops);
+		const local = { strict: false, batchIds: [batch] };
+
+		await getModelIssues();
+		await validateModel({ ops, baseRev: project.rev, batchIds: [batch] });
+		await previewCommit(project.rev, ops, undefined, local);
+
+		expect(engine.requests).toEqual([
+			{ route: 'issues', body: null },
+			{ route: 'validate', body: { ops, base_rev: project.rev } },
+			{ route: 'preview', body: { base_rev: project.rev, ops } }
+		]);
 	});
 });

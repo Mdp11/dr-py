@@ -43,14 +43,17 @@ export type EngineStore = {
 };
 
 /**
- * `dr.surfaces` = `{staging: 'engine'}`, the project's four replica routes on
- * MSW, the replica store started on it; resolves once the replica is ready.
- * Nothing serves a model read: one that strays to the server fails the test.
+ * `dr.surfaces` = `{staging: 'engine'}` plus `surfaces`, the project's four
+ * replica routes on MSW, the replica store started on it; resolves once the
+ * replica is ready. Nothing serves a model read: one that strays to the
+ * server fails the test.
  */
-export async function engineStore(options: { project?: FakeProject } = {}): Promise<EngineStore> {
+export async function engineStore(
+	options: { project?: FakeProject; surfaces?: { [surface: string]: string } } = {}
+): Promise<EngineStore> {
 	const project = options.project ?? fakeProject();
 	server.use(...project.handlers());
-	localStorage.setItem('dr.surfaces', JSON.stringify({ staging: 'engine' }));
+	localStorage.setItem('dr.surfaces', JSON.stringify({ staging: 'engine', ...options.surfaces }));
 	const links: EngineLink[] = [];
 	let refusals = 0;
 	const statuses: ReplicaStatus[] = [];

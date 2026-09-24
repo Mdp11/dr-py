@@ -50,6 +50,12 @@ export type ReplicaStatus = {
 	cspViolations: number;
 	/** Why the phase is `off`, `frozen`, `failed` or `server`. */
 	reason: string | null;
+	/**
+	 * The replica's issue store has been swept whole once. False for every
+	 * new replica — a new run, a re-bootstrap, a new worker — until its first
+	 * sweep ends; a sweep started again later keeps what it swept.
+	 */
+	seeded: boolean;
 };
 
 export const OFF: ReplicaStatus = {
@@ -60,7 +66,8 @@ export const OFF: ReplicaStatus = {
 	source: null,
 	isolated: null,
 	cspViolations: 0,
-	reason: null
+	reason: null,
+	seeded: false
 };
 
 /** The server a sync reads from, each call scoped to the project it names. */
@@ -355,8 +362,18 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	const artifacts = new Map<string, WireArtifact>();
 	let stagedArtifacts: readonly WireStagedArtifact[] = [];
 	const changedListeners = new Set<(event: ChangedEvent) => void>();
+	/**
+	 * The engine said its replica is `ready` since the replica the shell opens
+	 * now began: only that replica's sweep may seed it, never one it replaced.
+	 */
+	let sweeping = false;
 
 	const set = (patch: Partial<ReplicaStatus>) => {
+		// Opening and re-bootstrapping begin a replica whose store is not swept.
+		if (patch.phase === 'opening' || patch.phase === 'resyncing') {
+			sweeping = false;
+			patch = { ...patch, seeded: false };
+		}
 		status = { ...status, ...patch };
 		deps.onStatus(status);
 		examine();
@@ -534,6 +551,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 
 	const adopt = (r: Run, made: EngineLink) => {
 		link = made;
+		sweeping = false;
 		// Before anything else reaches the new engine: no held read overtakes them.
 		for (const [viewId, ids] of placements) sendPlacement(made.client, viewId, ids);
 		if (artifacts.size > 0) {
@@ -587,17 +605,29 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	/**
 	 * Only while the replica is ready does an engine `replica` event speak of
 	 * the replica the shell follows; before, it speaks of one an attempt is
-	 * still opening, and the attempt reads its outcome from the answers.
+	 * still opening, and the attempt reads its outcome from the answers. A
+	 * `sweep` report is not progress the UI shows: its end seeds the replica
+	 * the engine last called `ready`, in any phase — the events come in the
+	 * engine's order, so a replica's end of sweep never comes before its
+	 * `ready`, nor one a new replica replaced after the new one began.
 	 */
 	const onEngineEvent = (r: Run, event: ServiceEvent) => {
 		if (run !== r) return;
 		const phase = status.phase;
 		if (event.event === 'progress') {
+			if (event.task === 'sweep') {
+				if (sweeping && event.done === event.total && !status.seeded) set({ seeded: true });
+				return;
+			}
 			const opening = phase === 'opening' || phase === 'resyncing';
 			if (opening || (event.task === 'verify' && phase === 'ready')) {
 				set({ progress: { task: event.task, done: event.done, total: event.total } });
 			}
-		} else if (event.event === 'replica' && phase === 'ready') {
+		} else if (event.event === 'replica') {
+			sweeping = event.state === 'ready';
+			// A replica gone from `ready` (diverged, closed) took its store with it.
+			if (!sweeping && status.seeded) set({ seeded: false });
+			if (phase !== 'ready') return;
 			if (event.rev !== null) learnRev(event.rev);
 			if (event.state === 'diverged') ask(r, r.epoch);
 		}
@@ -1125,6 +1155,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		artifacts.clear();
 		stagedArtifacts = [];
 		dropLink();
+		sweeping = false;
 		refuseWaiters();
 		if (status !== OFF) {
 			status = OFF;

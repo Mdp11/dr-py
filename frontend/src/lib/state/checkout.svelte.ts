@@ -369,16 +369,14 @@ function _onTokenExpired(token: string): void {
  * once every edit has reached them, and a staged list the engine cannot say
  * rejects with `StagedUnreadableError`, posting nothing. */
 export async function previewStaged(): Promise<PreviewResponse> {
-	if (getStagingSide() === 'engine') await stagedSettled();
+	const onEngine = getStagingSide() === 'engine';
+	if (onEngine) await stagedSettled();
+	const model = captureStaged();
 	return previewCommit(
 		getModelRev(),
-		[
-			...getStagedMetamodelOps(),
-			...captureStaged().ops,
-			...getStagedArtifactOps(),
-			...getStagedViewOps()
-		],
-		_clientConfig
+		[...getStagedMetamodelOps(), ...model.ops, ...getStagedArtifactOps(), ...getStagedViewOps()],
+		_clientConfig,
+		onEngine ? { strict: getStrictMode(), batchIds: model.batchIds } : undefined
 	);
 }
 

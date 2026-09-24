@@ -3,7 +3,8 @@ import { ApiError } from './errors';
 
 /**
  * A surface: the reads that move between server and engine together — the
- * five model reads, the navigation evaluation and the criteria search.
+ * five model reads, the navigation evaluation, the criteria search and the
+ * validation issues.
  */
 export type Surface =
 	| 'elements'
@@ -12,15 +13,30 @@ export type Surface =
 	| 'tree'
 	| 'summary'
 	| 'navigation'
-	| 'criteria';
+	| 'criteria'
+	| 'issues';
 export type Side = 'engine' | 'server';
 
-/** Why the server answered a call the engine refused: it reaches a script, or a pattern. */
-export type Fallback = 'script' | 'pattern';
+/** Why the server answered a call the engine refused: it reaches a script, a pattern, or validation rules. */
+export type Fallback = 'script' | 'pattern' | 'rules';
+
+/**
+ * When the shadow compares an engine answer: only while nothing is staged
+ * (the default), also while edits are staged (the call sent them to the
+ * server too), or never.
+ */
+export type ShadowWhen = 'unstaged' | 'always' | 'never';
 
 export type RouteOptions<T> = {
-	/** Marks the server's answer to a call the engine sent it. */
-	mark?: (value: T, reason: Fallback) => T;
+	/** Marks the server's answer to a call the engine sent it for a script or a pattern. */
+	mark?: (value: T, reason: Exclude<Fallback, 'rules'>) => T;
+	shadow?: ShadowWhen;
+	/**
+	 * The surface's side is asked again once the engine answers: a side gone
+	 * to the server meanwhile takes the server's answer, since the replica
+	 * that answered may not be the one the call was routed to.
+	 */
+	recheck?: boolean;
 };
 
 /** One read method of the engine, answered with the route's response body. */
@@ -33,6 +49,8 @@ export type ShadowProbe = {
 	surface: Surface;
 	method: string;
 	params: unknown;
+	/** Compared while edits are staged: the call sent them to the server as well. */
+	whileStaged?: boolean;
 	engine: Outcome;
 	/** The same engine read once more, parsed. */
 	again(): Promise<unknown>;
@@ -67,13 +85,32 @@ export function engineSide(surface: Surface): Side {
 
 const FALLBACKS: { readonly [detail: string]: Fallback } = {
 	'reaches a script': 'script',
-	'reaches an unsupported pattern': 'pattern'
+	'reaches an unsupported pattern': 'pattern',
+	'reaches validation rules': 'rules'
 };
 
 /** The engine's refusal that sends a call to the server, if `error` is one. */
 function fallbackOf(error: unknown): Fallback | null {
 	if (!(error instanceof ApiError) || error.status !== 501) return null;
 	return Object.hasOwn(FALLBACKS, error.message) ? FALLBACKS[error.message]! : null;
+}
+
+/** The engine's 409s for a call whose staged batches, `base_rev` or replica moved under it. */
+const MOVED = new Set(['stale staged batches', 'stale base_rev', 'replica is not ready']);
+
+function movedUnder(error: unknown): boolean {
+	return error instanceof ApiError && error.status === 409 && MOVED.has(error.message);
+}
+
+/**
+ * The shadow rule for a call that sends staged ops to the server: compared
+ * while staged, unless an op creates an entity — the server mints ids for it
+ * that the engine never sees.
+ */
+export function comparableWhileStaged(ops: readonly { kind: string }[]): ShadowWhen {
+	return ops.some((op) => op.kind === 'create_element' || op.kind === 'create_relationship')
+		? 'never'
+		: 'always';
 }
 
 /** `body` as the server is sent it: plain JSON, which a `$state` proxy is not, `undefined` left out. */
@@ -85,9 +122,11 @@ export function asSent(body: object): unknown {
  * Answers a read from the engine or the server. A call that names its server
  * (`baseUrl` or `fetch`) goes there. `engineCall` makes exactly one engine
  * call and parses its body with the server's schema. A 501 the engine
- * refuses a script or a pattern with is answered by the server, handed to
- * `options.mark` with its reason, and not shadowed; any other 501 is the
- * caller's.
+ * refuses a script, a pattern or validation rules with is answered by the
+ * server — for a script or a pattern handed to `options.mark` with its
+ * reason — and not shadowed; any other 501 is the caller's. So is a 409 that
+ * says the staged batches, the `base_rev` or the replica moved under the
+ * call: the server answers it whole.
  */
 export function route<T>(
 	surface: Surface,
@@ -118,13 +157,15 @@ export function route<T>(
 	} catch (error) {
 		answer = Promise.reject(error);
 	}
+	const when = options.shadow ?? 'unstaged';
 	const probe = (engine: Outcome) => {
-		if (seam.shadow === undefined) return;
+		if (seam.shadow === undefined || when === 'never') return;
 		try {
 			const returned: unknown = seam.shadow({
 				surface,
 				method,
 				params,
+				...(when === 'always' ? { whileStaged: true } : {}),
 				engine,
 				again: () => engineCall(seam.call),
 				server: serverCall
@@ -137,15 +178,16 @@ export function route<T>(
 	};
 	return answer.then(
 		(value) => {
+			if (options.recheck === true && seam.side(surface) === 'server') return serverCall();
 			probe({ ok: true, value });
 			return value;
 		},
 		(error: unknown) => {
-			if (seam.gone(error)) return serverCall();
+			if (seam.gone(error) || movedUnder(error)) return serverCall();
 			const reason = fallbackOf(error);
 			if (reason !== null) {
 				const { mark } = options;
-				return mark === undefined
+				return mark === undefined || reason === 'rules'
 					? serverCall()
 					: serverCall().then((value) => mark(value, reason));
 			}

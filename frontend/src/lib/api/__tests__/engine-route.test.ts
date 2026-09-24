@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+	comparableWhileStaged,
 	engineSide,
 	installEngineSeam,
 	route,
@@ -306,6 +307,50 @@ describe('the server fallback', () => {
 		}
 	});
 
+	it('a 501 "reaches validation rules" is answered by the server, never marked, with no shadow', async () => {
+		const shadow = vi.fn();
+		const { seam } = seamOf(
+			() => Promise.reject(refusal(501, 'reaches validation rules')),
+			{},
+			shadow
+		);
+		installEngineSeam(seam);
+		const server = serverOf('from server');
+		const marker = vi.fn(mark);
+		await expect(
+			route('issues', undefined, engineRead({}), server, { mark: marker })
+		).resolves.toBe('from server');
+		await expect(route('issues', undefined, engineRead({}), server)).resolves.toBe('from server');
+		expect(server).toHaveBeenCalledTimes(2);
+		expect(marker).not.toHaveBeenCalled();
+		await flush();
+		expect(shadow).not.toHaveBeenCalled();
+	});
+
+	it('a 409 that says the staged batches, the base_rev or the replica moved is answered by the server', async () => {
+		for (const detail of ['stale staged batches', 'stale base_rev', 'replica is not ready']) {
+			const shadow = vi.fn();
+			const { seam, calls } = seamOf(() => Promise.reject(refusal(409, detail)), {}, shadow);
+			installEngineSeam(seam);
+			const server = serverOf('from server');
+			await expect(route('issues', undefined, engineRead({}), server)).resolves.toBe('from server');
+			expect(calls).toHaveLength(1);
+			expect(server).toHaveBeenCalledOnce();
+			await flush();
+			expect(shadow).not.toHaveBeenCalled();
+		}
+	});
+
+	it("any other 409, or the same words under another status, is the caller's error", async () => {
+		for (const error of [refusal(409, 'replica closed'), refusal(501, 'stale staged batches')]) {
+			const { seam } = seamOf(() => Promise.reject(error));
+			installEngineSeam(seam);
+			const server = serverOf();
+			await expect(route('issues', undefined, engineRead({}), server)).rejects.toBe(error);
+			expect(server).not.toHaveBeenCalled();
+		}
+	});
+
 	it('an engine answer and a server side are never marked', async () => {
 		const marker = vi.fn(mark);
 		const { seam } = seamOf(() => Promise.resolve({ n: 5 }), { criteria: 'server' });
@@ -317,6 +362,98 @@ describe('the server fallback', () => {
 			route('criteria', undefined, engineRead({}), serverOf(), { mark: marker })
 		).resolves.toBe('server');
 		expect(marker).not.toHaveBeenCalled();
+	});
+});
+
+describe('the shadow option', () => {
+	it('by default the probe is compared only while nothing is staged', async () => {
+		const probes: ShadowProbe[] = [];
+		const { seam } = seamOf(
+			() => Promise.resolve({ n: 1 }),
+			{},
+			(probe) => void probes.push(probe)
+		);
+		installEngineSeam(seam);
+		await route('issues', undefined, engineRead({}), serverOf());
+		await route('issues', undefined, engineRead({}), serverOf(), { shadow: 'unstaged' });
+		expect(probes).toHaveLength(2);
+		for (const probe of probes) expect(probe.whileStaged).toBeUndefined();
+	});
+
+	it("'always' hands the probe over to be compared while staged", async () => {
+		const probes: ShadowProbe[] = [];
+		const { seam } = seamOf(
+			() => Promise.resolve({ n: 1 }),
+			{},
+			(probe) => void probes.push(probe)
+		);
+		installEngineSeam(seam);
+		await route('issues', undefined, engineRead({}), serverOf(), { shadow: 'always' });
+		expect(probes).toHaveLength(1);
+		expect(probes[0]).toMatchObject({ surface: 'issues', whileStaged: true });
+	});
+
+	it("'never' hands the shadow nothing, an answer or an error", async () => {
+		const shadow = vi.fn();
+		const answering = seamOf(() => Promise.resolve({ n: 1 }), {}, shadow);
+		installEngineSeam(answering.seam);
+		await route('issues', undefined, engineRead({}), serverOf(), { shadow: 'never' });
+		const refused = new Error('refused');
+		const failing = seamOf(() => Promise.reject(refused), {}, shadow);
+		installEngineSeam(failing.seam);
+		await expect(
+			route('issues', undefined, engineRead({}), serverOf(), { shadow: 'never' })
+		).rejects.toBe(refused);
+		await flush();
+		expect(shadow).not.toHaveBeenCalled();
+	});
+
+	it('comparableWhileStaged is always, unless an op creates an entity', () => {
+		const update = { kind: 'update_element' };
+		expect(comparableWhileStaged([])).toBe('always');
+		expect(comparableWhileStaged([update, { kind: 'delete_relationship' }])).toBe('always');
+		expect(comparableWhileStaged([update, { kind: 'create_element' }])).toBe('never');
+		expect(comparableWhileStaged([{ kind: 'create_relationship' }])).toBe('never');
+	});
+});
+
+describe('recheck', () => {
+	it("an answer that comes once the surface's side is the server's is replaced by the server's", async () => {
+		let side: Side = 'engine';
+		const shadow = vi.fn();
+		const { seam } = seamOf(
+			() => {
+				side = 'server';
+				return Promise.resolve({ n: 1 });
+			},
+			{},
+			shadow
+		);
+		installEngineSeam({ ...seam, side: () => side });
+		const server = serverOf('from server');
+		await expect(
+			route('issues', undefined, engineRead({}), server, { recheck: true })
+		).resolves.toBe('from server');
+		expect(server).toHaveBeenCalledOnce();
+		await flush();
+		expect(shadow).not.toHaveBeenCalled();
+	});
+
+	it("without it, or with the side unmoved, the engine's answer stands", async () => {
+		let side: Side = 'engine';
+		const { seam } = seamOf(() => {
+			side = 'server';
+			return Promise.resolve({ n: 1 });
+		});
+		installEngineSeam({ ...seam, side: () => side });
+		const server = serverOf();
+		await expect(route('issues', undefined, engineRead({}), server)).resolves.toBe(1);
+		const steady = seamOf(() => Promise.resolve({ n: 2 }));
+		installEngineSeam(steady.seam);
+		await expect(
+			route('issues', undefined, engineRead({}), server, { recheck: true })
+		).resolves.toBe(2);
+		expect(server).not.toHaveBeenCalled();
 	});
 });
 

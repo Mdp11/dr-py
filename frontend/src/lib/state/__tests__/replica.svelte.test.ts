@@ -7,6 +7,7 @@ import { engineSide } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
 import { evaluateNavigation } from '$lib/api/artifacts';
 import { getElementsBatch } from '$lib/api/model-read';
+import * as validationApi from '$lib/api/validation';
 import { createSnapshotCache } from '$lib/engine/cache';
 import { SURFACES } from '$lib/engine/surfaces';
 import type { EngineLink } from '$lib/engine/client';
@@ -54,13 +55,16 @@ import {
 import * as modelEngine from '../model-engine.svelte';
 import {
 	applyDelta,
+	cancelIssuesRefetch,
 	emit,
 	ensureElements,
+	getLiveIssues,
 	getModelError,
 	getStagedBatchIds,
 	getStagedConflicts,
 	getStagedOps,
 	getStructureRev,
+	refetchIssues,
 	revertAllStaged,
 	stagedSettled
 } from '../model.svelte';
@@ -1828,5 +1832,152 @@ describe('the artifact follower', () => {
 
 		await vi.waitFor(async () => expect(await totalOf({ artifact_id: tempId })).toBe(projects));
 		expect(await totalOf({ artifact_id: 'n1' })).toBe(projects);
+	});
+});
+
+describe('the issues on the engine', () => {
+	const API = `${PAGE_ORIGIN}/api/v1/projects/p`;
+	const TOO_LONG = 'x'.repeat(201);
+	const FROM_SERVER = {
+		severity: 'error',
+		message: 'from server',
+		target_ids: ['e_000009'],
+		check: 'facets',
+		origin: 'on_server'
+	};
+	const tooLong = {
+		severity: 'error',
+		message: 'name: length 201 exceeds max_length 200',
+		target_ids: ['e_000001'],
+		check: 'facets',
+		origin: 'uncommitted'
+	};
+	let store: EngineStore | null = null;
+
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+		cancelIssuesRefetch();
+	});
+
+	/**
+	 * The engine store with the issues on the engine; the server's issue route
+	 * answers FROM_SERVER. Every `getModelIssues` answer is recorded with the
+	 * replica's `seeded` when it came and whether the server answered it.
+	 */
+	async function issuesStore() {
+		let serverHits = 0;
+		server.use(
+			http.get(`${API}/model/issues`, () => {
+				serverHits += 1;
+				return HttpResponse.json({ model_rev: 0, issues: [FROM_SERVER], counts: { error: 1 } });
+			})
+		);
+		const real = validationApi.getModelIssues;
+		const answers: { seeded: boolean; server: boolean; issues: unknown[] }[] = [];
+		const spy = vi.spyOn(validationApi, 'getModelIssues').mockImplementation(async (cfg) => {
+			const before = serverHits;
+			const list = await real(cfg);
+			answers.push({
+				seeded: getReplicaStatus().seeded,
+				server: serverHits > before,
+				issues: list.issues
+			});
+			return list;
+		});
+		store = await engineStore({ surfaces: { issues: 'engine' } });
+		return { s: store, spy, real, answers };
+	}
+
+	const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+	it('the gate opening at the end of the first sweep schedules one refetch, from the engine', async () => {
+		const { s, spy, answers } = await issuesStore();
+		if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
+		expect(engineSide('issues')).toBe('engine');
+
+		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+		await sleep(350);
+		expect(spy).toHaveBeenCalledOnce();
+		await vi.waitFor(() => expect(answers).toHaveLength(1));
+		expect(answers[0]).toEqual({ seeded: true, server: false, issues: [] });
+	});
+
+	it('a changed with a new issues_version schedules ONE refetch after 300 ms; one with the same version none', async () => {
+		const { s, spy, real } = await issuesStore();
+		if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
+		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+		await sleep(350);
+		spy.mockClear();
+		await ensureElements(['e_000001', 'e_000002']);
+
+		const moved: number[] = [];
+		const off = s.sync.on('changed', () => void moved.push(Date.now()));
+		spy.mockImplementation((cfg) => {
+			moved.push(-Date.now());
+			return real(cfg);
+		});
+		emit(rename('e_000001', TOO_LONG));
+		await settled(s);
+		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+		off();
+		const heard = moved.filter((at) => at > 0);
+		const asked = -moved.find((at) => at < 0)!;
+		expect(asked - heard.at(-1)!).toBeGreaterThanOrEqual(299);
+		await vi.waitFor(() => expect(getLiveIssues()).toEqual([tooLong]));
+		await sleep(350);
+		expect(spy).toHaveBeenCalledOnce();
+
+		spy.mockClear();
+		emit(rename('e_000002', 'still fine'));
+		await settled(s);
+		await sleep(350);
+		expect(spy).not.toHaveBeenCalled();
+		expect(getLiveIssues()).toEqual([tooLong]);
+	});
+
+	it('with the issues on the server, a changed schedules nothing', async () => {
+		server.use(
+			http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] }))
+		);
+		const spy = vi.spyOn(validationApi, 'getModelIssues');
+		store = await engineStore();
+		const s = store;
+		if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
+		await ensureElements(['e_000001']);
+
+		emit(rename('e_000001', TOO_LONG));
+		await settled(s);
+		await sleep(350);
+
+		expect(engineSide('issues')).toBe('server');
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	it('a worker that dies closes the gate: the server answers until the new replica is swept, then the engine, and no unswept list is adopted', async () => {
+		const { s, answers } = await issuesStore();
+		if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
+		await ensureElements(['e_000001']);
+		emit(rename('e_000001', TOO_LONG));
+		await settled(s);
+		await vi.waitFor(() => expect(getLiveIssues()).toEqual([tooLong]));
+		const from = answers.length;
+
+		s.link.dispose();
+		const reseeded = s.until((status) => status.phase === 'ready' && status.seeded);
+		// The engine is found gone under this call: the server answers it.
+		await refetchIssues();
+		expect(getReplicaStatus()).toMatchObject({ phase: 'resyncing', seeded: false });
+		expect(getLiveIssues()).toEqual([FROM_SERVER]);
+		// While the new replica opens, its gate is closed.
+		await refetchIssues();
+		expect(getLiveIssues()).toEqual([FROM_SERVER]);
+
+		await reseeded;
+		await vi.waitFor(() => expect(getLiveIssues()).toEqual([tooLong]));
+		const later = answers.slice(from);
+		expect(later.filter((answer) => !answer.seeded).every((answer) => answer.server)).toBe(true);
+		expect(later.filter((answer) => answer.server)).toHaveLength(2);
+		expect(later.at(-1)).toEqual({ seeded: true, server: false, issues: [tooLong] });
 	});
 });

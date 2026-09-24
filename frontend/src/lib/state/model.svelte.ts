@@ -216,8 +216,9 @@ export function setModelApiConfig(cfg: ClientConfig | undefined): void {
  * rolls back, and tags each issue's origin (on_server / uncommitted / resolved).
  * With an empty buffer it is a plain committed-model validation (all on_server).
  * On the engine side the ops are the engine's staged batches, once every edit
- * has reached them; rejects with `StagedUnreadableError`, posting nothing,
- * while they cannot be read.
+ * has reached them, named by their ids — with the issues on the engine, it
+ * validates those batches itself; rejects with `StagedUnreadableError`,
+ * posting nothing, while they cannot be read.
  *
  * A pure fetch: it does NOT mutate the live issue map (see `adoptIssues`/
  * `applyDelta`). The caller (`validate-action.ts`'s `runValidation`) stores
@@ -226,9 +227,14 @@ export function setModelApiConfig(cfg: ClientConfig | undefined): void {
  * surface in the panel.
  */
 export async function validateAll(): Promise<Issue[]> {
-	if (getStagingSide() === 'engine') await engine.stagedSettled();
-	const staged = captureStaged().ops;
-	const options = staged.length > 0 ? { ops: staged, baseRev: getModelRev() } : undefined;
+	if (getStagingSide() !== 'engine') {
+		const staged = legacy.getStagedOps();
+		const options = staged.length > 0 ? { ops: staged, baseRev: getModelRev() } : undefined;
+		return validateModel(options, getClientConfig());
+	}
+	await engine.stagedSettled();
+	const { ops, batchIds } = captureStaged();
+	const options = ops.length > 0 ? { ops, baseRev: getModelRev(), batchIds } : { batchIds };
 	return validateModel(options, getClientConfig());
 }
 

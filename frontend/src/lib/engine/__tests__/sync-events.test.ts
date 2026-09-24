@@ -1,13 +1,14 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { ModelOp, ServiceEvent, StageResult } from '$engine';
 import { server } from '$lib/api/__tests__/server';
-import type { EngineLink } from '../client';
+import { EngineGoneError, type EngineLink } from '../client';
 import type { ChangedEvent } from '../sync';
 import { connectInProcess } from '../testing';
 import {
 	fakeProject,
 	hold,
 	syncOver,
+	type Committed,
 	type FakeProject,
 	type SyncOverrides
 } from './support/project-server';
@@ -42,6 +43,13 @@ async function ready(project: FakeProject, overrides: SyncOverrides = {}) {
 const rename = (id: string, name: string): ModelOp[] => [
 	{ kind: 'update_element', id, properties_patch: { name } }
 ];
+
+/** The feed frame of `committed`, its state digest flipped: the replica diverges on it. */
+function withWrongDigest(committed: Committed): string {
+	const digest = committed.delta['state_digest'] as string;
+	const wrong = (BigInt('0x' + digest) ^ 1n).toString(16).padStart(16, '0');
+	return committed.eventText.replace(`"state_digest":"${digest}"`, `"state_digest":"${wrong}"`);
+}
 
 /** Stages a rename through the sync's current link, as the engine store's transitions will. */
 const stage = (over: ReturnType<typeof syncOver>, id: string, name: string) =>
@@ -158,5 +166,94 @@ describe('the changed event', () => {
 		expect(over.sync.status().phase).toBe('ready');
 		await stage(over, 'e_000001', 'reopened');
 		expect(heard.map((event) => event.staged_version)).toEqual([1]);
+	});
+});
+
+describe('the sweep seeds the replica', () => {
+	/** Every `sweep` progress event the link's engine posts from now on. */
+	const sweepsOf = (link: EngineLink) => {
+		const seen: { done: number; total: number }[] = [];
+		link.client.on((event) => {
+			if (event.event === 'progress' && event.task === 'sweep') {
+				seen.push({ done: event.done, total: event.total });
+			}
+		});
+		return seen;
+	};
+
+	it('the end of the first sweep after ready sets seeded; the sweep is no progress the UI shows', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const over = open(project);
+		expect(over.sync.status().seeded).toBe(false);
+		await over.until((status) => status.seeded);
+
+		const first = over.statuses.findIndex((status) => status.seeded);
+		expect(over.statuses[first]!.phase).toBe('ready');
+		expect(over.statuses.slice(0, first).every((status) => !status.seeded)).toBe(true);
+		expect(over.statuses.some((status) => status.progress?.task === 'sweep')).toBe(false);
+		expect(over.sync.status()).toMatchObject({ phase: 'ready', seeded: true });
+	});
+
+	it('a sweep started again keeps the replica seeded through its done: 0', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const over = open(project);
+		await over.until((status) => status.seeded);
+		const sweeps = sweepsOf(over.link!);
+		const from = over.statuses.length;
+
+		await over.link!.client.call('validateModel', { batch_ids: [] });
+
+		expect(sweeps[0]).toMatchObject({ done: 0 });
+		expect(sweeps.at(-1)!.done).toBe(sweeps.at(-1)!.total);
+		expect(over.statuses.slice(from).every((status) => status.seeded)).toBe(true);
+		expect(over.sync.status().seeded).toBe(true);
+	});
+
+	it('a new link starts unseeded, and its own sweep seeds it', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const over = open(project);
+		await over.until((status) => status.seeded);
+		const from = over.statuses.length;
+
+		over.links[0]!.dispose();
+		await expect(over.sync.call('getModelSummary', {})).rejects.toBeInstanceOf(EngineGoneError);
+		expect(over.sync.status()).toMatchObject({ phase: 'resyncing', seeded: false });
+		await over.until((status) => status.seeded, from);
+
+		expect(over.connects).toBe(2);
+		const later = over.statuses.slice(from);
+		const reseeded = later.findIndex((status) => status.seeded);
+		expect(later.slice(0, reseeded).every((status) => !status.seeded)).toBe(true);
+		expect(later.slice(0, reseeded).some((status) => status.phase === 'ready')).toBe(true);
+		expect(later[reseeded]!.phase).toBe('ready');
+	});
+
+	it('a re-bootstrap on the same worker starts unseeded', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const over = open(project);
+		await over.until((status) => status.seeded);
+		const from = over.statuses.length;
+
+		const committed = project.commit(rename('e_000002', 'diverges'));
+		over.sync.feedCommit(withWrongDigest(committed), project.rev);
+		await over.until((status) => status.phase === 'resyncing', from);
+		expect(over.sync.status().seeded).toBe(false);
+		await over.until((status) => status.seeded, from);
+
+		expect(over.connects).toBe(1);
+		expect(over.sync.status()).toMatchObject({ phase: 'ready', rev: project.rev, seeded: true });
+	});
+
+	it('stop() leaves it unseeded', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const over = open(project);
+		await over.until((status) => status.seeded);
+		over.sync.stop();
+		expect(over.sync.status().seeded).toBe(false);
 	});
 });

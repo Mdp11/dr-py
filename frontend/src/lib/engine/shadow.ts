@@ -35,16 +35,21 @@ export type ShadowDeps = {
  * re-test is retried, up to three rounds, then given up on silently: a
  * replica that never rests is not a mismatch. Nothing is compared while an
  * edit is staged in the replica — the server has not seen it — and a
- * comparison under way ends silently once one is. An `AbortError` from either
- * side, or an `EngineGoneError` from the engine side (the worker died, or a
- * `stop()` while a re-test was mid-flight), ends the comparison without a
- * report — a comparison the caller can no longer see through is not a
- * mismatch either.
+ * comparison under way ends silently once one is; unless the probe says the
+ * call sent the staged edits to the server too (`whileStaged`), when a 409 on
+ * either side ends it instead: the staged edits or the `rev` moved since the
+ * call. An `AbortError` from either side, or an `EngineGoneError` from the
+ * engine side (the worker died, or a `stop()` while a re-test was
+ * mid-flight), ends the comparison without a report — a comparison the
+ * caller can no longer see through is not a mismatch either.
  */
 export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']> {
 	return async function shadow(probe): Promise<void> {
 		const { surface, method, params, engine, again, server } = probe;
-		if (isTerminal(engine) || deps.staged()) return;
+		const whileStaged = probe.whileStaged === true;
+		const staged = () => !whileStaged && deps.staged();
+		const moved = (...outcomes: Outcome[]) => whileStaged && outcomes.some(isConflict);
+		if (isTerminal(engine) || staged() || moved(engine)) return;
 
 		let serverOutcome: Outcome;
 		try {
@@ -52,11 +57,11 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 		} catch {
 			return;
 		}
-		if (same(surface, engine, serverOutcome)) return;
+		if (moved(serverOutcome) || same(surface, engine, serverOutcome)) return;
 
 		for (let round = 0; round < MAX_ROUNDS; round++) {
 			await deps.quiet();
-			if (deps.staged()) return;
+			if (staged()) return;
 			const before = deps.rev();
 			let retested: [Outcome, Outcome];
 			try {
@@ -65,7 +70,7 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 				return;
 			}
 			const [retestedEngine, retestedServer] = retested;
-			if (deps.staged()) return;
+			if (staged() || moved(retestedEngine, retestedServer)) return;
 			if (before !== deps.rev()) continue;
 			if (same(surface, retestedEngine, retestedServer)) return;
 			deps.report(reportLine(surface, method, params, retestedEngine, retestedServer));
@@ -87,6 +92,10 @@ function isTerminal(outcome: Outcome): boolean {
 	return !outcome.ok && isTerminalError(outcome.error);
 }
 
+function isConflict(outcome: Outcome): boolean {
+	return !outcome.ok && outcome.error instanceof ApiError && outcome.error.status === 409;
+}
+
 /** An `AbortError` (either side) or an `EngineGoneError` (only ever the
  * engine side: `again()`, or the `engine` outcome the probe was handed). */
 function isTerminalError(error: unknown): boolean {
@@ -106,17 +115,41 @@ function same(surface: Surface, a: Outcome, b: Outcome): boolean {
 	return false;
 }
 
-/** `summary` compares without `issue_counts` and `undo_depth`. */
+/**
+ * `summary` compares without `issue_counts` and `undo_depth`. `issues`
+ * compares its lists as multisets: an issue list, a bare list, and a
+ * preview's `structural_blockers` and `issues`.
+ */
 function present(surface: Surface, value: unknown): unknown {
-	if (
-		surface !== 'summary' ||
-		typeof value !== 'object' ||
-		value === null ||
-		Array.isArray(value)
-	) {
-		return value;
+	if (surface === 'issues') {
+		if (Array.isArray(value)) return byIssueKey(value);
+		if (!isRecord(value)) return value;
+		const lists = Object.entries(value).map(([key, item]) =>
+			ISSUE_LISTS.has(key) && Array.isArray(item) ? [key, byIssueKey(item)] : [key, item]
+		);
+		return Object.fromEntries(lists);
 	}
+	if (surface !== 'summary' || !isRecord(value)) return value;
 	return Object.fromEntries(Object.entries(value).filter(([key]) => !SUMMARY_OMIT.has(key)));
+}
+
+const ISSUE_LISTS = new Set(['issues', 'structural_blockers']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** `issues` in one order whatever order they came in. */
+function byIssueKey(issues: readonly unknown[]): unknown[] {
+	const keyed = issues.map((issue) => ({ issue, key: issueKey(issue) }));
+	keyed.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+	return keyed.map(({ issue }) => issue);
+}
+
+function issueKey(issue: unknown): string {
+	if (!isRecord(issue)) return JSON.stringify(issue) ?? '';
+	const { severity, category, check, message, target_ids, origin } = issue;
+	return JSON.stringify([severity, category, check, message, target_ids, origin]);
 }
 
 function sameError(a: unknown, b: unknown): boolean {

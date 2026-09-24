@@ -10,7 +10,7 @@ import {
 	type Side,
 	type Surface
 } from '$lib/api/engine-route';
-import { NotFoundError } from '$lib/api/errors';
+import { errorForStatus, NotFoundError } from '$lib/api/errors';
 import { listContainmentRoots } from '$lib/api/model-read';
 import { EngineGoneError } from '../client';
 import { createEngineSeam } from '../seam';
@@ -368,6 +368,113 @@ describe('createShadow', () => {
 			report
 		);
 		expect(report).toHaveBeenCalledOnce();
+	});
+
+	describe('issues', () => {
+		const issue = (message: string, check = 'facets', origin = 'on_server') => ({
+			severity: 'error',
+			message,
+			target_ids: [message.slice(0, 4)],
+			category: 'conformance',
+			check,
+			origin
+		});
+		const a = issue('e-1a: bad');
+		const b = issue('e-2b: bad', 'multiplicity');
+		const c = issue('e-3c: bad', 'facets', 'uncommitted');
+
+		/** Runs the shadow over `engine` and `server` as issue answers; true when it reported. */
+		async function differs(engineValue: unknown, serverValue: unknown): Promise<boolean> {
+			const report = vi.fn();
+			await run(
+				{
+					surface: 'issues',
+					method: 'getModelIssues',
+					params: {},
+					engine: { ok: true, value: engineValue },
+					again: () => Promise.resolve(engineValue),
+					server: () => Promise.resolve(serverValue)
+				},
+				{},
+				report
+			);
+			return report.mock.calls.length > 0;
+		}
+
+		it('two issue lists in different orders are the same', async () => {
+			const list = (issues: unknown[]) => ({
+				model_rev: 2,
+				issues,
+				counts: { error: 3 },
+				truncated: false,
+				rules_status: null
+			});
+			expect(await differs(list([a, b, c]), list([c, a, b]))).toBe(false);
+			expect(await differs([a, b, c], [b, c, a])).toBe(false);
+			const preview = (blockers: unknown[], issues: unknown[]) => ({
+				conformance_error_count: 3,
+				structural_blockers: blockers,
+				issues,
+				would_block: false
+			});
+			expect(await differs(preview([a, b], [a, b, c]), preview([b, a], [c, b, a]))).toBe(false);
+		});
+
+		it('two differing in one check are not', async () => {
+			const other = { ...b, check: 'facets' };
+			expect(await differs([a, b, c], [c, a, other])).toBe(true);
+			expect(
+				await differs(
+					{ model_rev: 2, issues: [a, b], counts: { error: 2 } },
+					{ model_rev: 2, issues: [other, a], counts: { error: 2 } }
+				)
+			).toBe(true);
+		});
+
+		it('a list with an issue twice differs from one with it once', async () => {
+			expect(await differs([a, a, b], [a, b, b])).toBe(true);
+			expect(await differs([a, a, b], [b, a, a])).toBe(false);
+		});
+	});
+
+	describe('a probe compared while staged', () => {
+		const conflict = () => errorForStatus(409, { detail: 'stale staged batches' }, 'stale');
+
+		it('is compared with edits staged, and a difference is reported', async () => {
+			const report = vi.fn();
+			const serverCall = vi.fn(() => Promise.resolve({ total: 9 }));
+			await run(
+				{
+					whileStaged: true,
+					engine: { ok: true, value: { total: 1 } },
+					again: () => Promise.resolve({ total: 1 }),
+					server: serverCall
+				},
+				{ staged: () => true },
+				report
+			);
+			expect(serverCall).toHaveBeenCalledTimes(2);
+			expect(report).toHaveBeenCalledOnce();
+		});
+
+		it('ends silently on a 409 from either side, the first answers or a re-test', async () => {
+			const report = vi.fn();
+			const moved = [
+				{ engine: { ok: false, error: conflict() }, again: 1, server: 1 },
+				{ engine: { ok: true, value: 1 }, again: 1, server: 'conflict' },
+				{ engine: { ok: true, value: 1 }, again: 'conflict', server: 2 }
+			] as const;
+			for (const { engine, again, server: answer } of moved) {
+				const answering = (value: unknown) => () =>
+					value === 'conflict' ? Promise.reject(conflict()) : Promise.resolve(value);
+				await run(
+					{ whileStaged: true, engine, again: answering(again), server: answering(answer) },
+					{ staged: () => true },
+					report
+				);
+			}
+			expect(report).not.toHaveBeenCalled();
+		});
 	});
 
 	it('the line is cut: a 10,000-character difference gives a line under 1,000', async () => {

@@ -323,9 +323,8 @@
 		// runValidation(), which is POST /model/validate with no ops, i.e. the
 		// full pipeline over a model that can be ~80 MB. (It would also install a
 		// Validate overlay from a run the user never asked for, switching the
-		// whole UI into overlay mode after someone else's rebind.) The local
-		// rebind in MetamodelTab adopts the rebind response's issue list for the
-		// same reason; this path has no such response, so it refetches.
+		// whole UI into overlay mode after someone else's rebind.) The
+		// committer's own rebind refetches the same way (`adoptReboundMetamodel`).
 		await refetchIssues();
 		clearPendingRebind();
 	}

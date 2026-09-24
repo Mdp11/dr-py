@@ -786,9 +786,28 @@ dropped). Triggers, all of them best-effort:
 | peer commit (300 ms debounce) | `realtime.svelte.ts`                                                                               |
 | feed reconnect snapshot       | `realtime.svelte.ts` — **unconditional**, deliberately NOT rev-guarded (see the sweep note above)  |
 | own-commit rebind adoption    | `checkout.svelte.ts`'s `adoptReboundMetamodel()` — refetches metamodel + issues + summary in place |
+| replica issue store moved     | `replica.svelte.ts` — a `changed` whose `issues_version` moved, with the issues on the engine      |
+| issues gate opening           | `replica.svelte.ts` — the replica's first sweep ended, with the issues on the engine               |
 
 Refetch, not feed deltas: commit feed events deliberately carry **no** issue
-delta, because reconnect needs the refetch path anyway.
+delta, because reconnect needs the refetch path anyway. The debounced triggers
+share ONE 300 ms timer, `scheduleIssuesRefetch()` in `model-shared.svelte.ts`
+(`stopRealtime()` disarms it through `cancelIssuesRefetch()`).
+
+**With the issues on the engine** (the `issues` surface, `lib/engine/README.md`
+"Surfaces"), `getModelIssues` answers the replica's live issue store: the
+WORKING copy's issues, a staged edit's own tagged `uncommitted`, every other
+one `on_server`, never `resolved` — so the live map shows what the staged
+edits break before any Validate, and a fixed issue simply leaves it. Every
+trigger above routes through the same function, so each reads the engine;
+the replica adds its own two, which the debounce folds with the rest. The
+own-commit splice (`applyDeltaShared`'s issue delta) stays: it is a transient
+the refetch after the replica applies the commit replaces with the engine's
+list, where the committed issues read `on_server`. Until the replica's first
+sweep has ended (and again after every new replica — a re-bootstrap, a dead
+worker, a rebind adoption), the server answers, exactly as with the surface
+on `server`. `validateAll` sends the engine's staged batch ids with the ops,
+and the engine validates those batches itself.
 
 Adopting committed truth **clears the overlay** (`adoptIssues`, `applyDelta`) —
 the staged state it described has been superseded. So do `resetModelStore()` and
@@ -1298,9 +1317,9 @@ order, unfiltered, artifacts ignored — the server's
 `lib/engine` needs no `lib/api/types` value.
 
 **Surfaces** (`lib/api/engine-route.ts`, `lib/engine/surfaces.ts`,
-`lib/engine/seam.ts`). The nine model reads of `lib/api` and its two
-evaluations keep their signatures and schemas and are answered by the
-engine or the server, one switch per surface:
+`lib/engine/seam.ts`). The nine model reads of `lib/api`, its two
+evaluations and its three issue calls keep their signatures and schemas and
+are answered by the engine or the server, one switch per surface:
 
 | surface         | functions                                                                                           |
 | --------------- | --------------------------------------------------------------------------------------------------- |
@@ -1311,6 +1330,7 @@ engine or the server, one switch per surface:
 | `summary`       | `getModelSummary`                                                                                   |
 | `navigation`    | `evaluateNavigation`                                                                                |
 | `criteria`      | `searchModel`                                                                                       |
+| `issues`        | `getModelIssues`, `validateModel`, the model half of `previewCommit`                                |
 
 - `lib/api` imports nothing of `lib/engine`: the engine is an injected seam
   (`installEngineSeam(seam | null)`), like the 401 handler. Each function
@@ -1333,7 +1353,33 @@ engine or the server, one switch per surface:
   page `fallback: 'script' | 'pattern'`, which the navigation editor's
   preview keeps from its first page and `Navigation/ResultsDock.svelte`
   shows above the chains as a muted note (`data-testid="nav-fallback"`,
-  "Reads committed state: …"); `searchModel` passes no mark.
+  "Reads committed state: …"); `searchModel` passes no mark. A third 501,
+  `reaches validation rules` (an issue call while a `validation_rules`
+  artifact resolves), is answered by the server the same way, never
+  marked. So is a 409 the engine answers when the staged batches, the
+  `base_rev` or the replica moved under the call (`stale staged batches`,
+  `stale base_rev`, `replica is not ready`): the server answers the whole
+  request. `route`'s options also take `shadow` (`'unstaged'`, the default;
+  `'always'`, compared with edits staged, for a call that sends them to the
+  server too; `'never'`) and `recheck` (the side is asked again once the
+  engine answers, and a side gone to the server meanwhile takes the
+  server's answer).
+- The `issues` surface: `getModelIssues` is the engine's `getModelIssues {}`
+  (`recheck`: an answer from a replica whose sweep has not ended is not
+  adopted), `validateModel` with no inline model or scope — and, when it
+  sends ops, the engine batch ids they are (`batchIds`) — is
+  `validateModel {batch_ids}`, and `previewCommit(baseRev, ops, cfg?,
+local?)` with `local` (`{strict, batchIds}`) and no `metamodel.rebind`
+  op is `previewCommit {base_rev, batch_ids, strict}`: the engine previews
+  the model ops from its own staged batches and, when any op is not a model
+  op, the server previews those alone, the halves summed (counts added,
+  lists concatenated engine first, `would_block` or-ed). Anything else is
+  the server's whole request. `validateModel` and `previewCommit` compare
+  while staged (`comparableWhileStaged`), unless an op creates an entity,
+  whose id the server mints and the engine never sees. A `validateModel`
+  with nothing staged is never compared: the server's full run names one
+  member of a containment cycle where the engine names every element on
+  it, and `getModelIssues` compares the unstaged state already.
 - The engine's params are flat and snake_case — `{id}`, `{ids}`,
   `{type, q, limit, offset}`, `{id, direction, limit, offset}`, `{}`,
   `{limit, offset}`, `{limit, offset, view_id}`, `{id, limit, offset}` —
@@ -1350,7 +1396,8 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
   `SURFACE_DEFAULTS` — `engine` for the five read surfaces
-  (`READ_SURFACES`) and for `navigation` and `criteria` — and
+  (`READ_SURFACES`) and for `navigation` and `criteria`, `server` for
+  `issues` — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
@@ -1363,7 +1410,8 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
   alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
   take effect. `navigation` and `criteria` are never forced: the server
-  never evaluated staged edits in either mode. It is not a surface: `SURFACES` and `anyEngineSurface` do not
+  never evaluated staged edits in either mode; nor is `issues`, whose calls
+  send the server the staged edits. It is not a surface: `SURFACES` and `anyEngineSurface` do not
   count it. The switches are read once, with the rest, and honoured in a
   build too. `readSurfaces(storage?)` is `readSwitches(storage).surfaces`;
   `anyEngineSurface(surfaces)` says whether any is on the engine.
@@ -1372,7 +1420,12 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   so, its gate (when given) answers true, and the phase is neither `off`
   nor `server`; `call` is `sync.call`
   (so the read barrier holds); `gone` is `EngineGoneError`. The replica
-  store installs it (see "Wiring").
+  store installs it (see "Wiring"), with two gates: `navigation` (the
+  artifact follower has loaded) and `issues` — staging on the engine (the
+  legacy buffer's edits are not in the working copy) and the status's
+  `seeded`, which closes it the moment the engine's replica leaves `ready`
+  (diverged or closed). A `frozen` replica keeps `seeded`: its list matches
+  the old-metamodel UI until the adoption re-bootstraps it.
 
 **Shadow comparison** (`lib/engine/shadow.ts`, `lib/engine/quiet.ts`). Holds
 the engine's answer to a switched-on read to the server's own, in dev only.
@@ -1405,8 +1458,15 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   re-test's `again()`) — a `stop()` mid-re-test can drop the replica's `rev`
   to `null` right as the worker goes, and `null === null` must never be read
   as a round whose `rev` held still.
+- An `issues` comparison sorts the issue lists first — a list body's
+  `issues`, a bare list, a preview's `structural_blockers` and `issues` — by
+  `[severity, category, check, message, target_ids, origin]`, so the two
+  sides agree as multisets whatever order each store keeps.
 - Nothing is compared while `staged()` is true: the replica's answers then
-  hold edits the server has not seen. It is asked before `server()` is
+  hold edits the server has not seen — unless the probe says `whileStaged`
+  (`route`'s `shadow: 'always'`), when the call sent the staged edits to
+  the server too; then a 409 on either side ends the comparison silently
+  instead (the staged batches or the `rev` moved since the call). It is asked before `server()` is
   called, after each `quiet()` and after each re-test round, so a
   comparison under way when an edit is staged ends silently. The replica
   store hands it
@@ -1443,8 +1503,14 @@ handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
 opening; `verify`, the background digest check, carried in `ready` too),
 `attempt` (1–3 while opening or resyncing, else 0), `source` (`cache` /
 `network`), `isolated` (the frame's `crossOriginIsolated`, `null` before the
-handshake), `cspViolations` (every violation the frame reported) and `reason`
-(why `off`, `frozen`, `failed` or `server`). `server` is the boot fallback: the
+handshake), `cspViolations` (every violation the frame reported), `reason`
+(why `off`, `frozen`, `failed` or `server`) and `seeded` (the replica's issue
+store has been swept whole once: set at the end of the first `sweep` the
+engine reports after it called the replica `ready`, cleared by every new
+replica — each open or re-bootstrap attempt, a new worker — and by the
+engine's replica leaving `ready`; a sweep started again, by `validateModel`,
+keeps it, its `done: 0` included; `sweep` is never `progress`, since the
+workspace opens at `ready`). `server` is the boot fallback: the
 frame did not connect, or three opens failed, before the first `ready`. In
 `server` (and `off`) every surface's effective side is the server's.
 
@@ -1510,6 +1576,15 @@ sync exists:
   follower's first load lands (`loaded()`; a failed load is asked once more
   after a second) the seam's `navigation` gate is closed and navigations go
   to the server, and while it runs its `settled()` is a quiet probe.
+- **The issues.** The seam's `issues` gate is `getStagingSide() === 'engine'`
+  and the status's `seeded`. With the `issues` switch on the engine, the
+  gate going from closed to open schedules the debounced issues refetch
+  (`scheduleIssuesRefetch()`, `model-shared.svelte.ts`), and so does a
+  `changed` event whose `issues_version` is not the last one seen while the
+  gate is open: `startReplica()` subscribes to the sync's `changed`
+  events, `stopReplica()` / `resetReplica()` unsubscribe. The version is
+  per worker, so a new worker's first may repeat an old one; its gate
+  opening refetches anyway (see "Validation issues").
 - **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
   drawer's revert (`HistoryDrawer.svelte::doRevert`) both call
   `beginReplicaCommit()` right before the POST, hand `commitChanges` /

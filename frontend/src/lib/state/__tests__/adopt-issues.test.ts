@@ -6,13 +6,15 @@ import {
 	adoptIssues,
 	adoptSummary,
 	applyDelta,
+	cancelIssuesRefetch,
 	getIssueCounts,
 	getIssuesByOwner,
 	getIssuesTruncatedTotal,
 	getLiveIssues,
 	getRulesStatus,
 	refetchIssues,
-	resetModelStore
+	resetModelStore,
+	scheduleIssuesRefetch
 } from '../model.svelte';
 import {
 	clearOverlay,
@@ -193,6 +195,39 @@ describe('refetchIssues', () => {
 		});
 		await refetchIssues();
 		expect(getRulesStatus()).toEqual(rulesStatus);
+	});
+});
+
+describe('scheduleIssuesRefetch', () => {
+	const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+	const answered = () =>
+		vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 0,
+			issues: [issue('fetched', 'e1')],
+			counts: { error: 1 },
+			truncated: false,
+			rules_status: null
+		});
+
+	it('refetches once, 300 ms after the last of a burst, and adopts the answer', async () => {
+		const spy = answered();
+		scheduleIssuesRefetch();
+		scheduleIssuesRefetch();
+		const last = Date.now();
+		scheduleIssuesRefetch();
+		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+		expect(Date.now() - last).toBeGreaterThanOrEqual(299);
+		await vi.waitFor(() => expect(getLiveIssues()[0]?.message).toBe('fetched'));
+		await sleep(350);
+		expect(spy).toHaveBeenCalledOnce();
+	});
+
+	it('cancelIssuesRefetch disarms one scheduled', async () => {
+		const spy = answered();
+		scheduleIssuesRefetch();
+		cancelIssuesRefetch();
+		await sleep(350);
+		expect(spy).not.toHaveBeenCalled();
 	});
 });
 

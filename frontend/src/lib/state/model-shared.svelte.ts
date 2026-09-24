@@ -259,12 +259,13 @@ export function adoptSummary(s: ModelSummary): void {
 }
 
 /**
- * Adopt a committed-issue snapshot (GET /model/issues, rebind response) as
- * the live store. Ignores a response STRICTLY older than the cached rev (it
- * lost a race with a commit splice; the next delta or refetch heals) —
- * equal-rev responses are adopted because the background sweep grows the
- * server store WITHOUT bumping model_rev. Clears the Validate overlay:
- * committed truth moved, so any staged snapshot is moot.
+ * Adopt an issue snapshot (GET /model/issues, or the engine's list over the
+ * working copy) as the live store. Ignores a response STRICTLY older than the
+ * cached rev (it lost a race with a commit splice; the next delta or refetch
+ * heals) — equal-rev responses are adopted because the background sweep
+ * grows the store WITHOUT bumping model_rev, and the engine's list moves
+ * with staged edits. Clears the Validate overlay: committed truth moved, so
+ * any staged snapshot is moot.
  */
 export function adoptIssues(
 	issues: Issue[],
@@ -281,9 +282,10 @@ export function adoptIssues(
 	clearOverlay();
 }
 
-/** Fetch GET /model/issues and adopt it. Best-effort by contract: every
- * caller is a background refresh (boot, peer commit, sweep completion,
- * feed reconnect) where a miss just means the next event heals. */
+/** Fetch GET /model/issues — the engine's list, with the issues on it — and
+ * adopt it. Best-effort by contract: every caller is a background refresh
+ * (boot, peer commit, sweep completion, feed reconnect, the replica's issue
+ * store moving) where a miss just means the next event heals. */
 export async function refetchIssues(): Promise<void> {
 	// Same guard every other in-flight read in this store relies on
 	// (`_generation`): a boot refetch for project A that lands after a switch
@@ -299,6 +301,29 @@ export async function refetchIssues(): Promise<void> {
 	} catch {
 		// keep the current map; the next commit delta or refetch heals
 	}
+}
+
+// Debounce for issue refetches: peer commits, reconnect snapshots and the
+// replica's issue-store moves can arrive in bursts (a multi-op batch, a flaky
+// connection reconnecting several times, a sweep's slices); one GET per burst
+// is enough. The refetch corrects what the synthesized peer-commit delta
+// cannot know — the feed event carries no issue delta by design: refetch is
+// preferred over shipping deltas on the wire because reconnect needs the
+// refetch path anyway.
+let _issuesRefetchTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Refetches the issues 300 ms after the last of a burst of calls. */
+export function scheduleIssuesRefetch(): void {
+	if (_issuesRefetchTimer !== null) clearTimeout(_issuesRefetchTimer);
+	_issuesRefetchTimer = setTimeout(() => {
+		_issuesRefetchTimer = null;
+		void refetchIssues();
+	}, 300);
+}
+
+export function cancelIssuesRefetch(): void {
+	if (_issuesRefetchTimer !== null) clearTimeout(_issuesRefetchTimer);
+	_issuesRefetchTimer = null;
 }
 
 /**

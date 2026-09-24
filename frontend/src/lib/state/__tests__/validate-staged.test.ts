@@ -1,8 +1,10 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
 import { server } from '$lib/api/__tests__/server';
-import { emit } from '../model.svelte';
+import * as validationApi from '$lib/api/validation';
+import { PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
+import { cancelIssuesRefetch, emit, ensureElements, stagedSettled } from '../model.svelte';
 import {
 	validateAll,
 	resetModelStore,
@@ -14,6 +16,7 @@ import {
 } from '../model.svelte';
 import { clearOverlay, getLastError, getOverlay } from '../validation.svelte';
 import { runValidation } from '../validate-action';
+import { engineStore, rename, type EngineStore } from './support/engine-store';
 
 const BASE = 'http://api.test/api/v1';
 
@@ -122,5 +125,81 @@ describe('runValidation — 409 conflict path', () => {
 
 		expect(getModelError()?.kind).toBe('conflict');
 		expect(getLastError()).not.toBeNull();
+	});
+});
+
+describe('validateAll on the engine side', () => {
+	const API = `${PAGE_ORIGIN}/api/v1/projects/p`;
+	let store: EngineStore | null = null;
+
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+		// The gate's opening scheduled one: it must not outlive the store.
+		cancelIssuesRefetch();
+		vi.restoreAllMocks();
+	});
+
+	/** The engine store; `/model/validate` records what it is sent and answers nothing. */
+	async function open(surfaces: { [surface: string]: string } = {}) {
+		// The suites above name their server; these reach the active project's.
+		setModelApiConfig(undefined);
+		const bodies: unknown[] = [];
+		server.use(
+			http.post(`${API}/model/validate`, async ({ request }) => {
+				const text = await request.text();
+				bodies.push(text === '' ? null : JSON.parse(text));
+				return HttpResponse.json([]);
+			}),
+			http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] }))
+		);
+		store = await engineStore({ surfaces });
+		await ensureElements(['e_000001']);
+		return { s: store, bodies };
+	}
+
+	it('names the batches it sends; with the issues on the engine, the engine validates them', async () => {
+		const { s, bodies } = await open({ issues: 'engine' });
+		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
+		const spy = vi.spyOn(validationApi, 'validateModel');
+		const op = rename('e_000001', 'x'.repeat(201));
+		emit(op);
+		await stagedSettled();
+
+		const issues = await validateAll();
+
+		expect(spy).toHaveBeenCalledWith({ ops: [op], baseRev: 0, batchIds: [1] }, undefined);
+		expect(issues).toEqual([
+			{
+				severity: 'error',
+				message: 'name: length 201 exceeds max_length 200',
+				target_ids: ['e_000001'],
+				check: 'facets',
+				origin: 'uncommitted'
+			}
+		]);
+		expect(bodies).toEqual([]);
+	});
+
+	it('with nothing staged, names no batch', async () => {
+		const { s, bodies } = await open({ issues: 'engine' });
+		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
+		const spy = vi.spyOn(validationApi, 'validateModel');
+
+		await expect(validateAll()).resolves.toEqual([]);
+
+		expect(spy).toHaveBeenCalledWith({ batchIds: [] }, undefined);
+		expect(bodies).toEqual([]);
+	});
+
+	it('with the issues on the server, the server is sent the ops', async () => {
+		const { bodies } = await open();
+		const op = rename('e_000001', 'x'.repeat(201));
+		emit(op);
+		await stagedSettled();
+
+		await validateAll();
+
+		expect(bodies).toEqual([{ ops: [op], base_rev: 0 }]);
 	});
 });

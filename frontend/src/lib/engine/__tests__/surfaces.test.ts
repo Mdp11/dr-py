@@ -15,9 +15,9 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces and the two evaluations, every one on the engine by default', () => {
+	it('names the five read surfaces, the two evaluations and the issues, all but the issues on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
-		expect(SURFACES).toEqual([...READ_SURFACES, 'navigation', 'criteria']);
+		expect(SURFACES).toEqual([...READ_SURFACES, 'navigation', 'criteria', 'issues']);
 		expect(SURFACE_DEFAULTS).toEqual({
 			elements: 'engine',
 			search: 'engine',
@@ -25,7 +25,8 @@ describe('the surface switches', () => {
 			tree: 'engine',
 			summary: 'engine',
 			navigation: 'engine',
-			criteria: 'engine'
+			criteria: 'engine',
+			issues: 'server'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
@@ -44,6 +45,21 @@ describe('the surface switches', () => {
 			navigation: 'server',
 			criteria: 'server'
 		});
+	});
+
+	it('issues default to the server, staging on the engine does not force them, and dr.surfaces moves them', () => {
+		expect(readSwitches(storing('{"staging": "engine"}'))).toEqual({
+			surfaces: { ...SURFACE_DEFAULTS, issues: 'server' },
+			staging: 'engine'
+		});
+		for (const staging of ['engine', 'legacy']) {
+			expect(readSurfaces(storing(`{"staging": "${staging}", "issues": "engine"}`)).issues).toBe(
+				'engine'
+			);
+		}
+		expect(readSurfaces(storing('{"staging": "engine", "issues": "server"}')).issues).toBe(
+			'server'
+		);
 	});
 
 	it('an override moves the one surface it names', () => {
@@ -199,9 +215,11 @@ describe('the surface switches', () => {
 			tree: 'server',
 			summary: 'server',
 			navigation: 'server',
-			criteria: 'server'
+			criteria: 'server',
+			issues: 'server'
 		} as const;
 		expect(anyEngineSurface(allServer)).toBe(false);
+		expect(anyEngineSurface({ ...allServer, issues: 'engine' })).toBe(true);
 		expect(anyEngineSurface({ ...allServer, summary: 'engine' })).toBe(true);
 		expect(anyEngineSurface({ ...allServer, navigation: 'engine' })).toBe(true);
 		expect(anyEngineSurface({ ...allServer, criteria: 'engine' })).toBe(true);

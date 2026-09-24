@@ -38,6 +38,7 @@ import {
 	getCachedElements,
 	getModelRev,
 	resetModelStore,
+	scheduleIssuesRefetch,
 	seedElements
 } from '../model.svelte';
 import { setActiveProject } from '../active-project.svelte';
@@ -293,6 +294,34 @@ describe('issue refetch triggers', () => {
 
 		expect(issuesSpy).toHaveBeenCalledTimes(1);
 		expect(summarySpy).not.toHaveBeenCalled(); // the guarded sibling stayed put
+	});
+
+	it("the feed's triggers and the replica's share one debounce", async () => {
+		vi.useFakeTimers();
+		const spy = vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 2,
+			issues: [],
+			counts: {},
+			truncated: false,
+			rules_status: null
+		});
+		handleFeedEvent(commitEvent(2));
+		await vi.advanceTimersByTimeAsync(200);
+		scheduleIssuesRefetch();
+		await vi.advanceTimersByTimeAsync(200);
+		handleFeedEvent({ type: 'reset', model_rev: 2 });
+		expect(spy).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(350);
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+
+	it('stopRealtime disarms a refetch the replica scheduled too', async () => {
+		vi.useFakeTimers();
+		const spy = vi.spyOn(validationApi, 'getModelIssues');
+		scheduleIssuesRefetch();
+		stopRealtime();
+		await vi.advanceTimersByTimeAsync(350);
+		expect(spy).not.toHaveBeenCalled();
 	});
 
 	it('stopRealtime disarms a pending refetch (project unmount / logout)', async () => {

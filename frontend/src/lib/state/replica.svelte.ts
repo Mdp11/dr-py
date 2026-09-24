@@ -8,7 +8,9 @@
  * replica or the server, as `dr.surfaces` says (read once per page load);
  * with staging on the engine, the model store's engine half follows it
  * through a handle (`attachEngine`). An artifact follower keeps the project's
- * artifacts, committed and staged, in the sync's context.
+ * artifacts, committed and staged, in the sync's context. With the issues on
+ * the engine, the live issue list is refetched whenever the replica's issue
+ * store moves.
  */
 
 import type { WireBatch } from '$engine';
@@ -19,7 +21,7 @@ import { createArtifactFollower, type ArtifactFollower } from '$lib/engine/artif
 import { createSnapshotCache } from '$lib/engine/cache';
 import { connectFrame } from '$lib/engine/frame';
 import { addQuietProbe, quiet } from '$lib/engine/quiet';
-import { createEngineSeam } from '$lib/engine/seam';
+import { createEngineSeam, type SurfaceGates } from '$lib/engine/seam';
 import { anyStaged } from '$lib/engine/staged-probe';
 import {
 	anyEngineSurface,
@@ -53,7 +55,7 @@ import {
 	type EngineHandle,
 	type StatusListener
 } from './model-engine.svelte';
-import { markStructureChanged } from './model-shared.svelte';
+import { markStructureChanged, scheduleIssuesRefetch } from './model-shared.svelte';
 import { journeyReplica } from './open-journey';
 
 let _status = $state.raw<ReplicaStatus>(OFF);
@@ -75,6 +77,8 @@ let _noticeDismissed = $state(false);
 let _retrying = $state(false);
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 const _statusListeners = new Set<StatusListener>();
+/** Unsubscribes the issues refetch from the sync's `changed` events. */
+let _offChanged: (() => void) | null = null;
 /** The started replica's artifact follower, the project it follows, and its quiet probe's remover. */
 let _follower: {
 	projectId: string;
@@ -108,7 +112,10 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			// A sync that was replaced speaks for nothing the UI shows.
 			if (_sync !== made) return;
 			const previousPhase = _status.phase;
+			const issuesWereOpen = issuesOnEngine(_status);
 			setStatus(status);
+			// The live list was the server's until now: the engine's replaces it.
+			if (!issuesWereOpen && issuesOnEngine(status)) scheduleIssuesRefetch();
 			observe?.(status);
 			// Only `opening`: `resyncing` also reports progress, but a re-bootstrap
 			// is not the journey's open, and `ready`'s own `verify` progress is not
@@ -179,6 +186,25 @@ function _releaseGate(): void {
 	for (const resolve of waiters) resolve();
 }
 
+/**
+ * Whether the issues are the engine's at `status`: their switch says so,
+ * staging is on the engine (whose working copy holds the staged edits, as
+ * the legacy buffer's are not) and the replica's first sweep has ended.
+ */
+function issuesOnEngine(status: ReplicaStatus): boolean {
+	return (
+		_switches !== null &&
+		_switches.surfaces.issues === 'engine' &&
+		stagingOnEngine(status) &&
+		status.seeded
+	);
+}
+
+function stagingOnEngine(status: ReplicaStatus): boolean {
+	if (_switches === null || _switches.staging !== 'engine') return false;
+	return status.phase !== 'off' && status.phase !== 'server';
+}
+
 /** Whether some read surface is on the engine — the gate, the notice and the block all exist only then. */
 function _anyEngine(): boolean {
 	return _switches !== null && anyEngineSurface(_switches.surfaces);
@@ -196,8 +222,12 @@ function installSeam(sync: ReplicaSync): void {
 	uninstallSeam();
 	const surfaces = (_switches ??= readSwitches()).surfaces;
 	const token = _seamToken;
-	// A navigation may name artifacts: the engine answers once it holds them.
-	const gates = { navigation: () => _follower?.follower.loaded() ?? false };
+	const gates: SurfaceGates = {
+		// A navigation may name artifacts: the engine answers once it holds them.
+		navigation: () => _follower?.follower.loaded() ?? false,
+		// A store swept part-way is not the model's list.
+		issues: () => getStagingSide() === 'engine' && sync.status().seeded
+	};
 	installEngineSeam(createEngineSeam(sync, surfaces, undefined, gates));
 	_removeQuietProbe = addQuietProbe(() => sync.settled());
 	if (import.meta.env.DEV && anyEngineSurface(surfaces)) {
@@ -242,9 +272,7 @@ export function getReplicaStatus(): ReplicaStatus {
  * `_status` is what `onStatus` keeps current for the sync in use.
  */
 export function getStagingSide(): StagingSide {
-	if (_switches === null || _switches.staging !== 'engine') return 'legacy';
-	const { phase } = _status;
-	return phase === 'off' || phase === 'server' ? 'legacy' : 'engine';
+	return stagingOnEngine(_status) ? 'engine' : 'legacy';
 }
 
 /**
@@ -261,10 +289,31 @@ export function startReplica(): void {
 	// Not with staging on legacy: attached, the engine half would move the
 	// structure rev on every delta the replica applies, as the legacy half does.
 	if (_switches?.staging === 'engine') attachEngine(engineHandle(sync));
+	followIssues(sync);
 	sync.open(projectId);
 	// Before the follower mirrors the buffer: one staged in another project is dropped.
 	bindStagedArtifacts(projectId);
 	follow(sync, projectId);
+}
+
+/**
+ * With the issues on the engine, a `changed` whose `issues_version` moved
+ * refetches the live list. The version is per worker, so a new worker's
+ * first may repeat an old one; the gate opening after its sweep refetches.
+ */
+function followIssues(sync: ReplicaSync): void {
+	stopFollowingIssues();
+	let seen: number | null = null;
+	_offChanged = sync.on('changed', (event) => {
+		if (event.issues_version === seen) return;
+		seen = event.issues_version;
+		if (issuesOnEngine(_status)) scheduleIssuesRefetch();
+	});
+}
+
+function stopFollowingIssues(): void {
+	_offChanged?.();
+	_offChanged = null;
 }
 
 /**
@@ -297,6 +346,7 @@ function stopFollower(): void {
 /** Every read goes to the server again; the sync forgets the placements, the engine half everything. */
 export function stopReplica(): void {
 	uninstallSeam();
+	stopFollowingIssues();
 	detachEngine();
 	_placedViews.clear();
 	stopFollower();
@@ -442,6 +492,7 @@ export function resetReplica(): void {
 	_sync = null;
 	_deps = undefined;
 	uninstallSeam();
+	stopFollowingIssues();
 	detachEngine();
 	_switches = null;
 	_placedViews.clear();
