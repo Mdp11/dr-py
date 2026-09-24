@@ -1,9 +1,11 @@
 import { errorDetail, ModelError } from '../model/errors.ts';
 import { findArrayIndexKey, TEMP_ID_PREFIX } from '../model/load.ts';
 import type { Model } from '../model/model.ts';
-import { getProp, setProp, type ElementRec, type Props, type RelRec } from '../model/records.ts';
+import { ElementRec, getProp, setProp, type Props, type RelRec } from '../model/records.ts';
+import type { DirtyCollector } from '../validation/dirty.ts';
 import { cmpCodePoint } from '../value/compare.ts';
 import { pyRepr } from '../value/repr.ts';
+import type { Value } from '../value/types.ts';
 import { OpError } from './errors.ts';
 import { resolveProps } from './resolve.ts';
 import { BatchResult } from './result.ts';
@@ -18,6 +20,12 @@ export type ApplyOptions = {
 	 * staged entity lives under its temp id until the server mints the real one.
 	 */
 	idFor?: (tempId: string) => string;
+	/**
+	 * Collects the ids whose validation verdict the batch may have changed,
+	 * through the hooks the server's applier fires, at the same points. A
+	 * refused batch leaves it holding ids of a batch that never happened.
+	 */
+	dirty?: DirtyCollector;
 };
 
 /** A JavaScript object cannot keep such a key in insertion order, so no op may carry one. */
@@ -74,7 +82,7 @@ function createdId(
  * The elements `deleteElement` would remove, the element first. Walked from a
  * stack, children by sorted relationship id: the order is part of the result.
  */
-function containmentClosure(model: Model, elementId: string): ElementRec[] {
+export function containmentClosure(model: Model, elementId: string): ElementRec[] {
 	const root = model.getElement(elementId);
 	const order = [root];
 	const seen = new Set([root]);
@@ -96,14 +104,35 @@ function containmentClosure(model: Model, elementId: string): ElementRec[] {
 
 const byId = (a: RelRec, b: RelRec) => cmpCodePoint(a.id, b.id);
 
-function applyPatch(model: Model, target: ElementRec | RelRec, patch: Props): Props {
+/** Writes one property, a `null` removing the key, between the hooks the server fires around it. */
+function writeProp(
+	model: Model,
+	target: ElementRec | RelRec,
+	key: string,
+	value: Value,
+	remove: boolean,
+	dirty: DirtyCollector | undefined
+): void {
+	const isElement = dirty !== undefined && target instanceof ElementRec;
+	if (isElement) dirty.beforeElementPropsChange(model, target.id);
+	if (remove) model.deleteProperty(target, key);
+	else model.setProperty(target, key, value);
+	if (isElement) dirty.afterElementPropsChange(model, target.id);
+	else dirty?.afterRelationshipPropsChange(target.id);
+}
+
+function applyPatch(
+	model: Model,
+	target: ElementRec | RelRec,
+	patch: Props,
+	dirty: DirtyCollector | undefined
+): Props {
 	// The inverse restores each prior value, and removes a key that was not there.
 	const inverse: Props = {};
 	for (const key of Object.keys(patch)) setProp(inverse, key, getProp(target.props, key) ?? null);
 	for (const key of Object.keys(patch)) {
 		const value = getProp(patch, key)!;
-		if (value === null) model.deleteProperty(target, key);
-		else model.setProperty(target, key, value);
+		writeProp(model, target, key, value, value === null, dirty);
 	}
 	return inverse;
 }
@@ -115,16 +144,20 @@ function applyPatch(model: Model, target: ElementRec | RelRec, patch: Props): Pr
  */
 function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOptions): void {
 	const resolve = (id: string) => res.idMap.get(id) ?? id;
+	const dirty = options.dirty;
 	switch (op.kind) {
 		case 'create_element': {
 			refuseIndexKeys(op.properties);
 			const props = resolveProps(op.properties, res.idMap);
 			const { id, temp } = createdId(op, options);
 			const element = model.createElement(op.type_name, id);
+			dirty?.afterElementCreate(model, element.id);
 			if (temp) res.idMap.set(op.temp_id, element.id);
 			res.noteElementBefore(element.id, null);
 			res.inverseUnits.push([{ kind: 'delete_element', id: element.id }]);
-			for (const key of Object.keys(props)) model.setProperty(element, key, getProp(props, key)!);
+			for (const key of Object.keys(props)) {
+				writeProp(model, element, key, getProp(props, key)!, false, dirty);
+			}
 			res.markElementCreated(element.id);
 			return;
 		}
@@ -136,7 +169,7 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 			const patch = resolveProps(op.properties_patch, res.idMap);
 			const valid = model.metamodel.effectiveElementPropertyNames(element.typeName);
 			checkPatchKeys(valid, element.typeName, patch);
-			const inverse = applyPatch(model, element, patch);
+			const inverse = applyPatch(model, element, patch, dirty);
 			res.inverseUnits.push([{ kind: 'update_element', id, properties_patch: inverse }]);
 			res.markElementChanged(id);
 			return;
@@ -167,6 +200,7 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 				res.noteRelationshipBefore(rel.id, rel);
 				unit.push(recreate(rel));
 			}
+			dirty?.beforeElementDelete(model, id, closure);
 			model.deleteElement(id);
 			res.inverseUnits.push(unit);
 			for (const element of closure) res.markElementDeleted(element.id);
@@ -179,11 +213,15 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 			refuseIndexKeys(op.properties);
 			const props = resolveProps(op.properties, res.idMap);
 			const { id, temp } = createdId(op, options);
+			dirty?.beforeConnect(model, op.type_name, sourceId, targetId);
 			const rel = model.connect(op.type_name, sourceId, targetId, id);
+			dirty?.afterConnect(model, rel.id);
 			if (temp) res.idMap.set(op.temp_id, rel.id);
 			res.noteRelationshipBefore(rel.id, null);
 			res.inverseUnits.push([{ kind: 'delete_relationship', id: rel.id }]);
-			for (const key of Object.keys(props)) model.setProperty(rel, key, getProp(props, key)!);
+			for (const key of Object.keys(props)) {
+				writeProp(model, rel, key, getProp(props, key)!, false, dirty);
+			}
 			res.markRelationshipCreated(rel.id);
 			return;
 		}
@@ -195,7 +233,7 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 			const patch = resolveProps(op.properties_patch, res.idMap);
 			const valid = model.metamodel.effectiveRelationshipPropertyNames(rel.typeName);
 			checkPatchKeys(valid, rel.typeName, patch);
-			const inverse = applyPatch(model, rel, patch);
+			const inverse = applyPatch(model, rel, patch, dirty);
 			res.inverseUnits.push([{ kind: 'update_relationship', id, properties_patch: inverse }]);
 			res.markRelationshipChanged(id);
 			return;
@@ -205,7 +243,9 @@ function applyOne(model: Model, op: ModelOp, res: BatchResult, options: ApplyOpt
 			const rel = model.getRelationship(id);
 			res.noteRelationshipBefore(id, rel);
 			const unit = [recreate(rel)];
+			dirty?.beforeDisconnect(model, id);
 			model.disconnect(id);
+			dirty?.afterDisconnect(model, rel.typeName, rel.target.id);
 			res.inverseUnits.push(unit);
 			res.markRelationshipDeleted(id);
 			return;

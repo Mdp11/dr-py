@@ -4,6 +4,7 @@ import {
 	applyBatch,
 	ArtifactSet,
 	cmpCodePoint,
+	DirtyCollector,
 	drain,
 	dumpIndexes,
 	elementLine,
@@ -12,6 +13,7 @@ import {
 	EVALUATIONS,
 	FacetPatterns,
 	isSteps,
+	IssueStore,
 	Metamodel,
 	Model,
 	ModelError,
@@ -32,6 +34,7 @@ import {
 	RelRec,
 	resolveRefs,
 	shuffleAdjacency,
+	storeListBody,
 	validateScoped,
 	Validators,
 	verifyConsistent,
@@ -65,6 +68,7 @@ export type Observed = { digest: string; fingerprint: string; state?: string[]; 
  */
 export type BatchOutcome = {
 	id_map: [string, string][];
+	dirty?: string[];
 	changed_element_ids: string[];
 	changed_relationship_ids: string[];
 	deleted_element_ids: string[];
@@ -93,6 +97,8 @@ export type Step = Partial<Observed> & {
 	/** `batch`: the ops, one line of JSON text each; `restore` reinstates exact ids. */
 	ops?: string[];
 	restore?: boolean;
+	/** `batch` / `undo`: the result carries the dirty ids, in the order collected. */
+	record_dirty?: boolean;
 	/** `undo`: the index of the landed batch whose inverse ops to run. */
 	of?: number;
 	/** `read`: a method of `READS` or of `EVALUATIONS`, and its params. */
@@ -199,16 +205,35 @@ export function outcome(model: Model, res: BatchResult): BatchOutcome {
 
 /**
  * What a replay carries from step to step: the batches that landed, by step
- * index, the views, and the artifacts with the layer they go into.
+ * index, the views, the artifacts with the layer they go into, and once a
+ * `seed` step ran, the session's issue store and `model_rev`.
  */
 type Landed = Map<number, BatchResult>;
+type Validation = { validators: Validators; patterns: FacetPatterns };
 type Carried = {
 	landed: Landed;
 	placements: ViewPlacements;
 	artifacts: ArtifactSet;
 	layer: ArtifactLayer;
-	validation: { validators: Validators; patterns: FacetPatterns } | null;
+	validation: Validation | null;
+	session: { store: IssueStore; rev: number } | null;
 };
+
+function validationOf(carried: Carried, model: Model): Validation {
+	const mm = model.metamodel;
+	return (carried.validation ??= {
+		validators: new Validators(mm),
+		patterns: new FacetPatterns(mm)
+	});
+}
+
+/** Every element id in state order, then every relationship id. */
+function allIds(model: Model): string[] {
+	return [
+		...[...model.elements()].map((el) => el.id),
+		...[...model.relationships()].map((rel) => rel.id)
+	];
+}
 
 /** `tests/golden/tagged.py`'s rendering of a scalar. */
 function tag(value: Value): Tagged {
@@ -270,17 +295,22 @@ function apply(
 			throw new Error(`no read ${method}`);
 		}
 		case 'validate': {
-			const ids =
-				step.scope === 'all_ids'
-					? [
-							...[...model.elements()].map((el) => el.id),
-							...[...model.relationships()].map((rel) => rel.id)
-						]
-					: step.scope!;
-			const mm = model.metamodel;
-			carried.validation ??= { validators: new Validators(mm), patterns: new FacetPatterns(mm) };
-			const { validators, patterns } = carried.validation;
+			const ids = step.scope === 'all_ids' ? allIds(model) : step.scope!;
+			const { validators, patterns } = validationOf(carried, model);
 			return validateScoped(model, ids, validators, patterns).map((i) => wireIssue(i, 'on_server'));
+		}
+		case 'seed': {
+			// The server's sweep: every id, validated and spliced into an empty store.
+			const { validators, patterns } = validationOf(carried, model);
+			const store = new IssueStore();
+			const ids = allIds(model);
+			store.replace(ids, validateScoped(model, ids, validators, patterns));
+			carried.session = { store, rev: 0 };
+			return null;
+		}
+		case 'issues': {
+			const { store, rev } = carried.session!;
+			return storeListBody(store, rev);
 		}
 		case 'artifacts':
 			setArtifacts(carried, step);
@@ -316,9 +346,20 @@ function apply(
 		case 'undo': {
 			const ops = step.do === 'batch' ? parseOps(step.ops!) : landed.get(step.of!)!.inverseOps();
 			const restore = step.do === 'undo' || step.restore === true;
-			const res = applyBatch(model, ops, { restore, idFor: mint });
+			const { session } = carried;
+			const dirty =
+				step.record_dirty === true || session !== null ? new DirtyCollector() : undefined;
+			const res = applyBatch(model, ops, { restore, idFor: mint, dirty });
 			landed.set(index, res);
-			return outcome(model, res);
+			const out = outcome(model, res);
+			if (step.record_dirty === true) out.dirty = [...dirty!.ids];
+			if (session !== null) {
+				// As the ops route finalizes a landed batch: its dirty scope revalidated and spliced.
+				const { validators, patterns } = validationOf(carried, model);
+				session.rev += 1;
+				session.store.replace(dirty!.ids, validateScoped(model, dirty!.ids, validators, patterns));
+			}
+			return out;
 		}
 		case 'create_element':
 			return model.createElement(step.type!, mint()).id;
@@ -366,7 +407,7 @@ function apply(
 }
 
 /** Steps whose result is compared as JSON text. */
-const READ_LIKE = new Set(['read', 'navigate', 'has_script', 'validate']);
+const READ_LIKE = new Set(['read', 'navigate', 'has_script', 'validate', 'issues']);
 
 /**
  * Replays a recorded scenario through the engine, comparing every outcome and
@@ -387,7 +428,8 @@ export function replaySteps(
 		placements: new ViewPlacements(),
 		artifacts: new ArtifactSet(),
 		layer,
-		validation: null
+		validation: null,
+		session: null
 	};
 	let minted = 0;
 	let last = observe(model);

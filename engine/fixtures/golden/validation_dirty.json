@@ -1,0 +1,1535 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Thing",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Node",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [
+          {
+            "name": "code",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "note",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "ref",
+            "datatype": "Node",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "refs",
+            "datatype": "Node",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": [
+          "code"
+        ]
+      },
+      {
+        "name": "Tag",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [
+          {
+            "name": "v",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "w",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Has",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Thing",
+        "target": "Thing",
+        "mappings": [
+          {
+            "source": "Thing",
+            "target": "Thing"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Link",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "lbl",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "n",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "to",
+            "datatype": "Node",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_r-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R1\"},\"id\":\"r-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_r-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R2\"},\"id\":\"r-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-0\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zero\"},\"id\":\"n-0\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"id\":\"n-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"id\":\"n-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"id\":\"n-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\"},\"id\":\"n-4\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\",\"ref\":\"n-1\"},\"id\":\"n-5\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-6\",\"type_name\":\"Node\",\"properties\":{\"code\":\"D\",\"refs\":[\"n-1\",\"n-2\"]},\"id\":\"n-6\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-7\",\"type_name\":\"Node\",\"properties\":{\"code\":\"E\",\"ref\":\"n-new\"},\"id\":\"n-7\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"id\":\"a-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"id\":\"c-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"id\":\"c-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"id\":\"c-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"id\":\"c-4\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-8\",\"type_name\":\"Node\",\"properties\":{\"code\":\"F\",\"ref\":\"c-2\"},\"id\":\"n-8\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-9\",\"type_name\":\"Node\",\"properties\":{\"code\":\"G\",\"refs\":[\"c-3\",\"c-4\"]},\"id\":\"n-9\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_t-0\",\"type_name\":\"Tag\",\"properties\":{},\"id\":\"t-0\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"id\":\"t-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_t-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"id\":\"t-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_t-3\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"id\":\"t-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_t-9\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"id\":\"t-9\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_r-1",
+            "r-1"
+          ],
+          [
+            "tmp_r-2",
+            "r-2"
+          ],
+          [
+            "tmp_n-0",
+            "n-0"
+          ],
+          [
+            "tmp_n-1",
+            "n-1"
+          ],
+          [
+            "tmp_n-2",
+            "n-2"
+          ],
+          [
+            "tmp_n-3",
+            "n-3"
+          ],
+          [
+            "tmp_n-4",
+            "n-4"
+          ],
+          [
+            "tmp_n-5",
+            "n-5"
+          ],
+          [
+            "tmp_n-6",
+            "n-6"
+          ],
+          [
+            "tmp_n-7",
+            "n-7"
+          ],
+          [
+            "tmp_a-1",
+            "a-1"
+          ],
+          [
+            "tmp_c-1",
+            "c-1"
+          ],
+          [
+            "tmp_c-2",
+            "c-2"
+          ],
+          [
+            "tmp_c-3",
+            "c-3"
+          ],
+          [
+            "tmp_c-4",
+            "c-4"
+          ],
+          [
+            "tmp_n-8",
+            "n-8"
+          ],
+          [
+            "tmp_n-9",
+            "n-9"
+          ],
+          [
+            "tmp_t-0",
+            "t-0"
+          ],
+          [
+            "tmp_t-1",
+            "t-1"
+          ],
+          [
+            "tmp_t-2",
+            "t-2"
+          ],
+          [
+            "tmp_t-3",
+            "t-3"
+          ],
+          [
+            "tmp_t-9",
+            "t-9"
+          ]
+        ],
+        "changed_element_ids": [
+          "r-1",
+          "r-2",
+          "n-0",
+          "n-1",
+          "n-2",
+          "n-3",
+          "n-4",
+          "n-5",
+          "n-6",
+          "n-7",
+          "a-1",
+          "c-1",
+          "c-2",
+          "c-3",
+          "c-4",
+          "n-8",
+          "n-9",
+          "t-0",
+          "t-1",
+          "t-2",
+          "t-3",
+          "t-9"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "r-1",
+            null
+          ],
+          [
+            "r-2",
+            null
+          ],
+          [
+            "n-0",
+            null
+          ],
+          [
+            "n-1",
+            null
+          ],
+          [
+            "n-2",
+            null
+          ],
+          [
+            "n-3",
+            null
+          ],
+          [
+            "n-4",
+            null
+          ],
+          [
+            "n-5",
+            null
+          ],
+          [
+            "n-6",
+            null
+          ],
+          [
+            "n-7",
+            null
+          ],
+          [
+            "a-1",
+            null
+          ],
+          [
+            "c-1",
+            null
+          ],
+          [
+            "c-2",
+            null
+          ],
+          [
+            "c-3",
+            null
+          ],
+          [
+            "c-4",
+            null
+          ],
+          [
+            "n-8",
+            null
+          ],
+          [
+            "n-9",
+            null
+          ],
+          [
+            "t-0",
+            null
+          ],
+          [
+            "t-1",
+            null
+          ],
+          [
+            "t-2",
+            null
+          ],
+          [
+            "t-3",
+            null
+          ],
+          [
+            "t-9",
+            null
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"t-9\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"t-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"t-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"t-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"t-0\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-9\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-8\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"a-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-7\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-6\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-5\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-0\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"r-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"r-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"r-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R1\"},\"rev\":1}",
+          "{\"id\":\"r-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R2\"},\"rev\":1}",
+          "{\"id\":\"n-0\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zero\"},\"rev\":1}",
+          "{\"id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+          "{\"id\":\"n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+          "{\"id\":\"n-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+          "{\"id\":\"n-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\"},\"rev\":1}",
+          "{\"id\":\"n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\",\"ref\":\"n-1\"},\"rev\":2}",
+          "{\"id\":\"n-6\",\"type_name\":\"Node\",\"properties\":{\"code\":\"D\",\"refs\":[\"n-1\",\"n-2\"]},\"rev\":2}",
+          "{\"id\":\"n-7\",\"type_name\":\"Node\",\"properties\":{\"code\":\"E\",\"ref\":\"n-new\"},\"rev\":2}",
+          "{\"id\":\"a-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+          "{\"id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"rev\":1}",
+          "{\"id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"rev\":1}",
+          "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+          "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+          "{\"id\":\"n-8\",\"type_name\":\"Node\",\"properties\":{\"code\":\"F\",\"ref\":\"c-2\"},\"rev\":2}",
+          "{\"id\":\"n-9\",\"type_name\":\"Node\",\"properties\":{\"code\":\"G\",\"refs\":[\"c-3\",\"c-4\"]},\"rev\":2}",
+          "{\"id\":\"t-0\",\"type_name\":\"Tag\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}",
+          "{\"id\":\"t-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}",
+          "{\"id\":\"t-3\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+          "{\"id\":\"t-9\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}"
+        ],
+        "changed_relationships": [],
+        "dirty": [
+          "r-1",
+          "r-2",
+          "n-0",
+          "n-1",
+          "n-2",
+          "n-3",
+          "n-4",
+          "n-5",
+          "n-6",
+          "n-7",
+          "a-1",
+          "c-1",
+          "c-2",
+          "c-3",
+          "c-4",
+          "n-8",
+          "n-9",
+          "t-0",
+          "t-1",
+          "t-2",
+          "t-3",
+          "t-9"
+        ]
+      },
+      "error": null,
+      "digest": "9e1ec40120cfd473",
+      "fingerprint": "271695535e8a6cf7",
+      "state": [
+        "{\"id\":\"r-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R1\"},\"rev\":1}",
+        "{\"id\":\"r-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R2\"},\"rev\":1}",
+        "{\"id\":\"n-0\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zero\"},\"rev\":1}",
+        "{\"id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\"},\"rev\":1}",
+        "{\"id\":\"n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\",\"ref\":\"n-1\"},\"rev\":2}",
+        "{\"id\":\"n-6\",\"type_name\":\"Node\",\"properties\":{\"code\":\"D\",\"refs\":[\"n-1\",\"n-2\"]},\"rev\":2}",
+        "{\"id\":\"n-7\",\"type_name\":\"Node\",\"properties\":{\"code\":\"E\",\"ref\":\"n-new\"},\"rev\":2}",
+        "{\"id\":\"a-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"rev\":1}",
+        "{\"id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"rev\":1}",
+        "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"n-8\",\"type_name\":\"Node\",\"properties\":{\"code\":\"F\",\"ref\":\"c-2\"},\"rev\":2}",
+        "{\"id\":\"n-9\",\"type_name\":\"Node\",\"properties\":{\"code\":\"G\",\"refs\":[\"c-3\",\"c-4\"]},\"rev\":2}",
+        "{\"id\":\"t-0\",\"type_name\":\"Tag\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}",
+        "{\"id\":\"t-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}",
+        "{\"id\":\"t-3\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"t-9\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"a-1\",\"c-1\",\"c-2\",\"c-3\",\"c-4\",\"n-0\",\"n-1\",\"n-2\",\"n-3\",\"n-4\",\"n-5\",\"n-6\",\"n-7\",\"n-8\",\"n-9\",\"r-1\",\"r-2\"]],[\"Tag\",[\"t-0\",\"t-1\",\"t-2\",\"t-3\",\"t-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[[\"n-5\",[\"n-1\"]],[\"n-6\",[\"n-1\",\"n-2\"]],[\"n-7\",[\"n-new\"]],[\"n-8\",[\"c-2\"]],[\"n-9\",[\"c-3\",\"c-4\"]]],\"referencers\":[[\"c-2\",[\"n-8\"]],[\"c-3\",[\"n-9\"]],[\"c-4\",[\"n-9\"]],[\"n-1\",[\"n-5\",\"n-6\"]],[\"n-2\",[\"n-6\"]],[\"n-new\",[\"n-7\"]]],\"uniq_groups\":[[\"a-1\",\"n-1\",\"n-2\",\"n-3\"],[\"c-1\"],[\"c-2\"],[\"c-3\",\"c-4\"],[\"n-0\"],[\"n-4\"],[\"n-5\"],[\"n-6\"],[\"n-7\"],[\"n-8\"],[\"n-9\"],[\"r-1\"],[\"r-2\"],[\"t-0\"],[\"t-1\",\"t-2\"],[\"t-3\",\"t-9\"]],\"duplicates\":[[\"a-1\",\"n-1\",\"n-2\",\"n-3\"],[\"c-3\",\"c-4\"],[\"t-1\",\"t-2\"],[\"t-3\",\"t-9\"]],\"roots\":[[\"a-1\",\"a-1\"],[\"c-1\",\"c-1\"],[\"c-2\",\"c-2\"],[\"c-3\",\"c-3\"],[\"c-4\",\"c-4\"],[\"n-1\",\"n-1\"],[\"n-2\",\"n-2\"],[\"n-3\",\"n-3\"],[\"n-4\",\"n-4\"],[\"n-5\",\"n-5\"],[\"n-6\",\"n-6\"],[\"n-7\",\"n-7\"],[\"n-8\",\"n-8\"],[\"n-9\",\"n-9\"],[\"r-1\",\"r-1\"],[\"r-2\",\"r-2\"],[\"t-0\",\"t-0\"],[\"t-1\",\"t-1\"],[\"t-2\",\"t-2\"],[\"t-3\",\"t-3\"],[\"t-9\",\"t-9\"],[\"zero\",\"n-0\"]]}"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h-1\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"a-1\",\"properties\":{},\"id\":\"h-1\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"id\":\"h-2\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"id\":\"h-3\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"id\":\"h-4\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h-5\",\"type_name\":\"Has\",\"source_id\":\"n-4\",\"target_id\":\"t-9\",\"properties\":{},\"id\":\"h-5\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"id\":\"l-1\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-2\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"c-2\",\"properties\":{},\"id\":\"l-2\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"b\",\"n\":1,\"to\":\"c-1\"},\"id\":\"l-3\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"id\":\"l-4\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"id\":\"l-5\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_Link\",\"type_name\":\"Link\",\"source_id\":\"n-4\",\"target_id\":\"n-5\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_h-1",
+            "h-1"
+          ],
+          [
+            "tmp_h-2",
+            "h-2"
+          ],
+          [
+            "tmp_h-3",
+            "h-3"
+          ],
+          [
+            "tmp_h-4",
+            "h-4"
+          ],
+          [
+            "tmp_h-5",
+            "h-5"
+          ],
+          [
+            "tmp_l-1",
+            "l-1"
+          ],
+          [
+            "tmp_l-2",
+            "l-2"
+          ],
+          [
+            "tmp_l-3",
+            "l-3"
+          ],
+          [
+            "tmp_l-4",
+            "l-4"
+          ],
+          [
+            "tmp_l-5",
+            "l-5"
+          ],
+          [
+            "tmp_Link",
+            "id-1"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "h-1",
+          "h-2",
+          "h-3",
+          "h-4",
+          "h-5",
+          "l-1",
+          "l-2",
+          "l-3",
+          "l-4",
+          "l-5",
+          "id-1"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "h-1",
+            null
+          ],
+          [
+            "h-2",
+            null
+          ],
+          [
+            "h-3",
+            null
+          ],
+          [
+            "h-4",
+            null
+          ],
+          [
+            "h-5",
+            null
+          ],
+          [
+            "l-1",
+            null
+          ],
+          [
+            "l-2",
+            null
+          ],
+          [
+            "l-3",
+            null
+          ],
+          [
+            "l-4",
+            null
+          ],
+          [
+            "l-5",
+            null
+          ],
+          [
+            "id-1",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-1\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-5\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-4\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-3\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-2\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-1\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-5\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-4\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-3\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-2\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-1\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"h-1\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"a-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"h-5\",\"type_name\":\"Has\",\"source_id\":\"n-4\",\"target_id\":\"t-9\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+          "{\"id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"b\",\"n\":1,\"to\":\"c-1\"},\"rev\":3}",
+          "{\"id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-1\",\"type_name\":\"Link\",\"source_id\":\"n-4\",\"target_id\":\"n-5\",\"properties\":{},\"rev\":0}"
+        ],
+        "dirty": [
+          "r-1",
+          "a-1",
+          "n-1",
+          "n-2",
+          "n-3",
+          "h-1",
+          "c-1",
+          "c-2",
+          "h-2",
+          "c-3",
+          "c-4",
+          "h-3",
+          "h-4",
+          "n-4",
+          "t-9",
+          "t-3",
+          "h-5",
+          "l-1",
+          "l-2",
+          "l-3",
+          "l-4",
+          "l-5",
+          "n-5",
+          "id-1"
+        ]
+      },
+      "error": null,
+      "digest": "55ec882c87e9cb70",
+      "fingerprint": "1fa02281d689b249"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_Tag\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_n-new\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\",\"name\":\"new\"},\"id\":\"n-new\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_Tag",
+            "id-2"
+          ],
+          [
+            "tmp_n-new",
+            "n-new"
+          ]
+        ],
+        "changed_element_ids": [
+          "id-2",
+          "n-new"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-2",
+            null
+          ],
+          [
+            "n-new",
+            null
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"n-new\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-2\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+          "{\"id\":\"n-new\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\",\"name\":\"new\"},\"rev\":2}"
+        ],
+        "changed_relationships": [],
+        "dirty": [
+          "id-2",
+          "t-0",
+          "t-1",
+          "t-2",
+          "t-3",
+          "n-new",
+          "n-0",
+          "n-7",
+          "n-1",
+          "n-2",
+          "n-3"
+        ]
+      },
+      "error": null,
+      "digest": "9de22dbb1dca4a0f",
+      "fingerprint": "8399277c9d80be79"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"n-2\",\"properties_patch\":{\"code\":\"B\",\"note\":\"moved\",\"ref\":\"n-3\",\"name\":null}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "n-2"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "n-2",
+            "{\"id\":\"n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"n-2\",\"properties_patch\":{\"code\":\"A\",\"note\":null,\"ref\":null,\"name\":null}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\",\"note\":\"moved\",\"ref\":\"n-3\"},\"rev\":4}"
+        ],
+        "changed_relationships": [],
+        "dirty": [
+          "n-2",
+          "n-1",
+          "n-3",
+          "n-new",
+          "n-4"
+        ]
+      },
+      "error": null,
+      "digest": "f3a51c916f60f6c9",
+      "fingerprint": "882ac3bdda4631eb"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"t-1\",\"properties_patch\":{\"w\":1}}",
+        "{\"kind\":\"update_element\",\"id\":\"n-5\",\"properties_patch\":{\"ref\":null}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "t-1",
+          "n-5"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "t-1",
+            "{\"id\":\"t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}"
+          ],
+          [
+            "n-5",
+            "{\"id\":\"n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\",\"ref\":\"n-1\"},\"rev\":2}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"n-5\",\"properties_patch\":{\"ref\":\"n-1\"}}",
+          "{\"kind\":\"update_element\",\"id\":\"t-1\",\"properties_patch\":{\"w\":null}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+          "{\"id\":\"n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\"},\"rev\":3}"
+        ],
+        "changed_relationships": [],
+        "dirty": [
+          "t-1",
+          "t-2",
+          "id-2",
+          "t-3",
+          "n-5"
+        ]
+      },
+      "error": null,
+      "digest": "cafa9394a231fe86",
+      "fingerprint": "c8a2d0f118281ada"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h-6\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"n-3\",\"properties\":{},\"id\":\"h-6\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_h-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-3\",\"properties\":{},\"id\":\"h-7\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-6\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"n-5\",\"properties\":{\"lbl\":\"c\",\"n\":2,\"to\":\"n-4\"},\"id\":\"l-6\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_h-6",
+            "h-6"
+          ],
+          [
+            "tmp_h-7",
+            "h-7"
+          ],
+          [
+            "tmp_l-6",
+            "l-6"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "h-6",
+          "h-7",
+          "l-6"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "h-6",
+            null
+          ],
+          [
+            "h-7",
+            null
+          ],
+          [
+            "l-6",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-6\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-7\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-6\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"h-6\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"h-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-6\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"n-5\",\"properties\":{\"lbl\":\"c\",\"n\":2,\"to\":\"n-4\"},\"rev\":3}"
+        ],
+        "dirty": [
+          "r-1",
+          "n-3",
+          "n-1",
+          "n-new",
+          "h-6",
+          "a-1",
+          "r-2",
+          "h-7",
+          "n-5",
+          "l-6"
+        ]
+      },
+      "error": null,
+      "digest": "826876a102aad61a",
+      "fingerprint": "d34b12412b079dbd",
+      "state": [
+        "{\"id\":\"r-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R1\"},\"rev\":1}",
+        "{\"id\":\"r-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R2\"},\"rev\":1}",
+        "{\"id\":\"n-0\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zero\"},\"rev\":1}",
+        "{\"id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\",\"note\":\"moved\",\"ref\":\"n-3\"},\"rev\":4}",
+        "{\"id\":\"n-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\"},\"rev\":1}",
+        "{\"id\":\"n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\"},\"rev\":3}",
+        "{\"id\":\"n-6\",\"type_name\":\"Node\",\"properties\":{\"code\":\"D\",\"refs\":[\"n-1\",\"n-2\"]},\"rev\":2}",
+        "{\"id\":\"n-7\",\"type_name\":\"Node\",\"properties\":{\"code\":\"E\",\"ref\":\"n-new\"},\"rev\":2}",
+        "{\"id\":\"a-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"rev\":1}",
+        "{\"id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"rev\":1}",
+        "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"n-8\",\"type_name\":\"Node\",\"properties\":{\"code\":\"F\",\"ref\":\"c-2\"},\"rev\":2}",
+        "{\"id\":\"n-9\",\"type_name\":\"Node\",\"properties\":{\"code\":\"G\",\"refs\":[\"c-3\",\"c-4\"]},\"rev\":2}",
+        "{\"id\":\"t-0\",\"type_name\":\"Tag\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"t-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}",
+        "{\"id\":\"t-3\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"t-9\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"n-new\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\",\"name\":\"new\"},\"rev\":2}",
+        "{\"id\":\"h-1\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"a-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-5\",\"type_name\":\"Has\",\"source_id\":\"n-4\",\"target_id\":\"t-9\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+        "{\"id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"b\",\"n\":1,\"to\":\"c-1\"},\"rev\":3}",
+        "{\"id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-1\",\"type_name\":\"Link\",\"source_id\":\"n-4\",\"target_id\":\"n-5\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-6\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-6\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"n-5\",\"properties\":{\"lbl\":\"c\",\"n\":2,\"to\":\"n-4\"},\"rev\":3}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"a-1\",\"c-1\",\"c-2\",\"c-3\",\"c-4\",\"n-0\",\"n-1\",\"n-2\",\"n-3\",\"n-4\",\"n-5\",\"n-6\",\"n-7\",\"n-8\",\"n-9\",\"n-new\",\"r-1\",\"r-2\"]],[\"Tag\",[\"id-2\",\"t-0\",\"t-1\",\"t-2\",\"t-3\",\"t-9\"]]],\"out\":[[\"c-1\",[\"h-2\",\"l-1\"]],[\"c-2\",[\"h-3\",\"h-4\"]],[\"c-3\",[\"l-3\",\"l-5\"]],[\"c-4\",[\"l-4\"]],[\"n-1\",[\"l-2\",\"l-6\"]],[\"n-4\",[\"h-5\",\"id-1\"]],[\"r-1\",[\"h-1\",\"h-6\"]],[\"r-2\",[\"h-7\"]]],\"in\":[[\"a-1\",[\"h-1\"]],[\"c-2\",[\"h-2\",\"l-2\"]],[\"c-3\",[\"h-3\"]],[\"c-4\",[\"h-4\",\"l-4\",\"l-5\"]],[\"n-2\",[\"l-3\"]],[\"n-3\",[\"h-6\",\"h-7\"]],[\"n-4\",[\"l-1\"]],[\"n-5\",[\"id-1\",\"l-6\"]],[\"t-9\",[\"h-5\"]]],\"out_count\":[[\"c-1\",\"Has\",1],[\"c-1\",\"Link\",1],[\"c-2\",\"Has\",2],[\"c-3\",\"Link\",2],[\"c-4\",\"Link\",1],[\"n-1\",\"Link\",2],[\"n-4\",\"Has\",1],[\"n-4\",\"Link\",1],[\"r-1\",\"Has\",2],[\"r-2\",\"Has\",1]],\"in_count\":[[\"a-1\",\"Has\",1],[\"c-2\",\"Has\",1],[\"c-2\",\"Link\",1],[\"c-3\",\"Has\",1],[\"c-4\",\"Has\",1],[\"c-4\",\"Link\",2],[\"n-2\",\"Link\",1],[\"n-3\",\"Has\",2],[\"n-4\",\"Link\",1],[\"n-5\",\"Link\",2],[\"t-9\",\"Has\",1]],\"parents\":[[\"a-1\",[\"r-1\"],[\"h-1\"]],[\"c-2\",[\"c-1\"],[\"h-2\"]],[\"c-3\",[\"c-2\"],[\"h-3\"]],[\"c-4\",[\"c-2\"],[\"h-4\"]],[\"n-3\",[\"r-1\",\"r-2\"],[\"h-6\",\"h-7\"]],[\"t-9\",[\"n-4\"],[\"h-5\"]]],\"refs\":[[\"l-3\",[\"c-1\"]],[\"l-6\",[\"n-4\"]],[\"n-2\",[\"n-3\"]],[\"n-6\",[\"n-1\",\"n-2\"]],[\"n-7\",[\"n-new\"]],[\"n-8\",[\"c-2\"]],[\"n-9\",[\"c-3\",\"c-4\"]]],\"referencers\":[[\"c-1\",[\"l-3\"]],[\"c-2\",[\"n-8\"]],[\"c-3\",[\"n-9\"]],[\"c-4\",[\"n-9\"]],[\"n-1\",[\"n-6\"]],[\"n-2\",[\"n-6\"]],[\"n-3\",[\"n-2\"]],[\"n-4\",[\"l-6\"]],[\"n-new\",[\"n-7\"]]],\"uniq_groups\":[[\"a-1\",\"n-3\"],[\"c-1\"],[\"c-2\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-0\"],[\"n-1\",\"n-new\"],[\"n-2\",\"n-4\"],[\"n-5\"],[\"n-6\"],[\"n-7\"],[\"n-8\"],[\"n-9\"],[\"r-1\"],[\"r-2\"],[\"t-0\"],[\"t-2\"],[\"t-9\"]],\"duplicates\":[[\"a-1\",\"n-3\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-1\",\"n-new\"],[\"n-2\",\"n-4\"]],\"roots\":[[\"c-1\",\"c-1\"],[\"id-2\",\"id-2\"],[\"n-1\",\"n-1\"],[\"n-2\",\"n-2\"],[\"n-4\",\"n-4\"],[\"n-5\",\"n-5\"],[\"n-6\",\"n-6\"],[\"n-7\",\"n-7\"],[\"n-8\",\"n-8\"],[\"n-9\",\"n-9\"],[\"new\",\"n-new\"],[\"r-1\",\"r-1\"],[\"r-2\",\"r-2\"],[\"t-0\",\"t-0\"],[\"t-1\",\"t-1\"],[\"t-2\",\"t-2\"],[\"t-3\",\"t-3\"],[\"zero\",\"n-0\"]]}"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"update_relationship\",\"id\":\"l-3\",\"properties_patch\":{\"lbl\":\"d\",\"n\":null,\"to\":\"n-1\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "l-3"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "l-3",
+            "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"b\",\"n\":1,\"to\":\"c-1\"},\"rev\":3}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_relationship\",\"id\":\"l-3\",\"properties_patch\":{\"lbl\":\"b\",\"n\":1,\"to\":\"c-1\"}}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"d\",\"to\":\"n-1\"},\"rev\":6}"
+        ],
+        "dirty": [
+          "l-3"
+        ]
+      },
+      "error": null,
+      "digest": "265ff4250ff6a9c5",
+      "fingerprint": "01e3e70229135223"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"h-6\"}",
+        "{\"kind\":\"delete_relationship\",\"id\":\"l-6\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "h-6",
+          "l-6"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "h-6",
+            "{\"id\":\"h-6\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "l-6",
+            "{\"id\":\"l-6\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"n-5\",\"properties\":{\"lbl\":\"c\",\"n\":2,\"to\":\"n-4\"},\"rev\":3}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"l-6\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"n-5\",\"properties\":{\"lbl\":\"c\",\"n\":2,\"to\":\"n-4\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"h-6\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"n-3\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [],
+        "dirty": [
+          "h-6",
+          "r-1",
+          "n-3",
+          "a-1",
+          "l-6",
+          "n-1",
+          "n-5"
+        ]
+      },
+      "error": null,
+      "digest": "befdd6719237286b",
+      "fingerprint": "d5a1ab3b0244716d"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"c-1\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "c-1",
+          "c-2",
+          "c-3",
+          "c-4"
+        ],
+        "deleted_relationship_ids": [
+          "h-2",
+          "l-1",
+          "h-3",
+          "h-4",
+          "l-2",
+          "l-3",
+          "l-5",
+          "l-4"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "c-1",
+            "{\"id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"rev\":1}"
+          ],
+          [
+            "c-2",
+            "{\"id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"rev\":1}"
+          ],
+          [
+            "c-3",
+            "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}"
+          ],
+          [
+            "c-4",
+            "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "h-2",
+            "{\"id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "l-1",
+            "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}"
+          ],
+          [
+            "h-3",
+            "{\"id\":\"h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "h-4",
+            "{\"id\":\"h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "l-2",
+            "{\"id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "l-3",
+            "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"d\",\"to\":\"n-1\"},\"rev\":6}"
+          ],
+          [
+            "l-5",
+            "{\"id\":\"l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "l-4",
+            "{\"id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"c-2\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"d\",\"to\":\"n-1\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [],
+        "dirty": [
+          "c-1",
+          "h-2",
+          "c-2",
+          "l-1",
+          "n-4",
+          "h-3",
+          "c-3",
+          "h-4",
+          "c-4",
+          "l-2",
+          "n-1",
+          "n-8",
+          "l-3",
+          "n-2",
+          "l-5",
+          "n-9",
+          "l-4"
+        ]
+      },
+      "error": null,
+      "digest": "5b176d411562f29b",
+      "fingerprint": "c31e35576d319f9e"
+    },
+    {
+      "do": "undo",
+      "of": 8,
+      "record_dirty": true,
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "c-1",
+          "c-2",
+          "c-3",
+          "c-4"
+        ],
+        "changed_relationship_ids": [
+          "h-2",
+          "l-1",
+          "h-3",
+          "h-4",
+          "l-2",
+          "l-3",
+          "l-5",
+          "l-4"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "c-1",
+            null
+          ],
+          [
+            "c-2",
+            null
+          ],
+          [
+            "c-3",
+            null
+          ],
+          [
+            "c-4",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "h-2",
+            null
+          ],
+          [
+            "l-1",
+            null
+          ],
+          [
+            "h-3",
+            null
+          ],
+          [
+            "h-4",
+            null
+          ],
+          [
+            "l-2",
+            null
+          ],
+          [
+            "l-3",
+            null
+          ],
+          [
+            "l-5",
+            null
+          ],
+          [
+            "l-4",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-4\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-5\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-3\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-2\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-4\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-3\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-1\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"h-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"rev\":1}",
+          "{\"id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"rev\":1}",
+          "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+          "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+          "{\"id\":\"h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"d\",\"to\":\"n-1\"},\"rev\":2}",
+          "{\"id\":\"l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}"
+        ],
+        "dirty": [
+          "c-1",
+          "n-0",
+          "c-2",
+          "n-8",
+          "c-3",
+          "n-9",
+          "c-4",
+          "h-2",
+          "n-4",
+          "l-1",
+          "h-3",
+          "h-4",
+          "n-1",
+          "l-2",
+          "n-2",
+          "l-3",
+          "l-5",
+          "l-4"
+        ]
+      },
+      "error": null,
+      "digest": "2d94071d3cefb920",
+      "fingerprint": "88b8306b8bebdaab"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"n-1\"}",
+        "{\"kind\":\"delete_element\",\"id\":\"t-9\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "n-1",
+          "t-9"
+        ],
+        "deleted_relationship_ids": [
+          "l-2",
+          "h-5"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "n-1",
+            "{\"id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}"
+          ],
+          [
+            "t-9",
+            "{\"id\":\"t-9\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "l-2",
+            "{\"id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "h-5",
+            "{\"id\":\"h-5\",\"type_name\":\"Has\",\"source_id\":\"n-4\",\"target_id\":\"t-9\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"t-9\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"h-5\",\"type_name\":\"Has\",\"source_id\":\"n-4\",\"target_id\":\"t-9\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"n-1\",\"target_id\":\"c-2\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [],
+        "dirty": [
+          "n-1",
+          "l-2",
+          "c-2",
+          "l-3",
+          "n-6",
+          "n-new",
+          "t-9",
+          "h-5",
+          "n-4"
+        ]
+      },
+      "error": null,
+      "digest": "b57ed63a188fec75",
+      "fingerprint": "e4989aa0c62197a0",
+      "state": [
+        "{\"id\":\"r-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R1\"},\"rev\":1}",
+        "{\"id\":\"r-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R2\"},\"rev\":1}",
+        "{\"id\":\"n-0\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zero\"},\"rev\":1}",
+        "{\"id\":\"n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\",\"note\":\"moved\",\"ref\":\"n-3\"},\"rev\":4}",
+        "{\"id\":\"n-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\"},\"rev\":1}",
+        "{\"id\":\"n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\"},\"rev\":3}",
+        "{\"id\":\"n-6\",\"type_name\":\"Node\",\"properties\":{\"code\":\"D\",\"refs\":[\"n-1\",\"n-2\"]},\"rev\":2}",
+        "{\"id\":\"n-7\",\"type_name\":\"Node\",\"properties\":{\"code\":\"E\",\"ref\":\"n-new\"},\"rev\":2}",
+        "{\"id\":\"a-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-8\",\"type_name\":\"Node\",\"properties\":{\"code\":\"F\",\"ref\":\"c-2\"},\"rev\":2}",
+        "{\"id\":\"n-9\",\"type_name\":\"Node\",\"properties\":{\"code\":\"G\",\"refs\":[\"c-3\",\"c-4\"]},\"rev\":2}",
+        "{\"id\":\"t-0\",\"type_name\":\"Tag\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"t-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}",
+        "{\"id\":\"t-3\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"n-new\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\",\"name\":\"new\"},\"rev\":2}",
+        "{\"id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"rev\":1}",
+        "{\"id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"rev\":1}",
+        "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"h-1\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"a-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-1\",\"type_name\":\"Link\",\"source_id\":\"n-4\",\"target_id\":\"n-5\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+        "{\"id\":\"h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"d\",\"to\":\"n-1\"},\"rev\":2}",
+        "{\"id\":\"l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"a-1\",\"c-1\",\"c-2\",\"c-3\",\"c-4\",\"n-0\",\"n-2\",\"n-3\",\"n-4\",\"n-5\",\"n-6\",\"n-7\",\"n-8\",\"n-9\",\"n-new\",\"r-1\",\"r-2\"]],[\"Tag\",[\"id-2\",\"t-0\",\"t-1\",\"t-2\",\"t-3\"]]],\"out\":[[\"c-1\",[\"h-2\",\"l-1\"]],[\"c-2\",[\"h-3\",\"h-4\"]],[\"c-3\",[\"l-3\",\"l-5\"]],[\"c-4\",[\"l-4\"]],[\"n-4\",[\"id-1\"]],[\"r-1\",[\"h-1\"]],[\"r-2\",[\"h-7\"]]],\"in\":[[\"a-1\",[\"h-1\"]],[\"c-2\",[\"h-2\"]],[\"c-3\",[\"h-3\"]],[\"c-4\",[\"h-4\",\"l-4\",\"l-5\"]],[\"n-2\",[\"l-3\"]],[\"n-3\",[\"h-7\"]],[\"n-4\",[\"l-1\"]],[\"n-5\",[\"id-1\"]]],\"out_count\":[[\"c-1\",\"Has\",1],[\"c-1\",\"Link\",1],[\"c-2\",\"Has\",2],[\"c-3\",\"Link\",2],[\"c-4\",\"Link\",1],[\"n-4\",\"Link\",1],[\"r-1\",\"Has\",1],[\"r-2\",\"Has\",1]],\"in_count\":[[\"a-1\",\"Has\",1],[\"c-2\",\"Has\",1],[\"c-3\",\"Has\",1],[\"c-4\",\"Has\",1],[\"c-4\",\"Link\",2],[\"n-2\",\"Link\",1],[\"n-3\",\"Has\",1],[\"n-4\",\"Link\",1],[\"n-5\",\"Link\",1]],\"parents\":[[\"a-1\",[\"r-1\"],[\"h-1\"]],[\"c-2\",[\"c-1\"],[\"h-2\"]],[\"c-3\",[\"c-2\"],[\"h-3\"]],[\"c-4\",[\"c-2\"],[\"h-4\"]],[\"n-3\",[\"r-2\"],[\"h-7\"]]],\"refs\":[[\"l-3\",[\"n-1\"]],[\"n-2\",[\"n-3\"]],[\"n-6\",[\"n-1\",\"n-2\"]],[\"n-7\",[\"n-new\"]],[\"n-8\",[\"c-2\"]],[\"n-9\",[\"c-3\",\"c-4\"]]],\"referencers\":[[\"c-2\",[\"n-8\"]],[\"c-3\",[\"n-9\"]],[\"c-4\",[\"n-9\"]],[\"n-1\",[\"l-3\",\"n-6\"]],[\"n-2\",[\"n-6\"]],[\"n-3\",[\"n-2\"]],[\"n-new\",[\"n-7\"]]],\"uniq_groups\":[[\"a-1\"],[\"c-1\"],[\"c-2\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-0\"],[\"n-2\",\"n-4\"],[\"n-3\"],[\"n-5\"],[\"n-6\"],[\"n-7\"],[\"n-8\"],[\"n-9\"],[\"n-new\"],[\"r-1\"],[\"r-2\"],[\"t-0\"],[\"t-2\"]],\"duplicates\":[[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-2\",\"n-4\"]],\"roots\":[[\"c-1\",\"c-1\"],[\"id-2\",\"id-2\"],[\"n-2\",\"n-2\"],[\"n-4\",\"n-4\"],[\"n-5\",\"n-5\"],[\"n-6\",\"n-6\"],[\"n-7\",\"n-7\"],[\"n-8\",\"n-8\"],[\"n-9\",\"n-9\"],[\"new\",\"n-new\"],[\"r-1\",\"r-1\"],[\"r-2\",\"r-2\"],[\"t-0\",\"t-0\"],[\"t-1\",\"t-1\"],[\"t-2\",\"t-2\"],[\"t-3\",\"t-3\"],[\"zero\",\"n-0\"]]}"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "restore": true,
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"l-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-1\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "n-1"
+        ],
+        "changed_relationship_ids": [
+          "l-7"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "n-1",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "l-7",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-7\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"n-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"l-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-1\",\"properties\":{},\"rev\":0}"
+        ],
+        "dirty": [
+          "n-1",
+          "n-0",
+          "l-3",
+          "n-6",
+          "n-new",
+          "r-2",
+          "l-7",
+          "n-3"
+        ]
+      },
+      "error": null,
+      "digest": "4ac52d904903cc02",
+      "fingerprint": "5fa0050e8643c059"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"h-1\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "h-1"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "h-1",
+            "{\"id\":\"h-1\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"a-1\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"h-1\",\"type_name\":\"Has\",\"source_id\":\"r-1\",\"target_id\":\"a-1\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [],
+        "dirty": [
+          "h-1",
+          "r-1",
+          "a-1",
+          "n-new"
+        ]
+      },
+      "error": null,
+      "digest": "8b3c2fce93c0fe10",
+      "fingerprint": "57000c4f43673fcc",
+      "state": [
+        "{\"id\":\"r-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R1\"},\"rev\":1}",
+        "{\"id\":\"r-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"R2\"},\"rev\":1}",
+        "{\"id\":\"n-0\",\"type_name\":\"Node\",\"properties\":{\"name\":\"zero\"},\"rev\":1}",
+        "{\"id\":\"n-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\",\"note\":\"moved\",\"ref\":\"n-3\"},\"rev\":4}",
+        "{\"id\":\"n-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"B\"},\"rev\":1}",
+        "{\"id\":\"n-5\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C\"},\"rev\":3}",
+        "{\"id\":\"n-6\",\"type_name\":\"Node\",\"properties\":{\"code\":\"D\",\"refs\":[\"n-1\",\"n-2\"]},\"rev\":2}",
+        "{\"id\":\"n-7\",\"type_name\":\"Node\",\"properties\":{\"code\":\"E\",\"ref\":\"n-new\"},\"rev\":2}",
+        "{\"id\":\"a-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"n-8\",\"type_name\":\"Node\",\"properties\":{\"code\":\"F\",\"ref\":\"c-2\"},\"rev\":2}",
+        "{\"id\":\"n-9\",\"type_name\":\"Node\",\"properties\":{\"code\":\"G\",\"refs\":[\"c-3\",\"c-4\"]},\"rev\":2}",
+        "{\"id\":\"t-0\",\"type_name\":\"Tag\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-1\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"t-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\"},\"rev\":1}",
+        "{\"id\":\"t-3\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"id-2\",\"type_name\":\"Tag\",\"properties\":{\"v\":\"x\",\"w\":1},\"rev\":2}",
+        "{\"id\":\"n-new\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\",\"name\":\"new\"},\"rev\":2}",
+        "{\"id\":\"c-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C1\"},\"rev\":1}",
+        "{\"id\":\"c-2\",\"type_name\":\"Node\",\"properties\":{\"code\":\"C2\"},\"rev\":1}",
+        "{\"id\":\"c-3\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"c-4\",\"type_name\":\"Node\",\"properties\":{\"code\":\"X\"},\"rev\":1}",
+        "{\"id\":\"n-1\",\"type_name\":\"Node\",\"properties\":{\"code\":\"A\"},\"rev\":1}",
+        "{\"id\":\"id-1\",\"type_name\":\"Link\",\"source_id\":\"n-4\",\"target_id\":\"n-5\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-2\",\"type_name\":\"Has\",\"source_id\":\"c-1\",\"target_id\":\"c-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"c-1\",\"target_id\":\"n-4\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+        "{\"id\":\"h-3\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"h-4\",\"type_name\":\"Has\",\"source_id\":\"c-2\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"n-2\",\"properties\":{\"lbl\":\"d\",\"to\":\"n-1\"},\"rev\":2}",
+        "{\"id\":\"l-5\",\"type_name\":\"Link\",\"source_id\":\"c-3\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-4\",\"type_name\":\"Link\",\"source_id\":\"c-4\",\"target_id\":\"c-4\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-7\",\"type_name\":\"Has\",\"source_id\":\"r-2\",\"target_id\":\"n-1\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Node\",[\"a-1\",\"c-1\",\"c-2\",\"c-3\",\"c-4\",\"n-0\",\"n-1\",\"n-2\",\"n-3\",\"n-4\",\"n-5\",\"n-6\",\"n-7\",\"n-8\",\"n-9\",\"n-new\",\"r-1\",\"r-2\"]],[\"Tag\",[\"id-2\",\"t-0\",\"t-1\",\"t-2\",\"t-3\"]]],\"out\":[[\"c-1\",[\"h-2\",\"l-1\"]],[\"c-2\",[\"h-3\",\"h-4\"]],[\"c-3\",[\"l-3\",\"l-5\"]],[\"c-4\",[\"l-4\"]],[\"n-4\",[\"id-1\"]],[\"r-2\",[\"h-7\",\"l-7\"]]],\"in\":[[\"c-2\",[\"h-2\"]],[\"c-3\",[\"h-3\"]],[\"c-4\",[\"h-4\",\"l-4\",\"l-5\"]],[\"n-1\",[\"l-7\"]],[\"n-2\",[\"l-3\"]],[\"n-3\",[\"h-7\"]],[\"n-4\",[\"l-1\"]],[\"n-5\",[\"id-1\"]]],\"out_count\":[[\"c-1\",\"Has\",1],[\"c-1\",\"Link\",1],[\"c-2\",\"Has\",2],[\"c-3\",\"Link\",2],[\"c-4\",\"Link\",1],[\"n-4\",\"Link\",1],[\"r-2\",\"Has\",2]],\"in_count\":[[\"c-2\",\"Has\",1],[\"c-3\",\"Has\",1],[\"c-4\",\"Has\",1],[\"c-4\",\"Link\",2],[\"n-1\",\"Has\",1],[\"n-2\",\"Link\",1],[\"n-3\",\"Has\",1],[\"n-4\",\"Link\",1],[\"n-5\",\"Link\",1]],\"parents\":[[\"c-2\",[\"c-1\"],[\"h-2\"]],[\"c-3\",[\"c-2\"],[\"h-3\"]],[\"c-4\",[\"c-2\"],[\"h-4\"]],[\"n-1\",[\"r-2\"],[\"l-7\"]],[\"n-3\",[\"r-2\"],[\"h-7\"]]],\"refs\":[[\"l-3\",[\"n-1\"]],[\"n-2\",[\"n-3\"]],[\"n-6\",[\"n-1\",\"n-2\"]],[\"n-7\",[\"n-new\"]],[\"n-8\",[\"c-2\"]],[\"n-9\",[\"c-3\",\"c-4\"]]],\"referencers\":[[\"c-2\",[\"n-8\"]],[\"c-3\",[\"n-9\"]],[\"c-4\",[\"n-9\"]],[\"n-1\",[\"l-3\",\"n-6\"]],[\"n-2\",[\"n-6\"]],[\"n-3\",[\"n-2\"]],[\"n-new\",[\"n-7\"]]],\"uniq_groups\":[[\"a-1\",\"n-new\"],[\"c-1\"],[\"c-2\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-0\"],[\"n-1\",\"n-3\"],[\"n-2\",\"n-4\"],[\"n-5\"],[\"n-6\"],[\"n-7\"],[\"n-8\"],[\"n-9\"],[\"r-1\"],[\"r-2\"],[\"t-0\"],[\"t-2\"]],\"duplicates\":[[\"a-1\",\"n-new\"],[\"c-3\",\"c-4\"],[\"id-2\",\"t-1\",\"t-3\"],[\"n-1\",\"n-3\"],[\"n-2\",\"n-4\"]],\"roots\":[[\"a-1\",\"a-1\"],[\"c-1\",\"c-1\"],[\"id-2\",\"id-2\"],[\"n-2\",\"n-2\"],[\"n-4\",\"n-4\"],[\"n-5\",\"n-5\"],[\"n-6\",\"n-6\"],[\"n-7\",\"n-7\"],[\"n-8\",\"n-8\"],[\"n-9\",\"n-9\"],[\"new\",\"n-new\"],[\"r-1\",\"r-1\"],[\"r-2\",\"r-2\"],[\"t-0\",\"t-0\"],[\"t-1\",\"t-1\"],[\"t-2\",\"t-2\"],[\"t-3\",\"t-3\"],[\"zero\",\"n-0\"]]}"
+    }
+  ]
+}

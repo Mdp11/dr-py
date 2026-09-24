@@ -72,7 +72,7 @@ export {
 	type SetOp,
 	type SnippetSource
 } from './navigation/schema.ts';
-export { applyBatch, type ApplyOptions } from './ops/apply.ts';
+export { applyBatch, containmentClosure, type ApplyOptions } from './ops/apply.ts';
 export { OpError } from './ops/errors.ts';
 export { remapOp } from './ops/remap.ts';
 export { BatchResult, type ElementImage, type RelImage } from './ops/result.ts';
@@ -192,6 +192,8 @@ export type {
 	WireChanges,
 	WireConflict
 } from './service/types.ts';
+export { ISSUES_RESPONSE_MAX, storeListBody, type IssueListBody } from './validation/bodies.ts';
+export { addNeighbourhood, DirtyCollector } from './validation/dirty.ts';
 export {
 	issueKey,
 	issueOwner,
@@ -210,6 +212,7 @@ export {
 	type Run,
 	type Validator
 } from './validation/pipeline.ts';
+export { IssueStore } from './validation/store.ts';
 export { pyIsoDate, pyReprFrozen, pyStrNumber, valueConforms } from './validation/values.ts';
 export { entityHash, formatDigest, modelDigest, type EntityHash } from './snapshot/digest.ts';
 export { LineSplitter } from './snapshot/lines.ts';

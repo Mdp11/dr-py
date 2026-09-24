@@ -1,0 +1,2652 @@
+{
+  "metamodel": {
+    "enums": {
+      "Color": [
+        "red",
+        "green"
+      ]
+    },
+    "elements": [
+      {
+        "name": "Base",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Blk",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [
+          {
+            "name": "n",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": 0.0,
+            "max": 5.0,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "c",
+            "datatype": "Color",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "b",
+            "datatype": "boolean",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "code",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": "[A-Z]+",
+            "max_length": 3
+          },
+          {
+            "name": "ref",
+            "datatype": "Blk",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "req",
+            "datatype": "string",
+            "multiplicity": "1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Other",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "Car",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "Wheel",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Base",
+        "target": "Base",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Base"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Link",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Blk",
+        "target": "Other",
+        "mappings": [
+          {
+            "source": "Blk",
+            "target": "Other"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "lbl",
+            "datatype": "string",
+            "multiplicity": "1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      },
+      {
+        "name": "Needs",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Car",
+        "target": "Wheel",
+        "mappings": [
+          {
+            "source": "Car",
+            "target": "Wheel"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "1..*",
+        "properties": []
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":3,\"req\":\"x\"},\"id\":\"b-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":9,\"req\":\"y\"},\"id\":\"b-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"id\":\"o-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"id\":\"o-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1\"},\"id\":\"car-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"id\":\"wheel-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"id\":\"p-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"id\":\"p-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"id\":\"x-1\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"id\":\"own-1\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"id\":\"l-1\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_b-1",
+            "b-1"
+          ],
+          [
+            "tmp_b-2",
+            "b-2"
+          ],
+          [
+            "tmp_o-1",
+            "o-1"
+          ],
+          [
+            "tmp_o-2",
+            "o-2"
+          ],
+          [
+            "tmp_car-1",
+            "car-1"
+          ],
+          [
+            "tmp_wheel-1",
+            "wheel-1"
+          ],
+          [
+            "tmp_p-1",
+            "p-1"
+          ],
+          [
+            "tmp_p-2",
+            "p-2"
+          ],
+          [
+            "tmp_x-1",
+            "x-1"
+          ],
+          [
+            "tmp_own-1",
+            "own-1"
+          ],
+          [
+            "tmp_l-1",
+            "l-1"
+          ]
+        ],
+        "changed_element_ids": [
+          "b-1",
+          "b-2",
+          "o-1",
+          "o-2",
+          "car-1",
+          "wheel-1",
+          "p-1",
+          "p-2",
+          "x-1"
+        ],
+        "changed_relationship_ids": [
+          "own-1",
+          "l-1"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            null
+          ],
+          [
+            "b-2",
+            null
+          ],
+          [
+            "o-1",
+            null
+          ],
+          [
+            "o-2",
+            null
+          ],
+          [
+            "car-1",
+            null
+          ],
+          [
+            "wheel-1",
+            null
+          ],
+          [
+            "p-1",
+            null
+          ],
+          [
+            "p-2",
+            null
+          ],
+          [
+            "x-1",
+            null
+          ]
+        ],
+        "before_relationships": [
+          [
+            "own-1",
+            null
+          ],
+          [
+            "l-1",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-1\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"own-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"x-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"p-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"p-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"wheel-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"car-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"o-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"o-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"b-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"b-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":3,\"req\":\"x\"},\"rev\":3}",
+          "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":9,\"req\":\"y\"},\"rev\":3}",
+          "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+          "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+          "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1\"},\"rev\":1}",
+          "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+          "{\"id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+          "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+          "{\"id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"rev\":1}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}"
+        ]
+      },
+      "error": null,
+      "digest": "b8c3ea7cf77cca4d",
+      "fingerprint": "33ef6df1ba150db7",
+      "state": [
+        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":3,\"req\":\"x\"},\"rev\":3}",
+        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":9,\"req\":\"y\"},\"rev\":3}",
+        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1\"},\"rev\":1}",
+        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+        "{\"id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+        "{\"id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"rev\":1}",
+        "{\"id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\"]],[\"Car\",[\"car-1\"]],[\"Other\",[\"o-1\",\"o-2\",\"p-1\",\"p-2\",\"x-1\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\"]],[\"p-1\",[\"own-1\"]]],\"in\":[[\"o-1\",[\"l-1\"]],[\"x-1\",[\"own-1\"]]],\"out_count\":[[\"b-1\",\"Link\",1],[\"p-1\",\"Owns\",1]],\"in_count\":[[\"o-1\",\"Link\",1],[\"x-1\",\"Owns\",1]],\"parents\":[[\"x-1\",[\"p-1\"],[\"own-1\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"o-1\"],[\"o-2\"],[\"p-1\"],[\"p-2\"],[\"wheel-1\"],[\"x-1\"]],\"duplicates\":[],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1\",\"car-1\"],[\"o1\",\"o-1\"],[\"o2\",\"o-2\"],[\"p1\",\"p-1\"],[\"p2\",\"p-2\"],[\"wheel1\",\"wheel-1\"]]}"
+    },
+    {
+      "do": "insert_element",
+      "id": "g-1",
+      "type": "Gad",
+      "rev": 1,
+      "value": {
+        "t": "dict",
+        "v": [
+          [
+            "x",
+            {
+              "t": "int",
+              "v": "1"
+            }
+          ]
+        ]
+      },
+      "result": "g-1",
+      "error": null,
+      "digest": "3572b69349b9047e",
+      "fingerprint": "466139863064c337"
+    },
+    {
+      "do": "seed",
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 0,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 9 above max 5.0",
+            "target_ids": [
+              "b-2"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 3
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":1.0}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":3,\"req\":\"x\"},\"rev\":3}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":3}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":1.0,\"req\":\"x\"},\"rev\":4}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "616d482fbe74d301",
+      "fingerprint": "088470c9d8804f54"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 1,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 9 above max 5.0",
+            "target_ids": [
+              "b-2"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Blk.n: value 1.0 is not a valid integer",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 4
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":2}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":1.0,\"req\":\"x\"},\"rev\":4}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":1.0}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\"},\"rev\":5}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "9671699607c2e521",
+      "fingerprint": "7bf92031daf9f4da"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 2,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 9 above max 5.0",
+            "target_ids": [
+              "b-2"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 3
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"car-1\",\"properties_patch\":{\"name\":\"car1b\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "car-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "car-1",
+            "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"car-1\",\"properties_patch\":{\"name\":\"car1\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "ff166912ac09bbe9",
+      "fingerprint": "77a597ffdb6990f4"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 3,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 9 above max 5.0",
+            "target_ids": [
+              "b-2"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 3
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-2\",\"properties_patch\":{\"n\":4}}",
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":-3}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-2",
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-2",
+            "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":9,\"req\":\"y\"},\"rev\":3}"
+          ],
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\"},\"rev\":5}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":2}}",
+          "{\"kind\":\"update_element\",\"id\":\"b-2\",\"properties_patch\":{\"n\":9}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}",
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":-3,\"req\":\"x\"},\"rev\":6}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "0d5927e7af53344c",
+      "fingerprint": "457fcab8b57d64a2",
+      "state": [
+        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":-3,\"req\":\"x\"},\"rev\":6}",
+        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}",
+        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}",
+        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+        "{\"id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+        "{\"id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"rev\":1}",
+        "{\"id\":\"g-1\",\"type_name\":\"Gad\",\"properties\":{\"x\":1},\"rev\":1}",
+        "{\"id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\"]],[\"Car\",[\"car-1\"]],[\"Gad\",[\"g-1\"]],[\"Other\",[\"o-1\",\"o-2\",\"p-1\",\"p-2\",\"x-1\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\"]],[\"p-1\",[\"own-1\"]]],\"in\":[[\"o-1\",[\"l-1\"]],[\"x-1\",[\"own-1\"]]],\"out_count\":[[\"b-1\",\"Link\",1],[\"p-1\",\"Owns\",1]],\"in_count\":[[\"o-1\",\"Link\",1],[\"x-1\",\"Owns\",1]],\"parents\":[[\"x-1\",[\"p-1\"],[\"own-1\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"g-1\"],[\"o-1\"],[\"o-2\"],[\"p-1\"],[\"p-2\"],[\"wheel-1\"],[\"x-1\"]],\"duplicates\":[],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1b\",\"car-1\"],[\"g-1\",\"g-1\"],[\"o1\",\"o-1\"],[\"o2\",\"o-2\"],[\"p1\",\"p-1\"],[\"p2\",\"p-2\"],[\"wheel1\",\"wheel-1\"]]}"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 4,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "n: -3 below min 0.0",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 3
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"code\":\"abcd\",\"n\":2}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":-3,\"req\":\"x\"},\"rev\":6}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"code\":null,\"n\":-3}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"abcd\"},\"rev\":8}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "21df3681a45075e7",
+      "fingerprint": "6cdd20a0af810ee1"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 5,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "code: 'abcd' does not match pattern '[A-Z]+'",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "code: length 4 exceeds max_length 3",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 4
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"code\":\"AB\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"abcd\"},\"rev\":8}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"code\":\"abcd\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\"},\"rev\":9}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "f51d42fee1f467d3",
+      "fingerprint": "3e886aa9cb3c641b"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 6,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 2
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"c\":\"blue\",\"b\":1}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\"},\"rev\":9}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"c\":null,\"b\":null}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"blue\",\"b\":1},\"rev\":11}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "40f0bc06375e9229",
+      "fingerprint": "6e7b5d074ba2ef5a"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 7,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Blk.c: value 'blue' is not a valid Color",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Blk.b: value 1 is not a valid boolean",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 4
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"c\":\"red\",\"b\":null}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"blue\",\"b\":1},\"rev\":11}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"c\":\"blue\",\"b\":1}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\"},\"rev\":13}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "9a6d070477a54241",
+      "fingerprint": "f53333615d68316e"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 8,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 2
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"ref\":\"nope\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\"},\"rev\":13}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"ref\":null}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\",\"ref\":\"nope\"},\"rev\":14}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "3cded413c26edb0f",
+      "fingerprint": "d5fa6fb45a172fb9",
+      "state": [
+        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\",\"ref\":\"nope\"},\"rev\":14}",
+        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}",
+        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}",
+        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+        "{\"id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+        "{\"id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"rev\":1}",
+        "{\"id\":\"g-1\",\"type_name\":\"Gad\",\"properties\":{\"x\":1},\"rev\":1}",
+        "{\"id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\"]],[\"Car\",[\"car-1\"]],[\"Gad\",[\"g-1\"]],[\"Other\",[\"o-1\",\"o-2\",\"p-1\",\"p-2\",\"x-1\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\"]],[\"p-1\",[\"own-1\"]]],\"in\":[[\"o-1\",[\"l-1\"]],[\"x-1\",[\"own-1\"]]],\"out_count\":[[\"b-1\",\"Link\",1],[\"p-1\",\"Owns\",1]],\"in_count\":[[\"o-1\",\"Link\",1],[\"x-1\",\"Owns\",1]],\"parents\":[[\"x-1\",[\"p-1\"],[\"own-1\"]]],\"refs\":[[\"b-1\",[\"nope\"]]],\"referencers\":[[\"nope\",[\"b-1\"]]],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"g-1\"],[\"o-1\"],[\"o-2\"],[\"p-1\"],[\"p-2\"],[\"wheel-1\"],[\"x-1\"]],\"duplicates\":[],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1b\",\"car-1\"],[\"g-1\",\"g-1\"],[\"o1\",\"o-1\"],[\"o2\",\"o-2\"],[\"p1\",\"p-1\"],[\"p2\",\"p-2\"],[\"wheel1\",\"wheel-1\"]]}"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 9,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Blk.ref: reference 'nope' points to no element",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "structural",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 3
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_nope\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"nope\",\"req\":\"z\"},\"id\":\"nope\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_nope",
+            "nope"
+          ]
+        ],
+        "changed_element_ids": [
+          "nope"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "nope",
+            null
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"nope\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"nope\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"nope\",\"req\":\"z\"},\"rev\":2}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "cfe1d3ce3c776594",
+      "fingerprint": "3eabe5cd9a2ab07d"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 10,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 2
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"ref\":\"o-1\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\",\"ref\":\"nope\"},\"rev\":14}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"ref\":\"nope\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\",\"ref\":\"o-1\"},\"rev\":15}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "84251825e4d9b63d",
+      "fingerprint": "276f691d11304ae9"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 11,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Blk.ref: reference 'o-1' is Other, expected Blk or subtype",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 3
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"ref\":null}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\",\"ref\":\"o-1\"},\"rev\":15}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"ref\":\"o-1\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\"},\"rev\":16}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "442e900042e01edb",
+      "fingerprint": "cac3af247c5bb964"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 12,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 2
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"req\":null}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"req\":\"x\",\"code\":\"AB\",\"c\":\"red\"},\"rev\":16}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"req\":\"x\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"code\":\"AB\",\"c\":\"red\"},\"rev\":17}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "7b1da1591f30ef4f",
+      "fingerprint": "12a69e3b0d1a36d4"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 13,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Blk.req: 0 value(s) violates multiplicity '1'",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 3
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"req\":\"x\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"code\":\"AB\",\"c\":\"red\"},\"rev\":17}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"req\":null}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":18}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "9298b86ef30dfb6e",
+      "fingerprint": "a9775bebb65c67c9",
+      "state": [
+        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":18}",
+        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}",
+        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}",
+        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+        "{\"id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+        "{\"id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"rev\":1}",
+        "{\"id\":\"g-1\",\"type_name\":\"Gad\",\"properties\":{\"x\":1},\"rev\":1}",
+        "{\"id\":\"nope\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"nope\",\"req\":\"z\"},\"rev\":2}",
+        "{\"id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\",\"nope\"]],[\"Car\",[\"car-1\"]],[\"Gad\",[\"g-1\"]],[\"Other\",[\"o-1\",\"o-2\",\"p-1\",\"p-2\",\"x-1\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\"]],[\"p-1\",[\"own-1\"]]],\"in\":[[\"o-1\",[\"l-1\"]],[\"x-1\",[\"own-1\"]]],\"out_count\":[[\"b-1\",\"Link\",1],[\"p-1\",\"Owns\",1]],\"in_count\":[[\"o-1\",\"Link\",1],[\"x-1\",\"Owns\",1]],\"parents\":[[\"x-1\",[\"p-1\"],[\"own-1\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"g-1\"],[\"nope\"],[\"o-1\"],[\"o-2\"],[\"p-1\"],[\"p-2\"],[\"wheel-1\"],[\"x-1\"]],\"duplicates\":[],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1b\",\"car-1\"],[\"g-1\",\"g-1\"],[\"nope\",\"nope\"],[\"o1\",\"o-1\"],[\"o2\",\"o-2\"],[\"p1\",\"p-1\"],[\"p2\",\"p-2\"],[\"wheel1\",\"wheel-1\"]]}"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 14,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Needs: element car-1 has 0 target(s), violates target multiplicity '1..*'",
+            "target_ids": [
+              "car-1"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 2
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_n-1\",\"type_name\":\"Needs\",\"source_id\":\"car-1\",\"target_id\":\"wheel-1\",\"properties\":{},\"id\":\"n-1\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_n-1",
+            "n-1"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "n-1"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "n-1",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"n-1\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"n-1\",\"type_name\":\"Needs\",\"source_id\":\"car-1\",\"target_id\":\"wheel-1\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "b0eae4baf8b2ff31",
+      "fingerprint": "999b33ea06a718ba"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 15,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 1
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-2\",\"type_name\":\"Link\",\"source_id\":\"o-1\",\"target_id\":\"b-1\",\"properties\":{\"lbl\":\"q\"},\"id\":\"l-2\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{},\"id\":\"l-3\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_l-2",
+            "l-2"
+          ],
+          [
+            "tmp_l-3",
+            "l-3"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "l-2",
+          "l-3"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "l-2",
+            null
+          ],
+          [
+            "l-3",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-3\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"l-2\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"o-1\",\"target_id\":\"b-1\",\"properties\":{\"lbl\":\"q\"},\"rev\":1}",
+          "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "bf1089538346802a",
+      "fingerprint": "1beb7242f4258534"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 16,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Link: source Other is not one of [Blk]",
+            "target_ids": [
+              "l-2"
+            ],
+            "category": "conformance",
+            "check": "endpoint_typing",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Link: target Blk is not one of [Other]",
+            "target_ids": [
+              "l-2"
+            ],
+            "category": "conformance",
+            "check": "endpoint_typing",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Link.lbl: 0 value(s) violates multiplicity '1'",
+            "target_ids": [
+              "l-3"
+            ],
+            "category": "conformance",
+            "check": "multiplicity",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 4
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"l-2\"}",
+        "{\"kind\":\"update_relationship\",\"id\":\"l-3\",\"properties_patch\":{\"lbl\":\"x\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "l-3"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "l-2"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "l-2",
+            "{\"id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"o-1\",\"target_id\":\"b-1\",\"properties\":{\"lbl\":\"q\"},\"rev\":1}"
+          ],
+          [
+            "l-3",
+            "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_relationship\",\"id\":\"l-3\",\"properties_patch\":{\"lbl\":null}}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"l-2\",\"type_name\":\"Link\",\"source_id\":\"o-1\",\"target_id\":\"b-1\",\"properties\":{\"lbl\":\"q\"},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{\"lbl\":\"x\"},\"rev\":1}"
+        ]
+      },
+      "error": null,
+      "digest": "cc1f156244580026",
+      "fingerprint": "8350c9d6d81c6107"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 17,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 1
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_own-2\",\"type_name\":\"Owns\",\"source_id\":\"p-2\",\"target_id\":\"x-1\",\"properties\":{},\"id\":\"own-2\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_own-2",
+            "own-2"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "own-2"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "own-2",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"own-2\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"own-2\",\"type_name\":\"Owns\",\"source_id\":\"p-2\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "9c3a410b77acfdea",
+      "fingerprint": "311a67f0d5d681b4"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 18,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Element x-1 has 2 containment parents (must have at most one)",
+            "target_ids": [
+              "x-1"
+            ],
+            "category": "structural",
+            "check": "containment",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 2
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"own-2\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "own-2"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "own-2",
+            "{\"id\":\"own-2\",\"type_name\":\"Owns\",\"source_id\":\"p-2\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"own-2\",\"type_name\":\"Owns\",\"source_id\":\"p-2\",\"target_id\":\"x-1\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "cc1f156244580026",
+      "fingerprint": "8350c9d6d81c6107",
+      "state": [
+        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":18}",
+        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}",
+        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}",
+        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+        "{\"id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+        "{\"id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"rev\":1}",
+        "{\"id\":\"g-1\",\"type_name\":\"Gad\",\"properties\":{\"x\":1},\"rev\":1}",
+        "{\"id\":\"nope\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"nope\",\"req\":\"z\"},\"rev\":2}",
+        "{\"id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+        "{\"id\":\"n-1\",\"type_name\":\"Needs\",\"source_id\":\"car-1\",\"target_id\":\"wheel-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{\"lbl\":\"x\"},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\",\"nope\"]],[\"Car\",[\"car-1\"]],[\"Gad\",[\"g-1\"]],[\"Other\",[\"o-1\",\"o-2\",\"p-1\",\"p-2\",\"x-1\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\",\"l-3\"]],[\"car-1\",[\"n-1\"]],[\"p-1\",[\"own-1\"]]],\"in\":[[\"o-1\",[\"l-1\"]],[\"o-2\",[\"l-3\"]],[\"wheel-1\",[\"n-1\"]],[\"x-1\",[\"own-1\"]]],\"out_count\":[[\"b-1\",\"Link\",2],[\"car-1\",\"Needs\",1],[\"p-1\",\"Owns\",1]],\"in_count\":[[\"o-1\",\"Link\",1],[\"o-2\",\"Link\",1],[\"wheel-1\",\"Needs\",1],[\"x-1\",\"Owns\",1]],\"parents\":[[\"x-1\",[\"p-1\"],[\"own-1\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"g-1\"],[\"nope\"],[\"o-1\"],[\"o-2\"],[\"p-1\"],[\"p-2\"],[\"wheel-1\"],[\"x-1\"]],\"duplicates\":[],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1b\",\"car-1\"],[\"g-1\",\"g-1\"],[\"nope\",\"nope\"],[\"o1\",\"o-1\"],[\"o2\",\"o-2\"],[\"p1\",\"p-1\"],[\"p2\",\"p-2\"],[\"wheel1\",\"wheel-1\"]]}"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 19,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 1
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_own-a\",\"type_name\":\"Owns\",\"source_id\":\"o-1\",\"target_id\":\"o-2\",\"properties\":{},\"id\":\"own-a\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_own-b\",\"type_name\":\"Owns\",\"source_id\":\"o-2\",\"target_id\":\"o-1\",\"properties\":{},\"id\":\"own-b\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_own-a",
+            "own-a"
+          ],
+          [
+            "tmp_own-b",
+            "own-b"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "own-a",
+          "own-b"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "own-a",
+            null
+          ],
+          [
+            "own-b",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"own-b\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"own-a\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"own-a\",\"type_name\":\"Owns\",\"source_id\":\"o-1\",\"target_id\":\"o-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"own-b\",\"type_name\":\"Owns\",\"source_id\":\"o-2\",\"target_id\":\"o-1\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "d7da6b972c7f6b4a",
+      "fingerprint": "fe307a5bd0413110"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 20,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Containment cycle detected involving element o-1",
+            "target_ids": [
+              "o-1"
+            ],
+            "category": "structural",
+            "check": "containment",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Containment cycle detected involving element o-2",
+            "target_ids": [
+              "o-2"
+            ],
+            "category": "structural",
+            "check": "containment",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 3
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"own-b\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "own-b"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "own-b",
+            "{\"id\":\"own-b\",\"type_name\":\"Owns\",\"source_id\":\"o-2\",\"target_id\":\"o-1\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"own-b\",\"type_name\":\"Owns\",\"source_id\":\"o-2\",\"target_id\":\"o-1\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "49bd96439b60f893",
+      "fingerprint": "83729cd478547961"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 21,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 1
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"id\":\"d-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"id\":\"d-2\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_d-1",
+            "d-1"
+          ],
+          [
+            "tmp_d-2",
+            "d-2"
+          ]
+        ],
+        "changed_element_ids": [
+          "d-1",
+          "d-2"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "d-1",
+            null
+          ],
+          [
+            "d-2",
+            null
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"d-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"d-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"d-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}",
+          "{\"id\":\"d-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "594ff63a25df6250",
+      "fingerprint": "6a626898194549f8"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 22,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Duplicate Other element d-2: matches d-1 (no key — all properties match)",
+            "target_ids": [
+              "d-2",
+              "d-1"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 2
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"id\":\"d-3\"}",
+        "{\"kind\":\"delete_element\",\"id\":\"d-1\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_d-3",
+            "d-3"
+          ]
+        ],
+        "changed_element_ids": [
+          "d-3"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "d-1"
+        ],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "d-3",
+            null
+          ],
+          [
+            "d-1",
+            "{\"id\":\"d-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"d-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"id\":null}",
+          "{\"kind\":\"delete_element\",\"id\":\"d-3\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"d-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "f816580bf7aea732",
+      "fingerprint": "a51c9f008b9bc3ba"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 23,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          },
+          {
+            "severity": "error",
+            "message": "Duplicate Other element d-3: matches d-2 (no key — all properties match)",
+            "target_ids": [
+              "d-3",
+              "d-2"
+            ],
+            "category": "conformance",
+            "check": "uniqueness",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 2
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"d-3\",\"properties_patch\":{\"name\":\"e\"}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "d-3"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "d-3",
+            "{\"id\":\"d-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"d-3\",\"properties_patch\":{\"name\":\"d\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"d-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"e\"},\"rev\":2}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "c9fa2d7d5ec22a80",
+      "fingerprint": "683bee397f37bf32",
+      "state": [
+        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":18}",
+        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}",
+        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}",
+        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+        "{\"id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+        "{\"id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"rev\":1}",
+        "{\"id\":\"g-1\",\"type_name\":\"Gad\",\"properties\":{\"x\":1},\"rev\":1}",
+        "{\"id\":\"nope\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"nope\",\"req\":\"z\"},\"rev\":2}",
+        "{\"id\":\"d-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}",
+        "{\"id\":\"d-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"e\"},\"rev\":2}",
+        "{\"id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+        "{\"id\":\"n-1\",\"type_name\":\"Needs\",\"source_id\":\"car-1\",\"target_id\":\"wheel-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{\"lbl\":\"x\"},\"rev\":1}",
+        "{\"id\":\"own-a\",\"type_name\":\"Owns\",\"source_id\":\"o-1\",\"target_id\":\"o-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\",\"nope\"]],[\"Car\",[\"car-1\"]],[\"Gad\",[\"g-1\"]],[\"Other\",[\"d-2\",\"d-3\",\"o-1\",\"o-2\",\"p-1\",\"p-2\",\"x-1\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\",\"l-3\"]],[\"car-1\",[\"n-1\"]],[\"o-1\",[\"own-a\"]],[\"p-1\",[\"own-1\"]]],\"in\":[[\"o-1\",[\"l-1\"]],[\"o-2\",[\"l-3\",\"own-a\"]],[\"wheel-1\",[\"n-1\"]],[\"x-1\",[\"own-1\"]]],\"out_count\":[[\"b-1\",\"Link\",2],[\"car-1\",\"Needs\",1],[\"o-1\",\"Owns\",1],[\"p-1\",\"Owns\",1]],\"in_count\":[[\"o-1\",\"Link\",1],[\"o-2\",\"Link\",1],[\"o-2\",\"Owns\",1],[\"wheel-1\",\"Needs\",1],[\"x-1\",\"Owns\",1]],\"parents\":[[\"o-2\",[\"o-1\"],[\"own-a\"]],[\"x-1\",[\"p-1\"],[\"own-1\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"d-2\"],[\"d-3\"],[\"g-1\"],[\"nope\"],[\"o-1\"],[\"o-2\"],[\"p-1\"],[\"p-2\"],[\"wheel-1\"],[\"x-1\"]],\"duplicates\":[],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1b\",\"car-1\"],[\"d\",\"d-2\"],[\"e\",\"d-3\"],[\"g-1\",\"g-1\"],[\"nope\",\"nope\"],[\"o1\",\"o-1\"],[\"p1\",\"p-1\"],[\"p2\",\"p-2\"],[\"wheel1\",\"wheel-1\"]]}"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 24,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 1
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":7}}",
+        "{\"kind\":\"update_element\",\"id\":\"ghost\",\"properties_patch\":{\"n\":1}}"
+      ],
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "No element with id 'ghost"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 24,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "g-1 is an instance of unknown type 'Gad'",
+            "target_ids": [
+              "g-1"
+            ],
+            "category": "conformance",
+            "check": "type_conformance",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 1
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"g-1\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "g-1"
+        ],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "g-1",
+            "{\"id\":\"g-1\",\"type_name\":\"Gad\",\"properties\":{\"x\":1},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"g-1\",\"type_name\":\"Gad\",\"properties\":{\"x\":1},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "444b7192e007e4b3",
+      "fingerprint": "38def220dd693349"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 25,
+        "issues": [],
+        "counts": {},
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":8}}",
+        "{\"kind\":\"delete_element\",\"id\":\"p-1\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "b-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "p-1",
+          "x-1"
+        ],
+        "deleted_relationship_ids": [
+          "own-1"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "b-1",
+            "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":2,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":18}"
+          ],
+          [
+            "p-1",
+            "{\"id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"rev\":1}"
+          ],
+          [
+            "x-1",
+            "{\"id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "own-1",
+            "{\"id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"p-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p1\"},\"id\":null}",
+          "{\"kind\":\"create_element\",\"temp_id\":\"x-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"x1\"},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"own-1\",\"type_name\":\"Owns\",\"source_id\":\"p-1\",\"target_id\":\"x-1\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"update_element\",\"id\":\"b-1\",\"properties_patch\":{\"n\":2}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":8,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":19}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "7cc129c7b0424765",
+      "fingerprint": "5dba1a01345c87f0",
+      "state": [
+        "{\"id\":\"b-1\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b1\",\"n\":8,\"code\":\"AB\",\"c\":\"red\",\"req\":\"x\"},\"rev\":19}",
+        "{\"id\":\"b-2\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"b2\",\"n\":4,\"req\":\"y\"},\"rev\":4}",
+        "{\"id\":\"o-1\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o1\"},\"rev\":1}",
+        "{\"id\":\"o-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"o2\"},\"rev\":1}",
+        "{\"id\":\"car-1\",\"type_name\":\"Car\",\"properties\":{\"name\":\"car1b\"},\"rev\":2}",
+        "{\"id\":\"wheel-1\",\"type_name\":\"Wheel\",\"properties\":{\"name\":\"wheel1\"},\"rev\":1}",
+        "{\"id\":\"p-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+        "{\"id\":\"nope\",\"type_name\":\"Blk\",\"properties\":{\"name\":\"nope\",\"req\":\"z\"},\"rev\":2}",
+        "{\"id\":\"d-2\",\"type_name\":\"Other\",\"properties\":{\"name\":\"d\"},\"rev\":1}",
+        "{\"id\":\"d-3\",\"type_name\":\"Other\",\"properties\":{\"name\":\"e\"},\"rev\":2}",
+        "{\"id\":\"l-1\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-1\",\"properties\":{\"lbl\":\"a\"},\"rev\":1}",
+        "{\"id\":\"n-1\",\"type_name\":\"Needs\",\"source_id\":\"car-1\",\"target_id\":\"wheel-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"l-3\",\"type_name\":\"Link\",\"source_id\":\"b-1\",\"target_id\":\"o-2\",\"properties\":{\"lbl\":\"x\"},\"rev\":1}",
+        "{\"id\":\"own-a\",\"type_name\":\"Owns\",\"source_id\":\"o-1\",\"target_id\":\"o-2\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Blk\",[\"b-1\",\"b-2\",\"nope\"]],[\"Car\",[\"car-1\"]],[\"Other\",[\"d-2\",\"d-3\",\"o-1\",\"o-2\",\"p-2\"]],[\"Wheel\",[\"wheel-1\"]]],\"out\":[[\"b-1\",[\"l-1\",\"l-3\"]],[\"car-1\",[\"n-1\"]],[\"o-1\",[\"own-a\"]]],\"in\":[[\"o-1\",[\"l-1\"]],[\"o-2\",[\"l-3\",\"own-a\"]],[\"wheel-1\",[\"n-1\"]]],\"out_count\":[[\"b-1\",\"Link\",2],[\"car-1\",\"Needs\",1],[\"o-1\",\"Owns\",1]],\"in_count\":[[\"o-1\",\"Link\",1],[\"o-2\",\"Link\",1],[\"o-2\",\"Owns\",1],[\"wheel-1\",\"Needs\",1]],\"parents\":[[\"o-2\",[\"o-1\"],[\"own-a\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"b-1\"],[\"b-2\"],[\"car-1\"],[\"d-2\"],[\"d-3\"],[\"nope\"],[\"o-1\"],[\"o-2\"],[\"p-2\"],[\"wheel-1\"]],\"duplicates\":[],\"roots\":[[\"b1\",\"b-1\"],[\"b2\",\"b-2\"],[\"car1b\",\"car-1\"],[\"d\",\"d-2\"],[\"e\",\"d-3\"],[\"nope\",\"nope\"],[\"o1\",\"o-1\"],[\"p2\",\"p-2\"],[\"wheel1\",\"wheel-1\"]]}"
+    },
+    {
+      "do": "issues",
+      "result": {
+        "model_rev": 26,
+        "issues": [
+          {
+            "severity": "error",
+            "message": "n: 8 above max 5.0",
+            "target_ids": [
+              "b-1"
+            ],
+            "category": "conformance",
+            "check": "facets",
+            "origin": "on_server"
+          }
+        ],
+        "counts": {
+          "error": 1
+        },
+        "truncated": false,
+        "rules_status": {
+          "total": 0,
+          "skipped": [],
+          "eval_errors": {}
+        }
+      },
+      "error": null,
+      "unchanged": true
+    }
+  ]
+}

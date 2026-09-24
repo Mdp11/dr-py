@@ -9,9 +9,13 @@ function on the recorder's model and records the response body; ``view`` and
 artifacts it may fetch. ``navigate`` and ``has_script`` run the navigation
 core itself on a definition whose refs resolve against those artifacts.
 ``validate`` runs the six built-in validators over a scope of ids and records
-the issues as the server's routes send them. ``insert_element`` and
-``insert_relationship`` put an entity in as committed state arrives, its type
-unchecked. After every step the recorder
+the issues as the server's routes send them. ``seed`` gives the recorder a
+session over its model, its issue store filled by the server's own sweep; from
+then on every landed batch bumps ``model_rev`` and is finalized as
+``POST /model/ops`` finalizes it, and ``issues`` records ``GET /model/issues``.
+A batch with ``record_dirty`` adds its dirty ids to its result.
+``insert_element`` and ``insert_relationship`` put an entity in as committed
+state arrives, its type unchecked. After every step the recorder
 adds the outcome (``result`` or ``error``) and what the step left behind: the
 state digest and a fingerprint of the entity lines plus the index dump. Every
 ``full_every``-th step, and the last, carries the lines and the dump
@@ -44,7 +48,8 @@ from data_rover.api.deps import Session
 from data_rover.api.routes import artifacts as artifact_routes
 from data_rover.api.routes import read
 from data_rover.api.routes.elements import get_element
-from data_rover.api.routes.ops import _apply_batch, _BatchResult
+from data_rover.api.routes.ops import _apply_batch, _BatchResult, _finalize
+from data_rover.api.routes.validation import list_issues
 from data_rover.api.schemas import (
     ElementOut,
     EvaluateNavigationIn,
@@ -56,6 +61,7 @@ from data_rover.api.search import SearchQueryIn
 from data_rover.api.serialize import iter_entity_lines
 from data_rover.api.settings import Settings
 from data_rover.api.state_digest import model_digest
+from data_rover.api.validation_sweep import start_validation_sweep
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
@@ -65,6 +71,7 @@ from data_rover.core.navigation.resolve import navigation_has_script, resolve_re
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
 from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
 from data_rover.core.validation.scope import Scope
+from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
 from .index_dump import dump_indexes
@@ -324,6 +331,7 @@ class Recorder:
         self._landed: dict[int, _BatchResult] = {}
         self._views: dict[str, View] = {}
         self._artifacts: Artifacts = {}
+        self._session: Session | None = None
 
     def _entity(self, step: dict[str, Any]) -> Element | Relationship:
         detached = step.get("detached")
@@ -339,7 +347,9 @@ class Recorder:
             raise AssertionError(f"scenario names an unknown entity {step['id']!r}")
         return entity
 
-    def _batch(self, ops: list[ModelOpIn], *, restore: bool) -> dict[str, Any]:
+    def _batch(
+        self, ops: list[ModelOpIn], *, restore: bool, record_dirty: bool
+    ) -> dict[str, Any]:
         drawn = self._ids.drawn
         try:
             res = _apply_batch(self.model, ops, restore=restore)
@@ -347,16 +357,54 @@ class Recorder:
             self._ids.drawn = drawn
             raise
         self._landed[len(self._steps)] = res
-        return _outcome(self.model, res)
+        outcome = _outcome(self.model, res)
+        if record_dirty:
+            outcome["dirty"] = list(res.dirty.ids)
+        session = self._session
+        if session is not None:
+            # an empty batch is answered before anything lands, rev unmoved
+            assert ops, "a seeded recorder takes no empty batch"
+            assert session.validation is not None
+            prev_rev = session.model_rev
+            session.model_rev += 1
+            _finalize(
+                session,
+                session.validation,
+                self.model,
+                res,
+                prev_rev=prev_rev,
+                state_digest=session.advance_state_digest(res),
+            )
+        return outcome
 
     def _apply(self, step: dict[str, Any]) -> Any:
         model = self.model
         match step["do"]:
             case "batch":
                 ops = _MODEL_OPS.validate_python(step["_ops"])
-                return self._batch(ops, restore=bool(step.get("restore", False)))
+                return self._batch(
+                    ops,
+                    restore=bool(step.get("restore", False)),
+                    record_dirty=bool(step.get("record_dirty", False)),
+                )
             case "undo":
-                return self._batch(self._landed[step["of"]].inverse_ops(), restore=True)
+                return self._batch(
+                    self._landed[step["of"]].inverse_ops(),
+                    restore=True,
+                    record_dirty=bool(step.get("record_dirty", False)),
+                )
+            case "seed":
+                assert self._session is None, "a recorder is seeded once"
+                session = Session(
+                    metamodel=self.metamodel, model=model, views=self._views
+                )
+                session.validation = ValidationState()
+                start_validation_sweep(session, sync=True)
+                self._session = session
+                return None
+            case "issues":
+                assert self._session is not None, "issues needs a seeded recorder"
+                return list_issues(session=self._session).model_dump(mode="json")
             case "read":
                 session = Session(
                     metamodel=self.metamodel, model=model, views=self._views
