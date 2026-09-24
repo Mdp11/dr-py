@@ -118,15 +118,19 @@ function same(surface: Surface, a: Outcome, b: Outcome): boolean {
 /**
  * `summary` compares without `issue_counts` and `undo_depth`. `issues`
  * compares its lists as multisets: an issue list, a bare list, and a
- * preview's `structural_blockers` and `issues`.
+ * preview's `structural_blockers` and `issues`. A body `truncated` at the
+ * cap compares without its `issues`: each side keeps its own subset.
  */
 function present(surface: Surface, value: unknown): unknown {
 	if (surface === 'issues') {
 		if (Array.isArray(value)) return byIssueKey(value);
 		if (!isRecord(value)) return value;
-		const lists = Object.entries(value).map(([key, item]) =>
-			ISSUE_LISTS.has(key) && Array.isArray(item) ? [key, byIssueKey(item)] : [key, item]
-		);
+		const truncated = value['truncated'] === true;
+		const lists = Object.entries(value)
+			.filter(([key]) => !(truncated && key === 'issues'))
+			.map(([key, item]) =>
+				ISSUE_LISTS.has(key) && Array.isArray(item) ? [key, byIssueKey(item)] : [key, item]
+			);
 		return Object.fromEntries(lists);
 	}
 	if (surface !== 'summary' || !isRecord(value)) return value;

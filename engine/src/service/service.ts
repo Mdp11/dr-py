@@ -309,7 +309,8 @@ const METHODS: { readonly [method: string]: Method } = {
 	}),
 
 	setArtifacts: now((service, params) => {
-		service.artifacts.setCommitted(readArtifacts(params['artifacts']));
+		const artifacts = readArtifacts(params['artifacts']);
+		service.moveArtifacts(() => service.artifacts.setCommitted(artifacts));
 		return null;
 	}),
 	putArtifacts: now((service, params) => {
@@ -318,12 +319,15 @@ const METHODS: { readonly [method: string]: Method } = {
 		const staged = params['staged'];
 		const entries =
 			staged === undefined || staged === null ? null : readStagedArtifacts(staged, 'staged');
-		service.artifacts.put(changed, deletedIds);
-		if (entries !== null) service.artifacts.setStaged(entries);
+		service.moveArtifacts(() => {
+			service.artifacts.put(changed, deletedIds);
+			if (entries !== null) service.artifacts.setStaged(entries);
+		});
 		return null;
 	}),
 	setStagedArtifacts: now((service, params) => {
-		service.artifacts.setStaged(readStagedArtifacts(params['entries']));
+		const entries = readStagedArtifacts(params['entries']);
+		service.moveArtifacts(() => service.artifacts.setStaged(entries));
 		return null;
 	}),
 
@@ -520,6 +524,11 @@ class Service {
 		try {
 			issues.probed = live.origins();
 		} catch (caught) {
+			// A replay that could not even put the batches back left the model below them.
+			if (live.wc.diverged) {
+				this.diverge(live.wc);
+				throw new Refused(409, NOT_READY);
+			}
 			if (probing) this.scheduler.restartBackground();
 			if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
 			throw caught;
@@ -613,6 +622,19 @@ class Service {
 			issues.seen = issues.live.version;
 		}
 		return this.issuesVersion;
+	}
+
+	/**
+	 * Runs `put` over the artifacts. Whether a validation rules artifact
+	 * resolves decides whether the store is read at all, so a flip moves
+	 * `issues_version` and a ready replica posts a bare `changed`.
+	 */
+	moveArtifacts(put: () => void): void {
+		const rules = this.artifacts.resolvesKind('validation_rules');
+		put();
+		if (this.artifacts.resolvesKind('validation_rules') === rules) return;
+		this.issuesVersion += 1;
+		this.flushIssues();
 	}
 
 	/** At a slice's end: a bare `changed` when the store moved since the last one posted. */

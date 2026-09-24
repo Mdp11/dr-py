@@ -322,4 +322,48 @@ describe('what the engine refuses', () => {
 			detail: 'reaches validation rules'
 		});
 	});
+
+	it('posts a bare changed with a moved issues_version whenever the rules start or stop resolving', async () => {
+		const client = await swept();
+		const rules = {
+			id: 'r-1',
+			kind: 'validation_rules',
+			name: 'Rules',
+			artifact_rev: 1,
+			payload: { text: '' }
+		};
+		const other = { id: 'q-1', kind: 'query', name: 'Q', artifact_rev: 1, payload: {} };
+		const seen: number[] = [issuesVersion(client)];
+		/** Runs `method`, and the bare `changed` events it posted. */
+		const bare = async (method: string, params: object) => {
+			const from = client.events.length;
+			await client.call(method, params);
+			const posted = client.events.slice(from).filter(isBare);
+			for (const event of posted) seen.push(event['issues_version'] as number);
+			return posted;
+		};
+		// Nothing flips: no rules before, none after.
+		expect(await bare('setArtifacts', { artifacts: [other] })).toEqual([]);
+		expect(await bare('putArtifacts', { changed: [rules], deleted_ids: [] })).toHaveLength(1);
+		expect(await bare('putArtifacts', { changed: [other], deleted_ids: [] })).toEqual([]);
+		expect(
+			await bare('setStagedArtifacts', { entries: [{ op: 'delete', id: 'r-1' }] })
+		).toHaveLength(1);
+		expect(
+			await bare('setStagedArtifacts', { entries: [{ op: 'delete', id: 'q-1' }] })
+		).toHaveLength(1);
+		expect(await bare('setArtifacts', { artifacts: [other] })).toHaveLength(1);
+		expect(
+			await bare('putArtifacts', {
+				changed: [],
+				deleted_ids: [],
+				staged: [{ op: 'create', id: 'tmp_r', kind: 'validation_rules', name: 'R', payload: {} }]
+			})
+		).toHaveLength(1);
+		expect(await bare('setArtifacts', { artifacts: [] })).toEqual([]);
+		expect(await bare('setStagedArtifacts', { entries: [] })).toHaveLength(1);
+		expect(seen).toEqual([...new Set(seen)].sort((a, b) => a - b));
+		expect(seen).toHaveLength(7);
+		expect((await client.call<IssueListBody>('getModelIssues')).counts).toEqual({ error: 3 });
+	});
 });

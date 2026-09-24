@@ -371,7 +371,7 @@ describe('NewProjectWizard', () => {
 	});
 
 	// The other two `beginJourney('open', ...)` callers (the picker, boot())
-	// pass the same `{replica: anyEngineSurface(readSurfaces())}`; the create
+	// pass the same `{replica: anyEngineSurface(readSwitches())}`; the create
 	// flow's own call must too, or a create journey never reads
 	// REPLICA_SLICES.create no matter what `dr.surfaces` says. Every surface
 	// defaults to `engine` (`SURFACE_DEFAULTS`), so no override is needed to

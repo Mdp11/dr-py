@@ -620,7 +620,24 @@ now, in the grid too); a mousedown on the dropdown's scrollbar blurred the input
 and closed it (`preventDefault`). Not in scope, still open: P-2 (per-column
 search).
 
-### U-9 · Commit panel content overflows its bounds · `done` (2026-08-26, fix/ux-minor-batch) · *2026-08-18*
+### U-9 · Commit panel content overflows its bounds · `open` (reopened 2026-09-24; the 2026-08-26 fix covered the rows, not the dialog's grid) · *2026-08-18*
+**Reopened, diagnosed (2026-09-24, feat/eval-validation).** A staged value that is one long
+unbroken string still pushes the commit dialog's footer, and its Commit button, past the
+viewport. `Dialog.Content` (`components/ui/dialog/dialog-content.svelte:39`) is
+`display: grid` with `overflow: visible` and no `min-width: 0` on its items. A browser sizes a
+grid track from its items' min-content contribution without applying `overflow-wrap:
+break-word`, so the 201-character `x…x` rename that `e2e/eval-issues.spec.ts` stages — shown
+twice in the "Modified" list, as the entry's name and as the diff line's value — widens the
+track to about 1,430 px against the content box's own 384 px, and every grid item, the
+footer included, renders at that width (measured with `getBoundingClientRect` in Chromium at
+a 1440 px viewport: footer row `x 549, w 1432`, content box `w 384`; static across runs, not a
+re-render loop). It does not depend on the issues or on which side answers them: any long
+unbroken value in the diff reproduces it. The spec works around it by focusing the button and
+pressing Enter. Fix direction: `min-w-0` on the dialog's grid items (or
+`grid-cols-[minmax(0,1fr)]` on `Dialog.Content`), then drop the spec's workaround for a plain
+click.
+
+The earlier fix:
 Cause confirmed as diagnosed: flex children with no `min-w-0` and unbroken strings (ids, names
 without spaces). `DiffRow` label/id/endpoint/value spans and the drawer's artifact rows, view
 entries and error alerts now carry `min-w-0` + `break-words`/`break-all`; the dialog keeps its
@@ -1191,7 +1208,17 @@ passed in (both blobs 5.83 MiB). The decode is paid once per cold hydration, the
 path. The owner accepted the cost when every writer moved to v2: watch it, do not fix it
 without a missed budget.
 
-The client-engine program's issues (`K-29` → `K-48`) are in `BACKLOG-ENGINE.md`.
+### K-64 · The migration CLI's float coercion raises on a dict or a nested list · `open` · *2026-09-24*
+`src/data_rover/migration/legacy.py:332` (`_coerce_scalar`) tests `value in FLOAT_INFINITIES`
+before it knows `value` is a string, so a legacy model whose `float` property holds a dict or
+a list inside a list raises `TypeError: unhashable type` and aborts the migration instead of
+passing the value through for validation to report. The same unguarded test in
+`core/validation`'s `value_conforms` was fixed on both sides in the eval-validation branch
+(`isinstance(value, str) and value in FLOAT_INFINITIES`). Fix: the same guard, with a
+migration test holding a dict and a nested list on a float property.
+
+The client-engine program's issues (`K-29` → `K-63`, but for `K-33` and `K-34` above) are in
+`BACKLOG-ENGINE.md`.
 
 ---
 
@@ -1307,6 +1334,28 @@ dialog.
 (`Sidebar/Search.svelte`) renders its hits as `role="option"` in a listbox, so the rename is
 there but the locator never matches. It fails the same way before and after the
 eval-navigation branch. Match the option instead.
+
+### T-10 · The live issue store's failure and race paths are untested · `open` · *2026-09-24*
+Paths of the engine's live issues (AD-32) that no test drives, found in the eval-validation
+reviews:
+- **Probe failures.** A replay that is refused (`WorkingCopy.probeStaged`, the batches put
+  back) and one whose put-back is refused too (the working copy diverged, and the service
+  diverges the replica) have no honest trigger: a staged batch replays over an exact rewind,
+  deterministically. Only a fault injected into the applier reaches them. `probeStaged`'s
+  `finally` replay failure also hides an `onCommitted` throw.
+- **A pending `validateModel`.** Only a `close` while it waits is tested
+  (`engine/test/service/issues.test.ts`); a divergence, a new `open`, a second
+  `validateModel` and a `{cancel}` while it waits are not.
+- **A `getModelIssues` queued across a divergence** and answered by the re-bootstrapped
+  replica before its sweep is covered only by a fake-seam unit test: removing
+  `recheck: true` (`lib/api/validation.ts`) fails no integration test.
+- **The split commit preview.** `checkout.test.ts`'s merge tests pin neither `would_block`'s
+  OR of the two halves nor the engine-first order of `structural_blockers` in both
+  directions.
+- **e2e Discard.** `e2e/eval-issues.spec.ts` discards through the sidebar's per-entity
+  `staged-revert`, not the commit dialog's Discard button.
+- `probe.test.ts`'s coalesce case asserts that `stagedVersion` moved, not that the edit
+  coalesced.
 
 ---
 

@@ -24,11 +24,18 @@ engine; a bug found in any of them still lands on both sides with a fixture unti
 regardless. `core/table/resolve.py` (ref resolution and script reach) is frozen from C's
 first plan on. `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's
 conformance half (`routes/commits.py::preview_commit`'s model half,
-`api/rules.py::attributable_issues`) stay frozen for behaviour past C's second plan flipping
-`issues` to the engine, and left it for FEATURES with that flip. Two bugs landed on both sides
-under it: `value_conforms`'s float branch, which raised `TypeError` on an unhashable value and
-now answers `False`, and the dirty hooks, which missed a key relationship's endpoints'
-uniqueness groups on connect, disconnect and cascade delete until 6b3cdb6.
+`api/rules.py::attributable_issues`) are frozen for behaviour from C's plan 2 on and stay so
+past its flip of `issues` to the engine: until F a feature there lands on both sides with a
+fixture step, as a bug does, since the server pipeline still decides strict commits
+(`attributable_issues`) and `validation_error_count`, and answers every fallback: a rules
+project, an unsupported pattern, `staging: legacy` and the window before the replica's first
+sweep. Two bugs landed on both sides under it: `value_conforms`'s float branch, which raised
+`TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed a
+key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete until
+6b3cdb6. The second widens strict mode's `base_dirty`: connecting, disconnecting or cascading
+away a relationship named in a key now makes the keyed ends' old and new group members
+attributable, so a strict commit that used to land can get a 422, as a key-property edit already
+could.
 
 ---
 
@@ -59,7 +66,7 @@ C's plan 2 adds one live issue store over the working copy (AD-32) — a resumab
 sweep, incremental revalidation inside every transition, origins by a rewind probe — and
 serves `getModelIssues`, `validateModel` and the model half of `previewCommit` from it, behind
 the `issues` surface, which now defaults to the engine too, gated on the replica's first sweep
-completing; a call that also reaches validation rules is refused with 501 and answered by the
+completing and the artifact follower's first load; a call that also reaches validation rules is refused with 501 and answered by the
 server (plan 3 deletes this refusal once rules are ported).
 The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op applier from
 the start of A's second plan; `routes/read.py`'s route functions and
@@ -73,16 +80,23 @@ every committed navigation payload against them; `core/table/resolve.py` (ref re
 script reach) is frozen from C's first plan on too. `core/validation` minus `rules/`,
 `api/validation_sweep.py` and the preview's conformance half
 (`routes/commits.py::preview_commit`'s model half, `api/rules.py::attributable_issues`) are
-frozen for behaviour from C's plan 2 on, and left it for FEATURES with C's plan 2's flip of
-`issues` to the engine. A bug fixed during a port, or found in any of these areas afterward,
-lands on both sides with a fixture until F (MR-1), whether or not the feature freeze has
-lifted for that area. Two landed by C's plan 2: `value_conforms`'s float branch, which raised
-`TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed
-a key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete
-until 6b3cdb6.
+frozen for behaviour from C's plan 2 on and stay so past its flip of `issues` to the engine:
+until F a feature there lands on both sides with a fixture step, since the server pipeline still
+decides strict commits (`attributable_issues`) and `validation_error_count`, and answers every
+fallback: a rules project, an unsupported pattern, `staging: legacy` and the window before the
+replica's first sweep. A bug fixed during a port, or found in any of these areas afterward,
+lands on both sides with a fixture until F (MR-1), whether or not the feature freeze has lifted
+for that area. Two landed by C's plan 2: `value_conforms`'s float branch, which raised
+`TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed a
+key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete until
+6b3cdb6. The second widens strict mode's `base_dirty`: connecting, disconnecting or cascading
+away a relationship named in a key now makes the keyed ends' old and new group members
+attributable, so a strict commit that used to land can get a 422, as a key-property edit already
+could.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
-`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `C-21`, `C-22`,
-`C-23` in this file; `K-33`, `K-34` in `BACKLOG.md`.
+`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-59`, `K-60`,
+`K-61`, `K-62`, `K-63`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
+`BACKLOG.md`.
 Size: very large.
 
 ---
@@ -382,7 +396,57 @@ had before 6b3cdb6 fixed them for staged ops), so any caller that appeared would
 issue store holding a duplicate that is gone, or missing one that appeared, after a CR built
 through it applies. Fix direction: fix it — mirror 6b3cdb6's hooks, adding the keyed other
 ends' old and new groups for every added, modified or deleted relationship of a keyed type —
-or delete it with its two tests.
+or delete it with its two tests. Either way, `dirty.py:41-44`'s module docstring, which still
+calls it the CR-apply path, goes with it.
+
+### K-59 · The sweep's first step, and a browser slice while sweeping, exceed their budgets · `open` · perf · *2026-09-24*
+`LiveIssues.sweepSteps()`'s first step lists every element id then every relationship id in
+one unit: 13 ms at M (`pixi run engine-bench`, 15 ms on the first pass) against the
+scheduler's 8 ms slice target, and up to 8 ms of other units can precede it in the same slice.
+In the browser (`pixi run engine-bench-browser`) the longest slice while sweeping is 21 ms
+(21, 23, 21), past CN-3's 16 ms chunk; the bench's two ping loops overlap
+(`frontend/bench/main.ts:521-532`), so that row may also count digest-check slices. Every
+other sweep step is 5.8 ms at most once warm (11 ms on the first pass). The whole sweep, ready
+to seeded, is 767 ms in the browser. Fix direction: list the ids in steps too (an
+`ord`-ordered walk that resumes), then separate the bench's two ping loops before reading the
+row again. Not optimized yet: the owner's rule is to report before optimizing.
+
+### K-60 · `uniqGroupOf` re-keys every member of a duplicate group per call · `open` · perf · *2026-09-24*
+`model/indexes.ts:92-97` derives `uniqKey` (a `pyKey` serialization) for every member of the
+bucket on each call, so a scoped run that reaches a large duplicate group pays O(group)
+serializations once per run: a 20,000-member group costs about 27 ms per sweep step, and a
+stage, unstage or probe that touches one of its members pays the same inside its transition.
+The Python core (`core/validation`'s uniqueness over `model.indexes`) has the same shape, so
+the server pays it too. Fix direction: cache the key per member (or the group per bucket)
+across calls, invalidated at the mutation boundary; on both sides, with a fixture step, while
+the freeze holds.
+
+### K-61 · Every issue refetch with a large staged set runs a probe · `open` · perf · *2026-09-24*
+`getModelIssues` and `previewCommit` read `origins()`, which probes (rewinds and replays every
+staged batch) once per `(rev, stagedVersion)`. Each staged edit moves `stagedVersion` and
+then `issues_version`, so each 300 ms refetch probes again: about 27 ms per 100 staged batches
+at M, inside a model-lane transition that holds reads behind it. Fine at today's staged sizes;
+a user holding thousands of batches pays it on every keystroke's refetch. Fix direction: a
+probe incremental in the batches that moved (the top ones, for an edit that coalesces or
+stages on top), or a refetch that skips the probe when only the list, not the origins, is
+read.
+
+### K-62 · A server issue list fetched with the gate closed can land after the engine's · `open` · *2026-09-24*
+`refetchIssues()` issued while the `issues` gate was closed goes to `GET /model/issues`; when
+the gate opens meanwhile, the refetch it schedules is answered by the engine, and a slower
+server answer can land after it. `adoptIssues` accepts an equal `model_rev` (the server's own
+sweep grows its store without moving the rev), so the server's committed list overwrites the
+engine's — a staged edit's `uncommitted` issues vanish — until the next `issues_version` move
+refetches. Fix direction: a refetch sequence number in `model-shared.svelte.ts`, adopting only
+the answer of the latest refetch asked.
+
+### K-63 · Past the 5,000-issue cap a staged edit's own issues can fall off the list · `open` · *2026-09-24*
+`issueListBody` truncates at `ISSUES_RESPONSE_MAX` (5,000) in store order, and every
+transition re-files its dirty owners last, so on a store past the cap the staged edit just
+made lists its issues past the cut: `counts` has them, the panel does not. The server
+truncates its own store's order, a different subset, which is why the dev shadow skips a
+`truncated` list's `issues`. Fix direction: when truncating, list the probe's `S` owners (the
+staged edits' dirty set) first, then the rest in store order.
 
 ---
 

@@ -10,6 +10,8 @@ export type ArtifactFollowerDeps = {
 	staged(): WireStagedArtifact[];
 	/** Waited out before a failed load's one retry; absent, the retry goes at once. */
 	pause?(): Promise<void>;
+	/** Called once, when the first load has landed and `loaded()` turned true. */
+	onLoaded?(): void;
 };
 
 /** What a feed event or a commit says of one artifact. */
@@ -205,11 +207,14 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 			}
 			if (stopped) return;
 			sync.setArtifacts(list.map(wire));
+			const first = !loadedOnce;
 			loadedOnce = true;
 			revs = new Map(list.map((artifact) => [artifact.id, artifact.artifact_rev]));
-			if (carried.length === 0) return;
-			carried = [];
-			pushStaged();
+			if (carried.length > 0) {
+				carried = [];
+				pushStaged();
+			}
+			if (first) deps.onLoaded?.();
 		});
 	};
 

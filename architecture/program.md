@@ -124,12 +124,18 @@ fixture, until F (MR-1), whether or not the feature freeze has lifted.
 `core/table/resolve.py` (ref resolution and script reach) is frozen from C's plan 1 on.
 `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's conformance half
 (`routes/commits.py::preview_commit`'s model half, `api/rules.py::attributable_issues`) are
-frozen for behaviour from C's plan 2 on, and left it for FEATURES with that plan's flip of
-`issues` to the engine. Two bugs landed on both sides under this rule during C's plan 2:
-`value_conforms`'s float branch, which raised `TypeError` on an unhashable value and now
-answers `False`, and the dirty hooks, which missed a key relationship's endpoints' uniqueness
-groups on connect, disconnect and cascade delete until 6b3cdb6. Areas not yet being ported
-carry on as normal.
+frozen for behaviour from C's plan 2 on, and are the exception to the rule above: they stay
+frozen past that plan's flip of `issues` to the engine, and until F a feature there lands on
+both sides with a fixture step, as a bug does, since the server pipeline still decides strict
+commits (`attributable_issues`) and `validation_error_count`, and answers every fallback: a
+rules project, an unsupported pattern, `staging: legacy` and the window before the replica's
+first sweep. Two bugs landed on both sides under this rule during C's plan 2: `value_conforms`'s
+float branch, which raised `TypeError` on an unhashable value and now answers `False`, and the
+dirty hooks, which missed a key relationship's endpoints' uniqueness groups on connect,
+disconnect and cascade delete until 6b3cdb6. The second widens strict mode's `base_dirty`:
+connecting, disconnecting or cascading away a relationship named in a key now makes the keyed
+ends' old and new group members attributable, so a strict commit that used to land can get a
+422, as a key-property edit already could. Areas not yet being ported carry on as normal.
 
 **MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
 engine on a small fixture model. The route-level mock tests of its server path stay while

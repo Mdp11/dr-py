@@ -435,6 +435,20 @@ describe('createShadow', () => {
 			expect(await differs([a, a, b], [a, b, b])).toBe(true);
 			expect(await differs([a, a, b], [b, a, a])).toBe(false);
 		});
+
+		it('a truncated list compares without its issues, and only a truncated one', async () => {
+			const list = (issues: unknown[], truncated: boolean, counts = { error: 9000 }) => ({
+				model_rev: 2,
+				issues,
+				counts,
+				truncated,
+				rules_status: null
+			});
+			expect(await differs(list([a, b], true), list([c, a], true))).toBe(false);
+			expect(await differs(list([a, b], true), list([a, b], true, { error: 9001 }))).toBe(true);
+			expect(await differs(list([a, b], true), list([a, b], false))).toBe(true);
+			expect(await differs(list([a, b], false), list([c, a], false))).toBe(true);
+		});
 	});
 
 	describe('a probe compared while staged', () => {

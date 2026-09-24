@@ -448,7 +448,7 @@ describe('LiveIssues', () => {
 		expect(listed(live)).toEqual([]);
 	});
 
-	it('probes once per state:the origins are cached until the rev or the staged batches move', () => {
+	it('probes once per state: the origins are cached until the rev or the staged batches move', () => {
 		const { live } = small();
 		const none = live.origins();
 		expect(none.dirty).toEqual([]);

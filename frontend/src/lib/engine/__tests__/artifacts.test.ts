@@ -84,6 +84,7 @@ function follow(sync: ReplicaSync, pause?: () => Promise<void>) {
 	const gates: Deferred<void>[] = [];
 	const posted: Posted[] = [];
 	let staged: WireStagedArtifact[] = [];
+	const loads = { told: 0 };
 	const follower = createArtifactFollower({
 		sync: {
 			setArtifacts(artifacts) {
@@ -112,11 +113,16 @@ function follow(sync: ReplicaSync, pause?: () => Promise<void>) {
 			return ids === undefined ? all : all.filter((a) => ids.includes(a.id));
 		},
 		staged: () => staged,
+		onLoaded: () => {
+			loads.told += 1;
+		},
 		...(pause === undefined ? {} : { pause })
 	});
 	followers.push(follower);
 	return {
 		follower,
+		/** How many times `onLoaded` was called. */
+		loads,
 		committed,
 		fetches,
 		posted,
@@ -440,7 +446,7 @@ describe('the artifact follower', () => {
 		return { over, f, totals, created };
 	}
 
-	it('loaded holds once a load lands, and not after stop; a new follower starts unloaded', async () => {
+	it('loaded holds once a load lands, and not after stop; a new follower starts unloaded; onLoaded is told once', async () => {
 		const over = await ready();
 		const f = follow(over.sync);
 		expect(f.follower.loaded()).toBe(false);
@@ -449,9 +455,14 @@ describe('the artifact follower', () => {
 		await macrotask();
 		expect(f.follower.loaded()).toBe(false);
 
+		expect(f.loads.told).toBe(0);
 		loading.resolve();
 		await f.follower.settled();
 		expect(f.follower.loaded()).toBe(true);
+		expect(f.loads.told).toBe(1);
+		f.follower.load();
+		await f.follower.settled();
+		expect(f.loads.told).toBe(1);
 
 		f.follower.stop();
 		expect(f.follower.loaded()).toBe(false);
@@ -493,6 +504,7 @@ describe('the artifact follower', () => {
 		expect(f.fetches).toEqual([undefined, undefined]);
 		expect(f.posted).toEqual([]);
 		expect(f.follower.loaded()).toBe(false);
+		expect(f.loads.told).toBe(0);
 	});
 
 	it('a failed refresh reloads once at once', async () => {

@@ -279,24 +279,28 @@ origin (`uncommitted` / `on_server` / `resolved`) is read off a rewind probe: ev
 batch is rewound, replayed once to find the dirty set a server preview of the same ops would
 see, and validated on both the working and the committed state either side of the rewind.
 **Why.** The panel must read a staged edit's issues before any commit, and the tree and the
-commit preview must agree with it — one store, not three answers that can drift. The probe is
-O(staged): it walks the staged batches once, never the whole model, so its cost holds under
-CN-3's transition budget however large the committed model is.
+commit preview must agree with it — one store, not three answers that can drift. The probe
+never walks the whole model: it costs O(staged + the neighbourhoods the staged ops touch,
+uniqueness groups included), so it stays within CN-3's transition budget unless the staged
+set, or a duplicate group it reaches, is itself large.
 **Rejected.** An engine overlay layered on the server's committed issue store: two sources to
 reconcile, and the server's store still lags a staged edit. Validating on demand only, with no
 resident store: every panel read would cost a full scoped run, and the tree's live badges would
 have nothing to poll. A second store that mirrors only committed issues, separate from the
 working one: the exact drift this decision avoids, moved one level down.
-**Consequences.** The sweep holds no iterator, so it resumes across a stage, an unstage, a
-delta and a re-bootstrap; a re-sweep (`validateModel`) revalidates in place and never empties
-the store. Three dirty rules keep it exact: a stage fires the Python hooks the applier already
-runs; a rebase (unstage, `applyDelta`) takes the neighbourhood of every id it may touch, before
-and after, and carries the ends of every relationship it touches on both sides, since it has no
-Python counterpart to mirror exactly; a coalesced edit takes its trial run's hooks plus the
-rebase rule over the batches a merge replays. The `issues` surface is gated on `staging: engine`
-and the replica's first sweep completing; a re-sweep (`validateModel`) does not close the gate
-again — it closes only when the replica leaves `ready` or a new replica starts, and stays open
-across a frozen replica. Before the gate opens, for a project the engine cannot validate (an
+**Consequences.** The sweep holds no iterator, so it resumes across a stage, an unstage and a
+delta; a re-bootstrap builds a new store whose sweep starts over, and the gate closes until it
+ends. A re-sweep (`validateModel`) revalidates in place and never empties the store. Three dirty
+rules keep it exact: a stage fires the Python hooks the applier already runs; a rebase (unstage,
+`applyDelta`) takes the neighbourhood of every id it may touch, before and after, and carries
+the ends of every relationship it touches on both sides, since it has no Python counterpart to
+mirror exactly; a coalesced edit takes its trial run's hooks plus the rebase rule over the
+batches a merge replays. The `issues` surface is gated on `staging: engine`, the replica's first
+sweep completing and the artifact follower's first load (until then the engine cannot know a
+`validation_rules` artifact exists); a re-sweep (`validateModel`) does not close the gate again
+— it closes only when the replica leaves `ready` or a new replica starts, and stays open across
+a frozen replica. Before the gate opens, for a project the engine cannot validate (an
 unsupported facet pattern, a `validation_rules` artifact), or when the engine answers 409
 (`stale staged batches`, `stale base_rev`, `replica is not ready`), the whole request falls back
-to the server, as CT-4's refusals say.
+to the server, as CT-4's refusals say; a `validation_rules` artifact that starts or stops
+resolving moves `issues_version`, so the list is fetched again from the side that now answers.

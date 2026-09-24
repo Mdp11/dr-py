@@ -172,8 +172,10 @@ event     {event, …}                     engine → client, unsolicited
   deleted_relationship_ids, structural}` after every transition of a `ready` replica that
   changed something. `structural` says the element set or a relationship may have moved;
   `staged_version` moves whenever the staged batches do; `issues_version` moves whenever the
-  issue store's content changes or `rev` does (origins can change under it), and the sweep
-  posts it bare — no ids, `structural: false` — at most once per slice.
+  issue store's content changes or `rev` does (origins can change under it), and whenever a
+  `validation_rules` artifact starts or stops resolving among the artifacts the engine holds
+  (the 501 `reaches validation rules` comes or goes). The sweep and an artifact call post it
+  bare — no ids, `structural: false` — the sweep at most once per slice.
 - Every request is cancellable. The engine client rejects a cancelled call with an
   `AbortError`, as an aborted `fetch` does.
 

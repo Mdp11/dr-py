@@ -1052,6 +1052,32 @@ describe('the notice and the block', () => {
 		expect(isReplicaBlocked()).toBe(false);
 	});
 
+	it('an opt-out stored without the issues switch, staging on legacy, waits for and blocks nothing', async () => {
+		onEngine({
+			staging: 'legacy',
+			...Object.fromEntries(SURFACES.filter((s) => s !== 'issues').map((s) => [s, 'server']))
+		});
+		const project = fakeProject();
+		const held = hold();
+		server.use(...project.handlers({ hold: held }));
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await held.reached;
+		expect(getReplicaStatus().phase).toBe('opening');
+		let resolved = false;
+		void replicaGate().then(() => {
+			resolved = true;
+		});
+		await macrotask();
+		expect(resolved).toBe(true);
+		held.release();
+
+		await failReplica(project, replica);
+		expect(isReplicaBlocked()).toBe(false);
+		expect(engineSide('issues')).toBe('server');
+	});
+
 	it('retryReplica in ready leaves isReplicaRetrying false', async () => {
 		onEngine({ elements: 'engine' });
 		const project = fakeProject();
@@ -1865,7 +1891,7 @@ describe('the issues on the engine', () => {
 	 * answers FROM_SERVER. Every `getModelIssues` answer is recorded with the
 	 * replica's `seeded` when it came and whether the server answered it.
 	 */
-	async function issuesStore() {
+	async function issuesStore(project = fakeProject()) {
 		let serverHits = 0;
 		server.use(
 			http.get(`${API}/model/issues`, () => {
@@ -1885,7 +1911,7 @@ describe('the issues on the engine', () => {
 			});
 			return list;
 		});
-		store = await engineStore({ surfaces: { issues: 'engine' } });
+		store = await engineStore({ project, surfaces: { issues: 'engine' } });
 		return { s: store, spy, real, answers };
 	}
 
@@ -1979,5 +2005,104 @@ describe('the issues on the engine', () => {
 		expect(later.filter((answer) => !answer.seeded).every((answer) => answer.server)).toBe(true);
 		expect(later.filter((answer) => answer.server)).toHaveLength(2);
 		expect(later.at(-1)).toEqual({ seeded: true, server: false, issues: [tooLong] });
+	});
+
+	describe('and the artifact follower', () => {
+		const rules = {
+			id: 'r1',
+			kind: 'validation_rules',
+			name: 'Rules',
+			artifact_rev: 1,
+			updated_at: '2026-09-24T00:00:00Z',
+			updated_by: null,
+			entry_points: null,
+			payload: { text: '' }
+		};
+
+		/** `project` whose payload fetches wait for `held.whole` (a whole load) or `held.named`. */
+		function holdPayloads(held: { whole?: Promise<void>; named?: Promise<void> }) {
+			const project = fakeProject();
+			const handlers = project.handlers.bind(project);
+			project.handlers = (options) => [
+				http.get(`${API}/artifacts/payloads`, async ({ request }) => {
+					const ids = new URL(request.url).searchParams.getAll('id');
+					await (ids.length === 0 ? held.whole : held.named);
+					const items = [...project.artifacts.values()].filter(
+						(artifact) => ids.length === 0 || ids.includes(artifact.id)
+					);
+					return HttpResponse.json({ items });
+				}),
+				...handlers(options)
+			];
+			return project;
+		}
+
+		it('a rules artifact whose load is slow: the server answers until the follower has loaded, and after it', async () => {
+			const load = hold();
+			const project = holdPayloads({ whole: load.arrive() });
+			project.artifacts.set('r1', rules);
+			const { s, answers } = await issuesStore(project);
+			if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
+			await load.reached;
+
+			// Swept, but the engine does not yet hold the artifact it must refuse over.
+			expect(engineSide('issues')).toBe('server');
+			await vi.waitFor(() => expect(answers).toHaveLength(1));
+			await refetchIssues();
+			expect(answers.map((answer) => answer.server)).toEqual([true, true]);
+			expect(getLiveIssues()).toEqual([FROM_SERVER]);
+
+			load.release();
+			await vi.waitFor(() => expect(engineSide('issues')).toBe('engine'));
+			// The load and the rules it brings each schedule a refetch; the engine refuses it.
+			await vi.waitFor(() => expect(answers.length).toBeGreaterThan(2));
+			await sleep(350);
+			expect(answers.slice(2).every((answer) => answer.seeded && answer.server)).toBe(true);
+			expect(getLiveIssues()).toEqual([FROM_SERVER]);
+		});
+
+		it("no rules artifact, a slow load: the server's list until it lands, then the engine's", async () => {
+			const load = hold();
+			const { s, answers } = await issuesStore(holdPayloads({ whole: load.arrive() }));
+			if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
+			await load.reached;
+			await vi.waitFor(() => expect(answers).toHaveLength(1));
+			await ensureElements(['e_000001']);
+			emit(rename('e_000001', TOO_LONG));
+			await settled(s);
+			await vi.waitFor(() => expect(answers).toHaveLength(2));
+			expect(answers.every((answer) => answer.server)).toBe(true);
+			expect(getLiveIssues()).toEqual([FROM_SERVER]);
+
+			load.release();
+			await vi.waitFor(() => expect(getLiveIssues()).toEqual([tooLong]));
+			expect(answers.at(-1)).toMatchObject({ seeded: true, server: false });
+		});
+
+		it("a rules artifact a peer commits while the engine's list is shown: the list ends at the server", async () => {
+			const held: { named?: Promise<void> } = {};
+			const { s, answers } = await issuesStore(holdPayloads(held));
+			if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
+			await vi.waitFor(() => expect(answers).toHaveLength(1));
+			expect(answers[0]).toMatchObject({ server: false });
+			await ensureElements(['e_000001']);
+
+			const fetched = hold();
+			held.named = fetched.arrive();
+			s.project.artifacts.set('r1', rules);
+			const { id, kind, name, artifact_rev, updated_at, updated_by, entry_points } = rules;
+			const created = { id, kind, name, artifact_rev, updated_at, updated_by, entry_points };
+			handReplicaFeed({ type: 'artifact', action: 'created', artifact: created }, '{}');
+			await fetched.reached;
+			// A refetch that beats the payload fetch reads the engine, which does not know of the rules yet.
+			emit(rename('e_000001', TOO_LONG));
+			await settled(s);
+			await vi.waitFor(() => expect(getLiveIssues()).toEqual([tooLong]));
+			expect(answers.at(-1)).toMatchObject({ server: false });
+
+			fetched.release();
+			await vi.waitFor(() => expect(getLiveIssues()).toEqual([FROM_SERVER]));
+			expect(answers.at(-1)).toMatchObject({ seeded: true, server: true });
+		});
 	});
 });

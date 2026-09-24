@@ -6,7 +6,8 @@ import {
 	SURFACES,
 	anyEngineSurface,
 	readSurfaces,
-	readSwitches
+	readSwitches,
+	type Switches
 } from '../surfaces';
 
 /** A storage holding `value` under `dr.surfaces`, and nothing else. */
@@ -207,7 +208,7 @@ describe('the surface switches', () => {
 		}
 	});
 
-	it('anyEngineSurface says whether one surface is on the engine', () => {
+	it('anyEngineSurface says whether one surface is on the engine; issues only with staging there', () => {
 		const allServer = {
 			elements: 'server',
 			search: 'server',
@@ -218,10 +219,24 @@ describe('the surface switches', () => {
 			criteria: 'server',
 			issues: 'server'
 		} as const;
-		expect(anyEngineSurface(allServer)).toBe(false);
-		expect(anyEngineSurface({ ...allServer, issues: 'engine' })).toBe(true);
-		expect(anyEngineSurface({ ...allServer, summary: 'engine' })).toBe(true);
-		expect(anyEngineSurface({ ...allServer, navigation: 'engine' })).toBe(true);
-		expect(anyEngineSurface({ ...allServer, criteria: 'engine' })).toBe(true);
+		for (const staging of ['engine', 'legacy'] as const) {
+			const any = (surfaces: Record<string, string>) =>
+				anyEngineSurface({ surfaces: { ...allServer, ...surfaces }, staging } as Switches);
+			expect(any({})).toBe(false);
+			expect(any({ issues: 'engine' })).toBe(staging === 'engine');
+			expect(any({ summary: 'engine' })).toBe(true);
+			expect(any({ navigation: 'engine' })).toBe(true);
+			expect(any({ criteria: 'engine' })).toBe(true);
+		}
+	});
+
+	it('a stored opt-out that predates the issues switch puts no surface on the engine', () => {
+		const optOut = JSON.stringify({
+			staging: 'legacy',
+			...Object.fromEntries(SURFACES.filter((s) => s !== 'issues').map((s) => [s, 'server']))
+		});
+		const switches = readSwitches(storing(optOut));
+		expect(switches.surfaces.issues).toBe('engine');
+		expect(anyEngineSurface(switches)).toBe(false);
 	});
 });

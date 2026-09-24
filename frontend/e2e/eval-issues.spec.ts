@@ -136,25 +136,14 @@ test('a staged facet violation lives in the Issues panel, blocks a strict commit
 	// overlay-only "last run" label proves the click actually re-ran it, not
 	// just that the live list still shows the same row it showed before.
 	await page.getByRole('button', { name: 'Validate', exact: true }).click();
+	await expect(tabpanel.getByText(/^last run /)).toBeVisible({ timeout: 15_000 });
 	await expect(row).toBeVisible({ timeout: 15_000 });
 	await expect(row.getByText('new', { exact: true })).toBeVisible();
-	await expect(tabpanel.getByText(/^last run /)).toBeVisible({ timeout: 15_000 });
 
-	// Back off strict mode so the commit below can land, then commit. With a
-	// live conformance issue on the batch (unlike every other spec's commit),
-	// the diff list carries the staged rename's full 201-character value
-	// unbroken. `Dialog.Content` is a CSS grid with `overflow: visible` and no
-	// `min-width: 0` on its items, so that unbroken text sets the grid's
-	// min-content track width — measured (`getBoundingClientRect`) at ~1430px
-	// against the dialog's own ~385px `max-w-md` box — and the footer, a grid
-	// item, renders at that width and overflows off past the right edge of the
-	// 1440px viewport instead of wrapping. It is a real, static (non-animating)
-	// position, confirmed by computed styles up the ancestor chain: not a
-	// re-render loop, and not particular to the engine or the `issues` surface
-	// — `DiffDrawer.svelte` and the dialog primitives predate this branch, and
-	// any long unbroken diff value would reproduce it. `.click()`'s pointer
-	// actionability check waits forever for a stable, in-viewport target that
-	// this never is; focus and Enter need no pointer geometry.
+	// Back off strict mode so the commit below can land, then commit. The
+	// staged 201-character value is unbroken, so it widens the dialog's grid
+	// track and the footer overflows past the viewport; focus and Enter need
+	// no pointer geometry.
 	await setStrictMode(page, false);
 	await page.getByRole('button', { name: 'Commit', exact: true }).click();
 	await expect(drawer).toBeVisible({ timeout: 10_000 });

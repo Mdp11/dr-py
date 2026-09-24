@@ -364,7 +364,7 @@ function _onSplineTick(): void {
 /** Start the journey. Idempotent: a no-op if one is already active, so the
  * create flow can start it and the workspace boot() can adopt the same one
  * (options included — a later idempotent call's `replica` is not applied).
- * `options.replica` picks the slice table: pass `anyEngineSurface(readSurfaces())`
+ * `options.replica` picks the slice table: pass `anyEngineSurface(readSwitches())`
  * — a journey begun with `replica: false` (or no options) keeps today's
  * slices exactly, and `journeyReplica` never touches it. */
 export function beginJourney(kind: JourneyKind, options?: { replica?: boolean }): void {

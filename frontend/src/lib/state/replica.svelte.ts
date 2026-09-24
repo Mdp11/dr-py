@@ -207,12 +207,12 @@ function stagingOnEngine(status: ReplicaStatus): boolean {
 
 /** Whether some read surface is on the engine — the gate, the notice and the block all exist only then. */
 function _anyEngine(): boolean {
-	return _switches !== null && anyEngineSurface(_switches.surfaces);
+	return _switches !== null && anyEngineSurface(_switches);
 }
 
 /**
- * Routes the read surfaces through `sync`; navigations only once the
- * follower has loaded the artifacts. In dev, with `dr.shadow` set, the
+ * Routes the read surfaces through `sync`; navigations and issues only once
+ * the follower has loaded the artifacts. In dev, with `dr.shadow` set, the
  * seam is installed again with a shadow once that module has loaded, idle
  * while the model store's engine half has an edit staged, an artifact entry
  * is staged, or the follower still lays a commit's entries over the
@@ -220,17 +220,22 @@ function _anyEngine(): boolean {
  */
 function installSeam(sync: ReplicaSync): void {
 	uninstallSeam();
-	const surfaces = (_switches ??= readSwitches()).surfaces;
+	const switches = (_switches ??= readSwitches());
+	const surfaces = switches.surfaces;
 	const token = _seamToken;
 	const gates: SurfaceGates = {
 		// A navigation may name artifacts: the engine answers once it holds them.
 		navigation: () => _follower?.follower.loaded() ?? false,
-		// A store swept part-way is not the model's list.
-		issues: () => getStagingSide() === 'engine' && sync.status().seeded
+		// A store swept part-way is not the model's list, and until the artifacts
+		// are held the engine cannot know it must refuse a rules project.
+		issues: () =>
+			getStagingSide() === 'engine' &&
+			sync.status().seeded &&
+			(_follower?.follower.loaded() ?? false)
 	};
 	installEngineSeam(createEngineSeam(sync, surfaces, undefined, gates));
 	_removeQuietProbe = addQuietProbe(() => sync.settled());
-	if (import.meta.env.DEV && anyEngineSurface(surfaces)) {
+	if (import.meta.env.DEV && anyEngineSurface(switches)) {
 		void import('../engine/shadow')
 			.then(({ createShadow, shadowEnabled }) => {
 				if (token !== _seamToken || !shadowEnabled()) return;
@@ -327,7 +332,12 @@ function follow(sync: ReplicaSync, projectId: string): void {
 		sync,
 		payloads: (ids) => listArtifactPayloads(ids, { baseUrl: `/api/v1/projects/${projectId}` }),
 		staged: stagedArtifactsForEngine,
-		pause: () => new Promise<void>((resolve) => setTimeout(resolve, LOAD_RETRY_MS))
+		pause: () => new Promise<void>((resolve) => setTimeout(resolve, LOAD_RETRY_MS)),
+		// The issues gate opens here too: the server's list, answered until now,
+		// holds none of the staged edits' own issues.
+		onLoaded: () => {
+			if (issuesOnEngine(_status)) scheduleIssuesRefetch();
+		}
 	});
 	// A shadow re-test waits out a payload fetch in flight, which may change what it reads.
 	_follower = { projectId, follower, removeQuiet: addQuietProbe(() => follower.settled()) };

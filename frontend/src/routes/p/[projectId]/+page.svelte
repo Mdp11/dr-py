@@ -17,7 +17,7 @@
 	import ReplicaFallbackNotice from '$lib/components/ReplicaFallbackNotice.svelte';
 	import ReplicaFailedOverlay from '$lib/components/ReplicaFailedOverlay.svelte';
 	import { metamodel as metamodelApi } from '$lib/api';
-	import { anyEngineSurface, readSurfaces } from '$lib/engine/surfaces';
+	import { anyEngineSurface, readSwitches } from '$lib/engine/surfaces';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		getFeedTermination,
@@ -147,7 +147,7 @@
 		// Adopt the journey started on the picker/wizard click, or start one now for
 		// a direct-URL landing. Idempotent: a create/open journey already running is
 		// preserved (kind + slice table intact).
-		beginJourney('open', { replica: anyEngineSurface(readSurfaces()) });
+		beginJourney('open', { replica: anyEngineSurface(readSwitches()) });
 		try {
 			void trackOpenProgress(); // fire-and-forget: feeds the journey while the requests below hydrate
 			markViewUnresolved(); // reset the view-answered gate on every project (re)entry

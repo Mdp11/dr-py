@@ -118,7 +118,7 @@ function allIds(model: Model): string[] {
  * the server's own dirty set; a rebase (`unstage`, `applyDelta`) the
  * neighbourhoods, before and after, of every id it may touch and of the ends
  * of every relationship among them; a merged edit both, since it replays the
- * batches above the one it lands in. A background
+ * batches from the one it lands in. A background
  * sweep fills the store in steps and resumes across any transition; once it
  * has run to its end the store is `seeded`. A facet pattern the host cannot
  * run makes it `unusable` for good: the store empties and stays empty.

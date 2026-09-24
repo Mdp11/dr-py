@@ -80,6 +80,13 @@ export function readSurfaces(storage?: Pick<Storage, 'getItem'>): Record<Surface
 	return readSwitches(storage).surfaces;
 }
 
-export function anyEngineSurface(surfaces: Readonly<Record<Surface, Side>>): boolean {
-	return SURFACES.some((surface) => surfaces[surface] === 'engine');
+/**
+ * Whether some surface can be answered by the engine. `issues` counts only
+ * with staging on the engine: the legacy buffer's edits are not in the
+ * replica, so its issues are always the server's.
+ */
+export function anyEngineSurface({ surfaces, staging }: Readonly<Switches>): boolean {
+	return SURFACES.some(
+		(surface) => surfaces[surface] === 'engine' && (surface !== 'issues' || staging === 'engine')
+	);
 }
