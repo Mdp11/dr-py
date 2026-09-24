@@ -2,7 +2,8 @@
  * The engine at model M: opening a snapshot, against opening the same model
  * as one document in the same pass; the digest check; the long operations in
  * steps — their total and their longest step, for there is no scheduler here;
- * the heap one replica holds; staging, rewinding, rebasing and a delta.
+ * the heap one replica holds; staging, rewinding, rebasing and a delta; the
+ * issue store's sweep, and the same edits through it, each revalidating.
  *
  * `pixi run engine-bench-data` writes the input once, `pixi run engine-bench`
  * measures. Timings drift between sessions: compare only numbers of one run.
@@ -13,6 +14,7 @@ import {
 	entityHash,
 	EVALUATIONS,
 	formatDigest,
+	LiveIssues,
 	Metamodel,
 	Model,
 	openSnapshot,
@@ -30,6 +32,8 @@ import {
 } from '../src/index.ts';
 
 const PASSES = 3;
+/** The copies of one element staged for the duplicate-group sweep. */
+const DUPLICATES = 20_000;
 const CHUNK_BYTES = 1 << 16;
 const OPEN_BUDGET_MS = 3000;
 const HEAP_BUDGET_MB = 400;
@@ -74,7 +78,16 @@ const ROWS = {
 	iterateAfter: 'iterate again: the first time re-sorts',
 	rebase: 'rebase 100 staged batches over a delta',
 	unstageEntity: 'unstage one entity among 100 staged batches',
-	delta: 'apply a delta (99 changed, 40 new, 10 deleted), nothing staged'
+	delta: 'apply a delta (99 changed, 40 new, 10 deleted), nothing staged',
+	sweep: 'sweep the issue store: every entity validated, in steps',
+	sweepFirst: '  its first step: every id listed',
+	sweepLongest: '  its longest step after the first',
+	sweepGroup: `sweep again with ${DUPLICATES.toLocaleString('en-US')} duplicates staged, one group`,
+	sweepGroupLongest: '  its longest step after the first',
+	liveStage: 'stage 1,000 ops + revalidation',
+	liveUnstage: 'unstage all + revalidation',
+	probe: 'origin probe (100 staged batches)',
+	liveDelta: 'delta over 100 staged + revalidation'
 };
 type Row = keyof typeof ROWS;
 
@@ -91,14 +104,21 @@ function timed<T>(row: Row, run: () => T): T {
 	return result;
 }
 
-/** Drives `steps` by hand: the whole run under `total`, its longest step under `longest`. */
-function stepped<T>(total: Row, longest: Row | null, steps: Steps<T>): T {
+/**
+ * Drives `steps` by hand: the whole run under `total`, its longest step under
+ * `longest` — past the first one when `first` takes that apart.
+ */
+function stepped<T>(total: Row, longest: Row | null, steps: Steps<T>, first?: Row | null): T {
 	let worst = 0;
+	let taken = 0;
 	const start = performance.now();
 	for (;;) {
 		const before = performance.now();
 		const next = steps.next();
-		worst = Math.max(worst, performance.now() - before);
+		const ms = performance.now() - before;
+		if (first !== undefined && taken++ === 0) {
+			if (first !== null) record(first, ms);
+		} else worst = Math.max(worst, ms);
 		if (next.done === true) {
 			record(total, performance.now() - start);
 			if (longest !== null) record(longest, worst);
@@ -214,17 +234,21 @@ const entities = (model: Model): [ElementRec[], RelRec[]] => [
 	[...model.relationships()]
 ];
 
-function measureEdits(wc: WorkingCopy): void {
-	const { model } = wc;
+const any = () => true;
+
+const namedIn = (model: Model) => (element: ElementRec) =>
+	model.metamodel.effectiveElementPropertyNames(element.typeName).has('name');
+
+/**
+ * 500 renames, 200 new elements, 200 new relationships, 50 relationships and
+ * 50 leaf elements deleted — relationships first: nothing names an entity
+ * already gone.
+ */
+function thousandOps(model: Model, elements: ElementRec[], relationships: RelRec[]): ModelOp[] {
 	const metamodel = model.metamodel;
-	let [elements, relationships] = timed('iterate', () => entities(model));
-	const named = (element: ElementRec) =>
-		metamodel.effectiveElementPropertyNames(element.typeName).has('name');
+	const named = namedIn(model);
 	const leaf = (element: ElementRec) =>
 		element.out.every((rel) => !metamodel.isContainment(rel.typeName));
-	const any = () => true;
-
-	// Deletions come last, relationships first: nothing names an entity already gone.
 	const batch: ModelOp[] = [
 		...sample(elements, 500, 0, named).map((element, i) => renamed(element, `mine ${i}`)),
 		...sample(elements, 200, 1, named).map((like, i): ModelOp => ({
@@ -250,6 +274,14 @@ function measureEdits(wc: WorkingCopy): void {
 		}))
 	];
 	if (batch.length !== 1000) throw new Error(`the batch holds ${batch.length} ops`);
+	return batch;
+}
+
+function measureEdits(wc: WorkingCopy): void {
+	const { model } = wc;
+	const named = namedIn(model);
+	let [elements, relationships] = timed('iterate', () => entities(model));
+	const batch = thousandOps(model, elements, relationships);
 	timed('stage', () => wc.stage(batch));
 	timed('unstage', () => wc.unstage('all'));
 	// A deleted entity came back as a new record: the lists are read again.
@@ -270,6 +302,49 @@ function measureEdits(wc: WorkingCopy): void {
 		sample(relationships, 10, 9, any)
 	);
 	timed('delta', () => wc.applyDelta(delta));
+	const sound = !wc.diverged && wc.verifyDigest();
+	if (!sound) throw new Error('the bench drove the replica off its digest');
+}
+
+/**
+ * The issue store over the replica: its sweep, and edits like the ones above
+ * through it, each revalidating what it may have moved. Then a sweep over a
+ * group of duplicates, whose members each read the whole group.
+ */
+function measureIssues(wc: WorkingCopy): void {
+	const { model } = wc;
+	const named = namedIn(model);
+	const live = new LiveIssues(wc);
+	if (!stepped('sweep', 'sweepLongest', live.sweepSteps(), 'sweepFirst')) {
+		throw new Error('the sweep ended unusable');
+	}
+	const batch = thousandOps(model, ...entities(model));
+	timed('liveStage', () => live.stage(batch));
+	timed('liveUnstage', () => live.unstage('all'));
+	// A deleted entity came back as a new record: the lists are read again.
+	const [elements] = entities(model);
+	sample(elements, 100, 3, named).forEach((element, i) =>
+		live.stage([renamed(element, `mine ${i}`)])
+	);
+	timed('probe', () => live.origins());
+	const theirs = sample(elements, 100, 5, named);
+	const one = deltaOver(wc, theirs.slice(0, 1), { elements: [], relationships: [] }, []);
+	timed('liveDelta', () => live.applyDelta(one));
+	live.unstage('all');
+
+	// Staged past the store: its dirty sets would sort the growing group once an op.
+	const like = sample(elements, 1, 11, named)[0]!;
+	const copies = Array.from({ length: DUPLICATES }, (_, i): ModelOp => ({
+		kind: 'create_element',
+		temp_id: `tmp_dup${i}`,
+		type_name: like.typeName,
+		properties: { ...like.props }
+	}));
+	wc.stage(copies);
+	const grouped = new LiveIssues(wc);
+	stepped('sweepGroup', 'sweepGroupLongest', grouped.sweepSteps(), null);
+	if (grouped.store.size < DUPLICATES) throw new Error('the copies make no group');
+	wc.unstage('all');
 	const sound = !wc.diverged && wc.verifyDigest();
 	if (!sound) throw new Error('the bench drove the replica off its digest');
 }
@@ -325,6 +400,7 @@ async function pass(): Promise<void> {
 	timed('nativeParse', () => JSON.parse(text) as unknown);
 
 	measureEdits(workingCopy);
+	measureIssues(workingCopy);
 }
 
 for (let i = 0; i < PASSES; i++) await pass();

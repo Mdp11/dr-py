@@ -139,6 +139,7 @@ describe('the changed event', () => {
 			event: 'changed',
 			rev: rev!,
 			staged_version: 9,
+			issues_version: 0,
 			element_ids: ['e_000001'],
 			relationship_ids: [],
 			deleted_element_ids: [],

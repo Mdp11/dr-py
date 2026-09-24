@@ -124,6 +124,11 @@ description = "Write benchmarks/large.model.json as the v2 snapshot that engine-
 cmd = "python scripts/snapshot_v2.py --model benchmarks/large.model.json --metamodel examples/smart-city.metamodel.yaml --out benchmarks/large.snapshot.v2 --gzip"
 default-environment = "core-dev"
 
+[feature.core-dev.tasks.engine-parity-oracle]
+description = "Write benchmarks/large.issues.json: the Python sweep's issues over model M, which engine-parity-large compares"
+cmd = "python scripts/issues_large.py"
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.core-lint]
 description = "Lint + typecheck the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
@@ -294,6 +299,12 @@ cwd = "engine"
 description = "Benchmark the engine at model M (run engine-bench-data once before)"
 cmd = "npm run bench"
 cwd = "engine"
+
+[feature.frontend.tasks.engine-parity-large]
+description = "Compare the engine's sweep at model M with the Python oracle's, as multisets of issues (run engine-bench-data once before)"
+cmd = "node --disable-warning=ExperimentalWarning bench/parity-large.ts"
+cwd = "engine"
+depends-on = [{ task = "engine-parity-oracle", environment = "core-dev" }]
 
 [feature.frontend.tasks.engine-bench-browser]
 description = "Benchmark the replica in the browser at model M: the bench page drives the built sandbox (run engine-bench-data once before)"

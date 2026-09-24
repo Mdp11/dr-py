@@ -27,9 +27,10 @@ export interface StatusProgress {
 	fraction: number | null;
 }
 /** A replica progress event (`lib/engine/sync.ts`'s `ReplicaProgress`); `verify`
- * (the background digest check) is a valid task but `journeyReplica` ignores it. */
+ * (the background digest check) and `sweep` (the issue store's) are valid tasks
+ * but `journeyReplica` ignores them. */
 export interface ReplicaProgressInput {
-	task: 'download' | 'parse' | 'index' | 'tail' | 'verify';
+	task: 'download' | 'parse' | 'index' | 'tail' | 'verify' | 'sweep';
 	done: number;
 	total: number | null;
 }
@@ -417,12 +418,12 @@ export function journeyStatus(status: ModelStatus): void {
  * opens whatever `dr.surfaces` says, so a `replica: false` journey (no
  * surface on the engine) can still be handed a stray report, and without
  * this guard `download` outranks `validate` in the phase order and would
- * hijack the bar from the real `/model/status` polls. `verify` (the
- * background digest check) is ignored too, and so is anything the
- * forward-only phase order has already passed. */
+ * hijack the bar from the real `/model/status` polls. `verify` and `sweep`
+ * (the background digest check and issue sweep) are ignored too, and so is
+ * anything the forward-only phase order has already passed. */
 export function journeyReplica(progress: ReplicaProgressInput): void {
 	if (!_active || _finishing || !_replica) return;
-	if (progress.task === 'verify') return;
+	if (progress.task === 'verify' || progress.task === 'sweep') return;
 	const fraction = progress.total ? progress.done / progress.total : null;
 	_setPhase(progress.task, fraction);
 }

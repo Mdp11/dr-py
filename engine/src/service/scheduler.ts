@@ -41,6 +41,9 @@ type Entry = {
 
 type Running = { entry: Entry; steps: Steps<unknown>; cancelled: boolean };
 
+/** A background slot: its task, and the steps in flight, made at its first idle step. */
+type Slot = { task: BackgroundTask; steps: Steps<boolean> | null };
+
 /**
  * One pump over two lanes, each in arrival order. The control lane holds the
  * replica's own transitions and runs in any state, first. The model lane runs
@@ -54,8 +57,10 @@ type Running = { entry: Entry; steps: Steps<unknown>; cancelled: boolean };
  *
  * The pump reads the clock after every unit of work — a read, a transition,
  * one step — and past `SLICE_TARGET_MS` yields to the host, whose turn is when
- * messages arrive: engine state is consistent whenever a handler runs. Idle
- * and open, it gives the background task one slice at a time.
+ * messages arrive: engine state is consistent whenever a handler runs. A
+ * slice ends there, or when the pump runs out of work; `onSliceEnd` is called
+ * at either. Idle and open, it gives its two background slots — the digest
+ * check (`setBackground`) and the sweep (`setSweep`) — one step each in turn.
  */
 export class Scheduler {
 	private readonly deps: HostDeps;
@@ -64,7 +69,10 @@ export class Scheduler {
 	private model: Entry[] = [];
 	private running: Running | null = null;
 	private open = false;
-	private background: { task: BackgroundTask; steps: Steps<boolean> | null } | null = null;
+	private background: Slot | null = null;
+	private sweep: Slot | null = null;
+	// The slot the last idle step went to: the other one goes next.
+	private took: 'background' | 'sweep' = 'sweep';
 	private sliceStart: number | null = null;
 	// Set by a host turn: the reads queued ahead of a running scan go first.
 	private boundary = false;
@@ -123,6 +131,15 @@ export class Scheduler {
 	}
 
 	/**
+	 * The second background slot, for a task whose steps resume across any
+	 * transition: `restartBackground` leaves it alone, and closing only pauses it.
+	 */
+	setSweep(task: BackgroundTask | null): void {
+		this.sweep = task === null ? null : { task, steps: null };
+		this.kick();
+	}
+
+	/**
 	 * For work outside the pump, such as a snapshot open: `undefined` while the
 	 * slice has room, else the host's turn, after which a new slice has begun.
 	 */
@@ -176,6 +193,7 @@ export class Scheduler {
 		} finally {
 			this.pumping = false;
 			this.sliceStart = null;
+			this.onSliceEnd?.();
 			for (const resolve of this.idle.splice(0)) resolve();
 		}
 	}
@@ -214,11 +232,23 @@ export class Scheduler {
 			else this.runWhole(head);
 			return true;
 		}
-		if (this.background !== null) {
-			this.advanceBackground(this.background);
+		const slot = this.idleSlot();
+		if (slot !== null) {
+			this.advanceBackground(slot);
 			return true;
 		}
 		return false;
+	}
+
+	/** The background slot whose turn it is: each in turn while both are set. */
+	private idleSlot(): Slot | null {
+		const { background, sweep } = this;
+		if (background !== null && (sweep === null || this.took === 'sweep')) {
+			this.took = 'background';
+			return background;
+		}
+		if (sweep !== null) this.took = 'sweep';
+		return sweep;
 	}
 
 	/** The first read queued before the first transition, or -1. */
@@ -275,23 +305,21 @@ export class Scheduler {
 		this.running = null;
 	}
 
-	/** A background task that throws is a bug; it ends as a failed check. */
-	private advanceBackground(background: {
-		task: BackgroundTask;
-		steps: Steps<boolean> | null;
-	}): void {
+	/** A background task that throws is a bug; it ends as a failed one. */
+	private advanceBackground(slot: Slot): void {
 		let next: IteratorResult<Progress, boolean>;
 		try {
-			background.steps ??= background.task.start();
-			next = background.steps.next();
+			slot.steps ??= slot.task.start();
+			next = slot.steps.next();
 		} catch {
 			next = { done: true, value: false };
 		}
 		if (next.done !== true) {
-			background.task.progress?.(next.value);
+			slot.task.progress?.(next.value);
 			return;
 		}
-		if (this.background === background) this.background = null;
-		background.task.done(next.value);
+		if (this.background === slot) this.background = null;
+		if (this.sweep === slot) this.sweep = null;
+		slot.task.done(next.value);
 	}
 }

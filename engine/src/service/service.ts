@@ -19,6 +19,8 @@ import {
 } from '../read/wire.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
+import { issueListBody, previewBody, validateBody } from '../validation/bodies.ts';
+import { LiveIssues, type Origins } from '../validation/live.ts';
 import { pyRepr } from '../value/repr.ts';
 import { readDeltaText, readTailText } from '../working/delta.ts';
 import type {
@@ -110,6 +112,13 @@ function stagedDiff(wc: WorkingCopy): StagedDiffResult {
 /** Past this many changed entities, `stage` answers their ids alone. */
 const STAGE_POST_STATE_MAX = 500;
 
+/** The refusals the client answers from the server (501), and the ones it retries there (409). */
+const UNSUPPORTED_PATTERN = 'reaches an unsupported pattern';
+const VALIDATION_RULES = 'reaches validation rules';
+const NOT_READY = 'replica is not ready';
+const STALE_BATCHES = 'stale staged batches';
+const STALE_BASE = 'stale base_rev';
+
 // -- the boundary in -----------------------------------------------------------
 
 const isObject = (value: unknown): value is { [key: string]: unknown } =>
@@ -130,6 +139,36 @@ function strings(params: ReadParams, key: string): string[] {
 		throw new Refused(422, `${key} must be a list of strings`);
 	}
 	return value as string[];
+}
+
+function integer(params: ReadParams, key: string): number {
+	const value = params[key];
+	if (typeof value !== 'number' || !Number.isInteger(value)) {
+		throw new Refused(422, `${key} must be an integer`);
+	}
+	return value;
+}
+
+function flag(params: ReadParams, key: string): boolean {
+	const value = params[key];
+	if (typeof value !== 'boolean') throw new Refused(422, `${key} must be a boolean`);
+	return value;
+}
+
+function batchIds(params: ReadParams): number[] {
+	const value = params['batch_ids'];
+	if (!Array.isArray(value) || !value.every((id) => Number.isInteger(id))) {
+		throw new Refused(422, 'batch_ids must be a list of batch ids');
+	}
+	return value as number[];
+}
+
+/** Refuses unless `ids` are the staged batches', in order: the ops a caller sent are the ones staged. */
+function requireStaged(wc: WorkingCopy, ids: readonly number[]): void {
+	const staged = wc.staged();
+	if (staged.length !== ids.length || staged.some((batch, i) => batch.id !== ids[i])) {
+		throw new Refused(409, STALE_BATCHES);
+	}
 }
 
 function readBatches(raw: unknown): StagedBatch[] {
@@ -239,6 +278,22 @@ const METHODS: { readonly [method: string]: Method } = {
 		const what = readUnstage(params['what']);
 		return (wc) => service.unstage(wc, what);
 	}),
+
+	getModelIssues: (service, call) => service.issues(call, issueListBody),
+	validateModel: (service, call) => service.validateModel(call, batchIds(call.params)),
+	previewCommit: (service, call) => {
+		const baseRev = integer(call.params, 'base_rev');
+		const ids = batchIds(call.params);
+		const strict = flag(call.params, 'strict');
+		service.issues(
+			call,
+			(live) => previewBody(live, strict),
+			(wc) => {
+				if (wc.rev !== baseRev) throw new Refused(409, STALE_BASE);
+				requireStaged(wc, ids);
+			}
+		);
+	},
 	staged: now((service) => service.wc?.staged().map(wireBatch) ?? []),
 	conflicts: now((service) => service.wc?.conflicts().map(wireConflict) ?? []),
 	stagedDiff: inspect(stagedDiff),
@@ -284,6 +339,13 @@ type Opening = {
 	ending: boolean;
 };
 
+/**
+ * The issue store of the ready replica: `seen`, how much of its `version` the
+ * service has counted; `probed`, the origins its last answer read, so that a
+ * new probe shows.
+ */
+type Issues = { readonly live: LiveIssues; seen: number; probed: Origins | null };
+
 class Service {
 	readonly placements = new ViewPlacements();
 	readonly artifacts = new ArtifactSet();
@@ -298,11 +360,22 @@ class Service {
 	private failed: unknown = null;
 	private readonly progressHeld = new Map<ProgressTask, { done: number; total: number }>();
 	private readonly awaiting = new Map<string | number, Call>();
+	private issuesOf: Issues | null = null;
+	// Moves with every store's `version`, across replicas: it never goes back.
+	private issuesVersion = 0;
+	private issuesPosted = 0;
+	// The `validateModel` calls waiting for the sweep they restarted.
+	private readonly validating = new Set<Call>();
 
 	constructor(port: Port, deps: ServiceDeps) {
 		this.port = port;
 		this.deps = deps;
-		this.scheduler = new Scheduler(deps, { onSliceEnd: () => this.flushProgress() });
+		this.scheduler = new Scheduler(deps, {
+			onSliceEnd: () => {
+				this.flushProgress();
+				this.flushIssues();
+			}
+		});
 		port.onMessage((message) => this.receive(message));
 	}
 
@@ -410,8 +483,156 @@ class Service {
 
 	/** The replica a model-lane job runs on: the lane runs only while there is a ready one. */
 	private ready(): WorkingCopy {
-		if (this.state !== 'ready' || this.wc === null) throw new Refused(409, 'replica is not ready');
+		if (this.state !== 'ready' || this.wc === null) throw new Refused(409, NOT_READY);
 		return this.wc;
+	}
+
+	/** Where a transition of `wc` goes: through the issue store once the replica is ready. */
+	private moving(wc: WorkingCopy): LiveIssues | WorkingCopy {
+		const live = this.issuesOf?.live;
+		return live !== undefined && live.wc === wc ? live : wc;
+	}
+
+	// -- the issue store -----------------------------------------------------
+
+	/**
+	 * The ready replica's issue store, or the refusal of a call that would
+	 * read it: 501 where the engine must not answer, so the server does.
+	 */
+	private live(): LiveIssues {
+		const wc = this.ready();
+		const live = this.issuesOf?.live;
+		if (live === undefined || live.wc !== wc) throw new Refused(409, NOT_READY);
+		if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
+		if (this.artifacts.resolvesKind('validation_rules')) throw new Refused(501, VALIDATION_RULES);
+		return live;
+	}
+
+	/**
+	 * `body` over the store, after the probe it reads. A probe rewinds and
+	 * replays the staged batches — the committed images the digest check
+	 * walks are rebuilt — so a new one restarts the check.
+	 */
+	private answer<T>(live: LiveIssues, body: (live: LiveIssues) => T): T {
+		const issues = this.issuesOf!;
+		const before = issues.probed;
+		const probing = live.wc.staged().length > 0;
+		try {
+			issues.probed = live.origins();
+		} catch (caught) {
+			if (probing) this.scheduler.restartBackground();
+			if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
+			throw caught;
+		}
+		if (probing && issues.probed !== before) this.scheduler.restartBackground();
+		return body(live);
+	}
+
+	/**
+	 * `getModelIssues` and `previewCommit`: a transition of the model lane —
+	 * a probe rewinds, so no scan may be running — that posts no `changed`.
+	 * `check` refuses a stale call before any probe.
+	 */
+	issues(
+		call: Call,
+		body: (live: LiveIssues) => unknown,
+		check: (wc: WorkingCopy) => void = () => undefined
+	): void {
+		this.submit(call, 'model', {
+			kind: 'transition',
+			run: () => {
+				const live = this.live();
+				check(live.wc);
+				return this.answer(live, body);
+			}
+		});
+	}
+
+	/**
+	 * A transition that restarts the sweep; the answer is built by a second
+	 * one once that sweep has ended, from the same store — or refused, if the
+	 * replica went meanwhile or the staged batches moved.
+	 */
+	validateModel(call: Call, ids: readonly number[]): void {
+		this.scheduler.submit(
+			call.id,
+			'model',
+			{
+				kind: 'transition',
+				run: () => {
+					const live = this.live();
+					requireStaged(live.wc, ids);
+					live.restartSweep();
+					this.sweep(live);
+					this.validating.add(call);
+					this.awaiting.set(call.id, call);
+					void live.whenSwept().then(() =>
+						this.submit(call, 'model', {
+							kind: 'transition',
+							run: () => {
+								// Already refused, or cancelled: nothing to build.
+								if (!this.validating.delete(call) || call.cancelled) return null;
+								if (this.live() !== live) throw new Refused(409, NOT_READY);
+								requireStaged(live.wc, ids);
+								return this.answer(live, validateBody);
+							}
+						})
+					);
+				}
+			},
+			(outcome) => {
+				if (!outcome.ok) call.refuse(outcome.error);
+			}
+		);
+	}
+
+	/** Sets the store's sweep in the scheduler's sweep slot: from where it stands, or from the start after `restartSweep`. */
+	private sweep(live: LiveIssues): void {
+		this.scheduler.setSweep({
+			start: () => live.sweepSteps(),
+			progress: ({ done, total }) => this.progress('sweep', done, total),
+			done: (ok) => {
+				// A sweep that threw is a bug: what waits for it is answered, not left hanging.
+				if (!ok && live.unusable === null && this.issuesOf?.live === live) {
+					this.refuseValidations(new Error('the sweep failed'));
+				}
+			}
+		});
+	}
+
+	private refuseValidations(error: unknown): void {
+		for (const call of this.validating) call.refuse(error);
+		this.validating.clear();
+	}
+
+	/** The service's `issues_version`, counting what the store's `version` moved since last read. */
+	private issuesNow(): number {
+		const issues = this.issuesOf;
+		if (issues !== null) {
+			this.issuesVersion += issues.live.version - issues.seen;
+			issues.seen = issues.live.version;
+		}
+		return this.issuesVersion;
+	}
+
+	/** At a slice's end: a bare `changed` when the store moved since the last one posted. */
+	private flushIssues(): void {
+		const wc = this.wc;
+		if (this.state !== 'ready' || wc === null) return;
+		const version = this.issuesNow();
+		if (version === this.issuesPosted) return;
+		this.issuesPosted = version;
+		this.emit({
+			event: 'changed',
+			rev: wc.rev,
+			staged_version: wc.stagedVersion,
+			issues_version: version,
+			element_ids: [],
+			relationship_ids: [],
+			deleted_element_ids: [],
+			deleted_relationship_ids: [],
+			structural: false
+		});
 	}
 
 	// -- events --------------------------------------------------------------
@@ -459,10 +680,12 @@ class Service {
 		const touched = named > 0 || wc.stagedVersion !== versionBefore;
 		if (touched) this.scheduler.restartBackground();
 		if (this.state === 'ready' && (touched || moved)) {
+			this.issuesPosted = this.issuesNow();
 			this.emit({
 				event: 'changed',
 				rev: wc.rev,
 				staged_version: wc.stagedVersion,
+				issues_version: this.issuesPosted,
 				...wireChanges(changes)
 			});
 		}
@@ -482,6 +705,14 @@ class Service {
 		this.progressHeld.clear();
 		this.scheduler.setOpen(false);
 		this.scheduler.setBackground(null);
+		this.dropIssues();
+	}
+
+	/** Drops the issue store with its replica; what waits for its sweep is refused. */
+	private dropIssues(): void {
+		this.issuesOf = null;
+		this.scheduler.setSweep(null);
+		this.refuseValidations(new Refused(409, NOT_READY));
 	}
 
 	open(params: ReadParams): null {
@@ -605,7 +836,7 @@ class Service {
 					run: () => {
 						if (tail.stopped || this.wc !== wc) return;
 						const version = wc.stagedVersion;
-						const { status, changes } = wc.applyDelta(delta);
+						const { status, changes } = this.moving(wc).applyDelta(delta);
 						if (status === 'gap') {
 							tail.status = 'gap';
 							tail.stopped = true;
@@ -646,13 +877,18 @@ class Service {
 		const own = readOwn(call.params['own']);
 		this.transition(call, (wc): DeltaResult => {
 			const version = wc.stagedVersion;
-			const { status, changes } = wc.applyDelta(delta, own);
+			const { status, changes } = this.moving(wc).applyDelta(delta, own);
 			this.changed(wc, changes, version, status === 'applied');
 			if (wc.diverged) this.diverge(wc);
 			return { status, rev: wc.rev, diverged: wc.diverged };
 		});
 	}
 
+	/**
+	 * The replica's issue store is built here and swept in the background: the
+	 * batches adopted and the tail applied while opening went to the working
+	 * copy alone, and the first sweep covers them.
+	 */
 	private becomeReady(wc: WorkingCopy): void {
 		this.enter('ready');
 		this.scheduler.setOpen(true);
@@ -663,6 +899,9 @@ class Service {
 				if (!ok && this.wc === wc) this.diverge(wc);
 			}
 		});
+		const live = new LiveIssues(wc);
+		this.issuesOf = { live, seen: live.version, probed: null };
+		this.sweep(live);
 	}
 
 	private diverge(wc: WorkingCopy): void {
@@ -670,6 +909,7 @@ class Service {
 		this.progressHeld.clear();
 		this.scheduler.setOpen(false);
 		this.scheduler.setBackground(null);
+		this.dropIssues();
 		this.enter('diverged');
 	}
 
@@ -677,7 +917,7 @@ class Service {
 
 	stage(wc: WorkingCopy, ops: readonly ModelOp[]): StageResult {
 		const version = wc.stagedVersion;
-		const { batch, coalesced, changes } = wc.stage(ops, { coalesce: true });
+		const { batch, coalesced, changes } = this.moving(wc).stage(ops, { coalesce: true });
 		this.changed(wc, changes, version);
 		const many = changes.elementIds.length + changes.relationshipIds.length > STAGE_POST_STATE_MAX;
 		const model = wc.model;
@@ -702,7 +942,7 @@ class Service {
 
 	unstage(wc: WorkingCopy, what: Unstage): { changes: WireChanges } {
 		const version = wc.stagedVersion;
-		const changes = wc.unstage(what);
+		const changes = this.moving(wc).unstage(what);
 		this.changed(wc, changes, version);
 		return { changes: wireChanges(changes) };
 	}

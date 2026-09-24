@@ -420,13 +420,14 @@ describe('open-journey replica phases', () => {
 		expect(pct()!).toBeGreaterThanOrEqual(afterDownload); // still just creeping forward in download/parse
 	});
 
-	it('verify is ignored outright', () => {
+	it('verify and sweep are ignored outright', () => {
 		beginJourney('open', { replica: true });
 		journeyReplica({ task: 'download', done: 1, total: 2 });
 		vi.advanceTimersByTime(80 * 30);
 		const before = pct()!;
 		journeyReplica({ task: 'verify', done: 1, total: 1 });
-		expect(pct()).toBe(before); // no tick yet: verify touched nothing at all
+		journeyReplica({ task: 'sweep', done: 1, total: 1 });
+		expect(pct()).toBe(before); // no tick yet: verify and sweep touched nothing at all
 		vi.advanceTimersByTime(80 * 30);
 		const [, downloadCeil] = phaseSlice('open', 'download', true);
 		expect(pct()!).toBeLessThanOrEqual(downloadCeil); // still in download's own slice, not pushed anywhere

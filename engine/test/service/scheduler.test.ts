@@ -306,6 +306,141 @@ describe('the background task', () => {
 	});
 });
 
+describe('the sweep slot', () => {
+	/** A task of `steps` steps that logs each as `<name><n>` and counts its starts. */
+	function task(log: string[], name: string, steps: number) {
+		let starts = 0;
+		return {
+			task: {
+				*start(): Steps<boolean> {
+					starts++;
+					for (let i = 1; i <= steps; i++) {
+						log.push(`${name}${i}`);
+						yield { done: i, total: steps };
+					}
+					return true;
+				},
+				done: (ok: boolean) => log.push(`${name} ${ok}`)
+			},
+			starts: () => starts
+		};
+	}
+
+	it('runs while idle and open, taking turns with the digest slot', async () => {
+		const { host, scheduler, log, answer } = setup(3);
+		host.auto = true;
+		const digest = task(log, 'd', 2);
+		const sweep = task(log, 's', 4);
+		scheduler.setBackground(digest.task);
+		scheduler.setSweep(sweep.task);
+		scheduler.submit('r', 'model', read(log, 'r'), answer('r'));
+		await scheduler.whenIdle();
+		expect(log).toEqual([]);
+		scheduler.setOpen(true);
+		await scheduler.whenIdle();
+		expect(log).toEqual([
+			'run r',
+			'answer r',
+			'd1',
+			's1',
+			'd2',
+			's2',
+			'd true',
+			's3',
+			's4',
+			's true'
+		]);
+		expect([digest.starts(), sweep.starts()]).toEqual([1, 1]);
+	});
+
+	it('runs alone, and empties when its task ends', async () => {
+		const { host, scheduler, log } = setup(3);
+		host.auto = true;
+		scheduler.setOpen(true);
+		const sweep = task(log, 's', 3);
+		scheduler.setSweep(sweep.task);
+		await scheduler.whenIdle();
+		scheduler.submit('t', 'model', transition(log, 't'), () => undefined);
+		await scheduler.whenIdle();
+		expect(log).toEqual(['s1', 's2', 's3', 's true', 'run t']);
+		expect(sweep.starts()).toBe(1);
+	});
+
+	it('is left alone by restartBackground', async () => {
+		const { host, scheduler, log } = setup(3);
+		scheduler.setOpen(true);
+		const sweep = task(log, 's', 6);
+		scheduler.setSweep(sweep.task);
+		await settle();
+		expect(log).toEqual(['s1', 's2', 's3']);
+		scheduler.restartBackground();
+		host.auto = true;
+		host.turn();
+		await scheduler.whenIdle();
+		expect(log).toEqual(['s1', 's2', 's3', 's4', 's5', 's6', 's true']);
+		expect(sweep.starts()).toBe(1);
+	});
+
+	it('is not dropped by a transition between two of its steps', async () => {
+		const { host, scheduler, log, answer } = setup(3);
+		scheduler.setOpen(true);
+		const sweep = task(log, 's', 5);
+		scheduler.setSweep(sweep.task);
+		await settle();
+		scheduler.submit('t', 'model', transition(log, 't'), answer('t'));
+		host.auto = true;
+		host.turn();
+		await scheduler.whenIdle();
+		expect(log).toEqual(['s1', 's2', 's3', 'run t', 'answer t', 's4', 's5', 's true']);
+		expect(sweep.starts()).toBe(1);
+	});
+
+	it('pauses while closed and resumes where it was', async () => {
+		const { host, scheduler, log } = setup(3);
+		scheduler.setOpen(true);
+		const sweep = task(log, 's', 5);
+		scheduler.setSweep(sweep.task);
+		await settle();
+		expect(log).toEqual(['s1', 's2', 's3']);
+		scheduler.setOpen(false);
+		host.turn();
+		await scheduler.whenIdle();
+		expect(log).toEqual(['s1', 's2', 's3']);
+		host.auto = true;
+		scheduler.setOpen(true);
+		await scheduler.whenIdle();
+		expect(log).toEqual(['s1', 's2', 's3', 's4', 's5', 's true']);
+		expect(sweep.starts()).toBe(1);
+	});
+
+	it('empties on setSweep(null)', async () => {
+		const { host, scheduler, log } = setup(3);
+		scheduler.setOpen(true);
+		scheduler.setSweep(task(log, 's', 5).task);
+		await settle();
+		scheduler.setSweep(null);
+		host.auto = true;
+		host.turn();
+		await scheduler.whenIdle();
+		expect(log).toEqual(['s1', 's2', 's3']);
+	});
+});
+
+describe('onSliceEnd', () => {
+	it('is called at every slice end, the last one before the pump goes idle included', async () => {
+		const host = fakeHost({ tick: 3 });
+		host.auto = true;
+		let ends = 0;
+		const scheduler = new Scheduler(host.deps, { onSliceEnd: () => ends++ });
+		scheduler.setOpen(true);
+		const log: string[] = [];
+		scheduler.submit('s', 'model', scan(log, 's', 7), () => undefined);
+		await scheduler.whenIdle();
+		expect(host.slices).toHaveLength(2);
+		expect(ends).toBe(3);
+	});
+});
+
 describe('slices', () => {
 	async function busy(tick: number): Promise<number[]> {
 		const { host, scheduler, log, answer } = setup(tick);

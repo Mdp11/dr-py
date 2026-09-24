@@ -179,6 +179,15 @@ export class ArtifactSet {
 		}
 	}
 
+	/** Whether any id resolves to an artifact of `kind`. */
+	resolvesKind(kind: string): boolean {
+		for (const id of this.committed.keys()) if (this.resolve(id)?.kind === kind) return true;
+		for (const [id, entry] of this.staged) {
+			if (entry.op === 'create' && this.resolve(id)?.kind === kind) return true;
+		}
+		return false;
+	}
+
 	/** How many ids resolve. */
 	get size(): number {
 		let count = 0;

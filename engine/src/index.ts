@@ -173,6 +173,7 @@ export type {
 	ErrorBody,
 	OpenParams,
 	Port,
+	PreviewCommitParams,
 	PutArtifactsParams,
 	ProgressTask,
 	ReplicaState,
@@ -187,8 +188,10 @@ export type {
 	StageResult,
 	TailParams,
 	TailResult,
+	ValidateModelParams,
 	ViewPlacementParams,
 	WireBatch,
+	WireChanged,
 	WireChanges,
 	WireConflict
 } from './service/types.ts';

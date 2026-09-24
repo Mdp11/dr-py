@@ -195,6 +195,8 @@ describe('following the server', () => {
 			event: 'changed',
 			rev: 1,
 			staged_version: 0,
+			// The rev moved, and the origins with it.
+			issues_version: 1,
 			element_ids: ['a'],
 			relationship_ids: [],
 			deleted_element_ids: ['d'],

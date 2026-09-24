@@ -25,7 +25,7 @@ export type ResponseMessage =
 	| { id: string | number; ok: true; result: unknown }
 	| { id: string | number; ok: false; error: ErrorBody };
 
-export type ProgressTask = 'parse' | 'index' | 'tail' | 'verify';
+export type ProgressTask = 'parse' | 'index' | 'tail' | 'verify' | 'sweep';
 
 /** The ids a transition may have changed, in the wire's names. */
 export type WireChanges = {
@@ -36,10 +36,22 @@ export type WireChanges = {
 	structural: boolean;
 };
 
+/**
+ * After a transition of a ready replica, what it changed; `issues_version`
+ * moves whenever the issue store may read otherwise. The sweep posts one with
+ * no ids when only the store moved.
+ */
+export type WireChanged = {
+	event: 'changed';
+	rev: number;
+	staged_version: number;
+	issues_version: number;
+} & WireChanges;
+
 export type ServiceEvent =
 	| { event: 'replica'; state: ReplicaState; rev: number | null }
 	| { event: 'progress'; task: ProgressTask; done: number; total: number }
-	| ({ event: 'changed'; rev: number; staged_version: number } & WireChanges);
+	| WireChanged;
 
 export type WireBatch = { id: number; ops: Wire[] };
 export type WireConflict = { batch: WireBatch; error: ErrorBody };
@@ -80,6 +92,9 @@ export type StagedDiffResult = {
 	elements: { id: string; before: WireElement | null; after: WireElement | null }[];
 	relationships: { id: string; before: WireRelationship | null; after: WireRelationship | null }[];
 };
+/** `batch_ids`: the staged batches the caller's ops came from, in order. */
+export type ValidateModelParams = { batch_ids: number[] };
+export type PreviewCommitParams = { base_rev: number; batch_ids: number[]; strict: boolean };
 export type ViewPlacementParams = { view_id: string; element_ids: string[] };
 export type SetArtifactsParams = { artifacts: WireArtifact[] };
 export type PutArtifactsParams = {
