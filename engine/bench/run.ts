@@ -66,6 +66,8 @@ const ROWS = {
 	scanRare: "search q='sensor'",
 	criteria: "criteria scan (property contains 'a'): every element matched",
 	criteriaLongest: '  its longest step',
+	navigation: 'navigation, untyped scope, one relationship hop (Owns): every id sorted',
+	navigationLongest: '  its longest step',
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -115,6 +117,18 @@ const criteriaScan = (model: Model) =>
 			target: 'element',
 			criteria: [{ type: 'property', name: 'name', op: 'contains', value: 'a' }],
 			limit: 100
+		}
+	);
+
+const navigation = (model: Model) =>
+	EVALUATIONS['evaluateNavigation']!(
+		{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements() },
+		{
+			definition: {
+				kind: 'path',
+				start: { kind: 'scope' },
+				steps: [{ kind: 'relationship', relationship_type: 'Owns' }]
+			}
 		}
 	);
 
@@ -289,6 +303,7 @@ async function pass(): Promise<void> {
 	stepped('scan', 'scanLongest', search(workingCopy.model, 'a'));
 	stepped('scanRare', null, search(workingCopy.model, 'sensor'));
 	stepped('criteria', 'criteriaLongest', criteriaScan(workingCopy.model));
+	stepped('navigation', 'navigationLongest', navigation(workingCopy.model));
 	counts = `${count(header.elements)} elements, ${count(header.relationships)} relationships`;
 	// Weighed before the document is read: the last text a regular expression
 	// ran over stays reachable, and further down that is the whole document.

@@ -28,6 +28,50 @@ export { elementLine, modelLines, relationshipLine } from './model/lines.ts';
 export { Model, type ModelOptions } from './model/model.ts';
 export { displayName, nameOf } from './model/naming.ts';
 export { ElementRec, RelRec, type Props } from './model/records.ts';
+export {
+	DEFAULT_LIMITS,
+	evaluateNavigationCore,
+	evaluateSteps,
+	Meter,
+	NavKeyError,
+	NavValueError,
+	PropertyValue,
+	type ChainNode,
+	type ChainResult,
+	type EvalLimits,
+	type ScalarValue
+} from './navigation/evaluate.ts';
+export {
+	navigationHasScript,
+	NavigationResolveError,
+	RefCycleError,
+	RefNotFoundError,
+	resolveRefs,
+	type Fetch
+} from './navigation/resolve.ts';
+export {
+	evaluateNavigation,
+	navigationFetch,
+	type ChainPageOut,
+	type ChainValueOut
+} from './navigation/route.ts';
+export {
+	MAX_STEPS,
+	readNavigation,
+	type FilterStep,
+	type NavigationDefinition,
+	type NavigationStep,
+	type Operand,
+	type PathNavigation,
+	type PropertyStep,
+	type RelationshipStep,
+	type RowStart,
+	type Scope,
+	type ScriptStep,
+	type SetExpression,
+	type SetOp,
+	type SnippetSource
+} from './navigation/schema.ts';
 export { applyBatch, type ApplyOptions } from './ops/apply.ts';
 export { OpError } from './ops/errors.ts';
 export { remapOp } from './ops/remap.ts';

@@ -385,7 +385,7 @@ def _hop_property(
     resolved.extend(
         sorted(
             item
-            for item in set(candidates)
+            for item in set(item for item in candidates if isinstance(item, str))
             if isinstance(item, str) and item in model.elements
         )
     )

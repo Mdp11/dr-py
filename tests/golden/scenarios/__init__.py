@@ -11,6 +11,7 @@ from . import (  # noqa: F401
     model_indexes,
     model_load,
     model_mutations,
+    nav_eval,
     ops_batches,
     ops_churn,
     ops_recreate,

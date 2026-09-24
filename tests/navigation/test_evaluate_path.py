@@ -485,6 +485,18 @@ def test_property_hop_skips_dangling_reference() -> None:
     assert not any(chain[0] == ids["s2"] for chain in result.chains)
 
 
+def test_property_hop_skips_unhashable_items() -> None:
+    # A list holding a dict or a list hops through its string items only.
+    model, ids = _ref_fixture()
+    model.set_property(
+        model.elements[ids["s1"]],
+        "peers",
+        [{"id": ids["s2"]}, ids["smart"], [ids["s2"]]],
+    )
+    result = evaluate(model.metamodel, model, _prop_path(steps=[_prop("peers")]))
+    assert result.chains == [(ids["s1"], ids["smart"])]
+
+
 def test_property_hop_honors_exclude_visited() -> None:
     model, ids = _ref_fixture()
     model.set_property(model.elements[ids["s2"]], "peers", [ids["s2"]])

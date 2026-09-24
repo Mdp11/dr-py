@@ -8,6 +8,7 @@ import {
 	dumpIndexes,
 	elementLine,
 	ElementRec,
+	evaluateNavigationCore,
 	EVALUATIONS,
 	isSteps,
 	Metamodel,
@@ -15,23 +16,33 @@ import {
 	ModelError,
 	modelDigest,
 	modelLines,
+	NavKeyError,
+	NavValueError,
+	navigationFetch,
+	navigationHasScript,
 	OpError,
 	parseJson,
+	PyFloat,
 	pyDumps,
 	ReadError,
+	readNavigation,
 	READS,
 	relationshipLine,
 	RelRec,
+	resolveRefs,
 	shuffleAdjacency,
 	verifyConsistent,
 	ViewPlacements,
 	type BatchResult,
+	type ChainNode,
+	type CommittedArtifact,
 	type ElementImage,
 	type MetamodelDoc,
 	type ModelOp,
 	type ModelOptions,
 	type ReadParams,
 	type RelImage,
+	type StagedArtifact,
 	type Value
 } from '../../src/index.ts';
 import { untag, type Tagged } from './load.ts';
@@ -84,12 +95,21 @@ export type Step = Partial<Observed> & {
 	params?: ReadParams;
 	/** `view` / `drop_view`: the view whose placements `result` lists / to forget. */
 	view_id?: string;
-	result: string | string[] | BatchOutcome | object | null;
+	/** `artifacts`: the project's committed artifacts from here on, by id. */
+	artifacts?: { [id: string]: { kind: string; payload: Tagged } };
+	/** `navigate` / `has_script`: a definition whose refs resolve against those artifacts. */
+	definition?: unknown;
+	limits?: { max_visited: number; max_chains: number };
+	row_elements?: string[] | null;
+	result: string | string[] | BatchOutcome | object | boolean | null;
 	error: StepError | null;
 	unchanged?: true;
 };
 
 export type StepsFixture = { metamodel: MetamodelDoc; steps: Step[] };
+
+/** Where a replay puts the artifacts of an `artifacts` step. */
+export type ArtifactLayer = 'committed' | 'staged';
 
 /** A small seeded generator (mulberry32): test runs must be repeatable. */
 export function seededRandom(seed: number): () => number {
@@ -168,9 +188,50 @@ export function outcome(model: Model, res: BatchResult): BatchOutcome {
 	};
 }
 
-/** What a replay carries from step to step: the batches that landed, by step index, and the views. */
+/**
+ * What a replay carries from step to step: the batches that landed, by step
+ * index, the views, and the artifacts with the layer they go into.
+ */
 type Landed = Map<number, BatchResult>;
-type Carried = { landed: Landed; placements: ViewPlacements };
+type Carried = {
+	landed: Landed;
+	placements: ViewPlacements;
+	artifacts: ArtifactSet;
+	layer: ArtifactLayer;
+};
+
+/** `tests/golden/tagged.py`'s rendering of a scalar. */
+function tag(value: Value): Tagged {
+	if (value === null) return { t: 'null' };
+	if (typeof value === 'boolean') return { t: 'bool', v: value };
+	if (typeof value === 'number' || typeof value === 'bigint') return { t: 'int', v: String(value) };
+	if (typeof value === 'string') return { t: 'str', v: value };
+	if (value instanceof PyFloat) {
+		const view = new DataView(new ArrayBuffer(8));
+		view.setFloat64(0, value.value);
+		return { t: 'float', hex: view.getBigUint64(0).toString(16).padStart(16, '0') };
+	}
+	throw new Error('a chain holds no container');
+}
+
+const recordedNode = (node: ChainNode) =>
+	typeof node === 'string' ? node : { value: tag(node.value) };
+
+function setArtifacts({ artifacts, layer }: Carried, step: Step): void {
+	const entries = Object.entries(step.artifacts!).map(([id, { kind, payload }]) => ({
+		id,
+		kind,
+		name: id,
+		payload: untag(payload) as CommittedArtifact['payload']
+	}));
+	if (layer === 'committed') {
+		artifacts.setCommitted(entries.map((entry) => ({ ...entry, rev: 1 })));
+		artifacts.setStaged([]);
+	} else {
+		artifacts.setCommitted([]);
+		artifacts.setStaged(entries.map((entry): StagedArtifact => ({ op: 'create', ...entry })));
+	}
+}
 
 /**
  * `mint` stands in for the oracle's `SequentialIdGenerator`. A failed call
@@ -182,8 +243,9 @@ function apply(
 	step: Step,
 	index: number,
 	mint: () => string,
-	{ landed, placements }: Carried
+	carried: Carried
 ): unknown {
+	const { landed, placements, artifacts } = carried;
 	switch (step.do) {
 		case 'read': {
 			const method = step.method!;
@@ -193,11 +255,33 @@ function apply(
 				return isSteps(out) ? drain(out) : out;
 			}
 			if (Object.hasOwn(EVALUATIONS, method)) {
-				return drain(
-					EVALUATIONS[method]!({ model, artifacts: new ArtifactSet(), placements }, params)
-				);
+				return drain(EVALUATIONS[method]!({ model, artifacts, placements }, params));
 			}
 			throw new Error(`no read ${method}`);
+		}
+		case 'artifacts':
+			setArtifacts(carried, step);
+			return null;
+		case 'navigate': {
+			const fetch = navigationFetch(artifacts);
+			const defn = resolveRefs(readNavigation(step.definition, 'definition'), fetch);
+			const { max_visited, max_chains } = step.limits!;
+			const result = evaluateNavigationCore(
+				model.metamodel,
+				model,
+				defn,
+				{ maxVisited: max_visited, maxChains: max_chains },
+				step.row_elements ?? null
+			);
+			return {
+				step_types: result.stepTypes,
+				chains: result.chains.map((chain) => chain.map(recordedNode)),
+				truncated: result.truncated
+			};
+		}
+		case 'has_script': {
+			const fetch = navigationFetch(artifacts);
+			return navigationHasScript(resolveRefs(readNavigation(step.definition, 'definition'), fetch));
 		}
 		case 'view':
 			placements.set(step.view_id!, step.result as string[]);
@@ -247,15 +331,29 @@ function apply(
 	throw new Error(`unknown step ${step.do}`);
 }
 
+/** Steps whose result is compared as JSON text. */
+const READ_LIKE = new Set(['read', 'navigate', 'has_script']);
+
 /**
  * Replays a recorded scenario through the engine, comparing every outcome and
  * the whole observable state after every step. Adjacency is shuffled before
- * each step and the indexes are checked against a rebuild after it.
+ * each step and the indexes are checked against a rebuild after it. The
+ * artifacts of an `artifacts` step go into `layer`: committed, or staged as
+ * creates under their own ids over an empty committed layer.
  */
-export function replaySteps(fixture: StepsFixture, options: ModelOptions = {}): void {
+export function replaySteps(
+	fixture: StepsFixture,
+	options: ModelOptions = {},
+	layer: ArtifactLayer = 'committed'
+): void {
 	const model = new Model(Metamodel.fromJSON(fixture.metamodel), options);
 	const random = seededRandom(20260918);
-	const carried: Carried = { landed: new Map(), placements: new ViewPlacements() };
+	const carried: Carried = {
+		landed: new Map(),
+		placements: new ViewPlacements(),
+		artifacts: new ArtifactSet(),
+		layer
+	};
 	let minted = 0;
 	let last = observe(model);
 	fixture.steps.forEach((step, index) => {
@@ -272,12 +370,15 @@ export function replaySteps(fixture: StepsFixture, options: ModelOptions = {}): 
 			else if (caught instanceof OpError) error = { status: caught.status, detail: caught.detail };
 			else if (caught instanceof ReadError) {
 				error = { status: caught.status, detail: caught.detail };
-			} else throw caught;
+			} else if (caught instanceof NavKeyError) error = { kind: 'key', message: caught.id };
+			else if (caught instanceof NavValueError) error = { kind: 'value', message: caught.message };
+			else throw caught;
 		}
 		expect(error, label).toEqual(step.error);
 		// A body is compared as text: values and key order at once.
-		if (step.do === 'read') expect(JSON.stringify(result), label).toBe(JSON.stringify(step.result));
-		else expect(result, label).toEqual(step.result);
+		if (READ_LIKE.has(step.do)) {
+			expect(JSON.stringify(result), label).toBe(JSON.stringify(step.result));
+		} else expect(result, label).toEqual(step.result);
 		const seen = observe(model);
 		if (step.unchanged) {
 			expect(seen, label).toEqual(last);
