@@ -10,7 +10,8 @@ owner on 2026-09-25.
 the server as fallback (MR-1) and the dev shadow clean in e2e (MR-2). Table pages see staged
 model edits and staged artifacts (tables, navigations), which today they never do: the server
 reads committed state only and nothing re-pages on a staged edit. CN-3's table budget — the
-112k-row table at M, build + sort + every cell ≤ 3 s — is measured in Node and in Chromium and
+spike's table over M's 112k-row scope, capped at the route's 50,000 rows (the owner's limit),
+build + sort + every cell ≤ 3 s — is measured in Node and in Chromium and
 reported to the owner before anything is optimized.
 
 ## Non-goals
@@ -172,7 +173,7 @@ or artifact buffer); a 501-refused call is never compared.
 - **Gate.** `engine-bench-data` also writes a 112k-row table definition over `large.model.json`
   shaped as CN-4's spike row (`spikes/client_engine/bench_engine.py:35-62`: scope rows over the
   nine big types; element, property `name`, a navigation column over `SystemContainsComponent`;
-  sorted by name). `engine-bench` and `engine-bench-browser` gain a table row — total (build +
+  sorted by name), evaluated at the default 50,000-row cap. `engine-bench` and `engine-bench-browser` gain a table row — total (build +
   sort + every cell ≤ 3 s), first page, a cached page, the longest step against the 16 ms
   chunk; the browser also a rules row (R19). `engine-parity-large` compares the table's cells
   with the oracle's (`scripts/` writes `large.table.json`). Medians of 3 (CN-5), reported to
