@@ -11,7 +11,7 @@ are promoted into this directory.
 | — | Program design (this directory) | approved 2026-09-18 |
 | A | Engine foundation | done — every golden fixture passes in Node; at M the engine opens a snapshot in 2.3 s of CN-3's 3 s and one open replica holds 231 MB of heap *(measured, Node 22, `pixi run engine-bench`, 2026-09-18)* |
 | B | Replica and frontend seam | done — six plans built (exact server state: `K-30` and `K-31` closed, digest and `prev_rev` on every delta carrier; v2 snapshot writers, the snapshot descriptor, blob and tail routes, `X-Metamodel-Id`; the engine service: CT-4 dispatcher and scheduler, the index build and the digest check in steps, the five read surfaces ported and held to the read routes by fixture — at M the open is 2.4 s, the longest step 12 ms *(measured, Node 22, 2026-09-21)*; the sandbox site and the shell: the replica opens from the cache or the network and follows by delta, tail and re-bootstrap, with a status-bar indicator as its only face; the transport swap: the five read surfaces default to the engine, each behind its own `dr.surfaces` switch with the server as fallback, the workspace waits for `ready` behind an honest progress bar, a tab whose engine could not start shows a dismissible fallback notice and reads from the server, a replica that cannot be rebuilt blocks the workspace behind a `Retry` overlay that keeps uncommitted edits, and shadow comparison holds the engine to the server in dev and in every e2e spec; in the browser (`engine-bench-browser`) the cold open is 1.84 s, the worker's heap 115 MB, the longest slice bounded from outside 51 ms (27 ms once parsing runs), `stage` of 1,000 ops 58 ms and `unstage` 52 ms through the port *(measured, Chromium 148, WSL2, 2026-09-22)*; the forked store: the model store forks into `model-legacy.svelte.ts` and `model-engine.svelte.ts` over a shared half, `staging` defaults to `engine`, the user's edits stage in the replica's working copy and mirror for the synchronous readers, the legacy store stays reachable behind `staging: legacy`, the DiffDrawer gains a conflicts section, and a divergence-recovery test is green) |
-| C | Evaluation | in progress — plan 2 of 8 built (artifacts in the engine, navigation and criteria search served by it; live issues and the model half of the commit preview served by the engine) |
+| C | Evaluation | in progress — plan 3 of 8 built (custom rules evaluated in the engine, staged rule sets included) |
 | D | Scripts in the browser | not started |
 | E | Headless host | not started |
 | F | Thin server and deploy | not started |
@@ -127,15 +127,17 @@ fixture, until F (MR-1), whether or not the feature freeze has lifted.
 frozen for behaviour from C's plan 2 on, and are the exception to the rule above: they stay
 frozen past that plan's flip of `issues` to the engine, and until F a feature there lands on
 both sides with a fixture step, as a bug does, since the server pipeline still decides strict
-commits (`attributable_issues`) and `validation_error_count`, and answers every fallback: a
-rules project, an unsupported pattern, `staging: legacy` and the window before the replica's
+commits (`attributable_issues`) and `validation_error_count`, and answers every fallback: an
+unreadable rule set, an unsupported pattern, `staging: legacy` and the window before the replica's
 first sweep. Two bugs landed on both sides under this rule during C's plan 2: `value_conforms`'s
 float branch, which raised `TypeError` on an unhashable value and now answers `False`, and the
 dirty hooks, which missed a key relationship's endpoints' uniqueness groups on connect,
 disconnect and cascade delete until 6b3cdb6. The second widens strict mode's `base_dirty`:
 connecting, disconnecting or cascading away a relationship named in a key now makes the keyed
 ends' old and new group members attributable, so a strict commit that used to land can get a
-422, as a key-property edit already could. Areas not yet being ported carry on as normal.
+422, as a key-property edit already could. `core/validation/rules` and `api/rules.py` are frozen
+from C's plan 3 on, which ports them: a bug or a feature there lands on both sides with a fixture
+until F. Areas not yet being ported carry on as normal.
 
 **MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
 engine on a small fixture model. The route-level mock tests of its server path stay while

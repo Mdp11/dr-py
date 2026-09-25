@@ -118,6 +118,7 @@ callable only by the thin server. Inputs arrive in the request; isolation per CN
 | Tables, navigation, validation, rules, exports, compare/apply-CR, save/download, metamodel diff, history Compare | Engine |
 | `WasmScriptRunner`, script sweeps, server cell cache, `pending` cells, 202 retries | Script workers + engine cell cache; synchronous results |
 | `GET /model/issues`, `GET /model/status`, `POST /commits/preview` | Engine-local |
+| Rule YAML parsed and compiled in the server session (`core/validation/rules`) | The server parses rule YAML for the engine (`POST /rules/parse`, `rules` on `GET /artifacts/payloads`); the engine compiles and evaluates (AD-33) |
 | Commits, locks, feed, journal | Stay; the commit check reads head rows |
 | Snapshots encoded from the live model | Snapshots streamed from head rows |
 | Auth, tenancy, admin, projects; artifact, view and metamodel rows | Unchanged |

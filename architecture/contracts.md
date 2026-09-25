@@ -139,7 +139,13 @@ event     {event, …}                     engine → client, unsolicited
   {artifacts}`, `putArtifacts {changed, deleted_ids, staged?}`, `setStagedArtifacts
   {entries}` — the project's committed artifacts with their payloads, and the staged entries
   mirrored from the frontend's buffer (AD-30). The shell remembers both and sends them again
-  to every new worker, before any read; the engine keeps them across `close` and `open`.
+  to every new worker, before any read; the engine keeps them across `close` and `open`. A
+  `validation_rules` artifact carries its YAML's parse in `rules`, the body of `POST
+  /rules/parse` — `{ok, document, errors}`, `document` the rule set as JSON text, read by the
+  engine's exact parser (AD-33): a committed one `RulesParse | null` (`null` or absent: no
+  parse), a staged create or update with a payload `RulesParse | 'pending'` (`'pending'` while
+  the shell's parse is out: the set stands on the last parse the engine received for that id,
+  and a create with none contributes nothing yet).
 - A result is the HTTP response body of the `lib/api` function the method is named after.
   Evaluations are reads over the working copy: `searchModel {target, criteria, limit,
   offset}` and `evaluateNavigation {definition | artifact_id, row_element_id, limit,
@@ -147,12 +153,17 @@ event     {event, …}                     engine → client, unsolicited
   step. `getModelIssues {}`, `validateModel {batch_ids}` and `previewCommit {base_rev,
   batch_ids, strict}` (the model half only — artifact, view and `metamodel.move_node` ops
   stay a server call the shell merges in) answer the one live issue store over the working
-  copy (AD-32).
+  copy (AD-32), custom rules included — the committed and staged rule sets for the list and
+  `validateModel`, the committed ones for the preview, as the server's preview does (AD-33).
+  The three wait for a rule-set change to be applied: an artifact method that changes the
+  rules starts a background rescan of the rules' population, and an `issues` call that
+  arrives meanwhile is answered once it ends.
 - An evaluation, or an `issues` call, the engine must not answer is refused with 501 before any
   work: `reaches a script` (a navigation that reaches a configured script step), `reaches an
   unsupported pattern` (a criterion or facet pattern the engine cannot match exactly as
-  Python's `re` does) or `reaches validation rules` (an `issues` call while any
-  `validation_rules` artifact resolves — until rules are ported). The client answers exactly
+  Python's `re` does) or `reaches unreadable rules` (an `issues` call while a rule set in
+  either layer arrived without its parse, or with a document the engine's reader refuses —
+  only a shell and a sandbox bundle of different versions send one). The client answers exactly
   those three from the server — a navigation's page marked with the reason (AD-31), an
   `issues` call's answer unmarked, exactly as the server always gave it; any other 501 is an
   error.
@@ -173,9 +184,9 @@ event     {event, …}                     engine → client, unsolicited
   changed something. `structural` says the element set or a relationship may have moved;
   `staged_version` moves whenever the staged batches do; `issues_version` moves whenever the
   issue store's content changes or `rev` does (origins can change under it), and whenever a
-  `validation_rules` artifact starts or stops resolving among the artifacts the engine holds
-  (the 501 `reaches validation rules` comes or goes). The sweep and an artifact call post it
-  bare — no ids, `structural: false` — the sweep at most once per slice.
+  rule set changes — its compile, `rules_status` or the tags may have moved, or the 501
+  `reaches unreadable rules` come or go. The sweep, the rules rescan and an artifact call post
+  it bare — no ids, `structural: false` — the sweep and the rescan at most once per slice.
 - Every request is cancellable. The engine client rejects a cancelled call with an
   `AbortError`, as an aborted `fetch` does.
 
@@ -201,7 +212,8 @@ event     {event, …}                     engine → client, unsolicited
    instead.*
 5. The working copy covers the **model** and **artifact** families — the inputs of
    evaluation. The artifact family is the committed payloads the shell hands in plus the
-   staged entries mirrored from the frontend's buffer; references resolve against it,
+   staged entries mirrored from the frontend's buffer, each rule set carrying its parse
+   (`rules`) beside its payload; references resolve against it,
    staged artifacts included. View and metamodel staged buffers stay in the frontend
    (AD-30). A call that reaches a script reads committed state on the server until scripts
    run in the browser (AD-31).

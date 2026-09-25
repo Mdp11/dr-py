@@ -300,7 +300,42 @@ sweep completing and the artifact follower's first load (until then the engine c
 `validation_rules` artifact exists); a re-sweep (`validateModel`) does not close the gate again
 — it closes only when the replica leaves `ready` or a new replica starts, and stays open across
 a frozen replica. Before the gate opens, for a project the engine cannot validate (an
-unsupported facet pattern, a `validation_rules` artifact), or when the engine answers 409
+unsupported facet pattern, a rule set it cannot read), or when the engine answers 409
 (`stale staged batches`, `stale base_rev`, `replica is not ready`), the whole request falls back
-to the server, as CT-4's refusals say; a `validation_rules` artifact that starts or stops
-resolving moves `issues_version`, so the list is fetched again from the side that now answers.
+to the server, as CT-4's refusals say; a rule-set change moves `issues_version`, so the list is
+fetched again from the side that now answers. The gate no longer reads rules as unsupported:
+since AD-33 the engine compiles and evaluates the project's rule sets itself, and only an
+unreadable one sends an `issues` call to the server.
+
+## AD-33 · Rules reach the engine as parsed text; the engine compiles, reaches and evaluates them
+**Decision.** The server parses a rule set's YAML (`POST /rules/parse`, and `rules` beside each
+rule set on `GET /artifacts/payloads`) and hands the engine the validated rule set as JSON text,
+which the engine reads with its exact parser and a strict reader (CT-4). The engine compiles,
+reaches and evaluates the rules itself, as the seventh validator of its live issue store
+(AD-32): a committed compile over the committed rule sets and a working one over the staged
+overlay laid on them, each in name order, then id.
+**Why.** AD-22 extended: YAML, the grammar and its caps stay on the server, which must check a
+rule set at commit anyway; a second parser would be a second grammar to keep identical. Exactness
+(AD-26): a document sent as a string keeps `1.0` and integers past 2^53, which the shell's
+`JSON.parse` would lose, and a rule's operand compares exactly. The store sees staged rule sets:
+the panel and Validate show a staged rule set's issues before any commit, which the server,
+knowing only committed rules, cannot.
+**Rejected.** A YAML parser in the engine: the second grammar. A server compile per candidate:
+a round trip per staged change, and the compile apart from the reach and evaluation that read
+it. The document as a JSON object: the shell's parse and the engine's re-serialization lose
+exactness. Answering reads mid-rescan: a half-rescanned store mixes two rule sets' verdicts.
+**Consequences.** Two compiles and the rescan: a rule-set change swaps both at once and queues
+the population of every rule whose identity changed, old and new working set together, for a
+background rescan in the sweep's slot; `getModelIssues`, `validateModel` and `previewCommit`
+wait for it to end, and typing never does. Reach joins every dirty set — stage, rebase,
+coalesced edit, probe — on the state after the transition, with the working rules' paths; its
+premise (an owner whose verdict flips has a path that first meets an element that moved, and
+every dirty set holds such elements) is held by seeded invariants against a fresh sweep. The
+preview reads the committed rules, as the server's does, until `K-65`: on a strict project a
+staged rule set that fails on existing elements shows in the panel and in Validate, the preview
+says the batch lands, and the commit answers 422. Origins stay exact across a staged rule set:
+the probe also validates the changed rules' population on both states, and caches the part the
+staged model edits do not reach per `rev` and rule-set change, so a keystroke does not pay it
+again. A document the engine's reader refuses, or a rule set that arrives without its parse, is
+refused (`reaches unreadable rules`), never guessed at; `rules_status` comes from the working
+compile, which with nothing staged equals the server's.

@@ -27,15 +27,16 @@ conformance half (`routes/commits.py::preview_commit`'s model half,
 `api/rules.py::attributable_issues`) are frozen for behaviour from C's plan 2 on and stay so
 past its flip of `issues` to the engine: until F a feature there lands on both sides with a
 fixture step, as a bug does, since the server pipeline still decides strict commits
-(`attributable_issues`) and `validation_error_count`, and answers every fallback: a rules
-project, an unsupported pattern, `staging: legacy` and the window before the replica's first
+(`attributable_issues`) and `validation_error_count`, and answers every fallback: an unreadable
+rule set, an unsupported pattern, `staging: legacy` and the window before the replica's first
 sweep. Two bugs landed on both sides under it: `value_conforms`'s float branch, which raised
 `TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed a
 key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete until
 6b3cdb6. The second widens strict mode's `base_dirty`: connecting, disconnecting or cascading
 away a relationship named in a key now makes the keyed ends' old and new group members
 attributable, so a strict commit that used to land can get a 422, as a key-property edit already
-could.
+could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on, which ports them
+to the engine: a bug or a feature there lands on both sides with a fixture until F.
 
 ---
 
@@ -56,7 +57,7 @@ read surfaces default to the engine behind per-surface switches, the wait for `r
 fallback notice and the retry overlay, shadow comparison in dev and e2e, and the browser
 benchmark; the forked store — `staging` defaults to `engine`, the user's edits stage in the
 replica's working copy, the legacy store lives behind `staging: legacy`) — and watches `K-32`.
-C (evaluation) is in progress, C's plan 2 of 8 built: the engine holds the project's artifacts —
+C (evaluation) is in progress, C's plan 3 of 8 built: the engine holds the project's artifacts —
 the committed payloads the shell fetches and follows, the staged entries mirrored from the
 frontend's buffer (AD-30) — and serves navigation and criteria search over the working copy,
 by default (`navigation` and `criteria` surfaces, held to the routes by fixture and by shadow
@@ -66,8 +67,15 @@ C's plan 2 adds one live issue store over the working copy (AD-32) — a resumab
 sweep, incremental revalidation inside every transition, origins by a rewind probe — and
 serves `getModelIssues`, `validateModel` and the model half of `previewCommit` from it, behind
 the `issues` surface, which now defaults to the engine too, gated on the replica's first sweep
-completing and the artifact follower's first load; a call that also reaches validation rules is refused with 501 and answered by the
-server (plan 3 deletes this refusal once rules are ported).
+completing and the artifact follower's first load. C's plan 3 evaluates custom validation rules in
+that store (AD-33): the server parses each rule set's YAML for the engine (`POST /rules/parse`,
+`rules` beside each rule set on `GET /artifacts/payloads`), and the engine compiles, reaches and
+evaluates the committed and the staged rule sets, so a staged rule set's issues show in the Issues
+panel and in Validate before any commit, while the preview reads the committed rules, as the
+server's does (`K-65`); an `issues` call waits for a rule-set change's rescan, and only a rule set
+the engine cannot read sends it to the server (501 `reaches unreadable rules`). The plan also
+lists the sweep in steps (`K-59`), caches uniqueness key texts in the engine (`K-60`'s engine
+half) and tags the panel's list without a probe per keystroke (`K-61`).
 The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op applier from
 the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
@@ -83,19 +91,21 @@ script reach) is frozen from C's first plan on too. `core/validation` minus `rul
 frozen for behaviour from C's plan 2 on and stay so past its flip of `issues` to the engine:
 until F a feature there lands on both sides with a fixture step, since the server pipeline still
 decides strict commits (`attributable_issues`) and `validation_error_count`, and answers every
-fallback: a rules project, an unsupported pattern, `staging: legacy` and the window before the
-replica's first sweep. A bug fixed during a port, or found in any of these areas afterward,
-lands on both sides with a fixture until F (MR-1), whether or not the feature freeze has lifted
-for that area. Two landed by C's plan 2: `value_conforms`'s float branch, which raised
+fallback: an unreadable rule set, an unsupported pattern, `staging: legacy` and the window
+before the replica's first sweep. A bug fixed during a port, or found in any of these areas
+afterward, lands on both sides with a fixture until F (MR-1), whether or not the feature freeze
+has lifted for that area. Two landed by C's plan 2: `value_conforms`'s float branch, which raised
 `TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed a
 key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete until
 6b3cdb6. The second widens strict mode's `base_dirty`: connecting, disconnecting or cascading
 away a relationship named in a key now makes the keyed ends' old and new group members
 attributable, so a strict commit that used to land can get a 422, as a key-property edit already
-could.
+could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on: a bug or a
+feature there lands on both sides with a fixture until F.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
-`K-63`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-63`, `K-65`, `K-66`, `K-67`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
+`BACKLOG.md`.
 Size: very large.
 
 ---
@@ -423,7 +433,12 @@ slice target; not optimized. In the browser, before the set was added: the longe
 sweeping, the check ended, 9.7 → 9.7 ms; the longest during the check, the sweep's first steps
 among them, 12 → 11, and its moment 26 → 151 ms after ready. The walk ends as long as each
 step's 8,192 skips outrun what lands behind the iterator between two steps: a probe's or a
-rebase's replay appends one entry per staged create, a re-sort the whole map again.
+rebase's replay appends one entry per staged create, a re-sort the whole map again. With the
+set, in the browser (a cloud container, Chromium 141's headless shell, so not comparable to the
+rows above, 2026-09-25): the longest slice while sweeping 13 ms (16, 13, 11), inside CN-3's
+16 ms chunk, the digest check's 15, and the sweep 1,219 ms from ready to seeded. The browser
+bench holds no rule set; in Node on the same machine the sweep with the bench's five rules is
+1,163 ms, its longest step after the first 12 (16, 12, 11).
 
 ### K-60 · The server walks a whole duplicate group per call · `open` · perf · *2026-09-24*
 The Python core keeps each element's key (`uniq_key_of`) and groups by it, so it serializes
@@ -475,6 +490,43 @@ made lists its issues past the cut: `counts` has them, the panel does not. The s
 truncates its own store's order, a different subset, which is why the dev shadow skips a
 `truncated` list's `issues`. Fix direction: when truncating, list the probe's `S` owners (the
 staged edits' dirty set) first, then the rest in store order.
+
+### K-65 · The preview ignores a staged rule set that a strict commit enforces · `open` · *2026-09-25*
+`POST /commits/preview` validates with the session's COMMITTED rules: a staged rules artifact
+contributes nothing to it (`routes/commits.py:595-598`), while `POST /commits` recompiles with
+the batch's rule sets before it validates and its strict gate counts every `rule:` issue in
+the scope. So on a strict project, staging a rule set that fails on existing elements, the
+preview says the batch lands and the commit answers 422. The engine mirrors the server's
+preview on purpose (AD-33), so both sides give the same wrong promise. Fix on both sides with a
+fixture: the preview compiles the staged rule sets, and its dirty set adds their
+`applies_population` over the old and new compiles, as the commit's does.
+
+### K-66 · A peer's rules commit reaches the engine as a model delta first, its payload after · `open` · *2026-09-25*
+The commit's delta arrives on the feed and is applied at once; the changed rule set arrives
+later, through the follower's payload fetch for the artifact event. In between, the engine
+answers issue reads with the old rules while the server already has the new ones, so a
+dev-shadow `[shadow]` line is possible in that window. An own commit whose parses have landed
+does not open it: the follower puts the rule sets the commit created or updated into the
+engine's committed layer when the commit is announced. One committed while its parse is still
+out does — Save, then commit within one `/rules/parse` round trip: the rule set goes into
+neither layer until the payload refresh lands, so a create shows no rules and an update keeps
+the old committed ones meanwhile — and so does a follower load in flight at the commit, whose
+answer drops the committed rule set until the refresh. A single user can reach both, an e2e
+too. `/model/undo` of a rules commit reaches the engine as a peer's does (a delta, then an
+artifact event). Fix direction: hold the delta until the payloads of the artifacts its commit
+names have landed, or have the feed's commit event carry the changed rule sets' parses.
+
+### K-67 · A YAML scalar PyYAML cannot construct escapes `parse_rule_set` as a bare `ValueError` · `open` · *2026-09-25*
+`core/validation/rules/schema.py::parse_rule_set` catches `yaml.YAMLError` and `RecursionError`
+only, but PyYAML's constructors raise a plain `ValueError` for a scalar their tag cannot build
+— an impossible date (`x: 2001-13-45`), an explicit `!!float abc`. It escapes unwrapped, the
+app's `ValueError` handler answers 422, and `POST /rules/lint` and `POST /rules/parse` both 422
+where they should answer 200 with `ok: false` and one error. The rules editor reads lint's 422
+as "Rule set is too large to lint" (the only 422 it expects) and blocks Save; a staged rule set
+holding such YAML (saved inside the lint's debounce) stays `'pending'` in the engine, since the
+shell counts a failed parse as not landed and asks again only at the next staged push. Fix:
+catch the constructor's `ValueError` in `parse_rule_set` as a `RuleSetError`, with a test on both
+routes; a bug fix, so the freeze allows it, and the engine, which reads no YAML, does not change.
 
 ---
 
