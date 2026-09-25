@@ -1321,12 +1321,12 @@ highlighting, type search, panel TOC/collapse) join this list — unit-covered, 
 exercises pick a file → Preview diff → Replace → commit, or the multi-CR ordering and its 409,
 against a real backend.
 
-### T-8 · `script-embedding.spec.ts` sorts through a header button that is gone · `open` · *2026-09-24*
-"script column: ref snippet computes values + error cell + sorts" (`frontend/e2e/script-embedding.spec.ts:92`)
-waits at `:205` for a `Sort by` button in the table header; sorting moved into the definition
-and `Table/ColumnSortDialog.svelte` with `edc60f2` (2026-09-15), so the test times out. It
-fails the same way before and after the eval-navigation branch. Drive the sort through the
-dialog.
+### T-8 · `script-embedding.spec.ts` sorts through a header button that is gone · `done` (2026-09-25, feat/eval-tables) · *2026-09-24*
+"script column: ref snippet computes values + error cell + sorts" waited at `:205` for a
+`Sort by` button in the table header; sorting moved into the definition and
+`Table/ColumnSortDialog.svelte` with `edc60f2` (2026-09-15). Fixed: the test now drives
+`table-sort-button` → `sort-toggle-{i}` → `sort-dir-{i}` (▲, flipped to ▼ if the first order
+ties the unsorted one) → `sort-done`, matching the dialog.
 
 ### T-9 · `snippet-flow.spec.ts` looks for a sidebar search hit as a button · `open` · *2026-09-24*
 "stage a snippet edit and commit it" (`frontend/e2e/snippet-flow.spec.ts:70`) expects

@@ -104,7 +104,8 @@ could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on:
 feature there lands on both sides with a fixture until F.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
-`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
+`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `C-21`, `C-22`, `C-23` in
+this file; `K-33`, `K-34`, `T-10` in
 `BACKLOG.md`.
 Size: very large.
 
@@ -548,6 +549,41 @@ holds one has no defined order. C's plan 4 ports the table sort mirroring all th
 fixing them on one side (`Number(bigint)` rounds the same way and throws past `Number.MAX_VALUE`),
 and keeps `NaN` atoms out of the golden fixtures. Fix direction, on both sides with a fixture:
 compare ints exactly, never through a float, and sort a `NaN` atom last.
+
+### K-70 · On the server path, an artifact-only commit that changes a referenced navigation does not re-page an open table · `open` · *2026-09-25*
+`table-editor.svelte.ts`'s `onCommitEvent` handler only calls `handleTableModelRevChanged` when
+the feed event's `scope` includes `'model'`, on the premise that "an artifact-only commit
+changes no model content and invalidates none of the server's cell-evaluation caches." True for
+the server's per-cell cache, but not for a table whose row source or a column navigates through
+a REFERENCED navigation artifact (a `ref`, not an inline definition): a peer's commit that only
+updates that navigation changes what the table computes, yet moves no `model_rev`, so an open
+table on the `tables` surface's server fallback (a script column, say) keeps showing the old
+rows until an unrelated model-moving commit or a reload happens to refresh it. C's plan 4 does
+not reach this: on the engine, `followTables`/`scheduleTablesRepage` re-page on any
+`artifacts_version` move through `changed` (D9/D11), independent of `rev`, so only the server
+path (a table the engine has refused) has the gap. Fix direction: re-page on an artifact-scoped
+commit too, or narrow the server path's cache invalidation to cover a referenced artifact's
+navigation ids the way the engine's `ArtifactSet` already does.
+
+### K-71 · Installing rules is one unsliced `now` unit · `open` · perf · *2026-09-25*
+`Service.moveArtifacts` compiles the working and committed rule sets and, on a change, calls
+`live.setRules`, which walks `appliesPopulation` over every element of the old and new rules'
+applicable types to seed the rescan queue — all inline, in the one `now` call `moveArtifacts`
+runs from (fact 13: artifact methods never slice). Measured at M in the browser (2026-09-25,
+Chromium 141): rules install + rescan 372 ms, its longest slice 50 ms — over CN-3's 16 ms step
+budget, on a project whose rules happen to change on load or on a peer's rules commit. Not
+optimized here; the owner schedules it.
+
+### K-72 · An expand column reading an element-typed property that holds a dict or list item raises · `open` · *2026-09-25*
+`core/table/cells.py::_element_ids` (reached by `expand_property_values` for an `expand`
+element-typed property column) does `dict.fromkeys(items)` to de-duplicate the reached
+references; `items` is the raw property value itself, or its list unwrapped. A property
+declared element-typed whose actual value is a `dict`, or a list holding a `dict` or another
+`list`, hits `dict.fromkeys` with an unhashable key and raises a bare `TypeError`, which the
+route turns into a 500. The engine's `elementIds` (`table/rows.ts`) mirrors it on purpose,
+throwing the same `unhashable type: 'list'`/`'dict'` message — an unrefused 500 there too. Fix
+direction, on both sides with a fixture: treat a non-string, non-id item as a plain value
+(through `cellText`) instead of assuming every element-typed item is an id.
 
 ---
 

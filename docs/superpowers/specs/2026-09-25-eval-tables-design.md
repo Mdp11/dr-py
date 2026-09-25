@@ -96,8 +96,9 @@ a model-lane `scan`, answers `TablePageOut` with the server's key order: `column
   later pages are O(page). A scan restarted by the scheduler builds again from nothing; no
   memo outlives one `run()`.
 - **Errors** as the route: `NavKeyError`/`NavValueError`/`ValueError` paths → 422 with the
-  Python text; an unknown artifact → 422 `unknown artifact <id>`; no replica → 409
-  `replica is not ready` (the shell falls back).
+  Python text; an unknown artifact → 422 `unknown artifact <id>`. A call before the replica is
+  `ready` is not refused: `evaluateTable` is an `evaluate` method (CT-4), held in arrival order
+  until the replica reaches `ready`, like every other evaluation.
 
 ## 2. `artifacts_version` and `changed`
 

@@ -196,18 +196,32 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	expect(valueCells.length, JSON.stringify(cells)).toBeGreaterThanOrEqual(1);
 	expect(valueCells.some((c) => /^SoftwareSystem-\d{3}$/.test(c.text))).toBeTruthy();
 
-	// --- 4. Sort by the script column: no crash, and the row order changes
-	// (the errored row's position moves relative to its neighbors either way,
-	// even though the rest were already near-sorted by fixture insertion
-	// order — see the CODE comment above). The settings dialog was already
-	// saved-and-closed above, so nothing is intercepting the grid. ----------
+	// --- 4. Sort by the script column through the Sorting dialog (the header
+	// `Sort by` button is gone — `table-sort-button` opens `column-sort-dialog`,
+	// whose `sort-toggle-{i}` ticks a column on, `sort-dir-{i}` shows/flips its
+	// direction, and `sort-done` closes it): no crash, and the row order
+	// changes (the errored row's position moves relative to its neighbors
+	// either way, even though the rest were already near-sorted by fixture
+	// insertion order — see the CODE comment above). The settings dialog was
+	// already saved-and-closed above, so nothing is intercepting the grid. ---
 	const before = cells.map((c) => c.text);
-	const sortButton = columnHeaders.nth(scriptColIndex).getByRole('button', { name: /^Sort by/ });
-	await sortButton.click();
-	await expect(sortButton).toContainText(/[▲▼]/, { timeout: 10_000 });
+	const sortDialog = page.getByTestId('column-sort-dialog');
+	const sortDir = sortDialog.getByTestId(`sort-dir-${scriptColIndex}`);
+	await tabpanel.getByTestId('table-sort-button').click();
+	await expect(sortDialog).toBeVisible();
+	await sortDialog.getByTestId(`sort-toggle-${scriptColIndex}`).click();
+	await expect(sortDir).toContainText('▲', { timeout: 10_000 }); // newly toggled: ascending
+	await sortDialog.getByTestId('sort-done').click();
+	await expect(sortDialog).toBeHidden();
 	let after = (await readColumnCells(rows, scriptColIndex)).map((c) => c.text);
 	if (JSON.stringify(after) === JSON.stringify(before)) {
-		await sortButton.click(); // toggle direction — still shouldn't match
+		// Toggle direction — still shouldn't match.
+		await tabpanel.getByTestId('table-sort-button').click();
+		await expect(sortDialog).toBeVisible();
+		await sortDir.click();
+		await expect(sortDir).toContainText('▼', { timeout: 10_000 });
+		await sortDialog.getByTestId('sort-done').click();
+		await expect(sortDialog).toBeHidden();
 		after = (await readColumnCells(rows, scriptColIndex)).map((c) => c.text);
 	}
 	expect(after).not.toEqual(before);

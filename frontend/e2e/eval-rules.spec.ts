@@ -24,6 +24,7 @@ import { openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';
 import { changeBadge, commitStaged } from './helpers/commit';
 import { expectReplicaReady } from './helpers/replica';
+import { headRev, peer, projectIdByName } from './helpers/api-client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = join(__dirname, '..', '..', 'examples');
@@ -72,6 +73,46 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeEach(async ({ page }) => {
 	page.on('dialog', (dialog) => void dialog.accept());
+});
+
+/** The rule set name the running test is using, for `afterEach` to sweep up —
+ * set as soon as the test picks its name, cleared by nothing (each test
+ * generates its own timestamped name). */
+let cleanupRuleSet: string | undefined;
+
+/**
+ * Regardless of pass/fail: strict mode back off (a failure between :226 and
+ * :234 below would otherwise leave it on for `strict-mode.spec.ts`'s next
+ * test — the suite is serial, one worker) and the rule set this test made,
+ * deleted, in case an assertion failed before the test's own cleanup ran.
+ * Both go through the owner peer client, disposed after.
+ */
+test.afterEach(async ({ playwright }) => {
+	const api = await peer(playwright);
+	try {
+		const projectId = await projectIdByName(api, 'Smart City');
+		await api.patch(`projects/${projectId}/settings`, { data: { strict_mode: false } });
+		if (cleanupRuleSet !== undefined) {
+			const list = await api.get(`projects/${projectId}/artifacts?kind=validation_rules`);
+			expect(list.ok(), await list.text()).toBeTruthy();
+			const items = ((await list.json()) as { items: { id: string; name: string }[] }).items;
+			const leftover = items.find((a) => a.name === cleanupRuleSet);
+			if (leftover) {
+				const commit = await api.post(`projects/${projectId}/commits`, {
+					data: {
+						base_rev: await headRev(api, projectId),
+						ops: [{ kind: 'delete_artifact', id: leftover.id }],
+						message: 'e2e cleanup: leftover rule set',
+						lock_tokens: [],
+						ack_errors: true
+					}
+				});
+				expect(commit.ok(), await commit.text()).toBeTruthy();
+			}
+		}
+	} finally {
+		await api.dispose();
+	}
 });
 
 function nameInput(page: Page): Locator {
@@ -142,6 +183,7 @@ test('a staged rule set lists its issues and its drifted rule before any commit,
 }) => {
 	test.setTimeout(240_000);
 	const setName = `e2e-rules-${Date.now()}`;
+	cleanupRuleSet = setName;
 
 	await openDefaultProject(page);
 	await loadFiles(page, {

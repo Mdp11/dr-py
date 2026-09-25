@@ -24,7 +24,7 @@ and generated locally.
 |---|---|
 | Open, from inflated bytes to indexed replica | ≤ 3 s |
 | Cold open — no cached snapshot; fetch + inflate + open on the CN-4 setup | ≤ 3 s · ≤ 6 s at L |
-| 112k-row table, build + sort + every cell | ≤ 3 s |
+| Table over M's 112k-row scope, capped at 50,000 rows: build + sort + every cell | ≤ 3 s |
 | 10,000 Python script cells | ≤ 2 s |
 | Engine heap, steady state (Pyodide excluded) | ≤ 400 MB |
 | Engine chunk between yields — evaluation and background work (system.md rule 4) | ≤ 16 ms |
