@@ -1,0 +1,2046 @@
+# Review package: 80f6de1..HEAD
+
+## Commits
+2851f483 List the sweep in steps, cache key texts and tag the panel incrementally
+
+## Files changed
+ BACKLOG-ENGINE.md                      |  55 +++++---
+ engine/README.md                       |  10 +-
+ engine/bench/run.ts                    |  57 +++++++-
+ engine/src/debug/verify-consistent.ts  |  16 ++-
+ engine/src/model/indexes.ts            |  47 +++++--
+ engine/src/model/model.ts              |  13 ++
+ engine/src/service/service.ts          |  20 ++-
+ engine/src/validation/bodies.ts        |  15 +--
+ engine/src/validation/live.ts          | 210 +++++++++++++++++++++++++-----
+ engine/test/model/indexes.test.ts      | 138 ++++++++++++++++++++
+ engine/test/validation/helpers.ts      |  24 ++++
+ engine/test/validation/live.test.ts    | 230 ++++++++++++++++++++++++++++++++-
+ engine/test/working/invariants.test.ts |  11 +-
+ frontend/bench/main.ts                 |  25 ++--
+ 14 files changed, 770 insertions(+), 101 deletions(-)
+
+## Diff
+diff --git a/BACKLOG-ENGINE.md b/BACKLOG-ENGINE.md
+index 1848c84c..da105163 100644
+--- a/BACKLOG-ENGINE.md
++++ b/BACKLOG-ENGINE.md
+@@ -87,23 +87,22 @@ fallback: a rules project, an unsupported pattern, `staging: legacy` and the win
+ replica's first sweep. A bug fixed during a port, or found in any of these areas afterward,
+ lands on both sides with a fixture until F (MR-1), whether or not the feature freeze has lifted
+ for that area. Two landed by C's plan 2: `value_conforms`'s float branch, which raised
+ `TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed a
+ key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete until
+ 6b3cdb6. The second widens strict mode's `base_dirty`: connecting, disconnecting or cascading
+ away a relationship named in a key now makes the keyed ends' old and new group members
+ attributable, so a strict commit that used to land can get a 422, as a key-property edit already
+ could.
+ Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
+-`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-59`, `K-60`,
+-`K-61`, `K-62`, `K-63`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
+-`BACKLOG.md`.
++`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
++`K-63`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+ Size: very large.
+ 
+ ---
+ 
+ ## 2. Diagnosed issues
+ 
+ ### K-29 · The bulk loader accepts a relationship whose id an element already holds · `open` · *2026-09-18*
+ `routes/_snapshot.py`'s guards keep one `seen_ids` set per kind, so `build_model_from_dicts`
+ loads an element and a relationship sharing an id, while the mutation boundary
+ (`restore_element` / `restore_relationship`) refuses exactly that and the state digest (CT-3)
+@@ -392,51 +391,75 @@ like a manual edit, through the ops route's hooks — the same ones 6b3cdb6 fixe
+ `tests/validation/test_dirty.py:246` and `tests/validation/rules/test_reach.py:363` still call
+ it, and it still adds a relationship's endpoints' uniqueness groups only when the relationship
+ type is containment (the same gap `after_connect`/`before_disconnect`/`after_element_delete`
+ had before 6b3cdb6 fixed them for staged ops), so any caller that appeared would leave the
+ issue store holding a duplicate that is gone, or missing one that appeared, after a CR built
+ through it applies. Fix direction: fix it — mirror 6b3cdb6's hooks, adding the keyed other
+ ends' old and new groups for every added, modified or deleted relationship of a keyed type —
+ or delete it with its two tests. Either way, `dirty.py:41-44`'s module docstring, which still
+ calls it the CR-apply path, goes with it.
+ 
+-### K-59 · The sweep's first step, and a browser slice while sweeping, exceed their budgets · `open` · perf · *2026-09-24*
++### K-59 · The sweep's first step, and a browser slice while sweeping, exceed their budgets · `done` · perf · *2026-09-24*
+ `LiveIssues.sweepSteps()`'s first step lists every element id then every relationship id in
+ one unit: 13 ms at M (`pixi run engine-bench`, 15 ms on the first pass) against the
+ scheduler's 8 ms slice target, and up to 8 ms of other units can precede it in the same slice.
+ In the browser (`pixi run engine-bench-browser`) the longest slice while sweeping is 21 ms
+ (21, 23, 21), past CN-3's 16 ms chunk; the bench's two ping loops overlap
+ (`frontend/bench/main.ts:521-532`), so that row may also count digest-check slices. Every
+ other sweep step is 5.8 ms at most once warm (11 ms on the first pass). The whole sweep, ready
+ to seeded, is 767 ms in the browser. Fix direction: list the ids in steps too (an
+ `ord`-ordered walk that resumes), then separate the bench's two ping loops before reading the
+ row again. Not optimized yet: the owner's rule is to report before optimizing.
+-
+-### K-60 · `uniqGroupOf` re-keys every member of a duplicate group per call · `open` · perf · *2026-09-24*
+-`model/indexes.ts:92-97` derives `uniqKey` (a `pyKey` serialization) for every member of the
+-bucket on each call, so a scoped run that reaches a large duplicate group pays O(group)
+-serializations once per run: a 20,000-member group costs about 27 ms per sweep step, and a
+-stage, unstage or probe that touches one of its members pays the same inside its transition.
+-The Python core (`core/validation`'s uniqueness over `model.indexes`) has the same shape, so
+-the server pays it too. Fix direction: cache the key per member (or the group per bucket)
+-across calls, invalidated at the mutation boundary; on both sides, with a fixture step, while
+-the freeze holds.
+-
+-### K-61 · Every issue refetch with a large staged set runs a probe · `open` · perf · *2026-09-24*
++**Done:** the sweep walks the model in steps: its first step only takes the total, and each
++later one pulls the next 512 entities from a live iterator per map, taken again when a re-sort
++moves `Model.orderEpoch` and then passing over what it had handed out, at most 16 × 512 a step;
++`done` stays short of the total until the last step. The bench's two ping loops are separated:
++one until the digest check ends, a second from then until the sweep ends. At M (`pixi run
++engine-bench`, medians of three passes, before → after): the first step 13 → 0.0 ms, the longest
++step after it 6.0 → 6.3, the whole sweep 843 → 841. In the browser: the longest slice while
++sweeping, the check ended, 9.7 → 9.7 ms; the longest during the check, the sweep's first steps
++among them, 12 → 11, and its moment 26 → 151 ms after ready. A re-sort sends the walk back over
++what it passed, 8,192 entities a step: re-sorts more frequent than that would keep a sweep from
++its end.
++
++### K-60 · The server walks a whole duplicate group per call · `open` · perf · *2026-09-24*
++The Python core keeps each element's key (`uniq_key_of`) and groups by it, so it serializes
++nothing per call, but it still walks the whole group: the scoped uniqueness validator finds
++each scoped member's primary by a `min` over the group (`validators/uniqueness.py:54`), so a
++scoped run over k members of a group pays O(k × group) — the server's sweep once per chunk —
++and `DirtyCollector.add_uniqueness_group_of` sorts the group on every call, so a commit or an
++ops batch that touches one member pays O(group log group) inside its write. Fix direction: the
++primary once per group and run, as the engine's validator finds it; `core/validation` and
++`core/model` are frozen (MR-3), so it waits for the freeze to lift.
++**Done for the engine,** whose `uniqGroupOf` re-keyed every member of the bucket on each call
++(a `pyKey` serialization each, about 27 ms per sweep step over a 20,000-member group):
++`IndexSet.keyText` caches the text of every member of a bucket of two or more, written as an
++element is filed and refreshed by every rekey, and `verifyConsistent` holds it to a rebuild's.
++At M, with 20,000 copies of one element staged: `uniqGroupOf` over the group 23 → 1.7 ms, the
++sweep's longest step 39 → 7.9 ms and the sweep 1,956 → 989 ms; a 1,000-op stage through the
++store 82 → 54 ms (with the bench rules' reach 81 → 58).
++
++### K-61 · Every issue refetch with a large staged set runs a probe · `done` · perf · *2026-09-24*
+ `getModelIssues` and `previewCommit` read `origins()`, which probes (rewinds and replays every
+ staged batch) once per `(rev, stagedVersion)`. Each staged edit moves `stagedVersion` and
+ then `issues_version`, so each 300 ms refetch probes again: about 27 ms per 100 staged batches
+ at M, inside a model-lane transition that holds reads behind it. Fine at today's staged sizes;
+ a user holding thousands of batches pays it on every keystroke's refetch. Fix direction: a
+ probe incremental in the batches that moved (the top ones, for an edit that coalesces or
+ stages on top), or a refetch that skips the probe when only the list, not the origins, is
+ read.
++**Done:** `getModelIssues` tags through `LiveIssues.tagScope()`: the owners an exact probe
++dirtied, with their committed issues, then every id a transition dirties, with the store's
++issues from just before it revalidates them, kept while the store is seeded and settled, the
++rev and the rule sets hold and the working rules are the committed ones; otherwise it probes.
++`previewCommit` and `validateModel` keep the exact probe. At M, the list read after a keystroke
++merged into the latest staged batch: 100 batches 7.6 → 0.0 ms, 1,000 batches 258 → 0.0 ms.
+ 
+ ### K-62 · A server issue list fetched with the gate closed can land after the engine's · `open` · *2026-09-24*
+ `refetchIssues()` issued while the `issues` gate was closed goes to `GET /model/issues`; when
+ the gate opens meanwhile, the refetch it schedules is answered by the engine, and a slower
+ server answer can land after it. `adoptIssues` accepts an equal `model_rev` (the server's own
+ sweep grows its store without moving the rev), so the server's committed list overwrites the
+ engine's — a staged edit's `uncommitted` issues vanish — until the next `issues_version` move
+ refetches. Fix direction: a refetch sequence number in `model-shared.svelte.ts`, adopting only
+ the answer of the latest refetch asked.
+ 
+diff --git a/engine/README.md b/engine/README.md
+index e7339f5c..0fd798e1 100644
+--- a/engine/README.md
++++ b/engine/README.md
+@@ -1,29 +1,29 @@
+ # Engine (`engine/`)
+ 
+ Commands: `pixi run engine-install | engine-test | engine-check | golden-fixtures | engine-bench-data | engine-bench | engine-parity-large | engine-bench-browser` (tasks set cwd = `engine`).
+ 
+ The TypeScript engine of the target architecture (`architecture/`), built bottom-up. It holds the **value layer, the metamodel, the record-graph store, the op applier, the working copy, the snapshot reader and the state digest** — all of sub-project A — and, from sub-project B, the **steps layer, the read surfaces and the service** (the CT-4 dispatcher and its scheduler), and, from sub-project C, the **artifact set and the first evaluations** (criteria search and navigation, which the app's `criteria` and `navigation` surfaces take from the engine by default) and the **built-in validators** with the **custom rules** (`src/rules/`); the server never imports it, and the frontend imports its TYPES only — the sandbox's worker (`sandbox/README.md`) is its one host, and the frontend's shell (`frontend/src/lib/engine/README.md`) talks to it over a `MessagePort`.
+ 
+ - **`src/` has no DOM and no Node dependency** (`lib: ["ES2023"]`, `types: []`), is erasable-syntax-only, and imports with `.ts` specifiers, so a worker, Node and vitest all run the sources unbuilt.
+ - **`src/value/`** reproduces the Python core's view of JSON values. A `number` is always a Python `int`; every `float` is a `PyFloat`; integers past 2^53 are `bigint`. `parseJson`/`parseLines` route each line: a regex pre-scan sends lines holding a float, a 16-digit integer, a bare `Infinity`/`NaN` or `-0` to the exact parser and everything else to native `JSON.parse`, many lines to a call — which is why `parseLines` refuses a line holding more than one document instead of shifting every document after it. `parseExact(text, {floatConstants: true})` reads a bare `NaN` / `Infinity` / `-Infinity` as the `PyFloat` it stands for (as `json.loads` does) instead of keeping its text, which a rule-set document needs to tell `Infinity` from `"Infinity"`. `pyDumps` is `json.dumps(ensure_ascii=False, allow_nan=False)` byte for byte (`{allowNan: true}`: `allow_nan=True`, the non-finite floats written bare); `pyContains` is `needle in haystack` over code points; `pyFloatRepr`, `pyRepr`, `cmpCodePoint` and `pyKey` mirror `repr(float)`, `repr(str)`, `str` ordering and the uniqueness signature (`_frozen`). `pyLower` / `pyStrip` are `str.lower()` / `str.strip()` of Python 3.14 whatever Unicode version the host carries (Node's `toLowerCase()` differs at 28 code points, `trim()` from `strip()` at 6): generated tables — `lower-tables.ts`, written by `pixi run golden-fixtures`, never by hand — plus Python's final-sigma rule, held to `py_lower.json` over every code point. The search criteria's "JavaScript" coercion is Python's `str()` and `float()` in fact (`core/search/criteria.py`'s `_js_str` / `_to_number`): `jsStr` mirrors `_js_str`, `pyReprValue` the `repr` it and `_to_number` fall back to for a container, and `toNumber` `_to_number` itself, throwing `PyOverflowError` where `float(int)` raises `OverflowError`. `pyFloatOf` is `float(str)`: every Unicode decimal digit and `str.isspace()` code point past ASCII becomes its ASCII digit or a space — an ASCII code point, control characters included, is untouched, so `float()`'s own leading/trailing strip (the six classic whitespace characters, narrower than `str.isspace()`) still governs what parses — before the grammar runs and underscores are dropped for `Number()`. Its digits and whitespace come from `digit-tables.ts` (generated, `tests/golden/coerce_tables.py`), held to `py_coerce.json`. `translatePyRegex(pattern, mode)` is `re.search` / `re.fullmatch` (a criterion's `matches`, a pattern facet) in JavaScript. It answers `ok` with a `test(subject)`, `invalid` where `re.compile` certainly refuses the pattern (which then never matches), or `unsupported` with a one-line reason: anything outside its subset is `unsupported`, never guessed, and its caller sends the call to the server. A recursive-descent parser that follows `re`'s own over code points emits a `u`-flag `RegExp` source (never a string replacement over the pattern) and leaves nothing to JavaScript's semantics: the dot is `[^\n]`, `^` / `$` / `\A` / `\Z` / `\z` are look-arounds (`$` also before a final newline), `\w \d \s` and their negations are explicit classes, `\b` / `\B` look-arounds over the `\w` class, named groups become numbered ones, the whole is anchored natively (`^[\s\S]*?(?:…)` for a search, `^(?:…)$` for a full match) because V8 also tries a `u` search between the halves of a surrogate pair, where every look-around sees no neighbour, and IGNORECASE is not JavaScript's `i` (its folding differs at `İ` and `ı`, and with the host's Unicode) but `re`'s: a cased literal, or a class holding a cased member, becomes the class of every code point whose `re` lowercase is a member's lowercase or one of `re`'s extra equivalents. Outside the subset: flags other than leading `(?i)` / `(?m)` / `(?s)`, possessive quantifiers, atomic, conditional and comment groups, `\N{…}`, a class Python reads as a future set operation or a nested set, a look-behind of varying width, a repeated look-around, a back-reference under `(?i)`, in a look-behind or to a group that may not have matched (JavaScript matches an unset group as empty, `re` fails it), a class past U+FFFF under `(?i)`, a count past 65535 and a translation past 4 MiB. The classes and the case data come from `regex-tables.ts` (generated, `tests/golden/regex_tables.py`, which also asserts the two properties of `re`'s case data the translation leans on); the answers are held to `py_regex.json`, patterns × subjects in both modes plus a few patterns against every code point. Translations are memoized per pattern and mode, the 256 used last.
+ - **`src/metamodel/`** — `Metamodel.fromJSON(doc)` takes the `GET /metamodel` document (validated by the server; the engine parses no YAML and runs no `check_metamodel`) and builds every lookup of the Python `Metamodel` up front, under the same names in camelCase. `Multiplicity.parse` mirrors the Python parser, error text included.
+-- **`src/model/`** is the store: one fixed-shape record per entity (`ElementRec`, `RelRec`), adjacency and containment parents as arrays of record references ON the records, and `Model` as the single mutation boundary, with the Python method set and error texts (`ModelError.kind` is `key` / `value` for `KeyError` / `ValueError`). The engine never mints ids: `createElement(typeName, id)` and `connect(…, id)` take them. Entity order is state: each record has an `ord`, `elements()` / `relationships()` iterate in it, and a record restored WITH its old `ord` goes back to its old place (the Python core always appends). `IndexSet` keeps by-type, uniqueness, references and root order; adjacency order is unspecified, so anything observable sorts by code point. Uniqueness buckets are keyed by a 53-bit hash of the `pyKey` text and confirmed by the exact text at query time. `loadElement` / `loadRelationship` + `rebuildIndexes()` are the bulk path — non-strict like `build_model_from_dicts(strict=False)`, the same refusal texts as `SnapshotError` — and stricter than Python in two places: an id shared by an element and a relationship, and an array-index property key (`"0"`) at any depth, which a JavaScript object cannot keep in insertion order. Committed state enters through `insertElement` / `insertRelationship` / `overwrite`, which check no type (a model may hold one its metamodel no longer has) and take `rev` as given instead of counting it.
++- **`src/model/`** is the store: one fixed-shape record per entity (`ElementRec`, `RelRec`), adjacency and containment parents as arrays of record references ON the records, and `Model` as the single mutation boundary, with the Python method set and error texts (`ModelError.kind` is `key` / `value` for `KeyError` / `ValueError`). The engine never mints ids: `createElement(typeName, id)` and `connect(…, id)` take them. Entity order is state: each record has an `ord`, `elements()` / `relationships()` iterate in it, and a record restored WITH its old `ord` goes back to its old place (the Python core always appends). `IndexSet` keeps by-type, uniqueness, references and root order; adjacency order is unspecified, so anything observable sorts by code point. Uniqueness buckets are keyed by a 53-bit hash of the `pyKey` text and confirmed by the exact text at query time; that text is kept (`keyText`) for every member of a bucket of two or more, written as the element is filed and refreshed by every rekey — even one that keeps its hash, as a property edit, a re-parenting or a key relationship can move the text without moving the hash — so `uniqKey`, `uniqGroupOf` and the uniqueness validator read a group without serializing its members again, and `verifyConsistent` holds the texts to a rebuild's. Entity order has an epoch, `orderEpoch`, moved by every re-sort of either map: a `Map` iterator that crosses a re-sort reads the whole map again, so whatever holds one across a write must take a fresh one when the epoch moves. `loadElement` / `loadRelationship` + `rebuildIndexes()` are the bulk path — non-strict like `build_model_from_dicts(strict=False)`, the same refusal texts as `SnapshotError` — and stricter than Python in two places: an id shared by an element and a relationship, and an array-index property key (`"0"`) at any depth, which a JavaScript object cannot keep in insertion order. Committed state enters through `insertElement` / `insertRelationship` / `overwrite`, which check no type (a model may hold one its metamodel no longer has) and take `rev` as given instead of counting it.
+ - **`src/ops/`** — `applyBatch(model, ops, {restore, idFor, dirty})` is the port of `routes/ops.py::_apply_batch` for the six model ops, in the wire's shapes: temp ids resolved through `idMap` in ids, ends and property values (strings and lists, never inside a dict), `id` hints, restore mode, merge patches, the cascade read before it happens, first-touch changed/deleted sets kept disjoint, the `recreated` sets (the changed ids the batch deleted and created again), inverse units and `inverseOps()`. `idFor` decides a created entity's id and is the identity by default — a staged entity lives under its temp id. `dirty`, a `DirtyCollector`, receives the dirty-set hooks exactly where `_apply_one` fires them (see `src/validation/`); without one the applier fires nothing. A refusal is an `OpError {status: 422, detail}` with the server's text, the quote-stripping of `_error_detail` included (`No element with id 'ghost`). One deliberate difference from the server: an op carrying an array-index property key at any depth is refused. A refused batch leaves NO trace on either side — `rewind(model, result)` puts every touched entity back from its first-touch before-image (properties, `rev`, `ord`), and the server's `_rollback` is its port. A record that outlived the batch still has the `ord` of its image and is rewritten in place; anything else under a touched id is removed and the image inserted at its old `ord`.
+ - **`src/working/`** — `WorkingCopy` owns a `Model`, the committed `rev` and state digest, the staged batches and the committed image of every entity they touched (`committedElement` / `committedRelationship`, `isStaged`). `stage(ops)` applies a batch in place; `unstage('all' | {batch} | {entity, incident?})` and `applyDelta(delta, own?)` are both a rebase — rewind every staged batch newest first, change committed state, replay in order — and a batch that no longer applies is parked in `conflicts()`, never dropped. `applyDelta` follows CT-2 (`applied` / `duplicate` / `gap`), reads the delta's entities with the bulk loader's checks before anything moves, writes them through the committed-state methods (the ids the delta names in `recreated_*` go out first and are appended, as the server's dict did; a record that would change its type or its ends WITHOUT being named does not fit), folds the digest per entity and sets `diverged` on a mismatch or on a delta that does not fit; for the user's own commit it drops the committed batches and rewrites their temp ids in the rest (`remapOp`). The `(id, rev)` hash is the engine's own (`src/snapshot/`); the `entityHash` option replaces it, which is how tests hold it to another implementation. `verifyDigest()` recomputes the digest from every COMMITTED entity — the model's, with the committed image standing in wherever a staged batch has been — and sets `diverged` on a mismatch. Every operation returns a change set, whose `structural` says it may have moved more than properties: it names a relationship, a deleted element or an element absent when it began (presence is asked BEFORE a rebase rewinds, of the ids the staged batches and the change name), or it is an own commit with minted ids — a rebase over-reports what it touched, so a staged relationship makes any peer delta structural, which costs a refresh, never a stale tree. `stage(ops, {coalesce: true})` with ONE property update merges it into the first staged (never parked) op of the same kind and id — `{...old, ...new}`, later keys win, a `null` stays — as a new batch object under the old batch id: the op is first tried alone on top (a bad patch throws and cannot park the batch holding the earlier edits) and rewound, then the working copy rebases FROM that batch (the private `rebase` takes the index to start at; the batches below it stand). Never in place: an update bumps `rev` once per key and re-places a deleted key, so an in-place merge would leave a state no replay of `staged()` gives (key order and `rev`s included), which the seeded invariants hold. `adoptStaged(batches)` replays batches under their ids on a working copy with nothing staged or parked (a re-bootstrap carrying the user's edits), parks the refused ones and numbers the next batch past the highest id. A `duplicate` delta that comes with `own` naming a batch still staged or parked drops them all the same — the echo of a commit can arrive before its answer. `stagedVersion` moves whenever `staged()` or `conflicts()` come to hold other batch objects (a stage, a merge, a remap, a drop, a park; a plain rebase keeps them). `stagedDiff()` pairs each committed image with the record now, in first-touch order; `touchedIds(from?)` lists the ids those images hold, elements then relationships, or the ids the batches from `from` on touched; `mergePoint(op)` is the index of the batch a coalesced `op` would merge into (the batches from there on are the ones it replays), -1 when it would stage alone. `stage(ops, {dirty})` hands a `DirtyCollector` the hooks of the batch applied, or of a merge's trial run on top. `probeStaged(onWorking, onCommitted)` looks at the staged batches as the server's preview takes them and leaves no trace: it rewinds them, replays them in order into one collector — the dirty set `S` of the staged ops applied as ONE batch to committed state — and runs `onWorking(S)`; rewinds again and runs `onCommitted()` on committed state; replays once more. The entries and committed images are rebuilt from the replays, never through the staged-version tracking, so `staged()`, `conflicts()`, `stagedVersion`, the entity lines, the index dump and the digest are all as they were; parked batches are not touched. A replay cannot be refused (the same batches on the same states); if one ever is, it throws a plain `Error` with the staged batches put back, or, when even that fails, still listed and the replica diverged, for the next replica to adopt them.
+ - **`src/snapshot/`** — `sha256` is FIPS 180-4 in plain TypeScript, synchronous because the digest fold cannot wait for WebCrypto; `entityHash(id, rev)` is CT-3's hash (the first 8 bytes over `utf8(id) ‖ 0x00 ‖ ascii(rev)`, the UTF-8 written by hand, a lone surrogate as U+FFFD), `modelDigest(model)` the port of `state_digest.model_digest`, and both are `WorkingCopy`'s default. `openSnapshot(chunks, metamodel, onProgress?, options?)` reads a `datarover.snapshot/v2` text from inflated bytes cut anywhere and returns `{header, workingCopy}` at the header's `rev` and `state_digest` — adopted, not checked: `verifyDigest()` is the check, whenever the caller chooses. Bytes are decoded by the host's `TextDecoder` (`fatal`, the byte order mark kept so that it fails the format check), reached through a typed `globalThis` lookup in `utf8.ts` because a declared global would collide with the host typings of any project that compiles these sources; `LineSplitter` cuts on LF alone; lines are parsed and loaded 500 at a time through `parseLines`, the first `elements` of them as elements, so the text is never held whole — 500 being the largest batch that stays a short step (at 2,000 the worst batch took 36 ms at M, _measured_). `options.pause` is asked after every loaded batch and every step of the index build (`rebuildIndexSteps`, reported through `options.onIndex`); only a returned promise is awaited, so an open with room left in its slice pays no microtask, and a throw ends the open. The pause sits in the batch loop, not the chunk loop, and a chunk is decoded in pieces of 64 KiB: a snapshot served from a cache arrives as a few large chunks, and awaiting a chunk that is already there resolves in microtasks, which is no yield to the host. Anything that does not start with `{"format":"datarover.snapshot/v2"` is refused at its first bytes. A refusal is a `SnapshotError`: the server's two texts (`snapshot v2 header carries no valid entity counts`, `snapshot v2 holds N entity lines, its header promises E + R` — the count is checked BEFORE the last lines are parsed, which is what gives a cut text the server's answer), the bulk loader's own, or the engine's for what the server's decoder never looks at (`rev`, `state_digest`, the ids, invalid UTF-8, a line that is not one JSON document, named by its number). Like the server's reader it takes a last line without its LF and CRLF line ends.
+ - **`src/steps/`** — a `Steps<T>` is a generator that cuts a long operation into steps of about a millisecond at M, each `yield` saying where it stands (`{done, total}`). Every long operation exists once, in that form, and its synchronous name drains it (`drain`): `IndexSet.rebuild` / `Model.rebuildIndexes` (`rebuildIndexSteps`, 1,024 entity visits a step), `WorkingCopy.verifyDigest` (`verifyDigestSteps`, 2,048 entities a step), `RootOrder.reset` — so no caller of the one-shot forms changed. A steps generator publishes nothing before its last step (`diverged`, the root order), so abandoning one leaves no trace; it holds iterators over the model across its yields, so the model must stay still between two of them, and each user says who keeps it still: the index build runs only while a replica is opening, a scan is protected by the service's queue, and the digest check is dropped and restarted after any transition. `sortedInSlices(items, compare, run = 2048)` is a stable bottom-up merge sort in steps (runs sorted natively, then merge passes into a second buffer, a step every `run` items written; the order `Array.prototype.sort` gives); it costs about twice the native sort and no step over 2 ms at M (_measured_), and serves the root sort of the index build and the hit sort of a search.
+ - **`src/read/`** — the read surfaces, a port of `routes/read.py` (and `routes/elements.py::get_element`) rule for rule. A read is `(model, placements, params)` → the route's HTTP response BODY, in pydantic's field order (`{id, type_name, properties, rev}`, `{items, total}`, …), as a plain call or a `Steps` generator; it reads the model and nothing else. `READS` maps the `lib/api` names (`getElement`, `getElementsBatch`, `listElementsPage`, `listElementRelationships`, `getModelSummary`) to them, and `readScans(method, params)` says which calls run in steps. `toWire` deep-copies a value into plain JSON-able data — a `PyFloat` as its number, a `bigint` as the nearest double, which is what a client's `JSON.parse` of the server's body gives — so nothing of the replica leaves; `readOps` reads ops as the server reads what a client sends: through `JSON.stringify` (an integral double is an `int`, `NaN` `null`, `-0` `0`) and the exact parser, then a shape check whose refusal is a 422 `ops[i]…` in the engine's words. `ViewPlacements` holds the element ids each loaded view places (an unknown, empty or absent view places nothing). An unknown element is the model's `ModelError` (`key`); page bounds (`limit` 1–500, `offset` ≥ 0) and parameter types refuse with `ReadError(422)` in the engine's own texts, because FastAPI, not the route, enforces them and no fixture can hold them — `too many ids: N (max 500)` is the route's own. `getModelSummary` answers `issue_counts: null` and `undo_depth: 0`, `model_rev` being the caller's. The tree (`tree.ts`: `getTreeItemsBatch`, `listContainmentRoots`, `listExcludedRoots`, `listContainmentChildren`): a child belongs to its FIRST containment parent (`parents[0]`, relationship order — a relationship restored under its old id goes last, so it does not win its child back), counts once however many parallel edges hold it, and levels sort by `(displayName, id)`, both by code point; roots come off the maintained root order, the excluded pool is that order minus the ids `ViewPlacements` holds for `view_id` (whatever a view places that is not a root changes nothing) with `total` counted over the whole walk. Search (`search.ts`, `listElementsPage` with a `q` that is not blank) is a full scan in steps — no trigram index (AD-13) — of `searchScore` over every element in state order, 512 a step: the query is `pyLower(pyStrip(q))`; a name (`nameOf`) is lowered with `pyLower` and scored by `nameScore` — exact 1000, prefix 100, word boundary 30, substring 10 — plus `len(query) / len(lowered name)` counted in code points of the LOWERED name (U+0130 lowers to two); the boundary test runs on the lowered name (U+212A lowers to `k`) as an occurrence walk that tries every start, overlapping ones included, which is what the route's regular expression does; then +5 / +2 for the id, +1 for the type (memoized per type), +0.5 per other string property (every `name`-cased key skipped). The additions happen in the route's order, in doubles, so equal scores are equal doubles and nothing is rounded. Hits sort by `(-score, id)`, ids by code point, through `sortedInSlices`; `total` is every hit; nothing is kept between pages (the server keeps nothing either).
+ - **`src/search/`** — a port of `core/search/criteria.py` and of `POST /model/search`. `readCriteria(raw, path)` reads the eight criterion shapes as pydantic reads canonical JSON: `type` required (a group holds leaves only), the defaults filled (`names`, `criteria`, `rel_types` to `[]`, a property's `value` to `""`, `datatype` to `null`), `relTypes` and `rel_types` both taken — the alias winning when both are given — unknown keys ignored, an absent key defaulted but a `null` taken only where the field allows one (`datatype`); what pydantic would coerce (`"3"` or `true` for a count) is a 422 `<path>[i].<key>: …` in the engine's words. `compileCriteria` translates every `matches` pattern, group members included, BEFORE any entity is matched: a pattern `translatePyRegex` answers `unsupported` refuses the whole call with 501 `reaches an unsupported pattern` (the shell then asks the server), one it answers `invalid` never matches, as `_safe_regex` has it. What the host cannot run although Python can is that same 501, mid-scan too, its detail never the source: a `RangeError` — a pattern nested past the translator's stack, or a subject past the backtracking stack of the translated `RegExp` (about 8M code units of `(a)*$`, fewer the more groups it holds) — and V8's `SyntaxError` `Regular expression too large` (a literal of 50,000 `k`, or 40,000 under `(?i)`), which V8 throws on a pattern's first run because it compiles lazily, apart for one-byte and two-byte subjects; `compileCriteria` therefore runs each translation once on `''` and on `'Ā'`, so that it refuses before the first step whatever the model holds. Nothing else is caught. `matchElement` / `matchRelationship` are the matchers line for line: text ops over `jsStr` of the value (missing and `null` are `""`), `contains` over `pyLower` of both and never splitting a surrogate pair (Python's `in` counts code points), numeric ops over `toNumber` — whose `PyOverflowError` for an int past the double range reaches the service as the route's 500 `int too large to convert to float` — with NaN on either side never matching; type names compare exactly (a subtype is not its parent) in `entity_type`, `rel_types`, `connected_to_type` and `endpoint_type`; a relationship count counts a self-loop once; an empty group matches; an element-only criterion on a relationship query, and the reverse, matches. `nameProp` is `name_prop`: a non-empty STRING only (never a list's first entry, unlike `nameOf`), `name` first, then every other `name`-cased key in property order. `searchModel` is the route body: `target` required, `criteria` default `[]`, `limit` 1–500 default 500, `offset` ≥ 0; every entity of the target in state order, criteria ANDed in order (an earlier one that fails keeps a later one from running, as `all()` does), 512 a step; the page is cut after matching and `total` counts every match; the body is `{target, elements, relationships, total}`, the other list empty.
+ - **`src/artifacts/`** — `ArtifactSet`, the project's artifacts in two layers: the committed ones the shell hands in (`setCommitted` replaces the layer, `put(changed, deletedIds)` upserts then removes) and over them the staged overlay mirrored from the frontend's buffer, one entry per id (`setStaged` replaces it). `resolve(id)` answers `{id, kind, name, payload}` or `null`: a staged `delete` hides the id, a staged `create` (under its temp id) is itself, a staged `update` lays its `name` / `payload` — whichever it carries — over the committed artifact and names nothing when none is under it, and otherwise the committed artifact answers; `size` counts the ids that resolve. `readArtifacts` (`WireArtifact`: `{id, kind, name, artifact_rev, payload, rules?}`, unknown keys ignored) and `readStagedArtifacts` (`WireStagedArtifact`: `{op: 'create', id, kind, name, payload, rules?}`, `{op: 'update', id, name?, payload?, rules?}`, `{op: 'delete', id}`) read a list as `readOps` does — `JSON.stringify`, then the exact parser, so a payload's `1` is an `int` and `1.5` a `PyFloat` — and refuse a malformed entry with a 422 `<where>[i].<key>: …` in the engine's words before anything moves. `rules` is a rule set's parse, `POST /rules/parse`'s body read strictly as a `RulesParse` (`{ok: true, document}` or `{ok: false, errors}` with at least one `{message}`; other keys ignored): committed, absent or `null` carries none; staged, it may be `'pending'` while the shell's parse is out. The document text is not parsed here. The set keeps, per rule set, the parse a `'pending'` entry stands on (`lastWorkingParse`): the last one a staged payload brought — an update with no payload records none — or else the committed one, which a committed artifact arriving does not overwrite while a staged payload stands over its id; an entry that stops carrying a payload (a discard) resets it to the committed parse, and an id gone from both layers is forgotten. The set holds what the readers made, never what was handed in, and replaces entries rather than changing them, so a resolved payload stays as it was however the set moves after; it is read, never mutated. The service's set is not tied to a replica: it survives `close` and `open`, as the view placements do.
+ - **`src/navigation/`** — a port of `core/navigation` and of `POST .../artifacts/navigation/evaluate`. `readNavigation(raw, path)` reads a definition as pydantic reads canonical JSON: `kind` required on every definition, start and step, `op` on a set, the defaults filled (`direction` `out`, `types` / `target_types` / `criteria` / `steps` `[]`, `exclude_visited` `true`, a snippet `{}`), unknown keys ignored, criteria through `readCriteria`, and what pydantic checks but nothing uses checked all the same — `schema_version` an int on a path and a set, a path's `name` and every step's `comment` a string or `null` (a set has no `name`: pydantic ignores one), a `true`, `1.0` or `"3"` version refused where pydantic coerces it; the core's own texts where it has them (non-empty `children`, more than 10 steps, an operand without exactly one of `ref` / `definition`, a snippet with both), a 422 `<path>…: …` in the engine's words otherwise. A snippet is not read past its `ref` / `definition`: set or not is all that matters. `resolveRefs(defn, fetch)` inlines every operand's ref depth first — a ref already on the path is `RefCycleError` (`navigation reference cycle through 'x'`), a diamond is fine — and `navigationFetch(artifacts)` is the fetch the route uses: `ArtifactSet.resolve`, so a staged create, update or delete is what a ref sees, and anything but a `navigation` is `RefNotFoundError` (`unknown navigation artifact 'x'`). `navigationHasScript` is true when a script step with a snippet set is anywhere in the resolved tree. `evaluateSteps(mm, model, defn, limits, rowElements, meter?)` is `evaluate.py` line for line in steps: ids sorted by code point (`sortedInSlices` past 1,024), a hop's relationships counted once each (`either` counts a self-loop once) and charged to the budget before any is examined, parallel edges one continuation, a property hop through an element-typed property to the distinct STRING values naming an element (any other item, a dict or a list included, is skipped) and through a scalar one to a `PropertyValue` per scalar item in list order, a script step pruning (one with a snippet never gets here), a fresh budget per set operand, a truncated start set marking the path truncated. A `PropertyValue`'s `key` is `(type, value)`, so `True`, `1` and `1.0` stay three; `bigint` and `number` ints share one. `Meter` counts the units of a whole call — an edge or a property value examined, an element gathered, matched or expanded, a set member combined, a chain collected, an id sorted — and ends a step every 1,024; `evaluateNavigationCore` drains it. The core's `KeyError` (a filter or a property step on an id no element has) is `NavKeyError`, its `ValueError`s (`step_index`, an unbound row) `NavValueError`. `evaluateNavigation` is the route body: exactly one of `definition` / `artifact_id`, `row_element_id`, `limit` 1–500 default 100 and `offset` read first; then the refs resolved and a definition that reaches a script refused with 501 `reaches a script`, before every pattern of the resolved tree is translated inside `evaluateSteps` — so a definition holding both a script step and an unsupported pattern answers `reaches a script` — all before the first step; a page of `TreeItem`s and `{kind: 'value', value}` nodes (`toWire`), `{step_types, chains, total, truncated, warnings: []}`. Its error texts are the route's, quirks included (`C-22`): an unknown `artifact_id` is `unknown navigation artifact n1` without quotes; the evaluator's `KeyError`, which the route's `LookupError` handler catches, is `unknown navigation artifact 'x'`; an unknown row element with no steps reaches the page and is the 404 `x` of a raw `KeyError`.
+ - **`src/evaluate/`** — `EvalContext` (`{model, artifacts, placements}`, `artifacts` an `ArtifactSet`) and `EVALUATIONS`, the evaluations by `lib/api` name (`searchModel`, `evaluateNavigation`). An evaluation is always a `Steps` generator — the service runs it as a model-lane scan, whatever its params — and it reads its params, resolves its artifacts and translates its patterns before its first step, so a refusal (422, 501) happens before any work and leaves nothing behind.
+ - **`src/validation/`** — a port of the Python core's six built-in validators and of its scoped pipeline (`core/validation/`), held to `validation_kinds.json`. `Validators` holds them for one metamodel, in pipeline order — type conformance, multiplicity, facets, endpoint typing, containment, uniqueness — with their memos per type name, so one is built per metamodel and reused; `FacetPatterns` likewise. `validateScoped(model, ids, validators, patterns, rules?)` is `ValidationPipeline.validate(model, Scope(ids))`: each id once, its first occurrence deciding the order; an element through every element hook, a relationship through every relationship hook, an id naming nothing skipped; then every global hook, in validator order; `check` stamped with the validator's name. With `rules` (a `CompiledRules`, below) it is `pipeline_for(compiled)`: a `RulesValidator` runs seventh, in every loop and in the globals. Only scoped runs exist: the full run (`Scope.all()`), which names ONE representative of a containment cycle, is not ported — a scoped run reports every scoped element whose first-parent chain reaches a cycle, those hanging below it included. Every issue is an error; a dangling reference, a second containment parent and a cycle are `structural`, the rest `conformance`. The messages are the core's texts: a value through `repr` (`pyReprValue`); a uniqueness identity through `repr` of the FROZEN value (`pyReprFrozen`: a list as a tuple, a dict as its key-sorted pairs, a missing key as `None`), rendered from the reported element's OWN key — `1`, `1.0` and `True` share a group — with its key relationships' endpoint ids sorted by code point, the group's primary being its member with the least `ord`; a facet bound is a float and renders as one (`5.0`) while the value goes through `str()` (`pyStrNumber`: `100000000000000000000`, `1e+20`); `max_length` counts code points; an enum member must be a string; a `date` is what `datetime.date.fromisoformat` accepts (`pyIsoDate`, CPython's parser over the UTF-8 bytes: `YYYY-MM-DD`, `YYYYMMDD`, `YYYY-Www[-D]`, `YYYYWww[D]`, ASCII digits, the calendar and ISO week 53 checked, and — since the parser never looks for the end — the two bytes past an eight-byte date not read at all, so `20240101xx` passes). Facet patterns are `re.fullmatch` through `translatePyRegex(…, 'fullmatch')`, each translated once and run on `''` and `'Ā'` when `FacetPatterns` is built: a pattern outside the translator's subset, or one the host cannot run (`beyondHost`, shared with the criteria), makes it `unusable`, and testing such a pattern throws `PatternUnusable` — the one way out, never a guessed answer. `wireIssue(i, origin)` is the routes' `IssueOut` (`{severity, message, target_ids, category, check, origin}`), `issueOwner` the first target, `issueKey` the multiset key `(severity, category, check, message, target_ids)`. `DirtyCollector` is `core/validation/dirty.py`'s: an ordered set of ids (`ids` in first-insertion order) with the same hooks under camelCase names — `afterElementCreate`, `before`/`afterElementPropsChange`, `before`/`afterElementDelete` (over the applier's `containmentClosure`), `before`/`afterConnect`, `before`/`afterDisconnect`, `afterRelationshipPropsChange`, `addUniquenessGroupOf` — each adding exactly what the core's adds, every index set sorted by code point; a relationship type named in a uniqueness key (`out:` / `in:`, `keysOn`) re-keys the ends it names, so connecting, disconnecting or cascading it away also brings their old and new groups; fired from `applyBatch`, it collects the dirty set `_finalize` validates, held to `validation_dirty.json` in order. A rebase has no hook to fire, so `addNeighbourhood(model, ids, into)` over-approximates: per id, an element adds itself, its uniqueness group, its referencers, each outgoing relationship with its target and each incoming one with its source (each set sorted); a relationship itself, its ends and, for containment, its target's group; an id naming nothing itself — taken on the states before and after, it covers every entity whose verdict inputs moved. `IssueStore` is `ValidationState`: issues by owner, owners in insertion order; `replace(dirty, issues)` drops every dirty owner and files the new issues, an owner returning last, refuses an issue owned outside `dirty`, and says whether any owner's issues now differ (an owner that only moved does not count); `counts()` is kept as the store changes, severities in the order a walk of the store meets them. `storeListBody(store, rev, rulesStatus, tagOf?)` is `GET /model/issues`'s body over it — the first 5,000 issues in store order, `counts` exact, `truncated`, and the `rules_status` given, which `rulesStatusBody(compiled)` builds from a compile as the route does (`total`, `skipped` with `artifact_id, set_name, rule, reason`, `eval_errors`) — held with the store to `validation_steps.json`.
+-  `LiveIssues(wc, {seed?, sweepStep?, rules?})` (`live.ts`) keeps an `IssueStore` over a working copy's WORKING state; nothing else may write to the working copy while it wraps it. It holds two compiles, `rules = {working, committed}` (W and C, both `EMPTY_RULES` unless given): W is the working layer's rule sets, the ones the store's issues are found with, C the committed layer's; with nothing staged they are the same. Its `stage`, `unstage` and `applyDelta` are the working copy's, each revalidating before it returns the ids whose verdict it may have moved, by three rules: a stage takes its applier's hooks, the server's own dirty set; a rebase (`unstage`, `applyDelta`) takes `addNeighbourhood` on the state before over every id it may touch — `touchedIds()`, plus every id a delta names or deletes — and on the state after over those and the ids its change set names, both passes carrying the ends of every relationship among them (from the model, the committed image of one staged away, or the delta's own `source_id` / `target_id`), since a relationship absent on one side cannot name its ends there and they move groups all the same; a merged edit (`coalesce`) takes its trial run's hooks and the rebase rule over the id it names and every batch it replays — from `mergePoint(op)` on, `touchedIds(at)` — since those batches may overwrite part of it or park; an edit that asks to merge and does not pays its hooks only. Every one of those dirty sets is then widened by W's reach (`expandScope`) on the state AFTER the transition — a stage after its hooks, as `_finalize` does, a rebase or a merged edit after its neighbourhoods — and revalidated with W: the premise of `src/rules/` holds because each dirty set holds every element whose properties or incident relationships moved, and the seeded invariants hold it with rules of two-hop atoms in play, the store equal to a fresh sweep after every action. The containment chain past its first link is the one input no rule reaches (the core shares it), which is why the seeded invariants compare stores without cycle issues. `version` moves when a splice changes the store's content (not when it only re-files an owner), on every applied delta (origins move with the rev), on every `setRules` (`rules_status` or the tags may have moved) and when the store becomes unusable. The sweep, `sweepSteps()`, is a `Steps<boolean>` whose state lives on the object, never in the generator: its first step lists every element id in state order then every relationship id, each later one validates and splices the next `sweepStep` (`SWEEP_STEP`, 512) — a complete change of its own — so it resumes across any transition (an id gone since is dropped, one new since was validated by the transition that made it) and any generator picks it up; its last step sets `seeded` and releases `whenSwept()`. `restartSweep()` sweeps again from a fresh list, in place: the store keeps what it holds meanwhile. `setRules({working, committed})` swaps both compiles, moves `rulesVersion` and `version` and drops the origins; it validates nothing. When W's ordered list of rule identities changes, `appliesPopulation(model, old W, new W)` joins the rescan queue after the ids still queued, each once — a rename or anything that leaves W's rules as they were queues nothing. The same generator drains the queue after any sweep due, `sweepStep` ids a step, each a `revalidate` with W as it is at that step, and yields `RESCAN_STEP` (a `SweepStep` marked `rescan: true`) in place of progress, so a rescan reports none and never moves `seeded`, which still means a sweep has ended. `settled` is false while the queue holds ids; `whenSettled()` resolves when it empties or the store becomes unusable, and `whenSwept()` waits for the rescan too. A `PatternUnusable` anywhere — `FacetPatterns` refusing a pattern at construction, or the host failing one mid-run, which is sticky — sets `unusable = 'pattern'`, empties the store, ends the sweep (`false`) and moves `version`; the transition itself still answers. `origins()` runs `probeStaged`, once per `(rev, stagedVersion, rulesVersion)` and not at all with nothing staged: `hooks` is the probe's dirty set (the server's `base_dirty`), `S` (`dirty`) is `hooks` widened by W's reach on the working state, and while W and C differ, every element a changed rule applies to — the rules one identity list holds more often than the other, both ways (ΔPop) — with its issues validated on the working state with W (`working`) and on the committed one with C (`committed`); `previewDirty` is `hooks` widened by C's reach and `preview` its issues on the working state with C, which is `working` itself when W and C hold the same rules in the same order. An element of ΔPop that neither W nor C reaches from `hooks` has the same inputs on both states, so its issues with W and with C are found on the working state alone and kept (`deltaOf`) for one rev and one pair of rule sets: a keystroke's probe does not pay for ΔPop again. With nothing staged in the model, `S` is ΔPop alone, empty when W = C. The three bodies (`bodies.ts`) answer as the routes do, each through `origins()`, so each throws `PatternUnusable` when the store is unusable: `issueListBody` is `GET /model/issues` over the working store, an issue owned inside `S` `on_server` while a committed issue with the same `(severity, message, target_ids, category)` is left to match it and `uncommitted` past that, every other one `on_server`, and no `resolved` (the live list never shows a fixed issue), its `rules_status` W's — so a new rule's issues read `uncommitted` and a removed rule's are gone; `validateBody` is the staged branch of `POST /model/validate` — the store's issues of owners outside `S`, then `S`'s working issues tagged the same way, then the committed ones left unmatched as `resolved`, in their order; `previewBody(live, strict)` is the model half of `POST /commits/preview` over `preview`, all `on_server` — C's rules, as the server's preview never assigns a staged rule set — `would_block` being `strict` and a conformance issue the ops can be held to (`attributable_issues`): owned inside `hooks`, or any rule's, warnings included. Both staged bodies are held to `validation_steps.json`, whose second session carries rule sets.
++  `LiveIssues(wc, {seed?, sweepStep?, sweepSkip?, rules?})` (`live.ts`) keeps an `IssueStore` over a working copy's WORKING state; nothing else may write to the working copy while it wraps it. It holds two compiles, `rules = {working, committed}` (W and C, both `EMPTY_RULES` unless given): W is the working layer's rule sets, the ones the store's issues are found with, C the committed layer's; with nothing staged they are the same. Its `stage`, `unstage` and `applyDelta` are the working copy's, each revalidating before it returns the ids whose verdict it may have moved, by three rules: a stage takes its applier's hooks, the server's own dirty set; a rebase (`unstage`, `applyDelta`) takes `addNeighbourhood` on the state before over every id it may touch — `touchedIds()`, plus every id a delta names or deletes — and on the state after over those and the ids its change set names, both passes carrying the ends of every relationship among them (from the model, the committed image of one staged away, or the delta's own `source_id` / `target_id`), since a relationship absent on one side cannot name its ends there and they move groups all the same; a merged edit (`coalesce`) takes its trial run's hooks and the rebase rule over the id it names and every batch it replays — from `mergePoint(op)` on, `touchedIds(at)` — since those batches may overwrite part of it or park; an edit that asks to merge and does not pays its hooks only. Every one of those dirty sets is then widened by W's reach (`expandScope`) on the state AFTER the transition — a stage after its hooks, as `_finalize` does, a rebase or a merged edit after its neighbourhoods — and revalidated with W: the premise of `src/rules/` holds because each dirty set holds every element whose properties or incident relationships moved, and the seeded invariants hold it with rules of two-hop atoms in play, the store equal to a fresh sweep after every action. The containment chain past its first link is the one input no rule reaches (the core shares it), which is why the seeded invariants compare stores without cycle issues. `version` moves when a splice changes the store's content (not when it only re-files an owner), on every applied delta (origins move with the rev), on every `setRules` (`rules_status` or the tags may have moved) and when the store becomes unusable. The sweep, `sweepSteps()`, is a `Steps<boolean>` whose state lives on the object, never in the generator: its first step takes the total, the entities then (`done: 0`), each later one walks on — elements in state order, then relationships — and validates and splices the next `sweepStep` entities (`SWEEP_STEP`, 512), a complete change of its own, so it resumes across any transition and any generator picks it up. It holds a live iterator per map, with the `orderEpoch` it was taken at and the greatest `ord` it has handed out: an entity deleted since is not reached (the transition that deleted it dropped it from the store) and one made since is reached, validated twice; when a re-sort moves the epoch it takes a fresh iterator and passes over every entity whose `ord` is no greater, at most `sweepSkip` (16 × `sweepStep`) a step — each was handed out already, or was put back at its old place by a transition that validated it. The progress counts the entities validated, short of the total until the last step, which alone reports `done === total` (entities made meanwhile can take the count past it); that step sets `seeded` and releases `whenSwept()`. A re-sort sends the walk back over what it passed, `sweepSkip` a step, so re-sorts more frequent than that would hold the sweep off its end. `restartSweep()` sweeps again from the start, in place: the store keeps what it holds meanwhile. `setRules({working, committed})` swaps both compiles, moves `rulesVersion` and `version` and drops the origins; it validates nothing. When W's ordered list of rule identities changes, `appliesPopulation(model, old W, new W)` joins the rescan queue after the ids still queued, each once — a rename or anything that leaves W's rules as they were queues nothing. The same generator drains the queue after any sweep due, `sweepStep` ids a step, each a `revalidate` with W as it is at that step, and yields `RESCAN_STEP` (a `SweepStep` marked `rescan: true`) in place of progress, so a rescan reports none and never moves `seeded`, which still means a sweep has ended. `settled` is false while the queue holds ids; `whenSettled()` resolves when it empties or the store becomes unusable, and `whenSwept()` waits for the rescan too. A `PatternUnusable` anywhere — `FacetPatterns` refusing a pattern at construction, or the host failing one mid-run, which is sticky — sets `unusable = 'pattern'`, empties the store, ends the sweep (`false`) and moves `version`; the transition itself still answers. `origins()` runs `probeStaged`, once per `(rev, stagedVersion, rulesVersion)` and not at all with nothing staged: `hooks` is the probe's dirty set (the server's `base_dirty`), `S` (`dirty`) is `hooks` widened by W's reach on the working state, and while W and C differ, every element a changed rule applies to — the rules one identity list holds more often than the other, both ways (ΔPop) — with its issues validated on the working state with W (`working`) and on the committed one with C (`committed`); `previewDirty` is `hooks` widened by C's reach and `preview` its issues on the working state with C, which is `working` itself when W and C hold the same rules in the same order. An element of ΔPop that neither W nor C reaches from `hooks` has the same inputs on both states, so its issues with W and with C are found on the working state alone and kept (`deltaOf`) for one rev and one pair of rule sets: a keystroke's probe does not pay for ΔPop again. With nothing staged in the model, `S` is ΔPop alone, empty when W = C. `tagScope()` is what the panel's tags read: every owner whose issues may differ between the two states, with its committed issues. The exact probe finds it (`S`, with `committed`); from there, while the store is seeded and settled, the rev and the rule sets hold and W's identities are C's, each transition adds the ids it dirties, with the store's issues from just before it revalidates them — no transition had dirtied them since the probe, so those were their committed issues (the dirty sets are exact, and each owner's issues are found independently of the rest of a scope) — and a keystroke's list runs no probe. A delta, a `setRules`, W ≠ C or a store not seeded or not settled drops it, and the next read probes; `resetTagScope()` drops it too. The three bodies (`bodies.ts`) answer as the routes do — `validateBody` and `previewBody` through `origins()`, whose `S` is part of their answer, `issueListBody` through `tagScope()` — so each throws `PatternUnusable` when the store is unusable: `issueListBody` is `GET /model/issues` over the working store, an issue whose owner the tag scope names `on_server` while a committed issue of that owner with the same `(severity, message, target_ids, category)` is left to match it and `uncommitted` past that, every other one `on_server`, and no `resolved` (the live list never shows a fixed issue), its `rules_status` W's — so a new rule's issues read `uncommitted` and a removed rule's are gone; `validateBody` is the staged branch of `POST /model/validate` — the store's issues of owners outside `S`, then `S`'s working issues tagged the same way, then the committed ones left unmatched as `resolved`, in their order; `previewBody(live, strict)` is the model half of `POST /commits/preview` over `preview`, all `on_server` — C's rules, as the server's preview never assigns a staged rule set — `would_block` being `strict` and a conformance issue the ops can be held to (`attributable_issues`): owned inside `hooks`, or any rule's, warnings included. Both staged bodies are held to `validation_steps.json`, whose second session carries rule sets.
+ - **`src/rules/`** — a port of `core/validation/rules/` (the rule grammar, compile, reach and the validator), line for line, held to `rules_compile.json`, `rules_eval.json` and `rules_reach.json`. The engine parses no YAML: the server parses each rule set once (`POST /rules/parse`, and `rules` on `GET /artifacts/payloads`) and hands on the definition as a JSON document in TEXT, which `readRuleSet` (`document.ts`) reads with the exact parser — bare `NaN` / `Infinity` as floats, integers past 2^53 as `bigint`, every float a `PyFloat` — and then strictly, against the grammar pydantic enforces: an unknown key, a wrong type, zero or two property tests (chosen by the key being there, so `equals: null` is a test), a `null` on a test other than `equals` / `not_equals`, an empty `all` / `any`, `count` without a bound, a relationship atom without exactly one non-null `exists` / `count`, more than 200 rules, a duplicate name or nesting past eight levels (a `where` one) all throw `RulesUnreadable`, the one way out, never a guess; where pydantic reads an explicit `null` as absence (`to`, `where`, `when`, `message`, a relationship's `exists` / `count`, a count bound) so does the reader, and absent defaults are filled. Each `Rule` keeps its `identity`, its entry as the document wrote it (`pyDumps` with `allowNan`). `compileRuleSets(sources, mm)` (`compile.ts`) compiles `RuleSource`s in the order given — `ruleSources(set, layer)` (`sources.ts`) lists them by name then id, both by code point: the committed layer's rule sets with their committed parse, or the working layer's, a staged payload's parse laid over, `'pending'` standing on the set's last parse and a `'pending'` create with none left out. A failed parse is one skip for the whole set (`rule` empty, `reason` the parse error's message); a disabled rule is dropped before the drift check; the drift check walks `when` then `then` and reports the first mismatch — an unknown `applies_to`, a property the DECLARED type lacks (a subtype's does not count), an unknown relationship type, an unknown `to`, a `where` checked against `to`'s properties and not at all without one — with `repr` (`pyRepr`), skipping the rule whole. A document the reader refuses, or a rule set that arrived without its parse, marks the compile `unreadable`: its rules are missing and it must not be used. A `CompiledRule` carries its `appliesTypes` (`elementDescendants(applies_to)`), `check` `rule:<name>` and reach `paths`; `rulesByType` lists them per exact type in compile order, and `identities` the compiled rules' identities. `appliesPopulation(model, …compiled)` is every element a rule applies to: types sorted, each type's ids sorted. `evaluate.ts` is `validator.py`: `pyRuleEq` is Python `==` with a `bool` equal only to a `bool` (numbers compare exactly across `int`, `bigint` and `PyFloat`, `NaN` never; `None` equals `None`, which a list item can be); a value is missing when absent, `null` or `[]`, and missing fails every test but `exists`; a list holds when any item does, `contains` on a list being membership and on a string a substring test (`pyContains`) with a string operand; the bounds need a number that is not a `bool`; a relationship atom counts the element's own adjacency of the type's descendants, the far element filtered by `to`'s descendants and `where`. An issue is `conformance` with the rule's severity and check, its message the rule's own when not empty, else `Rule '<name>' violated` plus `: <description>`, quotes literal. `RulesValidator` counts a rule that throws under its check and merges the run's counts into the compile's `evalErrors` once, in its global hook; nothing it runs can throw (every comparison is total, nesting is capped and a record cannot hold a dangling end), so `eval_errors` never moves on either side. `reach.ts`: `derivePaths` gives a root-first path of steps per relationship atom, a `where` extending its atom's path; `expandScope(model, compiled, dirtyIds)` walks, from the dirty ids that are current elements, every suffix of every path backwards (an `outgoing` step through `el.in`, an `incoming` one through `el.out`), keeps each element reached whose type the rule applies to, frontier sorted by code point, first-seen order — never filtering on the far types, so a retype on the path cannot hide an owner. Its premise: a rule's verdict on an owner reads the owner and its paths, so if a transition moves the verdict, some path of the owner, on the state before or after, first meets an element the transition dirtied (the stage hooks and the neighbourhood rule add both ends of every relationship they touch and every element they change), and the prefix up to it is on the after state too; walking back from the dirty set on the AFTER state therefore reaches the owner.
+ - **`src/service/`** — `Scheduler` (`scheduler.ts`) runs engine work on the host's thread in slices. One pump, two lanes, each in arrival order: the _control_ lane (the replica's own transitions) runs in any state and first; the _model_ lane runs while the scheduler is open. A job is a `read` (one call), a `transition` (one call that changes the model, never interrupted — a transition may run up to 100 ms, AD-23) or a `scan` (a `Steps` generator that `run()` makes). A transition waits for every read that arrived before it and holds everything behind it; at each slice boundary of a running scan, the reads queued before the first transition are answered and other scans are skipped over, never started — so a scan never sees the model move under its iterators (probe: a `Map` iterator that crosses a `clear()` and refill reads everything again, and `Model.elements()` does exactly that on the first ordered read after a rewind). `cancel(id)` removes a queued job or drops a running scan at its next step, unanswered; closed (`setOpen(false)`), the model lane keeps its jobs and a scan that was mid-flight goes back to the head to start over, `run()` called again. The pump reads the injected clock after every unit — a read, a transition, one step — and at `SLICE_TARGET_MS` (8, half of CN-3's 16 ms chunk: at M a collector pause of 5–8 ms lands inside a step now and then) calls `onSliceEnd`, awaits `yieldToHost()` and starts a new slice — `onSliceEnd` also runs when the pump runs out of work, the end of that slice; messages are handled on those host turns only, never inside a unit. Idle and open, it gives its two background slots one step each in turn: the digest check (`setBackground`), whose `restartBackground()` drops its steps in flight (they published nothing) so a new run starts at its next idle step, and the sweep (`setSweep`), whose steps resume across any transition — `restartBackground` leaves it alone and closing only pauses it. A slot empties when its task ends. `pause()` lends the slice clock to work outside the pump (a snapshot open): `undefined` while the slice has room, else the host's turn. The pump starts on a microtask, so every job one message brings is queued before any runs.
+   `createService(port, deps)` (`service.ts`) is the CT-4 dispatcher over one `Port` (`{post, onMessage}`: a `MessagePort` in a worker, `portPair()` in tests); `deps` is `HostDeps` plus `inflate`, since `src/` holds no timer, clock or gzip. A request `{id, method, params}` is answered `{id, ok, result | error: {status, detail}}` exactly once, or never once `{cancel: id}` came; a message without an id or a method is ignored. Errors: `OpError` / `ReadError` keep their status, a `ModelError` `key` is 404 with `errorDetail`'s quote-stripped text, `value` 422, a `SnapshotError` 422, an unknown method 404 `No method 'x'`, anything else 500 with its message. The replica is `opening`, `ready` or `diverged`. `open {project_id, metamodel}` discards any replica or open in flight (the heap never holds two) and starts `openSnapshot` over `deps.inflate` of a `ByteQueue` that `chunk {bytes}` feeds, with the scheduler's `pause` (which also stops a discarded open at its next batch); `end` answers the header once the replica is read and indexed — or the open's 422, which `chunk` and `end` then answer until the next `open`, a header of another project included — and the replica stays `opening`; `adoptStaged` (a control-lane transition) carries a re-bootstrap's staged batches over; `applyTail {text}` queues one transition per delta at once (control lane while opening, model lane after) and makes an opening replica `ready`, the scheduler open and the background digest check set; `applyDelta {text, own?}` is a model-lane transition, a 409 unless `ready`; `close` drops everything but the view placements, the artifacts and the queued model jobs. A delta or a tail crosses as the text the shell received and is read by `readDeltaText` / `readTailText` with the exact parser (AD-26: `JSON.parse` would lose `1.0` and integers past 2^53, which the digest cannot see); a commit response reads alike, `model_rev` standing for `rev`. Events: `replica {state, rev}`; `progress {task, done, total}` for `parse`, `index`, `tail`, `verify`, `sweep` — a task's first (`done` 0, which is how a restarted digest check or sweep shows) and last reports at once, the rest at most once a slice, from `onSliceEnd`; `changed {rev, staged_version, issues_version, …ids, structural}` after every transition of a `ready` replica that changed something, which also restarts the digest check when an entity or the staged list moved. A delta whose digest disagrees, or a digest check that ends false, makes the replica `diverged`: the scheduler closes, so reads and edits posted meanwhile wait, and are answered from the replica the shell opens next (`close`, `open` … `end`, `adoptStaged` with what `staged` returned, `applyTail`). The method table (`METHODS`) is built from a few kinds, so the message handler has no per-method branch: `now` (answered at once, in any state — `open`, `chunk`, `close`, `staged`, `conflicts`, `setViewPlacement`, `dropViewPlacement`, and the artifact context: `setArtifacts {artifacts}`, `putArtifacts {changed, deleted_ids, staged?}` — the committed layer moves, then `staged`, when given, replaces the overlay — and `setStagedArtifacts {entries}`, each answering `null` and reading the whole call before the set moves), `later` (`end`), `read` (every `READS` name, a `scan` job when `readScans` says so; `getModelSummary` is handed the committed `rev` as `model_rev`), `evaluate` (every `EVALUATIONS` name, always a `scan` job over the ready model, the placements and the service's `ArtifactSet`), `inspect` (`stagedDiff`) and `transition` (`stage`, `unstage`: their params are read at arrival, so a malformed request is refused before it queues), plus the three replica methods above and the three that answer from the issue store, below. Reads, `stagedDiff`, `stage` and `unstage` wait in the model lane for `ready`, so an edit made during a re-bootstrap lands after the adopted batches. `stage` reads its ops through `readOps` and always asks the working copy to coalesce; it answers `{batch, coalesced, changes, elements, relationships}`, the last two the post-state of what `changes` names as changed, both `null` past 500 entities. Every result and event is a copy built by the `wire*` functions — over a direct port pair nothing is cloned, and an uncopied result would hand out the replica's own property bags.
+-  The issue store: when the tail makes the replica `ready`, the service compiles the rule sets of its `ArtifactSet` against the replica's metamodel — W from `ruleSources(set, 'working')`, C from `ruleSources(set, 'committed')` — builds a `LiveIssues` over its working copy holding them, and puts its sweep in the sweep slot, reporting `progress sweep` from `done` 0 to `done === total` for every run, a re-sweep's included, and nothing for a rescan's steps (their `SweepStep` says `rescan`; the scheduler's `BackgroundTask` hands `progress` what the steps yield); `close`, a new `open` and a divergence drop it with the replica. From then on `stage`, `unstage`, `applyDelta` and a ready replica's tail go through it, so each revalidates what it may have moved before it answers; while opening, `adoptStaged` and the tail go to the working copy alone, and the first sweep covers them. Rules follow the artifact methods, which stay `now` (a `now` method never interleaves with a transition, and every sweep or rescan step reads the rule sets as they are then): after `setArtifacts`, `putArtifacts` or `setStagedArtifacts` has moved the set, W and C are compiled again — each only when its sources changed, compared as the ordered `(id, name, parse)` of its rule sets, a parse by its document text or its first error — and handed to the store (`setRules`); a rescan it queued puts the store's steps back in the sweep slot, and the `version` it moved is posted at once as a bare `changed`. The compiles are kept with the store, so a replica opened again — after a rebind, under another metamodel whose drift differs — compiles afresh, though the artifacts outlive `close` and `open`. `issues_version` is a per-service counter that never goes back: it moves by what the store's `version` moved (a splice that changed the store's content, an applied delta, a rule-set change, the store become unusable). A transition's `changed` carries it; at a slice's end, if it moved since the last `changed` posted — sweep or rescan steps, or a probe that met an unusable pattern — the service posts a bare `changed` (the current `rev` and `staged_version`, no ids, `structural: false`), which neither restarts the digest check nor counts as a transition. Three methods answer from the store, in the routes' bodies (`bodies.ts`): `getModelIssues {}` (`issueListBody`) and `previewCommit {base_rev, batch_ids, strict}` (`previewBody`, the model half, with C's rules alone, as the server's preview) are model-lane transitions that post no `changed` — they may probe, a rewind and replay, so they wait for a running scan and are never answered at its slice boundary, as a read would be; `validateModel {batch_ids}` is a transition that restarts the sweep, answered by a second one, queued once that sweep and any rescan have ended (`whenSwept`), that builds `validateBody` — refused 409 `replica is not ready` if the replica was closed, replaced or diverged meanwhile, and 500 if the sweep threw. None is answered while a rescan is due: a call that finds the store not `settled` waits for it (`whenSettled`) and then queues its answering transition, which checks `settled` again and waits again if an artifact method started another rescan in between; `close`, a new `open`, a divergence and a sweep that threw refuse a waiting call as they refuse a waiting `validateModel`, and a cancelled one is never answered. Each refuses first what the engine must not answer, with 501 for the client to take to the server: `reaches an unsupported pattern` (the store is `unusable`) and `reaches unreadable rules` (W or C is `unreadable`: a document the reader refuses, or a rule set that arrived without its parse, which only an older shell or a skewed bundle sends); then, with 409, what the shell retries at the server: `stale base_rev` (`previewCommit`'s `base_rev` is not the replica's `rev`) and `stale staged batches` (`batch_ids` are not `staged()`'s ids, in order) — both checked in the transition that answers. An answer whose probe ran anew (another `origins()` than the last one read, with batches staged) restarts the digest check, since a probe rebuilds the committed images it walks. A probe whose replay cannot even put the staged batches back diverges the replica, and the call is refused 409 `replica is not ready`. A direct call reads the store as it stands, partial until the first sweep has ended.
+-- **`bench/run.ts`** (`pixi run engine-bench`, input written once by `pixi run engine-bench-data` → `scripts/snapshot_v2.py`) measures model M in three passes: opening the snapshot against opening the same model as one document in the same pass, the digest check, the heap of one open replica, a 1,000-op batch staged and unstaged, a rebase of 100 staged batches, a delta — and the long operations driven step by step by hand (`stepped`), each with its total and its longest step: the index build (over the document model), the digest check, the broadest search (`q='a'`, hit sort included), a rare one, a criteria scan (`property name contains 'a'` over every element) and a navigation (an untyped scope, one `Owns` hop from every element, the sort of every id included). Then the issue store over the same replica: its sweep (total, its first step — every id listed, O(model) in one step — and its longest step after it), the 1,000-op batch staged and unstaged through `LiveIssues`, the origin probe over 100 staged batches, and the delta over them, each revalidating; a rescan, one rule set over every element of the largest type where there was none; a second sweep with 20,000 copies of one element staged, a single uniqueness group whose members each read the whole group (model M holds no issue); and a store with five rules over the smart-city types (a property test under a `when`, a `count` over a type with a subtype, a two-hop path under `where`, a `to` naming a subtype, a warning): its sweep, the 1,000-op batch staged with its dirty set widened by their reach, and the origin probe over 100 staged batches with one rule changed in the staged rule sets, the rescan it queued drained first. It measures STEPS, not slices: there is no scheduler in it; the browser benchmark below bounds the slices. `bench/parity-large.ts` (`pixi run engine-parity-large`) holds the sweep to the oracle at M over injected violations and custom rules, since M itself holds no issue: `scripts/issues_large.py` derives from `benchmarks/large.model.json`, deterministically, one batch of ops (`benchmarks/large.violations.ops.json`, ~7,300 ops) that breaks every check an op can break on this metamodel — wrong datatypes and enum values, mistyped, non-string and dangling references (set to a ghost id, or left by deleting the element), property and end multiplicities, min / max / pattern / max_length on elements and relationships, endpoint types, second containment parents, containment cycles with elements below them, small duplicate groups (keyed by properties and by containment owner) and one of 3,001 members — lands it through the ops route's `_apply_batch`, compiles six rules in two rule sets over the smart-city types into the session (a property test under a `when`, a `count` over a type with a subtype, a two-hop path under `where`, a `to` naming a subtype, a warning; each must fire on some of the elements it applies to and not on all, or the script exits non-zero), runs the server's own sweep (`start_validation_sweep(sync=True)`) and writes `benchmarks/large.rules.json` — the rule sets as the payloads route answers them, each with its `parse_result` — and `benchmarks/large.issues.json`, the sorted `issueKey`s (~18,500, ~10,800 of them the rules'); the engine lands the same batch on the snapshot written from that document through `applyBatch`, compiles the rule sets as the service does (`readArtifacts`, `ruleSources`, `compileRuleSets`), sweeps it with a `LiveIssues` holding them, and the two are compared as multisets — any difference fails the run, the first 20 printed, and both sides print their counts per check, and how many issues are the rules'. An unknown type (no op creates one) and a key-relationship duplicate (the metamodel keys on no relationship) are the two it cannot reach. It weighs the heap BEFORE it reads the document: the last text a regular expression ran over stays reachable in V8, and there that is 77 MB.
+-  **`frontend/bench/`** (`pixi run engine-bench-browser`, which builds the sandbox first) is the same model in the browser: a bench page on `http://127.0.0.1:5173` (`bench/vite.config.ts`: the app's COOP / COEP plugin, and `benchmarks/large.snapshot.v2.gz` — the encoder's own bytes, which `engine-bench-data` writes with `--gzip` — served at `/data/snapshot.gz` with its length and no `Content-Encoding`) drives the BUILT sandbox through `frame.ts` and `client.ts`, and `bench/run.ts` (Node's type stripping) drives the page through `window.bench` with Playwright's default headless shell, e2e's browser: three passes, each in a fresh context, medians, a verdict against CN-3, never a failing exit. It measures the cold open (first byte asked to `replica ready`, split at the last chunk sent, `end`, and when `parse` and `index` began and ended by the engine's `progress` events), the digest check, `stage` / `unstage` / `applyDelta` and the reads THROUGH THE PORT (round trips, so upper bounds), and the longest slice FROM OUTSIDE: a loop posts `staged` — a `now` method, answered on the worker's next host turn — each when the last was answered, so its longest round trip bounds the longest time the worker took no message, main thread included. The heap is the WORKER's: Chromium runs with `--remote-debugging-port`, the `worker` target of `/json/list` whose `url` holds `engine-worker` is reached over its own `webSocketDebuggerUrl` with Node's `WebSocket`, `HeapProfiler.collectGarbage` then `Runtime.getHeapUsage`, after the digest check is done (before, it is 15–35 MB higher); `backingStorageSize` is shown beside `usedSize`, not added. A worker has no `performance.memory`, and `context.newCDPSession(frame)` needs an out-of-process frame the headless shell does not give. The page cannot compute a state digest, so the last row's delta carries a wrong one and ends the replica — after the rewind, apply and replay it times.
++  The issue store: when the tail makes the replica `ready`, the service compiles the rule sets of its `ArtifactSet` against the replica's metamodel — W from `ruleSources(set, 'working')`, C from `ruleSources(set, 'committed')` — builds a `LiveIssues` over its working copy holding them, and puts its sweep in the sweep slot, reporting `progress sweep` from `done` 0 to `done === total` for every run, a re-sweep's included, and nothing for a rescan's steps (their `SweepStep` says `rescan`; the scheduler's `BackgroundTask` hands `progress` what the steps yield); `close`, a new `open` and a divergence drop it with the replica. From then on `stage`, `unstage`, `applyDelta` and a ready replica's tail go through it, so each revalidates what it may have moved before it answers; while opening, `adoptStaged` and the tail go to the working copy alone, and the first sweep covers them. Rules follow the artifact methods, which stay `now` (a `now` method never interleaves with a transition, and every sweep or rescan step reads the rule sets as they are then): after `setArtifacts`, `putArtifacts` or `setStagedArtifacts` has moved the set, W and C are compiled again — each only when its sources changed, compared as the ordered `(id, name, parse)` of its rule sets, a parse by its document text or its first error — and handed to the store (`setRules`); a rescan it queued puts the store's steps back in the sweep slot, and the `version` it moved is posted at once as a bare `changed`. The compiles are kept with the store, so a replica opened again — after a rebind, under another metamodel whose drift differs — compiles afresh, though the artifacts outlive `close` and `open`. `issues_version` is a per-service counter that never goes back: it moves by what the store's `version` moved (a splice that changed the store's content, an applied delta, a rule-set change, the store become unusable). A transition's `changed` carries it; at a slice's end, if it moved since the last `changed` posted — sweep or rescan steps, or a probe that met an unusable pattern — the service posts a bare `changed` (the current `rev` and `staged_version`, no ids, `structural: false`), which neither restarts the digest check nor counts as a transition. Three methods answer from the store, in the routes' bodies (`bodies.ts`): `getModelIssues {}` (`issueListBody`) and `previewCommit {base_rev, batch_ids, strict}` (`previewBody`, the model half, with C's rules alone, as the server's preview) are model-lane transitions that post no `changed` — they may probe, a rewind and replay, so they wait for a running scan and are never answered at its slice boundary, as a read would be; `validateModel {batch_ids}` is a transition that restarts the sweep, answered by a second one, queued once that sweep and any rescan have ended (`whenSwept`), that builds `validateBody` — refused 409 `replica is not ready` if the replica was closed, replaced or diverged meanwhile, and 500 if the sweep threw. None is answered while a rescan is due: a call that finds the store not `settled` waits for it (`whenSettled`) and then queues its answering transition, which checks `settled` again and waits again if an artifact method started another rescan in between; `close`, a new `open`, a divergence and a sweep that threw refuse a waiting call as they refuse a waiting `validateModel`, and a cancelled one is never answered. Each refuses first what the engine must not answer, with 501 for the client to take to the server: `reaches an unsupported pattern` (the store is `unusable`) and `reaches unreadable rules` (W or C is `unreadable`: a document the reader refuses, or a rule set that arrived without its parse, which only an older shell or a skewed bundle sends); then, with 409, what the shell retries at the server: `stale base_rev` (`previewCommit`'s `base_rev` is not the replica's `rev`) and `stale staged batches` (`batch_ids` are not `staged()`'s ids, in order) — both checked in the transition that answers. An answer whose body probed anew (`live.probes` moved, with batches staged) restarts the digest check, since a probe rebuilds the committed images it walks; `getModelIssues` over a kept tag scope probes nothing. A probe whose replay cannot even put the staged batches back diverges the replica, and the call is refused 409 `replica is not ready`. A direct call reads the store as it stands, partial until the first sweep has ended.
++- **`bench/run.ts`** (`pixi run engine-bench`, input written once by `pixi run engine-bench-data` → `scripts/snapshot_v2.py`) measures model M in three passes: opening the snapshot against opening the same model as one document in the same pass, the digest check, the heap of one open replica, a 1,000-op batch staged and unstaged, a rebase of 100 staged batches, a delta — and the long operations driven step by step by hand (`stepped`), each with its total and its longest step: the index build (over the document model), the digest check, the broadest search (`q='a'`, hit sort included), a rare one, a criteria scan (`property name contains 'a'` over every element) and a navigation (an untyped scope, one `Owns` hop from every element, the sort of every id included). Then the issue store over the same replica: its sweep (total, its first step and its longest step after it), the 1,000-op batch staged and unstaged through `LiveIssues`, the origin probe over 100 staged batches, and the delta over them, each revalidating; a rescan, one rule set over every element of the largest type where there was none; 20,000 copies of one element staged, a single uniqueness group: one member's `uniqGroupOf`, and a second sweep whose members each read the whole group (model M holds no issue); `issueListBody` after a keystroke merged into the latest of 100, then 1,000, staged batches, the list read once before it as the panel's refetch does; and a store with five rules over the smart-city types (a property test under a `when`, a `count` over a type with a subtype, a two-hop path under `where`, a `to` naming a subtype, a warning): its sweep, the 1,000-op batch staged with its dirty set widened by their reach, and the origin probe over 100 staged batches with one rule changed in the staged rule sets, the rescan it queued drained first, beside the changed rule's population, which each such probe recomputes. It measures STEPS, not slices: there is no scheduler in it; the browser benchmark below bounds the slices. `bench/parity-large.ts` (`pixi run engine-parity-large`) holds the sweep to the oracle at M over injected violations and custom rules, since M itself holds no issue: `scripts/issues_large.py` derives from `benchmarks/large.model.json`, deterministically, one batch of ops (`benchmarks/large.violations.ops.json`, ~7,300 ops) that breaks every check an op can break on this metamodel — wrong datatypes and enum values, mistyped, non-string and dangling references (set to a ghost id, or left by deleting the element), property and end multiplicities, min / max / pattern / max_length on elements and relationships, endpoint types, second containment parents, containment cycles with elements below them, small duplicate groups (keyed by properties and by containment owner) and one of 3,001 members — lands it through the ops route's `_apply_batch`, compiles six rules in two rule sets over the smart-city types into the session (a property test under a `when`, a `count` over a type with a subtype, a two-hop path under `where`, a `to` naming a subtype, a warning; each must fire on some of the elements it applies to and not on all, or the script exits non-zero), runs the server's own sweep (`start_validation_sweep(sync=True)`) and writes `benchmarks/large.rules.json` — the rule sets as the payloads route answers them, each with its `parse_result` — and `benchmarks/large.issues.json`, the sorted `issueKey`s (~18,500, ~10,800 of them the rules'); the engine lands the same batch on the snapshot written from that document through `applyBatch`, compiles the rule sets as the service does (`readArtifacts`, `ruleSources`, `compileRuleSets`), sweeps it with a `LiveIssues` holding them, and the two are compared as multisets — any difference fails the run, the first 20 printed, and both sides print their counts per check, and how many issues are the rules'. An unknown type (no op creates one) and a key-relationship duplicate (the metamodel keys on no relationship) are the two it cannot reach. It weighs the heap BEFORE it reads the document: the last text a regular expression ran over stays reachable in V8, and there that is 77 MB.
++  **`frontend/bench/`** (`pixi run engine-bench-browser`, which builds the sandbox first) is the same model in the browser: a bench page on `http://127.0.0.1:5173` (`bench/vite.config.ts`: the app's COOP / COEP plugin, and `benchmarks/large.snapshot.v2.gz` — the encoder's own bytes, which `engine-bench-data` writes with `--gzip` — served at `/data/snapshot.gz` with its length and no `Content-Encoding`) drives the BUILT sandbox through `frame.ts` and `client.ts`, and `bench/run.ts` (Node's type stripping) drives the page through `window.bench` with Playwright's default headless shell, e2e's browser: three passes, each in a fresh context, medians, a verdict against CN-3, never a failing exit. It measures the cold open (first byte asked to `replica ready`, split at the last chunk sent, `end`, and when `parse` and `index` began and ended by the engine's `progress` events), the digest check, `stage` / `unstage` / `applyDelta` and the reads THROUGH THE PORT (round trips, so upper bounds), and the longest slice FROM OUTSIDE: a loop posts `staged` — a `now` method, answered on the worker's next host turn — each when the last was answered, so its longest round trip bounds the longest time the worker took no message, main thread included. The digest check and the sweep both start at `ready` and take turns; one loop runs until the check ends, a second from then until the sweep ends, so the longest slice while sweeping holds sweep steps alone (none when the sweep ends first). The heap is the WORKER's: Chromium runs with `--remote-debugging-port`, the `worker` target of `/json/list` whose `url` holds `engine-worker` is reached over its own `webSocketDebuggerUrl` with Node's `WebSocket`, `HeapProfiler.collectGarbage` then `Runtime.getHeapUsage`, after the digest check is done (before, it is 15–35 MB higher); `backingStorageSize` is shown beside `usedSize`, not added. A worker has no `performance.memory`, and `context.newCDPSession(frame)` needs an out-of-process frame the headless shell does not give. The page cannot compute a state digest, so the last row's delta carries a wrong one and ends the replica — after the rewind, apply and replay it times.
+ - **`src/debug/`** — `dumpIndexes` (the canonical index dump the fixtures compare), `verifyConsistent` (incremental indexes against a rebuild, performed in place) and `shuffleAdjacency` (tests shuffle between steps to expose a dependence on adjacency order).
+ - **Golden fixtures** — `tests/golden/scenarios/*.py` run the real Python core and `pixi run golden-fixtures` writes `engine/fixtures/golden/*.json`; `engine/test/**/*.golden.test.ts` read them. The same task writes the generated sources `driver.GENERATED` lists: `lower-tables.ts`, `digit-tables.ts` and `regex-tables.ts` under `engine/src/value/` (`tests/golden/lower_tables.py`, `coerce_tables.py`, `regex_tables.py`). `tests/golden/test_fixtures_current.py` (part of `core-test`) fails when a committed fixture or one of those sources differs from what the core produces now. The Python core is the oracle: fix the engine, never the fixture. Values a plain JSON reader cannot hold are tagged (`tests/golden/tagged.py` ↔ `engine/test/golden/load.ts`). Model scenarios are step lists run by `tests/golden/model_steps.py` (`Recorder`): every step records its result or error text, the state digest and a fingerprint of the entity lines plus `tests/golden/index_dump.py`'s dump, and every n-th step carries both in full; `engine/test/golden/model-steps.ts` replays them, a second time with every uniqueness key forced into one bucket. A `batch` step runs an op batch through `routes/ops.py::_apply_batch` on the recorder's own model, as a session does — a refused batch must leave no trace, the recorder fails the run when one does, and `ops_refused` refuses after every kind of touch — and records the outcome, the first-touch before-images, the inverse ops and the delta a replica would be sent; `undo` runs an earlier batch's inverse ops in restore mode. A `read` step calls the real route function behind a `READS` or `EVALUATIONS` name on a `Session` built for the call, with EVERY argument passed (called directly, a route keeps its `Query(...)` objects as defaults; `searchModel`'s body goes through `SearchQueryIn.model_validate`), and records `model_dump(mode="json")`; the replay looks the method up in `READS`, then in `EVALUATIONS` (drained, over `{model, artifacts, placements}`), and compares `JSON.stringify` of both, values and key order at once. `artifacts` replaces the project artifacts a step may fetch (the replay's `ArtifactSet`, committed — or, in `staged.test.ts`, staged as creates under their own ids over an empty committed layer); `evaluateNavigation`'s route runs over a stand-in database session that serves them. `navigate` runs the core's evaluator itself with the step's limits and row binding, value nodes tagged, and `has_script` `navigation_has_script`, both on a definition whose refs resolve against those artifacts. `view` registers the element ids a view's nested folders place (`read._placed_element_ids`, the list the shell would register) and `drop_view` forgets them. `validate` runs `ValidationPipeline(default_validators())` over a scope — a list of ids, or `all_ids`: every element id in state order, then every relationship id — and records the issues as `IssueOut` bodies, which the replay compares as text with `validateScoped`'s; after a `rules` step it runs `pipeline_for` of the recorder's compile, and the replay passes its own. `rules` takes `(artifact_id, name, yaml)` sources, sorted by name then id as both sides compile them, and records `routes/rules.py::parse_result` per source, the compile's `rules_status` and each compiled rule's applies types and paths with the checks per type; the replay hands the sources in as committed rule-set artifacts carrying those parses, lists them with `ruleSources` and compiles them. `reach` records `expand_scope` over its ids. A `batch` or `undo` with `record_dirty` adds its `DirtyCollector`'s ids to its result, which the replay compares with the ids its own collector gathered; a `batch` with `expand` too records them widened by `expand_scope`, as `expand_dirty` widens them. `seed` gives the recorder a `Session` over its model, with the recorder's compile when a `rules` step ran, whose store the server's own sweep fills (`start_validation_sweep(sync=True)`); from then on every landed batch bumps `model_rev` and goes through `_finalize` as `POST /model/ops` does (reach widening included), a `rules` step lands as `POST /commits` lands a batch of rule-set ops alone — recompiled, `applies_population(old, new)` validated with the new rules and spliced, `model_rev` bumped — and `issues` records `routes/validation.py::list_issues`, `rules_status` included, which the replay answers from an `IssueStore` and a compile it keeps beside it, seeded and spliced the same way (`storeListBody`, `rulesStatusBody`). `preview` (with `strict`, the session's strict mode) and `validate_staged` send a step's ops to `routes/commits.py::preview_commit` and to the staged branch of `routes/validation.py::validate_model`, which apply, validate and roll back; the recorder holds both to leaving the model and the store as they were, and puts back any id a preview minted (creates carry `id` hints, so both sides name them alike). The replay clones the model into a `WorkingCopy`, gives it a `LiveIssues` seeded with a copy of its store and the compile as both W and C, stages the ops as one batch and answers `previewBody` / `validateBody`. `insert_element` / `insert_relationship` put an entity in as committed state arrives (`Model.insert_element`), its type unchecked, so a scenario can hold a type its metamodel lacks. `engine/test/working/replica.golden.test.ts` feeds a `WorkingCopy` those deltas alone and expects the oracle's state, entity order included — through `ops_recreate` too (an entity created again under its id, unchanged in type and ends), which only the delta's `recreated_*` lists can express. `snapshot_v2` holds a snapshot text as the server encodes it, the texts no writer emits that the server reads alike (`same`) and the ones its decoder refuses in its own words (`refused`); `engine/test/snapshot/open.golden.test.ts` opens them all, cut into pieces as small as one byte. Every `observe()` of the golden runner computes its digest with the engine's own hash, so each fixture step holds it to `hashlib`.
+diff --git a/engine/bench/run.ts b/engine/bench/run.ts
+index b8a14e50..5a8ab53c 100644
+--- a/engine/bench/run.ts
++++ b/engine/bench/run.ts
+@@ -1,30 +1,33 @@
+ /**
+  * The engine at model M: opening a snapshot, against opening the same model
+  * as one document in the same pass; the digest check; the long operations in
+  * steps — their total and their longest step, for there is no scheduler here;
+  * the heap one replica holds; staging, rewinding, rebasing and a delta; the
+- * issue store's sweep, and the same edits through it, each revalidating; and
++ * issue store's sweep, and the same edits through it, each revalidating; the
++ * issue list the panel reads after a keystroke over many staged batches; and
+  * the store with custom rules: its sweep, a rescan, a stage widened by the
+  * rules' reach and a probe across a staged rule change.
+  *
+  * `pixi run engine-bench-data` writes the input once, `pixi run engine-bench`
+  * measures. Timings drift between sessions: compare only numbers of one run.
+  */
+ import { existsSync, readFileSync } from 'node:fs';
+ import {
++	appliesPopulation,
+ 	ArtifactSet,
+ 	compileRuleSets,
+ 	drain,
+ 	entityHash,
+ 	EVALUATIONS,
+ 	formatDigest,
++	issueListBody,
+ 	LiveIssues,
+ 	Metamodel,
+ 	Model,
+ 	openSnapshot,
+ 	parseExact,
+ 	READS,
+ 	ViewPlacements,
+ 	type CompiledRules,
+ 	type Delta,
+ 	type ElementRec,
+@@ -78,34 +81,38 @@ const ROWS = {
+ 	navigation: 'navigation, untyped scope, one relationship hop (Owns): every id sorted',
+ 	navigationLongest: '  its longest step',
+ 	iterate: 'iterate every entity in state order',
+ 	stage: 'stage a 1,000-op batch',
+ 	unstage: 'unstage it: every touched entity back in its place',
+ 	iterateAfter: 'iterate again: the first time re-sorts',
+ 	rebase: 'rebase 100 staged batches over a delta',
+ 	unstageEntity: 'unstage one entity among 100 staged batches',
+ 	delta: 'apply a delta (99 changed, 40 new, 10 deleted), nothing staged',
+ 	sweep: 'sweep the issue store: every entity validated, in steps',
+-	sweepFirst: '  its first step: every id listed',
++	sweepFirst: '  its first step',
+ 	sweepLongest: '  its longest step after the first',
+ 	sweepGroup: `sweep again with ${DUPLICATES.toLocaleString('en-US')} duplicates staged, one group`,
+ 	sweepGroupLongest: '  its longest step after the first',
++	uniqGroup: `uniqGroupOf over a ${DUPLICATES.toLocaleString('en-US')}-member group`,
+ 	liveStage: 'stage 1,000 ops + revalidation',
+ 	liveUnstage: 'unstage all + revalidation',
+ 	probe: 'origin probe (100 staged batches)',
+ 	liveDelta: 'delta over 100 staged + revalidation',
++	keystroke100: 'getModelIssues after a coalesced keystroke, 100 staged batches',
++	keystroke1000: 'getModelIssues after a coalesced keystroke, 1,000 staged batches',
+ 	rescan: 'rules rescan (population of the rule over the largest type)',
+ 	rescanLongest: '  its longest step',
+ 	rulesSweep: 'sweep with rules',
+ 	rulesSweepLongest: '  its longest step after the first',
+ 	rulesStage: 'stage 1,000 ops + revalidation with reach',
+-	rulesProbe: 'origin probe, 100 staged batches + a staged rule change'
++	rulesProbe: 'origin probe, 100 staged batches + a staged rule change',
++	rulesPopulation: "  the changed rule's population, once"
+ };
+ type Row = keyof typeof ROWS;
+ 
+ const timings = new Map<Row, number[]>();
+ 
+ function record(row: Row, ms: number): void {
+ 	timings.set(row, [...(timings.get(row) ?? []), ms]);
+ }
+ 
+ function timed<T>(row: Row, run: () => T): T {
+@@ -377,22 +384,23 @@ function measureEdits(wc: WorkingCopy): void {
+ 		{ elements: sample(elements, 20, 7, any), relationships: sample(relationships, 20, 7, any) },
+ 		sample(relationships, 10, 9, any)
+ 	);
+ 	timed('delta', () => wc.applyDelta(delta));
+ 	const sound = !wc.diverged && wc.verifyDigest();
+ 	if (!sound) throw new Error('the bench drove the replica off its digest');
+ }
+ 
+ /**
+  * The issue store over the replica: its sweep, and edits like the ones above
+- * through it, each revalidating what it may have moved. Then a sweep over a
+- * group of duplicates, whose members each read the whole group.
++ * through it, each revalidating what it may have moved. Then a group of
++ * duplicates: one member's `uniqGroupOf`, and a sweep over it, whose members
++ * each read the whole group.
+  */
+ function measureIssues(wc: WorkingCopy): void {
+ 	const { model } = wc;
+ 	const named = namedIn(model);
+ 	const live = new LiveIssues(wc);
+ 	if (!stepped('sweep', 'sweepLongest', live.sweepSteps(), 'sweepFirst')) {
+ 		throw new Error('the sweep ended unusable');
+ 	}
+ 	const batch = thousandOps(model, ...entities(model));
+ 	timed('liveStage', () => live.stage(batch));
+@@ -419,50 +427,86 @@ function measureIssues(wc: WorkingCopy): void {
+ 
+ 	// Staged past the store: its dirty sets would sort the growing group once an op.
+ 	const like = sample(elements, 1, 11, named)[0]!;
+ 	const copies = Array.from({ length: DUPLICATES }, (_, i): ModelOp => ({
+ 		kind: 'create_element',
+ 		temp_id: `tmp_dup${i}`,
+ 		type_name: like.typeName,
+ 		properties: { ...like.props }
+ 	}));
+ 	wc.stage(copies);
++	// A staged entity lives under its temp id.
++	const copy = model.getElement('tmp_dup0');
++	const group = timed('uniqGroup', () => model.indexes.uniqGroupOf(copy));
++	if (group.length < DUPLICATES) throw new Error('the copies make no group');
+ 	const grouped = new LiveIssues(wc);
+ 	stepped('sweepGroup', 'sweepGroupLongest', grouped.sweepSteps(), null);
+ 	if (grouped.store.size < DUPLICATES) throw new Error('the copies make no group');
+ 	wc.unstage('all');
+ 	const sound = !wc.diverged && wc.verifyDigest();
+ 	if (!sound) throw new Error('the bench drove the replica off its digest');
+ }
+ 
++/**
++ * The issue list the panel reads after a keystroke that merges into the
++ * latest staged batch, over 100 and then 1,000 staged batches, each read once
++ * before the keystroke as the panel's refetch reads it.
++ */
++function measureKeystrokes(wc: WorkingCopy): void {
++	const { model } = wc;
++	const live = new LiveIssues(wc);
++	drain(live.sweepSteps());
++	const [elements] = entities(model);
++	const named = sample(elements, 1000, 13, namedIn(model));
++	let staged = 0;
++	for (const [row, batches] of [
++		['keystroke100', 100],
++		['keystroke1000', 1000]
++	] as const) {
++		for (; staged < batches; staged++) live.stage([renamed(named[staged]!, `mine ${staged}`)]);
++		issueListBody(live);
++		const typed = live.stage([renamed(named[staged - 1]!, `mine ${staged - 1}!`)], {
++			coalesce: true
++		});
++		if (!typed.coalesced) throw new Error('the keystroke did not merge');
++		timed(row, () => issueListBody(live));
++	}
++	live.unstage('all');
++	const sound = !wc.diverged && wc.verifyDigest();
++	if (!sound) throw new Error('the bench drove the replica off its digest');
++}
++
+ /**
+  * The issue store with the bench rules: its sweep, a 1,000-op stage whose
+  * dirty set their reach widens, and a probe over 100 staged batches with one
+  * rule changed in the staged rule sets, the rescan it queued drained first.
+  */
+ function measureRules(wc: WorkingCopy): void {
+ 	const { model } = wc;
+ 	const rules = compiledRules(wc, BENCH_RULES('3.0'));
+ 	const live = new LiveIssues(wc, { rules: { working: rules, committed: rules } });
+ 	if (!stepped('rulesSweep', 'rulesSweepLongest', live.sweepSteps(), null)) {
+ 		throw new Error('the sweep with rules ended unusable');
+ 	}
+ 	const batch = thousandOps(model, ...entities(model));
+ 	timed('rulesStage', () => live.stage(batch));
+ 	live.unstage('all');
+ 	const [elements] = entities(model);
+ 	sample(elements, 100, 3, namedIn(model)).forEach((element, i) =>
+ 		live.stage([renamed(element, `mine ${i}`)])
+ 	);
+-	live.setRules({ working: compiledRules(wc, BENCH_RULES('4.0')), committed: rules });
++	const changed = compiledRules(wc, BENCH_RULES('4.0'));
++	live.setRules({ working: changed, committed: rules });
+ 	drain(live.sweepSteps());
+ 	timed('rulesProbe', () => live.origins());
++	const prodReplicas = changed.rules.filter((cr) => cr.rule.name === 'prod-replicas');
++	timed('rulesPopulation', () => appliesPopulation(model, { rules: prodReplicas }));
+ 	live.unstage('all');
+ 	const sound = !wc.diverged && wc.verifyDigest();
+ 	if (!sound) throw new Error('the bench drove the replica off its digest');
+ }
+ 
+ const bytes = readFileSync(SNAPSHOT);
+ const metamodelDoc = JSON.parse(readFileSync(METAMODEL, 'utf-8')) as MetamodelDoc;
+ 
+ const heapMb: number[] = [];
+ let counts = '';
+@@ -506,20 +550,21 @@ async function pass(): Promise<void> {
+ 		for (const element of doc['elements']!) model.loadElement(element);
+ 		for (const rel of doc['relationships']!) model.loadRelationship(rel);
+ 	});
+ 	timed('documentIndex', () => model.rebuildIndexes());
+ 	record('document', performance.now() - documentStart);
+ 	stepped('indexSteps', 'indexLongest', model.rebuildIndexSteps());
+ 	timed('nativeParse', () => JSON.parse(text) as unknown);
+ 
+ 	measureEdits(workingCopy);
+ 	measureIssues(workingCopy);
++	measureKeystrokes(workingCopy);
+ 	measureRules(workingCopy);
+ }
+ 
+ for (let i = 0; i < PASSES; i++) await pass();
+ 
+ const width = Math.max(...Object.values(ROWS).map((label) => label.length));
+ const shown = (ms: number) => ms.toFixed(ms < 10 ? 1 : 0);
+ const open = median(timings.get('open')!);
+ const heap = median(heapMb);
+ 
+diff --git a/engine/src/debug/verify-consistent.ts b/engine/src/debug/verify-consistent.ts
+index 3dbda318..689af7c0 100644
+--- a/engine/src/debug/verify-consistent.ts
++++ b/engine/src/debug/verify-consistent.ts
+@@ -1,11 +1,12 @@
+ import type { Model } from '../model/model.ts';
++import { cmpCodePoint } from '../value/compare.ts';
+ import { dumpIndexes, type IndexDump } from './dump-indexes.ts';
+ 
+ function structuralFaults(model: Model): string[] {
+ 	const faults: string[] = [];
+ 	let lastOrd = -Infinity;
+ 	for (const element of model.elements()) {
+ 		if (element.ord <= lastOrd) faults.push(`element order at ${element.id}`);
+ 		lastOrd = element.ord;
+ 		element.out.forEach((rel, i) => {
+ 			if (rel.outAt !== i || rel.source !== element) faults.push(`out position of ${rel.id}`);
+@@ -24,27 +25,36 @@ function structuralFaults(model: Model): string[] {
+ 	lastOrd = -Infinity;
+ 	for (const rel of model.relationships()) {
+ 		if (rel.ord <= lastOrd) faults.push(`relationship order at ${rel.id}`);
+ 		lastOrd = rel.ord;
+ 		if (model.findElement(rel.source.id) !== rel.source) faults.push(`source of ${rel.id}`);
+ 		if (model.findElement(rel.target.id) !== rel.target) faults.push(`target of ${rel.id}`);
+ 	}
+ 	return faults;
+ }
+ 
++/** The cached uniqueness key texts, by element id. */
++function keyTexts(model: Model): string {
++	const texts = [...model.indexes.keyText].map(([element, text]) => [element.id, text] as const);
++	return JSON.stringify(texts.sort(([a], [b]) => cmpCodePoint(a, b)));
++}
++
+ /**
+- * Throws unless the incrementally maintained indexes equal a fresh rebuild.
+- * It rebuilds them in place — which leaves a consistent model as it was — so
+- * it is a full pass over the model: tests and debugging only.
++ * Throws unless the incrementally maintained indexes equal a fresh rebuild,
++ * the cached key texts included. It rebuilds them in place — which leaves a
++ * consistent model as it was — so it is a full pass over the model: tests
++ * and debugging only.
+  */
+ export function verifyConsistent(model: Model): void {
+ 	const faults = structuralFaults(model);
+ 	const kept = dumpIndexes(model);
++	const keptTexts = keyTexts(model);
+ 	model.rebuildIndexes();
+ 	const fresh = dumpIndexes(model);
+ 	for (const section of Object.keys(kept) as (keyof IndexDump)[]) {
+ 		if (JSON.stringify(kept[section]) !== JSON.stringify(fresh[section])) faults.push(section);
+ 	}
++	if (keptTexts !== keyTexts(model)) faults.push('key texts');
+ 	if (faults.length > 0) {
+ 		throw new Error('indexes differ from a fresh rebuild in: ' + faults.join(', '));
+ 	}
+ }
+diff --git a/engine/src/model/indexes.ts b/engine/src/model/indexes.ts
+index 80b619bd..2c5a0153 100644
+--- a/engine/src/model/indexes.ts
++++ b/engine/src/model/indexes.ts
+@@ -36,27 +36,30 @@ const NO_REFS: ReadonlySet<string> = new Set();
+  * root order — and the hooks that keep them, and the adjacency arrays on the
+  * records, in step with the mutation boundary. Every structure is sparse: a
+  * key whose set becomes empty is removed. Anything a set or an adjacency
+  * array holds has no specified order; whatever is observable sorts.
+  *
+  * Uniqueness mirrors the oracle: two elements are identical when they share
+  * the type, the first containment parent (or both have none) and either the
+  * type's effective key (property values, then per relationship key the sorted
+  * endpoint ids of exact-type edges) or, without a key, every property.
+  * Buckets are keyed by a hash of that key's canonical text, so members of one
+- * bucket are only candidates: the queries confirm with the exact text.
++ * bucket are only candidates: the queries confirm with the exact text, which
++ * is kept for every member of a bucket of two or more.
+  */
+ export class IndexSet {
+ 	/** Exact type name → its elements. */
+ 	readonly byType = new Map<string, Set<ElementRec>>();
+ 	/** Uniqueness hash → the one element filed under it, or a set of two or more. */
+ 	readonly buckets = new Map<number, ElementRec | Set<ElementRec>>();
++	/** Element → its uniqueness key text, for exactly the members of a bucket of two or more. */
++	readonly keyText = new Map<ElementRec, string>();
+ 	/** Entity id → the element ids its reference-typed properties name. */
+ 	readonly refsOf = new Map<string, ReadonlySet<string>>();
+ 	/** Element id → the entities naming it; a dangling target stays indexed. */
+ 	readonly referencers = new Map<string, Set<string>>();
+ 	readonly roots = new RootOrder();
+ 
+ 	private readonly model: Model;
+ 	private readonly hashKey: (key: string) => number;
+ 	private readonly elementRefProps = new Map<string, string[]>();
+ 	private readonly relationshipRefProps = new Map<string, string[]>();
+@@ -208,20 +211,21 @@ export class IndexSet {
+ 	 * its own. Nothing may read the indexes or write the model between two
+ 	 * steps: they are half built, and the passes hold iterators over the model.
+ 	 */
+ 	*rebuildSteps(): Steps<void> {
+ 		const model = this.model;
+ 		const total = 2 * model.elementCount + model.relationshipCount + 1;
+ 		let done = 0;
+ 		const visited = () => (++done & 1023) === 0;
+ 		this.byType.clear();
+ 		this.buckets.clear();
++		this.keyText.clear();
+ 		this.refsOf.clear();
+ 		this.referencers.clear();
+ 		for (const element of model.elements()) {
+ 			element.out.length = 0;
+ 			element.in.length = 0;
+ 			element.parents.length = 0;
+ 			if (visited()) yield { done, total };
+ 		}
+ 		// Relationships first, in order, so that owners are known before grouping.
+ 		for (const rel of model.relationships()) {
+@@ -247,20 +251,25 @@ export class IndexSet {
+ 		}
+ 		const sort = this.roots.resetSteps(roots);
+ 		while (sort.next().done !== true) yield { done: total - 1, total };
+ 		yield { done: total, total };
+ 	}
+ 
+ 	// -- uniqueness ----------------------------------------------------------
+ 
+ 	/** The canonical text of the element's identity; equal texts mean identical elements. */
+ 	uniqKey(element: ElementRec): string {
++		return this.keyText.get(element) ?? this.freshKey(element);
++	}
++
++	/** `uniqKey` computed from the element as it now stands. */
++	private freshKey(element: ElementRec): string {
+ 		const owner = element.parents.length > 0 ? element.parents[0]!.source.id : null;
+ 		const spec = this.keySpec(element.typeName);
+ 		const signature: Value =
+ 			spec === null
+ 				? element.props
+ 				: [
+ 						spec.properties.map((name) => getProp(element.props, name) ?? null),
+ 						spec.relationships.map((keyRel) => this.relEndpoints(element, keyRel))
+ 					];
+ 		return pyKey([element.typeName, owner, signature]);
+@@ -279,43 +288,61 @@ export class IndexSet {
+ 	private relEndpoints(element: ElementRec, keyRel: KeyRel): string[] {
+ 		const ids: string[] = [];
+ 		if (keyRel.direction === 'out') {
+ 			for (const rel of element.out) if (rel.typeName === keyRel.relType) ids.push(rel.target.id);
+ 		} else {
+ 			for (const rel of element.in) if (rel.typeName === keyRel.relType) ids.push(rel.source.id);
+ 		}
+ 		return ids.sort(cmpCodePoint);
+ 	}
+ 
+-	private addToGroup(element: ElementRec): void {
+-		const hash = this.hashKey(this.uniqKey(element));
++	/** Files the element under the hash of `text`, its fresh key. */
++	private addToGroup(element: ElementRec, text = this.freshKey(element)): void {
++		const hash = this.hashKey(text);
+ 		element.uniq = hash;
+ 		const bucket = this.buckets.get(hash);
+-		if (bucket === undefined) this.buckets.set(hash, element);
+-		else if (bucket instanceof Set) bucket.add(element);
+-		else this.buckets.set(hash, new Set([bucket, element]));
++		if (bucket === undefined) {
++			this.buckets.set(hash, element);
++			return;
++		}
++		if (bucket instanceof Set) {
++			bucket.add(element);
++		} else {
++			this.buckets.set(hash, new Set([bucket, element]));
++			this.keyText.set(bucket, this.freshKey(bucket));
++		}
++		this.keyText.set(element, text);
+ 	}
+ 
+ 	private removeFromGroup(element: ElementRec): void {
++		this.keyText.delete(element);
+ 		const bucket = this.buckets.get(element.uniq);
+ 		if (bucket === element) {
+ 			this.buckets.delete(element.uniq);
+ 		} else if (bucket instanceof Set && bucket.delete(element) && bucket.size === 1) {
+-			for (const last of bucket) this.buckets.set(element.uniq, last);
++			for (const last of bucket) {
++				this.buckets.set(element.uniq, last);
++				this.keyText.delete(last);
++			}
+ 		}
+ 	}
+ 
+ 	private rekey(element: ElementRec): void {
+-		// An unchanged hash is an unchanged bucket, whatever the key texts are.
+-		if (this.hashKey(this.uniqKey(element)) === element.uniq) return;
++		const text = this.freshKey(element);
++		if (this.hashKey(text) === element.uniq) {
++			// An unchanged hash is an unchanged bucket, whatever the key texts
++			// are; a shared one keeps the text the element has now.
++			if (this.keyText.has(element)) this.keyText.set(element, text);
++			return;
++		}
+ 		this.removeFromGroup(element);
+-		this.addToGroup(element);
++		this.addToGroup(element, text);
+ 	}
+ 
+ 	private isPresent(element: ElementRec): boolean {
+ 		return this.model.findElement(element.id) === element;
+ 	}
+ 
+ 	private rekeyIfPresent(element: ElementRec): void {
+ 		if (this.isPresent(element)) this.rekey(element);
+ 	}
+ 
+diff --git a/engine/src/model/model.ts b/engine/src/model/model.ts
+index a1e7a452..722ace5e 100644
+--- a/engine/src/model/model.ts
++++ b/engine/src/model/model.ts
+@@ -34,50 +34,63 @@ export class Model {
+ 	readonly metamodel: Metamodel;
+ 	readonly indexes: IndexSet;
+ 
+ 	private readonly elementMap = new Map<string, ElementRec>();
+ 	private readonly relationshipMap = new Map<string, RelRec>();
+ 	private nextOrd = 0;
+ 	// Set when a record came back with an old `ord`: the map is then out of
+ 	// order until the next ordered iteration sorts it, once.
+ 	private elementsShuffled = false;
+ 	private relationshipsShuffled = false;
++	private resorts = 0;
+ 
+ 	constructor(metamodel: Metamodel, options: ModelOptions = {}) {
+ 		this.metamodel = metamodel;
+ 		this.indexes = new IndexSet(this, options.hashKey ?? hashKey);
+ 	}
+ 
+ 	// -- reading -------------------------------------------------------------
+ 
+ 	get elementCount(): number {
+ 		return this.elementMap.size;
+ 	}
+ 
+ 	get relationshipCount(): number {
+ 		return this.relationshipMap.size;
+ 	}
+ 
++	/**
++	 * Moves whenever an ordered read re-sorts either map. An iterator taken
++	 * before a re-sort reads the whole map again from where it stands; one
++	 * taken since the last move skips an entity deleted before it reaches it,
++	 * and reads one added before it ends, last.
++	 */
++	get orderEpoch(): number {
++		return this.resorts;
++	}
++
+ 	/** The elements in state order. */
+ 	elements(): IterableIterator<ElementRec> {
+ 		if (this.elementsShuffled) {
+ 			byOrd(this.elementMap);
+ 			this.elementsShuffled = false;
++			this.resorts++;
+ 		}
+ 		return this.elementMap.values();
+ 	}
+ 
+ 	/** The relationships in state order. */
+ 	relationships(): IterableIterator<RelRec> {
+ 		if (this.relationshipsShuffled) {
+ 			byOrd(this.relationshipMap);
+ 			this.relationshipsShuffled = false;
++			this.resorts++;
+ 		}
+ 		return this.relationshipMap.values();
+ 	}
+ 
+ 	findElement(id: string): ElementRec | undefined {
+ 		return this.elementMap.get(id);
+ 	}
+ 
+ 	findRelationship(id: string): RelRec | undefined {
+ 		return this.relationshipMap.get(id);
+diff --git a/engine/src/service/service.ts b/engine/src/service/service.ts
+index 7c7e03f7..8a291b39 100644
+--- a/engine/src/service/service.ts
++++ b/engine/src/service/service.ts
+@@ -20,21 +20,21 @@ import {
+ import {
+ 	compileRuleSets,
+ 	type CompiledRules,
+ 	type RuleSource,
+ 	type RulesParse
+ } from '../rules/compile.ts';
+ import { ruleSources } from '../rules/sources.ts';
+ import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
+ import { drain, isSteps, type Steps } from '../steps/steps.ts';
+ import { issueListBody, previewBody, validateBody } from '../validation/bodies.ts';
+-import { LiveIssues, type Origins, type SweepStep } from '../validation/live.ts';
++import { LiveIssues, type SweepStep } from '../validation/live.ts';
+ import { pyRepr } from '../value/repr.ts';
+ import { readDeltaText, readTailText } from '../working/delta.ts';
+ import type {
+ 	ChangeSet,
+ 	Conflict,
+ 	OwnCommit,
+ 	StagedBatch,
+ 	Unstage,
+ 	WorkingCopy
+ } from '../working/working-copy.ts';
+@@ -374,28 +374,26 @@ const WAITING = Symbol('waiting');
+ type Opening = {
+ 	readonly projectId: string;
+ 	readonly queue: ByteQueue;
+ 	settled: Promise<Outcome<OpenedSnapshot>>;
+ 	discarded: boolean;
+ 	ending: boolean;
+ };
+ 
+ /**
+  * The issue store of the ready replica: `seen`, how much of its `version` the
+- * service has counted; `probed`, the origins its last answer read, so that a
+- * new probe shows; `working` and `committed`, its rule sets as compiled
++ * service has counted; `working` and `committed`, its rule sets as compiled
+  * against the replica's metamodel.
+  */
+ type Issues = {
+ 	readonly live: LiveIssues;
+ 	seen: number;
+-	probed: Origins | null;
+ 	working: Compiled;
+ 	committed: Compiled;
+ };
+ 
+ class Service {
+ 	readonly placements = new ViewPlacements();
+ 	readonly artifacts = new ArtifactSet();
+ 	state: ReplicaState = 'opening';
+ 	wc: WorkingCopy | null = null;
+ 
+@@ -550,42 +548,42 @@ class Service {
+ 		const wc = this.ready();
+ 		const live = this.issuesOf?.live;
+ 		if (live === undefined || live.wc !== wc) throw new Refused(409, NOT_READY);
+ 		if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
+ 		const { working, committed } = live.rules;
+ 		if (working.unreadable || committed.unreadable) throw new Refused(501, UNREADABLE_RULES);
+ 		return live;
+ 	}
+ 
+ 	/**
+-	 * `body` over the store, after the probe it reads. A probe rewinds and
++	 * `body` over the store, with the probe it may run. A probe rewinds and
+ 	 * replays the staged batches — the committed images the digest check
+ 	 * walks are rebuilt — so a new one restarts the check.
+ 	 */
+ 	private answer<T>(live: LiveIssues, body: (live: LiveIssues) => T): T {
+-		const issues = this.issuesOf!;
+-		const before = issues.probed;
++		const probes = live.probes;
+ 		const probing = live.wc.staged().length > 0;
++		let out: T;
+ 		try {
+-			issues.probed = live.origins();
++			out = body(live);
+ 		} catch (caught) {
+ 			// A replay that could not even put the batches back left the model below them.
+ 			if (live.wc.diverged) {
+ 				this.diverge(live.wc);
+ 				throw new Refused(409, NOT_READY);
+ 			}
+ 			if (probing) this.scheduler.restartBackground();
+ 			if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
+ 			throw caught;
+ 		}
+-		if (probing && issues.probed !== before) this.scheduler.restartBackground();
+-		return body(live);
++		if (probing && live.probes !== probes) this.scheduler.restartBackground();
++		return out;
+ 	}
+ 
+ 	/**
+ 	 * `getModelIssues` and `previewCommit`: a transition of the model lane —
+ 	 * a probe rewinds, so no scan may be running — that posts no `changed`,
+ 	 * once the store is settled. `check` refuses a stale call before any probe.
+ 	 */
+ 	issues(
+ 		call: Call,
+ 		body: (live: LiveIssues) => unknown,
+@@ -1024,21 +1022,21 @@ class Service {
+ 			done: (ok) => {
+ 				if (!ok && this.wc === wc) this.diverge(wc);
+ 			}
+ 		});
+ 		const mm = wc.model.metamodel;
+ 		const working = this.compiled('working', mm);
+ 		const committed = this.compiled('committed', mm);
+ 		const live = new LiveIssues(wc, {
+ 			rules: { working: working.rules, committed: committed.rules }
+ 		});
+-		this.issuesOf = { live, seen: live.version, probed: null, working, committed };
++		this.issuesOf = { live, seen: live.version, working, committed };
+ 		this.sweep(live);
+ 	}
+ 
+ 	private diverge(wc: WorkingCopy): void {
+ 		if (this.wc !== wc || this.state === 'diverged') return;
+ 		this.progressHeld.clear();
+ 		this.scheduler.setOpen(false);
+ 		this.scheduler.setBackground(null);
+ 		this.dropIssues();
+ 		this.enter('diverged');
+diff --git a/engine/src/validation/bodies.ts b/engine/src/validation/bodies.ts
+index 713752c4..ab3663b4 100644
+--- a/engine/src/validation/bodies.ts
++++ b/engine/src/validation/bodies.ts
+@@ -86,31 +86,30 @@ class Committed {
+ 		const key = originKey(i);
+ 		const n = this.left.get(key) ?? 0;
+ 		if (n === 0) return false;
+ 		this.left.set(key, n - 1);
+ 		return true;
+ 	}
+ }
+ 
+ /**
+  * `GET /model/issues` over the working state: the store's issues, each of an
+- * owner the staged changes dirty `on_server` while a committed one matches it
+- * and `uncommitted` past that, every other one `on_server`. A committed issue
+- * the staged changes fixed is not listed. `rules_status` is the working
+- * rules'.
++ * owner the staged changes may have moved (`tagScope()`) `on_server` while a
++ * committed one matches it and `uncommitted` past that, every other one
++ * `on_server`. A committed issue the staged changes fixed is not listed.
++ * `rules_status` is the working rules'.
+  */
+ export function issueListBody(live: LiveIssues): IssueListBody {
+-	const { dirty, committed } = live.origins();
+-	const staged = new Set(dirty);
+-	const matches = new Committed(committed);
++	const scope = live.tagScope();
++	const matches = new Committed([...scope.values()].flat());
+ 	return storeListBody(live.store, live.wc.rev, rulesStatusBody(live.rules.working), (i) =>
+-		!staged.has(issueOwner(i)) || matches.take(i) ? 'on_server' : 'uncommitted'
++		!scope.has(issueOwner(i)) || matches.take(i) ? 'on_server' : 'uncommitted'
+ 	);
+ }
+ 
+ /**
+  * The staged branch of `POST /model/validate`: the store's issues of the
+  * owners the staged changes leave alone, then theirs, fresh, tagged against
+  * the committed ones, then the committed ones left unmatched as `resolved`.
+  */
+ export function validateBody(live: LiveIssues): IssueOut[] {
+ 	const { dirty, working, committed } = live.origins();
+diff --git a/engine/src/validation/live.ts b/engine/src/validation/live.ts
+index a4a50937..ed1e7f36 100644
+--- a/engine/src/validation/live.ts
++++ b/engine/src/validation/live.ts
+@@ -1,11 +1,11 @@
+-import type { Model } from '../model/model.ts';
++import type { ElementRec, RelRec } from '../model/records.ts';
+ import type { ModelOp } from '../ops/types.ts';
+ import {
+ 	appliesPopulation,
+ 	EMPTY_RULES,
+ 	type CompiledRule,
+ 	type CompiledRules
+ } from '../rules/compile.ts';
+ import { expandScope } from '../rules/reach.ts';
+ import type { Progress } from '../steps/steps.ts';
+ import { PyFloat, type Value } from '../value/types.ts';
+@@ -19,36 +19,44 @@ import type {
+ 	WorkingCopy
+ } from '../working/working-copy.ts';
+ import { addNeighbourhood, DirtyCollector } from './dirty.ts';
+ import { issueOwner, type Issue } from './issue.ts';
+ import { FacetPatterns, PatternUnusable, validateScoped, Validators } from './pipeline.ts';
+ import { IssueStore } from './store.ts';
+ 
+ /** Ids a sweep step validates and splices. */
+ export const SWEEP_STEP = 512;
+ 
++/** A sweep step passes over at most this many times `sweepStep` entities, unless `sweepSkip` is given. */
++const SKIP_PER_STEP = 16;
++
+ /** A step of `sweepSteps`: the sweep's progress, or a rescan step, which reports none. */
+ export type SweepStep = Progress & { readonly rescan?: true };
+ 
+ /** What a rescan step yields where a sweep step yields its progress. */
+ export const RESCAN_STEP: SweepStep = Object.freeze({ done: 0, total: 0, rescan: true });
+ 
+ /** The rule sets as staged, over the working state, and as committed. */
+ export type LiveRules = { readonly working: CompiledRules; readonly committed: CompiledRules };
+ 
+ const NO_RULES: LiveRules = { working: EMPTY_RULES, committed: EMPTY_RULES };
+ 
+ export type LiveIssuesOptions = {
+ 	/** A store already complete for the working copy's state: the replica counts as swept. */
+ 	seed?: IssueStore;
+ 	/** Ids per sweep step, `SWEEP_STEP` unless given. */
+ 	sweepStep?: number;
++	/**
++	 * Entities a sweep step may pass over besides, those an earlier step or a
++	 * transition validated; 16 times `sweepStep` unless given.
++	 */
++	sweepSkip?: number;
+ 	/** The rule sets, none unless given; the store holds the working ones' issues. */
+ 	rules?: LiveRules;
+ };
+ 
+ /**
+  * What the staged changes change, as the server's routes see them. `hooks`
+  * is the dirty set of the staged ops applied as one batch to the committed
+  * state. `dirty` widens it by the working rules' reach and, while the working
+  * rules are not the committed ones, adds every element a changed rule applies
+  * to; `working` is its issues on the working state with the working rules,
+@@ -166,60 +174,87 @@ function endsOf(wc: WorkingCopy, ids: Iterable<string>): string[] {
+ 	return out;
+ }
+ 
+ const changedIds = (changes: ChangeSet) => [
+ 	...changes.elementIds,
+ 	...changes.relationshipIds,
+ 	...changes.deletedElementIds,
+ 	...changes.deletedRelationshipIds
+ ];
+ 
+-/** Every element id in state order, then every relationship id. */
+-function allIds(model: Model): string[] {
+-	const ids: string[] = [];
+-	for (const element of model.elements()) ids.push(element.id);
+-	for (const rel of model.relationships()) ids.push(rel.id);
+-	return ids;
+-}
++/**
++ * Where the sweep's walk of one map stands: the iterator, the model's order
++ * epoch when it was taken, and the greatest `ord` handed out so far.
++ */
++type Cursor<T> = { iter: Iterator<T> | null; epoch: number; ord: number; ended: boolean };
++
++const cursor = <T>(): Cursor<T> => ({ iter: null, epoch: -1, ord: -1, ended: false });
++
++/** The sweep due: its total when it began (`null` before its first step), and the entities it has validated. */
++type Sweep = {
++	total: number | null;
++	done: number;
++	readonly elements: Cursor<ElementRec>;
++	readonly relationships: Cursor<RelRec>;
++};
++
++const newSweep = (): Sweep => ({
++	total: null,
++	done: 0,
++	elements: cursor(),
++	relationships: cursor()
++});
++
++/** The panel's tag scope, kept for one committed rev and one pair of equal rule sets. */
++type Tags = {
++	readonly rev: number;
++	readonly rulesVersion: number;
++	readonly committedOf: Map<string, readonly Issue[]>;
++};
+ 
+ /**
+  * The issues of a working copy's working state, kept as it moves. Every
+  * transition goes through here and revalidates the ids whose verdict it may
+  * have changed before it returns: a stage the ids its applier's hooks name,
+  * the server's own dirty set; a rebase (`unstage`, `applyDelta`) the
+  * neighbourhoods, before and after, of every id it may touch and of the ends
+  * of every relationship among them; a merged edit both, since it replays the
+  * batches from the one it lands in. A background
+  * sweep fills the store in steps and resumes across any transition; once it
+  * has run to its end the store is `seeded`. A facet pattern the host cannot
+  * run makes it `unusable` for good: the store empties and stays empty.
+  *
+  * The store holds the working rules' issues. Every dirty set is widened by
+  * their reach on the state after the transition: an owner whose verdict
+  * reads an element that moved is found by walking its paths back from that
+  * element. A change of the working rules queues every element the old or the
+  * new ones apply to for a rescan, which the sweep's steps drain after any
+  * sweep due; the store is `settled` once it has.
+  *
++ * The panel's tags need each staged owner's committed issues. An exact probe
++ * finds them; while the rev and the rule sets hold, and the working rules are
++ * the committed ones, the transitions keep them from there (`tagScope`).
++ *
+  * Nothing else may write to the working copy while this one wraps it.
+  */
+ export class LiveIssues {
+ 	readonly wc: WorkingCopy;
+ 	private readonly validators: Validators;
+ 	private readonly patterns: FacetPatterns;
+ 	private readonly sweepStep: number;
++	private readonly sweepSkip: number;
+ 	private issues: IssueStore;
+ 	private moves = 0;
+ 	private swept: boolean;
+ 	private broken: 'pattern' | null = null;
+-	/** The sweep due: the ids its first step listed, and how many are done; `null` when none is. */
+-	private sweep: { ids: string[] | null; at: number } | null;
++	/** The sweep due; `null` when none is. */
++	private sweep: Sweep | null;
+ 	private waiters: (() => void)[] = [];
+ 	private compiled: LiveRules;
+ 	private rulesMoves = 0;
+ 	/** The ids a rule-set change left to revalidate, and how many are done; `null` when none are. */
+ 	private rescan: { ids: string[]; at: number } | null = null;
+ 	private settleWaiters: (() => void)[] = [];
+ 	private cached: {
+ 		rev: number;
+ 		stagedVersion: number;
+ 		rulesVersion: number;
+@@ -229,31 +264,39 @@ export class LiveIssues {
+ 	 * The issues, with the working and with the committed rules, of elements
+ 	 * a changed rule applies to that the staged edits did not reach when they
+ 	 * were found: the same on both states then, so found on the working state
+ 	 * alone. Such an element's issues are its committed ones whenever the
+ 	 * edits do not reach it, so an entry holds for one committed rev and one
+ 	 * pair of rule sets; a transition drops the entries of its dirty ids all
+ 	 * the same.
+ 	 */
+ 	private readonly deltaOf = new Map<string, { working: Issue[]; committed: Issue[] }>();
+ 	private deltaRev = -1;
++	/**
++	 * Every owner whose issues may differ between the two states, with its
++	 * committed issues; `null` until an exact probe finds them, and whenever
++	 * they cannot be kept.
++	 */
++	private tags: Tags | null = null;
++	private probeRuns = 0;
+ 
+ 	constructor(wc: WorkingCopy, options: LiveIssuesOptions = {}) {
+ 		this.wc = wc;
+ 		const mm = wc.model.metamodel;
+ 		this.validators = new Validators(mm);
+ 		this.patterns = new FacetPatterns(mm);
+ 		this.sweepStep = options.sweepStep ?? SWEEP_STEP;
++		this.sweepSkip = options.sweepSkip ?? SKIP_PER_STEP * this.sweepStep;
+ 		this.compiled = options.rules ?? NO_RULES;
+ 		this.issues = options.seed ?? new IssueStore();
+ 		this.swept = options.seed !== undefined;
+-		this.sweep = options.seed === undefined ? { ids: null, at: 0 } : null;
++		this.sweep = options.seed === undefined ? newSweep() : null;
+ 		if (this.patterns.unusable) {
+ 			this.broken = 'pattern';
+ 			this.issues = new IssueStore();
+ 			this.sweep = null;
+ 		}
+ 	}
+ 
+ 	get store(): IssueStore {
+ 		return this.issues;
+ 	}
+@@ -282,20 +325,25 @@ export class LiveIssues {
+ 
+ 	/** Set once a sweep has run to its end; a later sweep keeps it. */
+ 	get seeded(): boolean {
+ 		return this.swept;
+ 	}
+ 
+ 	get unusable(): 'pattern' | null {
+ 		return this.broken;
+ 	}
+ 
++	/** Moves whenever `origins()` finds the origins afresh. */
++	get probes(): number {
++		return this.probeRuns;
++	}
++
+ 	// -- transitions ---------------------------------------------------------
+ 
+ 	stage(
+ 		ops: readonly ModelOp[],
+ 		options: { coalesce?: boolean } = {}
+ 	): { batch: StagedBatch; coalesced: boolean; changes: ChangeSet } {
+ 		if (this.broken !== null) return this.wc.stage(ops, options);
+ 		const dirty = new DirtyCollector();
+ 		// A merge replays the batches from the one it lands in, which later ones
+ 		// may overwrite in part and which may park: its trial run on top cannot
+@@ -354,41 +402,44 @@ export class LiveIssues {
+ 			for (const id of appliesPopulation(this.wc.model, before, rules.working)) {
+ 				if (!seen.has(id)) queued.push(id);
+ 				seen.add(id);
+ 			}
+ 			if (queued.length > 0) this.rescan = { ids: queued, at: 0 };
+ 		}
+ 		this.rulesMoves++;
+ 		this.moves++;
+ 		this.cached = null;
+ 		this.deltaOf.clear();
++		this.tags = null;
+ 	}
+ 
+ 	/**
+ 	 * The neighbourhoods, before a rebase, of the ids it may touch and of the
+ 	 * ends of every relationship among them: a relationship absent on one side
+ 	 * cannot name its ends there, and they move groups all the same. Returns
+ 	 * the ids taken, for `afterRebase`.
+ 	 */
+ 	private beforeRebase(named: readonly string[], dirty: DirtyCollector): string[] {
+ 		const touched = [...named, ...endsOf(this.wc, named)];
+ 		addNeighbourhood(this.wc.model, touched, dirty);
+ 		return touched;
+ 	}
+ 
+ 	/**
+ 	 * The collector widened by the working rules' reach on the state after the
+-	 * transition, as its ids; `deltaOf` forgets them.
++	 * transition, as its ids; `deltaOf` forgets them, and the tag scope takes
++	 * those it lacks from the store, which still holds their issues from before.
+ 	 */
+ 	private reach(dirty: DirtyCollector): readonly string[] {
+ 		dirty.update(expandScope(this.wc.model, this.compiled.working, dirty.ids));
+ 		if (this.deltaOf.size > 0) for (const id of dirty.ids) this.deltaOf.delete(id);
++		this.keepTags(dirty.ids);
+ 		return dirty.ids;
+ 	}
+ 
+ 	/** The neighbourhoods, after a rebase, of what it could touch, of what it did, and of their ends. */
+ 	private afterRebase(dirty: DirtyCollector, touched: readonly string[], changes: ChangeSet): void {
+ 		const after = new Set([...touched, ...changedIds(changes)]);
+ 		addNeighbourhood(this.wc.model, new Set([...after, ...endsOf(this.wc, after)]), dirty);
+ 	}
+ 
+ 	/** Validates `ids` with the working rules and splices them into the store. */
+@@ -411,33 +462,34 @@ export class LiveIssues {
+ 		return validateScoped(this.wc.model, ids, this.validators, this.patterns, rules);
+ 	}
+ 
+ 	private markUnusable(): void {
+ 		this.broken = 'pattern';
+ 		this.issues = new IssueStore();
+ 		this.sweep = null;
+ 		this.rescan = null;
+ 		this.cached = null;
+ 		this.deltaOf.clear();
++		this.tags = null;
+ 		this.moves++;
+ 		this.release();
+ 	}
+ 
+ 	// -- the sweep -----------------------------------------------------------
+ 
+ 	/**
+-	 * The sweep in steps: the first lists every element id in state order,
+-	 * then every relationship id; each after it validates the next
+-	 * `sweepStep` of them and splices them into the store, a complete change
+-	 * of its own. An id gone since is dropped from the store, and one new since
+-	 * was validated by the transition that made it. Then the rescan, when one
+-	 * is due: `sweepStep` of its ids a step, each step yielding `RESCAN_STEP`.
++	 * The sweep in steps: the first takes the total, the number of entities
++	 * then; each after it validates the next `sweepStep` entities, elements in
++	 * state order then relationships, and splices them into the store, a
++	 * complete change of its own. Its progress counts the entities validated,
++	 * short of the total until the last step. Then the rescan, when one is
++	 * due: `sweepStep` of its ids a step, each step yielding `RESCAN_STEP`.
+ 	 * Every step validates with the rules as they are then. Its state is this
+ 	 * object's, never the generator's, so any generator resumes it where it
+ 	 * stands. The value is `true` when both ran to their end, `false` when the
+ 	 * store is unusable.
+ 	 */
+ 	*sweepSteps(): Generator<SweepStep, boolean, void> {
+ 		for (;;) {
+ 			if (this.broken !== null) return false;
+ 			const sweep = this.sweep;
+ 			if (sweep === null) {
+@@ -447,47 +499,87 @@ export class LiveIssues {
+ 				rescan.at += next.length;
+ 				this.revalidate(next, false);
+ 				if (this.broken !== null) return false;
+ 				if (this.rescan === rescan && rescan.at >= rescan.ids.length) {
+ 					this.rescan = null;
+ 					this.release();
+ 				}
+ 				yield RESCAN_STEP;
+ 				continue;
+ 			}
+-			if (sweep.ids === null) {
+-				sweep.ids = allIds(this.wc.model);
+-				sweep.at = 0;
+-				yield { done: 0, total: sweep.ids.length };
++			const model = this.wc.model;
++			if (sweep.total === null) {
++				sweep.total = model.elementCount + model.relationshipCount;
++				yield { done: 0, total: sweep.total };
+ 				continue;
+ 			}
+-			const ids = sweep.ids;
+-			const next = ids.slice(sweep.at, sweep.at + this.sweepStep);
+-			sweep.at += next.length;
++			const next: string[] = [];
++			const skip = { left: this.sweepSkip };
++			this.pull(sweep.elements, () => model.elements(), next, skip);
++			if (sweep.elements.ended) {
++				this.pull(sweep.relationships, () => model.relationships(), next, skip);
++			}
++			sweep.done += next.length;
+ 			this.revalidate(next, false);
+ 			if (this.broken !== null) return false;
+-			if (sweep.at < ids.length) {
+-				yield { done: sweep.at, total: ids.length };
++			const total = sweep.total;
++			if (!sweep.relationships.ended) {
++				// Entities made since the start are validated too: the count may pass the total.
++				yield { done: Math.max(0, Math.min(sweep.done, total - 1)), total };
+ 				continue;
+ 			}
+ 			if (this.sweep === sweep) {
+ 				this.sweep = null;
+ 				this.swept = true;
+ 				this.release();
+ 			}
+-			yield { done: ids.length, total: ids.length };
++			yield { done: total, total };
+ 		}
+ 	}
+ 
+-	/** Sweeps again from a fresh list of ids, in place: the store keeps what it holds meanwhile. */
++	/**
++	 * Pulls the next entities of `at`'s map into `into`, up to `sweepStep` of
++	 * them, passing over at most `skip.left` more: those with an `ord` no
++	 * greater than the greatest handed out so far. Taken in state order,
++	 * such an entity was handed out already, or was put back at its old place
++	 * since, by a transition that validated it. An iterator is dropped when a
++	 * re-sort moves the model's order epoch, since it would read the whole map
++	 * again: the fresh one passes over what the old one handed out.
++	 */
++	private pull<T extends ElementRec | RelRec>(
++		at: Cursor<T>,
++		read: () => Iterator<T>,
++		into: string[],
++		skip: { left: number }
++	): void {
++		const model = this.wc.model;
++		while (into.length < this.sweepStep && skip.left > 0 && !at.ended) {
++			if (at.iter === null || at.epoch !== model.orderEpoch) {
++				at.iter = read();
++				at.epoch = model.orderEpoch;
++			}
++			const next = at.iter.next();
++			if (next.done === true) {
++				at.ended = true;
++				at.iter = null;
++			} else if (next.value.ord <= at.ord) {
++				skip.left--;
++			} else {
++				at.ord = next.value.ord;
++				into.push(next.value.id);
++			}
++		}
++	}
++
++	/** Sweeps again from the start, in place: the store keeps what it holds meanwhile. */
+ 	restartSweep(): void {
+-		if (this.broken === null) this.sweep = { ids: null, at: 0 };
++		if (this.broken === null) this.sweep = newSweep();
+ 	}
+ 
+ 	/** Resolves once no sweep and no rescan is due, or the store is unusable. */
+ 	whenSwept(): Promise<void> {
+ 		if (this.sweep === null && this.rescan === null) return Promise.resolve();
+ 		return new Promise((resolve) => this.waiters.push(resolve));
+ 	}
+ 
+ 	/** Resolves once no rescan is due, or the store is unusable. */
+ 	whenSettled(): Promise<void> {
+@@ -516,20 +608,21 @@ export class LiveIssues {
+ 		const cached = this.cached;
+ 		if (
+ 			cached !== null &&
+ 			cached.rev === wc.rev &&
+ 			cached.stagedVersion === wc.stagedVersion &&
+ 			cached.rulesVersion === this.rulesMoves
+ 		) {
+ 			return cached.origins;
+ 		}
+ 		let origins: Origins;
++		this.probeRuns++;
+ 		try {
+ 			origins = this.probe();
+ 		} catch (caught) {
+ 			if (caught instanceof PatternUnusable) this.markUnusable();
+ 			throw caught;
+ 		}
+ 		this.cached = {
+ 			rev: wc.rev,
+ 			stagedVersion: wc.stagedVersion,
+ 			rulesVersion: this.rulesMoves,
+@@ -595,20 +688,77 @@ export class LiveIssues {
+ 		if (outside.length === 0) return origins;
+ 		// On the working state again: the probe put the staged batches back.
+ 		const rest = this.changedOwners(outside);
+ 		return {
+ 			...origins,
+ 			working: [...origins.working, ...rest.working],
+ 			committed: [...origins.committed, ...rest.committed]
+ 		};
+ 	}
+ 
++	// -- the panel's tags ----------------------------------------------------
++
++	/**
++	 * Every owner whose issues may differ between the committed and the
++	 * working state, each with its committed issues: what the panel's tags
++	 * read, an issue of an owner it does not name being the same on both
++	 * states. The exact probe finds it (`origins()`: its dirty set, with the
++	 * committed issues); then, while the store is seeded and settled, the rev
++	 * and the rule sets hold and the working rules are the committed ones, each
++	 * transition adds the ids it dirties, with the store's issues from just
++	 * before it: no transition had dirtied them since the probe, so those were
++	 * their committed issues. Otherwise every call reads `origins()`. Throws
++	 * `PatternUnusable` when the store is unusable, or becomes so.
++	 */
++	tagScope(): ReadonlyMap<string, readonly Issue[]> {
++		if (this.broken !== null) throw new PatternUnusable();
++		const kept = this.tags;
++		if (kept !== null && this.tagsHold(kept)) return kept.committedOf;
++		this.tags = null;
++		const { dirty, committed } = this.origins();
++		const committedOf = new Map<string, Issue[]>();
++		for (const id of dirty) committedOf.set(id, []);
++		for (const issue of committed) committedOf.get(issueOwner(issue))?.push(issue);
++		const tags = { rev: this.wc.rev, rulesVersion: this.rulesMoves, committedOf };
++		if (this.tagsHold(tags)) this.tags = tags;
++		return committedOf;
++	}
++
++	/** Drops the tag scope kept, so that the next `tagScope()` reads `origins()`; nothing else moves. */
++	resetTagScope(): void {
++		this.tags = null;
++	}
++
++	private tagsHold(tags: Tags): boolean {
++		const { working, committed } = this.compiled;
++		return (
++			this.swept &&
++			this.rescan === null &&
++			tags.rev === this.wc.rev &&
++			tags.rulesVersion === this.rulesMoves &&
++			sameList(working.identities, committed.identities)
++		);
++	}
++
++	/** A transition's dirty ids join the tag scope kept, before it revalidates them. */
++	private keepTags(ids: readonly string[]): void {
++		const tags = this.tags;
++		if (tags === null) return;
++		if (!this.tagsHold(tags)) {
++			this.tags = null;
++			return;
++		}
++		for (const id of ids) {
++			if (!tags.committedOf.has(id)) tags.committedOf.set(id, this.issues.issuesOf(id));
++		}
++	}
++
+ 	/** `ids`' issues with the working and with the committed rules on the working state, from `deltaOf` where it has them. */
+ 	private changedOwners(ids: readonly string[]): { working: Issue[]; committed: Issue[] } {
+ 		if (this.deltaRev !== this.wc.rev) {
+ 			this.deltaOf.clear();
+ 			this.deltaRev = this.wc.rev;
+ 		}
+ 		const missing = ids.filter((id) => !this.deltaOf.has(id));
+ 		if (missing.length > 0) {
+ 			const working = byIssueOwner(this.validate(missing, this.compiled.working));
+ 			const committed = byIssueOwner(this.validate(missing, this.compiled.committed));
+diff --git a/engine/test/model/indexes.test.ts b/engine/test/model/indexes.test.ts
+new file mode 100644
+index 00000000..bea9a73c
+--- /dev/null
++++ b/engine/test/model/indexes.test.ts
+@@ -0,0 +1,138 @@
++import { describe, expect, it } from 'vitest';
++import {
++	applyBatch,
++	cmpCodePoint,
++	Metamodel,
++	Model,
++	OpError,
++	verifyConsistent,
++	type ModelOptions
++} from '../../src/index.ts';
++import { loadFixture } from '../golden/load.ts';
++import { seededRandom, type StepsFixture } from '../golden/model-steps.ts';
++import { workingCopy } from '../working/helpers.ts';
++import { RandomOps } from '../working/random-ops.ts';
++import { nodeMetamodel } from './fixtures.ts';
++
++/** `Part` keyless; `Slot` keyed by `code` and its `Feeds` both ways; `Owns` a containment. */
++const metamodel = Metamodel.fromJSON(loadFixture<StepsFixture>('ops_churn').metamodel);
++
++/** The cached key texts by element id, sorted. */
++const cachedTexts = (model: Model) =>
++	[...model.indexes.keyText]
++		.map(([element, text]) => [element.id, text] as const)
++		.sort(([a], [b]) => cmpCodePoint(a, b));
++
++/** The key texts a rebuild from the entities computes, in place: none is carried over. */
++function freshTexts(model: Model) {
++	model.rebuildIndexes();
++	return cachedTexts(model);
++}
++
++/**
++ * Random batches over a model, then staged and unstaged over it, so that
++ * entities come back at their old places: after each, every cached text is
++ * what a rebuild computes. `shared` is the most texts cached at once.
++ */
++function churn(seed: number, options: ModelOptions, checked: 'checked' | 'uncached' = 'checked') {
++	const random = seededRandom(seed);
++	const model = new Model(metamodel, options);
++	const ops = new RandomOps(random);
++	let shared = 0;
++	const check = (i: number) => {
++		shared = Math.max(shared, model.indexes.keyText.size);
++		if (checked === 'uncached') return;
++		expect(cachedTexts(model), `batch ${i}`).toEqual(freshTexts(model));
++		verifyConsistent(model);
++	};
++	const attempt = (run: () => unknown) => {
++		try {
++			run();
++		} catch (caught) {
++			if (!(caught instanceof OpError)) throw caught;
++		}
++	};
++	for (let i = 0; i < 40; i++) {
++		attempt(() => applyBatch(model, ops.batch(model)));
++		check(i);
++	}
++	const wc = workingCopy(model);
++	for (let i = 40; i < 80; i++) {
++		attempt(() => (i % 4 < 3 ? wc.stage(ops.batch(model)) : wc.unstage('all')));
++		check(i);
++	}
++	return { model, shared };
++}
++
++describe('cached key texts', () => {
++	it.each([1, 2, 3])('seed %i: equal a fresh key after random churn', (seed) => {
++		expect(churn(seed, {}).shared).toBeGreaterThan(1);
++	});
++
++	it.each([1, 2, 3])(
++		'seed %i: stay fresh when every key hashes alike, so every rekey keeps its bucket',
++		(seed) => {
++			const { model } = churn(seed, { hashKey: () => 0 });
++			// One bucket: every element is cached.
++			expect(model.indexes.keyText.size).toBe(model.elementCount);
++		}
++	);
++
++	it('follow a property edit, a re-parenting and a key relationship under one hash', () => {
++		const model = new Model(metamodel, { hashKey: () => 0 });
++		const [p1, p2, s1] = [
++			model.createElement('Part', 'p1'),
++			model.createElement('Part', 'p2'),
++			model.createElement('Slot', 's1')
++		];
++		model.createElement('Slot', 's2');
++		const texts = () => cachedTexts(model);
++		const fresh = () => freshTexts(model);
++		model.setProperty(s1, 'code', 1);
++		expect(texts()).toEqual(fresh());
++		model.connect('Owns', 'p1', 'p2', 'o1');
++		expect(texts()).toEqual(fresh());
++		model.connect('Owns', 'p1', 's2', 'o2');
++		model.connect('Feeds', 's1', 's2', 'f1');
++		expect(texts()).toEqual(fresh());
++		model.disconnect('o1');
++		model.deleteProperty(s1, 'code');
++		expect(texts()).toEqual(fresh());
++		expect(model.indexes.uniqGroupOf(p1)).toEqual([p1, p2]);
++		model.deleteElement('s2');
++		expect(texts()).toEqual(fresh());
++		verifyConsistent(model);
++	});
++
++	it('are dropped when a bucket is back to one member', () => {
++		const model = new Model(nodeMetamodel());
++		const a = model.createElement('Node', 'a');
++		const b = model.createElement('Node', 'b');
++		const c = model.createElement('Node', 'c');
++		model.setProperty(c, 'name', 'c');
++		expect(model.indexes.keyText.size).toBe(2);
++		expect(model.indexes.uniqGroupOf(a)).toEqual([a, b]);
++		model.setProperty(b, 'name', 'b');
++		expect(model.indexes.keyText.size).toBe(0);
++		model.setProperty(b, 'name', 'c');
++		expect(cachedTexts(model).map(([id]) => id)).toEqual(['b', 'c']);
++		model.deleteElement('c');
++		expect(model.indexes.keyText.size).toBe(0);
++		expect(model.indexes.uniqGroupOf(b)).toEqual([b]);
++		verifyConsistent(model);
++	});
++
++	it.each([1, 2])('seed %i: give uniqGroupOf the groups the uncached texts give', (seed) => {
++		const { model } = churn(seed, { hashKey: () => 0 }, 'uncached');
++		const ids = (elements: Iterable<{ id: string }>) =>
++			[...elements].map((element) => element.id).sort(cmpCodePoint);
++		const elements = [...model.elements()];
++		const groups = elements.map((element) => ids(model.indexes.uniqGroupOf(element)));
++		const fresh = new Map(freshTexts(model));
++		elements.forEach((element, i) => {
++			const text = fresh.get(element.id);
++			const uncached = elements.filter((other) => fresh.get(other.id) === text);
++			expect(groups[i], element.id).toEqual(ids(uncached));
++		});
++	});
++});
+diff --git a/engine/test/validation/helpers.ts b/engine/test/validation/helpers.ts
+index 0194ce0a..356b14ad 100644
+--- a/engine/test/validation/helpers.ts
++++ b/engine/test/validation/helpers.ts
+@@ -1,20 +1,23 @@
+ import { expect } from 'vitest';
+ import {
+ 	cmpCodePoint,
+ 	compileRuleSets,
+ 	drain,
+ 	EMPTY_RULES,
+ 	issueKey,
++	issueOwner,
+ 	LiveIssues,
+ 	pyDumps,
+ 	PyFloat,
++	rulesStatusBody,
++	storeListBody,
+ 	type CompiledRules,
+ 	type IssueListBody,
+ 	type IssueOut,
+ 	type IssueStore,
+ 	type Metamodel,
+ 	type Model,
+ 	type Origin,
+ 	type Value,
+ 	type WorkingCopy
+ } from '../../src/index.ts';
+@@ -103,20 +106,41 @@ export const answered = (body: readonly IssueOut[]) =>
+ 		.filter((i) => !cyclic(i))
+ 		.map((i) => `${i.origin === 'resolved' ? '?' : i.check} ${wireKey(i)} ${i.origin}`)
+ 		.sort(cmpCodePoint);
+ 
+ /** The origin of each listed issue, matched in list order against a fresh sweep of `committed` under `rules`. */
+ export function listedTags(body: IssueListBody, committed: Model, rules: CompiledRules): Origin[] {
+ 	const left = sweptKeys(committed, rules);
+ 	return body.issues.map((i) => (take(left, wireKey(i)) ? 'on_server' : 'uncommitted'));
+ }
+ 
++/**
++ * `GET /model/issues` as the probe tags it: an issue owned inside the probe's
++ * dirty set `on_server` while a committed issue there matches it, every other
++ * one `on_server`. Reads `origins()` only, so it leaves the tag scope alone.
++ */
++export function probedListBody(live: LiveIssues): IssueListBody {
++	const { dirty, committed } = live.origins();
++	const staged = new Set(dirty);
++	const key = (i: {
++		severity: string;
++		message: string;
++		targetIds: readonly string[];
++		category: string;
++	}) => JSON.stringify([i.severity, i.message, i.targetIds, i.category]);
++	const left = new Map<string, number>();
++	for (const issue of committed) left.set(key(issue), (left.get(key(issue)) ?? 0) + 1);
++	return storeListBody(live.store, live.wc.rev, rulesStatusBody(live.rules.working), (i) =>
++		!staged.has(issueOwner(i)) || take(left, key(i)) ? 'on_server' : 'uncommitted'
++	);
++}
++
+ /** A rule of a document: a JSON object, floats as `PyFloat`. */
+ export type RuleDoc = { [key: string]: Value };
+ 
+ /**
+  * Rule sets `[id, name, rules]` compiled over `mm` in the order given, each
+  * document written as the server writes it. Every rule must compile.
+  */
+ export function compileSets(mm: Metamodel, ...sets: [string, string, RuleDoc[]][]): CompiledRules {
+ 	const compiled = compileRuleSets(
+ 		sets.map(([artifactId, name, rules]) => ({
+diff --git a/engine/test/validation/live.test.ts b/engine/test/validation/live.test.ts
+index fecba940..cbc6f176 100644
+--- a/engine/test/validation/live.test.ts
++++ b/engine/test/validation/live.test.ts
+@@ -1,31 +1,33 @@
+-import { describe, expect, it } from 'vitest';
++import { describe, expect, it, vi } from 'vitest';
+ import {
+ 	applyBatch,
+ 	cmpCodePoint,
+ 	drain,
+ 	FacetPatterns,
+ 	issueKey,
+ 	issueListBody,
+ 	LiveIssues,
+ 	Metamodel,
+ 	Model,
+ 	OpError,
+ 	PatternUnusable,
+ 	previewBody,
+ 	PyFloat,
+ 	RESCAN_STEP,
+ 	shuffleAdjacency,
+ 	validateBody,
+ 	type CompiledRules,
++	type ElementRec,
+ 	type MetamodelDoc,
+ 	type ModelOp,
++	type RelRec,
+ 	type Value
+ } from '../../src/index.ts';
+ import { loadFixture } from '../golden/load.ts';
+ import { seededRandom, type StepsFixture } from '../golden/model-steps.ts';
+ import { clone, Server, workingCopy } from '../working/helpers.ts';
+ import { byOwner, compileSets, sweptFresh, type RuleDoc } from './helpers.ts';
+ 
+ const doc = loadFixture<{ runs: StepsFixture[] }>('validation_steps').runs[0]!.metamodel;
+ const metamodel = Metamodel.fromJSON(doc);
+ 
+@@ -249,20 +251,148 @@ describe('an edit during the sweep', () => {
+ 				}
+ 			}
+ 			expect(wc.diverged).toBe(false);
+ 			expect(live.seeded).toBe(true);
+ 			expect(live.store.size).toBeGreaterThan(0);
+ 			expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(wc)));
+ 		}
+ 	);
+ });
+ 
++/** Passes `inner`'s entries on, counting each. */
++function* counted<T>(inner: Iterator<T>, count: () => void): Generator<T, undefined, void> {
++	for (;;) {
++		const next = inner.next();
++		if (next.done === true) return;
++		count();
++		yield next.value;
++	}
++}
++
++/**
++ * The entries `model`'s ordered reads hand out while `during` runs: every
++ * iterator they return counts, whoever holds it and whenever it is read.
++ */
++function pullCounter(model: Model) {
++	let counting = false;
++	let pulled = 0;
++	const count = () => {
++		if (counting) pulled++;
++	};
++	const elements = model.elements.bind(model);
++	const relationships = model.relationships.bind(model);
++	model.elements = () => counted<ElementRec>(elements(), count);
++	model.relationships = () => counted<RelRec>(relationships(), count);
++	return <T>(during: () => T): [T, number] => {
++		counting = true;
++		pulled = 0;
++		try {
++			return [during(), pulled];
++		} finally {
++			counting = false;
++		}
++	};
++}
++
++describe('the sweep lists in steps', () => {
++	it.each([1, 2])(
++		'seed %i: across entities restored at their old places and re-sorts, no step pulls more than its share and the store ends as a fresh sweep',
++		(seed) => {
++			const random = seededRandom(seed);
++			const server = new Server(grown(random, 3000), 1);
++			const wc = workingCopy(clone(server.model), server.rev);
++			const [sweepStep, sweepSkip] = [97, 1000];
++			const live = new LiveIssues(wc, { sweepStep, sweepSkip });
++			const listed = [...wc.model.elements()].map((e) => e.id);
++			const during = pullCounter(wc.model);
++			const steps = live.sweepSteps();
++			const pulls: number[] = [];
++			const reports: number[] = [];
++			const epoch = wc.model.orderEpoch;
++			let restores = 0;
++			let ended = false;
++			// A re-sort sends the sweep back over what it has passed, `sweepSkip` a
++			// step: bounded, in case one every few steps ever kept it from its end.
++			for (let k = 0; k < 1000 && !ended; k++) {
++				const [next, pulled] = during(() => steps.next());
++				pulls.push(pulled);
++				if (next.done === true) {
++					expect(next.value).toBe(true);
++					ended = true;
++					continue;
++				}
++				reports.push(next.value.done);
++				const done = next.value.done;
++				const present = (ids: readonly string[]) => ids.find((id) => wc.model.findElement(id));
++				if (k % 8 === 1) {
++					// one the sweep has passed, deleted with its relationships
++					const passed = present(listed.slice(0, done).toReversed());
++					if (passed !== undefined) live.stage([{ kind: 'delete_element', id: passed }]);
++				} else if (k % 8 === 3) {
++					// one it has not reached yet
++					const ahead = present(listed.slice(done + 200));
++					if (ahead !== undefined) live.stage([{ kind: 'delete_element', id: ahead }]);
++				} else if (k % 8 === 7 && wc.staged().length > 0) {
++					// both back at their old places; the next ordered reads re-sort
++					live.unstage('all');
++					restores++;
++					expect([...wc.model.elements()]).toHaveLength(wc.model.elementCount);
++					expect([...wc.model.relationships()]).toHaveLength(wc.model.relationshipCount);
++				} else if (random() < 0.3) {
++					attempt(() => live.stage(new Churn(random, `tmp_${k}_`).batch(wc.model)));
++				}
++			}
++			expect(ended).toBe(true);
++			expect(restores).toBeGreaterThan(3);
++			expect(wc.model.orderEpoch).toBeGreaterThanOrEqual(epoch + restores);
++			expect(reports[0]).toBe(0);
++			expect(Math.max(...pulls)).toBeLessThanOrEqual(sweepStep + sweepSkip);
++			expect(live.seeded).toBe(true);
++			expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(wc)));
++		}
++	);
++
++	it('reports done === total at its last step only, entities made meanwhile included', () => {
++		const random = seededRandom(9);
++		const wc = workingCopy(grown(random, 400));
++		const sweepStep = 50;
++		const live = new LiveIssues(wc, { sweepStep });
++		const during = pullCounter(wc.model);
++		const steps = live.sweepSteps();
++		const reports: { done: number; total: number }[] = [];
++		for (let k = 0; ; k++) {
++			const [next, pulled] = during(() => steps.next());
++			if (k === 0) expect(pulled).toBeLessThanOrEqual(sweepStep);
++			if (next.done === true) break;
++			reports.push(next.value);
++			for (let i = 0; i < 10; i++) {
++				live.stage([
++					{
++						kind: 'create_element',
++						temp_id: `tmp_${k}_${i}`,
++						type_name: 'Other',
++						properties: { name: `made ${k} ${i}` }
++					}
++				]);
++			}
++		}
++		expect(reports[0]!.done).toBeLessThanOrEqual(sweepStep);
++		const total = reports[0]!.total;
++		expect(reports.every((report) => report.total === total)).toBe(true);
++		expect(reports.slice(0, -1).every((report) => report.done < total)).toBe(true);
++		expect(reports.at(-1)!.done).toBe(total);
++		const dones = reports.map((report) => report.done);
++		expect(dones).toEqual(dones.toSorted((a, b) => a - b));
++		expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(wc)));
++	});
++});
++
+ /** A replica of a small committed model, swept, with the server behind it. */
+ function small() {
+ 	const model = new Model(metamodel);
+ 	applyBatch(model, [
+ 		{
+ 			kind: 'create_element',
+ 			temp_id: 'tmp_1',
+ 			id: 'b-1',
+ 			type_name: 'Blk',
+ 			properties: { name: 'b1', n: 3, req: 'x' }
+@@ -691,20 +821,118 @@ describe('rules in the store', () => {
+ 				type_name: 'Blk',
+ 				properties: { name: 'b', req: 'r', code: 'a'.repeat(1_000_000) }
+ 			}
+ 		]);
+ 		expect(live.unusable).toBe('pattern');
+ 		await waiting;
+ 		expect(live.settled).toBe(true);
+ 	});
+ });
+ 
++/**
++ * A swept replica where `b-1` has relationships both ways and a referencer:
++ * `b-2` names it in `ref`, it links to `o-1` and `b-3` owns it. `b-2` and
++ * `b-3` each have an issue.
++ */
++function linked() {
++	const blk = (id: string, properties: { [key: string]: Value }): ModelOp => ({
++		kind: 'create_element',
++		temp_id: `tmp_${id}`,
++		id,
++		type_name: 'Blk',
++		properties: { name: id, req: 'x', ...properties }
++	});
++	const rel = (id: string, type_name: string, source_id: string, target_id: string): ModelOp => ({
++		kind: 'create_relationship',
++		temp_id: `tmp_${id}`,
++		id,
++		type_name,
++		source_id,
++		target_id,
++		properties: type_name === 'Link' ? { lbl: 'l' } : {}
++	});
++	const model = new Model(metamodel);
++	applyBatch(model, [
++		blk('b-1', { n: 3 }),
++		blk('b-2', { n: 9, ref: 'b-1' }),
++		blk('b-3', { n: 9 }),
++		{ kind: 'create_element', temp_id: 'tmp_o-1', id: 'o-1', type_name: 'Other', properties: {} },
++		rel('l-1', 'Link', 'b-1', 'o-1'),
++		rel('w-1', 'Owns', 'b-3', 'b-1')
++	]);
++	const server = new Server(model, 1);
++	const wc = workingCopy(clone(model), server.rev);
++	const live = new LiveIssues(wc);
++	drain(live.sweepSteps());
++	return { server, wc, live };
++}
++
++describe("the panel's tags", () => {
++	it('after a merged keystroke on a staged element, come without a probe, its neighbourhood from the store', () => {
++		const { wc, live } = linked();
++		live.stage([update('b-1', { n: 7 })]);
++		expect(listed(live)).toContain('b-1: n: 7 above max 5.0 (uncommitted)');
++		const probes = vi.spyOn(wc, 'probeStaged');
++		expect(live.stage([update('b-1', { n: 8 })], { coalesce: true }).coalesced).toBe(true);
++		const body = issueListBody(live);
++		expect(probes).not.toHaveBeenCalled();
++		const scope = live.tagScope();
++		for (const id of ['b-2', 'b-3', 'o-1', 'l-1', 'w-1']) {
++			expect(scope.get(id), id).toEqual(live.store.issuesOf(id));
++		}
++		expect(scope.get('b-2')).toHaveLength(1);
++		expect(listed(live)).toEqual([
++			'b-1: n: 8 above max 5.0 (uncommitted)',
++			'b-2: n: 9 above max 5.0 (on_server)',
++			'b-3: n: 9 above max 5.0 (on_server)'
++		]);
++		// The same list as an exact probe tags it.
++		live.resetTagScope();
++		expect(issueListBody(live)).toEqual(body);
++		expect(probes).toHaveBeenCalledTimes(1);
++		expect(wc.model.getElement('b-1').props).toEqual({ name: 'b-1', req: 'x', n: 8 });
++	});
++
++	it('probe again after a delta, a change of the committed rules, and while the rule sets differ', () => {
++		const { server, wc, live } = linked();
++		live.stage([update('b-1', { n: 7 })]);
++		issueListBody(live);
++		const probes = vi.spyOn(wc, 'probeStaged');
++		const keystroke = (n: number) =>
++			expect(live.stage([update('b-1', { n })], { coalesce: true }).coalesced).toBe(true);
++		expect(live.applyDelta(server.commit([update('o-1', { name: 'o' })]).delta).status).toBe(
++			'applied'
++		);
++		issueListBody(live);
++		expect(probes).toHaveBeenCalledTimes(1);
++		keystroke(8);
++		issueListBody(live);
++		expect(probes).toHaveBeenCalledTimes(1);
++
++		live.setRules(both(ONE));
++		drain(live.sweepSteps());
++		issueListBody(live);
++		expect(probes).toHaveBeenCalledTimes(2);
++		keystroke(9);
++		issueListBody(live);
++		expect(probes).toHaveBeenCalledTimes(2);
++
++		live.setRules({ working: TWO, committed: ONE });
++		drain(live.sweepSteps());
++		issueListBody(live);
++		expect(probes).toHaveBeenCalledTimes(3);
++		keystroke(10);
++		issueListBody(live);
++		expect(probes).toHaveBeenCalledTimes(4);
++	});
++});
++
+ /** The `validation_steps` metamodel with `Blk.code`'s pattern replaced. */
+ function withPattern(pattern: string): Metamodel {
+ 	const copy = structuredClone(doc) as MetamodelDoc;
+ 	const blk = copy.elements.find((type) => type.name === 'Blk')!;
+ 	blk.properties.find((prop) => prop.name === 'code')!.pattern = pattern;
+ 	return Metamodel.fromJSON(copy);
+ }
+ 
+ describe('a pattern the host cannot run', () => {
+ 	// Nested groups under a star: past a million code units V8's backtracking stack runs out.
+diff --git a/engine/test/working/invariants.test.ts b/engine/test/working/invariants.test.ts
+index 61eee35d..8e08d085 100644
+--- a/engine/test/working/invariants.test.ts
++++ b/engine/test/working/invariants.test.ts
+@@ -18,20 +18,21 @@ import {
+ 	type WorkingCopy
+ } from '../../src/index.ts';
+ import { loadFixture } from '../golden/load.ts';
+ import { observe, seededRandom, type StepsFixture } from '../golden/model-steps.ts';
+ import {
+ 	answered,
+ 	byOwner,
+ 	churnRules,
+ 	classified,
+ 	listedTags,
++	probedListBody,
+ 	sweptFresh
+ } from '../validation/helpers.ts';
+ import { clone, Server, workingCopy } from './helpers.ts';
+ import { RandomOps } from './random-ops.ts';
+ 
+ const metamodel = Metamodel.fromJSON(loadFixture<StepsFixture>('ops_churn').metamodel);
+ 
+ /** A committed model grown by a server landing random batches. */
+ function grow(random: () => number, batches: number): Server {
+ 	const server = new Server(new Model(metamodel));
+@@ -173,21 +174,21 @@ describe('working-copy invariants over seeded random batches', () => {
+ 			restage(
+ 				fresh,
+ 				rest.map((batch) => batch.ops)
+ 			)
+ 		).toEqual([]);
+ 		expect(observe(wc.model)).toEqual(observe(fresh.model));
+ 		verifyConsistent(wc.model);
+ 	});
+ 
+ 	it.each(SEEDS.flatMap((seed) => [[seed, 'both'] as const, [seed, 'working'] as const]))(
+-		'seed %i, rules swapped %s: coalescing, deltas and unstages keep the state a replay of staged() gives, and the issues a sweep finds',
++		'seed %i, rules swapped %s: coalescing, deltas and unstages keep the state a replay of staged() gives, the issues a sweep finds and the tags a probe gives',
+ 		(seed, swap) => {
+ 			const random = seededRandom(seed);
+ 			const server = grow(random, 30);
+ 			const wc = workingCopy(clone(server.model), server.rev);
+ 			const variants = churnRules(metamodel);
+ 			const committed = variants.a;
+ 			let working = variants.a;
+ 			const live = new LiveIssues(wc, { rules: { working, committed } });
+ 			drain(live.sweepSteps());
+ 			const mine = new RandomOps(random);
+@@ -246,20 +247,28 @@ describe('working-copy invariants over seeded random batches', () => {
+ 				}
+ 				const origins = live.origins();
+ 				expect(origins.hooks, `action ${i}`).toEqual(hooks.ids);
+ 				expect(origins.dirty, `action ${i}`).toEqual(expected.ids);
+ 				// Tagged and resolved as two fresh sweeps, of each state under its rules, say.
+ 				const listed = issueListBody(live);
+ 				expect(
+ 					listed.issues.map((issue) => issue.origin),
+ 					`action ${i}`
+ 				).toEqual(listedTags(listed, server.model, liveRules.committed));
++				// Tagged incrementally as the exact probe tags it: through the probe's
++				// origins, which keep the tags kept so far, and every fifth action
++				// afresh, the tags dropped.
++				expect(listed, `action ${i}`).toEqual(probedListBody(live));
++				if (i % 5 === 4) {
++					live.resetTagScope();
++					expect(issueListBody(live), `action ${i}`).toEqual(listed);
++				}
+ 				expect(answered(validateBody(live)), `action ${i}`).toEqual(classified(live, server.model));
+ 				expect(observe(wc.model)).toEqual(seen);
+ 			}
+ 			expect(wc.diverged).toBe(false);
+ 		}
+ 	);
+ 
+ 	it.each(SEEDS)('seed %i: adopting staged batches equals restaging them one by one', (seed) => {
+ 		const random = seededRandom(seed);
+ 		const server = grow(random, 30);
+diff --git a/frontend/bench/main.ts b/frontend/bench/main.ts
+index 6d933605..7a091013 100644
+--- a/frontend/bench/main.ts
++++ b/frontend/bench/main.ts
+@@ -138,43 +138,47 @@ async function open(): Promise<OpenReport> {
+ 	});
+ 	const tail = await client.call<TailResult>('applyTail', { text });
+ 	if (tail.status !== 'applied' || tail.diverged) {
+ 		throw new Error(`the empty tail answered ${JSON.stringify(tail)}`);
+ 	}
+ 	rev = tail.rev;
+ 	const readyAt = await ready.promise;
+ 	const openTrips = await stopOpenPings();
+ 
+ 	// The digest check and the sweep run in their own scheduler slots, taking
+-	// turns: each gets its own ping loop, stopped the moment ITS task ends, so
+-	// neither's "longest slice" picks up the other's tail.
++	// turns. One ping loop at a time: the first until the check ends, the
++	// second from then until the sweep ends, so that "longest slice while
++	// sweeping" holds sweep steps alone. A sweep that ends first has none.
++	let checked = false;
++	let seededFirst = false;
++	void seeded.promise.then(() => (seededFirst = !checked));
+ 	const stopVerifyPings = ping(client);
+-	const stopSweepPings = ping(client);
+-	const [{ at: verifiedAt, trips: verifyTrips }, { at: seededAt, trips: sweepTrips }] =
+-		await Promise.all([
+-			verified.promise.then(async (at) => ({ at, trips: await stopVerifyPings() })),
+-			seeded.promise.then(async (at) => ({ at, trips: await stopSweepPings() }))
+-		]);
++	const verifiedAt = await verified.promise;
++	checked = true;
++	const verifyTrips = await stopVerifyPings();
++	const stopSweepPings = seededFirst ? null : ping(client);
++	const seededAt = await seeded.promise;
++	const sweepTrips = stopSweepPings === null ? [] : await stopSweepPings();
+ 
+ 	const idle: number[] = [];
+ 	for (let i = 0; i < IDLE_PINGS; i++) {
+ 		const at = now();
+ 		await client.call('staged');
+ 		idle.push(now() - at);
+ 	}
+ 
+ 	const since = (at: number | undefined) => (at === undefined ? NaN : at - start);
+ 	const openWorst = longest(openTrips);
+ 	const parseBegan = began.get('parse') ?? Infinity;
+ 	const steadyWorst = longest(openTrips.filter((trip) => trip.start >= parseBegan));
+ 	const verifyWorst = longest(verifyTrips);
+-	const sweepWorst = longest(sweepTrips);
++	const sweepWorst = sweepTrips.length > 0 ? longest(sweepTrips) : { start: NaN, ms: NaN };
+ 	return {
+ 		measures: {
+ 			'cold open: first byte asked to replica ready': readyAt - start,
+ 			'  last chunk sent': lastChunk - start,
+ 			'  end answered': endAnswered - start,
+ 			'  parse began': since(began.get('parse')),
+ 			'  parse ended': since(ended.get('parse')),
+ 			'  index began': since(began.get('index')),
+ 			'  index ended': since(ended.get('index')),
+ 			'longest staged round trip during the open (slice bound)': openWorst.ms,
+@@ -182,21 +186,22 @@ async function open(): Promise<OpenReport> {
+ 			'  the longest posted after parse began': steadyWorst.ms,
+ 			'  round trips during the open (count)': openTrips.length,
+ 			[`  of them over ${SLICE_MS} ms (count)`]: openTrips.filter((trip) => trip.ms > SLICE_MS)
+ 				.length,
+ 			[`staged round trip when idle (median of ${IDLE_PINGS})`]: median(idle),
+ 			'digest check: ready to its last progress': verifiedAt - readyAt,
+ 			'longest staged round trip during it (slice bound)': verifyWorst.ms,
+ 			'  posted at, after ready': verifyWorst.start - readyAt,
+ 			'sweep (ready → seeded)': seededAt - readyAt,
+ 			'longest slice while sweeping': sweepWorst.ms,
+-			'  posted at, after ready (sweep)': sweepWorst.start - readyAt
++			'  posted at, after ready (sweep)': sweepWorst.start - readyAt,
++			'  round trips once the digest check ended (count)': sweepTrips.length
+ 		},
+ 		header,
+ 		gzipBytes,
+ 		isolated: link.isolated,
+ 		violations
+ 	};
+ }
+ 
+ const renamed = (element: WireElement, name: string) => ({
+ 	kind: 'update_element',

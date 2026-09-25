@@ -1,0 +1,101 @@
+# Review package: a3e8299..HEAD
+
+## Commits
+c957bfa0 Test reach through unstage and delta
+
+## Files changed
+ engine/test/working/invariants.test.ts | 55 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 55 insertions(+)
+
+## Diff
+diff --git a/engine/test/working/invariants.test.ts b/engine/test/working/invariants.test.ts
+index d0e64a4e..61eee35d 100644
+--- a/engine/test/working/invariants.test.ts
++++ b/engine/test/working/invariants.test.ts
+@@ -7,20 +7,21 @@ import {
+ 	expandScope,
+ 	issueListBody,
+ 	LiveIssues,
+ 	Metamodel,
+ 	Model,
+ 	OpError,
+ 	shuffleAdjacency,
+ 	validateBody,
+ 	verifyConsistent,
+ 	type ModelOp,
++	type Value,
+ 	type WorkingCopy
+ } from '../../src/index.ts';
+ import { loadFixture } from '../golden/load.ts';
+ import { observe, seededRandom, type StepsFixture } from '../golden/model-steps.ts';
+ import {
+ 	answered,
+ 	byOwner,
+ 	churnRules,
+ 	classified,
+ 	listedTags,
+@@ -280,10 +281,64 @@ describe('working-copy invariants over seeded random batches', () => {
+ 			restager,
+ 			batches.map((batch) => batch.ops)
+ 		);
+ 		expect(observe(adopter.model)).toEqual(observe(restager.model));
+ 		expect(conflicts.map((conflict) => conflict.batch.id)).toEqual(
+ 			refused.map((i) => batches[i]!.id)
+ 		);
+ 		verifyConsistent(adopter.model);
+ 	});
+ });
++
++describe('reach through a rebase', () => {
++	/**
++	 * A part seated on a slot that feeds a coded slot: `seated` holds for `p`,
++	 * two hops from `s2`, which no neighbourhood of `s2` names.
++	 */
++	function seatedChain() {
++		const server = new Server(new Model(metamodel));
++		const element = (id: string, type_name: string, properties: { [key: string]: Value }) =>
++			({ kind: 'create_element', temp_id: `tmp_${id}`, id, type_name, properties }) as ModelOp;
++		const rel = (id: string, type_name: string, source_id: string, target_id: string) =>
++			({
++				kind: 'create_relationship',
++				temp_id: `tmp_${id}`,
++				id,
++				type_name,
++				source_id,
++				target_id
++			}) as ModelOp;
++		server.commit([
++			element('p', 'Part', { name: 'x' }),
++			element('s1', 'Slot', {}),
++			element('s2', 'Slot', { code: 1 }),
++			rel('seats', 'Seats', 'p', 's1'),
++			rel('feeds', 'Feeds', 's1', 's2')
++		]);
++		const wc = workingCopy(clone(server.model), server.rev);
++		const rules = churnRules(metamodel).a;
++		const live = new LiveIssues(wc, { rules: { working: rules, committed: rules } });
++		drain(live.sweepSteps());
++		const seated = () => live.store.issuesOf('p').some((issue) => issue.check === 'rule:seated');
++		expect(seated()).toBe(false);
++		const fresh = () => byOwner(sweptFresh(wc, rules));
++		return { server, live, seated, fresh };
++	}
++
++	const uncode: ModelOp = { kind: 'update_element', id: 's2', properties_patch: { code: 0 } };
++
++	it('a delta that moves a property two hops from the owner revalidates the owner', () => {
++		const { server, live, seated, fresh } = seatedChain();
++		expect(live.applyDelta(server.commit([uncode]).delta).status).toBe('applied');
++		expect(seated()).toBe(true);
++		expect(byOwner(live.store)).toEqual(fresh());
++	});
++
++	it('an unstage that moves a property two hops from the owner revalidates the owner', () => {
++		const { live, seated, fresh } = seatedChain();
++		live.stage([uncode]);
++		expect(seated()).toBe(true);
++		live.unstage('all');
++		expect(seated()).toBe(false);
++		expect(byOwner(live.store)).toEqual(fresh());
++	});
++});

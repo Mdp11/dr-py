@@ -1,0 +1,645 @@
+# Review package: 2cca78a..HEAD
+
+## Commits
+8bbe97c Parse rule sets for the engine
+
+## Files changed
+ src/data_rover/api/README.md              |   3 +-
+ src/data_rover/api/routes/artifacts.py    |  15 ++-
+ src/data_rover/api/routes/rules.py        |  68 ++++++++--
+ src/data_rover/api/schemas.py             |  24 +++-
+ tests/api/test_artifact_payloads_route.py |  59 ++++++++
+ tests/api/test_rules_parse.py             | 216 ++++++++++++++++++++++++++++++
+ 6 files changed, 368 insertions(+), 17 deletions(-)
+
+## Diff
+diff --git a/src/data_rover/api/README.md b/src/data_rover/api/README.md
+index 326beaf..f0550f3 100644
+--- a/src/data_rover/api/README.md
++++ b/src/data_rover/api/README.md
+@@ -8,21 +8,22 @@ This is the central design and the thing most likely to surprise you. The model
+ 
+ - **`session.py`** holds a process-wide `SessionRegistry` (one independent in-memory `Session` per project id, created lazily on first access). Each `Session` carries the metamodel, model, view, validation baseline, `model_rev`, and `op_log` for its project. Routes resolve the active `Session` per-request from the **`/api/v1/projects/{project_id}` path segment** via `deps.get_request_session`, which depends on `authz.require_membership` so the request is **authorized before the session is touched** (see Tenancy below); the no-arg `get_session()` returns the default project's session for internal/test callers. The **backend session is the source of truth; the client never holds the whole model** — except through the replica (see `frontend/src/lib/engine/README.md`), which mirrors it and stages the model edits.
+ - **`routes/ops.py` (`POST /model/ops`)** is the mutation path: clients send small op batches (mirroring `frontend/src/lib/state/ops.ts`). Ops are applied **in place** to the live model while inverse ops and first-touch before-images are collected; a mid-batch failure returns **422** after `_rollback(model, res)` has put every touched entity back from its before-image — properties, `rev` and place in insertion order — in the four passes of the engine's `rewind` (relationships out, elements out, elements in, relationships in), closed by `Model.settle_order()`. Every path that applies a batch and takes it back goes through it — `POST /commits/preview`, `POST /model/validate` with staged ops, `_CommitUnwind`, the persist failures of `/model/ops` and `/model/undo` — so none leaves a trace in any `rev`, in entity order or in the state digest. Each accepted batch bumps `model_rev` once and is appended to `op_log` for undo. `create_element`/`create_relationship` accept an optional **`id` hint** (CR/compare proposals carry the file's real ids): the applier reinstates the entity under it via `Model.restore_*` or 422s the batch when the id is taken, and the journal keeps only the canonical `temp_id`, so replay, undo and the commit diff never see the hint.
+ - **Rev conflicts**: clients echo `model_rev` as `base_rev`; a stale batch gets **409** and the client must reload.
+ - **The commit delta (CT-2)**: every landed batch — `POST /commits`, `/commits/revert`, `/model/ops`, `/model/undo` — answers with `prev_rev` (the `model_rev` before the bump), `state_digest` and `recreated_element_ids` / `recreated_relationship_ids` on `OpsResponse` / `CommitResponse` (`prev_rev` and `state_digest` are `null` on a response that applied nothing); `commit_event` carries the same four, and `Commit.state_digest` (nullable, Alembic `0015`) records the digest on the journal row. `Session.state_digest_value` is the CT-3 digest as an integer: `advance_state_digest(res)` folds a landed batch into it in O(batch) (`state_digest.fold_batch`: every before-image out, whatever the batch left behind in), and it is `None` — recomputed in one O(model) pass by the next `Session.state_digest()` — on a fresh or hydrated session and after `set_model` / `touch_model`. A rolled-back batch needs nothing, the rollback being exact; a path that takes a LANDED batch back (a persist failure, `_CommitUnwind` once `rev_bumped`) restores the value from before it. `/model/ops` and `/model/undo` stay silent on the feed: a replica sees the `prev_rev` gap at the next delta. `prev_rev` is kept, and the shell hands the response's text to the replica.
+ - **Replica routes (`api/replica.py`, `routes/replica.py`)** — pure rules over journal rows in `replica.py` (no FastAPI; queries stay in `content.py`), the routes in `routes/replica.py`, member-gated GETs and so viewer-allowed.
+   - `GET /replica/tail?from_rev=` answers `{from_rev, head_rev, complete, deltas}` (`ReplicaTailOut`): a range is served whole or not at all. `content.commit_tail_marks` reads `(rev, expressible)` for `(from_rev, head]` as scalar SQL — a row is expressible with a `state_digest`, `entity_states`, and neither metamodel-id column set; a Python `None` in a JSON column is stored as JSON `null`, not SQL NULL, so the test is `IS NULL OR CAST(... AS VARCHAR) = 'null'` — and `replica.tail_is_complete` demands every revision present, each expressible, and `0 <= head - from_rev <= TAIL_MAX_REVS` (1,000). Anything else is `complete: false` with no row loaded, and the client re-bootstraps. `head_rev` is `session.model_rev` read under `write_mutex` (no journal writer sits between its bump and its `db.commit()` there, so every row up to it is durable), the same number the feed's `snapshot` event reports — which is how a `touch_model` hole at head is seen. Each delta is `replica.delta_from_commit`: `feed.commit_event` built from the RAW `entity_states` (non-null `after`s changed, null ones deleted, in the row's key order; `recreated` absent on old rows = none) and `scope_of_ops` over the raw ops — so it is the feed event field for field (`test_replica_tail.py` holds the two together; `create_commit`'s own scope expression is not refactored onto it). `/model/ops` and `/model/undo` rows, silent on the feed, are served here like any other.
+   - `GET /replica/snapshot` (`SnapshotDescriptorOut`: `rev`, `metamodel_id`, `state_digest`, `elements`, `relationships`, `url`) names the snapshot a replica opens from, read off the `Snapshot` row's typed columns — it never touches the blob store. `replica.pick_snapshot` takes the newest v2 row at or below head and accepts it iff `tail_is_complete` over the same marks the tail route reads, so a client that follows a descriptor never meets an incomplete tail; ONE candidate suffices, as an older snapshot's range contains the newest one's. Lock-free fast path first; if it declines, it looks again under `write_mutex` (a second opener finds what the first wrote; a commit mid-flight in the fast path has landed) and only then writes a v2 snapshot at head through `write_snapshot` — a viewer-allowed GET that can fill that cache, holding the mutex ≈ 1.15 s at M plus the upload (measured). A failed write is a 503 `snapshot store unavailable`; no model is a 404 `No model loaded`. The descriptor's `state_digest` is the digest AT its `rev`, not the live one, and its `url` is a PATH (the request's own, last segment replaced), not an absolute URL.
+   - `GET /replica/snapshots/{rev}` answers the stored bytes — `application/gzip`, `Cache-Control: no-store` (the shell caches the bytes itself), and NEVER a `Content-Encoding`, so no client library inflates them; 404 `no v2 snapshot at rev N` when the row is missing, is not v2, or its blob is gone. It depends on `require_membership` alone, so it never hydrates a project. It stands in for signed storage URLs: the descriptor's `url` is all a client follows. A v1 row is invisible to both routes.
+   - `GET /metamodel` carries `X-Metamodel-Id` (`ModelRow.metamodel_id`, `""` without a row; CORS `expose_headers` lists it) so a client can pair the document with a descriptor's `metamodel_id`. It is read lock-free: a rebind landing between the two reads is healed by the `rebind_event` the client is already buffering.
+-  - `GET /artifacts/payloads` (`routes/artifacts.py`, `ArtifactPayloadListOut`) hands the replica's artifact follower the project's artifacts with their payloads, in `content.list_artifacts` order: every one, or with repeated `id` parameters only the named ids the project has — an unknown or foreign id is left out, never an error. Member-gated, so viewer-allowed; declared before `/artifacts/{artifact_id}`, which would read `payloads` as an id.
++  - `GET /artifacts/payloads` (`routes/artifacts.py`, `ArtifactPayloadListOut`) hands the replica's artifact follower the project's artifacts with their payloads, in `content.list_artifacts` order: every one, or with repeated `id` parameters only the named ids the project has — an unknown or foreign id is left out, never an error. Member-gated, so viewer-allowed; declared before `/artifacts/{artifact_id}`, which would read `payloads` as an id. Each item is an `ArtifactPayloadOut`: the `ArtifactOut` keys, then `rules` — `parse_result` of the payload's `yaml` for a `validation_rules` row (a payload without one parses `""`, the empty set, as `rules.rule_sources` reads it), `null` for any other kind.
++  - `POST /rules/parse {yaml}` (`routes/rules.py`) answers `RulesParseOut {ok, document, errors}` for a staged rule set the engine compiles. `document` is `rules_document(defn)`: `json.dumps` of `model_dump(mode="python", by_alias=True, exclude_unset=True)`, compact — aliased keys (`in`, `not`), only the fields the author wrote, in field order. It is a STRING that the shell hands on untouched and the engine reads with its exact parser, since `JSON.parse` would lose a float's `.0` and integers past 2^53 (`model_dump(mode="json")` is no substitute: it writes `in_` / `not_` and every unset test as `null`, and `model_dump_json` writes `inf` as `null`). A parse failure is `ok: false`, `document: null` and the one `LintErrorOut` `/rules/lint` gives for the same text (both build it through `_lint_error`); an empty document is `"{}"`. 200 for any string `yaml`, 422 for a malformed envelope or a `yaml` over `RULES_MAX_YAML_BYTES`. It depends on `require_membership` alone, so it never hydrates the project, and is not in the read-only allowlist: a viewer gets a 403, as on lint.
+ - **Undo** (`POST /model/undo`) replays an op-log batch's inverses in restore mode (`Model.restore_element/restore_relationship` reinstate exact ids). `op_log` is capped at `OP_LOG_MAX` (1000 batches); past that, `GET /model/changes` reports `complete: false`.
+ - **Legacy direct-mutation routes** (`routes/elements.py`, `relationships.py`) bypass the op protocol, so they call `session.touch_model()` to invalidate `op_log`/validation and bump `model_rev`.
+ - **Table sorting is part of the definition** (`TableDefinition.sort`, a priority list of `{column, direction}` keys normalized on read by `core/table/evaluate.py::sort_keys`, never validated): there is no request-level sort, so `/tables/evaluate`, `/tables/export`, `/tables/json-preview`, `/tables/script-errors` and every exporter entry order rows the same way, and the order cache keys on the definition fingerprint alone. The script sweep's job key strips it (`api/script_sweep.py::sweep_fingerprint`) so one sweep serves every order.
+ - Reads are **paged/on-demand** (element pages, fuzzy search, containment tree children, BFS neighborhoods); load/save **stream** rather than materializing the serialized model as a string. Fuzzy element search (`GET /model/elements?q=`) draws candidates from the trigram index (`IndexSet.search_postings` / `search_candidates`, maintained at the mutation boundary like `roots_order`; ownership is per element — `_trigrams_of` holds an entry for every indexed element, an empty tuple included, so an element WITHOUT one is bulk-loaded and not yet reached by the chunked build, and the property hooks leave it to that build while `search_ready` is False instead of indexing it on first touch). The index is **not** built by `IndexSet.rebuild()` — it is the dominant cost of a bulk load and most `rebuild()` callers (rebind views/previews, apply-cr copies, history reconstructions) never search — so a bulk-loaded model starts with `search_ready=False` and `search_candidates` returns `None`, which is the scan fallback; `api/search_index_build.py` fills the live session's index in chunks under `write_mutex` after load/hydrate (`DATA_ROVER_SEARCH_INDEX_SYNC=true` in tests), and the rebind paths rebuild with `keep_search=True` because the indexed text is metamodel-independent. Queries under 3 chars — or so common the index cannot beat a scan — fall back to the scan too, and results are byte-identical to a full scan either way.
+ - **Full-model validation is a background sweep** (`api/validation_sweep.py`): load/upload/hydrate install an empty issue store and stream issues in chunk-by-chunk under the write-mutex; `GET /model/status` (non-hydrating — `SessionRegistry.peek`) reports hydration/sweep progress and the frontend polls it during project open. Containment roots are served from a maintained order index (`IndexSet.roots_order`) — never re-sort roots per request.
+ - **`GET /model/issues` (`routes/validation.py`)** is the cheap read of that maintained store — the frontend's Issues panel is LIVE off it and needs no Validate click to be populated (see frontend/README.md, "Validation issues"). The panel itself is a **closable singleton workspace tab** (kind `'issues'`, id `issues:panel`), opened from the top bar's Issues button and deduped by kind exactly like the metamodel tab; it persists across reloads. It is on a hot multi-client path (every connected client refetches after every peer commit, on every feed reconnect, and repeatedly while the sweep runs), so everything it does is under `session.write_mutex` — including `_ensure_validation_seeded`, so that N clients racing a nulled store (`Session.touch_model`, `metamodel_swap`) cannot each launch their own full pipeline run — and it slices `ValidationState.iter_issues()` lazily at `ISSUES_RESPONSE_MAX` (5000) rather than materializing the store. The cap bounds the server-side copy, not just the wire; `counts` stays EXACT past it (that is what makes the cap acceptable — the client renders a truncation notice, never a wrong number), and there is deliberately no paging: one flat panel list is the only consumer. `POST /model/validate` with no ops remains the full O(model) pipeline and stays reachable ONLY from an explicit user click — never from an open, commit, reload or rebind path.
+ - **Compare / Apply CR (`routes/change_request.py`)** — two **dry-run** routes that never mutate, journal or validate: `POST /model/compare` (raw other-model body parsed `strict=False`; returns the session→file `datarover.cr/v1` CR plus the file's counts; viewer-allowed, so a viewer can hand an editor a CR). Both raw-body routes — this one and `POST /model/upload` — read through `deps.read_capped_body`, which refuses a body over `max_request_body_bytes` (`DATA_ROVER_MAX_REQUEST_BODY_BYTES`, default 512 MiB, 0 disables) with **413**, never the routes' 422: a `Content-Length` over the cap is refused before a byte is read, but the header is client-supplied and absent on a chunked body, so the running total is enforced while streaming too. Compare is why it exists — it holds the raw bytes plus a second parsed model beside the live one and `POST /model/apply-cr` (`{crs: [...]}`, capped at `MAX_CRS_PER_REQUEST` = 20 at request-parse time — a schema bound like `MAX_EXPORTER_ENTRIES`, since each CR costs an O(model) copy plus a full index rebuild — applied **sequentially and transiently** via the pure `apply_change_request`; the first conflicting CR 409s with `{cr_index, conflicts, model_rev}`; the combined base→final CR (`diff_models`) is gated by `_gate_cr_result` and translated by `api/change_request_ops.ops_for_change` into a phase-ordered op batch — creates with `id` hints → updates → relationship deletes/rewires → element deletes — so `delete_element`'s cascade can never over-delete; an element type change is a 422). The client stages the batch through `state/stage-proposed.ts` (the snippet-run precedent) and commits it like manual edits; **Replace** is the compare CR fed straight to apply-cr. Both are rules-blind by design — staging → `POST /commits/preview` is the validation.
+ 
+ The frontend edits through the check-out/commit flow (staged-edit buffers committed via POST /commits — see frontend/README.md "State model"); the op shapes below are shared by both paths. **`frontend/README.md` documents the frontend architecture in depth — read it before touching `frontend/src/lib/state/`.**
+ 
+diff --git a/src/data_rover/api/routes/artifacts.py b/src/data_rover/api/routes/artifacts.py
+index 23fd1e7..11f3b27 100644
+--- a/src/data_rover/api/routes/artifacts.py
++++ b/src/data_rover/api/routes/artifacts.py
+@@ -58,46 +58,59 @@ from ..db import get_db
+ from ..db_models import ArtifactKind, ArtifactRow, User
+ from ..deps import Session, get_request_session, require_model
+ from ..feed import artifact_event
+ from ..identity import get_current_user
+ from ..locking import artifact_resource
+ from ..schemas import (
+     ArtifactCreateIn,
+     ArtifactListOut,
+     ArtifactOut,
+     ArtifactPayloadListOut,
++    ArtifactPayloadOut,
+     ArtifactUpdateIn,
+     ChainPageOut,
+     ChainValueOut,
+     EvaluateNavigationIn,
+     ScriptWarningOut,
+ )
+ from ..script_eval import close_script_context, open_script_context
+ from ..script_runner import get_runner
+ from ..settings import Settings, get_settings
+ from .read import _tree_item  # shared lite projection
++from .rules import parse_result
+ 
+ router = APIRouter()
+ 
+ 
+ #: The row -> header projection lives in ``artifact_ops`` (see its docstring:
+ #: the artifact-op applier must capture a header before a DELETE removes the
+ #: row, and a service module cannot import a route module). Aliased here so
+ #: this module's call sites — and the shape of every artifact feed event —
+ #: keep coming from the single implementation.
+ _header = artifact_header
+ 
+ 
+ def _full(row: ArtifactRow) -> ArtifactOut:
+     return ArtifactOut(**_header(row).model_dump(), payload=row.payload)
+ 
+ 
++def _with_rules(row: ArtifactRow) -> ArtifactPayloadOut:
++    rules = None
++    if row.kind is ArtifactKind.validation_rules:
++        # The yaml `rule_sources` compiles: a malformed payload is an empty set.
++        payload = row.payload if isinstance(row.payload, dict) else {}
++        rules = parse_result(str(payload.get("yaml", "")))
++    return ArtifactPayloadOut(
++        **_header(row).model_dump(), payload=row.payload, rules=rules
++    )
++
++
+ def _validate_payload(kind: ArtifactKind, payload: dict[str, Any]) -> None:
+     spec = get_spec(kind)
+     if spec is None:
+         raise HTTPException(
+             status_code=422,
+             detail=f"artifact kind {kind.value!r} is not supported yet",
+         )
+     try:
+         spec.adapter.validate_python(payload)
+     except ValidationError as exc:
+@@ -159,21 +172,21 @@ def list_artifacts(
+ def list_artifact_payloads(
+     project_id: str,
+     ids: list[str] | None = Query(None, alias="id"),
+     _session: Session = Depends(get_request_session),
+     db: DbSession = Depends(get_db),
+ ) -> ArtifactPayloadListOut:
+     """Every artifact with its payload, or the named ids the project has, in
+     `list_artifacts` order. Declared before `/artifacts/{artifact_id}`, which
+     would read `payloads` as an id."""
+     rows = content.list_artifacts(db, project_id, ids=ids)
+-    return ArtifactPayloadListOut(items=[_full(r) for r in rows])
++    return ArtifactPayloadListOut(items=[_with_rules(r) for r in rows])
+ 
+ 
+ @router.get("/artifacts/{artifact_id}")
+ def get_artifact(
+     project_id: str,
+     artifact_id: str,
+     _session: Session = Depends(get_request_session),
+     db: DbSession = Depends(get_db),
+ ) -> ArtifactOut:
+     return _full(_require_artifact(db, project_id, artifact_id))
+diff --git a/src/data_rover/api/routes/rules.py b/src/data_rover/api/routes/rules.py
+index c19763d..738c406 100644
+--- a/src/data_rover/api/routes/rules.py
++++ b/src/data_rover/api/routes/rules.py
+@@ -4,59 +4,99 @@ Sibling of POST /metamodel/lint: cheap (no model iteration, no write_mutex),
+ deliberately NOT in the read-only-POST allowlist — only the editing flow
+ lints, and viewers have nothing to lint.
+ 
+ Always-200 covers LINT RESULTS, not the request envelope: any well-formed
+ body (a string ``yaml``, of any content — unparseable YAML, schema-violating
+ YAML, drifted rules, a bare scalar, a list, an empty document) reaches
+ ``lint_rules`` and gets a 200. A malformed envelope (missing/non-string
+ ``yaml``, invalid JSON, an oversized ``yaml``) never reaches it — FastAPI's
+ request validation 422s first, because the envelope is a client contract,
+ not a lint candidate, unlike ``/metamodel/lint`` whose raw body IS the
+-candidate."""
++candidate.
++
++``POST /rules/parse`` answers the same way for the engine: the rule set's
++normalized document, or the one parse error lint gives. It reads no session
++and no metamodel, so it never hydrates the project; like lint, a viewer gets
++a 403."""
+ 
+ from __future__ import annotations
+ 
++import json
++
+ from fastapi import APIRouter, Depends
+ 
+ from data_rover.core.validation.rules.compile import RuleSetSource, compile_rule_sets
+-from data_rover.core.validation.rules.schema import RuleSetError, parse_rule_set
++from data_rover.core.validation.rules.schema import (
++    RuleSetDefinition,
++    RuleSetError,
++    parse_rule_set,
++)
+ 
++from ..authz import require_membership
++from ..db_models import Membership
+ from ..deps import Session, get_request_session
+ from ..schemas import (
+     LintErrorOut,
+     RulesLintRequest,
+     RulesLintResponse,
++    RulesParseOut,
++    RulesParseRequest,
+     RuleWarningOut,
+ )
+ 
+ router = APIRouter()
+ 
+ 
++def _lint_error(exc: RuleSetError) -> LintErrorOut:
++    mark = getattr(exc.__cause__, "problem_mark", None)
++    return LintErrorOut(
++        message=str(exc),
++        line=mark.line + 1 if mark is not None else None,
++        column=mark.column + 1 if mark is not None else None,
++    )
++
++
++def rules_document(defn: RuleSetDefinition) -> str:
++    """The rule set as the engine reads it: aliased keys, only the fields the
++    author wrote, in field order. ``Infinity`` and ``NaN`` stay bare
++    literals, floats keep their ``.0`` and integers stay exact."""
++    return json.dumps(
++        defn.model_dump(mode="python", by_alias=True, exclude_unset=True),
++        ensure_ascii=False,
++        separators=(",", ":"),
++    )
++
++
++def parse_result(yaml: str) -> RulesParseOut:
++    try:
++        defn = parse_rule_set(yaml)
++    except RuleSetError as exc:
++        return RulesParseOut(ok=False, errors=[_lint_error(exc)])
++    return RulesParseOut(ok=True, document=rules_document(defn))
++
++
+ @router.post("/rules/lint")
+ def lint_rules(
+     payload: RulesLintRequest,
+     session: Session = Depends(get_request_session),
+ ) -> RulesLintResponse:
+     try:
+         parse_rule_set(payload.yaml)
+     except RuleSetError as exc:
+-        cause = exc.__cause__
+-        mark = getattr(cause, "problem_mark", None)
+-        return RulesLintResponse(
+-            ok=False,
+-            errors=[
+-                LintErrorOut(
+-                    message=str(exc),
+-                    line=mark.line + 1 if mark is not None else None,
+-                    column=mark.column + 1 if mark is not None else None,
+-                )
+-            ],
+-        )
++        return RulesLintResponse(ok=False, errors=[_lint_error(exc)])
+     warnings: list[RuleWarningOut] = []
+     if session.metamodel is not None:
+         compiled = compile_rule_sets(
+             [RuleSetSource("draft", "draft", payload.yaml)], session.metamodel
+         )
+         warnings = [
+             RuleWarningOut(rule=d.rule, message=d.reason) for d in compiled.skipped
+         ]
+     return RulesLintResponse(ok=True, warnings=warnings)
++
++
++@router.post("/rules/parse")
++def parse_rules(
++    payload: RulesParseRequest,
++    _membership: Membership = Depends(require_membership),
++) -> RulesParseOut:
++    return parse_result(payload.yaml)
+diff --git a/src/data_rover/api/schemas.py b/src/data_rover/api/schemas.py
+index 520e285..fa5c823 100644
+--- a/src/data_rover/api/schemas.py
++++ b/src/data_rover/api/schemas.py
+@@ -240,20 +240,35 @@ class RuleWarningOut(BaseModel):
+ class RulesLintResponse(BaseModel):
+     """Cheap parse/schema/drift check for the live rules editor. Always
+     200 — a failed parse is the RESULT, not an error. Drift is a warning
+     and leaves ``ok`` true."""
+ 
+     ok: bool
+     errors: list[LintErrorOut] = Field(default_factory=list)
+     warnings: list[RuleWarningOut] = Field(default_factory=list)
+ 
+ 
++class RulesParseRequest(BaseModel):
++    yaml: str = Field(max_length=RULES_MAX_YAML_BYTES)
++
++
++class RulesParseOut(BaseModel):
++    """A rule set parsed for the engine. ``document`` is the normalized rule
++    set as JSON TEXT, handed on as received: ``JSON.parse`` would lose a
++    float's ``.0`` and integers past 2^53. ``null`` when ``ok`` is false;
++    ``errors`` is then the one parse error ``/rules/lint`` gives."""
++
++    ok: bool
++    document: str | None = None
++    errors: list[LintErrorOut] = Field(default_factory=list)
++
++
+ class MetamodelDiffResponse(BaseModel):
+     """Read-only sandbox conformance diff + structural document
+     diff. now_failing = issues the candidate metamodel introduces;
+     now_passing = issues it resolves; structural = what changed in the
+     document itself (one differ, also rendered by the commit-diff API)."""
+ 
+     now_failing: list[IssueOut]
+     now_passing: list[IssueOut]
+     unchanged_count: int
+     current_error_count: int
+@@ -1231,22 +1246,29 @@ class ArtifactHeaderOut(BaseModel):
+ 
+ 
+ class ArtifactOut(ArtifactHeaderOut):
+     payload: dict[str, Any] = Field(default_factory=dict)
+ 
+ 
+ class ArtifactListOut(BaseModel):
+     items: list[ArtifactHeaderOut] = Field(default_factory=list)
+ 
+ 
++class ArtifactPayloadOut(ArtifactOut):
++    """``rules`` is the parse of a ``validation_rules`` payload's YAML, null
++    for any other kind."""
++
++    rules: RulesParseOut | None = None
++
++
+ class ArtifactPayloadListOut(BaseModel):
+-    items: list[ArtifactOut] = Field(default_factory=list)
++    items: list[ArtifactPayloadOut] = Field(default_factory=list)
+ 
+ 
+ class ArtifactCreateIn(BaseModel):
+     kind: Literal[
+         "navigation",
+         "table",
+         "diagram",
+         "diagram_kind",
+         "code_snippet",
+         "exporter",
+diff --git a/tests/api/test_artifact_payloads_route.py b/tests/api/test_artifact_payloads_route.py
+index 3735e53..6febdc5 100644
+--- a/tests/api/test_artifact_payloads_route.py
++++ b/tests/api/test_artifact_payloads_route.py
+@@ -2,29 +2,37 @@
+ or the named ids that exist."""
+ 
+ from __future__ import annotations
+ 
+ import pytest
+ from fastapi.testclient import TestClient
+ 
+ from data_rover.api import content, db, tenancy
+ from data_rover.api.db_models import ArtifactKind, Project, Role
+ from data_rover.api.main import create_app
++from data_rover.api.routes.rules import parse_result
+ 
+ from .conftest import AUTH_HEADERS, TEST_USER_ID, papi, seed_default_project
+ 
+ NAV = {
+     "kind": "path",
+     "start": {"kind": "scope", "types": ["Block"]},
+     "steps": [],
+ }
+ SNIP = {"code": "def value(el):\n    return 1\n"}
++RULES_YAML = (
++    "# comments stay in the payload\n"
++    "rules:\n"
++    "  - name: tall\n"
++    "    applies_to: Block\n"
++    "    then: {property: height, gt: 1}\n"
++)
+ 
+ 
+ @pytest.fixture
+ def client() -> TestClient:
+     seed_default_project()
+     c = TestClient(create_app())
+     c.headers.update(AUTH_HEADERS)
+     return c
+ 
+ 
+@@ -110,10 +118,61 @@ def test_another_projects_artifact_never_appears(client: TestClient) -> None:
+         )
+         foreign_id = foreign.id
+         s.commit()
+ 
+     every = client.get(papi("/artifacts/payloads")).json()["items"]
+     assert [i["id"] for i in every] == [own["id"]]
+     named = client.get(
+         papi("/artifacts/payloads"), params=[("id", foreign_id), ("id", own["id"])]
+     ).json()["items"]
+     assert [i["id"] for i in named] == [own["id"]]
++
++
++def test_a_rules_item_carries_its_parse(client: TestClient) -> None:
++    r = _create(
++        client, "validation_rules", "rules", {"schema_version": 1, "yaml": RULES_YAML}
++    )
++    n = _create(client, "navigation", "nav", NAV)
++
++    by_id = {
++        i["id"]: i for i in client.get(papi("/artifacts/payloads")).json()["items"]
++    }
++
++    rules = by_id[r["id"]]["rules"]
++    assert rules == parse_result(RULES_YAML).model_dump(mode="json")
++    assert rules["ok"] is True
++    assert '"gt":1.0' in rules["document"]
++    assert by_id[n["id"]]["rules"] is None
++
++
++def test_rules_is_the_last_key_and_the_rest_is_unchanged(client: TestClient) -> None:
++    r = _create(
++        client, "validation_rules", "rules", {"schema_version": 1, "yaml": RULES_YAML}
++    )
++    n = _create(client, "navigation", "nav", NAV)
++
++    by_id = {
++        i["id"]: i for i in client.get(papi("/artifacts/payloads")).json()["items"]
++    }
++
++    for created in (r, n):
++        single = client.get(papi(f"/artifacts/{created['id']}")).json()
++        item = by_id[created["id"]]
++        assert list(item) == [*single, "rules"]
++        assert {k: v for k, v in item.items() if k != "rules"} == single
++
++
++def test_a_rules_payload_without_yaml_parses_as_empty(client: TestClient) -> None:
++    with db.db_session() as s:
++        row = content.create_artifact(
++            s,
++            "default",
++            kind=ArtifactKind.validation_rules,
++            name="bare",
++            payload={"schema_version": 1},
++            updated_by=TEST_USER_ID,
++        )
++        row_id = row.id
++
++    (item,) = client.get(papi("/artifacts/payloads")).json()["items"]
++    assert item["id"] == row_id
++    assert item["rules"] == {"ok": True, "document": "{}", "errors": []}
+diff --git a/tests/api/test_rules_parse.py b/tests/api/test_rules_parse.py
+new file mode 100644
+index 0000000..21e0c2e
+--- /dev/null
++++ b/tests/api/test_rules_parse.py
+@@ -0,0 +1,216 @@
++"""POST /rules/parse: a rule set's normalized document, as text, for the
++engine. Always 200 for a well-formed request, 422 for a malformed envelope;
++viewers get 403, as on /rules/lint."""
++
++from __future__ import annotations
++
++import json
++from typing import Any
++
++import pytest
++from fastapi.testclient import TestClient
++from pydantic import BaseModel
++
++from data_rover.api import db
++from data_rover.api.db_models import Role, User
++from data_rover.api.main import create_app
++from data_rover.api.routes.rules import parse_result
++from data_rover.api.session import DEFAULT_PROJECT_ID
++from data_rover.api.tenancy import add_member
++from data_rover.core.validation.rules.schema import (
++    RULES_MAX_YAML_BYTES,
++    RuleSetDefinition,
++    parse_rule_set,
++)
++
++from .conftest import AUTH_HEADERS, papi, seed_default_project
++
++EVERY_FEATURE_YAML = """\
++schema_version: 1
++rules:
++  - name: every-feature
++    description: all of it
++    applies_to: Building
++    severity: warning
++    disabled: false
++    when:
++      all:
++        - {property: a, equals: null}
++        - {property: b, in: [1, "1", true, 1.0]}
++        - {property: c, gt: 1}
++        - {property: d, lt: .inf}
++        - {property: e, equals: 123456789012345678901}
++    then:
++      any:
++        - not: {property: f, exists: true}
++        - {property: g, not_equals: x}
++        - {property: h, gte: 2.5}
++        - {property: i, lte: -3}
++        - {property: j, contains: sub}
++        - relationship:
++            type: connects
++            direction: outgoing
++            to: Road
++            where: {property: k, exists: false}
++            count: {eq: true, gte: 0, lte: 4}
++        - relationship: {type: feeds, direction: incoming, exists: true}
++    message: custom message
++  - name: plain
++    applies_to: Road
++    disabled: true
++    then: {property: name, not_equals: null}
++"""
++
++# Keys written out of the model's field order, and no defaults.
++SMALL_YAML = """\
++rules:
++  - then:
++      relationship: {count: {eq: 1}, to: Road, direction: outgoing, type: connects}
++    description: one road
++    applies_to: Building
++    name: one-road
++  - applies_to: Building
++    name: kind-not-listed
++    then: {not: {in: [a, b], property: kind}}
++"""
++
++SMALL_DOCUMENT = (
++    '{"rules":['
++    '{"name":"one-road","description":"one road","applies_to":"Building",'
++    '"then":{"relationship":{"type":"connects","direction":"outgoing",'
++    '"to":"Road","count":{"eq":1}}}},'
++    '{"name":"kind-not-listed","applies_to":"Building",'
++    '"then":{"not":{"property":"kind","in":["a","b"]}}}'
++    "]}"
++)
++
++
++@pytest.fixture
++def client() -> TestClient:
++    seed_default_project()
++    c = TestClient(create_app())
++    c.headers.update(AUTH_HEADERS)
++    return c
++
++
++def _parse(client: TestClient, yaml_text: str) -> dict[str, Any]:
++    res = client.post(papi("/rules/parse"), json={"yaml": yaml_text})
++    assert res.status_code == 200, res.text
++    body: dict[str, Any] = res.json()
++    return body
++
++
++def _assert_same(a: object, b: object, at: str = "") -> None:
++    """Equal field for field, with the same fields set and the same scalar
++    types (`1 == 1.0 == True` in Python, so `==` alone would not tell)."""
++    if isinstance(a, BaseModel):
++        assert type(a) is type(b), at
++        assert isinstance(b, BaseModel)
++        assert a.model_fields_set == b.model_fields_set, at
++        for name in type(a).model_fields:
++            _assert_same(getattr(a, name), getattr(b, name), f"{at}.{name}")
++    elif isinstance(a, list):
++        assert isinstance(b, list), at
++        assert len(a) == len(b), at
++        for i, (x, y) in enumerate(zip(a, b, strict=True)):
++            _assert_same(x, y, f"{at}[{i}]")
++    else:
++        assert type(a) is type(b), at
++        assert a == b, at
++
++
++def test_the_document_round_trips_every_feature(client: TestClient) -> None:
++    body = _parse(client, EVERY_FEATURE_YAML)
++
++    assert body["ok"] is True
++    assert body["errors"] == []
++    document = body["document"]
++    assert isinstance(document, str)
++    reread = RuleSetDefinition.model_validate(json.loads(document))
++    _assert_same(reread, parse_rule_set(EVERY_FEATURE_YAML))
++    for written in (
++        '"equals":null',
++        '"in":[1,"1",true,1.0]',
++        '"gt":1.0',
++        '"count":{"eq":1,',
++        '"lt":Infinity',
++        '"equals":123456789012345678901',
++        '"not_equals":null',
++    ):
++        assert written in document, written
++
++
++def test_the_document_text_is_pinned(client: TestClient) -> None:
++    body = _parse(client, SMALL_YAML)
++
++    assert body == {"ok": True, "document": SMALL_DOCUMENT, "errors": []}
++
++
++@pytest.mark.parametrize(
++    "yaml_text",
++    [
++        pytest.param("rules: [", id="unclosed"),
++        pytest.param("a: &x 1\nb: *x\n", id="alias"),
++    ],
++)
++def test_unparseable_yaml_answers_the_lint_error(
++    client: TestClient, yaml_text: str
++) -> None:
++    body = _parse(client, yaml_text)
++    lint = client.post(papi("/rules/lint"), json={"yaml": yaml_text}).json()
++
++    assert body["ok"] is False
++    assert body["document"] is None
++    (err,) = body["errors"]
++    assert isinstance(err["line"], int)
++    assert isinstance(err["column"], int)
++    assert body["errors"] == lint["errors"]
++
++
++def test_a_schema_failure_has_no_position(client: TestClient) -> None:
++    yaml_text = "rules:\n  - name: no-then\n    applies_to: Building\n"
++    body = _parse(client, yaml_text)
++    lint = client.post(papi("/rules/lint"), json={"yaml": yaml_text}).json()
++
++    assert body["ok"] is False
++    assert body["document"] is None
++    (err,) = body["errors"]
++    assert "no-then" in err["message"]
++    assert err["line"] is None
++    assert err["column"] is None
++    assert body["errors"] == lint["errors"]
++
++
++def test_an_empty_document_is_an_empty_set(client: TestClient) -> None:
++    assert _parse(client, "") == {"ok": True, "document": "{}", "errors": []}
++
++
++def test_the_route_answers_parse_result(client: TestClient) -> None:
++    for yaml_text in (EVERY_FEATURE_YAML, "rules: [", ""):
++        assert _parse(client, yaml_text) == parse_result(yaml_text).model_dump(
++            mode="json"
++        )
++
++
++@pytest.mark.parametrize(
++    "body",
++    [
++        pytest.param({"yaml": "x" * (RULES_MAX_YAML_BYTES + 1)}, id="over-cap"),
++        pytest.param({}, id="missing"),
++    ],
++)
++def test_a_malformed_envelope_is_422(client: TestClient, body: dict) -> None:
++    res = client.post(papi("/rules/parse"), json=body)
++    assert res.status_code == 422, res.text
++
++
++def test_a_viewer_gets_403(client: TestClient) -> None:
++    with db.db_session() as s:
++        s.add(User(id="vw", email="vw@example.com"))
++        add_member(s, DEFAULT_PROJECT_ID, "vw", Role.viewer)
++    res = client.post(
++        papi("/rules/parse"),
++        json={"yaml": SMALL_YAML},
++        headers={"x-user-id": "vw", "x-user-email": "vw@example.com"},
++    )
++    assert res.status_code == 403, res.text
