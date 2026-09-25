@@ -148,9 +148,12 @@ event     {event, …}                     engine → client, unsolicited
   and a create with none contributes nothing yet).
 - A result is the HTTP response body of the `lib/api` function the method is named after.
   Evaluations are reads over the working copy: `searchModel {target, criteria, limit,
-  offset}` and `evaluateNavigation {definition | artifact_id, row_element_id, limit,
-  offset}`, each resolving every artifact it names — staged ones included — before its first
-  step. `getModelIssues {}`, `validateModel {batch_ids}` and `previewCommit {base_rev,
+  offset}`, `evaluateNavigation {definition | artifact_id, row_element_id, limit, offset}` and
+  `evaluateTable {definition | artifact_id, offset, limit}`, each resolving every artifact it
+  names — staged ones included — before its first step, so an artifact call that lands between
+  its slices changes the next call's answer, never its own. `evaluateTable` keeps the order of
+  its last 16 tables while the replica's `rev` and `staged_version` stand: a later page of one
+  evaluates its own cells alone. `getModelIssues {}`, `validateModel {batch_ids}` and `previewCommit {base_rev,
   batch_ids, strict}` (the model half only — artifact, view and `metamodel.move_node` ops
   stay a server call the shell merges in) answer the one live issue store over the working
   copy (AD-32), custom rules included — the committed and staged rule sets for the list and
@@ -159,7 +162,8 @@ event     {event, …}                     engine → client, unsolicited
   rules starts a background rescan of the rules' population, and an `issues` call that
   arrives meanwhile is answered once it ends.
 - An evaluation, or an `issues` call, the engine must not answer is refused with 501 before any
-  work: `reaches a script` (a navigation that reaches a configured script step), `reaches an
+  work: `reaches a script` (a navigation that reaches a configured script step, or a table
+  with a configured script column or such a navigation), `reaches an
   unsupported pattern` (a criterion or facet pattern the engine cannot match exactly as
   Python's `re` does) or `reaches unreadable rules` (an `issues` call while a rule set in
   either layer arrived without its parse, or with a document the engine's reader refuses —
@@ -179,14 +183,18 @@ event     {event, …}                     engine → client, unsolicited
   `progress {task, done, total}` for the tasks `parse`, `index`, `tail`, `verify` and `sweep`
   (AD-32's background revalidation, resumable, one background slot each with the digest check)
   — at most once per slice per task, plus a task's first and last; `changed {rev,
-  staged_version, issues_version, element_ids, relationship_ids, deleted_element_ids,
-  deleted_relationship_ids, structural}` after every transition of a `ready` replica that
-  changed something. `structural` says the element set or a relationship may have moved;
+  staged_version, issues_version, artifacts_version, element_ids, relationship_ids,
+  deleted_element_ids, deleted_relationship_ids, structural}` after every transition of a
+  `ready` replica that changed something. `structural` says the element set or a relationship may have moved;
   `staged_version` moves whenever the staged batches do; `issues_version` moves whenever the
   issue store's content changes or `rev` does (origins can change under it), and whenever a
   rule set changes — its compile, `rules_status` or the tags may have moved, or the 501
-  `reaches unreadable rules` come or go. The sweep, the rules rescan and an artifact call post
-  it bare — no ids, `structural: false` — the sweep and the rescan at most once per slice.
+  `reaches unreadable rules` come or go. `artifacts_version` moves whenever an artifact call
+  adds, removes or replaces an entry of either layer with one that differs; handed the same
+  entries again, it stays. The sweep, the rules rescan and an artifact call post it bare — no
+  ids, `structural: false` — the sweep and the rescan at most once per slice, an artifact call
+  once when either version moved, and never before `ready`: the first `changed` after carries
+  the moves made meanwhile.
 - Every request is cancellable. The engine client rejects a cancelled call with an
   `AbortError`, as an aborted `fetch` does.
 

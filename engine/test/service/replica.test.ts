@@ -197,6 +197,7 @@ describe('following the server', () => {
 			staged_version: 0,
 			// The rev moved, and the origins with it.
 			issues_version: 1,
+			artifacts_version: 0,
 			element_ids: ['a'],
 			relationship_ids: [],
 			deleted_element_ids: ['d'],

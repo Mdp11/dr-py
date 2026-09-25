@@ -26,6 +26,7 @@ import {
 import { ruleSources } from '../rules/sources.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
+import { TableOrderCache } from '../table/order-cache.ts';
 import { issueListBody, previewBody, validateBody } from '../validation/bodies.ts';
 import { LiveIssues, type SweepStep } from '../validation/live.ts';
 import { pyRepr } from '../value/repr.ts';
@@ -402,6 +403,8 @@ class Service {
 	private readonly port: Port;
 	private readonly deps: ServiceDeps;
 	private readonly scheduler: Scheduler;
+	// The replica's table orders, dropped with it.
+	private readonly tableOrders = new TableOrderCache();
 	private opening: Opening | null = null;
 	// The last open's failure, answered to `chunk` and `end` until the next open.
 	private failed: unknown = null;
@@ -509,19 +512,29 @@ class Service {
 		}
 	}
 
+	/**
+	 * Each `run()` reads where the replica stands: no transition of the model
+	 * lane runs while the scan does, so the stamp holds to its end.
+	 */
 	evaluate(method: string, call: Call): void {
 		this.submit(call, 'model', {
 			kind: 'scan',
-			run: () =>
-				EVALUATIONS[method]!(
+			run: () => {
+				const wc = this.ready();
+				return EVALUATIONS[method]!(
 					{
-						model: this.ready().model,
+						model: wc.model,
 						artifacts: this.artifacts,
 						placements: this.placements,
-						rev: this.ready().rev
+						working: {
+							rev: wc.rev,
+							stagedVersion: wc.stagedVersion,
+							tableOrders: this.tableOrders
+						}
 					},
 					call.params
-				)
+				);
+			}
 		});
 	}
 
@@ -722,22 +735,26 @@ class Service {
 	/**
 	 * Runs `put` over the artifacts, then hands the store the rule sets they
 	 * resolve to, when they compile otherwise than before: a change of the
-	 * working ones queues a rescan, and a ready replica posts a bare `changed`.
+	 * working ones queues a rescan. A ready replica posts a bare `changed` when
+	 * the artifacts or the store moved.
 	 */
 	moveArtifacts(put: () => void): void {
+		const version = this.artifacts.version;
 		put();
 		const issues = this.issuesOf;
-		if (issues === null) return;
-		const { live } = issues;
-		const mm = live.wc.model.metamodel;
-		const working = this.compiled('working', mm, issues.working);
-		const committed = this.compiled('committed', mm, issues.committed);
-		if (working === issues.working && committed === issues.committed) return;
-		issues.working = working;
-		issues.committed = committed;
-		live.setRules({ working: working.rules, committed: committed.rules });
-		if (!live.settled) this.sweep(live);
-		this.flushIssues();
+		if (issues !== null) {
+			const { live } = issues;
+			const mm = live.wc.model.metamodel;
+			const working = this.compiled('working', mm, issues.working);
+			const committed = this.compiled('committed', mm, issues.committed);
+			if (working !== issues.working || committed !== issues.committed) {
+				issues.working = working;
+				issues.committed = committed;
+				live.setRules({ working: working.rules, committed: committed.rules });
+				if (!live.settled) this.sweep(live);
+			}
+		}
+		this.postBare(this.artifacts.version !== version);
 	}
 
 	/** A layer's rule sets compiled against `mm`: `before` itself when they compile alike. */
@@ -753,16 +770,22 @@ class Service {
 
 	/** At a slice's end: a bare `changed` when the store moved since the last one posted. */
 	private flushIssues(): void {
+		this.postBare(false);
+	}
+
+	/** A ready replica's `changed` with no ids, when the store moved since the last one posted or `always`. */
+	private postBare(always: boolean): void {
 		const wc = this.wc;
 		if (this.state !== 'ready' || wc === null) return;
 		const version = this.issuesNow();
-		if (version === this.issuesPosted) return;
+		if (version === this.issuesPosted && !always) return;
 		this.issuesPosted = version;
 		this.emit({
 			event: 'changed',
 			rev: wc.rev,
 			staged_version: wc.stagedVersion,
 			issues_version: version,
+			artifacts_version: this.artifacts.version,
 			element_ids: [],
 			relationship_ids: [],
 			deleted_element_ids: [],
@@ -822,6 +845,7 @@ class Service {
 				rev: wc.rev,
 				staged_version: wc.stagedVersion,
 				issues_version: this.issuesPosted,
+				artifacts_version: this.artifacts.version,
 				...wireChanges(changes)
 			});
 		}
@@ -839,6 +863,7 @@ class Service {
 		}
 		this.wc = null;
 		this.progressHeld.clear();
+		this.tableOrders.clear();
 		this.scheduler.setOpen(false);
 		this.scheduler.setBackground(null);
 		this.dropIssues();
@@ -1049,6 +1074,7 @@ class Service {
 	private diverge(wc: WorkingCopy): void {
 		if (this.wc !== wc || this.state === 'diverged') return;
 		this.progressHeld.clear();
+		this.tableOrders.clear();
 		this.scheduler.setOpen(false);
 		this.scheduler.setBackground(null);
 		this.dropIssues();

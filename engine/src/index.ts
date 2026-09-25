@@ -11,7 +11,12 @@ export {
 export { dumpIndexes, type IndexDump } from './debug/dump-indexes.ts';
 export { shuffleAdjacency } from './debug/shuffle-adjacency.ts';
 export { verifyConsistent } from './debug/verify-consistent.ts';
-export { EVALUATIONS, type EvalContext, type Evaluation } from './evaluate/index.ts';
+export {
+	EVALUATIONS,
+	type EvalContext,
+	type Evaluation,
+	type WorkingStamp
+} from './evaluate/index.ts';
 export { parseKey, parseKeyEntry, type KeyRel, type KeySpec } from './metamodel/key.ts';
 export { Metamodel, type EndConstraint } from './metamodel/metamodel.ts';
 export { Multiplicity } from './metamodel/multiplicity.ts';
@@ -280,6 +285,12 @@ export { drain, isSteps, sortedInSlices, type Progress, type Steps } from './ste
 export { cellText } from './table/cell-text.ts';
 export { evaluateCellsSteps, type TableCell } from './table/cells.ts';
 export { NavMemo, type MemoEntry } from './table/nav-memo.ts';
+export {
+	orderKey,
+	TableOrderCache,
+	type CachedOrder,
+	type OrderStamp
+} from './table/order-cache.ts';
 export {
 	pageBody,
 	wireCell,

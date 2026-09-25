@@ -5,18 +5,26 @@ import type { ReadParams } from '../read/params.ts';
 import type { ViewPlacements } from '../read/placements.ts';
 import { searchModel } from '../search/search-model.ts';
 import type { Steps } from '../steps/steps.ts';
+import type { TableOrderCache } from '../table/order-cache.ts';
 import { evaluateTable } from '../table/route.ts';
 
 /**
- * What an evaluation reads: the working model, the project's artifacts, the
- * view placements, and the revision the committed state stands at (0 when
- * absent, as a session that has seen no commit).
+ * Where the working copy stands — the rev its committed state is at, and its
+ * staged version — and the table orders kept for it: an order is kept under
+ * both, since nothing else moves the model.
+ */
+export type WorkingStamp = { rev: number; stagedVersion: number; tableOrders: TableOrderCache };
+
+/**
+ * What an evaluation reads: the working model, the project's artifacts and
+ * the view placements; `working` absent, the committed state is at rev 0, as
+ * a session that has seen no commit, and no table order is kept.
  */
 export type EvalContext = {
 	model: Model;
 	artifacts: ArtifactSet;
 	placements: ViewPlacements;
-	rev?: number;
+	working?: WorkingStamp;
 };
 
 /**

@@ -201,6 +201,34 @@ export function readStagedArtifacts(raw: unknown, where = 'entries'): StagedArti
 
 // -- the set -------------------------------------------------------------------
 
+/** Whether two entries hold the same fields, in the same order, with exactly the same values. */
+function alike(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (a instanceof PyFloat || b instanceof PyFloat) {
+		return a instanceof PyFloat && b instanceof PyFloat && Object.is(a.value, b.value);
+	}
+	if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+	if (Array.isArray(a) !== Array.isArray(b)) return false;
+	const [x, y] = [a as { [key: string]: unknown }, b as { [key: string]: unknown }];
+	const keys = Object.keys(x);
+	const other = Object.keys(y);
+	return (
+		keys.length === other.length &&
+		keys.every((key, i) => key === other[i] && alike(x[key], y[key]))
+	);
+}
+
+/** Whether two layers hold alike entries under the same ids, in the same order. */
+function sameLayer<T>(a: ReadonlyMap<string, T>, b: ReadonlyMap<string, T>): boolean {
+	if (a.size !== b.size) return false;
+	const others = b.entries();
+	for (const [id, entry] of a) {
+		const [otherId, other] = others.next().value as [string, T];
+		if (id !== otherId || !alike(entry, other)) return false;
+	}
+	return true;
+}
+
 /** A create, or an update carrying a payload: an entry that stands for the artifact's content. */
 export const carriesPayload = (
 	entry: StagedArtifact | undefined
@@ -220,22 +248,37 @@ export class ArtifactSet {
 	 * staged payload brought, or the committed one while none stands over it.
 	 */
 	private lastParse = new Map<string, RulesParse>();
+	private moves = 0;
+
+	/**
+	 * Moves whenever a layer comes to hold other entries: one added, removed
+	 * or replaced by one that is not alike. Handed the same entries again, it
+	 * stays.
+	 */
+	get version(): number {
+		return this.moves;
+	}
 
 	/** Replaces the committed layer. */
 	setCommitted(list: readonly CommittedArtifact[]): void {
+		const before = this.committed;
 		this.committed = new Map(list.map((artifact) => [artifact.id, { ...artifact }]));
 		for (const artifact of list) this.keepCommittedParse(artifact);
 		this.forgetGone();
+		if (!sameLayer(before, this.committed)) this.moves++;
 	}
 
 	/** Upserts `changed` into the committed layer, then removes `deletedIds`. */
 	put(changed: readonly CommittedArtifact[], deletedIds: readonly string[]): void {
+		let moved = false;
 		for (const artifact of changed) {
+			moved ||= !alike(this.committed.get(artifact.id), artifact);
 			this.committed.set(artifact.id, { ...artifact });
 			this.keepCommittedParse(artifact);
 		}
-		for (const id of deletedIds) this.committed.delete(id);
+		for (const id of deletedIds) moved = this.committed.delete(id) || moved;
 		this.forgetGone();
+		if (moved) this.moves++;
 	}
 
 	/**
@@ -256,6 +299,7 @@ export class ArtifactSet {
 			else this.lastParse.set(id, committed);
 		}
 		this.forgetGone();
+		if (!sameLayer(before, this.staged)) this.moves++;
 	}
 
 	private keepParse(id: string, parse: RulesParse | undefined): void {

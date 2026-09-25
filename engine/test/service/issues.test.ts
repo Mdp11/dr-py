@@ -564,14 +564,18 @@ describe('rules', () => {
 		const client = await swept();
 		const other = { id: 'q-1', kind: 'query', name: 'Q', artifact_rev: 1, payload: {} };
 		const seen: number[] = [issuesVersion(client)];
-		/** Runs `method`, and the bare `changed` events it posted. */
+		/** Runs `method`, and the bare `changed` events it posted that moved `issues_version`. */
 		const bare = async (method: string, params: object) => {
 			const from = client.events.length;
 			await client.call(method, params);
 			await settle();
-			const posted = client.events.slice(from).filter(isBare);
-			for (const event of posted) seen.push(event['issues_version'] as number);
-			return posted;
+			const moved: Event[] = [];
+			for (const event of client.events.slice(from).filter(isBare)) {
+				if (event['issues_version'] === seen.at(-1)) continue;
+				moved.push(event);
+				seen.push(event['issues_version'] as number);
+			}
+			return moved;
 		};
 		const named = ruleSet('r-1', 'Rules', parsed(NAMED));
 		const renamed = { op: 'update', id: 'r-1', name: 'Renamed' };

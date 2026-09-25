@@ -38,14 +38,16 @@ export type WireChanges = {
 
 /**
  * After a transition of a ready replica, what it changed; `issues_version`
- * moves whenever the issue store may read otherwise. The sweep posts one with
- * no ids when only the store moved.
+ * moves whenever the issue store may read otherwise, `artifacts_version`
+ * whenever the artifacts do. The sweep and the artifact methods post one with
+ * no ids when only those moved.
  */
 export type WireChanged = {
 	event: 'changed';
 	rev: number;
 	staged_version: number;
 	issues_version: number;
+	artifacts_version: number;
 } & WireChanges;
 
 export type ServiceEvent =

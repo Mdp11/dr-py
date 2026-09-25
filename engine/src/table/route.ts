@@ -14,6 +14,7 @@ import type { Steps } from '../steps/steps.ts';
 import { pyRepr } from '../value/repr.ts';
 import { evaluateCellsSteps, type TableCell } from './cells.ts';
 import { NavMemo } from './nav-memo.ts';
+import { orderKey } from './order-cache.ts';
 import { pageBody, type TablePageBody } from './page.ts';
 import { resolveTableRefs, tableFetch, tableHasScript } from './resolve.ts';
 import {
@@ -70,35 +71,55 @@ function* answered<T>(steps: Steps<T>): Steps<T> {
  * resolves the table and every navigation it names through the working copy's
  * artifacts; a table that reaches a script refuses with 501, for the server
  * to run. Rows are built and sorted whole, then only the page's cells are
- * evaluated, each pass with a memo of its own.
+ * evaluated, each pass with a memo of its own. With `ctx.working`, the order
+ * is kept once sorted, under the resolved table and where the working copy
+ * stood at the call, and a later call there evaluates only its page's cells.
  */
 export function evaluateTable(ctx: EvalContext, params: ReadParams): Steps<TablePageBody> {
 	const source = sourceOf(params);
 	const { limit, offset } = pageOf(params);
 	const defn = resolved(ctx.artifacts, source);
 	if (tableHasScript(defn)) throw new ReadError(501, 'reaches a script');
-	const { model } = ctx;
-	const rev = ctx.rev ?? 0;
+	const { model, working } = ctx;
+	const rev = working?.rev ?? 0;
+	const kept =
+		working === undefined
+			? null
+			: {
+					cache: working.tableOrders,
+					key: orderKey(defn),
+					stamp: { rev, stagedVersion: working.stagedVersion }
+				};
 	const limits = DEFAULT_TABLE_LIMITS;
 
 	return answered(
 		(function* (): Steps<TablePageBody> {
 			const meter = new Meter(0);
-			const built = yield* buildRowsSteps(model, defn, limits, meter, new NavMemo());
-			const order = yield* orderRowsSteps(
-				model,
-				defn,
-				built.keys,
-				built.baseSlots,
-				meter,
-				new NavMemo()
-			);
-			const keys = order.slice(offset, offset + limit);
+			let order = kept?.cache.get(kept.key, kept.stamp);
+			if (order === undefined) {
+				const built = yield* buildRowsSteps(model, defn, limits, meter, new NavMemo());
+				const keys = yield* orderRowsSteps(
+					model,
+					defn,
+					built.keys,
+					built.baseSlots,
+					meter,
+					new NavMemo()
+				);
+				order = {
+					keys,
+					truncated: built.truncated,
+					baseTotal: built.baseTotal,
+					baseSlots: built.baseSlots
+				};
+				kept?.cache.put(kept.key, kept.stamp, order);
+			}
+			const keys = order.keys.slice(offset, offset + limit);
 			const cells = yield* evaluateCellsSteps(
 				model,
 				defn,
 				keys,
-				built.baseSlots,
+				order.baseSlots,
 				limits,
 				meter,
 				new NavMemo()
@@ -106,9 +127,9 @@ export function evaluateTable(ctx: EvalContext, params: ReadParams): Steps<Table
 			return pageBody(defn, {
 				keys,
 				cells,
-				total: order.length,
-				baseTotal: built.baseTotal,
-				truncated: built.truncated,
+				total: order.keys.length,
+				baseTotal: order.baseTotal,
+				truncated: order.truncated,
 				offset,
 				rev
 			});

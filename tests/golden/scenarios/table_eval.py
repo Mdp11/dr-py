@@ -4,10 +4,11 @@ model, two more gadgets holding exact values (``2**60``, ``-0.0``, ``1e16``,
 its type does not declare: pages at their edges; every column kind in both
 modes, over one element and over many; element-typed
 properties, dangling references and ``_Stereotype``; navigation cells at the
-cell cap (1, 20 and 21; 20 reached, and more); a build cut at the route's
-50,000 rows with expand columns after the cut; sorts over value labels; the
-route's refusals; saved tables. ``cell_text`` records a page as an export
-renders it, a page of a capped build included."""
+cell cap (1, 20 and 21; 2, 20, 21 reached, and more); a build cut at the
+route's 50,000 rows with expand columns after the cut; sorts over value labels;
+the route's refusals; saved tables. ``cell_text`` records a page as an export
+renders it, a page of a capped build included, and one cell joining ``None``, a
+dict, nested lists, ``1e16`` and ``2**64``."""
 
 from __future__ import annotations
 
@@ -133,7 +134,15 @@ _PROPERTIES = (
 
 #: 20 elements with a name, 22 in all (``id-12`` and ``stray`` have none)
 _REACH_20 = _path(_scope(["Person", "Gadget", "Leaf"], _exists("name")))
+_REACH_21 = _path(
+    _scope(
+        ["Person", "Gadget", "Leaf"],
+        {"type": "name_id", "field": "id", "op": "contains", "value": "id-"},
+    )
+)
 _REACH_22 = _path(_scope(["Person", "Gadget", "Leaf"]))
+#: the two people with an ``s``
+_REACH_2 = _path(_scope(["Person"], _exists("s")))
 _ALL_TAGS = _path(_scope(), _step("tags"))
 _EVERYTHING = _path(_scope())
 
@@ -412,6 +421,37 @@ def _saved_tables() -> list[dict[str, Any]]:
     ]
 
 
+_CAP_EDGES = _table(
+    _scope_rows(["Leaf"]), _el(), _capped(_REACH_21, None), _capped(_REACH_2, 1)
+)
+#: every gadget's ``mixed`` joined in one cell, after ``id-50``'s is set below
+_ALL_MIXED = _table(
+    _scope_rows(["Leaf"]),
+    _nav(_inline(_path(_scope(["Gadget"])))),
+    _prop("mixed", source=_ref(0)),
+)
+
+
+def _edges() -> list[dict[str, Any]]:
+    return [
+        _eval(_CAP_EDGES, limit=1),
+        _texts(_CAP_EDGES, limit=1),
+        batch(
+            [
+                {
+                    "kind": "update_element",
+                    "id": "id-50",
+                    "properties_patch": {
+                        "mixed": [None, {"k": [1]}, [1, [2, [3]]], 1e16, 2**64]
+                    },
+                }
+            ]
+        ),
+        _eval(_ALL_MIXED, limit=1),
+        _texts(_ALL_MIXED, limit=1),
+    ]
+
+
 _STEPS: list[dict[str, Any]] = [
     batch(_ELEMENTS),
     batch(_RELATIONSHIPS),
@@ -426,6 +466,7 @@ _STEPS: list[dict[str, Any]] = [
     *_texts_of_pages(),
     *_refusals(),
     *_saved_tables(),
+    *_edges(),
 ]
 
 
