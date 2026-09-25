@@ -105,7 +105,8 @@ function compose(
  * updated is not held: it goes into the committed layer at once, as the
  * commit made it, so the engine's committed rules are the server's from the
  * commit on; one whose parse is still out is left out until the refresh
- * brings it. A failed refresh keeps its entries
+ * brings it, and one the engine already holds at the commit's rev or past
+ * it, from a peer's event, is left as it is. A failed refresh keeps its entries
  * in the overlay, each only until a fetch brings newer committed news of the
  * artifact it stands for, and asks one `load()` at once. A failed load asks
  * once more after `pause()`; any other failed fetch leaves the context as it
@@ -174,15 +175,16 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 
 	/**
 	 * The committed rule set a commit made of `entry` (its parse attached) under
-	 * `id` at `rev`: `'pending'` while its parse is out, or when the commit
-	 * names no rev for it; `undefined` for an entry that is no rule set's
-	 * create or update.
+	 * `id` at `rev`: `'skip'` while its parse is out, when the commit names no
+	 * rev for it, or when the engine already holds that rev of it or a newer
+	 * one, which a peer's event brought first; `undefined` for an entry that is
+	 * no rule set's create or update.
 	 */
 	const committedAs = (
 		entry: WireStagedArtifact,
 		id: string,
 		rev: number | undefined
-	): WireArtifact | 'pending' | undefined => {
+	): WireArtifact | 'skip' | undefined => {
 		if (entry.op === 'delete') return undefined;
 		const base =
 			entry.op === 'create'
@@ -191,7 +193,9 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 					: undefined
 				: ruleSets.get(id);
 		if (base === undefined) return undefined;
-		if (rev === undefined || entry.rules === 'pending') return 'pending';
+		if (rev === undefined || entry.rules === 'pending' || (revs.get(id) ?? -1) >= rev) {
+			return 'skip';
+		}
 		return {
 			...base,
 			...(entry.name === undefined ? {} : { name: entry.name }),
@@ -341,7 +345,7 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 				const realId = entry.op === 'create' ? idMap[entry.id] : undefined;
 				const id = realId ?? entry.id;
 				const ruleSet = committedAs(parsed[at]!, id, revOf.get(id));
-				if (ruleSet === 'pending') return;
+				if (ruleSet === 'skip') return;
 				if (ruleSet !== undefined) {
 					ruleSetsMade.push(ruleSet);
 				} else if (realId === undefined) {

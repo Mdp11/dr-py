@@ -188,7 +188,8 @@ const cursor = <T>(): Cursor<T> => ({ iter: null, epoch: -1, ended: false });
 
 /**
  * The sweep due: its total when it began (`null` before its first step), how
- * many entities it has validated, and their ids.
+ * many entities it has validated, and their ids; `retry`, the ids a step that
+ * threw had pulled, which the next step validates first.
  */
 type Sweep = {
 	total: number | null;
@@ -196,6 +197,7 @@ type Sweep = {
 	readonly validated: Set<string>;
 	readonly elements: Cursor<ElementRec>;
 	readonly relationships: Cursor<RelRec>;
+	retry: string[];
 };
 
 const newSweep = (): Sweep => ({
@@ -203,7 +205,8 @@ const newSweep = (): Sweep => ({
 	done: 0,
 	validated: new Set(),
 	elements: cursor(),
-	relationships: cursor()
+	relationships: cursor(),
+	retry: []
 });
 
 /** The panel's tag scope, kept for one committed rev and one pair of equal rule sets. */
@@ -488,7 +491,9 @@ export class LiveIssues {
 	 * Every step validates with the rules as they are then. Its state is this
 	 * object's, never the generator's, so any generator resumes it where it
 	 * stands. The value is `true` when both ran to their end, `false` when the
-	 * store is unusable.
+	 * store is unusable. A step that throws leaves its ids due, for the next
+	 * generator's first step, and releases what waits: nothing drives the
+	 * steps until a caller sets them going again.
 	 */
 	*sweepSteps(): Generator<SweepStep, boolean, void> {
 		for (;;) {
@@ -498,8 +503,8 @@ export class LiveIssues {
 				const rescan = this.rescan;
 				if (rescan === null) return true;
 				const next = rescan.ids.slice(rescan.at, rescan.at + this.sweepStep);
+				this.stepOver(next);
 				rescan.at += next.length;
-				this.revalidate(next, false);
 				if (this.broken !== null) return false;
 				if (this.rescan === rescan && rescan.at >= rescan.ids.length) {
 					this.rescan = null;
@@ -514,14 +519,20 @@ export class LiveIssues {
 				yield { done: 0, total: sweep.total };
 				continue;
 			}
-			const next: string[] = [];
+			const next = sweep.retry;
+			sweep.retry = [];
 			const skip = { left: this.sweepSkip };
 			this.pull(sweep, sweep.elements, () => model.elements(), next, skip);
 			if (sweep.elements.ended) {
 				this.pull(sweep, sweep.relationships, () => model.relationships(), next, skip);
 			}
+			try {
+				this.stepOver(next);
+			} catch (caught) {
+				sweep.retry = next;
+				throw caught;
+			}
 			sweep.done += next.length;
-			this.revalidate(next, false);
 			if (this.broken !== null) return false;
 			const total = sweep.total;
 			if (!sweep.relationships.ended) {
@@ -573,18 +584,32 @@ export class LiveIssues {
 		}
 	}
 
+	/**
+	 * A sweep or rescan step's `revalidate`. A throw other than a pattern's is a
+	 * bug: what waits for the steps is released, so that its caller can refuse it.
+	 */
+	private stepOver(ids: readonly string[]): void {
+		try {
+			this.revalidate(ids, false);
+		} catch (caught) {
+			for (const resolve of this.settleWaiters.splice(0)) resolve();
+			for (const resolve of this.waiters.splice(0)) resolve();
+			throw caught;
+		}
+	}
+
 	/** Sweeps again from the start, in place: the store keeps what it holds meanwhile. */
 	restartSweep(): void {
 		if (this.broken === null) this.sweep = newSweep();
 	}
 
-	/** Resolves once no sweep and no rescan is due, or the store is unusable. */
+	/** Resolves once no sweep and no rescan is due, the store is unusable, or a step threw. */
 	whenSwept(): Promise<void> {
 		if (this.sweep === null && this.rescan === null) return Promise.resolve();
 		return new Promise((resolve) => this.waiters.push(resolve));
 	}
 
-	/** Resolves once no rescan is due, or the store is unusable. */
+	/** Resolves once no rescan is due, the store is unusable, or a step threw. */
 	whenSettled(): Promise<void> {
 		if (this.rescan === null) return Promise.resolve();
 		return new Promise((resolve) => this.settleWaiters.push(resolve));

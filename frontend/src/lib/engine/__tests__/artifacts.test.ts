@@ -1140,6 +1140,38 @@ describe('the artifact follower and rule sets', () => {
 		expect(f.parsesAsked).toEqual([B]);
 	});
 
+	it("a rule set the own commit updated stays the peer's when a newer rev of it landed first", async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.committed.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
+		f.follower.load();
+		await f.follower.settled();
+		f.parses.set(B, parsed(DE_OR_FR));
+		f.setStaged([{ op: 'update', id: 'r1', payload: rulesPayload(B) }]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+
+		// The own commit made rev 2; a peer's rev 3 lands before its response.
+		f.committed.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY), 3));
+		f.follower.onEvent('updated', header(f.committed.get('r1')!));
+		await f.follower.settled();
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: {},
+			changed: [{ id: 'r1', artifact_rev: 2 }],
+			deletedIds: []
+		});
+		await f.follower.settled();
+
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-only', NOT_DE, 'on_server'));
+		expect(
+			f.posted
+				.flatMap((p) => (p.method === 'putArtifacts' ? p.changed : []))
+				.map((a) => a.artifact_rev)
+		).toEqual([3]);
+	});
+
 	it('a rule set the own commit created while its parse was out is left out until the refresh brings it', async () => {
 		const over = await swept();
 		const f = follow(over.sync);

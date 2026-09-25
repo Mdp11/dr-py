@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	applyBatch,
 	Metamodel,
 	Model,
+	RulesValidator,
 	type IssueListBody,
 	type IssueOut,
 	type MetamodelDoc,
@@ -361,6 +362,31 @@ const rulesOf = (issues: IssueOut[]) => issues.filter((i) => i.check.startsWith(
 
 const listed = (client: Client) => client.call<IssueListBody>('getModelIssues');
 
+/** What `promise` settles to within `turns` host turns, else `'unanswered'`. */
+async function within<T>(promise: Promise<T>, turns = 200): Promise<T | 'unanswered'> {
+	let out: { value: T } | null = null;
+	void promise.then((value) => (out = { value }));
+	for (let turn = 0; turn < turns && out === null; turn++) await settle();
+	return out === null ? 'unanswered' : (out as { value: T }).value;
+}
+
+/**
+ * Makes every element a validator run reaches throw while `armed.on`: a bug
+ * in a validator, which no model can trigger.
+ */
+function breaking() {
+	const armed = { on: true };
+	const original = RulesValidator.prototype.validateElement;
+	const spy = vi.spyOn(RulesValidator.prototype, 'validateElement').mockImplementation(function (
+		this: RulesValidator,
+		...args: Parameters<RulesValidator['validateElement']>
+	) {
+		if (armed.on) throw new Error('a validator bug');
+		return original.apply(this, args);
+	});
+	return { armed, restore: () => spy.mockRestore() };
+}
+
 /** A replica of `blocks(count)` swept with nothing left in the background, its host now turned by hand. */
 async function paused(count: number, host = autoHost(1), rules: object[] = []) {
 	const client = connect(host);
@@ -625,6 +651,32 @@ describe('rules', () => {
 		expect(new Set(rulesOf(body.issues).map((i) => `${i.check} ${i.origin}`))).toEqual(
 			new Set(['rule:coloured uncommitted'])
 		);
+	});
+
+	it("refuses 409 'replica is not ready' what waits for a rescan whose step throws, and a later read runs the step again", async () => {
+		const client = await swept(blocks(1200));
+		const broken = breaking();
+		try {
+			void client.call('setArtifacts', { artifacts: [ruleSet('r-1', 'Rules', parsed(FLAGGED))] });
+			const [reading, validating] = await Promise.all([
+				refusal(listed(client)),
+				refusal(client.call('validateModel', { batch_ids: [] }))
+			]);
+			// Nothing drives the rescan now: a later read sets it going again.
+			const again = await within(refusal(listed(client)));
+			const notReady = { status: 409, detail: 'replica is not ready' };
+			expect({ reading, validating, again }).toEqual({
+				reading: notReady,
+				validating: notReady,
+				again: notReady
+			});
+			broken.armed.on = false;
+			const body = await listed(client);
+			expect(rulesOf(body.issues)).toHaveLength(1200);
+			expect(body.counts).toEqual({ error: 2400 });
+		} finally {
+			broken.restore();
+		}
 	});
 
 	it('never answers a waiting read that was cancelled', async () => {

@@ -104,7 +104,7 @@ could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on:
 feature there lands on both sides with a fixture until F.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
-`K-63`, `K-65`, `K-66`, `K-67`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
+`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
 `BACKLOG.md`.
 Size: very large.
 
@@ -527,6 +527,18 @@ holding such YAML (saved inside the lint's debounce) stays `'pending'` in the en
 shell counts a failed parse as not landed and asks again only at the next staged push. Fix:
 catch the constructor's `ValueError` in `parse_rule_set` as a `RuleSetError`, with a test on both
 routes; a bug fix, so the freeze allows it, and the engine, which reads no YAML, does not change.
+
+### K-68 · A legacy `PUT`/`DELETE /artifacts/{id}` on a rule set splits the engine from the server · `open` · *2026-09-25*
+The legacy artifact routes leave `session.compiled_rules` alone on a `validation_rules` write
+(`routes/artifacts.py`'s module note): the server keeps the old rules until the session is
+evicted and rehydrated. They emit the same `artifact` feed event as a commit, though, and the
+follower fetches the payload with its parse and hands it to the engine, which recompiles and
+rescans at once. From then until the rehydrate the engine's issue list, `rules_status` and the
+model half of its preview use the new rules while the server's use the old, so the two answer
+differently and a dev-shadow `[shadow]` line is possible. The frontend never calls those routes;
+only a script or a second client does. Fix direction: the routes recompile and re-splice as
+`POST /commits` does (the module note says why recompiling alone is worse than neither), or
+the event marks the write so the follower leaves the committed rules alone until a load.
 
 ---
 

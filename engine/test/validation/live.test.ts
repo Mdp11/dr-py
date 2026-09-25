@@ -14,6 +14,7 @@ import {
 	previewBody,
 	PyFloat,
 	RESCAN_STEP,
+	RulesValidator,
 	shuffleAdjacency,
 	validateBody,
 	type CompiledRules,
@@ -905,6 +906,70 @@ describe('rules in the store', () => {
 });
 
 /**
+ * Makes every element a validator run reaches throw while `armed.on`: a bug
+ * in a validator, which no model can trigger.
+ */
+function breaking() {
+	const armed = { on: true };
+	const original = RulesValidator.prototype.validateElement;
+	const spy = vi.spyOn(RulesValidator.prototype, 'validateElement').mockImplementation(function (
+		this: RulesValidator,
+		...args: Parameters<RulesValidator['validateElement']>
+	) {
+		if (armed.on) throw new Error('a validator bug');
+		return original.apply(this, args);
+	});
+	return { armed, restore: () => spy.mockRestore() };
+}
+
+describe('a sweep or rescan step that throws', () => {
+	it('leaves the ids the sweep had pulled to its next step, and releases what waits for it', async () => {
+		const live = new LiveIssues(workingCopy(grown(seededRandom(12), 300)), { sweepStep: 40 });
+		const steps = live.sweepSteps();
+		steps.next();
+		steps.next();
+		let released = false;
+		void live.whenSwept().then(() => (released = true));
+		const broken = breaking();
+		try {
+			expect(() => steps.next()).toThrow('a validator bug');
+		} finally {
+			broken.restore();
+		}
+		await Promise.resolve();
+		const after = { released, seeded: live.seeded };
+		expect(drain(live.sweepSteps())).toBe(true);
+		expect(live.seeded).toBe(true);
+		expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(live.wc)));
+		expect(after).toEqual({ released: true, seeded: false });
+	});
+
+	it('leaves the ids a rescan step had taken queued, and releases what waits for it', async () => {
+		// One step takes the whole queue.
+		const live = new LiveIssues(workingCopy(grown(seededRandom(13), 300)), {
+			sweepStep: 1000,
+			rules: both(ONE)
+		});
+		drain(live.sweepSteps());
+		live.setRules(both(TWO));
+		let released = false;
+		void live.whenSettled().then(() => (released = true));
+		const broken = breaking();
+		try {
+			expect(() => live.sweepSteps().next()).toThrow('a validator bug');
+		} finally {
+			broken.restore();
+		}
+		await Promise.resolve();
+		const after = { released, settled: live.settled };
+		expect(drain(live.sweepSteps())).toBe(true);
+		expect(live.settled).toBe(true);
+		expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(live.wc, TWO)));
+		expect(after).toEqual({ released: true, settled: false });
+	});
+});
+
+/**
  * A swept replica where `b-1` has relationships both ways and a referencer:
  * `b-2` names it in `ref`, it links to `o-1` and `b-3` owns it. `b-2` and
  * `b-3` each have an issue.
@@ -966,6 +1031,32 @@ describe("the panel's tags", () => {
 		expect(issueListBody(live)).toEqual(body);
 		expect(probes).toHaveBeenCalledTimes(1);
 		expect(wc.model.getElement('b-1').props).toEqual({ name: 'b-1', req: 'x', n: 8 });
+	});
+
+	it('are kept only once the store is seeded: a read, an edit and a read mid-sweep tag as an exact probe', () => {
+		const blk = (id: string, n: number): ModelOp => ({
+			kind: 'create_element',
+			temp_id: `tmp_${id}`,
+			id,
+			type_name: 'Blk',
+			properties: { name: id, req: 'x', n }
+		});
+		const model = new Model(metamodel);
+		applyBatch(model, [blk('b-1', 3), blk('b-2', 9)]);
+		const live = new LiveIssues(workingCopy(model), { sweepStep: 1 });
+		const steps = live.sweepSteps();
+		steps.next();
+		steps.next();
+		// `b-2` is not swept yet: the store holds none of its issues.
+		expect(live.store.issuesOf('b-2')).toEqual([]);
+		issueListBody(live);
+		live.stage([update('b-2', { name: 'b2' })]);
+		drain(steps);
+		expect(live.seeded).toBe(true);
+		const body = issueListBody(live);
+		live.resetTagScope();
+		expect(body).toEqual(issueListBody(live));
+		expect(listed(live)).toEqual(['b-2: n: 9 above max 5.0 (on_server)']);
 	});
 
 	it('probe again after a delta, a change of the committed rules, and while the rule sets differ', () => {

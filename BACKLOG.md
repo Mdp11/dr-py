@@ -268,8 +268,8 @@ property tests on the relationship itself inside a relationship atom;
 value-vs-value joins (comparing two navigated values against each other); a
 snippet-backed rule kind (Python escape hatch, priced separately if the
 declarative wall is ever hit); per-element severity override/muting;
-STRUCTURAL user rules (permanently out, by decision). **e2e coverage joins
-T-7.**
+STRUCTURAL user rules (permanently out, by decision). e2e coverage:
+`frontend/e2e/eval-rules.spec.ts`.
 
 ### P-13 · JSON export: one file per base element, with a name template · `done` (2026-08-14)
 Landed as `json_split`: `core/table/split.py` groups rows by the leading `RowKey` slot

@@ -324,9 +324,10 @@ knowing only committed rules, cannot.
 a round trip per staged change, and the compile apart from the reach and evaluation that read
 it. The document as a JSON object: the shell's parse and the engine's re-serialization lose
 exactness. Answering reads mid-rescan: a half-rescanned store mixes two rule sets' verdicts.
-**Consequences.** Two compiles and the rescan: a rule-set change swaps both at once and queues
-the population of every rule whose identity changed, old and new working set together, for a
-background rescan in the sweep's slot; `getModelIssues`, `validateModel` and `previewCommit`
+**Consequences.** Two compiles and the rescan: a rule-set change swaps both at once and, when
+the working set's ordered rule identities changed, queues the population of every rule of the
+old and the new working set, as the server's commit does, for a background rescan in the
+sweep's slot; `getModelIssues`, `validateModel` and `previewCommit`
 wait for it to end, and typing never does. Reach joins every dirty set — stage, rebase,
 coalesced edit, probe — on the state after the transition, with the working rules' paths; its
 premise (an owner whose verdict flips has a path that first meets an element that moved, and
