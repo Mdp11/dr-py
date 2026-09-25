@@ -16,9 +16,9 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, the two evaluations and the issues, all eight on the engine by default', () => {
+	it('names the five read surfaces, the two evaluations, the issues and the tables, all nine on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
-		expect(SURFACES).toEqual([...READ_SURFACES, 'navigation', 'criteria', 'issues']);
+		expect(SURFACES).toEqual([...READ_SURFACES, 'navigation', 'criteria', 'issues', 'tables']);
 		expect(SURFACE_DEFAULTS).toEqual({
 			elements: 'engine',
 			search: 'engine',
@@ -27,9 +27,20 @@ describe('the surface switches', () => {
 			summary: 'engine',
 			navigation: 'engine',
 			criteria: 'engine',
-			issues: 'engine'
+			issues: 'engine',
+			tables: 'engine'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
+	});
+
+	it('staging on the engine does not force the tables, and dr.surfaces moves them', () => {
+		for (const staging of ['engine', 'legacy']) {
+			expect(readSurfaces(storing(`{"staging": "${staging}", "tables": "server"}`))).toEqual({
+				...SURFACE_DEFAULTS,
+				tables: 'server'
+			});
+		}
+		expect(readSurfaces(storing('{"staging": "engine"}')).tables).toBe('engine');
 	});
 
 	it('dr.surfaces sets navigation and criteria, each on its own, whatever staging says', () => {
@@ -217,7 +228,8 @@ describe('the surface switches', () => {
 			summary: 'server',
 			navigation: 'server',
 			criteria: 'server',
-			issues: 'server'
+			issues: 'server',
+			tables: 'server'
 		} as const;
 		for (const staging of ['engine', 'legacy'] as const) {
 			const any = (surfaces: Record<string, string>) =>
@@ -227,6 +239,7 @@ describe('the surface switches', () => {
 			expect(any({ summary: 'engine' })).toBe(true);
 			expect(any({ navigation: 'engine' })).toBe(true);
 			expect(any({ criteria: 'engine' })).toBe(true);
+			expect(any({ tables: 'engine' })).toBe(true);
 		}
 	});
 

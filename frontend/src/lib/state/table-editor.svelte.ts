@@ -24,9 +24,15 @@
  * Staleness is guarded by a per-TAB generation counter (mirrors nav-editor's
  * `_generations`, just without the per-node keying): anything that makes an
  * in-flight `evaluateTable` response stale — a new `loadTablePage` call, a
- * reload, a close, a reset — bumps the tab's generation, and the async
- * loaders (full load AND chunk fills) drop the response on mismatch (or when
- * the draft is gone).
+ * reload, a close, a reset — bumps the tab's generation, which aborts the
+ * calls asked under the old one, and the async loaders (full load AND chunk
+ * fills) drop the response on mismatch (or when the draft is gone).
+ *
+ * With the `tables` surface on the engine, pages read the replica's working
+ * copy, and a staged edit moves neither `model_rev` nor `total`: the replica's
+ * `changed` events re-page the open tables instead (`scheduleTablesRepage`),
+ * and a chunk asked before one of them is never spliced into a page asked
+ * after it, or the other way round (`_repageEpoch`).
  *
  * Saving STAGES, it does not PUT: `saveTableDraft`/`saveAsTableDraft` push a
  * `create_artifact`/`update_artifact` op onto the staged-artifact buffer
@@ -44,6 +50,7 @@
  */
 import { SvelteMap } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
+import { engineSide } from '$lib/api/engine-route';
 import { evaluateTable, exportTable, fetchScriptErrors } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
@@ -70,6 +77,7 @@ import { releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
 import { onCommitEvent } from './realtime.svelte';
+import { onTablesMoved } from './replica.svelte';
 import { retryAndDownload, type ExportProgress } from '$lib/util/export-download';
 import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
 
@@ -93,6 +101,8 @@ const POLL_MAX_ATTEMPTS = 120;
 /** Delay between two script-error recap retries (the recap route answers 202
  * with `Retry-After: 1` while the sweep is still filling the cache). */
 const RECAP_RETRY_MS = 1_000;
+/** How long the replica's staged state must hold still before the open tables re-page. */
+const REPAGE_DEBOUNCE_MS = 300;
 /** Bound on consecutive 202 recap retries for one tab. Same reasoning — and
  * the same order of magnitude — as `POLL_MAX_ATTEMPTS`: a recap is a
  * whole-table pass server-side, so "still computing" must never turn into an
@@ -148,6 +158,8 @@ export interface TableData {
 	 * ScriptColumn raising on some rows) — see TablePageSchema.warnings.
 	 * Structured and aggregated; render via `formatScriptWarning`. */
 	warnings: ScriptWarning[];
+	/** Set when the server answered a table the engine refused, on committed state. */
+	fallback?: 'script' | 'pattern';
 }
 
 const _drafts = new SvelteMap<string, TableDraft>();
@@ -277,6 +289,39 @@ const _pollAttempts = new Map<string, number>();
  */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _generations = new Map<string, number>();
+
+/**
+ * Per-TAB abort controller of the current generation: every load and chunk
+ * asked under it carries its signal, and `bumpGeneration` aborts it, so a
+ * superseded engine call is cancelled rather than run to the end. Control
+ * state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _controllers = new Map<string, AbortController>();
+
+/**
+ * Moves at every `scheduleTablesRepage()`: each marks a staged change the
+ * engine has applied, which the next request sees and an earlier one may not.
+ * A page records the epoch it was asked at (`_pageEpochs`); a chunk is asked
+ * only while its page's epoch is the current one and spliced only if none
+ * moved meanwhile, so rows from before and after a staged change never share
+ * a grid. `model_rev` and `total` cannot tell them apart: a staged edit moves
+ * neither. On the server side it never moves.
+ */
+let _repageEpoch = 0;
+/** tabId -> the epoch the installed page was asked at. Control state, never read from templates. */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _pageEpochs = new Map<string, number>();
+/** The pending re-page of `scheduleTablesRepage`, if any. */
+let _repageTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Tabs whose load in flight is not a background re-page: one that supersedes
+ * it is not one either, since the page on screen may be of an older
+ * definition and its failure is the user's to see. Control state, never read
+ * from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _foregroundLoads = new Set<string>();
 
 /**
  * In-flight chunk fills: tabId -> chunk offset -> the generation the fetch was
@@ -468,11 +513,27 @@ export function revertSuspendedTableEdits(tabId: string): void {
 function bumpGeneration(tabId: string): number {
 	const next = (_generations.get(tabId) ?? 0) + 1;
 	_generations.set(tabId, next);
+	_controllers.get(tabId)?.abort();
+	_controllers.delete(tabId);
 	// Chunk fetches issued under older generations will be dropped on landing;
 	// clear their bookkeeping so the new generation can re-request those chunks.
 	_inflightChunks.delete(tabId);
 	_chunkRetries.delete(tabId);
 	return next;
+}
+
+/** The signal of the tab's current generation, aborted when it is superseded. */
+function signalOf(tabId: string): AbortSignal {
+	let controller = _controllers.get(tabId);
+	if (controller === undefined) {
+		controller = new AbortController();
+		_controllers.set(tabId, controller);
+	}
+	return controller.signal;
+}
+
+function isAbort(error: unknown): boolean {
+	return error instanceof DOMException && error.name === 'AbortError';
 }
 
 /** True while `gen` is still current for `tabId` and its draft exists. */
@@ -671,7 +732,7 @@ function handleScriptStatus(tabId: string, page: TablePage): void {
 			_pollTimers.delete(tabId);
 			if (!isCurrent(tabId, gen)) return; // edited/reloaded/closed since scheduled
 			const { offset, limit } = visibleRequest(tabId);
-			void _loadTablePage(tabId, offset, limit, true);
+			void _loadTablePage(tabId, offset, limit, { fromPoll: true });
 		}, POLL_MS)
 	);
 }
@@ -785,6 +846,13 @@ function moveTabState(oldTab: string, newTab: string): void {
 	const gen = _generations.get(oldTab);
 	_generations.delete(oldTab);
 	if (gen !== undefined) _generations.set(newTab, gen);
+	// What was asked under `oldTab` is orphaned either way (its draft is gone).
+	_controllers.get(oldTab)?.abort();
+	_controllers.delete(oldTab);
+	const epoch = _pageEpochs.get(oldTab);
+	_pageEpochs.delete(oldTab);
+	if (epoch !== undefined) _pageEpochs.set(newTab, epoch);
+	_foregroundLoads.delete(oldTab);
 
 	const view = _viewRanges.get(oldTab);
 	_viewRanges.delete(oldTab);
@@ -840,13 +908,13 @@ function moveTabState(oldTab: string, newTab: string): void {
 	// user-initiated loads: a rebind mid-sweep must not hand the poll loop a
 	// fresh attempt budget.
 	if (loading === true) {
-		void _loadTablePage(newTab, _pages.get(newTab)?.offset ?? 0, PAGE, true);
+		void _loadTablePage(newTab, _pages.get(newTab)?.offset ?? 0, PAGE, { fromPoll: true });
 	} else if (status?.state === 'computing') {
 		// Nothing was in flight to re-issue, but the sweep is still running and
 		// the cancelled timer belonged to the old id — restart the loop, or the
 		// tab would sit on `pending` cells forever.
 		const { offset, limit } = visibleRequest(newTab);
-		void _loadTablePage(newTab, offset, limit, true);
+		void _loadTablePage(newTab, offset, limit, { fromPoll: true });
 	}
 }
 
@@ -1143,8 +1211,8 @@ function _evaluateSource(
 	return { definition: draft.definition };
 }
 
-/** Install `page` as a FRESH sparse cache (drops any previously loaded rows). */
-function installPage(tabId: string, page: TablePage): void {
+/** Install `page`, asked at `epoch`, as a FRESH sparse cache (drops any previously loaded rows). */
+function installPage(tabId: string, page: TablePage, epoch: number): void {
 	const rows: (TableRow | undefined)[] = new Array<TableRow | undefined>(page.total);
 	for (let i = 0; i < page.rows.length && page.offset + i < page.total; i++) {
 		rows[page.offset + i] = page.rows[i];
@@ -1157,8 +1225,10 @@ function installPage(tabId: string, page: TablePage): void {
 		truncated: page.truncated,
 		offset: page.offset,
 		model_rev: page.model_rev,
-		warnings: page.warnings
+		warnings: page.warnings,
+		...(page.fallback === undefined ? {} : { fallback: page.fallback })
 	});
+	_pageEpochs.set(tabId, epoch);
 	handleScriptStatus(tabId, page);
 }
 
@@ -1169,10 +1239,10 @@ function installPage(tabId: string, page: TablePage): void {
  * cache; install it fresh instead and let the grid re-request whatever else
  * its window needs.
  */
-function mergePage(tabId: string, page: TablePage): void {
+function mergePage(tabId: string, page: TablePage, epoch: number): void {
 	const data = _pages.get(tabId);
 	if (!data || data.model_rev !== page.model_rev || data.total !== page.total) {
-		installPage(tabId, page);
+		installPage(tabId, page, epoch);
 		return;
 	}
 	const rows = data.rows.slice();
@@ -1199,43 +1269,59 @@ export async function loadTablePage(
 ): Promise<void> {
 	// A load nobody's poll timer asked for is a fresh start: give the sweep
 	// poll loop a new attempt budget (see `_pollAttempts`).
-	return _loadTablePage(tabId, offset, limit, false);
+	return _loadTablePage(tabId, offset, limit);
 }
 
-/** `loadTablePage` plus the poll-loop bookkeeping the exported wrapper hides:
- * `fromPoll` distinguishes a tick of the script-sweep poll loop (which spends
- * the tab's attempt budget) from any other caller (which resets it). */
+/** `loadTablePage` plus what the exported wrapper hides. `fromPoll`
+ * distinguishes a tick of the script-sweep poll loop (which spends the tab's
+ * attempt budget) from any other caller (which resets it). `background` is a
+ * re-page of the same definition over moved state: the page, its error and
+ * its recap stay on screen until the new page lands, and a failure keeps
+ * them, reporting an error only for a tab with no page to show. */
 async function _loadTablePage(
 	tabId: string,
 	offset: number,
 	limit: number,
-	fromPoll: boolean
+	{ fromPoll = false, background = false }: { fromPoll?: boolean; background?: boolean } = {}
 ): Promise<void> {
 	if (!fromPoll) _pollAttempts.delete(tabId);
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const gen = bumpGeneration(tabId); // supersede any older in-flight load
+	const epoch = _repageEpoch;
+	const quiet = background && !_foregroundLoads.has(tabId);
+	if (!quiet) _foregroundLoads.add(tabId);
 	// A re-evaluation is under way, so the tab has NO settled page state: drop
 	// the recap and its signature until one lands. Without this, a load that
 	// fails (or simply hasn't landed) would leave the previous recap askable at
 	// the NEW definition (a sort edit included) — `_fetchScriptErrors` reads
 	// the draft's current definition, while the grid is still showing the rows
 	// of the old one, and every `row_index` would address an order nobody is
-	// looking at.
-	clearScriptErrors(tabId);
-	_errors.delete(tabId);
+	// looking at. A background re-page keeps the definition, so what is on
+	// screen stays until its page replaces it.
+	if (!quiet) {
+		clearScriptErrors(tabId);
+		_errors.delete(tabId);
+	}
 	_loading.set(tabId, true);
-	const args = { ..._evaluateSource(draft), offset, limit };
+	const args = { ..._evaluateSource(draft), offset, limit, signal: signalOf(tabId) };
 	try {
 		const page = await evaluateTable(args);
 		if (!isCurrent(tabId, gen)) return; // stale: edited/reloaded/closed mid-flight
-		installPage(tabId, page);
+		_foregroundLoads.delete(tabId);
+		if (quiet) {
+			clearScriptErrors(tabId);
+			_errors.delete(tabId);
+		}
+		installPage(tabId, page, epoch);
 		_loading.set(tabId, false);
 	} catch (err) {
-		if (isCurrent(tabId, gen)) {
-			_errors.set(tabId, err instanceof Error ? err.message : String(err));
-			_loading.set(tabId, false);
-		}
+		if (!isCurrent(tabId, gen)) return;
+		_foregroundLoads.delete(tabId);
+		_loading.set(tabId, false);
+		if (isAbort(err)) return;
+		if (quiet && _pages.has(tabId)) return;
+		_errors.set(tabId, err instanceof Error ? err.message : String(err));
 	}
 }
 
@@ -1260,6 +1346,10 @@ export function ensureTableRange(tabId: string, start: number, end: number): voi
 	// DIFFERENT shape into the loaded page. The range is recorded above and
 	// re-driven by `resumeTableEvaluation`, so nothing is lost by declining.
 	if (_suspended.has(tabId)) return;
+	// A staged change landed after this page was asked: its rows and any chunk
+	// asked now would be of two states. The re-page it scheduled replaces the
+	// page, and the grid asks again for the range it then lacks.
+	if (_pageEpochs.get(tabId) !== _repageEpoch) return;
 	const gen = _generations.get(tabId) ?? 0;
 	let chunks = _inflightChunks.get(tabId);
 	for (let c = Math.floor(lo / PAGE) * PAGE; c < hi; c += PAGE) {
@@ -1286,12 +1376,15 @@ export function ensureTableRange(tabId: string, start: number, end: number): voi
 async function fetchChunk(tabId: string, offset: number, gen: number): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
-	const args = { ..._evaluateSource(draft), offset, limit: PAGE };
+	const epoch = _repageEpoch;
+	const args = { ..._evaluateSource(draft), offset, limit: PAGE, signal: signalOf(tabId) };
 	try {
 		const page = await evaluateTable(args);
 		if (!isCurrent(tabId, gen)) return; // superseded by a reset/close mid-flight
+		// A staged change landed meanwhile: the chunk may be of either side of it.
+		if (epoch !== _repageEpoch) return;
 		_chunkRetries.get(tabId)?.delete(offset);
-		mergePage(tabId, page);
+		mergePage(tabId, page, epoch);
 	} catch {
 		// A background chunk fill failing is non-fatal: its slots stay
 		// placeholders. Errors that matter (bad definition/sort) also fail the
@@ -1508,6 +1601,8 @@ export async function saveAsTableDraft(tabId: string, name: string): Promise<voi
 export async function reloadTableDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
 	_pages.delete(tabId);
+	_pageEpochs.delete(tabId);
+	_foregroundLoads.delete(tabId);
 	_loading.delete(tabId);
 	_errors.delete(tabId);
 	_viewRanges.delete(tabId);
@@ -1521,6 +1616,8 @@ export function closeTableDraft(tabId: string): void {
 	const draft = _drafts.get(tabId); // read BEFORE the delete: it owns the lease
 	_drafts.delete(tabId);
 	_pages.delete(tabId);
+	_pageEpochs.delete(tabId);
+	_foregroundLoads.delete(tabId);
 	_loading.delete(tabId);
 	_errors.delete(tabId);
 	_lockDenied.delete(tabId);
@@ -1575,8 +1672,12 @@ export async function downloadTable(
  * drops stale responses, so there is no need to await or serialize these.
  * Drafts are refetched too: their `row_source`/columns may read model data
  * that just changed even though the draft's definition itself is unsaved.
+ * Only with the `tables` surface on the server: on the engine the replica
+ * applies the commit and its `changed` re-pages, once.
  */
 export function handleTableModelRevChanged(): void {
+	// On the engine, the replica's `changed` re-pages instead (`scheduleTablesRepage`).
+	if (engineSide('tables') === 'engine') return;
 	for (const [tabId] of _drafts) {
 		// A tab that has never evaluated (no page, no error, no load in flight) is
 		// a brand-new table still waiting for its scope — a peer's commit must not
@@ -1605,7 +1706,47 @@ onCommitEvent(({ scope }) => {
 	if (scope.includes('model')) handleTableModelRevChanged();
 });
 
+/**
+ * The replica's staged state moved (its rev, its staged edits or its
+ * artifacts), with the tables on the engine: every chunk asked before now is
+ * dropped on landing, and once the moves pause for `REPAGE_DEBOUNCE_MS` the
+ * open tables re-page (`repageOpenTables`). Each call restarts the wait.
+ */
+export function scheduleTablesRepage(): void {
+	_repageEpoch += 1;
+	if (_repageTimer !== null) clearTimeout(_repageTimer);
+	_repageTimer = setTimeout(() => {
+		_repageTimer = null;
+		repageOpenTables();
+	}, REPAGE_DEBOUNCE_MS);
+}
+
+/**
+ * Re-pages, in the background, the range the user is looking at of every
+ * table that has evaluated (a page, an error or a load in flight): the rows
+ * stay until the new page replaces them. A tab whose settings dialog is open
+ * is only marked stale, for its resume to reload; a table that never
+ * evaluated stays empty.
+ */
+export function repageOpenTables(): void {
+	for (const [tabId] of _drafts) {
+		if (!_pages.has(tabId) && !_errors.has(tabId) && !(_loading.get(tabId) ?? false)) continue;
+		if (_suspended.has(tabId)) {
+			_suspendedStale.add(tabId);
+			continue;
+		}
+		const { offset, limit } = visibleRequest(tabId);
+		void _loadTablePage(tabId, offset, limit, { background: true });
+	}
+}
+
+onTablesMoved(() => scheduleTablesRepage());
+
 export function resetTableEditors(): void {
+	if (_repageTimer !== null) clearTimeout(_repageTimer);
+	_repageTimer = null;
+	_pageEpochs.clear();
+	_foregroundLoads.clear();
 	_drafts.clear();
 	_pages.clear();
 	_loading.clear();

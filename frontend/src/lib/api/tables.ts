@@ -1,4 +1,5 @@
 import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
+import { asSent, route } from './engine-route';
 import {
 	TablePageSchema,
 	type ExportFormat,
@@ -14,14 +15,41 @@ interface EvaluateArgs {
 	limit?: number;
 }
 
-export function evaluateTable(args: EvaluateArgs, cfg?: ClientConfig): Promise<TablePage> {
+/**
+ * POST /tables/evaluate, the `tables` surface: the engine answers from the
+ * working copy, staged edits and artifacts included; a table it refuses (a
+ * script, a pattern) is the server's page, on committed state, marked with
+ * why. `signal` aborts the call on either side.
+ */
+export function evaluateTable(
+	args: EvaluateArgs & { signal?: AbortSignal },
+	cfg?: ClientConfig
+): Promise<TablePage> {
 	const body = {
 		definition: args.definition,
 		artifact_id: args.artifactId,
 		offset: args.offset ?? 0,
 		limit: args.limit ?? 100
 	};
-	return apiFetch('/tables/evaluate', { method: 'POST', body, schema: TablePageSchema }, cfg);
+	const { signal } = args;
+	return route(
+		'tables',
+		cfg,
+		(call) =>
+			call('evaluateTable', asSent(body), signal).then((page) => TablePageSchema.parse(page)),
+		() =>
+			apiFetch(
+				'/tables/evaluate',
+				{
+					method: 'POST',
+					body,
+					schema: TablePageSchema,
+					...(signal === undefined ? {} : { signal })
+				},
+				cfg
+			),
+		{ mark: (page, reason) => ({ ...page, fallback: reason }) }
+	);
 }
 
 /**

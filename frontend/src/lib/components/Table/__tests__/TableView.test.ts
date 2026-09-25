@@ -36,6 +36,8 @@ import TableView from '../TableView.svelte';
 const h = vi.hoisted(() => ({
 	editable: true,
 	page: undefined as unknown,
+	/** Mirrors `getTableLoading`: a load (a background re-page included) is in flight. */
+	loading: false,
 	// Warnings are structured (`ScriptWarning[]`, formatted via
 	// `formatScriptWarning`), not a joined-string strip.
 	warnings: [] as ScriptWarning[],
@@ -109,7 +111,7 @@ vi.mock('$lib/state', () => ({
 	abandonTableEvaluationSuspension: vi.fn(),
 	// TableGrid's dependencies (always mounted below the chrome bar).
 	getTablePage: () => h.page,
-	getTableLoading: () => false,
+	getTableLoading: () => h.loading,
 	getTableScriptStatus: () => h.scriptStatus,
 	getScriptErrors: () => h.scriptErrors,
 	getScriptErrorsPhase: () => h.scriptErrorsPhase,
@@ -687,6 +689,90 @@ describe('TableView script-status strip', () => {
 			const strip = document.querySelector('[data-testid="table-script-status"]');
 			expect(strip?.textContent).toContain('sweep died');
 			expect(strip?.className).toContain('text-destructive');
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// A table the engine refuses (it reaches a script, or a pattern) is read from
+// the server, over committed state: the page says so, and the tab shows it.
+describe('TableView fallback marker', () => {
+	const PAGE = {
+		columns: [{ kind: 'element', header: '', width_px: null }],
+		rows: [],
+		total: 0,
+		truncated: false,
+		offset: 0,
+		model_rev: 1,
+		warnings: []
+	};
+
+	afterEach(() => {
+		h.page = undefined;
+		h.loading = false;
+	});
+
+	it('says the table reads committed state when its page ran a script on the server', () => {
+		h.page = { ...PAGE, fallback: 'script' };
+		const c = render('tbl:draft:script');
+		try {
+			const note = document.querySelector('[data-testid="table-fallback"]');
+			expect(note?.textContent?.trim()).toBe('Reads committed state: this table runs a script');
+			expect(note?.closest('[data-testid="table-header"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('names a pattern the server evaluates', () => {
+		h.page = { ...PAGE, fallback: 'pattern' };
+		const c = render('tbl:draft:pattern');
+		try {
+			expect(document.querySelector('[data-testid="table-fallback"]')?.textContent?.trim()).toBe(
+				'Reads committed state: a search pattern needs the server'
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('shows nothing for a page the engine answered, or no page', () => {
+		for (const page of [PAGE, undefined]) {
+			h.page = page;
+			const c = render('tbl:draft:engine');
+			try {
+				expect(document.querySelector('[data-testid="table-fallback"]')).toBeNull();
+			} finally {
+				unmount(c);
+			}
+		}
+	});
+
+	it('keeps the rows and shows the busy hint while a re-page is in flight', () => {
+		h.page = {
+			...PAGE,
+			rows: [
+				{
+					key: ['e1'],
+					cells: [
+						{
+							kind: 'element',
+							item: { id: 'e1', type_name: 'Block', display_name: 'B', child_count: 0 }
+						}
+					]
+				}
+			],
+			total: 1
+		};
+		h.loading = true;
+		const c = render('tbl:draft:repage');
+		try {
+			expect(
+				document.querySelector('[data-testid="table-activity"]')?.getAttribute('data-busy')
+			).toBe('true');
+			expect(document.querySelectorAll('[data-testid="table-row"]')).toHaveLength(1);
+			expect(document.querySelector('[data-testid="table-loading-skeleton"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}

@@ -1289,7 +1289,9 @@ export const TablePageSchema = z.object({
 	offset: z.number().int(),
 	model_rev: z.number().int(),
 	warnings: z.array(ScriptWarningSchema).default([]),
-	script_status: ScriptStatusSchema.nullish()
+	script_status: ScriptStatusSchema.nullish(),
+	/** Set when the engine refused the call and the server answered it, on committed state. */
+	fallback: z.enum(['script', 'pattern']).optional()
 });
 export type TablePage = z.infer<typeof TablePageSchema>;
 export type TableCell = z.infer<typeof TableCellSchema>;

@@ -1360,6 +1360,7 @@ are answered by the engine or the server, one switch per surface:
 | `navigation`    | `evaluateNavigation`                                                                                |
 | `criteria`      | `searchModel`                                                                                       |
 | `issues`        | `getModelIssues`, `validateModel`, the model half of `previewCommit`                                |
+| `tables`        | `evaluateTable`                                                                                     |
 
 - `lib/api` imports nothing of `lib/engine`: the engine is an injected seam
   (`installEngineSeam(seam | null)`), like the 401 handler. Each function
@@ -1382,7 +1383,12 @@ are answered by the engine or the server, one switch per surface:
   page `fallback: 'script' | 'pattern'`, which the navigation editor's
   preview keeps from its first page and `Navigation/ResultsDock.svelte`
   shows above the chains as a muted note (`data-testid="nav-fallback"`,
-  "Reads committed state: …"); `searchModel` passes no mark. A third 501,
+  "Reads committed state: …"); `evaluateTable` marks its page the same way
+  (`TablePageSchema.fallback`), which the table store keeps on its
+  `TableData` and `Table/TableView.svelte` shows in the tab's fixed chrome
+  (`data-testid="table-fallback"`, "Reads committed state: this table runs
+  a script", or "…: a search pattern needs the server"); `searchModel`
+  passes no mark. A third 501,
   `reaches unreadable rules` (an issue call over a rule set the engine
   cannot read, or that reached it without the server's parse — the
   follower sends every parse, so only a document the engine's reader
@@ -1418,15 +1424,17 @@ local?)` with `local` (`{strict, batchIds}`) and no `metamodel.rebind`
   are the server's body as plain JSON (`asSent`, since a `$state` proxy
   cannot cross a `MessagePort`): `evaluateNavigation`'s `{definition |
 artifact_id, row_element_id, limit, offset}`, `searchModel`'s
-  `{target, criteria, limit, offset}`. The option bags take a
-  `signal`: the engine gets it with the call (an abort cancels a search's
-  scan), the server as `init.signal`; it never reaches the query string.
+  `{target, criteria, limit, offset}`, `evaluateTable`'s
+  `{definition | artifact_id, offset, limit}`. The option bags (and
+  `evaluateTable`'s args) take a `signal`: the engine gets it with the call (an abort cancels
+  a search's or a table's scan), the server as `init.signal`; it never
+  reaches the query string or the body.
 - A seam may carry a `shadow`, handed after every engine outcome the
   surface, the method, the params, the outcome, `again()` (the same engine
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS` — `engine` for all eight surfaces — and
+  `SURFACE_DEFAULTS` — `engine` for all nine surfaces — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
@@ -1438,14 +1446,14 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   shows only in the replica's answers, so a read-surface-only override on its
   own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
   alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
-  take effect. `navigation`, `criteria` and `issues` are never forced by
-  `staging`: `navigation` and `criteria` because the server never evaluated
-  staged edits in either mode, `issues` because its calls send the server the
+  take effect. `navigation`, `criteria`, `tables` and `issues` are never
+  forced by `staging`: `navigation`, `criteria` and `tables` because the
+  server never evaluated staged edits in either mode, `issues` because its calls send the server the
   staged edits and — on the engine — because a gate (below) can hold it back
   to `server` whatever the switch says. The switches are read once, with the
   rest, and honoured in a build too. `readSurfaces(storage?)` is
   `readSwitches(storage).surfaces`; `anyEngineSurface(switches)` says whether
-  any of the eight is on the engine, `issues` counting only with `staging:
+  any of the nine is on the engine, `issues` counting only with `staging:
 engine` — on legacy its gate never opens, so an opt-out stored before the
   `issues` switch existed (seven surfaces on `server`, staging on legacy)
   waits for, and is blocked by, nothing.
@@ -1454,8 +1462,9 @@ engine` — on legacy its gate never opens, so an opt-out stored before the
   so, its gate (when given) answers true, and the phase is neither `off`
   nor `server`; `call` is `sync.call`
   (so the read barrier holds); `gone` is `EngineGoneError`. The replica
-  store installs it (see "Wiring"), with two gates: `navigation` (the
-  artifact follower has loaded) and `issues` — staging on the engine (the
+  store installs it (see "Wiring"), with three gates: `navigation` and
+  `tables` (the artifact follower has loaded: a table may name itself or
+  its navigations by id) and `issues` — staging on the engine (the
   legacy buffer's edits are not in the working copy), the status's
   `seeded`, which closes it the moment the engine's replica leaves `ready`
   (diverged or closed), and the artifact follower having loaded (until
@@ -1618,8 +1627,9 @@ sync exists:
   `stopReplica()` / `resetReplica()` stop the follower, so a payload answer
   for the old project is dropped (see `lib/engine/README.md`). Until the
   follower's first load lands (`loaded()`; a failed load is asked once more
-  after a second) the seam's `navigation` gate is closed and navigations go
-  to the server, and while it runs its `settled()` is a quiet probe.
+  after a second) the seam's `navigation` and `tables` gates are closed and
+  navigations and tables go to the server, and while it runs its
+  `settled()` is a quiet probe.
 - **The issues.** The seam's `issues` gate is `getStagingSide() === 'engine'`,
   the status's `seeded` and the follower's `loaded()`. With the `issues`
   switch on the engine, the status's half of it (staging and `seeded`)
@@ -1634,6 +1644,14 @@ sync exists:
   The version is per worker, so a new worker's first may
   repeat an old one; its gate opening refetches anyway (see "Validation
   issues").
+- **The tables.** `startReplica()` also follows the sync's `changed` events
+  for the tables (`followTables`, unsubscribed by `stopReplica()` /
+  `resetReplica()`): one whose `(rev, staged_version, artifacts_version)`
+  is not the last one seen, while `engineSide('tables')` is `engine`, calls
+  the `onTablesMoved` listeners — the table store's
+  `scheduleTablesRepage()` (see "Tables on the engine"). The listener
+  registry keeps `replica.svelte.ts` from importing the table store, which
+  imports the realtime store, which imports this one.
 - **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
   drawer's revert (`HistoryDrawer.svelte::doRevert`) both call
   `beginReplicaCommit()` right before the POST, hand `commitChanges` /
@@ -2028,6 +2046,53 @@ per tab:
   stay per-tab. `closeDraft` and `resetNavigationEditors` clear **every** node
   key for the tab (expanded set plus any lingering keys), cancel all timers, and
   bump generations so nothing leaks.
+
+### Tables on the engine
+
+With the `tables` surface on the engine (the default), `evaluateTable` reads
+the replica's working copy: a staged model edit or a staged artifact shows in
+the grid at once, and moves neither the page's `model_rev` nor its `total`.
+So the table store (`state/table-editor.svelte.ts`) follows the replica rather
+than the commit feed:
+
+- **One re-page path per side.** `scheduleTablesRepage()` (called through
+  `onTablesMoved`, see "Wiring") restarts a 300 ms debounce
+  (`REPAGE_DEBOUNCE_MS`); when it fires, `repageOpenTables()` re-pages every
+  table that has evaluated — a page, an error or a load in flight — over
+  the range the user is looking at (`visibleRequest`). A tab whose settings
+  dialog is open is only marked stale (`_suspendedStale`, its resume
+  reloads), and a table that never evaluated stays empty.
+  `handleTableModelRevChanged` (the commit feed's re-page) does nothing
+  while the side is `engine`: the replica applies the commit and its
+  `changed` re-pages, so a commit re-pages once. On the `server` side it is
+  the only path, and staged changes re-page nothing.
+- **In the background.** A re-page is a `background` `_loadTablePage`:
+  the page, its error and its script-error recap stay on screen
+  until the new page lands and replaces them in one install — the grid never
+  drops to placeholders — and the busy hint (`table-activity`) shows
+  meanwhile. A failed re-page keeps the page and reports no error; only a
+  tab with no page gets one. A re-page that supersedes a foreground load
+  still out (a definition edit, a poll) is a foreground one: the page on
+  screen may be of the older definition, and its failure is the user's to
+  see.
+- **Aborts.** Every load and chunk carries the signal of its tab's current
+  generation (`_controllers`); `bumpGeneration` aborts it, so a superseded
+  engine call is cancelled (CT-4's `cancel`) and a superseded fetch aborted.
+  An abort sets nothing.
+- **No two states in one grid.** The generation drops a response asked
+  before a newer load, but a chunk can be asked before a staged change and
+  answered after it with the same `model_rev` and `total`. So every
+  `scheduleTablesRepage()` moves an epoch (`_repageEpoch`): a page records
+  the epoch it was asked at, `ensureTableRange` asks no chunk while that is
+  not the current one (the re-page is coming), and a chunk that lands after
+  the epoch moved is dropped. No stamp travels with the page: the engine
+  posts `changed` after applying a change, and a request posted later sees
+  it.
+- **Script tables.** A table the engine refuses (a script, or a pattern) is
+  the server's page, over committed state, marked `fallback` (see "Surfaces");
+  its pending cells, status poll and script-error recap are the server's, as
+  before. A staged navigation that gains a script step flips an open table
+  to the server on its next re-page; unstaged, it flips back.
 
 ### Script columns & steps
 

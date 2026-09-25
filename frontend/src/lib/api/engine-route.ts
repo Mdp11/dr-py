@@ -3,8 +3,8 @@ import { ApiError } from './errors';
 
 /**
  * A surface: the reads that move between server and engine together — the
- * five model reads, the navigation evaluation, the criteria search and the
- * validation issues.
+ * five model reads, the navigation evaluation, the criteria search, the
+ * validation issues and the table pages.
  */
 export type Surface =
 	| 'elements'
@@ -14,7 +14,8 @@ export type Surface =
 	| 'summary'
 	| 'navigation'
 	| 'criteria'
-	| 'issues';
+	| 'issues'
+	| 'tables';
 export type Side = 'engine' | 'server';
 
 /** Why the server answered a call the engine refused: it reaches a script, a pattern, or rules it cannot read. */

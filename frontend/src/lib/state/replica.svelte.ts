@@ -11,12 +11,13 @@
  * artifacts, committed and staged, in the sync's context, each staged rule
  * set with the server's parse of its YAML. With the issues on
  * the engine, the live issue list is refetched whenever the replica's issue
- * store moves.
+ * store moves; with the tables on the engine, the open tables re-page
+ * whenever what they read moves.
  */
 
 import type { WireBatch } from '$engine';
 import { listArtifactPayloads } from '$lib/api/artifacts';
-import { installEngineSeam } from '$lib/api/engine-route';
+import { engineSide, installEngineSeam } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
 import { parseRules } from '$lib/api/rules';
 import { createArtifactFollower, type ArtifactFollower } from '$lib/engine/artifacts';
@@ -82,6 +83,10 @@ let _retrying = $state(false);
 const _statusListeners = new Set<StatusListener>();
 /** Unsubscribes the issues refetch from the sync's `changed` events. */
 let _offChanged: (() => void) | null = null;
+/** Unsubscribes the tables' re-page from the sync's `changed` events. */
+let _offTablesChanged: (() => void) | null = null;
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
+const _tablesListeners = new Set<() => void>();
 /** The started replica's artifact follower, the project it follows, and its quiet probe's remover. */
 let _follower: {
 	projectId: string;
@@ -214,8 +219,8 @@ function _anyEngine(): boolean {
 }
 
 /**
- * Routes the read surfaces through `sync`; navigations and issues only once
- * the follower has loaded the artifacts. In dev, with `dr.shadow` set, the
+ * Routes the read surfaces through `sync`; navigations, tables and issues
+ * only once the follower has loaded the artifacts. In dev, with `dr.shadow` set, the
  * seam is installed again with a shadow once that module has loaded, idle
  * while the model store's engine half has an edit staged, an artifact entry
  * is staged, or the follower still lays a commit's entries over the
@@ -229,6 +234,8 @@ function installSeam(sync: ReplicaSync): void {
 	const gates: SurfaceGates = {
 		// A navigation may name artifacts: the engine answers once it holds them.
 		navigation: () => _follower?.follower.loaded() ?? false,
+		// So may a table, by its own id or through its navigations.
+		tables: () => _follower?.follower.loaded() ?? false,
 		// A store swept part-way is not the model's list, and until the artifacts
 		// are held the engine knows none of the rule sets its list must carry.
 		issues: () =>
@@ -298,6 +305,7 @@ export function startReplica(): void {
 	// structure rev on every delta the replica applies, as the legacy half does.
 	if (_switches?.staging === 'engine') attachEngine(engineHandle(sync));
 	followIssues(sync);
+	followTables(sync);
 	sync.open(projectId);
 	// Before the follower mirrors the buffer: one staged in another project is dropped.
 	bindStagedArtifacts(projectId);
@@ -322,6 +330,40 @@ function followIssues(sync: ReplicaSync): void {
 function stopFollowingIssues(): void {
 	_offChanged?.();
 	_offChanged = null;
+}
+
+/**
+ * `listener` is called whenever what a table on the engine reads has moved:
+ * the replica's committed rev, its staged edits or its artifacts. The
+ * returned function unsubscribes.
+ */
+export function onTablesMoved(listener: () => void): () => void {
+	_tablesListeners.add(listener);
+	return () => {
+		_tablesListeners.delete(listener);
+	};
+}
+
+/**
+ * With the tables on the engine, a `changed` whose `rev`, `staged_version`
+ * or `artifacts_version` moved tells the `onTablesMoved` listeners. On the
+ * server a staged change moves no table; the commit feed re-pages those.
+ */
+function followTables(sync: ReplicaSync): void {
+	stopFollowingTables();
+	let seen: string | null = null;
+	_offTablesChanged = sync.on('changed', (event) => {
+		const at = `${event.rev}:${event.staged_version}:${event.artifacts_version}`;
+		if (at === seen) return;
+		seen = at;
+		if (engineSide('tables') !== 'engine') return;
+		for (const listener of [..._tablesListeners]) listener();
+	});
+}
+
+function stopFollowingTables(): void {
+	_offTablesChanged?.();
+	_offTablesChanged = null;
 }
 
 /**
@@ -367,6 +409,7 @@ function stopFollower(): void {
 export function stopReplica(): void {
 	uninstallSeam();
 	stopFollowingIssues();
+	stopFollowingTables();
 	detachEngine();
 	_placedViews.clear();
 	stopFollower();
@@ -513,6 +556,7 @@ export function resetReplica(): void {
 	_deps = undefined;
 	uninstallSeam();
 	stopFollowingIssues();
+	stopFollowingTables();
 	detachEngine();
 	_switches = null;
 	_placedViews.clear();

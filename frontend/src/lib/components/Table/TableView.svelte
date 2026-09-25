@@ -98,6 +98,12 @@
 	const locked = $derived(lockHolder !== null);
 	const page = $derived(getTablePage(tabId));
 	const warnings = $derived(getTableWarnings(tabId));
+	// A table the engine refused is the server's, read from committed state:
+	// staged edits do not show in it, and the tab says why.
+	const FALLBACK_NOTE = {
+		script: 'Reads committed state: this table runs a script',
+		pattern: 'Reads committed state: a search pattern needs the server'
+	} as const;
 	// Progress of the background script-value sweep: `computing` means some
 	// cells came back `pending` and the store has a re-poll scheduled (rows are
 	// in BUILD order until it lands — a sort over half-computed values would
@@ -725,6 +731,11 @@
 				{/if}
 			{/if}
 		</div>
+		{#if page?.fallback}
+			<p data-testid="table-fallback" class="px-3 py-1 text-[11px] text-muted-foreground/70">
+				{FALLBACK_NOTE[page.fallback]}
+			</p>
+		{/if}
 		{#if lockHolder !== null}
 			<div
 				class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning"
