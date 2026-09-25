@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from data_rover.api import content, db, tenancy
 from data_rover.api.db_models import ArtifactKind, Project, Role
 from data_rover.api.main import create_app
+from data_rover.api.routes.rules import parse_result
 
 from .conftest import AUTH_HEADERS, TEST_USER_ID, papi, seed_default_project
 
@@ -18,6 +19,13 @@ NAV = {
     "steps": [],
 }
 SNIP = {"code": "def value(el):\n    return 1\n"}
+RULES_YAML = (
+    "# comments stay in the payload\n"
+    "rules:\n"
+    "  - name: tall\n"
+    "    applies_to: Block\n"
+    "    then: {property: height, gt: 1}\n"
+)
 
 
 @pytest.fixture
@@ -117,3 +125,54 @@ def test_another_projects_artifact_never_appears(client: TestClient) -> None:
         papi("/artifacts/payloads"), params=[("id", foreign_id), ("id", own["id"])]
     ).json()["items"]
     assert [i["id"] for i in named] == [own["id"]]
+
+
+def test_a_rules_item_carries_its_parse(client: TestClient) -> None:
+    r = _create(
+        client, "validation_rules", "rules", {"schema_version": 1, "yaml": RULES_YAML}
+    )
+    n = _create(client, "navigation", "nav", NAV)
+
+    by_id = {
+        i["id"]: i for i in client.get(papi("/artifacts/payloads")).json()["items"]
+    }
+
+    rules = by_id[r["id"]]["rules"]
+    assert rules == parse_result(RULES_YAML).model_dump(mode="json")
+    assert rules["ok"] is True
+    assert '"gt":1.0' in rules["document"]
+    assert by_id[n["id"]]["rules"] is None
+
+
+def test_rules_is_the_last_key_and_the_rest_is_unchanged(client: TestClient) -> None:
+    r = _create(
+        client, "validation_rules", "rules", {"schema_version": 1, "yaml": RULES_YAML}
+    )
+    n = _create(client, "navigation", "nav", NAV)
+
+    by_id = {
+        i["id"]: i for i in client.get(papi("/artifacts/payloads")).json()["items"]
+    }
+
+    for created in (r, n):
+        single = client.get(papi(f"/artifacts/{created['id']}")).json()
+        item = by_id[created["id"]]
+        assert list(item) == [*single, "rules"]
+        assert {k: v for k, v in item.items() if k != "rules"} == single
+
+
+def test_a_rules_payload_without_yaml_parses_as_empty(client: TestClient) -> None:
+    with db.db_session() as s:
+        row = content.create_artifact(
+            s,
+            "default",
+            kind=ArtifactKind.validation_rules,
+            name="bare",
+            payload={"schema_version": 1},
+            updated_by=TEST_USER_ID,
+        )
+        row_id = row.id
+
+    (item,) = client.get(papi("/artifacts/payloads")).json()["items"]
+    assert item["id"] == row_id
+    assert item["rules"] == {"ok": True, "document": "{}", "errors": []}

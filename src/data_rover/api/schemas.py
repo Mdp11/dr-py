@@ -247,6 +247,21 @@ class RulesLintResponse(BaseModel):
     warnings: list[RuleWarningOut] = Field(default_factory=list)
 
 
+class RulesParseRequest(BaseModel):
+    yaml: str = Field(max_length=RULES_MAX_YAML_BYTES)
+
+
+class RulesParseOut(BaseModel):
+    """A rule set parsed for the engine. ``document`` is the normalized rule
+    set as JSON TEXT, handed on as received: ``JSON.parse`` would lose a
+    float's ``.0`` and integers past 2^53. ``null`` when ``ok`` is false;
+    ``errors`` is then the one parse error ``/rules/lint`` gives."""
+
+    ok: bool
+    document: str | None = None
+    errors: list[LintErrorOut] = Field(default_factory=list)
+
+
 class MetamodelDiffResponse(BaseModel):
     """Read-only sandbox conformance diff + structural document
     diff. now_failing = issues the candidate metamodel introduces;
@@ -1238,8 +1253,15 @@ class ArtifactListOut(BaseModel):
     items: list[ArtifactHeaderOut] = Field(default_factory=list)
 
 
+class ArtifactPayloadOut(ArtifactOut):
+    """``rules`` is the parse of a ``validation_rules`` payload's YAML, null
+    for any other kind."""
+
+    rules: RulesParseOut | None = None
+
+
 class ArtifactPayloadListOut(BaseModel):
-    items: list[ArtifactOut] = Field(default_factory=list)
+    items: list[ArtifactPayloadOut] = Field(default_factory=list)
 
 
 class ArtifactCreateIn(BaseModel):

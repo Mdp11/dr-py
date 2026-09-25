@@ -65,6 +65,7 @@ from ..schemas import (
     ArtifactListOut,
     ArtifactOut,
     ArtifactPayloadListOut,
+    ArtifactPayloadOut,
     ArtifactUpdateIn,
     ChainPageOut,
     ChainValueOut,
@@ -75,6 +76,7 @@ from ..script_eval import close_script_context, open_script_context
 from ..script_runner import get_runner
 from ..settings import Settings, get_settings
 from .read import _tree_item  # shared lite projection
+from .rules import parse_result
 
 router = APIRouter()
 
@@ -89,6 +91,17 @@ _header = artifact_header
 
 def _full(row: ArtifactRow) -> ArtifactOut:
     return ArtifactOut(**_header(row).model_dump(), payload=row.payload)
+
+
+def _with_rules(row: ArtifactRow) -> ArtifactPayloadOut:
+    rules = None
+    if row.kind is ArtifactKind.validation_rules:
+        # The yaml `rule_sources` compiles: a malformed payload is an empty set.
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        rules = parse_result(str(payload.get("yaml", "")))
+    return ArtifactPayloadOut(
+        **_header(row).model_dump(), payload=row.payload, rules=rules
+    )
 
 
 def _validate_payload(kind: ArtifactKind, payload: dict[str, Any]) -> None:
@@ -166,7 +179,7 @@ def list_artifact_payloads(
     `list_artifacts` order. Declared before `/artifacts/{artifact_id}`, which
     would read `payloads` as an id."""
     rows = content.list_artifacts(db, project_id, ids=ids)
-    return ArtifactPayloadListOut(items=[_full(r) for r in rows])
+    return ArtifactPayloadListOut(items=[_with_rules(r) for r in rows])
 
 
 @router.get("/artifacts/{artifact_id}")
