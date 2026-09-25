@@ -653,8 +653,9 @@ class Service {
 	 * Answers `call` with `run` over the store, in a model-lane transition run
 	 * while no rescan is due. Otherwise the call waits for the store to settle
 	 * and asks again in a new transition, since an artifact method can start
-	 * another rescan before it runs; a store whose steps threw has them set
-	 * going again first. `on` is the store a waiting call waits on: refused
+	 * another rescan before it runs. A store whose steps threw has them set
+	 * going again first, whether the call waits or is answered from the store
+	 * as it stands. `on` is the store a waiting call waits on: refused
 	 * meanwhile, it is not run; replaced, it is refused.
 	 */
 	private settled(
@@ -671,8 +672,8 @@ class Service {
 					if (on !== null && (!this.waiting.delete(call) || call.cancelled)) return WAITING;
 					const live = this.live();
 					if (on !== null && live !== on) throw new Refused(409, NOT_READY);
+					if (this.issuesOf!.stalled) this.sweep(live);
 					if (!live.settled) {
-						if (this.issuesOf!.stalled) this.sweep(live);
 						this.wait(call, live.whenSettled(), () => this.settled(call, run, live));
 						return WAITING;
 					}
@@ -697,7 +698,7 @@ class Service {
 	 * Sets the store's sweep in the scheduler's sweep slot: from where it
 	 * stands, or from the start after `restartSweep`, then any rescan due,
 	 * whose steps report nothing. Steps that throw leave the slot, their ids
-	 * still due, until a call that waits on the store sets them again.
+	 * still due, until a call that reads the store sets them going again.
 	 */
 	private sweep(live: LiveIssues): void {
 		const issues = this.issuesOf;

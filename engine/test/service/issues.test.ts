@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
 	applyBatch,
+	LiveIssues,
 	Metamodel,
 	Model,
 	RulesValidator,
+	WorkingCopy,
 	type IssueListBody,
 	type IssueOut,
 	type MetamodelDoc,
@@ -371,17 +373,21 @@ async function within<T>(promise: Promise<T>, turns = 200): Promise<T | 'unanswe
 }
 
 /**
- * Makes every element a validator run reaches throw while `armed.on`: a bug
- * in a validator, which no model can trigger.
+ * Makes every element a validator run reaches throw while `armed.on`, the
+ * first `times` of them: a bug in a validator, which no model can trigger.
+ * `thrown` counts the throws.
  */
-function breaking() {
-	const armed = { on: true };
+function breaking(times = Infinity) {
+	const armed = { on: true, thrown: 0 };
 	const original = RulesValidator.prototype.validateElement;
 	const spy = vi.spyOn(RulesValidator.prototype, 'validateElement').mockImplementation(function (
 		this: RulesValidator,
 		...args: Parameters<RulesValidator['validateElement']>
 	) {
-		if (armed.on) throw new Error('a validator bug');
+		if (armed.on && armed.thrown < times) {
+			armed.thrown++;
+			throw new Error('a validator bug');
+		}
 		return original.apply(this, args);
 	});
 	return { armed, restore: () => spy.mockRestore() };
@@ -730,5 +736,74 @@ describe('rules', () => {
 			],
 			eval_errors: {}
 		});
+	});
+});
+
+// -- a sweep step that throws --------------------------------------------------
+
+/** Turns the host until `done()`, at most `turns` times: whether it came. */
+async function by(done: () => boolean, turns = 200): Promise<boolean> {
+	for (let turn = 0; turn < turns && !done(); turn++) await settle();
+	return done();
+}
+
+describe('a plain sweep whose step threw', () => {
+	it('is set going again by a later read, and ends as a fresh sweep does, the tags then kept', async () => {
+		const broken = breaking(1);
+		const probes = vi.spyOn(WorkingCopy.prototype, 'probeStaged');
+		try {
+			const client = connect();
+			await openReplica(client, seeded(), DOC);
+			expect(await by(() => broken.armed.thrown === 1)).toBe(true);
+			// No rescan is due, and nothing drives the sweep.
+			expect(await by(() => client.events.some(isSwept), 50)).toBe(false);
+			const from = client.events.length;
+			await listed(client);
+			expect(await by(() => client.events.slice(from).some(isSwept))).toBe(true);
+			const body = await listed(client);
+			expect(JSON.stringify(body)).toBe(JSON.stringify(fixture.steps[3]!.result));
+			// Seeded, the store keeps the tags across a stage: a read after it does not probe.
+			probes.mockClear();
+			await client.call('stage', { ops: [setN('b-1', 9)] });
+			await listed(client);
+			await client.call('stage', { ops: [setN('b-2', 1)] });
+			await listed(client);
+			expect(probes).not.toHaveBeenCalled();
+		} finally {
+			probes.mockRestore();
+			broken.restore();
+		}
+	});
+
+	it('is set going again once a read while its step keeps throwing, and moves no issues_version', async () => {
+		const broken = breaking();
+		const steps = vi.spyOn(LiveIssues.prototype, 'sweepSteps');
+		try {
+			const client = connect();
+			await openReplica(client, seeded(), DOC);
+			expect(await by(() => broken.armed.thrown === 1)).toBe(true);
+			expect(await by(() => broken.armed.thrown > 1, 50)).toBe(false);
+			const from = client.events.length;
+			const version = issuesVersion(client);
+			const started = steps.mock.calls.length;
+			const reads = 3;
+			for (let read = 1; read <= reads; read++) {
+				await listed(client);
+				expect(await by(() => broken.armed.thrown === 1 + read), `read ${read}`).toBe(true);
+			}
+			// Only a read sets the steps going: nothing runs them again meanwhile.
+			expect(await by(() => broken.armed.thrown > 1 + reads, 50)).toBe(false);
+			expect(steps.mock.calls.length - started).toBe(reads);
+			expect(client.events.slice(from).filter((event) => event.event === 'changed')).toEqual([]);
+			expect(issuesVersion(client)).toBe(version);
+			broken.armed.on = false;
+			await listed(client);
+			expect(await by(() => client.events.slice(from).some(isSwept))).toBe(true);
+			const body = await listed(client);
+			expect(JSON.stringify(body)).toBe(JSON.stringify(fixture.steps[3]!.result));
+		} finally {
+			steps.mockRestore();
+			broken.restore();
+		}
 	});
 });
