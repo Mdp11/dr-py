@@ -89,6 +89,28 @@ async function readColumnCells(
 	return out;
 }
 
+/** True once `colIndex`'s cells hold every error/pending cell in one
+ * contiguous trailing run and the value cells before it read `dir`-sorted —
+ * `core/table/evaluate.py::order_rows`'s rule: an error or pending result
+ * sorts with the empties, which land after every real value regardless of
+ * direction (never reversed for `desc`). */
+async function isSortedByScriptColumn(
+	rows: Locator,
+	colIndex: number,
+	dir: 'asc' | 'desc'
+): Promise<boolean> {
+	const cells = await readColumnCells(rows, colIndex);
+	const firstErrorAt = cells.findIndex((c) => c.isError);
+	const tail = firstErrorAt === -1 ? [] : cells.slice(firstErrorAt);
+	if (tail.some((c) => !c.isError)) return false; // a value cell after an error/pending one
+	const values = cells.slice(0, cells.length - tail.length).map((c) => c.text);
+	if (values.length === 0) return false;
+	const sorted = [...values].sort((a, b) =>
+		dir === 'asc' ? (a < b ? -1 : a > b ? 1 : 0) : a > b ? -1 : a < b ? 1 : 0
+	);
+	return values.every((t, i) => t === sorted[i]);
+}
+
 test('script column: ref snippet computes values + error cell + sorts; inline script column computes a constant', async ({
 	page
 }) => {
@@ -199,12 +221,14 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	// --- 4. Sort by the script column through the Sorting dialog (the header
 	// `Sort by` button is gone — `table-sort-button` opens `column-sort-dialog`,
 	// whose `sort-toggle-{i}` ticks a column on, `sort-dir-{i}` shows/flips its
-	// direction, and `sort-done` closes it): no crash, and the row order
-	// changes (the errored row's position moves relative to its neighbors
-	// either way, even though the rest were already near-sorted by fixture
-	// insertion order — see the CODE comment above). The settings dialog was
-	// already saved-and-closed above, so nothing is intercepting the grid. ---
-	const before = cells.map((c) => c.text);
+	// direction, and `sort-done` closes it). The table is server-served with
+	// `script_status: computing` while its cells settle, so a single read right
+	// after `sort-done` can land before the re-page — `expect.poll` for the
+	// actual ordering instead: every value cell sorted, every error/pending
+	// cell trailing in a contiguous tail (`order_rows`' "empties last in both
+	// directions" — a script column's error/pending result sorts with the
+	// empties). The settings dialog was already saved-and-closed above, so
+	// nothing is intercepting the grid. -------------------------------------
 	const sortDialog = page.getByTestId('column-sort-dialog');
 	const sortDir = sortDialog.getByTestId(`sort-dir-${scriptColIndex}`);
 	await tabpanel.getByTestId('table-sort-button').click();
@@ -213,18 +237,20 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	await expect(sortDir).toContainText('▲', { timeout: 10_000 }); // newly toggled: ascending
 	await sortDialog.getByTestId('sort-done').click();
 	await expect(sortDialog).toBeHidden();
-	let after = (await readColumnCells(rows, scriptColIndex)).map((c) => c.text);
-	if (JSON.stringify(after) === JSON.stringify(before)) {
-		// Toggle direction — still shouldn't match.
-		await tabpanel.getByTestId('table-sort-button').click();
-		await expect(sortDialog).toBeVisible();
-		await sortDir.click();
-		await expect(sortDir).toContainText('▼', { timeout: 10_000 });
-		await sortDialog.getByTestId('sort-done').click();
-		await expect(sortDialog).toBeHidden();
-		after = (await readColumnCells(rows, scriptColIndex)).map((c) => c.text);
-	}
-	expect(after).not.toEqual(before);
+	await expect
+		.poll(() => isSortedByScriptColumn(rows, scriptColIndex, 'asc'), { timeout: 20_000 })
+		.toBe(true);
+
+	// Flip to descending — the value cells reorder, the error/pending tail stays last.
+	await tabpanel.getByTestId('table-sort-button').click();
+	await expect(sortDialog).toBeVisible();
+	await sortDir.click();
+	await expect(sortDir).toContainText('▼', { timeout: 10_000 });
+	await sortDialog.getByTestId('sort-done').click();
+	await expect(sortDialog).toBeHidden();
+	await expect
+		.poll(() => isSortedByScriptColumn(rows, scriptColIndex, 'desc'), { timeout: 20_000 })
+		.toBe(true);
 	await expect(rows).toHaveCount(12); // grid survived the sort intact
 
 	// --- 5. A second, INLINE script column: trivial constant snippet. ------

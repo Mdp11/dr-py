@@ -229,7 +229,7 @@ test('an open table sorted by name re-sorts after a staged rename in the side pa
 	await expect(settings).toBeHidden();
 	await expect(rows.first()).toContainText(/\w/, { timeout: 10_000 });
 
-	// Sort ascending by it, through the Sorting dialog (T-8's flow).
+	// Sort ascending by it, through the Sorting dialog.
 	await tabpanel.getByTestId('table-sort-button').click();
 	const sortDialog = page.getByTestId('column-sort-dialog');
 	await expect(sortDialog).toBeVisible();

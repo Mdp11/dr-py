@@ -81,33 +81,52 @@ test.beforeEach(async ({ page }) => {
 let cleanupRuleSet: string | undefined;
 
 /**
- * Regardless of pass/fail: strict mode back off (a failure between :226 and
- * :234 below would otherwise leave it on for `strict-mode.spec.ts`'s next
- * test — the suite is serial, one worker) and the rule set this test made,
- * deleted, in case an assertion failed before the test's own cleanup ran.
- * Both go through the owner peer client, disposed after.
+ * Regardless of pass/fail: strict mode back off (a failure between
+ * `setStrictMode(page, true)` and `setStrictMode(page, false)` below would
+ * otherwise leave it on for `strict-mode.spec.ts`'s next test — the suite is
+ * serial, one worker) and the rule set this test made, deleted, in case an
+ * assertion failed before the test's own cleanup ran. Both go through the
+ * owner peer client, disposed after. `delete_artifact` needs the artifact's
+ * own exclusive lease (`locking.py`'s `required_locks`), acquired and
+ * released here exactly as `peerCommit` does for an element's.
  */
 test.afterEach(async ({ playwright }) => {
 	const api = await peer(playwright);
 	try {
 		const projectId = await projectIdByName(api, 'Smart City');
-		await api.patch(`projects/${projectId}/settings`, { data: { strict_mode: false } });
+		const settings = await api.patch(`projects/${projectId}/settings`, {
+			data: { strict_mode: false }
+		});
+		expect(settings.ok(), await settings.text()).toBeTruthy();
 		if (cleanupRuleSet !== undefined) {
-			const list = await api.get(`projects/${projectId}/artifacts?kind=validation_rules`);
+			const base = `projects/${projectId}`;
+			const list = await api.get(`${base}/artifacts?kind=validation_rules`);
 			expect(list.ok(), await list.text()).toBeTruthy();
 			const items = ((await list.json()) as { items: { id: string; name: string }[] }).items;
 			const leftover = items.find((a) => a.name === cleanupRuleSet);
 			if (leftover) {
-				const commit = await api.post(`projects/${projectId}/commits`, {
+				const lock = await api.post(`${base}/locks`, {
 					data: {
-						base_rev: await headRev(api, projectId),
-						ops: [{ kind: 'delete_artifact', id: leftover.id }],
-						message: 'e2e cleanup: leftover rule set',
-						lock_tokens: [],
-						ack_errors: true
+						targets: [{ resource_id: leftover.id, mode: 'exclusive', type: 'artifact' }],
+						intent: 'delete'
 					}
 				});
-				expect(commit.ok(), await commit.text()).toBeTruthy();
+				expect(lock.ok(), await lock.text()).toBeTruthy();
+				const { token } = (await lock.json()) as { token: string };
+				try {
+					const commit = await api.post(`${base}/commits`, {
+						data: {
+							base_rev: await headRev(api, projectId),
+							ops: [{ kind: 'delete_artifact', id: leftover.id }],
+							message: 'e2e cleanup: leftover rule set',
+							lock_tokens: [token],
+							ack_errors: true
+						}
+					});
+					expect(commit.ok(), await commit.text()).toBeTruthy();
+				} finally {
+					await api.post(`${base}/locks/release`, { data: { token } });
+				}
 			}
 		}
 	} finally {

@@ -508,6 +508,7 @@ describe('a staged navigation re-pages a table that reads it', () => {
 		await start({ artifacts: [['n1', nav('Organization')]] });
 		await open('tbl:draft:1', READS_N1);
 		const spy = spyEvaluate();
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping `payload` on purpose
 		const { payload: _payload, ...header } = nav('Organization');
 
 		stageArtifactDelete('n1', header);

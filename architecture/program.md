@@ -112,16 +112,21 @@ does a bug found after the default flips, for as long as the server path lives (
 features with B's fifth plan, when the five read surfaces defaulted to the engine; `core/model`,
 `core/metamodel` and the model-op applier stay frozen. `core/navigation`, `core/search`,
 `api/search.py` and the `search_model` and `evaluate_navigation` route functions stay frozen
-too, past C's first plan flipping navigation and criteria search to the engine: `core/table`'s
-evaluator (`core/table/{evaluate,cells,nav_memo,resolve,schema}.py`) is frozen for BEHAVIOUR
-from C's plan 4 on, which ports it; its feature freeze lifted with that plan, since `tables`
-now defaults to the engine. `api/routes/exports.py` still reads it for exports, which stay on
-the server until C's plan 5, so exports keep their own feature freeze until then; `api/search.py`
-and the route functions are also the 501 fallback's server side from C's first plan on (AD-31)
-— a script or an unsupported pattern reads them whatever plan C is on; and
-`api/artifact_kinds.py` validates every committed navigation payload with `NAVIGATION_ADAPTER`.
-A bug found in `core/table`'s evaluator or in exports lands on both sides, with a fixture,
-until F (MR-1), whether or not a feature freeze there has lifted.
+too, past C's first plan flipping navigation and criteria search to the engine, for the same
+reason they did before plan 4: `api/routes/exports.py` still reads `core/table`'s evaluator
+(`core/table/{evaluate,cells,nav_memo,resolve,schema}.py`) to render exports server-side, which
+in turn reads `core/navigation`/`core/search` for a navigation-sourced row/column or a criteria
+scope, and exports stay on the server until C's plan 5. `core/table`'s evaluator ITSELF left the
+feature freeze with plan 4, which ported it: `tables` now defaults to the engine, so a feature
+there lands in TypeScript only; a bug found in it — reachable through `evaluateTable` or still
+through the server's export rendering — lands on both sides, with a fixture, until F (MR-1), as
+MR-3's opening rule already says. `core/navigation`, `core/search`, `api/search.py` and the
+route functions leave the feature freeze only once exports default to the engine too, at C's
+plan 5; `api/search.py` and the route functions are also the 501 fallback's server side from
+C's first plan on (AD-31) — a script or an unsupported pattern reads them whatever plan C is on
+— and `api/artifact_kinds.py` validates every committed navigation payload with
+`NAVIGATION_ADAPTER`. A bug found in any of them lands on both sides, with a fixture, until F,
+whether or not a feature freeze there has lifted.
 `core/table/resolve.py` (ref resolution and script reach) is frozen from C's plan 1 on.
 `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's conformance half
 (`routes/commits.py::preview_commit`'s model half, `api/rules.py::attributable_issues`) are
