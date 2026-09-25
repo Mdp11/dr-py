@@ -51,6 +51,7 @@
 import { SvelteMap } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
 import { engineSide } from '$lib/api/engine-route';
+import { ApiError } from '$lib/api/errors';
 import { evaluateTable, exportTable, fetchScriptErrors } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
@@ -315,13 +316,24 @@ const _pageEpochs = new Map<string, number>();
 /** The pending re-page of `scheduleTablesRepage`, if any. */
 let _repageTimer: ReturnType<typeof setTimeout> | null = null;
 /**
- * Tabs whose load in flight is not a background re-page: one that supersedes
- * it is not one either, since the page on screen may be of an older
- * definition and its failure is the user's to see. Control state, never read
- * from templates.
+ * Tabs whose load in flight is a foreground one (a definition edit, a reload;
+ * not a re-page, not a poll): a re-page that supersedes it is foreground too,
+ * since the page on screen may be of an older definition and its failure is
+ * the user's to see. Control state, never read from templates.
  */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _foregroundLoads = new Set<string>();
+/**
+ * tabId -> a background re-page that failed transiently: the attempts spent
+ * and the pending retry, on the chunk fills' schedule. Any new load of the
+ * tab, and any new staged change, supersedes it. Control state, never read
+ * from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _repageRetries = new Map<
+	string,
+	{ attempts: number; timer: ReturnType<typeof setTimeout> | null }
+>();
 
 /**
  * In-flight chunk fills: tabId -> chunk offset -> the generation the fetch was
@@ -534,6 +546,22 @@ function signalOf(tabId: string): AbortSignal {
 
 function isAbort(error: unknown): boolean {
 	return error instanceof DOMException && error.name === 'AbortError';
+}
+
+/** A refusal of the request itself: asking again over the same state answers the same. */
+function isRefusal(error: unknown): boolean {
+	return error instanceof ApiError && error.status >= 400 && error.status < 500;
+}
+
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** Drops the tab's pending re-page retry and the attempts it spent. */
+function cancelRepageRetry(tabId: string): void {
+	const retry = _repageRetries.get(tabId);
+	if (retry?.timer != null) clearTimeout(retry.timer);
+	_repageRetries.delete(tabId);
 }
 
 /** True while `gen` is still current for `tabId` and its draft exists. */
@@ -852,7 +880,11 @@ function moveTabState(oldTab: string, newTab: string): void {
 	const epoch = _pageEpochs.get(oldTab);
 	_pageEpochs.delete(oldTab);
 	if (epoch !== undefined) _pageEpochs.set(newTab, epoch);
-	_foregroundLoads.delete(oldTab);
+	// The re-issue below keeps the orphaned load's kind: a background re-page
+	// or a poll stays background, a definition edit stays foreground.
+	const wasForeground = _foregroundLoads.delete(oldTab);
+	if (wasForeground) _foregroundLoads.add(newTab);
+	cancelRepageRetry(oldTab);
 
 	const view = _viewRanges.get(oldTab);
 	_viewRanges.delete(oldTab);
@@ -908,13 +940,16 @@ function moveTabState(oldTab: string, newTab: string): void {
 	// user-initiated loads: a rebind mid-sweep must not hand the poll loop a
 	// fresh attempt budget.
 	if (loading === true) {
-		void _loadTablePage(newTab, _pages.get(newTab)?.offset ?? 0, PAGE, { fromPoll: true });
+		void _loadTablePage(newTab, _pages.get(newTab)?.offset ?? 0, PAGE, {
+			fromPoll: true,
+			background: !wasForeground
+		});
 	} else if (status?.state === 'computing') {
 		// Nothing was in flight to re-issue, but the sweep is still running and
 		// the cancelled timer belonged to the old id — restart the loop, or the
 		// tab would sit on `pending` cells forever.
 		const { offset, limit } = visibleRequest(newTab);
-		void _loadTablePage(newTab, offset, limit, { fromPoll: true });
+		void _loadTablePage(newTab, offset, limit, { fromPoll: true, background: !wasForeground });
 	}
 }
 
@@ -1276,21 +1311,30 @@ export async function loadTablePage(
  * distinguishes a tick of the script-sweep poll loop (which spends the tab's
  * attempt budget) from any other caller (which resets it). `background` is a
  * re-page of the same definition over moved state: the page, its error and
- * its recap stay on screen until the new page lands, and a failure keeps
- * them, reporting an error only for a tab with no page to show. */
+ * its recap stay on screen until the new page lands. A refusal of it (a 4xx,
+ * which asking again would repeat) is shown as a foreground failure is; any
+ * other failure keeps the page and is retried on the chunk fills' schedule,
+ * shown once the last attempt fails too. `retry` is such a retry, which
+ * spends the attempts rather than starting them over. */
 async function _loadTablePage(
 	tabId: string,
 	offset: number,
 	limit: number,
-	{ fromPoll = false, background = false }: { fromPoll?: boolean; background?: boolean } = {}
+	{
+		fromPoll = false,
+		background = false,
+		retry = false
+	}: { fromPoll?: boolean; background?: boolean; retry?: boolean } = {}
 ): Promise<void> {
 	if (!fromPoll) _pollAttempts.delete(tabId);
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
+	const attempts = retry ? (_repageRetries.get(tabId)?.attempts ?? 0) : 0;
+	cancelRepageRetry(tabId);
 	const gen = bumpGeneration(tabId); // supersede any older in-flight load
 	const epoch = _repageEpoch;
 	const quiet = background && !_foregroundLoads.has(tabId);
-	if (!quiet) _foregroundLoads.add(tabId);
+	if (!quiet && !fromPoll) _foregroundLoads.add(tabId);
 	// A re-evaluation is under way, so the tab has NO settled page state: drop
 	// the recap and its signature until one lands. Without this, a load that
 	// fails (or simply hasn't landed) would leave the previous recap askable at
@@ -1320,8 +1364,25 @@ async function _loadTablePage(
 		_foregroundLoads.delete(tabId);
 		_loading.set(tabId, false);
 		if (isAbort(err)) return;
-		if (quiet && _pages.has(tabId)) return;
-		_errors.set(tabId, err instanceof Error ? err.message : String(err));
+		if (!quiet || isRefusal(err) || attempts >= CHUNK_RETRY_MAX) {
+			_errors.set(tabId, errorText(err));
+			return;
+		}
+		// Transient: the page stays. An error already on screen, or no page to
+		// show, reads this failure's message rather than an older one.
+		if (_errors.has(tabId) || !_pages.has(tabId)) _errors.set(tabId, errorText(err));
+		const attempt = attempts + 1;
+		const pending = { attempts: attempt, timer: null as ReturnType<typeof setTimeout> | null };
+		_repageRetries.set(tabId, pending);
+		pending.timer = setTimeout(() => {
+			pending.timer = null;
+			if (_repageRetries.get(tabId) !== pending || !isCurrent(tabId, gen)) return;
+			const request = visibleRequest(tabId);
+			void _loadTablePage(tabId, request.offset, request.limit, {
+				background: true,
+				retry: true
+			});
+		}, CHUNK_RETRY_DELAY_MS * attempt);
 	}
 }
 
@@ -1347,8 +1408,9 @@ export function ensureTableRange(tabId: string, start: number, end: number): voi
 	// re-driven by `resumeTableEvaluation`, so nothing is lost by declining.
 	if (_suspended.has(tabId)) return;
 	// A staged change landed after this page was asked: its rows and any chunk
-	// asked now would be of two states. The re-page it scheduled replaces the
-	// page, and the grid asks again for the range it then lacks.
+	// asked now would be of two states. The re-page it scheduled (or its
+	// retry) replaces the page, and the grid asks again for the range it then
+	// lacks; a re-page that fails for good shows its error instead.
 	if (_pageEpochs.get(tabId) !== _repageEpoch) return;
 	const gen = _generations.get(tabId) ?? 0;
 	let chunks = _inflightChunks.get(tabId);
@@ -1603,6 +1665,7 @@ export async function reloadTableDraft(tabId: string): Promise<void> {
 	_pages.delete(tabId);
 	_pageEpochs.delete(tabId);
 	_foregroundLoads.delete(tabId);
+	cancelRepageRetry(tabId);
 	_loading.delete(tabId);
 	_errors.delete(tabId);
 	_viewRanges.delete(tabId);
@@ -1618,6 +1681,7 @@ export function closeTableDraft(tabId: string): void {
 	_pages.delete(tabId);
 	_pageEpochs.delete(tabId);
 	_foregroundLoads.delete(tabId);
+	cancelRepageRetry(tabId);
 	_loading.delete(tabId);
 	_errors.delete(tabId);
 	_lockDenied.delete(tabId);
@@ -1714,6 +1778,7 @@ onCommitEvent(({ scope }) => {
  */
 export function scheduleTablesRepage(): void {
 	_repageEpoch += 1;
+	for (const tabId of [..._repageRetries.keys()]) cancelRepageRetry(tabId);
 	if (_repageTimer !== null) clearTimeout(_repageTimer);
 	_repageTimer = setTimeout(() => {
 		_repageTimer = null;
@@ -1747,6 +1812,7 @@ export function resetTableEditors(): void {
 	_repageTimer = null;
 	_pageEpochs.clear();
 	_foregroundLoads.clear();
+	for (const tabId of [..._repageRetries.keys()]) cancelRepageRetry(tabId);
 	_drafts.clear();
 	_pages.clear();
 	_loading.clear();

@@ -2070,11 +2070,19 @@ than the commit feed:
   the page, its error and its script-error recap stay on screen
   until the new page lands and replaces them in one install — the grid never
   drops to placeholders — and the busy hint (`table-activity`) shows
-  meanwhile. A failed re-page keeps the page and reports no error; only a
-  tab with no page gets one. A re-page that supersedes a foreground load
-  still out (a definition edit, a poll) is a foreground one: the page on
-  screen may be of the older definition, and its failure is the user's to
-  see.
+  meanwhile. A re-page the engine or the server refuses (a 4xx — a staged
+  change broke the table, e.g. a navigation it reads by id was deleted) is
+  shown as a foreground failure is: its error replaces the grid, since the
+  old rows no longer describe the staged state. Any other failure (a
+  network error, a 5xx) keeps the page and retries the re-page on the chunk
+  fills' schedule (`CHUNK_RETRY_DELAY_MS` × attempt, `CHUNK_RETRY_MAX`
+  attempts), showing its error once the last attempt fails too; a new
+  staged change, or any new load of the tab, supersedes a pending retry. An
+  error already on screen always reads the latest failure's message. A
+  re-page that supersedes a foreground load still out (a definition edit, a
+  reload) is a foreground one: the page on screen may be of the older
+  definition, and its failure is the user's to see. A poll, or a load
+  re-issued for a re-keyed tab, keeps the kind of the load it continues.
 - **Aborts.** Every load and chunk carries the signal of its tab's current
   generation (`_controllers`); `bumpGeneration` aborts it, so a superseded
   engine call is cancelled (CT-4's `cancel`) and a superseded fetch aborted.
@@ -2084,7 +2092,8 @@ than the commit feed:
   answered after it with the same `model_rev` and `total`. So every
   `scheduleTablesRepage()` moves an epoch (`_repageEpoch`): a page records
   the epoch it was asked at, `ensureTableRange` asks no chunk while that is
-  not the current one (the re-page is coming), and a chunk that lands after
+  not the current one (its re-page is coming, is being retried, or failed
+  and shows its error in place of the grid), and a chunk that lands after
   the epoch moved is dropped. No stamp travels with the page: the engine
   posts `changed` after applying a change, and a request posted later sees
   it.

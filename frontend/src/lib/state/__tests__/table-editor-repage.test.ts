@@ -7,6 +7,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
 import { engineSide } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
+import { errorForStatus } from '$lib/api/errors';
 import * as tablesApi from '$lib/api/tables';
 import { TableDefinitionSchema, type TableDefinition, type TablePage } from '$lib/api/types';
 import type { ChangedEvent } from '$lib/engine/sync';
@@ -14,6 +15,7 @@ import { PAGE_ORIGIN, fakeProject } from '$lib/engine/__tests__/support/project-
 import {
 	resetArtifactEdits,
 	revertStagedArtifact,
+	stageArtifactDelete,
 	stageArtifactUpdate
 } from '../artifact-edits.svelte';
 import { cancelIssuesRefetch, emit, ensureElements } from '../model.svelte';
@@ -92,7 +94,12 @@ type Started = {
  * any re-page their events scheduled spent, before a table is opened.
  */
 async function start(
-	options: { surfaces?: { [surface: string]: string }; artifacts?: [string, object][] } = {}
+	options: {
+		surfaces?: { [surface: string]: string };
+		artifacts?: [string, object][];
+		/** The server's answer to its `n`th table read (from 1); `SERVED` by default. */
+		serve?: (n: number) => unknown;
+	} = {}
 ): Promise<Started> {
 	const project = fakeProject();
 	for (const [id, artifact] of options.artifacts ?? [])
@@ -102,7 +109,9 @@ async function start(
 		http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] })),
 		http.post(`${API}/tables/evaluate`, async ({ request }) => {
 			served.push(await request.json());
-			return HttpResponse.json(SERVED);
+			return HttpResponse.json(
+				(await (options.serve?.(served.length) ?? SERVED)) as Record<string, unknown>
+			);
 		})
 	);
 	store = await engineStore({ project, surfaces: options.surfaces });
@@ -265,21 +274,113 @@ describe('a staged edit re-pages the open tables', () => {
 		expect(spy.mock.calls[1]![0]).toMatchObject({ offset: 100, limit: 100 });
 	});
 
-	it('a re-page that fails keeps the page and sets no error', async () => {
+	it('a re-page that fails transiently keeps the page, sets no error and is retried', async () => {
 		const { s } = await start();
 		await open('tbl:draft:1');
 		const first = await idAt(0);
 		const before = getTablePage('tbl:draft:1');
 		const spy = vi
 			.spyOn(tablesApi, 'evaluateTable')
-			.mockRejectedValueOnce(new Error('the re-page failed'));
+			.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+			.mockImplementation((args) => real(args));
 
 		await stageRename(s, first, 'staged');
 		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
 		await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(false));
-
 		expect(getTablePage('tbl:draft:1')).toBe(before);
 		expect(getTableError('tbl:draft:1')).toBeUndefined();
+
+		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'), { timeout: 5000 });
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(getTableError('tbl:draft:1')).toBeUndefined();
+	});
+
+	it('a re-page that keeps failing shows the last failure once its retries are spent', async () => {
+		const { s } = await start();
+		await open('tbl:draft:1');
+		const first = await idAt(0);
+		const before = getTablePage('tbl:draft:1');
+		let failures = 0;
+		const spy = vi
+			.spyOn(tablesApi, 'evaluateTable')
+			.mockImplementation(() => Promise.reject(new TypeError(`failure ${++failures}`)));
+
+		await stageRename(s, first, 'staged');
+		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(false));
+		expect(getTableError('tbl:draft:1')).toBeUndefined();
+
+		await vi.waitFor(() => expect(getTableError('tbl:draft:1')).toBe('failure 4'), {
+			timeout: 15000
+		});
+		expect(spy).toHaveBeenCalledTimes(4);
+		expect(getTablePage('tbl:draft:1')).toBe(before);
+		expect(getTableLoading('tbl:draft:1')).toBe(false);
+	}, 20000);
+
+	it('a failure replaces an older error message rather than keeping it', async () => {
+		const { s } = await start();
+		await open('tbl:draft:1');
+		const first = await idAt(0);
+		const spy = vi
+			.spyOn(tablesApi, 'evaluateTable')
+			.mockRejectedValueOnce(errorForStatus(422, { detail: 'first refusal' }, 'first refusal'))
+			.mockRejectedValueOnce(new TypeError('second failure'))
+			.mockImplementation((args) => real(args));
+		await loadTablePage('tbl:draft:1', 0);
+		expect(getTableError('tbl:draft:1')).toBe('first refusal');
+
+		await stageRename(s, first, 'staged');
+
+		await vi.waitFor(() => expect(getTableError('tbl:draft:1')).toBe('second failure'));
+		// Retried, the re-page lands and takes the error with it.
+		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'), { timeout: 5000 });
+		expect(getTableError('tbl:draft:1')).toBeUndefined();
+		expect(spy).toHaveBeenCalledTimes(3);
+	});
+
+	it('a re-page that replaces a poll in flight and fails transiently keeps the grid', async () => {
+		const COMPUTING = {
+			...SERVED,
+			script_status: { state: 'computing', done: 0, total: 1, message: null }
+		};
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const { s, served } = await start({
+			serve: async (n) => {
+				if (n === 2) await held;
+				return COMPUTING;
+			}
+		});
+		try {
+			const scripted = TableDefinitionSchema.parse({
+				row_source: { kind: 'scope', types: ['Person'], criteria: [] },
+				columns: [
+					{ kind: 'element', source: { kind: 'row', chain_index: 0 } },
+					{ kind: 'script', source: { kind: 'row', chain_index: 0 }, snippet: { ref: 'sn1' } }
+				]
+			});
+			await open('tbl:draft:1', scripted);
+			const before = getTablePage('tbl:draft:1');
+			expect(before!.fallback).toBe('script');
+			let calls = 0;
+			const spy = vi.spyOn(tablesApi, 'evaluateTable').mockImplementation((args) => {
+				calls += 1;
+				return calls === 1 ? real(args) : Promise.reject(new TypeError('Failed to fetch'));
+			});
+			// The status poll goes out a second after the computing page, and is held.
+			await vi.waitFor(() => expect(served).toHaveLength(2), { timeout: 3000 });
+			expect(spy).toHaveBeenCalledOnce();
+
+			await stageRename(s, 'e_000031', 'staged');
+			await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+			await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(false));
+
+			expect(getTableError('tbl:draft:1')).toBeUndefined();
+			expect(getTablePage('tbl:draft:1')).toBe(before);
+		} finally {
+			release();
+		}
 	});
 
 	it('a re-page that supersedes a definition edit still out reports its failure', async () => {
@@ -372,6 +473,22 @@ describe('a staged navigation re-pages a table that reads it', () => {
 	const READS_N1: TableDefinition = TableDefinitionSchema.parse({
 		row_source: { kind: 'navigation', navigation: { ref: 'n1' } },
 		columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 } }]
+	});
+
+	it('a staged deletion of the navigation is refused, and its error shows at once', async () => {
+		await start({ artifacts: [['n1', nav('Organization')]] });
+		await open('tbl:draft:1', READS_N1);
+		const spy = spyEvaluate();
+		const { payload: _payload, ...header } = nav('Organization');
+
+		stageArtifactDelete('n1', header);
+
+		await vi.waitFor(() => expect(getTableError('tbl:draft:1')).toMatch(/n1/));
+		expect(getTableLoading('tbl:draft:1')).toBe(false);
+		// A refusal is not retried: asking again over the same state answers the same.
+		await sleep(2500);
+		expect(spy).toHaveBeenCalledOnce();
+		await expect(spy.mock.results[0]!.value).rejects.toMatchObject({ status: 422 });
 	});
 
 	it('when only the artifacts moved, and flips to the server and back with a script step', async () => {
