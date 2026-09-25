@@ -307,10 +307,10 @@ describe('the server fallback', () => {
 		}
 	});
 
-	it('a 501 "reaches validation rules" is answered by the server, never marked, with no shadow', async () => {
+	it('a 501 "reaches unreadable rules" is answered by the server, never marked, with no shadow', async () => {
 		const shadow = vi.fn();
 		const { seam } = seamOf(
-			() => Promise.reject(refusal(501, 'reaches validation rules')),
+			() => Promise.reject(refusal(501, 'reaches unreadable rules')),
 			{},
 			shadow
 		);

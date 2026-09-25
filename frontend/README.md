@@ -1363,9 +1363,9 @@ are answered by the engine or the server, one switch per surface:
   preview keeps from its first page and `Navigation/ResultsDock.svelte`
   shows above the chains as a muted note (`data-testid="nav-fallback"`,
   "Reads committed state: …"); `searchModel` passes no mark. A third 501,
-  `reaches validation rules` (an issue call while a `validation_rules`
-  artifact resolves), is answered by the server the same way, never
-  marked. So is a 409 the engine answers when the staged batches, the
+  `reaches unreadable rules` (an issue call over a rule set the engine
+  cannot read, or that reached it without the server's parse), is answered
+  by the server the same way, never marked. So is a 409 the engine answers when the staged batches, the
   `base_rev` or the replica moved under the call (`stale staged batches`,
   `stale base_rev`, `replica is not ready`): the server answers the whole
   request. `route`'s options also take `shadow` (`'unstaged'`, the default;

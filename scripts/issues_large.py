@@ -6,10 +6,15 @@ batch of model ops that breaks every built-in check the metamodel lets an op
 break — ``benchmarks/large.violations.ops.json``. The batch lands through the
 ops route's own ``_apply_batch``, the server's own sweep
 (``start_validation_sweep(sync=True)``) runs over a session holding the
-result, and ``benchmarks/large.issues.json`` receives every issue of the store
-as the engine's ``issueKey`` — ``[severity, category, check, message,
-target_ids]`` as compact JSON — sorted. ``engine/bench/parity-large.ts``
-applies the same ops to the snapshot and compares the engine's sweep with it.
+result and a fixed set of custom rules, compiled before it, and
+``benchmarks/large.issues.json`` receives every issue of the store as the
+engine's ``issueKey`` — ``[severity, category, check, message, target_ids]``
+as compact JSON — sorted. The rule sets go to ``benchmarks/large.rules.json``
+as the payloads route answers them, each with its ``parse_result``; every
+rule must fire on some of the elements it applies to and not on all, or the
+script exits non-zero. ``engine/bench/parity-large.ts`` applies the same ops
+to the snapshot, compiles the same rule sets and compares the engine's sweep
+with it.
 
 Run from the repo root (``pixi run engine-parity-large`` does):
 
@@ -33,12 +38,20 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from data_rover.api.routes._snapshot import build_model_from_dicts  # noqa: E402
 from data_rover.api.routes.ops import _apply_batch  # noqa: E402
+from data_rover.api.routes.rules import parse_result  # noqa: E402
+from data_rover.api.rules import compile_sources  # noqa: E402
 from data_rover.api.schemas import ModelOpIn  # noqa: E402
 from data_rover.api.serialize import parse_model_json  # noqa: E402
 from data_rover.api.session import Session  # noqa: E402
 from data_rover.api.validation_sweep import start_validation_sweep  # noqa: E402
 from data_rover.core.metamodel.loader import load_metamodel_file  # noqa: E402
+from data_rover.core.metamodel.schema import Metamodel  # noqa: E402
+from data_rover.core.model.model import Model  # noqa: E402
 from data_rover.core.validation.issue import Issue  # noqa: E402
+from data_rover.core.validation.rules.compile import (  # noqa: E402
+    CompiledRules,
+    RuleSetSource,
+)
 from data_rover.core.validation.state import ValidationState  # noqa: E402
 
 BENCHMARKS = REPO_ROOT / "benchmarks"
@@ -48,6 +61,71 @@ LARGE_GROUP = 3000
 
 Op = dict[str, Any]
 Doc = dict[str, Any]
+
+#: The custom rules the sweep runs, as ``(artifact id, set name, YAML)``: a
+#: property test under a ``when``, a ``count`` over a type with a subtype, a
+#: two-hop path under ``where``, a ``to`` naming a subtype and a warning.
+RULE_SETS: list[tuple[str, str, str]] = [
+    (
+        "rules-deployment",
+        "Deployment",
+        """\
+schema_version: 1
+rules:
+  - name: prod-replicas
+    description: an active microservice runs three replicas or more
+    applies_to: Microservice
+    when: {property: status, equals: Active}
+    then: {property: replica_count, gte: 3}
+  - name: no-dependency
+    applies_to: Microservice
+    then:
+      relationship: {type: DependsOn, direction: outgoing, count: {eq: 0}}
+  - name: hosted-deployment
+    applies_to: Service
+    message: deployed on a node hosted nowhere
+    when:
+      relationship: {type: DeployedOn, direction: outgoing, exists: true}
+    then:
+      relationship:
+        type: DeployedOn
+        direction: outgoing
+        to: Node
+        where:
+          relationship: {type: HostedIn, direction: outgoing, exists: true}
+        exists: true
+  - name: four-services
+    applies_to: System
+    then:
+      relationship:
+        type: SystemContainsComponent
+        direction: outgoing
+        to: Service
+        count: {gte: 4}
+  - name: server-sizing
+    applies_to: Server
+    when:
+      all:
+        - {property: os, in: [Linux]}
+        - not: {property: ram_gb, gte: 128}
+    then: {property: cpu_cores, gt: 4}
+""",
+    ),
+    (
+        "rules-people",
+        "People",
+        """\
+schema_version: 1
+rules:
+  - name: lead-in-team
+    applies_to: Person
+    severity: warning
+    when: {property: role, equals: Lead}
+    then:
+      relationship: {type: MemberOf, direction: outgoing, exists: true}
+""",
+    ),
+]
 
 
 def issue_key(issue: Issue) -> str:
@@ -294,6 +372,55 @@ class Violations:
             self.ops.append({"kind": "delete_element", "id": person})
 
 
+def rule_artifacts() -> list[Doc]:
+    """The rule sets as ``GET /artifacts/payloads`` answers them, in the
+    engine's compile order: by name, then by id."""
+    out: list[Doc] = []
+    for artifact_id, name, yaml in sorted(RULE_SETS, key=lambda s: (s[1], s[0])):
+        parsed = parse_result(yaml)
+        if not parsed.ok:
+            raise SystemExit(f"rule set {name!r} does not parse: {parsed.errors}")
+        out.append(
+            {
+                "id": artifact_id,
+                "kind": "validation_rules",
+                "name": name,
+                "artifact_rev": 1,
+                "payload": {"schema_version": 1, "yaml": yaml},
+                "rules": parsed.model_dump(mode="json"),
+            }
+        )
+    return out
+
+
+def compiled_rules(artifacts: list[Doc], metamodel: Metamodel) -> CompiledRules:
+    sources = [
+        RuleSetSource(a["id"], a["name"], a["payload"]["yaml"]) for a in artifacts
+    ]
+    compiled = compile_sources(sources, metamodel)
+    if compiled.skipped:
+        raise SystemExit(f"rules skipped against the metamodel: {compiled.skipped}")
+    return compiled
+
+
+def check_rules_fire(
+    compiled: CompiledRules, model: Model, issues: list[Issue]
+) -> None:
+    """Exits unless every rule fires on some, not all, of the elements it applies to."""
+    fired = Counter(i.check for i in issues)
+    bad: list[str] = []
+    for rule in compiled.rules:
+        population = sum(
+            len(model.indexes.elements_by_type.get(t, ())) for t in rule.applies_types
+        )
+        n = fired[rule.check]
+        print(f"  {rule.check}: fires on {n:,} of {population:,}")
+        if not 0 < n < population:
+            bad.append(rule.check)
+    if bad:
+        raise SystemExit(f"rules that fire on none or on all: {', '.join(bad)}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", type=Path, default=BENCHMARKS / "large.model.json")
@@ -306,6 +433,7 @@ def main() -> None:
         "--ops", type=Path, default=BENCHMARKS / "large.violations.ops.json"
     )
     parser.add_argument("--out", type=Path, default=BENCHMARKS / "large.issues.json")
+    parser.add_argument("--rules", type=Path, default=BENCHMARKS / "large.rules.json")
     args = parser.parse_args()
 
     if not args.model.exists():
@@ -321,8 +449,13 @@ def main() -> None:
     _apply_batch(
         model, TypeAdapter(list[ModelOpIn]).validate_python(ops), restore=False
     )
+    artifacts = rule_artifacts()
+    args.rules.write_text(json.dumps(artifacts, ensure_ascii=False), encoding="utf-8")
+    compiled = compiled_rules(artifacts, metamodel)
     state = ValidationState()
-    session = Session(metamodel=metamodel, model=model, validation=state)
+    session = Session(
+        metamodel=metamodel, model=model, validation=state, compiled_rules=compiled
+    )
     start = time.perf_counter()
     progress = start_validation_sweep(session, sync=True)
     seconds = time.perf_counter() - start
@@ -332,12 +465,15 @@ def main() -> None:
     keys = sorted(issue_key(issue) for issue in issues)
     args.out.write_text(json.dumps(keys, ensure_ascii=False), encoding="utf-8")
     checks = Counter(f"{i.check} ({i.category.value})" for i in issues)
+    ruled = sum(1 for i in issues if i.check.startswith("rule:"))
     print(
-        f"wrote {args.ops}: {len(ops):,} ops; {args.out}: {len(keys):,} issues "
+        f"wrote {args.ops}: {len(ops):,} ops; {args.rules}: {compiled.total} rules; "
+        f"{args.out}: {len(keys):,} issues, {ruled:,} of them the rules', "
         f"over {progress.total:,} entities, swept in {seconds:.1f} s"
     )
     for check, n in sorted(checks.items()):
         print(f"  {check}: {n:,}")
+    check_rules_fire(compiled, model, issues)
 
 
 if __name__ == "__main__":

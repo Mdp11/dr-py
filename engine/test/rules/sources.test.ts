@@ -121,11 +121,36 @@ describe('ruleSources', () => {
 		set.setStaged(readStagedArtifacts([update('r1', 'pending')]));
 		expect(working()).toEqual([['r1', 'One', parsed('committed')]]);
 
-		// a newer committed parse is the last one received
-		set.setStaged(readStagedArtifacts([update('r1', parsed('staged'))]));
+		// a newer committed parse, with no staged payload over it, is the last one received
+		set.setStaged([]);
 		set.put(readArtifacts([rulesArtifact('r1', 'One', parsed('committed-2'))]), []);
 		set.setStaged(readStagedArtifacts([update('r1', 'pending')]));
 		expect(working()).toEqual([['r1', 'One', parsed('committed-2')]]);
+	});
+
+	it("keeps a staged payload's parse under 'pending' when the committed artifact lands again", () => {
+		const set = setOf([rulesArtifact('r1', 'One', parsed('committed'))]);
+		const working = () => listed(ruleSources(set, 'working'));
+		set.setStaged(readStagedArtifacts([update('r1', parsed('staged'))]));
+		set.setStaged(readStagedArtifacts([update('r1', 'pending')]));
+		set.put(readArtifacts([rulesArtifact('r1', 'One', parsed('committed'))]), []);
+		expect(working()).toEqual([['r1', 'One', parsed('staged')]]);
+		set.setCommitted(readArtifacts([rulesArtifact('r1', 'One', parsed('committed-2'))]));
+		expect(working()).toEqual([['r1', 'One', parsed('staged')]]);
+		expect(listed(ruleSources(set, 'committed'))).toEqual([['r1', 'One', parsed('committed-2')]]);
+		// discarded: the committed parse again
+		set.setStaged([]);
+		set.setStaged(readStagedArtifacts([update('r1', 'pending')]));
+		expect(working()).toEqual([['r1', 'One', parsed('committed-2')]]);
+	});
+
+	it('records no parse from an update that carries no payload', () => {
+		const set = setOf([rulesArtifact('r1', 'One', parsed('committed'))]);
+		const renamed = { op: 'update', id: 'r1', name: 'Renamed', rules: parsed('stray') } as const;
+		set.setStaged(readStagedArtifacts([renamed]));
+		expect(listed(ruleSources(set, 'working'))).toEqual([['r1', 'Renamed', parsed('committed')]]);
+		set.setStaged(readStagedArtifacts([update('r1', 'pending')]));
+		expect(listed(ruleSources(set, 'working'))).toEqual([['r1', 'One', parsed('committed')]]);
 	});
 
 	it("leaves out a 'pending' create with no parse yet, and keeps its last one after", () => {

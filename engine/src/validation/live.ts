@@ -7,7 +7,7 @@ import {
 	type CompiledRules
 } from '../rules/compile.ts';
 import { expandScope } from '../rules/reach.ts';
-import type { Progress, Steps } from '../steps/steps.ts';
+import type { Progress } from '../steps/steps.ts';
 import { PyFloat, type Value } from '../value/types.ts';
 import type { Delta } from '../working/delta.ts';
 import type {
@@ -26,8 +26,11 @@ import { IssueStore } from './store.ts';
 /** Ids a sweep step validates and splices. */
 export const SWEEP_STEP = 512;
 
-/** What a rescan step yields where a sweep step yields its progress: a rescan reports none. */
-export const RESCAN_STEP: Progress = Object.freeze({ done: 0, total: 0 });
+/** A step of `sweepSteps`: the sweep's progress, or a rescan step, which reports none. */
+export type SweepStep = Progress & { readonly rescan?: true };
+
+/** What a rescan step yields where a sweep step yields its progress. */
+export const RESCAN_STEP: SweepStep = Object.freeze({ done: 0, total: 0, rescan: true });
 
 /** The rule sets as staged, over the working state, and as committed. */
 export type LiveRules = { readonly working: CompiledRules; readonly committed: CompiledRules };
@@ -433,7 +436,7 @@ export class LiveIssues {
 	 * stands. The value is `true` when both ran to their end, `false` when the
 	 * store is unusable.
 	 */
-	*sweepSteps(): Steps<boolean> {
+	*sweepSteps(): Generator<SweepStep, boolean, void> {
 		for (;;) {
 			if (this.broken !== null) return false;
 			const sweep = this.sweep;

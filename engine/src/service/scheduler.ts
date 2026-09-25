@@ -26,10 +26,13 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
 export type Lane = 'control' | 'model';
 
-/** Work for idle time: `start` makes the steps, `done` takes their result. */
-export type BackgroundTask = {
-	start(): Steps<boolean>;
-	progress?(progress: Progress): void;
+/**
+ * Work for idle time: `start` makes the steps, `progress` is handed what each
+ * yields, `done` takes their result.
+ */
+export type BackgroundTask<P extends Progress = Progress> = {
+	start(): Generator<P, boolean, void>;
+	progress?(progress: P): void;
 	done(result: boolean): void;
 };
 
@@ -134,7 +137,7 @@ export class Scheduler {
 	 * The second background slot, for a task whose steps resume across any
 	 * transition: `restartBackground` leaves it alone, and closing only pauses it.
 	 */
-	setSweep(task: BackgroundTask | null): void {
+	setSweep<P extends Progress>(task: BackgroundTask<P> | null): void {
 		this.sweep = task === null ? null : { task, steps: null };
 		this.kick();
 	}

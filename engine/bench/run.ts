@@ -3,7 +3,9 @@
  * as one document in the same pass; the digest check; the long operations in
  * steps — their total and their longest step, for there is no scheduler here;
  * the heap one replica holds; staging, rewinding, rebasing and a delta; the
- * issue store's sweep, and the same edits through it, each revalidating.
+ * issue store's sweep, and the same edits through it, each revalidating; and
+ * the store with custom rules: its sweep, a rescan, a stage widened by the
+ * rules' reach and a probe across a staged rule change.
  *
  * `pixi run engine-bench-data` writes the input once, `pixi run engine-bench`
  * measures. Timings drift between sessions: compare only numbers of one run.
@@ -11,6 +13,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import {
 	ArtifactSet,
+	compileRuleSets,
+	drain,
 	entityHash,
 	EVALUATIONS,
 	formatDigest,
@@ -21,6 +25,7 @@ import {
 	parseExact,
 	READS,
 	ViewPlacements,
+	type CompiledRules,
 	type Delta,
 	type ElementRec,
 	type MetamodelDoc,
@@ -87,7 +92,13 @@ const ROWS = {
 	liveStage: 'stage 1,000 ops + revalidation',
 	liveUnstage: 'unstage all + revalidation',
 	probe: 'origin probe (100 staged batches)',
-	liveDelta: 'delta over 100 staged + revalidation'
+	liveDelta: 'delta over 100 staged + revalidation',
+	rescan: 'rules rescan (population of the rule over the largest type)',
+	rescanLongest: '  its longest step',
+	rulesSweep: 'sweep with rules',
+	rulesSweepLongest: '  its longest step after the first',
+	rulesStage: 'stage 1,000 ops + revalidation with reach',
+	rulesProbe: 'origin probe, 100 staged batches + a staged rule change'
 };
 type Row = keyof typeof ROWS;
 
@@ -151,6 +162,71 @@ const navigation = (model: Model) =>
 			}
 		}
 	);
+
+/**
+ * Rules over the smart-city types, as the server's parse writes them: a
+ * property test under a `when`, a `count` over a type with a subtype, a
+ * two-hop path under `where`, a `to` naming a subtype and a warning.
+ */
+const BENCH_RULES = (replicas: string) =>
+	JSON.stringify({
+		rules: [
+			{
+				name: 'prod-replicas',
+				applies_to: 'Microservice',
+				when: { property: 'status', equals: 'Active' },
+				then: { property: 'replica_count', gte: '@replicas' }
+			},
+			{
+				name: 'no-dependency',
+				applies_to: 'Microservice',
+				then: { relationship: { type: 'DependsOn', direction: 'outgoing', count: { eq: 0 } } }
+			},
+			{
+				name: 'hosted-deployment',
+				applies_to: 'Service',
+				when: { relationship: { type: 'DeployedOn', direction: 'outgoing', exists: true } },
+				then: {
+					relationship: {
+						type: 'DeployedOn',
+						direction: 'outgoing',
+						to: 'Node',
+						where: { relationship: { type: 'HostedIn', direction: 'outgoing', exists: true } },
+						exists: true
+					}
+				}
+			},
+			{
+				name: 'four-services',
+				applies_to: 'System',
+				then: {
+					relationship: {
+						type: 'SystemContainsComponent',
+						direction: 'outgoing',
+						to: 'Service',
+						count: { gte: 4 }
+					}
+				}
+			},
+			{
+				name: 'lead-in-team',
+				applies_to: 'Person',
+				severity: 'warning',
+				when: { property: 'role', equals: 'Lead' },
+				then: { relationship: { type: 'MemberOf', direction: 'outgoing', exists: true } }
+			}
+		]
+	}).replace('"@replicas"', replicas);
+
+/** One rule set compiled whole against `wc`'s metamodel. */
+function compiledRules(wc: WorkingCopy, document: string): CompiledRules {
+	const source = { artifactId: 'bench', name: 'Bench', parse: { ok: true as const, document } };
+	const compiled = compileRuleSets([source], wc.model.metamodel);
+	if (compiled.unreadable || compiled.skipped.length > 0) {
+		throw new Error('the bench rules do not compile whole');
+	}
+	return compiled;
+}
 
 const count = (n: number) => n.toLocaleString('en-US');
 
@@ -332,6 +408,15 @@ function measureIssues(wc: WorkingCopy): void {
 	timed('liveDelta', () => live.applyDelta(one));
 	live.unstage('all');
 
+	// A rule over every element of the largest type, where there was none.
+	const [largest] = [...model.indexes.byType].reduce((a, b) => (b[1].size > a[1].size ? b : a));
+	const rule = { name: 'named', applies_to: largest, then: { property: 'name', exists: true } };
+	const overLargest = compiledRules(wc, JSON.stringify({ rules: [rule] }));
+	live.setRules({ working: overLargest, committed: overLargest });
+	if (!stepped('rescan', 'rescanLongest', live.sweepSteps())) {
+		throw new Error('the rescan ended unusable');
+	}
+
 	// Staged past the store: its dirty sets would sort the growing group once an op.
 	const like = sample(elements, 1, 11, named)[0]!;
 	const copies = Array.from({ length: DUPLICATES }, (_, i): ModelOp => ({
@@ -345,6 +430,33 @@ function measureIssues(wc: WorkingCopy): void {
 	stepped('sweepGroup', 'sweepGroupLongest', grouped.sweepSteps(), null);
 	if (grouped.store.size < DUPLICATES) throw new Error('the copies make no group');
 	wc.unstage('all');
+	const sound = !wc.diverged && wc.verifyDigest();
+	if (!sound) throw new Error('the bench drove the replica off its digest');
+}
+
+/**
+ * The issue store with the bench rules: its sweep, a 1,000-op stage whose
+ * dirty set their reach widens, and a probe over 100 staged batches with one
+ * rule changed in the staged rule sets, the rescan it queued drained first.
+ */
+function measureRules(wc: WorkingCopy): void {
+	const { model } = wc;
+	const rules = compiledRules(wc, BENCH_RULES('3.0'));
+	const live = new LiveIssues(wc, { rules: { working: rules, committed: rules } });
+	if (!stepped('rulesSweep', 'rulesSweepLongest', live.sweepSteps(), null)) {
+		throw new Error('the sweep with rules ended unusable');
+	}
+	const batch = thousandOps(model, ...entities(model));
+	timed('rulesStage', () => live.stage(batch));
+	live.unstage('all');
+	const [elements] = entities(model);
+	sample(elements, 100, 3, namedIn(model)).forEach((element, i) =>
+		live.stage([renamed(element, `mine ${i}`)])
+	);
+	live.setRules({ working: compiledRules(wc, BENCH_RULES('4.0')), committed: rules });
+	drain(live.sweepSteps());
+	timed('rulesProbe', () => live.origins());
+	live.unstage('all');
 	const sound = !wc.diverged && wc.verifyDigest();
 	if (!sound) throw new Error('the bench drove the replica off its digest');
 }
@@ -401,6 +513,7 @@ async function pass(): Promise<void> {
 
 	measureEdits(workingCopy);
 	measureIssues(workingCopy);
+	measureRules(workingCopy);
 }
 
 for (let i = 0; i < PASSES; i++) await pass();

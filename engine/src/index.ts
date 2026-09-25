@@ -134,6 +134,7 @@ export {
 	appliesPopulation,
 	compileRuleSets,
 	EMPTY_RULES,
+	RULE_CHECK_PREFIX,
 	type CompiledRule,
 	type CompiledRules,
 	type RuleSkip,
@@ -251,7 +252,8 @@ export {
 	SWEEP_STEP,
 	type LiveIssuesOptions,
 	type LiveRules,
-	type Origins
+	type Origins,
+	type SweepStep
 } from './validation/live.ts';
 export {
 	FacetPatterns,

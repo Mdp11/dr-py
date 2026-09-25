@@ -6,8 +6,8 @@ export const RULES_KIND = 'validation_rules';
 
 /**
  * The parse a rule set compiles from in the working layer: a staged payload's
- * own, `'pending'` standing on the last parse that arrived for the id, and
- * the committed parse under no staged payload. `null` is an artifact that
+ * own, `'pending'` standing on the set's `lastWorkingParse`, and the
+ * committed parse under no staged payload. `null` is an artifact that
  * arrived without its parse; `undefined` leaves out a create whose first
  * parse is still out.
  */

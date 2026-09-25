@@ -17,7 +17,7 @@ export type Surface =
 	| 'issues';
 export type Side = 'engine' | 'server';
 
-/** Why the server answered a call the engine refused: it reaches a script, a pattern, or validation rules. */
+/** Why the server answered a call the engine refused: it reaches a script, a pattern, or rules it cannot read. */
 export type Fallback = 'script' | 'pattern' | 'rules';
 
 /**
@@ -86,7 +86,7 @@ export function engineSide(surface: Surface): Side {
 const FALLBACKS: { readonly [detail: string]: Fallback } = {
 	'reaches a script': 'script',
 	'reaches an unsupported pattern': 'pattern',
-	'reaches validation rules': 'rules'
+	'reaches unreadable rules': 'rules'
 };
 
 /** The engine's refusal that sends a call to the server, if `error` is one. */
@@ -122,7 +122,7 @@ export function asSent(body: object): unknown {
  * Answers a read from the engine or the server. A call that names its server
  * (`baseUrl` or `fetch`) goes there. `engineCall` makes exactly one engine
  * call and parses its body with the server's schema. A 501 the engine
- * refuses a script, a pattern or validation rules with is answered by the
+ * refuses a script, a pattern or unreadable rules with is answered by the
  * server — for a script or a pattern handed to `options.mark` with its
  * reason — and not shadowed; any other 501 is the caller's. So is a 409 that
  * says the staged batches, the `base_rev` or the replica moved under the

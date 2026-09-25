@@ -1,11 +1,13 @@
 /**
  * The engine's sweep of model M against the Python oracle's, over the same
- * violations: `scripts/issues_large.py` writes a batch of ops that breaks
- * every check it can, lands it on the document the snapshot was written
- * from and runs the server's own sweep; here the same batch lands on the
- * snapshot through `applyBatch` and a `LiveIssues` sweeps it to its end. The
- * two are compared as multisets of `issueKey`. Exits 1, with the first
- * differences, when they differ.
+ * violations and the same custom rules: `scripts/issues_large.py` writes a
+ * batch of ops that breaks every check it can, lands it on the document the
+ * snapshot was written from, compiles its rule sets and runs the server's
+ * own sweep; here the same batch lands on the snapshot through `applyBatch`,
+ * the rule sets it wrote — the payloads route's bodies, each with its parse —
+ * compile as the service compiles them, and a `LiveIssues` holding them
+ * sweeps it to its end. The two are compared as multisets of `issueKey`.
+ * Exits 1, with the first differences, when they differ.
  *
  * `pixi run engine-parity-large` writes the oracle's side and runs this, once
  * `pixi run engine-bench-data` has written the snapshot.
@@ -13,14 +15,19 @@
 import { existsSync, readFileSync } from 'node:fs';
 import {
 	applyBatch,
+	ArtifactSet,
 	cmpCodePoint,
+	compileRuleSets,
 	drain,
 	issueKey,
 	LiveIssues,
 	Metamodel,
 	openSnapshot,
 	parseJson,
+	readArtifacts,
 	readOps,
+	RULE_CHECK_PREFIX,
+	ruleSources,
 	type Issue,
 	type MetamodelDoc
 } from '../src/index.ts';
@@ -33,8 +40,9 @@ const SNAPSHOT = new URL('large.snapshot.v2', DIR);
 const METAMODEL = new URL('large.snapshot.v2.metamodel.json', DIR);
 const ORACLE = new URL('large.issues.json', DIR);
 const VIOLATIONS = new URL('large.violations.ops.json', DIR);
+const RULES = new URL('large.rules.json', DIR);
 
-for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS]) {
+for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES]) {
 	if (!existsSync(file)) {
 		console.error(`Missing ${file.pathname}: run \`pixi run engine-bench-data\` first.`);
 		process.exit(1);
@@ -67,7 +75,17 @@ const { header, workingCopy } = await openSnapshot(
 // Committed state, as the oracle holds it: the store wraps the working copy after.
 const ops = readOps(parseJson(readFileSync(VIOLATIONS, 'utf-8')));
 applyBatch(workingCopy.model, ops);
-const live = new LiveIssues(workingCopy);
+const artifacts = new ArtifactSet();
+artifacts.setCommitted(readArtifacts(JSON.parse(readFileSync(RULES, 'utf-8'))));
+const rules = compileRuleSets(ruleSources(artifacts, 'committed'), workingCopy.model.metamodel);
+if (rules.unreadable || rules.skipped.length > 0) {
+	console.error(
+		'The rule sets do not compile whole:',
+		rules.unreadable ? 'unreadable' : rules.skipped
+	);
+	process.exit(1);
+}
+const live = new LiveIssues(workingCopy, { rules: { working: rules, committed: rules } });
 const start = performance.now();
 if (!drain(live.sweepSteps())) {
 	console.error('The sweep ended unusable: a facet pattern the engine cannot run.');
@@ -90,7 +108,10 @@ console.log(
 	`Model M: ${header.elements.toLocaleString('en-US')} elements, ` +
 		`${header.relationships.toLocaleString('en-US')} relationships, ` +
 		`${ops.length.toLocaleString('en-US')} violating ops applied. ` +
-		`Engine: ${size(engine).toLocaleString('en-US')} issues, swept in ${ms.toFixed(0)} ms; ` +
+		`${rules.total} rules. ` +
+		`Engine: ${size(engine).toLocaleString('en-US')} issues, ` +
+		`${issues.filter((i) => i.check.startsWith(RULE_CHECK_PREFIX)).length.toLocaleString('en-US')} ` +
+		`of them the rules', swept in ${ms.toFixed(0)} ms; ` +
 		`oracle: ${size(oracle).toLocaleString('en-US')} issues.`
 );
 const byCheck = counted(issues.map((i: Issue) => `${i.check} (${i.category})`));

@@ -215,13 +215,16 @@ export const carriesPayload = (
 export class ArtifactSet {
 	private committed = new Map<string, CommittedArtifact>();
 	private staged = new Map<string, StagedArtifact>();
-	/** Per rule set, the last parse that arrived with it, committed or staged. */
+	/**
+	 * Per rule set, the parse a `'pending'` entry stands on: the last one a
+	 * staged payload brought, or the committed one while none stands over it.
+	 */
 	private lastParse = new Map<string, RulesParse>();
 
 	/** Replaces the committed layer. */
 	setCommitted(list: readonly CommittedArtifact[]): void {
 		this.committed = new Map(list.map((artifact) => [artifact.id, { ...artifact }]));
-		for (const artifact of list) this.keepParse(artifact.id, artifact.rules);
+		for (const artifact of list) this.keepCommittedParse(artifact);
 		this.forgetGone();
 	}
 
@@ -229,7 +232,7 @@ export class ArtifactSet {
 	put(changed: readonly CommittedArtifact[], deletedIds: readonly string[]): void {
 		for (const artifact of changed) {
 			this.committed.set(artifact.id, { ...artifact });
-			this.keepParse(artifact.id, artifact.rules);
+			this.keepCommittedParse(artifact);
 		}
 		for (const id of deletedIds) this.committed.delete(id);
 		this.forgetGone();
@@ -244,7 +247,7 @@ export class ArtifactSet {
 		const before = this.staged;
 		this.staged = new Map(entries.map((entry) => [entry.id, { ...entry }]));
 		for (const entry of entries) {
-			if (entry.op !== 'delete' && entry.rules !== 'pending') this.keepParse(entry.id, entry.rules);
+			if (carriesPayload(entry) && entry.rules !== 'pending') this.keepParse(entry.id, entry.rules);
 		}
 		for (const [id, entry] of before) {
 			if (!carriesPayload(entry) || carriesPayload(this.staged.get(id))) continue;
@@ -257,6 +260,14 @@ export class ArtifactSet {
 
 	private keepParse(id: string, parse: RulesParse | undefined): void {
 		if (parse !== undefined) this.lastParse.set(id, parse);
+	}
+
+	/**
+	 * Keeps a committed parse unless a staged payload stands over the id: a
+	 * `'pending'` there keeps standing on the payload's.
+	 */
+	private keepCommittedParse(artifact: CommittedArtifact): void {
+		if (!carriesPayload(this.staged.get(artifact.id))) this.keepParse(artifact.id, artifact.rules);
 	}
 
 	private forgetGone(): void {
@@ -283,8 +294,8 @@ export class ArtifactSet {
 	}
 
 	/**
-	 * The last parse that arrived for the rule set `id`, which a `'pending'`
-	 * entry stands on until its own parse lands.
+	 * The parse a `'pending'` entry for the rule set `id` stands on until its
+	 * own lands: the last one a staged payload brought, or the committed one.
 	 */
 	lastWorkingParse(id: string): RulesParse | undefined {
 		return this.lastParse.get(id);
@@ -316,15 +327,6 @@ export class ArtifactSet {
 					payload: entry.payload ?? committed.payload
 				};
 		}
-	}
-
-	/** Whether any id resolves to an artifact of `kind`. */
-	resolvesKind(kind: string): boolean {
-		for (const id of this.committed.keys()) if (this.resolve(id)?.kind === kind) return true;
-		for (const [id, entry] of this.staged) {
-			if (entry.op === 'create' && this.resolve(id)?.kind === kind) return true;
-		}
-		return false;
 	}
 
 	/** How many ids resolve. */

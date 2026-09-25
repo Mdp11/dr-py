@@ -17,10 +17,17 @@ import {
 	wireRelationship,
 	wireRelImage
 } from '../read/wire.ts';
+import {
+	compileRuleSets,
+	type CompiledRules,
+	type RuleSource,
+	type RulesParse
+} from '../rules/compile.ts';
+import { ruleSources } from '../rules/sources.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
 import { issueListBody, previewBody, validateBody } from '../validation/bodies.ts';
-import { LiveIssues, type Origins } from '../validation/live.ts';
+import { LiveIssues, type Origins, type SweepStep } from '../validation/live.ts';
 import { pyRepr } from '../value/repr.ts';
 import { readDeltaText, readTailText } from '../working/delta.ts';
 import type {
@@ -114,7 +121,7 @@ const STAGE_POST_STATE_MAX = 500;
 
 /** The refusals the client answers from the server (501), and the ones it retries there (409). */
 const UNSUPPORTED_PATTERN = 'reaches an unsupported pattern';
-const VALIDATION_RULES = 'reaches validation rules';
+const UNREADABLE_RULES = 'reaches unreadable rules';
 const NOT_READY = 'replica is not ready';
 const STALE_BATCHES = 'stale staged batches';
 const STALE_BASE = 'stale base_rev';
@@ -335,6 +342,35 @@ const METHODS: { readonly [method: string]: Method } = {
 	...Object.fromEntries(Object.keys(EVALUATIONS).map((method) => [method, evaluate(method)]))
 };
 
+/** Whether two parses compile alike. */
+function sameParse(a: RulesParse | null, b: RulesParse | null): boolean {
+	if (a === null || b === null) return a === b;
+	if (a.ok && b.ok) return a.document === b.document;
+	if (!a.ok && !b.ok) return a.errors[0]?.message === b.errors[0]?.message;
+	return false;
+}
+
+/** Whether two lists of rule sets compile alike: the same sets, in the same order, parsed alike. */
+function sameSources(a: readonly RuleSource[], b: readonly RuleSource[]): boolean {
+	return (
+		a.length === b.length &&
+		a.every((source, i) => {
+			const other = b[i]!;
+			return (
+				source.artifactId === other.artifactId &&
+				source.name === other.name &&
+				sameParse(source.parse, other.parse)
+			);
+		})
+	);
+}
+
+/** One layer's rule sets compiled, with the sources they were compiled from. */
+type Compiled = { readonly sources: readonly RuleSource[]; readonly rules: CompiledRules };
+
+/** What a transition returns for a call it leaves waiting: nothing is answered. */
+const WAITING = Symbol('waiting');
+
 type Opening = {
 	readonly projectId: string;
 	readonly queue: ByteQueue;
@@ -346,9 +382,16 @@ type Opening = {
 /**
  * The issue store of the ready replica: `seen`, how much of its `version` the
  * service has counted; `probed`, the origins its last answer read, so that a
- * new probe shows.
+ * new probe shows; `working` and `committed`, its rule sets as compiled
+ * against the replica's metamodel.
  */
-type Issues = { readonly live: LiveIssues; seen: number; probed: Origins | null };
+type Issues = {
+	readonly live: LiveIssues;
+	seen: number;
+	probed: Origins | null;
+	working: Compiled;
+	committed: Compiled;
+};
 
 class Service {
 	readonly placements = new ViewPlacements();
@@ -368,8 +411,8 @@ class Service {
 	// Moves with every store's `version`, across replicas: it never goes back.
 	private issuesVersion = 0;
 	private issuesPosted = 0;
-	// The `validateModel` calls waiting for the sweep they restarted.
-	private readonly validating = new Set<Call>();
+	// The calls waiting for the store: for a sweep `validateModel` restarted, or for a rescan.
+	private readonly waiting = new Set<Call>();
 
 	constructor(port: Port, deps: ServiceDeps) {
 		this.port = port;
@@ -508,7 +551,8 @@ class Service {
 		const live = this.issuesOf?.live;
 		if (live === undefined || live.wc !== wc) throw new Refused(409, NOT_READY);
 		if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
-		if (this.artifacts.resolvesKind('validation_rules')) throw new Refused(501, VALIDATION_RULES);
+		const { working, committed } = live.rules;
+		if (working.unreadable || committed.unreadable) throw new Refused(501, UNREADABLE_RULES);
 		return live;
 	}
 
@@ -539,28 +583,24 @@ class Service {
 
 	/**
 	 * `getModelIssues` and `previewCommit`: a transition of the model lane —
-	 * a probe rewinds, so no scan may be running — that posts no `changed`.
-	 * `check` refuses a stale call before any probe.
+	 * a probe rewinds, so no scan may be running — that posts no `changed`,
+	 * once the store is settled. `check` refuses a stale call before any probe.
 	 */
 	issues(
 		call: Call,
 		body: (live: LiveIssues) => unknown,
 		check: (wc: WorkingCopy) => void = () => undefined
 	): void {
-		this.submit(call, 'model', {
-			kind: 'transition',
-			run: () => {
-				const live = this.live();
-				check(live.wc);
-				return this.answer(live, body);
-			}
+		this.settled(call, (live) => {
+			check(live.wc);
+			return this.answer(live, body);
 		});
 	}
 
 	/**
 	 * A transition that restarts the sweep; the answer is built by a second
-	 * one once that sweep has ended, from the same store — or refused, if the
-	 * replica went meanwhile or the staged batches moved.
+	 * one once that sweep and any rescan have ended, from the same store — or
+	 * refused, if the replica went meanwhile or the staged batches moved.
 	 */
 	validateModel(call: Call, ids: readonly number[]): void {
 		this.scheduler.submit(
@@ -573,19 +613,15 @@ class Service {
 					requireStaged(live.wc, ids);
 					live.restartSweep();
 					this.sweep(live);
-					this.validating.add(call);
-					this.awaiting.set(call.id, call);
-					void live.whenSwept().then(() =>
-						this.submit(call, 'model', {
-							kind: 'transition',
-							run: () => {
-								// Already refused, or cancelled: nothing to build.
-								if (!this.validating.delete(call) || call.cancelled) return null;
-								if (this.live() !== live) throw new Refused(409, NOT_READY);
-								requireStaged(live.wc, ids);
-								return this.answer(live, validateBody);
-							}
-						})
+					this.wait(call, live.whenSwept(), () =>
+						this.settled(
+							call,
+							(settled) => {
+								requireStaged(settled.wc, ids);
+								return this.answer(settled, validateBody);
+							},
+							live
+						)
 					);
 				}
 			},
@@ -595,23 +631,71 @@ class Service {
 		);
 	}
 
-	/** Sets the store's sweep in the scheduler's sweep slot: from where it stands, or from the start after `restartSweep`. */
+	/**
+	 * Answers `call` with `run` over the store, in a model-lane transition run
+	 * while no rescan is due. Otherwise the call waits for the store to settle
+	 * and asks again in a new transition, since an artifact method can start
+	 * another rescan before it runs. `on` is the store a waiting call waits
+	 * on: refused meanwhile, it is not run; replaced, it is refused.
+	 */
+	private settled(
+		call: Call,
+		run: (live: LiveIssues) => unknown,
+		on: LiveIssues | null = null
+	): void {
+		this.scheduler.submit(
+			call.id,
+			'model',
+			{
+				kind: 'transition',
+				run: () => {
+					if (on !== null && (!this.waiting.delete(call) || call.cancelled)) return WAITING;
+					const live = this.live();
+					if (on !== null && live !== on) throw new Refused(409, NOT_READY);
+					if (!live.settled) {
+						this.wait(call, live.whenSettled(), () => this.settled(call, run, live));
+						return WAITING;
+					}
+					return run(live);
+				}
+			},
+			(outcome) => {
+				if (!outcome.ok) call.refuse(outcome.error);
+				else if (outcome.value !== WAITING) call.answer(outcome.value);
+			}
+		);
+	}
+
+	/** Holds `call` until `until` resolves, then runs `then`; `dropIssues` refuses it meanwhile. */
+	private wait(call: Call, until: Promise<void>, then: () => void): void {
+		this.waiting.add(call);
+		this.awaiting.set(call.id, call);
+		void until.then(then);
+	}
+
+	/**
+	 * Sets the store's sweep in the scheduler's sweep slot: from where it
+	 * stands, or from the start after `restartSweep`, then any rescan due,
+	 * whose steps report nothing.
+	 */
 	private sweep(live: LiveIssues): void {
 		this.scheduler.setSweep({
 			start: () => live.sweepSteps(),
-			progress: ({ done, total }) => this.progress('sweep', done, total),
+			progress: (step: SweepStep) => {
+				if (step.rescan !== true) this.progress('sweep', step.done, step.total);
+			},
 			done: (ok) => {
 				// A sweep that threw is a bug: what waits for it is answered, not left hanging.
 				if (!ok && live.unusable === null && this.issuesOf?.live === live) {
-					this.refuseValidations(new Error('the sweep failed'));
+					this.refuseWaiting(new Error('the sweep failed'));
 				}
 			}
 		});
 	}
 
-	private refuseValidations(error: unknown): void {
-		for (const call of this.validating) call.refuse(error);
-		this.validating.clear();
+	private refuseWaiting(error: unknown): void {
+		for (const call of this.waiting) call.refuse(error);
+		this.waiting.clear();
 	}
 
 	/** The service's `issues_version`, counting what the store's `version` moved since last read. */
@@ -625,16 +709,35 @@ class Service {
 	}
 
 	/**
-	 * Runs `put` over the artifacts. Whether a validation rules artifact
-	 * resolves decides whether the store is read at all, so a flip moves
-	 * `issues_version` and a ready replica posts a bare `changed`.
+	 * Runs `put` over the artifacts, then hands the store the rule sets they
+	 * resolve to, when they compile otherwise than before: a change of the
+	 * working ones queues a rescan, and a ready replica posts a bare `changed`.
 	 */
 	moveArtifacts(put: () => void): void {
-		const rules = this.artifacts.resolvesKind('validation_rules');
 		put();
-		if (this.artifacts.resolvesKind('validation_rules') === rules) return;
-		this.issuesVersion += 1;
+		const issues = this.issuesOf;
+		if (issues === null) return;
+		const { live } = issues;
+		const mm = live.wc.model.metamodel;
+		const working = this.compiled('working', mm, issues.working);
+		const committed = this.compiled('committed', mm, issues.committed);
+		if (working === issues.working && committed === issues.committed) return;
+		issues.working = working;
+		issues.committed = committed;
+		live.setRules({ working: working.rules, committed: committed.rules });
+		if (!live.settled) this.sweep(live);
 		this.flushIssues();
+	}
+
+	/** A layer's rule sets compiled against `mm`: `before` itself when they compile alike. */
+	private compiled(
+		layer: 'working' | 'committed',
+		mm: Metamodel,
+		before: Compiled | null = null
+	): Compiled {
+		const sources = ruleSources(this.artifacts, layer);
+		if (before !== null && sameSources(before.sources, sources)) return before;
+		return { sources, rules: compileRuleSets(sources, mm) };
 	}
 
 	/** At a slice's end: a bare `changed` when the store moved since the last one posted. */
@@ -734,7 +837,7 @@ class Service {
 	private dropIssues(): void {
 		this.issuesOf = null;
 		this.scheduler.setSweep(null);
-		this.refuseValidations(new Refused(409, NOT_READY));
+		this.refuseWaiting(new Refused(409, NOT_READY));
 	}
 
 	open(params: ReadParams): null {
@@ -907,9 +1010,10 @@ class Service {
 	}
 
 	/**
-	 * The replica's issue store is built here and swept in the background: the
-	 * batches adopted and the tail applied while opening went to the working
-	 * copy alone, and the first sweep covers them.
+	 * The replica's issue store is built here, with the rule sets compiled
+	 * afresh against its metamodel, and swept in the background: the batches
+	 * adopted and the tail applied while opening went to the working copy
+	 * alone, and the first sweep covers them.
 	 */
 	private becomeReady(wc: WorkingCopy): void {
 		this.enter('ready');
@@ -921,8 +1025,13 @@ class Service {
 				if (!ok && this.wc === wc) this.diverge(wc);
 			}
 		});
-		const live = new LiveIssues(wc);
-		this.issuesOf = { live, seen: live.version, probed: null };
+		const mm = wc.model.metamodel;
+		const working = this.compiled('working', mm);
+		const committed = this.compiled('committed', mm);
+		const live = new LiveIssues(wc, {
+			rules: { working: working.rules, committed: committed.rules }
+		});
+		this.issuesOf = { live, seen: live.version, probed: null, working, committed };
 		this.sweep(live);
 	}
 
