@@ -1,4 +1,5 @@
 import type { Model } from '../model/model.ts';
+import { cmpCodePoint } from '../value/compare.ts';
 import { dumpIndexes, type IndexDump } from './dump-indexes.ts';
 
 function structuralFaults(model: Model): string[] {
@@ -31,19 +32,28 @@ function structuralFaults(model: Model): string[] {
 	return faults;
 }
 
+/** The cached uniqueness key texts, by element id. */
+function keyTexts(model: Model): string {
+	const texts = [...model.indexes.keyText].map(([element, text]) => [element.id, text] as const);
+	return JSON.stringify(texts.sort(([a], [b]) => cmpCodePoint(a, b)));
+}
+
 /**
- * Throws unless the incrementally maintained indexes equal a fresh rebuild.
- * It rebuilds them in place — which leaves a consistent model as it was — so
- * it is a full pass over the model: tests and debugging only.
+ * Throws unless the incrementally maintained indexes equal a fresh rebuild,
+ * the cached key texts included. It rebuilds them in place — which leaves a
+ * consistent model as it was — so it is a full pass over the model: tests
+ * and debugging only.
  */
 export function verifyConsistent(model: Model): void {
 	const faults = structuralFaults(model);
 	const kept = dumpIndexes(model);
+	const keptTexts = keyTexts(model);
 	model.rebuildIndexes();
 	const fresh = dumpIndexes(model);
 	for (const section of Object.keys(kept) as (keyof IndexDump)[]) {
 		if (JSON.stringify(kept[section]) !== JSON.stringify(fresh[section])) faults.push(section);
 	}
+	if (keptTexts !== keyTexts(model)) faults.push('key texts');
 	if (faults.length > 0) {
 		throw new Error('indexes differ from a fresh rebuild in: ' + faults.join(', '));
 	}

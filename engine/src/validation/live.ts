@@ -1,4 +1,4 @@
-import type { Model } from '../model/model.ts';
+import type { ElementRec, RelRec } from '../model/records.ts';
 import type { ModelOp } from '../ops/types.ts';
 import {
 	appliesPopulation,
@@ -26,6 +26,9 @@ import { IssueStore } from './store.ts';
 /** Ids a sweep step validates and splices. */
 export const SWEEP_STEP = 512;
 
+/** A sweep step passes over at most this many times `sweepStep` entities, unless `sweepSkip` is given. */
+const SKIP_PER_STEP = 16;
+
 /** A step of `sweepSteps`: the sweep's progress, or a rescan step, which reports none. */
 export type SweepStep = Progress & { readonly rescan?: true };
 
@@ -42,6 +45,11 @@ export type LiveIssuesOptions = {
 	seed?: IssueStore;
 	/** Ids per sweep step, `SWEEP_STEP` unless given. */
 	sweepStep?: number;
+	/**
+	 * Entities a sweep step may pass over besides, those an earlier step
+	 * validated; 16 times `sweepStep` unless given.
+	 */
+	sweepSkip?: number;
 	/** The rule sets, none unless given; the store holds the working ones' issues. */
 	rules?: LiveRules;
 };
@@ -173,13 +181,37 @@ const changedIds = (changes: ChangeSet) => [
 	...changes.deletedRelationshipIds
 ];
 
-/** Every element id in state order, then every relationship id. */
-function allIds(model: Model): string[] {
-	const ids: string[] = [];
-	for (const element of model.elements()) ids.push(element.id);
-	for (const rel of model.relationships()) ids.push(rel.id);
-	return ids;
-}
+/** Where the sweep's walk of one map stands: the iterator, and the model's order epoch when it was taken. */
+type Cursor<T> = { iter: Iterator<T> | null; epoch: number; ended: boolean };
+
+const cursor = <T>(): Cursor<T> => ({ iter: null, epoch: -1, ended: false });
+
+/**
+ * The sweep due: its total when it began (`null` before its first step), how
+ * many entities it has validated, and their ids.
+ */
+type Sweep = {
+	total: number | null;
+	done: number;
+	readonly validated: Set<string>;
+	readonly elements: Cursor<ElementRec>;
+	readonly relationships: Cursor<RelRec>;
+};
+
+const newSweep = (): Sweep => ({
+	total: null,
+	done: 0,
+	validated: new Set(),
+	elements: cursor(),
+	relationships: cursor()
+});
+
+/** The panel's tag scope, kept for one committed rev and one pair of equal rule sets. */
+type Tags = {
+	readonly rev: number;
+	readonly rulesVersion: number;
+	readonly committedOf: Map<string, readonly Issue[]>;
+};
 
 /**
  * The issues of a working copy's working state, kept as it moves. Every
@@ -200,6 +232,10 @@ function allIds(model: Model): string[] {
  * new ones apply to for a rescan, which the sweep's steps drain after any
  * sweep due; the store is `settled` once it has.
  *
+ * The panel's tags need each staged owner's committed issues. An exact probe
+ * finds them; while the rev and the rule sets hold, and the working rules are
+ * the committed ones, the transitions keep them from there (`tagScope`).
+ *
  * Nothing else may write to the working copy while this one wraps it.
  */
 export class LiveIssues {
@@ -207,12 +243,13 @@ export class LiveIssues {
 	private readonly validators: Validators;
 	private readonly patterns: FacetPatterns;
 	private readonly sweepStep: number;
+	private readonly sweepSkip: number;
 	private issues: IssueStore;
 	private moves = 0;
 	private swept: boolean;
 	private broken: 'pattern' | null = null;
-	/** The sweep due: the ids its first step listed, and how many are done; `null` when none is. */
-	private sweep: { ids: string[] | null; at: number } | null;
+	/** The sweep due; `null` when none is. */
+	private sweep: Sweep | null;
 	private waiters: (() => void)[] = [];
 	private compiled: LiveRules;
 	private rulesMoves = 0;
@@ -236,6 +273,13 @@ export class LiveIssues {
 	 */
 	private readonly deltaOf = new Map<string, { working: Issue[]; committed: Issue[] }>();
 	private deltaRev = -1;
+	/**
+	 * Every owner whose issues may differ between the two states, with its
+	 * committed issues; `null` until an exact probe finds them, and whenever
+	 * they cannot be kept.
+	 */
+	private tags: Tags | null = null;
+	private probeRuns = 0;
 
 	constructor(wc: WorkingCopy, options: LiveIssuesOptions = {}) {
 		this.wc = wc;
@@ -243,10 +287,11 @@ export class LiveIssues {
 		this.validators = new Validators(mm);
 		this.patterns = new FacetPatterns(mm);
 		this.sweepStep = options.sweepStep ?? SWEEP_STEP;
+		this.sweepSkip = options.sweepSkip ?? SKIP_PER_STEP * this.sweepStep;
 		this.compiled = options.rules ?? NO_RULES;
 		this.issues = options.seed ?? new IssueStore();
 		this.swept = options.seed !== undefined;
-		this.sweep = options.seed === undefined ? { ids: null, at: 0 } : null;
+		this.sweep = options.seed === undefined ? newSweep() : null;
 		if (this.patterns.unusable) {
 			this.broken = 'pattern';
 			this.issues = new IssueStore();
@@ -287,6 +332,11 @@ export class LiveIssues {
 
 	get unusable(): 'pattern' | null {
 		return this.broken;
+	}
+
+	/** Moves whenever `origins()` finds the origins afresh. */
+	get probes(): number {
+		return this.probeRuns;
 	}
 
 	// -- transitions ---------------------------------------------------------
@@ -361,6 +411,7 @@ export class LiveIssues {
 		this.moves++;
 		this.cached = null;
 		this.deltaOf.clear();
+		this.tags = null;
 	}
 
 	/**
@@ -377,11 +428,13 @@ export class LiveIssues {
 
 	/**
 	 * The collector widened by the working rules' reach on the state after the
-	 * transition, as its ids; `deltaOf` forgets them.
+	 * transition, as its ids; `deltaOf` forgets them, and the tag scope takes
+	 * those it lacks from the store, which still holds their issues from before.
 	 */
 	private reach(dirty: DirtyCollector): readonly string[] {
 		dirty.update(expandScope(this.wc.model, this.compiled.working, dirty.ids));
 		if (this.deltaOf.size > 0) for (const id of dirty.ids) this.deltaOf.delete(id);
+		this.keepTags(dirty.ids);
 		return dirty.ids;
 	}
 
@@ -418,6 +471,7 @@ export class LiveIssues {
 		this.rescan = null;
 		this.cached = null;
 		this.deltaOf.clear();
+		this.tags = null;
 		this.moves++;
 		this.release();
 	}
@@ -425,12 +479,12 @@ export class LiveIssues {
 	// -- the sweep -----------------------------------------------------------
 
 	/**
-	 * The sweep in steps: the first lists every element id in state order,
-	 * then every relationship id; each after it validates the next
-	 * `sweepStep` of them and splices them into the store, a complete change
-	 * of its own. An id gone since is dropped from the store, and one new since
-	 * was validated by the transition that made it. Then the rescan, when one
-	 * is due: `sweepStep` of its ids a step, each step yielding `RESCAN_STEP`.
+	 * The sweep in steps: the first takes the total, the number of entities
+	 * then; each after it validates the next `sweepStep` entities it has not
+	 * validated yet, elements in state order then relationships, and splices
+	 * them into the store, a complete change of its own. Its progress counts the entities validated,
+	 * short of the total until the last step. Then the rescan, when one is
+	 * due: `sweepStep` of its ids a step, each step yielding `RESCAN_STEP`.
 	 * Every step validates with the rules as they are then. Its state is this
 	 * object's, never the generator's, so any generator resumes it where it
 	 * stands. The value is `true` when both ran to their end, `false` when the
@@ -454,19 +508,25 @@ export class LiveIssues {
 				yield RESCAN_STEP;
 				continue;
 			}
-			if (sweep.ids === null) {
-				sweep.ids = allIds(this.wc.model);
-				sweep.at = 0;
-				yield { done: 0, total: sweep.ids.length };
+			const model = this.wc.model;
+			if (sweep.total === null) {
+				sweep.total = model.elementCount + model.relationshipCount;
+				yield { done: 0, total: sweep.total };
 				continue;
 			}
-			const ids = sweep.ids;
-			const next = ids.slice(sweep.at, sweep.at + this.sweepStep);
-			sweep.at += next.length;
+			const next: string[] = [];
+			const skip = { left: this.sweepSkip };
+			this.pull(sweep, sweep.elements, () => model.elements(), next, skip);
+			if (sweep.elements.ended) {
+				this.pull(sweep, sweep.relationships, () => model.relationships(), next, skip);
+			}
+			sweep.done += next.length;
 			this.revalidate(next, false);
 			if (this.broken !== null) return false;
-			if (sweep.at < ids.length) {
-				yield { done: sweep.at, total: ids.length };
+			const total = sweep.total;
+			if (!sweep.relationships.ended) {
+				// Entities made since the start are validated too: the count may pass the total.
+				yield { done: Math.max(0, Math.min(sweep.done, total - 1)), total };
 				continue;
 			}
 			if (this.sweep === sweep) {
@@ -474,13 +534,48 @@ export class LiveIssues {
 				this.swept = true;
 				this.release();
 			}
-			yield { done: ids.length, total: ids.length };
+			yield { done: total, total };
 		}
 	}
 
-	/** Sweeps again from a fresh list of ids, in place: the store keeps what it holds meanwhile. */
+	/**
+	 * Pulls the next entities of `at`'s map that the sweep has not validated
+	 * yet into `into`, up to `sweepStep` of them, passing over at most
+	 * `skip.left` it has. A live iterator reads, before it ends, every entity
+	 * the map holds between two steps: one put back or made again at the map's
+	 * end — a refused batch rewound, a probe's replay — included. It is taken
+	 * again when a re-sort moves the model's order epoch, since it would read
+	 * the whole map again anyway.
+	 */
+	private pull<T extends ElementRec | RelRec>(
+		sweep: Sweep,
+		at: Cursor<T>,
+		read: () => Iterator<T>,
+		into: string[],
+		skip: { left: number }
+	): void {
+		const model = this.wc.model;
+		while (into.length < this.sweepStep && skip.left > 0 && !at.ended) {
+			if (at.iter === null || at.epoch !== model.orderEpoch) {
+				at.iter = read();
+				at.epoch = model.orderEpoch;
+			}
+			const next = at.iter.next();
+			if (next.done === true) {
+				at.ended = true;
+				at.iter = null;
+			} else if (sweep.validated.has(next.value.id)) {
+				skip.left--;
+			} else {
+				sweep.validated.add(next.value.id);
+				into.push(next.value.id);
+			}
+		}
+	}
+
+	/** Sweeps again from the start, in place: the store keeps what it holds meanwhile. */
 	restartSweep(): void {
-		if (this.broken === null) this.sweep = { ids: null, at: 0 };
+		if (this.broken === null) this.sweep = newSweep();
 	}
 
 	/** Resolves once no sweep and no rescan is due, or the store is unusable. */
@@ -523,6 +618,7 @@ export class LiveIssues {
 			return cached.origins;
 		}
 		let origins: Origins;
+		this.probeRuns++;
 		try {
 			origins = this.probe();
 		} catch (caught) {
@@ -600,6 +696,63 @@ export class LiveIssues {
 			working: [...origins.working, ...rest.working],
 			committed: [...origins.committed, ...rest.committed]
 		};
+	}
+
+	// -- the panel's tags ----------------------------------------------------
+
+	/**
+	 * Every owner whose issues may differ between the committed and the
+	 * working state, each with its committed issues: what the panel's tags
+	 * read, an issue of an owner it does not name being the same on both
+	 * states. The exact probe finds it (`origins()`: its dirty set, with the
+	 * committed issues); then, while the store is seeded and settled, the rev
+	 * and the rule sets hold and the working rules are the committed ones, each
+	 * transition adds the ids it dirties, with the store's issues from just
+	 * before it: no transition had dirtied them since the probe, so those were
+	 * their committed issues. Otherwise every call reads `origins()`. Throws
+	 * `PatternUnusable` when the store is unusable, or becomes so.
+	 */
+	tagScope(): ReadonlyMap<string, readonly Issue[]> {
+		if (this.broken !== null) throw new PatternUnusable();
+		const kept = this.tags;
+		if (kept !== null && this.tagsHold(kept)) return kept.committedOf;
+		this.tags = null;
+		const { dirty, committed } = this.origins();
+		const committedOf = new Map<string, Issue[]>();
+		for (const id of dirty) committedOf.set(id, []);
+		for (const issue of committed) committedOf.get(issueOwner(issue))?.push(issue);
+		const tags = { rev: this.wc.rev, rulesVersion: this.rulesMoves, committedOf };
+		if (this.tagsHold(tags)) this.tags = tags;
+		return committedOf;
+	}
+
+	/** Drops the tag scope kept, so that the next `tagScope()` reads `origins()`; nothing else moves. */
+	resetTagScope(): void {
+		this.tags = null;
+	}
+
+	private tagsHold(tags: Tags): boolean {
+		const { working, committed } = this.compiled;
+		return (
+			this.swept &&
+			this.rescan === null &&
+			tags.rev === this.wc.rev &&
+			tags.rulesVersion === this.rulesMoves &&
+			sameList(working.identities, committed.identities)
+		);
+	}
+
+	/** A transition's dirty ids join the tag scope kept, before it revalidates them. */
+	private keepTags(ids: readonly string[]): void {
+		const tags = this.tags;
+		if (tags === null) return;
+		if (!this.tagsHold(tags)) {
+			this.tags = null;
+			return;
+		}
+		for (const id of ids) {
+			if (!tags.committedOf.has(id)) tags.committedOf.set(id, this.issues.issuesOf(id));
+		}
 	}
 
 	/** `ids`' issues with the working and with the committed rules on the working state, from `deltaOf` where it has them. */

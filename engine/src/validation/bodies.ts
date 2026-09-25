@@ -93,17 +93,16 @@ class Committed {
 
 /**
  * `GET /model/issues` over the working state: the store's issues, each of an
- * owner the staged changes dirty `on_server` while a committed one matches it
- * and `uncommitted` past that, every other one `on_server`. A committed issue
- * the staged changes fixed is not listed. `rules_status` is the working
- * rules'.
+ * owner the staged changes may have moved (`tagScope()`) `on_server` while a
+ * committed one matches it and `uncommitted` past that, every other one
+ * `on_server`. A committed issue the staged changes fixed is not listed.
+ * `rules_status` is the working rules'.
  */
 export function issueListBody(live: LiveIssues): IssueListBody {
-	const { dirty, committed } = live.origins();
-	const staged = new Set(dirty);
-	const matches = new Committed(committed);
+	const scope = live.tagScope();
+	const matches = new Committed([...scope.values()].flat());
 	return storeListBody(live.store, live.wc.rev, rulesStatusBody(live.rules.working), (i) =>
-		!staged.has(issueOwner(i)) || matches.take(i) ? 'on_server' : 'uncommitted'
+		!scope.has(issueOwner(i)) || matches.take(i) ? 'on_server' : 'uncommitted'
 	);
 }
 

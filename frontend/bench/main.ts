@@ -145,15 +145,19 @@ async function open(): Promise<OpenReport> {
 	const openTrips = await stopOpenPings();
 
 	// The digest check and the sweep run in their own scheduler slots, taking
-	// turns: each gets its own ping loop, stopped the moment ITS task ends, so
-	// neither's "longest slice" picks up the other's tail.
+	// turns. One ping loop at a time: the first until the check ends, the
+	// second from then until the sweep ends, so that "longest slice while
+	// sweeping" holds sweep steps alone. A sweep that ends first has none.
+	let checked = false;
+	let seededFirst = false;
+	void seeded.promise.then(() => (seededFirst = !checked));
 	const stopVerifyPings = ping(client);
-	const stopSweepPings = ping(client);
-	const [{ at: verifiedAt, trips: verifyTrips }, { at: seededAt, trips: sweepTrips }] =
-		await Promise.all([
-			verified.promise.then(async (at) => ({ at, trips: await stopVerifyPings() })),
-			seeded.promise.then(async (at) => ({ at, trips: await stopSweepPings() }))
-		]);
+	const verifiedAt = await verified.promise;
+	checked = true;
+	const verifyTrips = await stopVerifyPings();
+	const stopSweepPings = seededFirst ? null : ping(client);
+	const seededAt = await seeded.promise;
+	const sweepTrips = stopSweepPings === null ? [] : await stopSweepPings();
 
 	const idle: number[] = [];
 	for (let i = 0; i < IDLE_PINGS; i++) {
@@ -167,7 +171,7 @@ async function open(): Promise<OpenReport> {
 	const parseBegan = began.get('parse') ?? Infinity;
 	const steadyWorst = longest(openTrips.filter((trip) => trip.start >= parseBegan));
 	const verifyWorst = longest(verifyTrips);
-	const sweepWorst = longest(sweepTrips);
+	const sweepWorst = sweepTrips.length > 0 ? longest(sweepTrips) : { start: NaN, ms: NaN };
 	return {
 		measures: {
 			'cold open: first byte asked to replica ready': readyAt - start,
@@ -189,7 +193,8 @@ async function open(): Promise<OpenReport> {
 			'  posted at, after ready': verifyWorst.start - readyAt,
 			'sweep (ready → seeded)': seededAt - readyAt,
 			'longest slice while sweeping': sweepWorst.ms,
-			'  posted at, after ready (sweep)': sweepWorst.start - readyAt
+			'  posted at, after ready (sweep)': sweepWorst.start - readyAt,
+			'  round trips once the digest check ended (count)': sweepTrips.length
 		},
 		header,
 		gzipBytes,

@@ -25,6 +25,7 @@ import {
 	churnRules,
 	classified,
 	listedTags,
+	probedListBody,
 	sweptFresh
 } from '../validation/helpers.ts';
 import { clone, Server, workingCopy } from './helpers.ts';
@@ -180,7 +181,7 @@ describe('working-copy invariants over seeded random batches', () => {
 	});
 
 	it.each(SEEDS.flatMap((seed) => [[seed, 'both'] as const, [seed, 'working'] as const]))(
-		'seed %i, rules swapped %s: coalescing, deltas and unstages keep the state a replay of staged() gives, and the issues a sweep finds',
+		'seed %i, rules swapped %s: coalescing, deltas and unstages keep the state a replay of staged() gives, the issues a sweep finds and the tags a probe gives',
 		(seed, swap) => {
 			const random = seededRandom(seed);
 			const server = grow(random, 30);
@@ -253,6 +254,14 @@ describe('working-copy invariants over seeded random batches', () => {
 					listed.issues.map((issue) => issue.origin),
 					`action ${i}`
 				).toEqual(listedTags(listed, server.model, liveRules.committed));
+				// Tagged incrementally as the exact probe tags it: through the probe's
+				// origins, which keep the tags kept so far, and every fifth action
+				// afresh, the tags dropped.
+				expect(listed, `action ${i}`).toEqual(probedListBody(live));
+				if (i % 5 === 4) {
+					live.resetTagScope();
+					expect(issueListBody(live), `action ${i}`).toEqual(listed);
+				}
 				expect(answered(validateBody(live)), `action ${i}`).toEqual(classified(live, server.model));
 				expect(observe(wc.model)).toEqual(seen);
 			}

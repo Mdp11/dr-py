@@ -41,6 +41,7 @@ export class Model {
 	// order until the next ordered iteration sorts it, once.
 	private elementsShuffled = false;
 	private relationshipsShuffled = false;
+	private resorts = 0;
 
 	constructor(metamodel: Metamodel, options: ModelOptions = {}) {
 		this.metamodel = metamodel;
@@ -57,11 +58,22 @@ export class Model {
 		return this.relationshipMap.size;
 	}
 
+	/**
+	 * Moves whenever an ordered read re-sorts either map. An iterator taken
+	 * before a re-sort reads the whole map again from where it stands; one
+	 * taken since the last move skips an entity deleted before it reaches it,
+	 * and reads one added before it ends, last.
+	 */
+	get orderEpoch(): number {
+		return this.resorts;
+	}
+
 	/** The elements in state order. */
 	elements(): IterableIterator<ElementRec> {
 		if (this.elementsShuffled) {
 			byOrd(this.elementMap);
 			this.elementsShuffled = false;
+			this.resorts++;
 		}
 		return this.elementMap.values();
 	}
@@ -71,6 +83,7 @@ export class Model {
 		if (this.relationshipsShuffled) {
 			byOrd(this.relationshipMap);
 			this.relationshipsShuffled = false;
+			this.resorts++;
 		}
 		return this.relationshipMap.values();
 	}

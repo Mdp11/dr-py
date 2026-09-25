@@ -94,9 +94,8 @@ away a relationship named in a key now makes the keyed ends' old and new group m
 attributable, so a strict commit that used to land can get a 422, as a key-property edit already
 could.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
-`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-59`, `K-60`,
-`K-61`, `K-62`, `K-63`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
-`BACKLOG.md`.
+`K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
+`K-63`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -399,7 +398,7 @@ ends' old and new groups for every added, modified or deleted relationship of a 
 or delete it with its two tests. Either way, `dirty.py:41-44`'s module docstring, which still
 calls it the CR-apply path, goes with it.
 
-### K-59 · The sweep's first step, and a browser slice while sweeping, exceed their budgets · `open` · perf · *2026-09-24*
+### K-59 · The sweep's first step, and a browser slice while sweeping, exceed their budgets · `done` · perf · *2026-09-24*
 `LiveIssues.sweepSteps()`'s first step lists every element id then every relationship id in
 one unit: 13 ms at M (`pixi run engine-bench`, 15 ms on the first pass) against the
 scheduler's 8 ms slice target, and up to 8 ms of other units can precede it in the same slice.
@@ -410,18 +409,41 @@ other sweep step is 5.8 ms at most once warm (11 ms on the first pass). The whol
 to seeded, is 767 ms in the browser. Fix direction: list the ids in steps too (an
 `ord`-ordered walk that resumes), then separate the bench's two ping loops before reading the
 row again. Not optimized yet: the owner's rule is to report before optimizing.
+**Done:** the sweep walks the model in steps: its first step only takes the total, and each
+later one pulls the next 512 entities it has not validated yet from a live iterator per map,
+passing over those it has (a set of the ids it validated), at most 16 × 512 a step; the
+iterator is taken again when a re-sort moves `Model.orderEpoch`. `done` stays short of the
+total until the last step. The bench's two ping loops are separated:
+one until the digest check ends, a second from then until the sweep ends. At M (`pixi run
+engine-bench`, medians of three passes, before → after): the first step 13 → 0.0 ms, the longest
+step after it 6.0 → 10–14 and the whole sweep 843 → 986–1,035 (two runs on a loaded machine).
+The set of validated ids costs that: growing a `Set` to 300,000 ids alone takes 40–80 ms, and
+the rehash near 262,144 ids 8–20 ms in one step, which puts the longest step past the 8 ms
+slice target; not optimized. In the browser, before the set was added: the longest slice while
+sweeping, the check ended, 9.7 → 9.7 ms; the longest during the check, the sweep's first steps
+among them, 12 → 11, and its moment 26 → 151 ms after ready. The walk ends as long as each
+step's 8,192 skips outrun what lands behind the iterator between two steps: a probe's or a
+rebase's replay appends one entry per staged create, a re-sort the whole map again.
 
-### K-60 · `uniqGroupOf` re-keys every member of a duplicate group per call · `open` · perf · *2026-09-24*
-`model/indexes.ts:92-97` derives `uniqKey` (a `pyKey` serialization) for every member of the
-bucket on each call, so a scoped run that reaches a large duplicate group pays O(group)
-serializations once per run: a 20,000-member group costs about 27 ms per sweep step, and a
-stage, unstage or probe that touches one of its members pays the same inside its transition.
-The Python core (`core/validation`'s uniqueness over `model.indexes`) has the same shape, so
-the server pays it too. Fix direction: cache the key per member (or the group per bucket)
-across calls, invalidated at the mutation boundary; on both sides, with a fixture step, while
-the freeze holds.
+### K-60 · The server walks a whole duplicate group per call · `open` · perf · *2026-09-24*
+The Python core keeps each element's key (`uniq_key_of`) and groups by it, so it serializes
+nothing per call, but it still walks the whole group: the scoped uniqueness validator finds
+each scoped member's primary by a `min` over the group (`validators/uniqueness.py:54`), so a
+scoped run over k members of a group pays O(k × group) — the server's sweep once per chunk —
+and `DirtyCollector.add_uniqueness_group_of` sorts the group on every call, so a commit or an
+ops batch that touches one member pays O(group log group) inside its write. Fix direction: the
+primary once per group and run, as the engine's validator finds it; `core/validation` and
+`core/model` are frozen (MR-3), so it waits for the freeze to lift.
+**Done for the engine,** whose `uniqGroupOf` re-keyed every member of the bucket on each call
+(a `pyKey` serialization each, about 27 ms per sweep step over a 20,000-member group):
+`IndexSet.keyText` caches the text of every member of a bucket of two or more, written as an
+element is filed and refreshed by every rekey, and `verifyConsistent` holds it to a rebuild's.
+At M, with 20,000 copies of one element staged: `uniqGroupOf` over the group 23 → 1.7 ms, the
+sweep's longest step 39 → 7.9 ms and the sweep 1,956 → 989 ms (12–13 and 1,170–1,205 once the
+sweep tracks its validated ids, K-59); a 1,000-op stage through the
+store 82 → 54 ms (with the bench rules' reach 81 → 58).
 
-### K-61 · Every issue refetch with a large staged set runs a probe · `open` · perf · *2026-09-24*
+### K-61 · Every issue refetch with a large staged set runs a probe · `done` · perf · *2026-09-24*
 `getModelIssues` and `previewCommit` read `origins()`, which probes (rewinds and replays every
 staged batch) once per `(rev, stagedVersion)`. Each staged edit moves `stagedVersion` and
 then `issues_version`, so each 300 ms refetch probes again: about 27 ms per 100 staged batches
@@ -430,6 +452,12 @@ a user holding thousands of batches pays it on every keystroke's refetch. Fix di
 probe incremental in the batches that moved (the top ones, for an edit that coalesces or
 stages on top), or a refetch that skips the probe when only the list, not the origins, is
 read.
+**Done:** `getModelIssues` tags through `LiveIssues.tagScope()`: the owners an exact probe
+dirtied, with their committed issues, then every id a transition dirties, with the store's
+issues from just before it revalidates them, kept while the store is seeded and settled, the
+rev and the rule sets hold and the working rules are the committed ones; otherwise it probes.
+`previewCommit` and `validateModel` keep the exact probe. At M, the list read after a keystroke
+merged into the latest staged batch: 100 batches 7.6 → 0.0 ms, 1,000 batches 258 → 0.0 ms.
 
 ### K-62 · A server issue list fetched with the gate closed can land after the engine's · `open` · *2026-09-24*
 `refetchIssues()` issued while the `issues` gate was closed goes to `GET /model/issues`; when

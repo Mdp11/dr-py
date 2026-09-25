@@ -3,7 +3,8 @@
  * as one document in the same pass; the digest check; the long operations in
  * steps — their total and their longest step, for there is no scheduler here;
  * the heap one replica holds; staging, rewinding, rebasing and a delta; the
- * issue store's sweep, and the same edits through it, each revalidating; and
+ * issue store's sweep, and the same edits through it, each revalidating; the
+ * issue list the panel reads after a keystroke over many staged batches; and
  * the store with custom rules: its sweep, a rescan, a stage widened by the
  * rules' reach and a probe across a staged rule change.
  *
@@ -12,12 +13,14 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import {
+	appliesPopulation,
 	ArtifactSet,
 	compileRuleSets,
 	drain,
 	entityHash,
 	EVALUATIONS,
 	formatDigest,
+	issueListBody,
 	LiveIssues,
 	Metamodel,
 	Model,
@@ -85,20 +88,24 @@ const ROWS = {
 	unstageEntity: 'unstage one entity among 100 staged batches',
 	delta: 'apply a delta (99 changed, 40 new, 10 deleted), nothing staged',
 	sweep: 'sweep the issue store: every entity validated, in steps',
-	sweepFirst: '  its first step: every id listed',
+	sweepFirst: '  its first step',
 	sweepLongest: '  its longest step after the first',
 	sweepGroup: `sweep again with ${DUPLICATES.toLocaleString('en-US')} duplicates staged, one group`,
 	sweepGroupLongest: '  its longest step after the first',
+	uniqGroup: `uniqGroupOf over a ${DUPLICATES.toLocaleString('en-US')}-member group`,
 	liveStage: 'stage 1,000 ops + revalidation',
 	liveUnstage: 'unstage all + revalidation',
 	probe: 'origin probe (100 staged batches)',
 	liveDelta: 'delta over 100 staged + revalidation',
+	keystroke100: 'getModelIssues after a coalesced keystroke, 100 staged batches',
+	keystroke1000: 'getModelIssues after a coalesced keystroke, 1,000 staged batches',
 	rescan: 'rules rescan (population of the rule over the largest type)',
 	rescanLongest: '  its longest step',
 	rulesSweep: 'sweep with rules',
 	rulesSweepLongest: '  its longest step after the first',
 	rulesStage: 'stage 1,000 ops + revalidation with reach',
-	rulesProbe: 'origin probe, 100 staged batches + a staged rule change'
+	rulesProbe: 'origin probe, 100 staged batches + a staged rule change',
+	rulesPopulation: "  the changed rule's population, once"
 };
 type Row = keyof typeof ROWS;
 
@@ -384,8 +391,9 @@ function measureEdits(wc: WorkingCopy): void {
 
 /**
  * The issue store over the replica: its sweep, and edits like the ones above
- * through it, each revalidating what it may have moved. Then a sweep over a
- * group of duplicates, whose members each read the whole group.
+ * through it, each revalidating what it may have moved. Then a group of
+ * duplicates: one member's `uniqGroupOf`, and a sweep over it, whose members
+ * each read the whole group.
  */
 function measureIssues(wc: WorkingCopy): void {
 	const { model } = wc;
@@ -426,10 +434,43 @@ function measureIssues(wc: WorkingCopy): void {
 		properties: { ...like.props }
 	}));
 	wc.stage(copies);
+	// A staged entity lives under its temp id.
+	const copy = model.getElement('tmp_dup0');
+	const group = timed('uniqGroup', () => model.indexes.uniqGroupOf(copy));
+	if (group.length < DUPLICATES) throw new Error('the copies make no group');
 	const grouped = new LiveIssues(wc);
 	stepped('sweepGroup', 'sweepGroupLongest', grouped.sweepSteps(), null);
 	if (grouped.store.size < DUPLICATES) throw new Error('the copies make no group');
 	wc.unstage('all');
+	const sound = !wc.diverged && wc.verifyDigest();
+	if (!sound) throw new Error('the bench drove the replica off its digest');
+}
+
+/**
+ * The issue list the panel reads after a keystroke that merges into the
+ * latest staged batch, over 100 and then 1,000 staged batches, each read once
+ * before the keystroke as the panel's refetch reads it.
+ */
+function measureKeystrokes(wc: WorkingCopy): void {
+	const { model } = wc;
+	const live = new LiveIssues(wc);
+	drain(live.sweepSteps());
+	const [elements] = entities(model);
+	const named = sample(elements, 1000, 13, namedIn(model));
+	let staged = 0;
+	for (const [row, batches] of [
+		['keystroke100', 100],
+		['keystroke1000', 1000]
+	] as const) {
+		for (; staged < batches; staged++) live.stage([renamed(named[staged]!, `mine ${staged}`)]);
+		issueListBody(live);
+		const typed = live.stage([renamed(named[staged - 1]!, `mine ${staged - 1}!`)], {
+			coalesce: true
+		});
+		if (!typed.coalesced) throw new Error('the keystroke did not merge');
+		timed(row, () => issueListBody(live));
+	}
+	live.unstage('all');
 	const sound = !wc.diverged && wc.verifyDigest();
 	if (!sound) throw new Error('the bench drove the replica off its digest');
 }
@@ -453,9 +494,12 @@ function measureRules(wc: WorkingCopy): void {
 	sample(elements, 100, 3, namedIn(model)).forEach((element, i) =>
 		live.stage([renamed(element, `mine ${i}`)])
 	);
-	live.setRules({ working: compiledRules(wc, BENCH_RULES('4.0')), committed: rules });
+	const changed = compiledRules(wc, BENCH_RULES('4.0'));
+	live.setRules({ working: changed, committed: rules });
 	drain(live.sweepSteps());
 	timed('rulesProbe', () => live.origins());
+	const prodReplicas = changed.rules.filter((cr) => cr.rule.name === 'prod-replicas');
+	timed('rulesPopulation', () => appliesPopulation(model, { rules: prodReplicas }));
 	live.unstage('all');
 	const sound = !wc.diverged && wc.verifyDigest();
 	if (!sound) throw new Error('the bench drove the replica off its digest');
@@ -513,6 +557,7 @@ async function pass(): Promise<void> {
 
 	measureEdits(workingCopy);
 	measureIssues(workingCopy);
+	measureKeystrokes(workingCopy);
 	measureRules(workingCopy);
 }
 

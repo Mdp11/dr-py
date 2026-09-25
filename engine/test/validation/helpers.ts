@@ -5,9 +5,12 @@ import {
 	drain,
 	EMPTY_RULES,
 	issueKey,
+	issueOwner,
 	LiveIssues,
 	pyDumps,
 	PyFloat,
+	rulesStatusBody,
+	storeListBody,
 	type CompiledRules,
 	type IssueListBody,
 	type IssueOut,
@@ -108,6 +111,27 @@ export const answered = (body: readonly IssueOut[]) =>
 export function listedTags(body: IssueListBody, committed: Model, rules: CompiledRules): Origin[] {
 	const left = sweptKeys(committed, rules);
 	return body.issues.map((i) => (take(left, wireKey(i)) ? 'on_server' : 'uncommitted'));
+}
+
+/**
+ * `GET /model/issues` as the probe tags it: an issue owned inside the probe's
+ * dirty set `on_server` while a committed issue there matches it, every other
+ * one `on_server`. Reads `origins()` only, so it leaves the tag scope alone.
+ */
+export function probedListBody(live: LiveIssues): IssueListBody {
+	const { dirty, committed } = live.origins();
+	const staged = new Set(dirty);
+	const key = (i: {
+		severity: string;
+		message: string;
+		targetIds: readonly string[];
+		category: string;
+	}) => JSON.stringify([i.severity, i.message, i.targetIds, i.category]);
+	const left = new Map<string, number>();
+	for (const issue of committed) left.set(key(issue), (left.get(key(issue)) ?? 0) + 1);
+	return storeListBody(live.store, live.wc.rev, rulesStatusBody(live.rules.working), (i) =>
+		!staged.has(issueOwner(i)) || take(left, key(i)) ? 'on_server' : 'uncommitted'
+	);
 }
 
 /** A rule of a document: a JSON object, floats as `PyFloat`. */

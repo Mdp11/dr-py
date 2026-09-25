@@ -27,7 +27,7 @@ import { ruleSources } from '../rules/sources.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
 import { issueListBody, previewBody, validateBody } from '../validation/bodies.ts';
-import { LiveIssues, type Origins, type SweepStep } from '../validation/live.ts';
+import { LiveIssues, type SweepStep } from '../validation/live.ts';
 import { pyRepr } from '../value/repr.ts';
 import { readDeltaText, readTailText } from '../working/delta.ts';
 import type {
@@ -381,14 +381,12 @@ type Opening = {
 
 /**
  * The issue store of the ready replica: `seen`, how much of its `version` the
- * service has counted; `probed`, the origins its last answer read, so that a
- * new probe shows; `working` and `committed`, its rule sets as compiled
+ * service has counted; `working` and `committed`, its rule sets as compiled
  * against the replica's metamodel.
  */
 type Issues = {
 	readonly live: LiveIssues;
 	seen: number;
-	probed: Origins | null;
 	working: Compiled;
 	committed: Compiled;
 };
@@ -557,16 +555,16 @@ class Service {
 	}
 
 	/**
-	 * `body` over the store, after the probe it reads. A probe rewinds and
+	 * `body` over the store, with the probe it may run. A probe rewinds and
 	 * replays the staged batches — the committed images the digest check
 	 * walks are rebuilt — so a new one restarts the check.
 	 */
 	private answer<T>(live: LiveIssues, body: (live: LiveIssues) => T): T {
-		const issues = this.issuesOf!;
-		const before = issues.probed;
+		const probes = live.probes;
 		const probing = live.wc.staged().length > 0;
+		let out: T;
 		try {
-			issues.probed = live.origins();
+			out = body(live);
 		} catch (caught) {
 			// A replay that could not even put the batches back left the model below them.
 			if (live.wc.diverged) {
@@ -577,8 +575,8 @@ class Service {
 			if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
 			throw caught;
 		}
-		if (probing && issues.probed !== before) this.scheduler.restartBackground();
-		return body(live);
+		if (probing && live.probes !== probes) this.scheduler.restartBackground();
+		return out;
 	}
 
 	/**
@@ -1031,7 +1029,7 @@ class Service {
 		const live = new LiveIssues(wc, {
 			rules: { working: working.rules, committed: committed.rules }
 		});
-		this.issuesOf = { live, seen: live.version, probed: null, working, committed };
+		this.issuesOf = { live, seen: live.version, working, committed };
 		this.sweep(live);
 	}
 

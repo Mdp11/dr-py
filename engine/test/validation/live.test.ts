@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	applyBatch,
 	cmpCodePoint,
@@ -17,8 +17,10 @@ import {
 	shuffleAdjacency,
 	validateBody,
 	type CompiledRules,
+	type ElementRec,
 	type MetamodelDoc,
 	type ModelOp,
+	type RelRec,
 	type Value
 } from '../../src/index.ts';
 import { loadFixture } from '../golden/load.ts';
@@ -254,6 +256,210 @@ describe('an edit during the sweep', () => {
 			expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(wc)));
 		}
 	);
+});
+
+/** Passes `inner`'s entries on, counting each. */
+function* counted<T>(inner: Iterator<T>, count: () => void): Generator<T, undefined, void> {
+	for (;;) {
+		const next = inner.next();
+		if (next.done === true) return;
+		count();
+		yield next.value;
+	}
+}
+
+/**
+ * The entries `model`'s ordered reads hand out while `during` runs: every
+ * iterator they return counts, whoever holds it and whenever it is read.
+ */
+function pullCounter(model: Model) {
+	let counting = false;
+	let pulled = 0;
+	const count = () => {
+		if (counting) pulled++;
+	};
+	const elements = model.elements.bind(model);
+	const relationships = model.relationships.bind(model);
+	model.elements = () => counted<ElementRec>(elements(), count);
+	model.relationships = () => counted<RelRec>(relationships(), count);
+	return <T>(during: () => T): [T, number] => {
+		counting = true;
+		pulled = 0;
+		try {
+			return [during(), pulled];
+		} finally {
+			counting = false;
+		}
+	};
+}
+
+describe('the sweep lists in steps', () => {
+	it.each([1, 2])(
+		'seed %i: across entities restored at their old places and re-sorts, no step pulls more than its share and the store ends as a fresh sweep',
+		(seed) => {
+			const random = seededRandom(seed);
+			const server = new Server(grown(random, 3000), 1);
+			const wc = workingCopy(clone(server.model), server.rev);
+			const [sweepStep, sweepSkip] = [97, 1000];
+			const live = new LiveIssues(wc, { sweepStep, sweepSkip });
+			const listed = [...wc.model.elements()].map((e) => e.id);
+			const during = pullCounter(wc.model);
+			const steps = live.sweepSteps();
+			const pulls: number[] = [];
+			const reports: number[] = [];
+			const epoch = wc.model.orderEpoch;
+			let restores = 0;
+			let ended = false;
+			// A re-sort sends the sweep back over what it has passed, `sweepSkip` a
+			// step: bounded, in case one every few steps ever kept it from its end.
+			for (let k = 0; k < 1000 && !ended; k++) {
+				const [next, pulled] = during(() => steps.next());
+				pulls.push(pulled);
+				if (next.done === true) {
+					expect(next.value).toBe(true);
+					ended = true;
+					continue;
+				}
+				reports.push(next.value.done);
+				const done = next.value.done;
+				const present = (ids: readonly string[]) => ids.find((id) => wc.model.findElement(id));
+				if (k % 8 === 1) {
+					// one the sweep has passed, deleted with its relationships
+					const passed = present(listed.slice(0, done).toReversed());
+					if (passed !== undefined) live.stage([{ kind: 'delete_element', id: passed }]);
+				} else if (k % 8 === 3) {
+					// one it has not reached yet
+					const ahead = present(listed.slice(done + 200));
+					if (ahead !== undefined) live.stage([{ kind: 'delete_element', id: ahead }]);
+				} else if (k % 8 === 7 && wc.staged().length > 0) {
+					// both back at their old places; the next ordered reads re-sort
+					live.unstage('all');
+					restores++;
+					expect([...wc.model.elements()]).toHaveLength(wc.model.elementCount);
+					expect([...wc.model.relationships()]).toHaveLength(wc.model.relationshipCount);
+				} else if (random() < 0.3) {
+					attempt(() => live.stage(new Churn(random, `tmp_${k}_`).batch(wc.model)));
+				}
+			}
+			expect(ended).toBe(true);
+			expect(restores).toBeGreaterThan(3);
+			expect(wc.model.orderEpoch).toBeGreaterThanOrEqual(epoch + restores);
+			expect(reports[0]).toBe(0);
+			expect(Math.max(...pulls)).toBeLessThanOrEqual(sweepStep + sweepSkip);
+			expect(live.seeded).toBe(true);
+			expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(wc)));
+		}
+	);
+
+	it('reaches what a refused batch puts back at the end of the maps, unswept', () => {
+		const model = new Model(metamodel);
+		const ops: ModelOp[] = [];
+		for (let i = 0; i < 300; i++) {
+			ops.push({
+				kind: 'create_element',
+				temp_id: `tmp_o-${i}`,
+				id: `o-${i}`,
+				type_name: 'Other',
+				properties: { name: `o${i}` }
+			});
+		}
+		ops.splice(150, 0, {
+			kind: 'create_element',
+			temp_id: 'tmp_b-x',
+			id: 'b-x',
+			type_name: 'Blk',
+			properties: { name: 'b', n: 9, req: 'x' }
+		});
+		// Without `lbl`, which a Link requires: an issue of its own.
+		ops.push({
+			kind: 'create_relationship',
+			temp_id: 'tmp_l-x',
+			id: 'l-x',
+			type_name: 'Link',
+			source_id: 'b-x',
+			target_id: 'o-299'
+		});
+		applyBatch(model, ops);
+		const wc = workingCopy(model);
+		const fresh = byOwner(sweptFresh(wc));
+		expect(fresh.map(([owner]) => owner)).toEqual(expect.arrayContaining(['b-x']));
+		const live = new LiveIssues(wc, { sweepStep: 20 });
+		const steps = live.sweepSteps();
+		steps.next();
+		steps.next();
+		// b-x and its link go and come back, at the ends of the maps.
+		expect(() =>
+			live.stage([
+				{ kind: 'delete_element', id: 'b-x' },
+				{ kind: 'delete_element', id: 'gone' }
+			])
+		).toThrow(OpError);
+		expect(wc.model.findRelationship('l-x')).toBeDefined();
+		expect(drain(steps)).toBe(true);
+		expect(byOwner(live.store)).toEqual(fresh);
+	});
+
+	it('ends while every few steps a probe makes the staged creates again, past what it has pulled', () => {
+		const wc = workingCopy(grown(seededRandom(3), 1000));
+		const sweepStep = 50;
+		const live = new LiveIssues(wc, { sweepStep });
+		live.stage(
+			Array.from({ length: 600 }, (_, i): ModelOp => ({
+				kind: 'create_element',
+				temp_id: `tmp_new${i}`,
+				type_name: 'Other',
+				properties: { name: `n${i}` }
+			}))
+		);
+		// What a list of every id taken at the start would take, in steps.
+		const listed = Math.ceil((wc.model.elementCount + wc.model.relationshipCount) / sweepStep) + 2;
+		const steps = live.sweepSteps();
+		let taken = 0;
+		for (let next = steps.next(); next.done !== true && taken < 3 * listed; next = steps.next()) {
+			taken++;
+			if (taken % 5 === 0) {
+				live.stage([update('e-1', { name: `x${taken}` })]);
+				live.origins();
+			}
+		}
+		expect(taken).toBeLessThan(2 * listed);
+		expect(live.seeded).toBe(true);
+		expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(wc)));
+	});
+
+	it('reports done === total at its last step only, entities made meanwhile included', () => {
+		const random = seededRandom(9);
+		const wc = workingCopy(grown(random, 400));
+		const sweepStep = 50;
+		const live = new LiveIssues(wc, { sweepStep });
+		const during = pullCounter(wc.model);
+		const steps = live.sweepSteps();
+		const reports: { done: number; total: number }[] = [];
+		for (let k = 0; ; k++) {
+			const [next, pulled] = during(() => steps.next());
+			if (k === 0) expect(pulled).toBeLessThanOrEqual(sweepStep);
+			if (next.done === true) break;
+			reports.push(next.value);
+			for (let i = 0; i < 10; i++) {
+				live.stage([
+					{
+						kind: 'create_element',
+						temp_id: `tmp_${k}_${i}`,
+						type_name: 'Other',
+						properties: { name: `made ${k} ${i}` }
+					}
+				]);
+			}
+		}
+		expect(reports[0]!.done).toBeLessThanOrEqual(sweepStep);
+		const total = reports[0]!.total;
+		expect(reports.every((report) => report.total === total)).toBe(true);
+		expect(reports.slice(0, -1).every((report) => report.done < total)).toBe(true);
+		expect(reports.at(-1)!.done).toBe(total);
+		const dones = reports.map((report) => report.done);
+		expect(dones).toEqual(dones.toSorted((a, b) => a - b));
+		expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(wc)));
+	});
 });
 
 /** A replica of a small committed model, swept, with the server behind it. */
@@ -695,6 +901,104 @@ describe('rules in the store', () => {
 		expect(live.unusable).toBe('pattern');
 		await waiting;
 		expect(live.settled).toBe(true);
+	});
+});
+
+/**
+ * A swept replica where `b-1` has relationships both ways and a referencer:
+ * `b-2` names it in `ref`, it links to `o-1` and `b-3` owns it. `b-2` and
+ * `b-3` each have an issue.
+ */
+function linked() {
+	const blk = (id: string, properties: { [key: string]: Value }): ModelOp => ({
+		kind: 'create_element',
+		temp_id: `tmp_${id}`,
+		id,
+		type_name: 'Blk',
+		properties: { name: id, req: 'x', ...properties }
+	});
+	const rel = (id: string, type_name: string, source_id: string, target_id: string): ModelOp => ({
+		kind: 'create_relationship',
+		temp_id: `tmp_${id}`,
+		id,
+		type_name,
+		source_id,
+		target_id,
+		properties: type_name === 'Link' ? { lbl: 'l' } : {}
+	});
+	const model = new Model(metamodel);
+	applyBatch(model, [
+		blk('b-1', { n: 3 }),
+		blk('b-2', { n: 9, ref: 'b-1' }),
+		blk('b-3', { n: 9 }),
+		{ kind: 'create_element', temp_id: 'tmp_o-1', id: 'o-1', type_name: 'Other', properties: {} },
+		rel('l-1', 'Link', 'b-1', 'o-1'),
+		rel('w-1', 'Owns', 'b-3', 'b-1')
+	]);
+	const server = new Server(model, 1);
+	const wc = workingCopy(clone(model), server.rev);
+	const live = new LiveIssues(wc);
+	drain(live.sweepSteps());
+	return { server, wc, live };
+}
+
+describe("the panel's tags", () => {
+	it('after a merged keystroke on a staged element, come without a probe, its neighbourhood from the store', () => {
+		const { wc, live } = linked();
+		live.stage([update('b-1', { n: 7 })]);
+		expect(listed(live)).toContain('b-1: n: 7 above max 5.0 (uncommitted)');
+		const probes = vi.spyOn(wc, 'probeStaged');
+		expect(live.stage([update('b-1', { n: 8 })], { coalesce: true }).coalesced).toBe(true);
+		const body = issueListBody(live);
+		expect(probes).not.toHaveBeenCalled();
+		const scope = live.tagScope();
+		for (const id of ['b-2', 'b-3', 'o-1', 'l-1', 'w-1']) {
+			expect(scope.get(id), id).toEqual(live.store.issuesOf(id));
+		}
+		expect(scope.get('b-2')).toHaveLength(1);
+		expect(listed(live)).toEqual([
+			'b-1: n: 8 above max 5.0 (uncommitted)',
+			'b-2: n: 9 above max 5.0 (on_server)',
+			'b-3: n: 9 above max 5.0 (on_server)'
+		]);
+		// The same list as an exact probe tags it.
+		live.resetTagScope();
+		expect(issueListBody(live)).toEqual(body);
+		expect(probes).toHaveBeenCalledTimes(1);
+		expect(wc.model.getElement('b-1').props).toEqual({ name: 'b-1', req: 'x', n: 8 });
+	});
+
+	it('probe again after a delta, a change of the committed rules, and while the rule sets differ', () => {
+		const { server, wc, live } = linked();
+		live.stage([update('b-1', { n: 7 })]);
+		issueListBody(live);
+		const probes = vi.spyOn(wc, 'probeStaged');
+		const keystroke = (n: number) =>
+			expect(live.stage([update('b-1', { n })], { coalesce: true }).coalesced).toBe(true);
+		expect(live.applyDelta(server.commit([update('o-1', { name: 'o' })]).delta).status).toBe(
+			'applied'
+		);
+		issueListBody(live);
+		expect(probes).toHaveBeenCalledTimes(1);
+		keystroke(8);
+		issueListBody(live);
+		expect(probes).toHaveBeenCalledTimes(1);
+
+		live.setRules(both(ONE));
+		drain(live.sweepSteps());
+		issueListBody(live);
+		expect(probes).toHaveBeenCalledTimes(2);
+		keystroke(9);
+		issueListBody(live);
+		expect(probes).toHaveBeenCalledTimes(2);
+
+		live.setRules({ working: TWO, committed: ONE });
+		drain(live.sweepSteps());
+		issueListBody(live);
+		expect(probes).toHaveBeenCalledTimes(3);
+		keystroke(10);
+		issueListBody(live);
+		expect(probes).toHaveBeenCalledTimes(4);
 	});
 });
 

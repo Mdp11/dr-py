@@ -43,13 +43,16 @@ const NO_REFS: ReadonlySet<string> = new Set();
  * type's effective key (property values, then per relationship key the sorted
  * endpoint ids of exact-type edges) or, without a key, every property.
  * Buckets are keyed by a hash of that key's canonical text, so members of one
- * bucket are only candidates: the queries confirm with the exact text.
+ * bucket are only candidates: the queries confirm with the exact text, which
+ * is kept for every member of a bucket of two or more.
  */
 export class IndexSet {
 	/** Exact type name → its elements. */
 	readonly byType = new Map<string, Set<ElementRec>>();
 	/** Uniqueness hash → the one element filed under it, or a set of two or more. */
 	readonly buckets = new Map<number, ElementRec | Set<ElementRec>>();
+	/** Element → its uniqueness key text, for exactly the members of a bucket of two or more. */
+	readonly keyText = new Map<ElementRec, string>();
 	/** Entity id → the element ids its reference-typed properties name. */
 	readonly refsOf = new Map<string, ReadonlySet<string>>();
 	/** Element id → the entities naming it; a dangling target stays indexed. */
@@ -215,6 +218,7 @@ export class IndexSet {
 		const visited = () => (++done & 1023) === 0;
 		this.byType.clear();
 		this.buckets.clear();
+		this.keyText.clear();
 		this.refsOf.clear();
 		this.referencers.clear();
 		for (const element of model.elements()) {
@@ -254,6 +258,11 @@ export class IndexSet {
 
 	/** The canonical text of the element's identity; equal texts mean identical elements. */
 	uniqKey(element: ElementRec): string {
+		return this.keyText.get(element) ?? this.freshKey(element);
+	}
+
+	/** `uniqKey` computed from the element as it now stands. */
+	private freshKey(element: ElementRec): string {
 		const owner = element.parents.length > 0 ? element.parents[0]!.source.id : null;
 		const spec = this.keySpec(element.typeName);
 		const signature: Value =
@@ -286,29 +295,47 @@ export class IndexSet {
 		return ids.sort(cmpCodePoint);
 	}
 
-	private addToGroup(element: ElementRec): void {
-		const hash = this.hashKey(this.uniqKey(element));
+	/** Files the element under the hash of `text`, its fresh key. */
+	private addToGroup(element: ElementRec, text = this.freshKey(element)): void {
+		const hash = this.hashKey(text);
 		element.uniq = hash;
 		const bucket = this.buckets.get(hash);
-		if (bucket === undefined) this.buckets.set(hash, element);
-		else if (bucket instanceof Set) bucket.add(element);
-		else this.buckets.set(hash, new Set([bucket, element]));
+		if (bucket === undefined) {
+			this.buckets.set(hash, element);
+			return;
+		}
+		if (bucket instanceof Set) {
+			bucket.add(element);
+		} else {
+			this.buckets.set(hash, new Set([bucket, element]));
+			this.keyText.set(bucket, this.freshKey(bucket));
+		}
+		this.keyText.set(element, text);
 	}
 
 	private removeFromGroup(element: ElementRec): void {
+		this.keyText.delete(element);
 		const bucket = this.buckets.get(element.uniq);
 		if (bucket === element) {
 			this.buckets.delete(element.uniq);
 		} else if (bucket instanceof Set && bucket.delete(element) && bucket.size === 1) {
-			for (const last of bucket) this.buckets.set(element.uniq, last);
+			for (const last of bucket) {
+				this.buckets.set(element.uniq, last);
+				this.keyText.delete(last);
+			}
 		}
 	}
 
 	private rekey(element: ElementRec): void {
-		// An unchanged hash is an unchanged bucket, whatever the key texts are.
-		if (this.hashKey(this.uniqKey(element)) === element.uniq) return;
+		const text = this.freshKey(element);
+		if (this.hashKey(text) === element.uniq) {
+			// An unchanged hash is an unchanged bucket, whatever the key texts
+			// are; a shared one keeps the text the element has now.
+			if (this.keyText.has(element)) this.keyText.set(element, text);
+			return;
+		}
 		this.removeFromGroup(element);
-		this.addToGroup(element);
+		this.addToGroup(element, text);
 	}
 
 	private isPresent(element: ElementRec): boolean {
