@@ -21,6 +21,8 @@ export interface ValidateOptions {
 	baseRev?: number;
 	/** The engine's staged batches `ops` are, in order: the engine validates those. */
 	batchIds?: readonly number[];
+	/** A rule set is staged: the engine validates with it, the server knows none. */
+	rulesStaged?: boolean;
 }
 
 /**
@@ -51,7 +53,10 @@ export function validateModel(options?: ValidateOptions, cfg?: ClientConfig): Pr
 		// With nothing staged the server makes a full run, which names one
 		// member of a containment cycle where the engine names every element
 		// on it; `getModelIssues` compares the unstaged state instead.
-		{ shadow: ops.length === 0 ? 'never' : comparableWhileStaged(ops) }
+		{
+			shadow:
+				ops.length === 0 || options?.rulesStaged === true ? 'never' : comparableWhileStaged(ops)
+		}
 	);
 }
 

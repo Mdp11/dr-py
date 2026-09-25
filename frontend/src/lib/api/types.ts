@@ -394,6 +394,19 @@ export const MetamodelLintErrorSchema = z.object({
 });
 export type MetamodelLintError = z.infer<typeof MetamodelLintErrorSchema>;
 
+/**
+ * `POST /rules/parse`'s body, and a rule set's parse on a payload item.
+ * `document` is JSON TEXT the engine reads as it came: parsed here it would
+ * lose a float's `.0` and integers past 2^53. `null` when `ok` is false;
+ * `errors` then holds the one parse error `/rules/lint` gives.
+ */
+export const RulesParseSchema = z.object({
+	ok: z.boolean(),
+	document: z.string().nullable(),
+	errors: z.array(MetamodelLintErrorSchema).default([])
+});
+export type RulesParseOut = z.infer<typeof RulesParseSchema>;
+
 export const MetamodelLintSchema = z.object({
 	ok: z.boolean(),
 	errors: z.array(MetamodelLintErrorSchema).default([])
@@ -623,8 +636,14 @@ export const ArtifactSchema = ArtifactHeaderSchema.extend({
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
+/** A payload item: a `validation_rules` artifact carries the parse of its YAML, any other `null`. */
+export const ArtifactPayloadSchema = ArtifactSchema.extend({
+	rules: RulesParseSchema.nullable().optional()
+});
+export type ArtifactPayload = z.infer<typeof ArtifactPayloadSchema>;
+
 export const ArtifactPayloadListSchema = z.object({
-	items: z.array(ArtifactSchema).default([])
+	items: z.array(ArtifactPayloadSchema).default([])
 });
 export type ArtifactPayloadList = z.infer<typeof ArtifactPayloadListSchema>;
 

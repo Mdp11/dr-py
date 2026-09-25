@@ -21,6 +21,16 @@ import {
 } from '$lib/engine/sync';
 import { connectInProcess } from '$lib/engine/testing';
 import { BASE, fakeProject, hold, PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
+import {
+	DE_ONLY,
+	NOT_DE,
+	parsed,
+	ruleIssues,
+	ruleSet,
+	rulesPayload,
+	yamlOf
+} from '$lib/engine/__tests__/support/rules';
+import type { ArtifactPayload } from '$lib/api/types';
 import * as openJourney from '../open-journey';
 import { clearActiveProject, setActiveProject } from '../active-project.svelte';
 import {
@@ -2008,16 +2018,26 @@ describe('the issues on the engine', () => {
 	});
 
 	describe('and the artifact follower', () => {
-		const rules = {
-			id: 'r1',
-			kind: 'validation_rules',
-			name: 'Rules',
-			artifact_rev: 1,
-			updated_at: '2026-09-24T00:00:00Z',
-			updated_by: null,
-			entry_points: null,
-			payload: { text: '' }
-		};
+		const A = yamlOf(DE_ONLY);
+		const rules = ruleSet('r1', 'Rules', A, parsed(DE_ONLY));
+		const headerOf = ({
+			id,
+			kind,
+			name,
+			artifact_rev,
+			updated_at,
+			updated_by,
+			entry_points
+		}: ArtifactPayload) => ({
+			id,
+			kind,
+			name,
+			artifact_rev,
+			updated_at,
+			updated_by,
+			entry_points
+		});
+		const byKey = (issues: unknown[]) => issues.map((issue) => JSON.stringify(issue)).sort();
 
 		/** `project` whose payload fetches wait for `held.whole` (a whole load) or `held.named`. */
 		function holdPayloads(held: { whole?: Promise<void>; named?: Promise<void> }) {
@@ -2037,7 +2057,7 @@ describe('the issues on the engine', () => {
 			return project;
 		}
 
-		it('a rules artifact whose load is slow: the server answers until the follower has loaded, and after it', async () => {
+		it('a rules artifact whose load is slow: the gate stays closed until the follower has loaded, then the engine answers with its rule issues after one refetch', async () => {
 			const load = hold();
 			const project = holdPayloads({ whole: load.arrive() });
 			project.artifacts.set('r1', rules);
@@ -2045,7 +2065,7 @@ describe('the issues on the engine', () => {
 			if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
 			await load.reached;
 
-			// Swept, but the engine does not yet hold the artifact it must refuse over.
+			// Swept, but the engine does not yet hold the rule set its list must carry.
 			expect(engineSide('issues')).toBe('server');
 			await vi.waitFor(() => expect(answers).toHaveLength(1));
 			await refetchIssues();
@@ -2054,11 +2074,12 @@ describe('the issues on the engine', () => {
 
 			load.release();
 			await vi.waitFor(() => expect(engineSide('issues')).toBe('engine'));
-			// The load and the rules it brings each schedule a refetch; the engine refuses it.
-			await vi.waitFor(() => expect(answers.length).toBeGreaterThan(2));
+			const listed = ruleIssues('de-only', NOT_DE, 'on_server');
+			await vi.waitFor(() => expect(getLiveIssues()).toEqual(listed));
 			await sleep(350);
-			expect(answers.slice(2).every((answer) => answer.seeded && answer.server)).toBe(true);
-			expect(getLiveIssues()).toEqual([FROM_SERVER]);
+			// The load and the rules it brings share one refetch, answered after the rescan.
+			expect(answers.slice(2)).toEqual([{ seeded: true, server: false, issues: listed }]);
+			expect(s.project.rulesParsed).toEqual([]);
 		});
 
 		it("no rules artifact, a slow load: the server's list until it lands, then the engine's", async () => {
@@ -2079,7 +2100,7 @@ describe('the issues on the engine', () => {
 			expect(answers.at(-1)).toMatchObject({ seeded: true, server: false });
 		});
 
-		it("a rules artifact a peer commits while the engine's list is shown: the list ends at the server", async () => {
+		it("a rules artifact a peer commits while the engine's list is shown: the engine's list takes its rules", async () => {
 			const held: { named?: Promise<void> } = {};
 			const { s, answers } = await issuesStore(holdPayloads(held));
 			if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
@@ -2090,9 +2111,7 @@ describe('the issues on the engine', () => {
 			const fetched = hold();
 			held.named = fetched.arrive();
 			s.project.artifacts.set('r1', rules);
-			const { id, kind, name, artifact_rev, updated_at, updated_by, entry_points } = rules;
-			const created = { id, kind, name, artifact_rev, updated_at, updated_by, entry_points };
-			handReplicaFeed({ type: 'artifact', action: 'created', artifact: created }, '{}');
+			handReplicaFeed({ type: 'artifact', action: 'created', artifact: headerOf(rules) }, '{}');
 			await fetched.reached;
 			// A refetch that beats the payload fetch reads the engine, which does not know of the rules yet.
 			emit(rename('e_000001', TOO_LONG));
@@ -2101,8 +2120,60 @@ describe('the issues on the engine', () => {
 			expect(answers.at(-1)).toMatchObject({ server: false });
 
 			fetched.release();
-			await vi.waitFor(() => expect(getLiveIssues()).toEqual([FROM_SERVER]));
-			expect(answers.at(-1)).toMatchObject({ seeded: true, server: true });
+			const listed = [tooLong, ...ruleIssues('de-only', NOT_DE, 'on_server')];
+			await vi.waitFor(() => expect(byKey(getLiveIssues())).toEqual(byKey(listed)));
+			expect(answers.every((answer) => !answer.server)).toBe(true);
+		});
+
+		it('the user commits a staged rules create: each rule issue is listed once, uncommitted until the refresh lands, then on_server', async () => {
+			const held: { named?: Promise<void> } = {};
+			const project = holdPayloads(held);
+			project.rulesParses.set(A, parsed(DE_ONLY));
+			const { s, answers } = await issuesStore(project);
+			if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
+			await vi.waitFor(() => expect(engineSide('issues')).toBe('engine'));
+			await vi.waitFor(() => expect(answers).toHaveLength(1));
+
+			const tempId = stageArtifactCreate('validation_rules', 'R', rulesPayload(A), null);
+			const staged = ruleIssues('de-only', NOT_DE, 'uncommitted');
+			await vi.waitFor(() => expect(getLiveIssues()).toEqual(staged));
+			expect(project.rulesParsed).toEqual([A]);
+			const from = answers.length;
+
+			// The commit: the buffer is cleared and the commit announced in one run.
+			const fetched = hold();
+			held.named = fetched.arrive();
+			const committed = ruleSet('r9', 'R', A, parsed(DE_ONLY));
+			project.artifacts.set('r9', committed);
+			clearStagedArtifacts();
+			notifyArtifactCommit({
+				idMap: { [tempId]: 'r9' },
+				changed: [headerOf(committed)],
+				deletedIds: []
+			});
+			await fetched.reached;
+			// While the refresh is out, the rule set stands under its real id alone, still staged.
+			await refetchIssues();
+			expect(getLiveIssues()).toEqual(staged);
+
+			fetched.release();
+			const listed = ruleIssues('de-only', NOT_DE, 'on_server');
+			await vi.waitFor(() => expect(getLiveIssues()).toEqual(listed));
+			await sleep(350);
+			expect(getLiveIssues()).toEqual(listed);
+			const after = answers.slice(from);
+			expect(after.every((answer) => !answer.server)).toBe(true);
+			const firstLanded = after.findIndex(
+				(answer) => byKey(answer.issues).join() === byKey(listed).join()
+			);
+			expect(firstLanded).toBeGreaterThanOrEqual(0);
+			expect(
+				after.slice(0, firstLanded).every((a) => byKey(a.issues).join() === byKey(staged).join())
+			).toBe(true);
+			expect(
+				after.slice(firstLanded).every((a) => byKey(a.issues).join() === byKey(listed).join())
+			).toBe(true);
+			expect(project.rulesParsed).toEqual([A]);
 		});
 	});
 });

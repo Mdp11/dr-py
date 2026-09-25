@@ -1,13 +1,16 @@
 import type { WireArtifact, WireStagedArtifact } from '$engine';
-import type { Artifact, ArtifactHeader } from '$lib/api/types';
+import type { ArtifactHeader, ArtifactPayload } from '$lib/api/types';
+import { engineParse, RULES_KIND, type RulesParser } from './rules-parse';
 import type { ReplicaSync } from './sync';
 
 export type ArtifactFollowerDeps = {
 	sync: Pick<ReplicaSync, 'setArtifacts' | 'putArtifacts' | 'setStagedArtifacts'>;
 	/** Every artifact of the project with its payload, or the named ids it still has. */
-	payloads(ids?: readonly string[]): Promise<Artifact[]>;
+	payloads(ids?: readonly string[]): Promise<ArtifactPayload[]>;
 	/** The staged buffer as plain copies, in staging order. */
 	staged(): WireStagedArtifact[];
+	/** Parses the staged rule sets' YAML; one per follower. */
+	parser: RulesParser;
 	/** Waited out before a failed load's one retry; absent, the retry goes at once. */
 	pause?(): Promise<void>;
 	/** Called once, when the first load has landed and `loaded()` turned true. */
@@ -36,6 +39,8 @@ export type ArtifactFollower = {
 		deletedIds: string[];
 	}): void;
 	stagedChanged(): void;
+	/** The kind of the committed artifact `id`, as the engine was last handed it. */
+	kindOf(id: string): string | undefined;
 	/**
 	 * Whether the engine's staged overlay holds entries the buffer does not:
 	 * a commit's, while its refresh is out, or a failed refresh's, until
@@ -44,20 +49,18 @@ export type ArtifactFollower = {
 	hasOverlay(): boolean;
 	/** Every answer that comes after it is dropped, and nothing more is asked. */
 	stop(): void;
-	/** Resolves once no fetch is out and no staged push waits. */
+	/** Resolves once no fetch or rules parse is out and no staged push waits. */
 	settled(): Promise<void>;
 };
 
 /** Past this many ids, one fetch of everything costs less than a long query. */
 const NAMED_MAX = 100;
 
-const wire = ({ id, kind, name, artifact_rev, payload }: Artifact): WireArtifact => ({
-	id,
-	kind,
-	name,
-	artifact_rev,
-	payload
-});
+/** A rule set whose item carries no parse the engine can read goes without one, which it refuses. */
+function wire({ id, kind, name, artifact_rev, payload, rules }: ArtifactPayload): WireArtifact {
+	const parse = rules === undefined || rules === null ? null : engineParse(rules);
+	return { id, kind, name, artifact_rev, payload, ...(parse === null ? {} : { rules: parse }) };
+}
 
 /** A staged entry a commit carried, and the committed id it stands for: a create's real one. */
 type Held = { entry: WireStagedArtifact; stands: string };
@@ -90,13 +93,16 @@ function compose(
 /**
  * Keeps the sync's artifact context the project's: its committed payloads
  * and the frontend's staged buffer. Fetches run one at a time in the order
- * asked, so a later answer never lands under an earlier one.
+ * asked, so a later answer never lands under an earlier one. Every staged
+ * push carries the rule sets' parses through `deps.parser`, `'pending'`
+ * while one is out, and goes again when it lands.
  *
  * A commit's refresh holds the staged pushes. At once, the staged overlay
  * becomes the entries the commit carried, each created one ALSO under its
- * real id, with the buffer over them: until one `putArtifacts` brings the
- * payloads with the buffer as it is then, the engine reads the working copy
- * the commit came from under either id. A failed refresh keeps its entries
+ * real id — a created rule set under its real id alone — with the buffer
+ * over them: until one `putArtifacts` brings the payloads with the buffer as
+ * it is then, the engine reads the working copy the commit came from under
+ * either id. A failed refresh keeps its entries
  * in the overlay, each only until a fetch brings newer committed news of the
  * artifact it stands for, and asks one `load()` at once. A failed load asks
  * once more after `pause()`; any other failed fetch leaves the context as it
@@ -108,6 +114,8 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 	let loadedOnce = false;
 	/** The rev of every committed artifact the engine was handed. */
 	let revs = new Map<string, number>();
+	/** The kind of every committed artifact the engine was handed. */
+	let kinds = new Map<string, string>();
 	let chain: Promise<void> = Promise.resolve();
 	let running = 0;
 	/** The buffer as last read: at a commit, the entries it carried. */
@@ -137,28 +145,39 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 
 	const newer = (mark: ArtifactMark): boolean => (revs.get(mark.id) ?? -1) < mark.artifact_rev;
 
-	const fetchNamed = async (ids: readonly string[]): Promise<Artifact[]> => {
+	const fetchNamed = async (ids: readonly string[]): Promise<ArtifactPayload[]> => {
 		if (ids.length <= NAMED_MAX) return deps.payloads(ids);
 		const wanted = new Set(ids);
 		return (await deps.payloads()).filter((artifact) => wanted.has(artifact.id));
 	};
 
-	const remember = (changed: readonly Artifact[], deletedIds: readonly string[]) => {
-		for (const artifact of changed) revs.set(artifact.id, artifact.artifact_rev);
-		for (const id of deletedIds) revs.delete(id);
+	const remember = (changed: readonly ArtifactPayload[], deletedIds: readonly string[]) => {
+		for (const artifact of changed) {
+			revs.set(artifact.id, artifact.artifact_rev);
+			kinds.set(artifact.id, artifact.kind);
+		}
+		for (const id of deletedIds) {
+			revs.delete(id);
+			kinds.delete(id);
+		}
 	};
+
+	const kindOf = (id: string): string | undefined => kinds.get(id);
 
 	const read = (): WireStagedArtifact[] => {
 		latest = deps.staged();
 		return latest;
 	};
 
-	/** What the engine's staged overlay should be: the buffer over every held or carried entry. */
+	/**
+	 * What the engine's staged overlay should be: the buffer over every held or
+	 * carried entry, each rule set with its parse.
+	 */
 	const overlay = (): WireStagedArtifact[] => {
 		const buffer = read();
-		if (holds.size === 0 && carried.length === 0) return buffer;
+		if (holds.size === 0 && carried.length === 0) return deps.parser.attach(buffer, kindOf);
 		const base = [...carried, ...[...holds].flat()].map((held) => held.entry);
-		return compose(base, buffer);
+		return deps.parser.attach(compose(base, buffer), kindOf);
 	};
 
 	/**
@@ -194,9 +213,19 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 		});
 	};
 
+	/** Whether a staged update names a rule set by an id whose kind moved from `before`. */
+	const rulesKindMoved = (before: ReadonlyMap<string, string>): boolean =>
+		read().some(
+			(entry) =>
+				entry.op === 'update' &&
+				(before.get(entry.id) === RULES_KIND) !== (kinds.get(entry.id) === RULES_KIND)
+		);
+
+	const offParsed = deps.parser.onParsed(stagedChanged);
+
 	const load = () => {
 		enqueue(async () => {
-			let list: Artifact[];
+			let list: ArtifactPayload[];
 			try {
 				list = await deps.payloads();
 			} catch {
@@ -210,7 +239,10 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 			const first = !loadedOnce;
 			loadedOnce = true;
 			revs = new Map(list.map((artifact) => [artifact.id, artifact.artifact_rev]));
-			if (carried.length > 0) {
+			const before = kinds;
+			kinds = new Map(list.map((artifact) => [artifact.id, artifact.kind]));
+			// A staged update pushed before its kind was known went without its parse.
+			if (carried.length > 0 || (holds.size === 0 && rulesKindMoved(before))) {
 				carried = [];
 				pushStaged();
 			}
@@ -240,9 +272,13 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 					if (corrected) pushStaged();
 					return;
 				}
-				if (corrected) sync.putArtifacts(got.map(wire), [], overlay());
-				else sync.putArtifacts(got.map(wire), []);
+				const before = new Map(kinds);
 				remember(got, []);
+				if (corrected || (holds.size === 0 && rulesKindMoved(before))) {
+					sync.putArtifacts(got.map(wire), [], overlay());
+				} else {
+					sync.putArtifacts(got.map(wire), []);
+				}
 			});
 		},
 
@@ -258,8 +294,15 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 			const aliases: Held[] = [];
 			for (const entry of latest) {
 				const realId = entry.op === 'create' ? idMap[entry.id] : undefined;
-				held.push({ entry, stands: realId ?? entry.id });
-				if (realId !== undefined) aliases.push({ entry: { ...entry, id: realId }, stands: realId });
+				if (realId === undefined) {
+					held.push({ entry, stands: entry.id });
+				} else if (entry.op === 'create' && entry.kind === RULES_KIND) {
+					// Under its real id alone: nothing names a rule set, and two copies compile every rule twice.
+					held.push({ entry: { ...entry, id: realId }, stands: realId });
+				} else {
+					held.push({ entry, stands: realId });
+					aliases.push({ entry: { ...entry, id: realId }, stands: realId });
+				}
 			}
 			held.push(...aliases);
 			holds.add(held);
@@ -272,8 +315,9 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 					if (stopped) return;
 					holds.delete(held);
 					drop([...changed.map((mark) => mark.id), ...deletedIds]);
-					sync.putArtifacts(got.map(wire), deletedIds, overlay());
+					// Before the overlay: an update staged over a created rule set needs its kind.
 					remember(got, deletedIds);
+					sync.putArtifacts(got.map(wire), deletedIds, overlay());
 					landed = true;
 				} finally {
 					if (!landed && !stopped) {
@@ -289,6 +333,8 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 
 		stagedChanged,
 
+		kindOf,
+
 		hasOverlay() {
 			return holds.size > 0 || carried.length > 0;
 		},
@@ -299,11 +345,15 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 
 		stop() {
 			stopped = true;
+			offParsed();
 		},
 
-		settled() {
-			if (running === 0 && !pushQueued) return Promise.resolve();
-			return new Promise<void>((resolve) => idle.push(resolve));
+		async settled() {
+			// A landed parse queues a push, and a push may ask a parse again.
+			while (running > 0 || pushQueued || deps.parser.busy()) {
+				if (deps.parser.busy()) await deps.parser.settled();
+				else await new Promise<void>((resolve) => idle.push(resolve));
+			}
 		}
 	};
 }

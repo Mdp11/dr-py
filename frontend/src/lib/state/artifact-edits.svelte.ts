@@ -318,6 +318,20 @@ export function hasStagedArtifactOp(id: string): boolean {
 }
 
 /**
+ * Whether a rule set is staged: a create of one, or an update or delete of
+ * one — its kind the delete's header, else `kindOf(id)`, since an update
+ * records none.
+ */
+export function hasStagedRules(kindOf: (id: string) => string | undefined): boolean {
+	for (const entry of _staged.values()) {
+		const kind =
+			entry.kind === 'create' ? entry.artifactKind : (entry.header?.kind ?? kindOf(entry.id));
+		if (kind === 'validation_rules') return true;
+	}
+	return false;
+}
+
+/**
  * Project staged entries to the wire `ArtifactOp` union, in insertion order.
  * `update_artifact.name`/`.payload` are OMITTED (not sent as `undefined`)
  * when unset: the backend treats an absent key as "unchanged", so a

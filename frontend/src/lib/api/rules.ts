@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { apiFetch, type ClientConfig } from './client';
-import { MetamodelLintErrorSchema } from './types';
+import { MetamodelLintErrorSchema, RulesParseSchema, type RulesParseOut } from './types';
 
 /** One rules-lint finding. Position is best-effort and 1-based: only a YAML
  * PARSE error carries a line/column (from the parser mark); a schema violation
@@ -38,4 +38,17 @@ export type RulesLint = z.infer<typeof RulesLintSchema>;
  */
 export function lintRules(yaml: string, cfg?: ClientConfig): Promise<RulesLint> {
 	return apiFetch('/rules/lint', { method: 'POST', body: { yaml }, schema: RulesLintSchema }, cfg);
+}
+
+/**
+ * The rule set `yaml` parsed for the engine: its document, or the one parse
+ * error lint gives, answered 200 either way. A rejected envelope is a 422, and
+ * so is YAML whose scalars the server's loader cannot construct.
+ */
+export function parseRules(yaml: string, cfg?: ClientConfig): Promise<RulesParseOut> {
+	return apiFetch(
+		'/rules/parse',
+		{ method: 'POST', body: { yaml }, schema: RulesParseSchema },
+		cfg
+	);
 }

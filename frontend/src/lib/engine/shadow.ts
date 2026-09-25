@@ -117,9 +117,11 @@ function same(surface: Surface, a: Outcome, b: Outcome): boolean {
 
 /**
  * `summary` compares without `issue_counts` and `undo_depth`. `issues`
- * compares its lists as multisets: an issue list, a bare list, and a
- * preview's `structural_blockers` and `issues`. A body `truncated` at the
- * cap compares without its `issues`: each side keeps its own subset.
+ * compares its lists as multisets: an issue list, a bare list, a preview's
+ * `structural_blockers` and `issues`, and `rules_status.skipped`, which
+ * lists rule sets in an order the server's collation decides. A body
+ * `truncated` at the cap compares without its `issues`: each side keeps its
+ * own subset.
  */
 function present(surface: Surface, value: unknown): unknown {
 	if (surface === 'issues') {
@@ -128,9 +130,11 @@ function present(surface: Surface, value: unknown): unknown {
 		const truncated = value['truncated'] === true;
 		const lists = Object.entries(value)
 			.filter(([key]) => !(truncated && key === 'issues'))
-			.map(([key, item]) =>
-				ISSUE_LISTS.has(key) && Array.isArray(item) ? [key, byIssueKey(item)] : [key, item]
-			);
+			.map(([key, item]) => {
+				if (ISSUE_LISTS.has(key) && Array.isArray(item)) return [key, byIssueKey(item)];
+				if (key === 'rules_status' && isRecord(item)) return [key, bySkipKey(item)];
+				return [key, item];
+			});
 		return Object.fromEntries(lists);
 	}
 	if (surface !== 'summary' || !isRecord(value)) return value;
@@ -143,11 +147,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** `issues` in one order whatever order they came in. */
-function byIssueKey(issues: readonly unknown[]): unknown[] {
-	const keyed = issues.map((issue) => ({ issue, key: issueKey(issue) }));
+/** `items` in one order whatever order they came in. */
+function sortedBy(items: readonly unknown[], key: (item: unknown) => string): unknown[] {
+	const keyed = items.map((item) => ({ item, key: key(item) }));
 	keyed.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-	return keyed.map(({ issue }) => issue);
+	return keyed.map(({ item }) => item);
+}
+
+function byIssueKey(issues: readonly unknown[]): unknown[] {
+	return sortedBy(issues, issueKey);
+}
+
+/** `rules_status` with its `skipped` in one order whatever order they came in. */
+function bySkipKey(status: Record<string, unknown>): Record<string, unknown> {
+	const skipped = status['skipped'];
+	return Array.isArray(skipped) ? { ...status, skipped: sortedBy(skipped, skipKey) } : status;
+}
+
+function skipKey(skip: unknown): string {
+	if (!isRecord(skip)) return JSON.stringify(skip) ?? '';
+	const { artifact_id, rule, reason, set_name } = skip;
+	return JSON.stringify([artifact_id, rule, reason, set_name]);
 }
 
 function issueKey(issue: unknown): string {

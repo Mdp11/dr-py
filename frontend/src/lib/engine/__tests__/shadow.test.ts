@@ -436,6 +436,29 @@ describe('createShadow', () => {
 			expect(await differs([a, a, b], [b, a, a])).toBe(false);
 		});
 
+		it('two lists differing only in the order of rules_status.skipped are the same; in a skip, not', async () => {
+			const skip = (artifact_id: string, rule: string, reason = 'drift') => ({
+				artifact_id,
+				set_name: 'Rules',
+				rule,
+				reason
+			});
+			const list = (skipped: unknown[]) => ({
+				model_rev: 2,
+				issues: [a],
+				counts: { error: 1 },
+				truncated: false,
+				rules_status: { total: 1, skipped, eval_errors: {} }
+			});
+			const skips = [skip('r1', 'x'), skip('r1', ''), skip('r2', 'x'), skip('r1', 'x', 'other')];
+			expect(await differs(list(skips), list([...skips].reverse()))).toBe(false);
+			expect(await differs(list(skips), list([skips[1], skips[0], skips[3], skips[2]]))).toBe(
+				false
+			);
+			expect(await differs(list(skips), list([...skips.slice(1), skip('r3', 'x')]))).toBe(true);
+			expect(await differs(list(skips), list(skips.slice(1)))).toBe(true);
+		});
+
 		it('a truncated list compares without its issues, and only a truncated one', async () => {
 			const list = (issues: unknown[], truncated: boolean, counts = { error: 9000 }) => ({
 				model_rev: 2,

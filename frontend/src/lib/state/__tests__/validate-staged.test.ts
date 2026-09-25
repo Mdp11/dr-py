@@ -3,7 +3,19 @@ import { http, HttpResponse } from 'msw';
 
 import { server } from '$lib/api/__tests__/server';
 import * as validationApi from '$lib/api/validation';
-import { PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
+import { engineSide } from '$lib/api/engine-route';
+import { fakeProject, PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
+import {
+	DE_ONLY,
+	DE_OR_FR,
+	NOT_DE_OR_FR,
+	parsed,
+	ruleIssues,
+	ruleSet,
+	rulesPayload,
+	yamlOf
+} from '$lib/engine/__tests__/support/rules';
+import { resetArtifactEdits, stageArtifactUpdate } from '../artifact-edits.svelte';
 import { cancelIssuesRefetch, emit, ensureElements, stagedSettled } from '../model.svelte';
 import {
 	validateAll,
@@ -141,7 +153,7 @@ describe('validateAll on the engine side', () => {
 	});
 
 	/** The engine store; `/model/validate` records what it is sent and answers nothing. */
-	async function open(surfaces: { [surface: string]: string } = {}) {
+	async function open(surfaces: { [surface: string]: string } = {}, project = fakeProject()) {
 		// The suites above name their server; these reach the active project's.
 		setModelApiConfig(undefined);
 		const bodies: unknown[] = [];
@@ -153,7 +165,7 @@ describe('validateAll on the engine side', () => {
 			}),
 			http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] }))
 		);
-		store = await engineStore({ surfaces });
+		store = await engineStore({ surfaces, project });
 		await ensureElements(['e_000001']);
 		return { s: store, bodies };
 	}
@@ -201,5 +213,36 @@ describe('validateAll on the engine side', () => {
 		await validateAll();
 
 		expect(bodies).toEqual([{ ops: [op], base_rev: 0 }]);
+	});
+
+	it('with a rule set staged, asks for no shadow, and the engine validates the staged rules', async () => {
+		const project = fakeProject();
+		const A = yamlOf(DE_ONLY);
+		const B = yamlOf(DE_OR_FR);
+		project.artifacts.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
+		project.rulesParses.set(B, parsed(DE_OR_FR));
+		const { s, bodies } = await open({ issues: 'engine' }, project);
+		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
+		await vi.waitFor(() => expect(engineSide('issues')).toBe('engine'));
+
+		try {
+			stageArtifactUpdate('r1', { payload: rulesPayload(B) });
+			await vi.waitFor(async () =>
+				expect((await validationApi.getModelIssues()).issues).toEqual(
+					ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted')
+				)
+			);
+			expect(project.rulesParsed).toEqual([B]);
+			const spy = vi.spyOn(validationApi, 'validateModel');
+			const issues = await validateAll();
+
+			expect(spy).toHaveBeenCalledWith({ batchIds: [], rulesStaged: true }, undefined);
+			expect(issues.filter((issue) => issue.origin === 'uncommitted')).toEqual(
+				ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted')
+			);
+			expect(bodies).toEqual([]);
+		} finally {
+			resetArtifactEdits();
+		}
 	});
 });

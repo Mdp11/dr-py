@@ -1,11 +1,24 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { WireArtifact, WireStagedArtifact } from '$engine';
 import { ValidationError } from '$lib/api/errors';
 import { server } from '$lib/api/__tests__/server';
-import type { Artifact } from '$lib/api/types';
+import type { Artifact, ArtifactPayload, RulesParseOut } from '$lib/api/types';
 import { createArtifactFollower, type ArtifactFollower, type ArtifactMark } from '../artifacts';
+import { createRulesParser } from '../rules-parse';
 import type { ReplicaSync } from '../sync';
 import { fakeProject, syncOver } from './support/project-server';
+import {
+	DE_ONLY,
+	DE_OR_FR,
+	NOT_DE,
+	NOT_DE_OR_FR,
+	parsed,
+	RULES_KIND,
+	ruleIssues,
+	ruleSet,
+	rulesPayload,
+	yamlOf
+} from './support/rules';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
@@ -77,15 +90,29 @@ type Posted =
  * A follower over `sync`; `server` holds the committed artifacts its
  * `payloads` answers from. A fetch answers at once, unless `gate` holds a
  * deferred for it, which the test settles. `pause` is the follower's own.
+ * A rules parse answers from `parses` at once, unless `parseGate` holds a
+ * deferred for it; a text `parses` lacks is not answered.
  */
 function follow(sync: ReplicaSync, pause?: () => Promise<void>) {
-	const committed = new Map<string, Artifact>();
+	const committed = new Map<string, ArtifactPayload>();
 	const fetches: (readonly string[] | undefined)[] = [];
 	const gates: Deferred<void>[] = [];
 	const posted: Posted[] = [];
 	let staged: WireStagedArtifact[] = [];
 	const loads = { told: 0 };
+	const parses = new Map<string, RulesParseOut>();
+	const parsesAsked: string[] = [];
+	const parseGates: Deferred<void>[] = [];
+	const parser = createRulesParser(async (yaml) => {
+		parsesAsked.push(yaml);
+		const gate = parseGates.shift();
+		if (gate !== undefined) await gate.promise;
+		const answer = parses.get(yaml);
+		if (answer === undefined) throw new Error(`no parse for ${yaml}`);
+		return answer;
+	});
 	const follower = createArtifactFollower({
+		parser,
 		sync: {
 			setArtifacts(artifacts) {
 				posted.push({ method: 'setArtifacts', artifacts });
@@ -126,11 +153,19 @@ function follow(sync: ReplicaSync, pause?: () => Promise<void>) {
 		committed,
 		fetches,
 		posted,
+		parses,
+		parsesAsked,
 		methods: () => posted.map((p) => p.method),
 		/** The next fetch waits for the returned deferred. */
 		gate(): Deferred<void> {
 			const gate = deferred<void>();
 			gates.push(gate);
+			return gate;
+		},
+		/** The next rules parse waits for the returned deferred. */
+		parseGate(): Deferred<void> {
+			const gate = deferred<void>();
+			parseGates.push(gate);
 			return gate;
 		},
 		setStaged(entries: WireStagedArtifact[]) {
@@ -787,5 +822,337 @@ describe('the artifact follower', () => {
 		await expect(evaluate(over, { artifact_id: 'n1' })).rejects.toThrow(
 			'unknown navigation artifact n1'
 		);
+	});
+});
+
+describe('the artifact follower and rule sets', () => {
+	type Listed = {
+		issues: {
+			severity: string;
+			message: string;
+			target_ids: string[];
+			check: string;
+			origin: string;
+		}[];
+	};
+
+	/** A ready replica whose issue store is swept. */
+	async function swept() {
+		const over = await ready();
+		await over.until((status) => status.seeded);
+		return over;
+	}
+
+	/** The engine's rule issues, as the frontend's schema keeps them. */
+	async function ruleIssuesOf(over: ReturnType<typeof syncOver>) {
+		const body = await over.sync.call<Listed>('getModelIssues', {});
+		return body.issues
+			.filter((issue) => issue.check.startsWith('rule:'))
+			.map(({ severity, message, target_ids, check, origin }) => ({
+				severity,
+				message,
+				target_ids,
+				check,
+				origin
+			}));
+	}
+
+	const A = yamlOf(DE_ONLY);
+	const B = yamlOf(DE_OR_FR);
+	const document = (parse: RulesParseOut) => ({ ok: true, document: parse.document });
+
+	it('committed rule sets reach the engine with their parse', async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.committed.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
+
+		f.follower.load();
+		await f.follower.settled();
+
+		expect(f.posted).toEqual([
+			{
+				method: 'setArtifacts',
+				artifacts: [
+					{
+						id: 'r1',
+						kind: RULES_KIND,
+						name: 'Rules',
+						artifact_rev: 1,
+						payload: rulesPayload(A),
+						rules: document(parsed(DE_ONLY))
+					}
+				]
+			}
+		]);
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-only', NOT_DE, 'on_server'));
+		expect(f.parsesAsked).toEqual([]);
+	});
+
+	it('a committed rule set that came without its parse reaches the engine without one, which refuses', async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.committed.set('r1', ruleSet('r1', 'Rules', A, null));
+
+		f.follower.load();
+		await f.follower.settled();
+
+		expect(f.posted).toEqual([
+			{
+				method: 'setArtifacts',
+				artifacts: [
+					{
+						id: 'r1',
+						kind: RULES_KIND,
+						name: 'Rules',
+						artifact_rev: 1,
+						payload: rulesPayload(A)
+					}
+				]
+			}
+		]);
+		await expect(over.sync.call('getModelIssues', {})).rejects.toThrow('reaches unreadable rules');
+	});
+
+	it("a staged rules update is pushed 'pending', then again with its parse", async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.committed.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
+		f.follower.load();
+		await f.follower.settled();
+		f.parses.set(B, parsed(DE_OR_FR));
+		const parse = f.parseGate();
+		const edited: WireStagedArtifact = { op: 'update', id: 'r1', payload: rulesPayload(B) };
+
+		f.setStaged([edited]);
+		f.follower.stagedChanged();
+		await macrotask();
+
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...edited, rules: 'pending' }]
+		});
+		// Meanwhile the engine stands on the committed parse.
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-only', NOT_DE, 'on_server'));
+
+		parse.resolve();
+		await f.follower.settled();
+
+		expect(f.parsesAsked).toEqual([B]);
+		expect(f.methods()).toEqual(['setArtifacts', 'setStagedArtifacts', 'setStagedArtifacts']);
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...edited, rules: document(parsed(DE_OR_FR)) }]
+		});
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted'));
+	});
+
+	it('an update staged before the load that tells its kind is pushed again once it lands', async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.committed.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
+		f.parses.set(B, parsed(DE_OR_FR));
+		const edited: WireStagedArtifact = { op: 'update', id: 'r1', payload: rulesPayload(B) };
+		const loading = f.gate();
+		f.follower.load();
+		f.setStaged([edited]);
+		f.follower.stagedChanged();
+		await macrotask();
+		// The follower does not know r1 yet: the entry goes as it is.
+		expect(f.posted).toEqual([{ method: 'setStagedArtifacts', entries: [edited] }]);
+
+		loading.resolve();
+		await f.follower.settled();
+
+		expect(f.methods()).toEqual([
+			'setStagedArtifacts',
+			'setArtifacts',
+			'setStagedArtifacts',
+			'setStagedArtifacts'
+		]);
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...edited, rules: document(parsed(DE_OR_FR)) }]
+		});
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted'));
+	});
+
+	it('settled() waits for the parse and the push it brings', async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.follower.load();
+		await f.follower.settled();
+		f.parses.set(A, parsed(DE_ONLY));
+		const parse = f.parseGate();
+		const created: WireStagedArtifact = {
+			op: 'create',
+			id: 'tmp_r',
+			kind: RULES_KIND,
+			name: 'R',
+			payload: rulesPayload(A)
+		};
+		f.setStaged([created]);
+		f.follower.stagedChanged();
+		let settled = false;
+		void f.follower.settled().then(() => {
+			settled = true;
+		});
+		await macrotask();
+		expect(settled).toBe(false);
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...created, rules: 'pending' }]
+		});
+		// A create with no parse yet contributes nothing.
+		expect(await ruleIssuesOf(over)).toEqual([]);
+
+		parse.resolve();
+		await vi.waitFor(() => expect(settled).toBe(true));
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...created, rules: document(parsed(DE_ONLY)) }]
+		});
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-only', NOT_DE, 'uncommitted'));
+	});
+
+	it('a parse not answered leaves the entry pending, with no retry of its own; the next push asks again', async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.committed.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
+		f.follower.load();
+		await f.follower.settled();
+		const edited: WireStagedArtifact = { op: 'update', id: 'r1', payload: rulesPayload(B) };
+
+		f.setStaged([edited]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		await macrotask();
+		expect(f.parsesAsked).toEqual([B]);
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...edited, rules: 'pending' }]
+		});
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-only', NOT_DE, 'on_server'));
+
+		f.parses.set(B, parsed(DE_OR_FR));
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		expect(f.parsesAsked).toEqual([B, B]);
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted'));
+	});
+
+	it("the own commit's overlay carries the parse, the create under its real id alone, until the refresh lands", async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.follower.load();
+		await f.follower.settled();
+		f.parses.set(A, parsed(DE_ONLY));
+		const created: WireStagedArtifact = {
+			op: 'create',
+			id: 'tmp_r',
+			kind: RULES_KIND,
+			name: 'R',
+			payload: rulesPayload(A)
+		};
+		f.setStaged([created]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		const withParse = { ...created, rules: document(parsed(DE_ONLY)) };
+		expect(f.posted.at(-1)).toEqual({ method: 'setStagedArtifacts', entries: [withParse] });
+
+		f.committed.set('r9', ruleSet('r9', 'R', A, parsed(DE_ONLY)));
+		const refresh = f.gate();
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: { tmp_r: 'r9' },
+			changed: [header(f.committed.get('r9')!)],
+			deletedIds: []
+		});
+		// Under its real id alone: a second copy would compile every rule twice.
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...withParse, id: 'r9' }]
+		});
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-only', NOT_DE, 'uncommitted'));
+
+		refresh.resolve();
+		await f.follower.settled();
+		expect(f.posted.at(-1)).toMatchObject({
+			method: 'putArtifacts',
+			changed: [{ id: 'r9', rules: document(parsed(DE_ONLY)) }],
+			staged: []
+		});
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-only', NOT_DE, 'on_server'));
+		expect(f.parsesAsked).toEqual([A]);
+	});
+
+	it('an update staged over a rule set a peer event brings goes again with its parse', async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.follower.load();
+		await f.follower.settled();
+		f.parses.set(B, parsed(DE_OR_FR));
+		const edited: WireStagedArtifact = { op: 'update', id: 'r1', payload: rulesPayload(B) };
+		f.setStaged([edited]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		expect(f.posted.at(-1)).toEqual({ method: 'setStagedArtifacts', entries: [edited] });
+
+		f.committed.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
+		f.follower.onEvent('created', header(f.committed.get('r1')!));
+		await f.follower.settled();
+
+		expect(f.posted.at(-2)).toMatchObject({
+			method: 'putArtifacts',
+			changed: [{ id: 'r1' }],
+			staged: [{ ...edited, rules: 'pending' }]
+		});
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...edited, rules: document(parsed(DE_OR_FR)) }]
+		});
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted'));
+	});
+
+	it('an update staged over a created rule set during its refresh goes with its parse when the refresh lands', async () => {
+		const over = await swept();
+		const f = follow(over.sync);
+		f.follower.load();
+		await f.follower.settled();
+		f.parses.set(A, parsed(DE_ONLY));
+		f.parses.set(B, parsed(DE_OR_FR));
+		const created: WireStagedArtifact = {
+			op: 'create',
+			id: 'tmp_r',
+			kind: RULES_KIND,
+			name: 'R',
+			payload: rulesPayload(A)
+		};
+		f.setStaged([created]);
+		f.follower.stagedChanged();
+		await f.follower.settled();
+		f.committed.set('r9', ruleSet('r9', 'R', A, parsed(DE_ONLY)));
+		const refresh = f.gate();
+		f.setStaged([]);
+		f.follower.stagedChanged();
+		f.follower.onCommit({
+			idMap: { tmp_r: 'r9' },
+			changed: [header(f.committed.get('r9')!)],
+			deletedIds: []
+		});
+		const edited: WireStagedArtifact = { op: 'update', id: 'r9', payload: rulesPayload(B) };
+		f.setStaged([edited]);
+		f.follower.stagedChanged();
+		await macrotask();
+
+		refresh.resolve();
+		await f.follower.settled();
+
+		expect(f.parsesAsked).toEqual([A, B]);
+		expect(f.posted.at(-1)).toEqual({
+			method: 'setStagedArtifacts',
+			entries: [{ ...edited, rules: document(parsed(DE_OR_FR)) }]
+		});
+		expect(await ruleIssuesOf(over)).toEqual(ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted'));
 	});
 });
