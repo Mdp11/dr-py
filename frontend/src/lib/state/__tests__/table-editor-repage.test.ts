@@ -30,6 +30,7 @@ import {
 	loadTablePage,
 	resetTableEditors,
 	resumeTableEvaluation,
+	revertSuspendedTableEdits,
 	suspendTableEvaluation,
 	updateTableDefinition
 } from '../table-editor.svelte';
@@ -292,6 +293,34 @@ describe('a staged edit re-pages the open tables', () => {
 
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'), { timeout: 5000 });
 		expect(spy).toHaveBeenCalledTimes(2);
+		expect(getTableError('tbl:draft:1')).toBeUndefined();
+	});
+
+	it('a retry that comes due while the settings dialog is open waits for its resume', async () => {
+		const { s } = await start();
+		await open('tbl:draft:1');
+		const first = await idAt(0);
+		const spy = vi
+			.spyOn(tablesApi, 'evaluateTable')
+			.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+			.mockImplementation((args) => real(args));
+
+		await stageRename(s, first, 'staged');
+		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(false));
+		// The dialog opens and composes an edit before the retry comes due.
+		suspendTableEvaluation('tbl:draft:1');
+		updateTableDefinition('tbl:draft:1', { ...PEOPLE, sort: [{ column: 1, direction: 'desc' }] });
+		await sleep(2500);
+		expect(spy).toHaveBeenCalledOnce();
+
+		// Cancelled: the definition is the one before, and the owed refresh runs.
+		revertSuspendedTableEdits('tbl:draft:1');
+		resumeTableEvaluation('tbl:draft:1');
+		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'));
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(spy.mock.calls[1]![0]).toMatchObject({ definition: PEOPLE });
+		expect(spy.mock.calls[1]![0].definition?.sort ?? []).toEqual([]);
 		expect(getTableError('tbl:draft:1')).toBeUndefined();
 	});
 

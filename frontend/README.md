@@ -2077,7 +2077,9 @@ than the commit feed:
   network error, a 5xx) keeps the page and retries the re-page on the chunk
   fills' schedule (`CHUNK_RETRY_DELAY_MS` × attempt, `CHUNK_RETRY_MAX`
   attempts), showing its error once the last attempt fails too; a new
-  staged change, or any new load of the tab, supersedes a pending retry. An
+  staged change, or any new load of the tab, supersedes a pending retry,
+  and one that comes due while the settings dialog is open only marks the
+  tab stale, for its resume to reload. An
   error already on screen always reads the latest failure's message. A
   re-page that supersedes a foreground load still out (a definition edit, a
   reload) is a foreground one: the page on screen may be of the older

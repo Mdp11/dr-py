@@ -1376,7 +1376,17 @@ async function _loadTablePage(
 		_repageRetries.set(tabId, pending);
 		pending.timer = setTimeout(() => {
 			pending.timer = null;
-			if (_repageRetries.get(tabId) !== pending || !isCurrent(tabId, gen)) return;
+			if (_repageRetries.get(tabId) !== pending) return;
+			if (!isCurrent(tabId, gen)) {
+				_repageRetries.delete(tabId);
+				return;
+			}
+			// The settings dialog is composing a definition: its resume reloads.
+			if (_suspended.has(tabId)) {
+				_repageRetries.delete(tabId);
+				_suspendedStale.add(tabId);
+				return;
+			}
 			const request = visibleRequest(tabId);
 			void _loadTablePage(tabId, request.offset, request.limit, {
 				background: true,
