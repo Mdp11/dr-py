@@ -7,6 +7,7 @@ import {
 	ChainPageSchema,
 	type Artifact,
 	type ArtifactList,
+	type ArtifactPayload,
 	type ArtifactPayloadList,
 	type ChainPage,
 	type NavigationDefinition
@@ -24,11 +25,14 @@ export function getArtifact(id: string, cfg?: ClientConfig): Promise<Artifact> {
 	return apiFetch(`/artifacts/${id}`, { method: 'GET', schema: ArtifactSchema }, cfg);
 }
 
-/** Every artifact of the project with its payload, or the named ids it has; none for `[]`. */
+/**
+ * Every artifact of the project with its payload, or the named ids it has;
+ * none for `[]`. A rule set carries the server's parse of its YAML.
+ */
 export async function listArtifactPayloads(
 	ids?: readonly string[],
 	cfg?: ClientConfig
-): Promise<Artifact[]> {
+): Promise<ArtifactPayload[]> {
 	if (ids !== undefined && ids.length === 0) return [];
 	const query =
 		ids === undefined ? '' : `?${new URLSearchParams(ids.map((id) => ['id', id])).toString()}`;

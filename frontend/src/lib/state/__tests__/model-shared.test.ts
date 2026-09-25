@@ -91,6 +91,32 @@ describe('applyDeltaShared', () => {
 		expect(getIssuesByOwner().has('a')).toBe(false);
 	});
 
+	it("replaces an added issue's owner whole, though the removed ids do not name it", () => {
+		const issue = (message: string, owner: string, origin: 'on_server' | 'uncommitted') => ({
+			severity: 'error' as const,
+			message,
+			target_ids: [owner],
+			check: 'rule:r',
+			origin
+		});
+		// The engine's list: its own copy of an issue on `a`, which the server held none for.
+		applyDeltaShared(
+			delta({ issues_added: [issue('m', 'a', 'uncommitted'), issue('k', 'b', 'uncommitted')] }),
+			() => true
+		);
+
+		applyDeltaShared(
+			delta({ issues_added: [issue('m', 'a', 'on_server'), issue('n', 'a', 'on_server')] }),
+			() => true
+		);
+
+		expect(getLiveIssues()).toEqual([
+			issue('k', 'b', 'uncommitted'),
+			issue('m', 'a', 'on_server'),
+			issue('n', 'a', 'on_server')
+		]);
+	});
+
 	describe('the structure rev', () => {
 		it('bumps on an id_map', () => {
 			const before = getStructureRev();

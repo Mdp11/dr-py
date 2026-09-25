@@ -20,7 +20,8 @@ import {
 	resetArtifactEdits,
 	bindStagedArtifacts,
 	onStagedArtifactsChanged,
-	stagedArtifactsForEngine
+	stagedArtifactsForEngine,
+	hasStagedRules
 } from '../artifact-edits.svelte';
 import { isTempId } from '../ops';
 import type { ArtifactHeader } from '$lib/api/types';
@@ -286,5 +287,37 @@ describe('the engine mirror and the project binding', () => {
 		expect(discarded).not.toHaveBeenCalled();
 		offDiscard();
 		offHeard();
+	});
+});
+
+describe('hasStagedRules', () => {
+	const kinds: Record<string, string> = { r1: 'validation_rules', t1: 'table' };
+	const kindOf = (id: string) => kinds[id];
+	const rulesHeader = (id: string): ArtifactHeader => ({ ...header(id), kind: 'validation_rules' });
+
+	it('is false with nothing staged, or only other kinds', () => {
+		expect(hasStagedRules(kindOf)).toBe(false);
+		stageArtifactCreate('table', 'T', {}, null);
+		stageArtifactUpdate('t1', { payload: {} });
+		stageArtifactDelete('t2', header('t2'));
+		expect(hasStagedRules(kindOf)).toBe(false);
+	});
+
+	it('holds for a staged rules create', () => {
+		stageArtifactCreate('validation_rules', 'R', { schema_version: 1, yaml: '' }, null);
+		expect(hasStagedRules(kindOf)).toBe(true);
+	});
+
+	it('holds for a staged update of a rule set, its kind told by kindOf, a rename included', () => {
+		stageArtifactUpdate('r1', { name: 'renamed' });
+		expect(hasStagedRules(kindOf)).toBe(true);
+		expect(hasStagedRules(() => undefined)).toBe(false);
+	});
+
+	it("holds for a staged delete of a rule set, its kind the header's", () => {
+		stageArtifactDelete('r2', rulesHeader('r2'));
+		expect(hasStagedRules(() => undefined)).toBe(true);
+		revertStagedArtifact('r2');
+		expect(hasStagedRules(kindOf)).toBe(false);
 	});
 });

@@ -206,6 +206,10 @@ export function applyDeltaShared(
 	for (const owner of d.issues_removed_owner_ids) _issuesByOwner.delete(owner);
 	// The engine's list names a created entity by its temp id; the delta, by the minted one.
 	for (const tempId of Object.keys(d.id_map)) _issuesByOwner.delete(tempId);
+	// An added issue's owner was revalidated whole, so the added list is all it has. The
+	// removed ids name only owners the server held issues for; the engine's list may
+	// hold others, its own copies of these.
+	for (const issue of d.issues_added) _issuesByOwner.delete(issue.target_ids[0] ?? '');
 	for (const issue of d.issues_added) addIssueToOwner(issue);
 	clearOverlay(); // committed truth moved; any Validate snapshot is moot
 

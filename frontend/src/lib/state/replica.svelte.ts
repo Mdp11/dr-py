@@ -8,7 +8,8 @@
  * replica or the server, as `dr.surfaces` says (read once per page load);
  * with staging on the engine, the model store's engine half follows it
  * through a handle (`attachEngine`). An artifact follower keeps the project's
- * artifacts, committed and staged, in the sync's context. With the issues on
+ * artifacts, committed and staged, in the sync's context, each staged rule
+ * set with the server's parse of its YAML. With the issues on
  * the engine, the live issue list is refetched whenever the replica's issue
  * store moves.
  */
@@ -17,10 +18,12 @@ import type { WireBatch } from '$engine';
 import { listArtifactPayloads } from '$lib/api/artifacts';
 import { installEngineSeam } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
+import { parseRules } from '$lib/api/rules';
 import { createArtifactFollower, type ArtifactFollower } from '$lib/engine/artifacts';
 import { createSnapshotCache } from '$lib/engine/cache';
 import { connectFrame } from '$lib/engine/frame';
 import { addQuietProbe, quiet } from '$lib/engine/quiet';
+import { createRulesParser } from '$lib/engine/rules-parse';
 import { createEngineSeam, type SurfaceGates } from '$lib/engine/seam';
 import { anyStaged } from '$lib/engine/staged-probe';
 import {
@@ -227,7 +230,7 @@ function installSeam(sync: ReplicaSync): void {
 		// A navigation may name artifacts: the engine answers once it holds them.
 		navigation: () => _follower?.follower.loaded() ?? false,
 		// A store swept part-way is not the model's list, and until the artifacts
-		// are held the engine cannot know it must refuse a rules project.
+		// are held the engine knows none of the rule sets its list must carry.
 		issues: () =>
 			getStagingSide() === 'engine' &&
 			sync.status().seeded &&
@@ -328,10 +331,12 @@ function stopFollowingIssues(): void {
 function follow(sync: ReplicaSync, projectId: string): void {
 	if (_follower?.projectId === projectId) return;
 	stopFollower();
+	const cfg = { baseUrl: `/api/v1/projects/${projectId}` };
 	const follower = createArtifactFollower({
 		sync,
-		payloads: (ids) => listArtifactPayloads(ids, { baseUrl: `/api/v1/projects/${projectId}` }),
+		payloads: (ids) => listArtifactPayloads(ids, cfg),
 		staged: stagedArtifactsForEngine,
+		parser: createRulesParser((yaml) => parseRules(yaml, cfg)),
 		pause: () => new Promise<void>((resolve) => setTimeout(resolve, LOAD_RETRY_MS)),
 		// The issues gate opens here too: the server's list, answered until now,
 		// holds none of the staged edits' own issues.
@@ -339,11 +344,16 @@ function follow(sync: ReplicaSync, projectId: string): void {
 			if (issuesOnEngine(_status)) scheduleIssuesRefetch();
 		}
 	});
-	// A shadow re-test waits out a payload fetch in flight, which may change what it reads.
+	// A shadow re-test waits out a payload fetch or a rules parse in flight, which may change what it reads.
 	_follower = { projectId, follower, removeQuiet: addQuietProbe(() => follower.settled()) };
 	follower.load();
 	// The sync forgot the buffer at its last stop; the project's own, kept since, goes again.
 	if (getStagedArtifactDepth() > 0) follower.stagedChanged();
+}
+
+/** The kind of the committed artifact `id` as the current follower knows it; none without one. */
+export function artifactKindOf(id: string): string | undefined {
+	return _follower?.follower.kindOf(id);
 }
 
 /** A payload answer after this is dropped: it speaks for a replica no longer followed. */

@@ -808,13 +808,33 @@ the refetch after the replica applies the commit replaces with the engine's
 list, where the committed issues read `on_server`. The splice also drops every
 owner the delta's `id_map` names — the temp ids the engine's list filed a
 created entity's issues under — so none shows twice, under its temp id and its
-minted one. Until the replica's first
+minted one — and every owner of an added issue, whose issues the server
+revalidated whole: `issues_removed_owner_ids` names only the owners the
+server held issues for, and the engine's list may hold its own copies for
+others, so no issue shows twice beside its server copy. Until the replica's first
 sweep has ended and the artifact follower has loaded the artifacts once (and
 again after every new replica — a re-bootstrap, a dead worker, a rebind
-adoption), the server answers, exactly as with the surface on `server`; a
-`validation_rules` artifact the engine comes to hold, or stops holding,
-moves `issues_version`, and the refetch lands on the side that now answers. `validateAll` sends the engine's staged batch ids with the ops,
-and the engine validates those batches itself.
+adoption), the server answers, exactly as with the surface on `server`.
+`validateAll` sends the engine's staged batch ids with the ops, and the
+engine validates those batches itself.
+
+The project's rule sets are the engine's too: the follower hands it each
+committed rule set with the server's parse of its YAML, and each STAGED one
+(a create, or an update with a payload) with its own parse from
+`POST /rules/parse`, `'pending'` while it is out. So a staged rule set shows
+in the panel and in Validate before any commit — its issues `uncommitted`,
+Validate's `resolved` for the rules it drops — while the commit preview's
+model half uses the COMMITTED rules, as the server's preview does. A rule
+set change moves `issues_version`, and the refetch it schedules waits for
+the engine's rescan. A rule set the user's own commit creates or updates
+goes into the engine's COMMITTED rules at the announcement, as the commit
+made it, rather than staying staged until the payload refresh lands: the
+engine's list then tags its issues `on_server`, as the splice did, and no
+refetch while the refresh is out (or after a failed one) turns them back to
+`uncommitted`. One committed while its parse was still out is left out
+until the refresh brings the server's copy. Only a rule set the engine cannot read (a document its
+reader refuses, or one that came without a parse) sends the issue calls to
+the server.
 
 Adopting committed truth **clears the overlay** (`adoptIssues`, `applyDelta`) —
 the staged state it described has been superseded. With the issues on the
@@ -1364,7 +1384,9 @@ are answered by the engine or the server, one switch per surface:
   shows above the chains as a muted note (`data-testid="nav-fallback"`,
   "Reads committed state: …"); `searchModel` passes no mark. A third 501,
   `reaches unreadable rules` (an issue call over a rule set the engine
-  cannot read, or that reached it without the server's parse), is answered
+  cannot read, or that reached it without the server's parse — the
+  follower sends every parse, so only a document the engine's reader
+  refuses, or a payload item with no parse, gets here), is answered
   by the server the same way, never marked. So is a 409 the engine answers when the staged batches, the
   `base_rev` or the replica moved under the call (`stale staged batches`,
   `stale base_rev`, `replica is not ready`): the server answers the whole
@@ -1437,7 +1459,7 @@ engine` — on legacy its gate never opens, so an opt-out stored before the
   legacy buffer's edits are not in the working copy), the status's
   `seeded`, which closes it the moment the engine's replica leaves `ready`
   (diverged or closed), and the artifact follower having loaded (until
-  then the engine cannot refuse a `validation_rules` project). A `frozen` replica keeps `seeded`: its list matches
+  then the engine holds none of the rule sets its list must carry). A `frozen` replica keeps `seeded`: its list matches
   the old-metamodel UI until the adoption re-bootstraps it.
 
 **Shadow comparison** (`lib/engine/shadow.ts`, `lib/engine/quiet.ts`). Holds
@@ -1474,7 +1496,12 @@ the engine's answer to a switched-on read to the server's own, in dev only.
 - An `issues` comparison sorts the issue lists first — a list body's
   `issues`, a bare list, a preview's `structural_blockers` and `issues` — by
   `[severity, category, check, message, target_ids, origin]`, so the two
-  sides agree as multisets whatever order each store keeps. A list body
+  sides agree as multisets whatever order each store keeps; and
+  `rules_status.skipped` by `[artifact_id, rule, reason, set_name]`, since
+  the engine orders rule sets by code point and the server by its
+  collation. A `validateModel` while a rule set is staged (`rulesStaged`,
+  from `validateAll`'s `hasStagedRules`) is never compared: the engine
+  validates with it, the server knows none. A list body
   that is `truncated` compares without its `issues` (its `counts` still
   count): each side keeps a different subset under the cap.
 - Nothing is compared while `staged()` is true: the replica's answers then
@@ -1583,7 +1610,9 @@ sync exists:
   user's own commit changed (`onArtifactCommit`). The staged artifact buffer
   is mirrored too: `artifact-edits.svelte.ts` fires
   `onStagedArtifactsChanged` on every change and `stagedArtifactsForEngine()`
-  hands the entries as `$state.snapshot` copies. The buffer is bound to the
+  hands the entries as `$state.snapshot` copies; each staged rule set goes
+  with the server's parse of its YAML (`POST /rules/parse`, through the
+  follower's rules parser, `'pending'` while it is out). The buffer is bound to the
   project it was staged in (`bindStagedArtifacts`, from `startReplica()` and
   `boot()`): opening another project drops it, the same project keeps it.
   `stopReplica()` / `resetReplica()` stop the follower, so a payload answer

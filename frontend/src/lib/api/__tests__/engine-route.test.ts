@@ -327,6 +327,25 @@ describe('the server fallback', () => {
 		expect(shadow).not.toHaveBeenCalled();
 	});
 
+	it('with the shell sending parses, a rules project reaches the server only for an unreadable document', async () => {
+		// The engine answers rule sets now: the refusal a project with any rule set once got is the caller's.
+		for (const detail of ['reaches validation rules', 'reaches unreadable rules']) {
+			const shadow = vi.fn();
+			const error = refusal(501, detail);
+			const { seam } = seamOf(() => Promise.reject(error), {}, shadow);
+			installEngineSeam(seam);
+			const server = serverOf('from server');
+			const answered = route('issues', undefined, engineRead({}), server);
+			if (detail === 'reaches unreadable rules') {
+				await expect(answered).resolves.toBe('from server');
+				expect(server).toHaveBeenCalledOnce();
+			} else {
+				await expect(answered).rejects.toBe(error);
+				expect(server).not.toHaveBeenCalled();
+			}
+		}
+	});
+
 	it('a 409 that says the staged batches, the base_rev or the replica moved is answered by the server', async () => {
 		for (const detail of ['stale staged batches', 'stale base_rev', 'replica is not ready']) {
 			const shadow = vi.fn();

@@ -218,10 +218,16 @@ export function fakeProject(
 
 	/** The artifacts `GET /artifacts/payloads` serves, by id; none by default. */
 	const artifacts = new Map<string, { id: string; [key: string]: unknown }>();
+	/** What `POST /rules/parse` answers, by YAML text; a text it lacks is a 422. */
+	const rulesParses = new Map<string, { ok: boolean; [key: string]: unknown }>();
+	/** Every YAML text `POST /rules/parse` was sent, in order. */
+	const rulesParsed: string[] = [];
 
 	const project = {
 		projectId,
 		artifacts,
+		rulesParses,
+		rulesParsed,
 		get rev() {
 			return rev;
 		},
@@ -278,7 +284,8 @@ export function fakeProject(
 		},
 
 		/**
-		 * The four routes. `chunk` cuts the snapshot body (4096 bytes by default);
+		 * The four replica routes, and the artifact payloads and rules parse
+		 * routes the replica store's follower asks. `chunk` cuts the snapshot body (4096 bytes by default);
 		 * `hold` stops the download after its first chunk until released.
 		 */
 		handlers(handlerOptions: { chunk?: number; hold?: Hold } = {}): HttpHandler[] {
@@ -367,6 +374,17 @@ export function fakeProject(
 							(artifact) => ids.length === 0 || ids.includes(artifact.id)
 						);
 						return HttpResponse.json({ items });
+					}
+				),
+				http.post(
+					`${PAGE_ORIGIN}/api/v1/projects/${projectId}/rules/parse`,
+					async ({ request }) => {
+						const { yaml } = (await request.json()) as { yaml: string };
+						rulesParsed.push(yaml);
+						const answer = rulesParses.get(yaml);
+						return answer === undefined
+							? HttpResponse.json({ detail: 'no parse' }, { status: 422 })
+							: HttpResponse.json(answer);
 					}
 				)
 			];
