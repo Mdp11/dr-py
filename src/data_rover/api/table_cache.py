@@ -2,7 +2,8 @@
 fingerprint (the definition carries its own `sort`). A stored entry records the model_rev it was computed at AND
 the `truncated` flag `build_rows` produced (so a cached page reports the same
 completeness as the miss page that filled it — `len(rows) >= max_rows` is NOT a
-safe recompute, since a table of EXACTLY max_rows is not truncated). A lookup at
+safe recompute, since a table of EXACTLY max_rows is not truncated), the build's
+`base_total`, and its `base_slots`, which a cached page's cells need. A lookup at
 a different rev is a miss. Session.touch_model()/set_model clear the whole cache.
 Guards dict ops with a Lock; evaluation runs OUTSIDE the lock (a lost race merely
 recomputes)."""
@@ -29,26 +30,26 @@ class TableOrderCache:
     def __init__(self, cap: int = 16) -> None:
         self._cap = cap
         self._lock = threading.Lock()
-        self._d: OrderedDict[str, tuple[int, tuple[RowKey, ...], bool, int]] = (
+        self._d: OrderedDict[str, tuple[int, tuple[RowKey, ...], bool, int, int]] = (
             OrderedDict()
         )
 
     def get(
         self, fingerprint: str, model_rev: int
-    ) -> tuple[tuple[RowKey, ...], bool, int] | None:
-        """`(rows, truncated, base_total)` on a fresh hit; `None` on a miss or
-        stale rev."""
+    ) -> tuple[tuple[RowKey, ...], bool, int, int] | None:
+        """`(rows, truncated, base_total, base_slots)` on a fresh hit; `None` on
+        a miss or stale rev."""
         key = fingerprint
         with self._lock:
             hit = self._d.get(key)
             if hit is None:
                 return None
-            rev, rows, truncated, base_total = hit
+            rev, rows, truncated, base_total, base_slots = hit
             if rev != model_rev:
                 del self._d[key]
                 return None
             self._d.move_to_end(key)
-            return rows, truncated, base_total
+            return rows, truncated, base_total, base_slots
 
     def put(
         self,
@@ -57,10 +58,11 @@ class TableOrderCache:
         rows: tuple[RowKey, ...],
         truncated: bool,
         base_total: int,
+        base_slots: int,
     ) -> None:
         key = fingerprint
         with self._lock:
-            self._d[key] = (model_rev, rows, truncated, base_total)
+            self._d[key] = (model_rev, rows, truncated, base_total, base_slots)
             self._d.move_to_end(key)
             while len(self._d) > self._cap:
                 self._d.popitem(last=False)

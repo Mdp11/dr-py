@@ -391,11 +391,9 @@ def test_build_rows_ex_base_slots_is_the_chain_length_not_the_key_length():
 
 def test_build_rows_ex_base_slots_survives_a_capped_build():
     # Two expand columns; max_rows is small enough that the cap trips inside
-    # the FIRST one, so the loop breaks before the second ever runs (see
-    # `build_rows_ex`'s `if capped: break`). Every built key therefore has
-    # base_slots(2) + 1 slot, never base_slots(2) + 2 — and `base_slots`
-    # itself, carried from the pre-expand count rather than reconstructed,
-    # must still read 2 despite the truncation.
+    # the FIRST one. The second still expands the capped keys, so every key
+    # has base_slots(2) + 2 slots, and `base_slots` still reads 2 despite the
+    # truncation.
     mm = _chain_mm()
     model = Model(mm)
     _chain_fixture(model)
@@ -442,7 +440,7 @@ def test_build_rows_ex_base_slots_survives_a_capped_build():
     result = build_rows_ex(mm, model, defn, TableLimits(max_rows=2))
     assert result.truncated is True
     assert result.base_slots == 2
-    assert result.keys and all(len(k) == 3 for k in result.keys)
+    assert result.keys and all(len(k) == 4 for k in result.keys)
 
 
 def test_grouping_works_with_a_chains_row_source():
@@ -504,7 +502,7 @@ def test_grouping_works_with_a_chains_row_source():
         model,
         defn,
         build.keys,
-        iter_export_rows(mm, model, defn, build.keys),
+        iter_export_rows(mm, model, defn, build.keys, base_slots=build.base_slots),
         build.base_slots,
     )
     # Three base chains -- (root, P1), (root, P2), (root, P3) -- each grouping
@@ -724,7 +722,7 @@ def _render(mm, model, doc, *, order=None, row_number=None):
         model,
         defn,
         build.keys,
-        iter_export_rows(mm, model, defn, build.keys),
+        iter_export_rows(mm, model, defn, build.keys, base_slots=build.base_slots),
         build.base_slots,
         order=order,
         row_number=row_number,
@@ -978,7 +976,7 @@ def test_groups_merge_even_when_their_rows_are_not_contiguous():
         model,
         defn,
         scattered,
-        iter_export_rows(mm, model, defn, scattered),
+        iter_export_rows(mm, model, defn, scattered, base_slots=build.base_slots),
         build.base_slots,
     )
     roots = [d for d in docs if d["Name"] == "Root"]
@@ -1494,7 +1492,7 @@ def _render_ex(mm, model, doc, **kw):
         model,
         defn,
         build.keys,
-        iter_export_rows(mm, model, defn, build.keys),
+        iter_export_rows(mm, model, defn, build.keys, base_slots=build.base_slots),
         build.base_slots,
         **kw,
     )

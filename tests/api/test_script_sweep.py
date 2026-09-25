@@ -152,7 +152,7 @@ def test_sweep_fills_cache_and_completes(settings_sync_sweep: Settings) -> None:
         defn,
         built.keys,
         [SortSpec(column=1, direction="asc")],
-        script=ctx,
+        script=ctx, base_slots=built.base_slots,
     )
     assert ctx.pending_misses == 0
     assert runner.calls == 4  # the cache-only pass added no guest calls
@@ -634,7 +634,7 @@ def test_sweep_items_are_keyed_by_inputs(settings_sync_sweep: Settings) -> None:
     built = build_rows_ex(model.metamodel, model, _defn_with_inputs(), script=ctx)
     from data_rover.core.table.cells import evaluate_cells
 
-    evaluate_cells(model.metamodel, model, _defn_with_inputs(), built.keys, script=ctx)
+    evaluate_cells(model.metamodel, model, _defn_with_inputs(), built.keys, script=ctx, base_slots=built.base_slots)
     assert ctx.pending_misses == 0
 
 

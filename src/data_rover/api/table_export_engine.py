@@ -359,7 +359,14 @@ def render_json_sample(
     limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
     build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
     ordered = order_rows(
-        metamodel, model, defn, build.keys, sort_keys(defn), limits, script=script_ctx
+        metamodel,
+        model,
+        defn,
+        build.keys,
+        sort_keys(defn),
+        limits,
+        script=script_ctx,
+        base_slots=build.base_slots,
     )
     layout = export_layout(render_defn)
     eff = export_definition(render_defn)
@@ -388,7 +395,13 @@ def render_json_sample(
         validate_template(split.filename_template)
         validate_tokens(split.filename_template, SPLIT_TOKENS)
         rows = iter_export_rows(
-            metamodel, model, defn, ordered, limits, script=script_ctx
+            metamodel,
+            model,
+            defn,
+            ordered,
+            limits,
+            script=script_ctx,
+            base_slots=build.base_slots,
         )
         parts = split_partitions(ordered, rows)
         stems = render_filenames(
@@ -405,7 +418,15 @@ def render_json_sample(
         ]
         return JsonSampleSet(files=files, split=True, truncated=len(parts) > max_files)
     window = ordered[:max_rows]
-    rows = iter_export_rows(metamodel, model, defn, window, limits, script=script_ctx)
+    rows = iter_export_rows(
+        metamodel,
+        model,
+        defn,
+        window,
+        limits,
+        script=script_ctx,
+        base_slots=build.base_slots,
+    )
     return JsonSampleSet(
         files=[JsonSampleFile(filename=f"{name}.{format}", doc=_render(window, rows))],
         split=False,
@@ -630,7 +651,14 @@ def run_table_export(
         build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
         keys, truncated = build.keys, build.truncated
         ordered = order_rows(
-            metamodel, model, defn, keys, sort_keys(defn), limits, script=script_ctx
+            metamodel,
+            model,
+            defn,
+            keys,
+            sort_keys(defn),
+            limits,
+            script=script_ctx,
+            base_slots=build.base_slots,
         )
         if script_ctx is not None:
             # COMPLETENESS PROBE — do not "optimize" this pass away.
@@ -651,7 +679,13 @@ def run_table_export(
             # away — it makes the same calls at a bounded peak memory.
             _drain(
                 iter_export_rows(
-                    metamodel, model, defn, ordered, limits, script=script_ctx
+                    metamodel,
+                    model,
+                    defn,
+                    ordered,
+                    limits,
+                    script=script_ctx,
+                    base_slots=build.base_slots,
                 )
             )
             if script_ctx.pending_misses > 0 and runner is not None:
@@ -737,7 +771,13 @@ def run_table_export(
                 miss_baseline = script_ctx.pending_misses
                 _drain(
                     iter_export_rows(
-                        metamodel, model, defn, ordered, limits, script=script_ctx
+                        metamodel,
+                        model,
+                        defn,
+                        ordered,
+                        limits,
+                        script=script_ctx,
+                        base_slots=build.base_slots,
                     )
                 )
                 still_pending = script_ctx.pending_misses > miss_baseline
@@ -774,7 +814,13 @@ def run_table_export(
         if layout.row_number_pos is not None:
             headers.insert(layout.row_number_pos, layout.row_number_header)
         all_rows = iter_export_rows(
-            metamodel, model, defn, ordered, limits, script=script_ctx
+            metamodel,
+            model,
+            defn,
+            ordered,
+            limits,
+            script=script_ctx,
+            base_slots=build.base_slots,
         )
         # Baseline for the RENDER's own pending misses (see `_degraded` below).
         # Sampled here, after every probe pass, so only cells that the workbook

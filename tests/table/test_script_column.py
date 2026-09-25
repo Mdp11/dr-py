@@ -122,7 +122,7 @@ def test_expand_script_column_keeps_slot_arithmetic() -> None:
         ],
     )
     build = build_rows_ex(mm, model, defn)
-    cells = evaluate_cells(mm, model, defn, build.keys)
+    cells = evaluate_cells(mm, model, defn, build.keys, base_slots=build.base_slots)
     assert all(isinstance(r[0], ValueCell) and not r[0].present for r in cells)
     assert all(isinstance(r[1], ValueCell) for r in cells)
 
@@ -183,7 +183,7 @@ def test_script_cell_scalar_and_error() -> None:
     )
     ctx = _script_ctx(model)
     build = build_rows_ex(_mm(), model, defn, TableLimits(), script=ctx)
-    cells = evaluate_cells(_mm(), model, defn, build.keys, TableLimits(), script=ctx)
+    cells = evaluate_cells(_mm(), model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     kinds = {type(row[0]).__name__ for row in cells}
     assert "ValueCell" in kinds and "ErrorCell" in kinds
     err = next(r[0] for r in cells if isinstance(r[0], ErrorCell))
@@ -208,7 +208,7 @@ def test_script_cell_elements_and_chaining() -> None:
     )
     ctx = _script_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
-    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     for key, row in zip(build.keys, cells, strict=True):
         eid = key[0]
         assert isinstance(eid, str)  # scope row source: always an element id
@@ -228,7 +228,7 @@ def test_script_expand_scalars_wrap_property_value() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     n_blocks = len(model.indexes.elements_by_type.get("Block", set()))
     assert len(build.keys) == 2 * n_blocks
-    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     values: set[object] = set()
     for row in cells:
         assert isinstance(row[0], ValueCell)  # ValueCells, not ElementCells
@@ -248,7 +248,7 @@ def test_script_expand_error_keeps_one_error_row() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     n_blocks = len(model.indexes.elements_by_type.get("Block", set()))
     assert len(build.keys) == n_blocks                  # one row each, not dropped
-    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     assert all(isinstance(r[0], ErrorCell) for r in cells)
     ctx.close()
 
@@ -263,7 +263,7 @@ def test_script_dangling_ref_and_unconfigured() -> None:
     )
     ctx = _script_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
-    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     assert all(isinstance(r[0], ErrorCell) and "not found" in r[0].message for r in cells)
     assert all(isinstance(r[1], ValueCell) and not r[1].present for r in cells)
     ctx.close()
@@ -278,7 +278,7 @@ def test_script_memo_one_call_per_binding() -> None:
     defn = _one_col_table(code, keep_empty=False)       # forces build-time calls too
     ctx = _script_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
-    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     counters: list[int] = []
     for row in cells:
         assert isinstance(row[0], ValueCell)
@@ -310,7 +310,7 @@ def test_sort_by_script_column_mixed_kinds_and_errors() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     ordered = order_rows(
         mm, model, defn, build.keys, [SortSpec(column=0, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     names = [
         model.elements[k[0]].properties.get("name")
@@ -382,7 +382,7 @@ def test_pending_cell_from_cache_only_context() -> None:
         cache_only=True,
     )
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
-    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     assert build.keys  # sanity: the fixture's 3 Blocks produced rows
     assert all(isinstance(row[0], PendingCell) for row in cells)
     assert not ctx.errored and ctx.pending_misses > 0
@@ -420,7 +420,7 @@ def test_expand_rederive_is_cache_only() -> None:
     assert runner.calls[0] == 0  # the build-phase cache-only call never hit the guest
 
     ctx.cache_only = False  # flip to live for cell-render, as a real caller would
-    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     assert all(isinstance(row[0], PendingCell) for row in cells)
     assert runner.calls[0] == 0  # re-derive still never called the guest
     ctx.close()
@@ -476,7 +476,7 @@ def test_nav_script_step_as_navigation_column() -> None:
     )
     ctx = _script_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
-    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     # every row except ids[0]'s reaches ids[0] in the nav column
     reached = {
         key[0]: cell
@@ -557,7 +557,7 @@ def test_sort_by_collapse_nav_script_step_column_uses_reached_labels() -> None:
     assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]  # build order == id order
     ordered = order_rows(
         mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     assert ordered == [(ids[1],), (ids[2],), (ids[0],)]
     ctx.close()
@@ -612,7 +612,7 @@ def test_sort_by_property_column_sourced_from_nav_script_step_column() -> None:
     assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]  # build order == id order
     ordered = order_rows(
         mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     # row0 -> "C", row1 -> "A", row2 -> "B"; ascending -> row1, row2, row0
     assert ordered == [(ids[1],), (ids[2],), (ids[0],)]
@@ -684,7 +684,7 @@ def test_cache_only_sort_by_nav_script_step_degrades_with_warning() -> None:
     assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]
     ordered = order_rows(
         mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     # Degraded: build order, not the live sort's [ids[1], ids[2], ids[0]].
     assert ordered == build.keys
@@ -733,7 +733,7 @@ def test_cache_only_sort_via_column_ref_to_nav_script_step_degrades() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     ordered = order_rows(
         mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     assert ordered == build.keys
     assert runner.calls[0] == 0
@@ -765,7 +765,7 @@ def test_cache_only_sort_by_script_column_still_pends() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     order_rows(
         mm, model, defn, build.keys, [SortSpec(column=0, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     assert ctx.pending_misses > 0
     assert ctx.warnings == []
@@ -807,7 +807,7 @@ def test_cache_only_sort_by_script_free_navigation_is_untouched() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     ordered = order_rows(
         mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     # The property step reaches the row's own name: "A" < "B" < "C".
     assert ordered == [(ids[2],), (ids[0],), (ids[1],)]
@@ -868,7 +868,7 @@ def test_cache_only_sort_by_script_column_over_nav_script_still_pends() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     order_rows(
         mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     assert ctx.pending_misses > 0, "no pending miss => nothing ever kicks a sweep"
     # The only warning is the ordinary cache-only placeholder the nav step
@@ -902,7 +902,7 @@ def test_cache_only_sort_by_unconfigured_script_column_does_not_warn() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     ordered = order_rows(
         mm, model, defn, build.keys, [SortSpec(column=1, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=build.base_slots,
     )
     assert ordered == build.keys  # every row ties, as it always did
     assert ctx.warnings == []
@@ -933,7 +933,7 @@ def test_cache_only_sort_warning_is_emitted_per_sort_not_per_row() -> None:
     ctx = _cache_only_ctx(model)
     assert order_rows(
         mm, model, defn, [], [SortSpec(column=1, direction="asc")],
-        TableLimits(), script=ctx,
+        TableLimits(), script=ctx, base_slots=1,
     ) == []
     assert any(w.code == ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV for w in ctx.warnings)
     ctx.close()
@@ -1000,7 +1000,7 @@ def test_nav_script_step_value_terminal_renders_as_a_values_cell() -> None:
     )
     ctx = _script_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
-    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     cells = [r[1] for r in rows]
     assert all(isinstance(c, ValuesCell) for c in cells)
     assert {v for c in cells if isinstance(c, ValuesCell) for v in c.values} == {
@@ -1045,7 +1045,7 @@ def test_nav_script_step_distinct_scalar_types_survive_the_cell_layer() -> None:
     )
     ctx = _script_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
-    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx, base_slots=build.base_slots)
     cells = [r[1] for r in rows]
     assert all(isinstance(c, ValuesCell) for c in cells)
     for c in cells:

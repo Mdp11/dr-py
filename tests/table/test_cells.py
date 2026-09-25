@@ -11,7 +11,7 @@ from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
 from data_rover.core.model.model import Model
 from data_rover.core.navigation.evaluate import PropertyValue
 from data_rover.core.table.cells import ElementCell, ElementsCell, ValueCell, ValuesCell, evaluate_cells
-from data_rover.core.table.evaluate import build_rows
+from data_rover.core.table.evaluate import build_rows, build_rows_ex
 from data_rover.core.table.schema import TABLE_ADAPTER
 
 
@@ -58,8 +58,9 @@ def _fixture(mm: Metamodel) -> tuple[Model, dict[str, str]]:
 
 def _eval(mm: Metamodel, model: Model, doc: dict):
     defn = TABLE_ADAPTER.validate_python(doc)
-    keys, _ = build_rows(mm, model, defn)
-    return defn, keys, evaluate_cells(mm, model, defn, keys)
+    build = build_rows_ex(mm, model, defn)
+    keys = build.keys
+    return defn, keys, evaluate_cells(mm, model, defn, keys, base_slots=build.base_slots)
 
 
 def test_property_present_false_when_type_lacks_property():
@@ -164,7 +165,7 @@ def test_chain_index_out_of_range_raises_value_error():
     # length must fail with a ValueError (API: 422), not an IndexError (500).
     import pytest
 
-    from data_rover.core.table.evaluate import build_rows as _build
+    from data_rover.core.table.evaluate import build_rows_ex as _build
 
     mm = _mm()
     model, _ = _fixture(mm)
@@ -174,9 +175,9 @@ def test_chain_index_out_of_range_raises_value_error():
             "steps": []}}},
         "columns": [{"kind": "element", "source": {"kind": "row", "chain_index": 3}}],
     })
-    keys, _ = _build(mm, model, defn)
+    build = _build(mm, model, defn)
     with pytest.raises(ValueError, match="chain_index 3 out of range"):
-        evaluate_cells(mm, model, defn, keys)
+        evaluate_cells(mm, model, defn, build.keys, base_slots=build.base_slots)
 
 
 def test_column_ref_step_index_collapse():
@@ -347,7 +348,7 @@ def test_column_ref_step_index_out_of_range_raises():
     })
     keys, _ = build_rows(mm, model, defn)
     with pytest.raises(ValueError, match="step_index"):
-        evaluate_cells(mm, model, defn, keys)
+        evaluate_cells(mm, model, defn, keys, base_slots=1)
 
 
 def test_property_step_navigation_column_resolves_referenced_element():
@@ -572,7 +573,7 @@ def test_export_limits_ignore_per_column_cell_cap():
                            "relationship_type": "BlockHasPart", "direction": "out"}]}}}],
     })
     export_limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
-    cells = evaluate_cells(mm, model, defn, keys, export_limits)
+    cells = evaluate_cells(mm, model, defn, keys, export_limits, base_slots=1)
     root_row = next(i for i, k in enumerate(keys) if k[0] == ids["root"])
     cell = cells[root_row][0]
     assert isinstance(cell, ElementsCell)

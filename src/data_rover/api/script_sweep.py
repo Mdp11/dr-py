@@ -455,10 +455,7 @@ def _run_inner(
             arity = ctx.value_arity(c.snippet.definition.code)
             if (arity == 1 and c.inputs) or (arity == 2 and not c.inputs):
                 mismatched_cols.add(id(c))
-        expand_count = sum(
-            1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
-        )
-        base_slots = (len(built.keys[0]) - expand_count) if built.keys else 1
+        base_slots = built.base_slots
         job.total = len(built.keys) * len(script_cols)
 
         # Enumerate the cell work list through the SERIAL context: resolving a

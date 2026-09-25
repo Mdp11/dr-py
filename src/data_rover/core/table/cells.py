@@ -455,6 +455,8 @@ def evaluate_cells(
     keys: list[RowKey],
     limits: TableLimits = TableLimits(),
     script: ScriptEvalContext | None = None,
+    *,
+    base_slots: int,
 ) -> list[list[Cell]]:
     """Evaluate every cell for every row. Runs per page (unlike `build_rows`,
     which must see the whole table because expansion determines row count).
@@ -464,14 +466,9 @@ def evaluate_cells(
     `ScriptColumn` evaluation AND any `ScriptStep` inside a navigation column's
     navigation (forwarded through `_navigation_reached`/`resolve_source_
     elements`), so a script-driven navigation renders the same with `None`
-    (silent prune) as it does everywhere else in the table pipeline."""
-    expand_count = sum(
-        1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
-    )
-    # Correct here (unlike mid-`build_rows`) because `keys` is the FULL,
-    # already-built set: base_slots = total slots minus one per expand column.
-    base_slots = (len(keys[0]) - expand_count) if keys else 1
+    (silent prune) as it does everywhere else in the table pipeline.
 
+    `base_slots` is the build's `RowBuild.base_slots`."""
     # One memo per window pass — never shared with the build/sort passes
     # (see `nav_memo.py`): a result computed under `script.cache_only`
     # must not be served to this live pass.

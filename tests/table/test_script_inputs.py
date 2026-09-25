@@ -380,7 +380,7 @@ def test_page_cell_sees_both_inputs():
     defn = _table_with_inputs()
     ctx = _ctx(model)
     build = build_rows_ex(model.metamodel, model, defn, TableLimits(), script=ctx)
-    cells = evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx)
+    cells = evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx, base_slots=build.base_slots)
     by_row = {key[0]: row[2] for key, row in zip(build.keys, cells)}
     a = by_row[_row_of(model, "A")]
     assert isinstance(a, ValuesCell) and a.values == ["x:B", "y:B"]
@@ -395,7 +395,7 @@ def test_expand_and_keep_empty_filter_use_inputs():
     build = build_rows_ex(model.metamodel, model, defn, TableLimits(), script=ctx)
     # A expands to two rows (x:B, y:B); B has no values and is dropped
     assert [k[0] for k in build.keys] == [_row_of(model, "A")] * 2
-    cells = evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx)
+    cells = evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx, base_slots=build.base_slots)
     assert [c[2].value for c in cells] == ["x:B", "y:B"]  # type: ignore[union-attr]
     defn2 = _table_with_inputs(mode="collapse", keep_empty=False)
     build2 = build_rows_ex(model.metamodel, model, defn2, TableLimits(), script=ctx)
@@ -413,7 +413,7 @@ def test_sort_by_script_column_with_inputs():
         defn,
         build.keys,
         [SortSpec(column=2, direction="asc")],
-        script=ctx,
+        script=ctx, base_slots=build.base_slots,
     )
     # A has values, B is empty → empties last
     assert [k[0] for k in ordered] == [_row_of(model, "A"), _row_of(model, "B")]
@@ -434,7 +434,7 @@ def test_script_column_with_inputs_as_a_source():
         ],
     )
     build = build_rows_ex(model.metamodel, model, defn, TableLimits(), script=ctx)
-    cells = evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx)
+    cells = evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx, base_slots=build.base_slots)
     by_row = {key[0]: row[2] for key, row in zip(build.keys, cells)}
     a = by_row[_row_of(model, "A")]
     assert isinstance(a, ValueCell) and a.value == "B"
@@ -454,7 +454,7 @@ def test_errored_and_pending_inputs_render_as_cells():
     )
     ctx = _ctx(model)
     build = build_rows_ex(model.metamodel, model, defn, TableLimits(), script=ctx)
-    cells = evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx)
+    cells = evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx, base_slots=build.base_slots)
     c = cells[0][1]
     assert isinstance(c, ErrorCell) and c.message.startswith("input 'n': ")
     defn_ok = TableDefinition(
@@ -469,7 +469,7 @@ def test_errored_and_pending_inputs_render_as_cells():
     )
     ctx2 = _ctx(model, cell_cache=ScriptCellCache(), rev=0, cache_only=True)
     build2 = build_rows_ex(model.metamodel, model, defn_ok, TableLimits(), script=ctx2)
-    cells2 = evaluate_cells(model.metamodel, model, defn_ok, build2.keys, script=ctx2)
+    cells2 = evaluate_cells(model.metamodel, model, defn_ok, build2.keys, script=ctx2, base_slots=build2.base_slots)
     assert isinstance(cells2[0][1], PendingCell)
 
 
@@ -516,7 +516,7 @@ def test_value_arity_is_memoized_per_distinct_code(monkeypatch):
 
     monkeypatch.setattr(lint_mod, "_parse", counting_parse)
     build = build_rows_ex(model.metamodel, model, defn, TableLimits(), script=ctx)
-    evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx)
+    evaluate_cells(model.metamodel, model, defn, build.keys, script=ctx, base_slots=build.base_slots)
     # build_rows_ex' expand loop AND evaluate_cells' per-row render both
     # call through evaluate_script_column, several times over; the code is
     # parsed exactly once regardless.

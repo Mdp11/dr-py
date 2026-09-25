@@ -61,8 +61,8 @@ def test_property_numeric_sort_empty_last_both_directions():
         ],
     })
     keys, _ = build_rows(mm, model, defn)
-    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")])
-    desc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="desc")])
+    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")], base_slots=1)
+    desc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="desc")], base_slots=1)
     assert asc[0][0] == ids["mid"]  # 2 before 10
     assert asc[-1][0] == ids["leaf"]  # empty last
     assert desc[0][0] == ids["root"]  # 10 first
@@ -83,7 +83,7 @@ def test_navigation_count_sort():
         ],
     })
     keys, _ = build_rows(mm, model, defn)
-    desc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="desc")])
+    desc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="desc")], base_slots=1)
     assert desc[0][0] == ids["root"]  # owns the most parts
 
 
@@ -95,7 +95,7 @@ def test_binding_column_sort_uses_row_key():
         "columns": [{"kind": "element", "source": {"kind": "row"}}],
     })
     keys, _ = build_rows(mm, model, defn)
-    asc = order_rows(mm, model, defn, keys, [SortSpec(column=0, direction="asc")])
+    asc = order_rows(mm, model, defn, keys, [SortSpec(column=0, direction="asc")], base_slots=1)
     names = [model.elements[str(k[0])].properties.get("name", "") for k in asc]
     assert names == sorted(names, key=str.casefold)
 
@@ -118,7 +118,7 @@ def test_collapse_sort_is_unbounded():
         ],
     })
     keys, _ = build_rows(mm, model, defn)
-    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")])
+    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")], base_slots=1)
     assert len(asc) == n
     masses = [model.elements[str(k[0])].properties["mass"] for k in asc]
     assert masses == sorted(masses)
@@ -142,7 +142,7 @@ def test_expand_navigation_column_sorts_per_row_own_value():
         ],
     })
     keys, _ = build_rows(mm, model, defn)
-    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")])
+    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")], base_slots=1)
     root_rows = [k for k in asc if k[0] == ids["root"]]
     # "Leaf" sorts before "Mid" casefolded — the two rows sharing the root must
     # come out in THAT order, which is only possible if each row's own expanded
@@ -174,7 +174,7 @@ def test_element_column_sort_uses_case_insensitive_name_property():
         "columns": [{"kind": "element", "source": {"kind": "row"}}],
     })
     keys, _ = build_rows(mm, model, defn)
-    asc = order_rows(mm, model, defn, keys, [SortSpec(column=0, direction="asc")])
+    asc = order_rows(mm, model, defn, keys, [SortSpec(column=0, direction="asc")], base_slots=1)
     names = [model.elements[str(k[0])].properties["Name"] for k in asc]
     assert names == ["alpha", "Mike", "Zulu"]  # casefolded Name order, not id order
 
@@ -187,7 +187,7 @@ def test_sort_none_returns_input_order_unchanged():
         "columns": [{"kind": "element", "source": {"kind": "row"}}],
     })
     keys, _ = build_rows(mm, model, defn)
-    result = order_rows(mm, model, defn, keys, [])
+    result = order_rows(mm, model, defn, keys, [], base_slots=1)
     assert result == keys
     assert result is not keys
 
@@ -211,9 +211,9 @@ def test_sort_by_stereotype_orders_by_type_name():
         ],
     })
     keys, _ = build_rows(mm, model, defn)
-    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")])
+    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")], base_slots=1)
     assert [k[0] for k in asc] == [b.id, w.id]
-    desc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="desc")])
+    desc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="desc")], base_slots=1)
     assert [k[0] for k in desc] == [w.id, b.id]
 
 
@@ -249,7 +249,7 @@ def test_sort_by_element_typed_property_uses_display_names():
         ],
     })
     keys, _ = build_rows(mm, model, defn)
-    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")])
+    asc = order_rows(mm, model, defn, keys, [SortSpec(column=1, direction="asc")], base_slots=1)
     # Amy < Zed by display name (not by id), owner-less rows last
     assert [k[0] for k in asc][:2] == [second.id, first.id]
 
@@ -297,13 +297,13 @@ def test_later_sort_keys_break_ties_of_earlier_ones():
     keys, _ = build_rows(mm, model, defn)
     # mass desc, then name asc within a mass; mass-less rows last regardless
     ordered = order_rows(
-        mm, model, defn, keys, [SortSpec(1, "desc"), SortSpec(0, "asc")]
+        mm, model, defn, keys, [SortSpec(1, "desc"), SortSpec(0, "asc")], base_slots=1
     )
     assert [k[0] for k in ordered] == [
         ids["a-heavy"], ids["b-heavy"], ids["c-light"], ids["a-none"]
     ]
     # name desc alone: every row has a name, so none is "empty" here
-    ordered = order_rows(mm, model, defn, keys, [SortSpec(0, "desc")])
+    ordered = order_rows(mm, model, defn, keys, [SortSpec(0, "desc")], base_slots=1)
     assert [k[0] for k in ordered] == [
         ids["c-light"], ids["b-heavy"], ids["a-none"], ids["a-heavy"]
     ]
@@ -340,7 +340,7 @@ def test_property_sort_is_typed_regardless_of_row_source():
         ],
     })
     keys, _ = build_rows(mm, model, defn)
-    asc = order_rows(mm, model, defn, keys, [SortSpec(1, "asc")])
+    asc = order_rows(mm, model, defn, keys, [SortSpec(1, "asc")], base_slots=1)
     assert [k[0] for k in asc] == [ids["two"], ids["three"], ids["ten"]]
     # the same property reached through an earlier column, and split into rows
     defn2 = TABLE_ADAPTER.validate_python({
@@ -356,5 +356,5 @@ def test_property_sort_is_typed_regardless_of_row_source():
         ],
     })
     keys2, _ = build_rows(mm, model, defn2)
-    desc = order_rows(mm, model, defn2, keys2, [SortSpec(1, "desc")])
+    desc = order_rows(mm, model, defn2, keys2, [SortSpec(1, "desc")], base_slots=1)
     assert [k[1] for k in desc] == [ids["ten"], ids["three"], ids["two"]]

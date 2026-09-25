@@ -187,8 +187,8 @@ def test_iter_export_rows_matches_evaluate_cells_regardless_of_chunk_size():
     })
     keys, _ = build_rows(mm, model, defn)
     limits = TableLimits()
-    expected = evaluate_cells(mm, model, defn, keys, limits)
-    chunked = list(iter_export_rows(mm, model, defn, keys, limits, chunk=1))
+    expected = evaluate_cells(mm, model, defn, keys, limits, base_slots=1)
+    chunked = list(iter_export_rows(mm, model, defn, keys, limits, chunk=1, base_slots=1))
     assert chunked == expected
     assert len(chunked) == len(keys)
 
@@ -320,7 +320,7 @@ def test_empty_navigation_column_reaches_nothing():
     })
     keys, _ = build_rows(mm, model, defn)
     assert len(keys) == len(ids)
-    rows = evaluate_cells(mm, model, defn, keys)
+    rows = evaluate_cells(mm, model, defn, keys, base_slots=1)
     for row in rows:
         cell = row[1]
         assert isinstance(cell, ElementsCell) and cell.element_ids == []

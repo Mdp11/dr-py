@@ -295,7 +295,7 @@ def evaluate_table(
         try:
             cached = session.table_order_cache.get(fp, rev)
             if cached is not None:
-                cached_rows, truncated, base_total = cached
+                cached_rows, truncated, base_total, base_slots = cached
                 ordered = list(cached_rows)
                 # RE-DERIVE the sort-degraded warning on the cache-hit path.
                 # `order_rows` — the only thing that emits it — is skipped
@@ -324,8 +324,16 @@ def evaluate_table(
                     script_ctx.cache_only = True
                 built = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
                 truncated, base_total = built.truncated, built.base_total
+                base_slots = built.base_slots
                 ordered = order_rows(
-                    metamodel, model, defn, built.keys, sort, limits, script=script_ctx
+                    metamodel,
+                    model,
+                    defn,
+                    built.keys,
+                    sort,
+                    limits,
+                    script=script_ctx,
+                    base_slots=base_slots,
                 )
                 if script_ctx is not None:
                     script_ctx.cache_only = False
@@ -337,7 +345,13 @@ def evaluate_table(
                         ordered = list(built.keys)
             window = ordered[payload.offset : payload.offset + payload.limit]
             cells = evaluate_cells(
-                metamodel, model, defn, window, limits, script=script_ctx
+                metamodel,
+                model,
+                defn,
+                window,
+                limits,
+                script=script_ctx,
+                base_slots=base_slots,
             )
             # Cache-poisoning guard: only store a FRESHLY built order (a cache
             # hit is already cached), and only when nothing this request ran
@@ -363,7 +377,7 @@ def evaluate_table(
                 )
             ):
                 session.table_order_cache.put(
-                    fp, rev, tuple(ordered), truncated, base_total
+                    fp, rev, tuple(ordered), truncated, base_total, base_slots
                 )
             # Status is finalized HERE, after the window pass, so that EVERY
             # branch — including an order-cache HIT — observes the final
@@ -470,9 +484,16 @@ def evaluate_table(
                                 sort,
                                 limits,
                                 script=script_ctx,
+                                base_slots=re_built.base_slots,
                             )
                         evaluate_cells(
-                            metamodel, model, defn, window, limits, script=script_ctx
+                            metamodel,
+                            model,
+                            defn,
+                            window,
+                            limits,
+                            script=script_ctx,
+                            base_slots=base_slots,
                         )
                         script_ctx.cache_only = False
                         if script_ctx.pending_misses > miss_baseline:
@@ -692,7 +713,14 @@ def json_preview(
         build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
         keys = build.keys
         ordered = order_rows(
-            metamodel, model, defn, keys, sort, limits, script=script_ctx
+            metamodel,
+            model,
+            defn,
+            keys,
+            sort,
+            limits,
+            script=script_ctx,
+            base_slots=build.base_slots,
         )
         if script_ctx is not None:
             script_ctx.cache_only = False
@@ -703,7 +731,15 @@ def json_preview(
             model,
             export_definition(defn),
             window,
-            iter_export_rows(metamodel, model, defn, window, limits, script=script_ctx),
+            iter_export_rows(
+                metamodel,
+                model,
+                defn,
+                window,
+                limits,
+                script=script_ctx,
+                base_slots=build.base_slots,
+            ),
             build.base_slots,
             order=layout.rank,
             row_number=(layout.row_number_pos, layout.row_number_key)
@@ -740,6 +776,8 @@ def _collect_script_errors(
     ordered: list[RowKey],
     limits: TableLimits,
     script_ctx: ScriptEvalContext,
+    *,
+    base_slots: int,
 ) -> tuple[list[ScriptErrorItemOut], int]:
     """`(items, total)` — one CACHE-ONLY render pass over the WHOLE table,
     collecting every `ErrorCell` (the snippet failed) and every `PendingCell`
@@ -758,7 +796,15 @@ def _collect_script_errors(
     items: list[ScriptErrorItemOut] = []
     total = 0
     for row_index, row in enumerate(
-        iter_export_rows(metamodel, model, defn, ordered, limits, script=script_ctx)
+        iter_export_rows(
+            metamodel,
+            model,
+            defn,
+            ordered,
+            limits,
+            script=script_ctx,
+            base_slots=base_slots,
+        )
     ):
         for column_index, cell in enumerate(row):
             if isinstance(cell, PendingCell):
@@ -885,18 +931,26 @@ def table_script_errors(
         fp = table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode())
         cached = session.table_order_cache.get(fp, rev)
         if cached is not None:
-            ordered = list(cached[0])
+            ordered, base_slots = list(cached[0]), cached[3]
         else:
             built = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
+            base_slots = built.base_slots
             ordered = order_rows(
-                metamodel, model, defn, built.keys, sort, limits, script=script_ctx
+                metamodel,
+                model,
+                defn,
+                built.keys,
+                sort,
+                limits,
+                script=script_ctx,
+                base_slots=base_slots,
             )
             if script_ctx.pending_misses > 0:
                 # Same degrade as the page route: a sort computed over
                 # half-pending values is not the order the grid is showing.
                 ordered = list(built.keys)
         items, total = _collect_script_errors(
-            metamodel, model, defn, ordered, limits, script_ctx
+            metamodel, model, defn, ordered, limits, script_ctx, base_slots=base_slots
         )
         if script_ctx.pending_misses > 0 and runner is not None:
             # Lock stance: this route holds NO session lock (no write_mutex —
@@ -949,7 +1003,13 @@ def table_script_errors(
             # the memo — no fresh guest work, no double counting.
             miss_baseline = script_ctx.pending_misses
             re_items, re_total = _collect_script_errors(
-                metamodel, model, defn, ordered, limits, script_ctx
+                metamodel,
+                model,
+                defn,
+                ordered,
+                limits,
+                script_ctx,
+                base_slots=base_slots,
             )
             if script_ctx.pending_misses == miss_baseline:
                 body = status.model_dump()

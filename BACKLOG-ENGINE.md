@@ -104,7 +104,7 @@ could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on:
 feature there lands on both sides with a fixture until F.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
-`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
+`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
 `BACKLOG.md`.
 Size: very large.
 
@@ -539,6 +539,15 @@ differently and a dev-shadow `[shadow]` line is possible. The frontend never cal
 only a script or a second client does. Fix direction: the routes recompile and re-splice as
 `POST /commits` does (the module note says why recompiling alone is worse than neither), or
 the event marks the write so the follower leaves the committed rules alone until a load.
+
+### K-69 · A table sort compares numbers through `float()` · `open` · *2026-09-25*
+`core/table/evaluate.py::_script_sort_atom` ranks a number or bool by `float(item)`. An int past
+≈ 1.8e308 raises `OverflowError`, so sorting a column that holds one answers 500. An int past 2^53
+rounds, so two distinct ints can tie. A `NaN` compares false with everything, so a column that
+holds one has no defined order. C's plan 4 ports the table sort mirroring all three rather than
+fixing them on one side (`Number(bigint)` rounds the same way and throws past `Number.MAX_VALUE`),
+and keeps `NaN` atoms out of the golden fixtures. Fix direction, on both sides with a fixture:
+compare ints exactly, never through a float, and sort a `NaN` atom last.
 
 ---
 

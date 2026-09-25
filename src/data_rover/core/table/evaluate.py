@@ -496,13 +496,9 @@ class RowBuild:
     #: reads "N elements -> M rows".
     base_total: int
     #: Row-source slot count at the head of every key in `keys` — the
-    #: `_row_source_base_slots` answer, carried through rather than
-    #: reconstructed from a built key's length. It CANNOT be reconstructed
-    #: post-hoc by subtracting "number of expand columns in `defn`": when
-    #: `max_rows` caps the build mid-column, later expand columns never run
-    #: and never append their slot, so a formula that subtracts one slot per
-    #: DECLARED expand column overcounts and returns a wrong (too-small, even
-    #: negative) answer on exactly the truncated path a real export can hit.
+    #: `_row_source_base_slots` answer. Every consumer of `keys` (`order_rows`,
+    #: `evaluate_cells`, `iter_export_rows`, the JSON render) takes it from
+    #: here, never from a key's length.
     base_slots: int
 
 
@@ -536,6 +532,11 @@ def build_rows_ex(
     and a COLLAPSE column with `keep_empty=False` filters rows whose cell
     would be empty without splitting anything ("Keep rows with no value"
     works with or without the split).
+
+    An expand column that passes `max_rows` keeps its first `max_rows` rows,
+    and every later column still runs over them: every key holds one slot per
+    expand column, and a capped build's rows are a prefix of the uncapped
+    build's.
 
     `script` is `None` for callers with no script work in play; passed
     through to `resolve_source_elements`/`_collapse_has_value`/
@@ -591,7 +592,6 @@ def build_rows_ex(
                     kept.append(key)
             keys = kept
             continue
-        capped = False
         new_keys: list[RowKey] = []
         for key in keys:
             roots = resolve_source_elements(
@@ -627,12 +627,9 @@ def build_rows_ex(
                     new_keys.append((*key, v))
             if len(new_keys) > limits.max_rows:
                 truncated = True
-                capped = True
                 new_keys = new_keys[: limits.max_rows]
                 break
         keys = new_keys
-        if capped:
-            break
     if len(keys) > limits.max_rows:
         keys = keys[: limits.max_rows]
         truncated = True
@@ -1054,7 +1051,10 @@ def _sort_value(
         # (numbers numerically, strings casefolded, uniform triples so a
         # mixed column never raises) — never by the row source's declared
         # types, which a navigation/chain row source or an earlier-column
-        # source does not even have.
+        # source does not even have. One property name can be scalar on one
+        # type and element-typed on another, so the comparable leads with a
+        # shape tag (0 scalar, 1 element): the shapes never compare, and a
+        # single-shape column orders exactly as its untagged values would.
         if col.mode == "expand":
             v = key[_expand_slot_of(defn, base_slots, col_index)]
             if v is None:
@@ -1066,8 +1066,8 @@ def _sort_value(
                     mm, model, defn, key, col, base_slots, limits, script, memo
                 )
             ):
-                return (0, (_display_name(model, v).casefold(), v))
-            return (0, (_script_sort_atom(model, v),))
+                return (0, (1, (_display_name(model, v).casefold(), v)))
+            return (0, (0, (_script_sort_atom(model, v),)))
         els = resolve_source_elements(
             mm,
             model,
@@ -1088,7 +1088,8 @@ def _sort_value(
             ids = _property_element_ids(mm, model, col, els)
             if not ids:
                 return (1, ())
-            return (0, tuple(sorted(_display_name(model, i).casefold() for i in ids)))
+            names = tuple(sorted(_display_name(model, i).casefold() for i in ids))
+            return (0, (1, names))
         vals: list[Binding] = []
         for eid in els:
             v = raw_property(model.elements[eid], col.name)
@@ -1097,7 +1098,7 @@ def _sort_value(
             vals.extend(v if isinstance(v, list) else [v])
         if not vals:
             return (1, ())
-        return (0, tuple(_script_sort_atom(model, v) for v in vals))
+        return (0, (0, tuple(_script_sort_atom(model, v) for v in vals)))
     if isinstance(col, ScriptColumn):
         if col.mode == "expand":
             b = key[_expand_slot_of(defn, base_slots, col_index)]
@@ -1206,6 +1207,8 @@ def order_rows(
     sort: Sequence[SortSpec],
     limits: TableLimits = TableLimits(),
     script: ScriptEvalContext | None = None,
+    *,
+    base_slots: int,
 ) -> list[RowKey]:
     """Stable-sort `keys` by `sort` (normally `sort_keys(defn)`): the first key
     is primary, each later key breaks the ties of the one before; an empty
@@ -1221,20 +1224,13 @@ def order_rows(
     That reuses the single-key empties-last partition unchanged, at
     O(k · n log n).
 
-    `base_slots` is derived from the FULL key set exactly as in
-    `evaluate_cells`: `keys` here is always the complete, already-built row set
-    (never a partial key mid-`build_rows`), so `len(keys[0])` minus one slot
-    per `expand` column recovers the row-source's own slot count.
+    `base_slots` is the build's `RowBuild.base_slots`.
 
     A fresh `NavMemo` is created here and dies with the call: nothing this
     pass evaluates under `script.cache_only` can be served to a later pass."""
     if not sort:
         return list(keys)
     memo = NavMemo()
-    expand_count = sum(
-        1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
-    )
-    base_slots = (len(keys[0]) - expand_count) if keys else 1
     ordered = list(keys)
     for spec in reversed(sort):
         col = defn.columns[spec.column]
@@ -1297,11 +1293,19 @@ def iter_export_rows(
     limits: TableLimits = TableLimits(),
     chunk: int = 1000,
     script: ScriptEvalContext | None = None,
+    *,
+    base_slots: int,
 ) -> Iterator[list[Cell]]:
     """Yield evaluated cell rows for `keys`, in order, `chunk` rows at a time."""
     from .cells import evaluate_cells
 
     for i in range(0, len(keys), chunk):
         yield from evaluate_cells(
-            mm, model, defn, keys[i : i + chunk], limits, script=script
+            mm,
+            model,
+            defn,
+            keys[i : i + chunk],
+            limits,
+            script=script,
+            base_slots=base_slots,
         )
