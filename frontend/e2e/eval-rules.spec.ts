@@ -85,10 +85,18 @@ let cleanupRuleSet: string | undefined;
  * `setStrictMode(page, true)` and `setStrictMode(page, false)` below would
  * otherwise leave it on for `strict-mode.spec.ts`'s next test — the suite is
  * serial, one worker) and the rule set this test made, deleted, in case an
- * assertion failed before the test's own cleanup ran. Both go through the
- * owner peer client, disposed after. `delete_artifact` needs the artifact's
- * own exclusive lease (`locking.py`'s `required_locks`), acquired and
- * released here exactly as `peerCommit` does for an element's.
+ * assertion failed before the test's own cleanup ran. The PATCH result is
+ * asserted LAST, after the deletion attempt: a failed PATCH must not skip
+ * the rule-set cleanup. Both go through the owner peer client, disposed
+ * after. `delete_artifact` needs the artifact's own exclusive lease
+ * (`locking.py`'s `required_locks`), acquired and released here exactly as
+ * `peerCommit` does for an element's — no need to close the Rules tab
+ * first even though it holds its own `art:<id>` lease from checkout
+ * (`rules-editor.svelte.ts`): `page` and this peer client both authenticate
+ * as the same bootstrap admin (`openDefaultProject`'s default, `peer`'s
+ * only login), and `LockTable._conflict` exempts a lease already held by
+ * the SAME holder (`if le.holder == holder: continue`) — a same-user
+ * re-acquire, delete intent included, never conflicts.
  */
 test.afterEach(async ({ playwright }) => {
 	const api = await peer(playwright);
@@ -97,7 +105,6 @@ test.afterEach(async ({ playwright }) => {
 		const settings = await api.patch(`projects/${projectId}/settings`, {
 			data: { strict_mode: false }
 		});
-		expect(settings.ok(), await settings.text()).toBeTruthy();
 		if (cleanupRuleSet !== undefined) {
 			const base = `projects/${projectId}`;
 			const list = await api.get(`${base}/artifacts?kind=validation_rules`);
@@ -129,6 +136,7 @@ test.afterEach(async ({ playwright }) => {
 				}
 			}
 		}
+		expect(settings.ok(), await settings.text()).toBeTruthy();
 	} finally {
 		await api.dispose();
 	}
