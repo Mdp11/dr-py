@@ -86,9 +86,11 @@ a model-lane `scan`, answers `TablePageOut` with the server's key order: `column
   of the resolved definition with presentation-only fields removed — `header`, `width_px`,
   `hidden`, `json_export`, `export`, `display_order`, `export_order`, `show_row_numbers`,
   `json_split`, `transform` — so a column resize or rename does not re-sort. Value: the ordered
-  keys, `truncated`, `base_total`. Stamp: `(rev, staged_version, artifacts_version)`; a lookup
-  under another stamp evicts and misses. Stored whenever the build and sort completed
-  and were not cancelled (the server's "nothing errored" condition concerns script contexts,
+  keys, `truncated`, `base_total`. Stamp: `(rev, staged_version)`; a lookup under another stamp
+  evicts and misses. `artifacts_version` is not part of it: the key already holds the resolved
+  closure, so a changed navigation changes the key, and an unrelated artifact edit must not
+  evict every table (settled while planning, plan D6). Stored the moment build and sort complete
+  (a scan dropped before that stores nothing) (the server's "nothing errored" condition concerns script contexts,
   which never reach the engine). A hit evaluates only the page's cells:
   later pages are O(page). A scan restarted by the scheduler builds again from nothing; no
   memo outlives one `run()`.
@@ -155,8 +157,9 @@ or artifact buffer); a 501-refused call is never compared.
   navigation reached by a table, a staged delete hiding a committed navigation.
 - **The two suspected Python bugs** each get a failing Python test first. A confirmed one is
   fixed on both sides with a fixture (MR-3); an unconfirmed one is dropped from the plan.
-- **Engine tests** (real engine): cache hit; a miss for each stamp component; a presentation
-  edit hits; a cancelled scan stores nothing; an artifact change posted between slices is not
+- **Engine tests** (real engine): cache hit; a miss for each stamp component and for a
+  changed navigation in the closure; a presentation edit hits; a scan cancelled before its sort
+  completes stores nothing; an artifact change posted between slices is not
   seen by the scan in flight and is seen by the next call; the 501 refusal; `changed` carries
   `artifacts_version` and a table edit does not move `issues_version`.
 - **Frontend tests:** a routing test modelled on `api/__tests__/artifacts.test.ts` with the real
