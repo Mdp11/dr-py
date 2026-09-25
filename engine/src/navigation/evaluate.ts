@@ -503,6 +503,24 @@ export function evaluateSteps(
 	return evaluate({ mm, model, limits, rowElements, meter, compiled }, defn);
 }
 
+/**
+ * The ids `scope` selects in code point order, with no edge budget and no
+ * chain cap: a table's scope rows. Its patterns are translated at the first
+ * step.
+ */
+export function* scopeSteps(
+	mm: Metamodel,
+	model: Model,
+	scope: Scope,
+	meter: Meter
+): Steps<string[]> {
+	const compiled = compileCriteria(scope.criteria);
+	return yield* scopeIds(
+		{ mm, model, limits: DEFAULT_LIMITS, rowElements: null, meter, compiled },
+		scope
+	);
+}
+
 /** `evaluateSteps`, drained. */
 export function evaluateNavigationCore(
 	mm: Metamodel,

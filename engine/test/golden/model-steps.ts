@@ -32,6 +32,7 @@ import {
 	parseJson,
 	PyFloat,
 	previewBody,
+	pyRepr,
 	pyDumps,
 	readArtifacts,
 	ReadError,
@@ -62,7 +63,20 @@ import {
 	type ReadParams,
 	type RelImage,
 	type StagedArtifact,
-	type Value
+	type Value,
+	buildRowsSteps,
+	DEFAULT_TABLE_LIMITS,
+	Meter,
+	NavMemo,
+	orderRowsSteps,
+	PropertyValue,
+	readTableDefinition,
+	resolveTableRefs,
+	tableHasScript,
+	toWire,
+	type RowKey,
+	type TableLimits,
+	type Wire
 } from '../../src/index.ts';
 import { clone, workingCopy } from '../working/helpers.ts';
 import { untag, type Tagged } from './load.ts';
@@ -126,9 +140,10 @@ export type Step = Partial<Observed> & {
 	view_id?: string;
 	/** `artifacts`: the project's committed artifacts from here on, by id. */
 	artifacts?: { [id: string]: { kind: string; payload: Tagged } };
-	/** `navigate` / `has_script`: a definition whose refs resolve against those artifacts. */
+	/** `navigate` / `has_script` / `table_rows`: a definition whose refs resolve against those artifacts. */
 	definition?: unknown;
-	limits?: { max_visited: number; max_chains: number };
+	/** `navigate`'s evaluator limits, or `table_rows`' table limits. */
+	limits?: NavigateLimits | TableStepLimits;
 	row_elements?: string[] | null;
 	/** `preview`: the session's strict mode. */
 	strict?: boolean;
@@ -140,6 +155,9 @@ export type Step = Partial<Observed> & {
 	error: StepError | null;
 	unchanged?: true;
 };
+
+export type NavigateLimits = { max_visited: number; max_chains: number };
+export type TableStepLimits = { max_rows: number; max_cell_elements: number };
 
 export type StepsFixture = { metamodel: MetamodelDoc; steps: Step[] };
 
@@ -363,6 +381,62 @@ function setArtifacts({ artifacts, layer }: Carried, step: Step): void {
 	}
 }
 
+/** Row keys as the route writes them: a value terminal as `{"value": …}`. */
+const wireKeys = (keys: readonly RowKey[]): Wire[][] =>
+	keys.map((key) =>
+		key.map((slot) =>
+			slot instanceof PropertyValue ? { value: toWire(slot.value) } : toWire(slot)
+		)
+	);
+
+/**
+ * The row build and order of a definition resolved against the artifacts, a
+ * table that reaches a script not built; a core `ValueError` or `KeyError`
+ * answered as the tables route answers it.
+ */
+function tableRows(model: Model, artifacts: ArtifactSet, step: Step): unknown {
+	const defn = resolveTableRefs(
+		readTableDefinition(step.definition, 'definition'),
+		navigationFetch(artifacts)
+	);
+	if (tableHasScript(defn)) {
+		return {
+			has_script: true,
+			keys: null,
+			truncated: null,
+			base_total: null,
+			base_slots: null,
+			order: null
+		};
+	}
+	const raw = step.limits as TableStepLimits | undefined;
+	const limits: TableLimits =
+		raw === undefined
+			? DEFAULT_TABLE_LIMITS
+			: { maxRows: raw.max_rows, maxCellElements: raw.max_cell_elements };
+	const meter = new Meter(0);
+	try {
+		const built = drain(buildRowsSteps(model, defn, limits, meter, new NavMemo()));
+		const order = drain(
+			orderRowsSteps(model, defn, built.keys, built.baseSlots, meter, new NavMemo())
+		);
+		return {
+			has_script: false,
+			keys: wireKeys(built.keys),
+			truncated: built.truncated,
+			base_total: built.baseTotal,
+			base_slots: built.baseSlots,
+			order: wireKeys(order)
+		};
+	} catch (error) {
+		if (error instanceof NavValueError) throw new ReadError(422, error.message);
+		if (error instanceof NavKeyError) {
+			throw new ReadError(422, `unknown artifact ${pyRepr(error.id)}`);
+		}
+		throw error;
+	}
+}
+
 /**
  * `mint` stands in for the oracle's `SequentialIdGenerator`. A failed call
  * consumes no id, and neither does a refused batch: the oracle runs each on a
@@ -449,7 +523,7 @@ function apply(
 		case 'navigate': {
 			const fetch = navigationFetch(artifacts);
 			const defn = resolveRefs(readNavigation(step.definition, 'definition'), fetch);
-			const { max_visited, max_chains } = step.limits!;
+			const { max_visited, max_chains } = step.limits as NavigateLimits;
 			const result = evaluateNavigationCore(
 				model.metamodel,
 				model,
@@ -467,6 +541,8 @@ function apply(
 			const fetch = navigationFetch(artifacts);
 			return navigationHasScript(resolveRefs(readNavigation(step.definition, 'definition'), fetch));
 		}
+		case 'table_rows':
+			return tableRows(model, artifacts, step);
 		case 'view':
 			placements.set(step.view_id!, step.result as string[]);
 			return step.result;
@@ -550,6 +626,7 @@ const READ_LIKE = new Set([
 	'read',
 	'navigate',
 	'has_script',
+	'table_rows',
 	'validate',
 	'rules',
 	'reach',

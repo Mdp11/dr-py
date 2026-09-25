@@ -277,6 +277,49 @@ export {
 } from './snapshot/open.ts';
 export { sha256 } from './snapshot/sha256.ts';
 export { drain, isSteps, sortedInSlices, type Progress, type Steps } from './steps/steps.ts';
+export { NavMemo, type MemoEntry } from './table/nav-memo.ts';
+export { resolveTableRefs, tableFetch, tableHasScript } from './table/resolve.ts';
+export {
+	buildRowsSteps,
+	DEFAULT_TABLE_LIMITS,
+	type Binding,
+	type RowBuild,
+	type RowKey,
+	type TableLimits
+} from './table/rows.ts';
+export {
+	MAX_COLUMNS,
+	readTableDefinition,
+	type CellMode,
+	type ChainRows,
+	type Column,
+	type ColumnExportOptions,
+	type ColumnRef,
+	type ColumnSource,
+	type ElementColumn,
+	type JsonColumnOptions,
+	type JsonSplitOptions,
+	type NavigationColumn,
+	type NavigationRows,
+	type NavigationSource,
+	type PropertyColumn,
+	type RowNumberExportOptions,
+	type RowSlot,
+	type RowSource,
+	type ScopeRows,
+	type ScriptColumn,
+	type ScriptInput,
+	type SortKey,
+	type TableDefinition
+} from './table/schema.ts';
+export {
+	orderRowsSteps,
+	pyCompare,
+	sortKeys,
+	type Comparable,
+	type SortSpec
+} from './table/sort.ts';
+export { pyCasefold } from './value/casefold.ts';
 export { jsStr, pyFloatOf, PyOverflowError, toNumber } from './value/coerce.ts';
 export { cmpCodePoint, pyContains } from './value/compare.ts';
 export { pyFloatRepr } from './value/float-repr.ts';

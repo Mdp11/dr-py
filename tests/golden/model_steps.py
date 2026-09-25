@@ -7,12 +7,13 @@ inverse ops of an earlier batch in restore mode. ``read`` calls a read route
 function on the recorder's model and records the response body; ``view`` and
 ``drop_view`` keep the views a read may name, ``artifacts`` the project
 artifacts it may fetch. ``navigate`` and ``has_script`` run the navigation
-core itself on a definition whose refs resolve against those artifacts.
-``validate`` runs the six built-in validators over a scope of ids and records
-the issues as the server's routes send them; after a ``rules`` step, which
-parses and compiles rule sets as the server does, the rules validator runs
-seventh. ``reach`` records the elements those rules reach back to from a list
-of ids. ``seed`` gives the recorder a
+core itself on a definition whose refs resolve against those artifacts;
+``table_rows`` builds and orders a table's rows the same way, as the tables
+route does. ``validate`` runs the six built-in validators over a scope of ids
+and records the issues as the server's routes send them; after a ``rules``
+step, which parses and compiles rule sets as the server does, the rules
+validator runs seventh. ``reach`` records the elements those rules reach back
+to from a list of ids. ``seed`` gives the recorder a
 session over its model and its rules, its issue store filled by the server's
 own sweep; from then on every landed batch bumps ``model_rev`` and is
 finalized as ``POST /model/ops`` finalizes it, a ``rules`` step lands as a
@@ -70,6 +71,7 @@ from data_rover.api.schemas import (
     RelationshipOut,
     RuleSkipOut,
     RulesStatusOut,
+    TableRowOut,
     ValidateRequest,
 )
 from data_rover.api.search import SearchQueryIn
@@ -82,8 +84,22 @@ from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.evaluate import EvalLimits, evaluate
-from data_rover.core.navigation.resolve import navigation_has_script, resolve_refs
+from data_rover.core.navigation.resolve import (
+    NavigationResolveError,
+    navigation_has_script,
+    resolve_refs,
+)
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
+from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
+from data_rover.core.table.evaluate import (
+    RowKey,
+    TableLimits,
+    build_rows_ex,
+    order_rows,
+    sort_keys,
+)
+from data_rover.core.table.resolve import resolve_table_refs, table_has_script
+from data_rover.core.table.schema import TABLE_ADAPTER
 from data_rover.core.validation.dirty import DirtyCollector
 from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
 from data_rover.core.validation.rules.compile import (
@@ -300,6 +316,73 @@ def _navigate(model: Model, artifacts: Artifacts, step: dict[str, Any]) -> Any:
             for chain in result.chains
         ],
         "truncated": result.truncated,
+    }
+
+
+def _snippet_fetch(artifacts: Artifacts, artifact_id: str) -> SnippetDefinition:
+    artifact = artifacts.get(artifact_id)
+    if artifact is None or artifact["kind"] != ArtifactKind.code_snippet:
+        raise LookupError(artifact_id)
+    return SNIPPET_ADAPTER.validate_python(artifact["payload"])
+
+
+def _row_keys(keys: Iterable[RowKey]) -> list[list[Any]]:
+    """Row keys as the route writes them: a value terminal as ``{"value": …}``."""
+    return [
+        TableRowOut(key=list(key), cells=[]).model_dump(mode="json")["key"]
+        for key in keys
+    ]
+
+
+def _table_rows(model: Model, artifacts: Artifacts, step: dict[str, Any]) -> Any:
+    """The route's row build and order over a definition resolved against the
+    artifacts, its refusals as the route answers them. A table that reaches a
+    script records that alone: the engine never builds one."""
+    try:
+        defn = resolve_table_refs(
+            TABLE_ADAPTER.validate_python(step["definition"]),
+            lambda artifact_id: _fetch(artifacts, artifact_id),
+            lambda artifact_id: _snippet_fetch(artifacts, artifact_id),
+        )
+        if table_has_script(defn):
+            return {
+                "has_script": True,
+                "keys": None,
+                "truncated": None,
+                "base_total": None,
+                "base_slots": None,
+                "order": None,
+            }
+        raw = step.get("limits")
+        limits = (
+            TableLimits()
+            if raw is None
+            else TableLimits(
+                max_rows=raw["max_rows"], max_cell_elements=raw["max_cell_elements"]
+            )
+        )
+        mm = model.metamodel
+        built = build_rows_ex(mm, model, defn, limits)
+        order = order_rows(
+            mm,
+            model,
+            defn,
+            built.keys,
+            sort_keys(defn),
+            limits,
+            base_slots=built.base_slots,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
+    except (NavigationResolveError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "has_script": False,
+        "keys": _row_keys(built.keys),
+        "truncated": built.truncated,
+        "base_total": built.base_total,
+        "base_slots": built.base_slots,
+        "order": _row_keys(order),
     }
 
 
@@ -636,6 +719,8 @@ class Recorder:
                 return navigation_has_script(
                     _resolved(self._artifacts, step["definition"])
                 )
+            case "table_rows":
+                return _table_rows(model, self._artifacts, step)
             case "view":
                 view = View.model_validate(
                     {"name": step["view_id"], "folders": step["_folders"]}

@@ -30,6 +30,7 @@ from . import (  # noqa: F401
     smart_city,
     snapshot_v2,
     string_order,
+    table_rows,
     validation_dirty,
     validation_kinds,
     validation_steps,
