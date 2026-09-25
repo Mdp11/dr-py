@@ -21,7 +21,7 @@ single-sourced.
 1. **Where the system is going** — these documents win.
 2. **What the code does today** — the code and the co-located READMEs that
    `CLAUDE.md` maps win.
-3. A sub-project spec or plan (local working files under the git-ignored `docs/`) refines
+3. A sub-project spec or plan (under `docs/superpowers/`) refines
    these documents and MUST NOT contradict them. If it has to, change the document here
    first, in the same change.
 

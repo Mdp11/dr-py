@@ -53,8 +53,8 @@ the op applier. Nothing else writes entity state; indexes are maintained there.
 
 ## Process
 
-**RC-9 · Design before code.** Brainstorm → spec → plan → build. Specs and plans live under the
-git-ignored `docs/superpowers/`. Anything a later session must not rediscover is promoted: a
+**RC-9 · Design before code.** Brainstorm → spec → plan → build. Specs and plans live under
+`docs/superpowers/`, committed. Anything a later session must not rediscover is promoted: a
 decision into `architecture/`, an open item into `BACKLOG.md` (`BACKLOG-ENGINE.md` for this
 program), current behaviour into the co-located README.
 

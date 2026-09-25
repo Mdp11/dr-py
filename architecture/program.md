@@ -1,7 +1,7 @@
 # Program
 
 Six sub-projects, built in order. Each gets its own spec → plan → build cycle, chained by
-handoff. Specs and plans are local working files (RC-9); decisions that outlive a sub-project
+handoff. Specs and plans live under `docs/superpowers/` (RC-9); decisions that outlive a sub-project
 are promoted into this directory.
 
 ## Status

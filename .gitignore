@@ -22,7 +22,6 @@ frontend/playwright-report
 frontend/test-results
 frontend/e2e/.data
 
-docs/
 .superpowers/
 
 # generated benchmark fixtures

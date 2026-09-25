@@ -1446,8 +1446,8 @@ can't be reversed by an implementer acting alone.
 **Process / infra**
 - ~~**Pushing to `origin`** — never asked for.~~ **Superseded 2026-08-26**: the owner asked
   for merge-and-push of `fix/ux-minor-batch`; `main` is pushed from here on.
-- **Committing anything under `docs/superpowers/` or `.superpowers/`** — gitignored by
-  convention.
+- **Committing anything under `.superpowers/`** — gitignored by convention. Specs and
+  plans under `docs/superpowers/` are committed (RC-9).
 - **AbortSignal plumbing for wizard uploads** — a cancelled submit still uploads the full
   multipart body and the server still imports an orphan project; the client only refreshes
   the list. Parked as out-of-cleanup-scope; raise as a candidate task rather than doing it
