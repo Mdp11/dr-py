@@ -277,8 +277,20 @@ export {
 } from './snapshot/open.ts';
 export { sha256 } from './snapshot/sha256.ts';
 export { drain, isSteps, sortedInSlices, type Progress, type Steps } from './steps/steps.ts';
+export { cellText } from './table/cell-text.ts';
+export { evaluateCellsSteps, type TableCell } from './table/cells.ts';
 export { NavMemo, type MemoEntry } from './table/nav-memo.ts';
+export {
+	pageBody,
+	wireCell,
+	wireKey,
+	type TableCellBody,
+	type TableColumnBody,
+	type TablePageBody,
+	type TableRowBody
+} from './table/page.ts';
 export { resolveTableRefs, tableFetch, tableHasScript } from './table/resolve.ts';
+export { evaluateTable, tableSteps, type TableRows } from './table/route.ts';
 export {
 	buildRowsSteps,
 	DEFAULT_TABLE_LIMITS,
@@ -333,7 +345,7 @@ export {
 	type ParseOptions
 } from './value/parse.ts';
 export { translatePyRegex, type PyRegex } from './value/regex.ts';
-export { pyRepr, pyReprValue } from './value/repr.ts';
+export { pyRepr, pyReprValue, pyStr } from './value/repr.ts';
 export { pyDumps } from './value/serialize.ts';
 export { PyFloat, type Value } from './value/types.ts';
 export { readDeltaText, readTailText, type Delta } from './working/delta.ts';

@@ -65,7 +65,9 @@ import {
 	type StagedArtifact,
 	type Value,
 	buildRowsSteps,
+	cellText,
 	DEFAULT_TABLE_LIMITS,
+	evaluateCellsSteps,
 	Meter,
 	NavMemo,
 	orderRowsSteps,
@@ -108,8 +110,9 @@ export type BatchOutcome = {
 	changed_relationships: string[];
 };
 
+/** A route's refusal; a list `detail` is FastAPI's own, of a body it cannot read. */
 export type StepError =
-	{ kind: 'key' | 'value'; message: string } | { status: number; detail: string };
+	{ kind: 'key' | 'value'; message: string } | { status: number; detail: string | unknown[] };
 
 export type Step = Partial<Observed> & {
 	do: string;
@@ -140,10 +143,13 @@ export type Step = Partial<Observed> & {
 	view_id?: string;
 	/** `artifacts`: the project's committed artifacts from here on, by id. */
 	artifacts?: { [id: string]: { kind: string; payload: Tagged } };
-	/** `navigate` / `has_script` / `table_rows`: a definition whose refs resolve against those artifacts. */
+	/** `navigate` / `has_script` / `table_rows` / `cell_text`: a definition whose refs resolve against those artifacts. */
 	definition?: unknown;
-	/** `navigate`'s evaluator limits, or `table_rows`' table limits. */
+	/** `navigate`'s evaluator limits, or `table_rows`' and `cell_text`'s table limits. */
 	limits?: NavigateLimits | TableStepLimits;
+	/** `cell_text`: the page of rows rendered. */
+	offset?: number;
+	limit?: number;
 	row_elements?: string[] | null;
 	/** `preview`: the session's strict mode. */
 	strict?: boolean;
@@ -348,7 +354,7 @@ function allIds(model: Model): string[] {
 	];
 }
 
-/** `tests/golden/tagged.py`'s rendering of a scalar. */
+/** `tests/golden/tagged.py`'s rendering of a value. */
 function tag(value: Value): Tagged {
 	if (value === null) return { t: 'null' };
 	if (typeof value === 'boolean') return { t: 'bool', v: value };
@@ -359,7 +365,8 @@ function tag(value: Value): Tagged {
 		view.setFloat64(0, value.value);
 		return { t: 'float', hex: view.getBigUint64(0).toString(16).padStart(16, '0') };
 	}
-	throw new Error('a chain holds no container');
+	if (Array.isArray(value)) return { t: 'list', v: value.map(tag) };
+	return { t: 'dict', v: Object.entries(value).map(([key, item]) => [key, tag(item)]) };
 }
 
 const recordedNode = (node: ChainNode) =>
@@ -389,16 +396,23 @@ const wireKeys = (keys: readonly RowKey[]): Wire[][] =>
 		)
 	);
 
+const resolvedTable = (artifacts: ArtifactSet, step: Step) =>
+	resolveTableRefs(readTableDefinition(step.definition, 'definition'), navigationFetch(artifacts));
+
+function tableLimits(step: Step): TableLimits {
+	const raw = step.limits as TableStepLimits | undefined;
+	return raw === undefined
+		? DEFAULT_TABLE_LIMITS
+		: { maxRows: raw.max_rows, maxCellElements: raw.max_cell_elements };
+}
+
 /**
  * The row build and order of a definition resolved against the artifacts, a
  * table that reaches a script not built; a core `ValueError` or `KeyError`
  * answered as the tables route answers it.
  */
 function tableRows(model: Model, artifacts: ArtifactSet, step: Step): unknown {
-	const defn = resolveTableRefs(
-		readTableDefinition(step.definition, 'definition'),
-		navigationFetch(artifacts)
-	);
+	const defn = resolvedTable(artifacts, step);
 	if (tableHasScript(defn)) {
 		return {
 			has_script: true,
@@ -409,11 +423,7 @@ function tableRows(model: Model, artifacts: ArtifactSet, step: Step): unknown {
 			order: null
 		};
 	}
-	const raw = step.limits as TableStepLimits | undefined;
-	const limits: TableLimits =
-		raw === undefined
-			? DEFAULT_TABLE_LIMITS
-			: { maxRows: raw.max_rows, maxCellElements: raw.max_cell_elements };
+	const limits = tableLimits(step);
 	const meter = new Meter(0);
 	try {
 		const built = drain(buildRowsSteps(model, defn, limits, meter, new NavMemo()));
@@ -435,6 +445,23 @@ function tableRows(model: Model, artifacts: ArtifactSet, step: Step): unknown {
 		}
 		throw error;
 	}
+}
+
+/** One page of a table's cells in its row order, each as an export renders it, tagged. */
+function cellTexts(model: Model, artifacts: ArtifactSet, step: Step): Tagged[][] {
+	const defn = resolvedTable(artifacts, step);
+	const limits = tableLimits(step);
+	const meter = new Meter(0);
+	const built = drain(buildRowsSteps(model, defn, limits, meter, new NavMemo()));
+	const order = drain(
+		orderRowsSteps(model, defn, built.keys, built.baseSlots, meter, new NavMemo())
+	);
+	const offset = step.offset ?? 0;
+	const page = order.slice(offset, offset + (step.limit ?? 100));
+	const cells = drain(
+		evaluateCellsSteps(model, defn, page, built.baseSlots, limits, meter, new NavMemo())
+	);
+	return cells.map((row) => row.map((cell) => tag(cellText(model, cell))));
 }
 
 /**
@@ -543,6 +570,8 @@ function apply(
 		}
 		case 'table_rows':
 			return tableRows(model, artifacts, step);
+		case 'cell_text':
+			return cellTexts(model, artifacts, step);
 		case 'view':
 			placements.set(step.view_id!, step.result as string[]);
 			return step.result;
@@ -627,6 +656,7 @@ const READ_LIKE = new Set([
 	'navigate',
 	'has_script',
 	'table_rows',
+	'cell_text',
 	'validate',
 	'rules',
 	'reach',
@@ -679,7 +709,13 @@ export function replaySteps(
 			else if (caught instanceof NavValueError) error = { kind: 'value', message: caught.message };
 			else throw caught;
 		}
-		expect(error, label).toEqual(step.error);
+		const recorded = step.error;
+		if (recorded !== null && 'status' in recorded && typeof recorded.detail !== 'string') {
+			// FastAPI's refusal of a body: the engine refuses it in its own words.
+			expect(error !== null && 'status' in error ? error.status : error, label).toBe(
+				recorded.status
+			);
+		} else expect(error, label).toEqual(recorded);
 		// A body is compared as text: values and key order at once.
 		if (READ_LIKE.has(step.do)) {
 			expect(JSON.stringify(result), label).toBe(JSON.stringify(step.result));

@@ -9,7 +9,8 @@ function on the recorder's model and records the response body; ``view`` and
 artifacts it may fetch. ``navigate`` and ``has_script`` run the navigation
 core itself on a definition whose refs resolve against those artifacts;
 ``table_rows`` builds and orders a table's rows the same way, as the tables
-route does. ``validate`` runs the six built-in validators over a scope of ids
+route does, and ``cell_text`` renders one page of its cells as an export
+does. ``validate`` runs the six built-in validators over a scope of ids
 and records the issues as the server's routes send them; after a ``rules``
 step, which parses and compiles rule sets as the server does, the rules
 validator runs seventh. ``reach`` records the elements those rules reach back
@@ -50,12 +51,13 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from data_rover.api.db_models import ArtifactKind, ArtifactRow, Role
 from data_rover.api.deps import Session
 from data_rover.api.routes import artifacts as artifact_routes
 from data_rover.api.routes import read
+from data_rover.api.routes import tables as table_routes
 from data_rover.api.routes.commits import preview_commit
 from data_rover.api.routes.elements import get_element
 from data_rover.api.routes.ops import _apply_batch, _BatchResult, _finalize
@@ -65,6 +67,7 @@ from data_rover.api.rules import applies_population, pipeline_for, session_pipel
 from data_rover.api.schemas import (
     ElementOut,
     EvaluateNavigationIn,
+    EvaluateTableIn,
     IssueOut,
     ModelOpIn,
     PreviewRequest,
@@ -91,6 +94,8 @@ from data_rover.core.navigation.resolve import (
 )
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
 from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
+from data_rover.core.table.cell_text import cell_text
+from data_rover.core.table.cells import evaluate_cells
 from data_rover.core.table.evaluate import (
     RowKey,
     TableLimits,
@@ -99,7 +104,7 @@ from data_rover.core.table.evaluate import (
     sort_keys,
 )
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
-from data_rover.core.table.schema import TABLE_ADAPTER
+from data_rover.core.table.schema import TABLE_ADAPTER, TableDefinition
 from data_rover.core.validation.dirty import DirtyCollector
 from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
 from data_rover.core.validation.rules.compile import (
@@ -334,16 +339,31 @@ def _row_keys(keys: Iterable[RowKey]) -> list[list[Any]]:
     ]
 
 
+def _resolved_table(artifacts: Artifacts, definition: Any) -> TableDefinition:
+    return resolve_table_refs(
+        TABLE_ADAPTER.validate_python(definition),
+        lambda artifact_id: _fetch(artifacts, artifact_id),
+        lambda artifact_id: _snippet_fetch(artifacts, artifact_id),
+    )
+
+
+def _table_limits(step: dict[str, Any]) -> TableLimits:
+    """The step's ``limits`` (``max_rows``, ``max_cell_elements``), else the
+    route's."""
+    raw = step.get("limits")
+    if raw is None:
+        return TableLimits()
+    return TableLimits(
+        max_rows=raw["max_rows"], max_cell_elements=raw["max_cell_elements"]
+    )
+
+
 def _table_rows(model: Model, artifacts: Artifacts, step: dict[str, Any]) -> Any:
     """The route's row build and order over a definition resolved against the
     artifacts, its refusals as the route answers them. A table that reaches a
     script records that alone: the engine never builds one."""
     try:
-        defn = resolve_table_refs(
-            TABLE_ADAPTER.validate_python(step["definition"]),
-            lambda artifact_id: _fetch(artifacts, artifact_id),
-            lambda artifact_id: _snippet_fetch(artifacts, artifact_id),
-        )
+        defn = _resolved_table(artifacts, step["definition"])
         if table_has_script(defn):
             return {
                 "has_script": True,
@@ -353,14 +373,7 @@ def _table_rows(model: Model, artifacts: Artifacts, step: dict[str, Any]) -> Any
                 "base_slots": None,
                 "order": None,
             }
-        raw = step.get("limits")
-        limits = (
-            TableLimits()
-            if raw is None
-            else TableLimits(
-                max_rows=raw["max_rows"], max_cell_elements=raw["max_cell_elements"]
-            )
-        )
+        limits = _table_limits(step)
         mm = model.metamodel
         built = build_rows_ex(mm, model, defn, limits)
         order = order_rows(
@@ -384,6 +397,28 @@ def _table_rows(model: Model, artifacts: Artifacts, step: dict[str, Any]) -> Any
         "base_slots": built.base_slots,
         "order": _row_keys(order),
     }
+
+
+def _cell_text(model: Model, artifacts: Artifacts, step: dict[str, Any]) -> Any:
+    """One page of the core's cells of a script-free table, in the route's row
+    order, each as ``cell_text`` renders it for an export, tagged."""
+    defn = _resolved_table(artifacts, step["definition"])
+    limits = _table_limits(step)
+    mm = model.metamodel
+    built = build_rows_ex(mm, model, defn, limits)
+    order = order_rows(
+        mm,
+        model,
+        defn,
+        built.keys,
+        sort_keys(defn),
+        limits,
+        base_slots=built.base_slots,
+    )
+    offset = step.get("offset", 0)
+    page = order[offset : offset + step.get("limit", 100)]
+    cells = evaluate_cells(mm, model, defn, page, limits, base_slots=built.base_slots)
+    return [[tag(cell_text(model, cell)) for cell in row] for row in cells]
 
 
 def _read(
@@ -444,6 +479,23 @@ def _read(
         case "evaluateNavigation":
             return artifact_routes.evaluate_navigation(
                 EvaluateNavigationIn.model_validate(params),
+                project_id="p",
+                session=session,
+                db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
+                runner=None,
+                settings=Settings(),
+            )
+        case "evaluateTable":
+            try:
+                payload = EvaluateTableIn.model_validate(params)
+            except ValidationError as exc:
+                # FastAPI's refusal of a body it cannot read: pydantic's errors.
+                detail = exc.errors(
+                    include_url=False, include_context=False, include_input=False
+                )
+                raise HTTPException(status_code=422, detail=detail) from exc
+            return table_routes.evaluate_table(
+                payload,
                 project_id="p",
                 session=session,
                 db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
@@ -721,6 +773,8 @@ class Recorder:
                 )
             case "table_rows":
                 return _table_rows(model, self._artifacts, step)
+            case "cell_text":
+                return _cell_text(model, self._artifacts, step)
             case "view":
                 view = View.model_validate(
                     {"name": step["view_id"], "folders": step["_folders"]}

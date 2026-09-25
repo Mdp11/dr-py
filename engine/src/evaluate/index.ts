@@ -5,9 +5,19 @@ import type { ReadParams } from '../read/params.ts';
 import type { ViewPlacements } from '../read/placements.ts';
 import { searchModel } from '../search/search-model.ts';
 import type { Steps } from '../steps/steps.ts';
+import { evaluateTable } from '../table/route.ts';
 
-/** What an evaluation reads: the working model, the project's artifacts and the view placements. */
-export type EvalContext = { model: Model; artifacts: ArtifactSet; placements: ViewPlacements };
+/**
+ * What an evaluation reads: the working model, the project's artifacts, the
+ * view placements, and the revision the committed state stands at (0 when
+ * absent, as a session that has seen no commit).
+ */
+export type EvalContext = {
+	model: Model;
+	artifacts: ArtifactSet;
+	placements: ViewPlacements;
+	rev?: number;
+};
 
 /**
  * An evaluation: the response body of the route it stands for, always in
@@ -19,5 +29,6 @@ export type Evaluation = (ctx: EvalContext, params: ReadParams) => Steps<unknown
 /** Every evaluation, by the name of the `lib/api` function it answers for. */
 export const EVALUATIONS: { readonly [method: string]: Evaluation } = {
 	searchModel,
-	evaluateNavigation
+	evaluateNavigation,
+	evaluateTable
 };

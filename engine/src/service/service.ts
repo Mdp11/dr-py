@@ -514,7 +514,12 @@ class Service {
 			kind: 'scan',
 			run: () =>
 				EVALUATIONS[method]!(
-					{ model: this.ready().model, artifacts: this.artifacts, placements: this.placements },
+					{
+						model: this.ready().model,
+						artifacts: this.artifacts,
+						placements: this.placements,
+						rev: this.ready().rev
+					},
 					call.params
 				)
 		});

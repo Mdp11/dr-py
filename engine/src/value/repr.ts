@@ -42,3 +42,6 @@ export function pyReprValue(v: Value): string {
 	const entries = Object.entries(v).map(([k, item]) => `${pyRepr(k)}: ${pyReprValue(item)}`);
 	return '{' + entries.join(', ') + '}';
 }
+
+/** Python's `str()` of a value: a string as itself, anything else its `repr`. */
+export const pyStr = (v: Value): string => (typeof v === 'string' ? v : pyReprValue(v));

@@ -42,7 +42,11 @@ function nodes(count: number): Model {
 
 describe('searchModel', () => {
 	it('is a method beside the reads', () => {
-		expect(Object.keys(EVALUATIONS)).toEqual(['searchModel', 'evaluateNavigation']);
+		expect(Object.keys(EVALUATIONS)).toEqual([
+			'searchModel',
+			'evaluateNavigation',
+			'evaluateTable'
+		]);
 		expect(Object.keys(READS)).not.toContain('searchModel');
 	});
 

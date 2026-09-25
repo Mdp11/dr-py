@@ -14,7 +14,7 @@ import { PropertyValue, type Meter } from '../navigation/evaluate.ts';
 import type { Steps } from '../steps/steps.ts';
 import { pyCasefold } from '../value/casefold.ts';
 import { cmpCodePoint } from '../value/compare.ts';
-import { pyReprValue } from '../value/repr.ts';
+import { pyStr } from '../value/repr.ts';
 import { PyFloat, type Value } from '../value/types.ts';
 import type { NavMemo } from './nav-memo.ts';
 import {
@@ -67,9 +67,6 @@ export function pyCompare(a: Comparable, b: Comparable): number {
 	}
 	throw new Error(`'<' not supported between instances of '${kindOf(a)}' and '${kindOf(b)}'`);
 }
-
-/** Python's `str()` of a value. */
-const pyStr = (value: Value): string => (typeof value === 'string' ? value : pyReprValue(value));
 
 /** Python's `float()` of an int: rounded to nearest, too large refused. */
 function floatOfInt(value: bigint): number {
