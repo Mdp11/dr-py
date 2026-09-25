@@ -286,20 +286,24 @@ async function transitions(): Promise<Measures> {
 		await stopTablePings()
 	).ms;
 
-	// Custom rules staged: `setArtifacts` queues a rescan the store runs before
-	// answering the next `getModelIssues`, so that call's own time is the
-	// rescan's; a ping loop alongside bounds its longest slice.
+	// Custom rules installed: `setArtifacts` queues a rescan the store runs
+	// before answering the next `getModelIssues`, so the pair is timed as ONE
+	// call — the compile and the steps between the two calls are the rescan's
+	// too — with the ping loop already running before `setArtifacts` posts.
+	// The rules are removed again and that removal's own rescan drained, so
+	// nothing after this block (the stage/delta rows below) runs with every
+	// stage and rebase widened by their reach.
 	const rules: unknown = await (await fetch('/data/rules.json')).json();
-	await timed('setArtifacts: stage the custom rules', () =>
-		client.call('setArtifacts', { artifacts: rules })
-	);
 	const stopRescanPings = ping(client);
-	await timed('rules rescan: getModelIssues until it settles', () =>
-		client.call('getModelIssues', {})
-	);
+	await timed('setArtifacts: install the custom rules, until the rescan settles', async () => {
+		await client.call('setArtifacts', { artifacts: rules });
+		await client.call('getModelIssues', {});
+	});
 	measures['longest staged round trip during the rescan (slice bound)'] = longest(
 		await stopRescanPings()
 	).ms;
+	await client.call('setArtifacts', { artifacts: [] });
+	await client.call('getModelIssues', {});
 
 	// Last: the delta's digest is wrong on purpose (the page cannot compute
 	// one), so it ends the replica — after the rewind, the apply and the replay.
