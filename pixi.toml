@@ -129,6 +129,11 @@ description = "Write benchmarks/large.issues.json: the Python sweep's issues ove
 cmd = "python scripts/issues_large.py"
 default-environment = "core-dev"
 
+[feature.core-dev.tasks.engine-table-oracle]
+description = "Write benchmarks/large.table.json: the Python table evaluator's rows over model M, which engine-parity-large compares"
+cmd = "python scripts/table_large.py"
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.core-lint]
 description = "Lint + typecheck the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
@@ -301,16 +306,19 @@ cmd = "npm run bench"
 cwd = "engine"
 
 [feature.frontend.tasks.engine-parity-large]
-description = "Compare the engine's sweep at model M with the Python oracle's, as multisets of issues (run engine-bench-data once before)"
+description = "Compare the engine's table and sweep at model M with the Python oracle's (run engine-bench-data once before)"
 cmd = "node --disable-warning=ExperimentalWarning bench/parity-large.ts"
 cwd = "engine"
-depends-on = [{ task = "engine-parity-oracle", environment = "core-dev" }]
+depends-on = [
+    { task = "engine-parity-oracle", environment = "core-dev" },
+    { task = "engine-table-oracle", environment = "core-dev" }
+]
 
 [feature.frontend.tasks.engine-bench-browser]
 description = "Benchmark the replica in the browser at model M: the bench page drives the built sandbox (run engine-bench-data once before)"
 cmd = "npm run bench:browser"
 cwd = "frontend"
-depends-on = ["sandbox-build"]
+depends-on = ["sandbox-build", { task = "engine-parity-oracle", environment = "core-dev" }]
 
 [feature.frontend.tasks.engine-tidy]
 description = "Format + lint the engine"

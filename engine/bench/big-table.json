@@ -1,0 +1,37 @@
+{
+	"row_source": {
+		"kind": "scope",
+		"types": [
+			"Person",
+			"DataEntity",
+			"Microservice",
+			"APIEndpoint",
+			"IoTDevice",
+			"Service",
+			"Server",
+			"DataSchema",
+			"Database"
+		]
+	},
+	"columns": [
+		{ "kind": "element" },
+		{ "kind": "property", "name": "name" },
+		{
+			"kind": "navigation",
+			"navigation": {
+				"definition": {
+					"kind": "path",
+					"start": { "kind": "row" },
+					"steps": [
+						{
+							"kind": "relationship",
+							"relationship_type": "SystemContainsComponent",
+							"direction": "either"
+						}
+					]
+				}
+			}
+		}
+	],
+	"sort": [{ "column": 1 }]
+}

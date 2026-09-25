@@ -3,7 +3,14 @@
  * model M's snapshot streamed from this origin. `bench/run.ts` drives it
  * through `window.bench`; every number is taken here, on the page's clock.
  */
-import type { DeltaResult, ElementPage, EndResult, TailResult, WireElement } from '$engine';
+import type {
+	DeltaResult,
+	ElementPage,
+	EndResult,
+	TablePageBody,
+	TailResult,
+	WireElement
+} from '$engine';
 import type { EngineClient, EngineLink } from '$lib/engine/client';
 import { connectFrame } from '$lib/engine/frame';
 
@@ -257,6 +264,42 @@ async function transitions(): Promise<Measures> {
 	);
 	const ids = elements.slice(0, 500).map((element) => element.id);
 	await timed('getElementsBatch of 500 ids', () => client.call('getElementsBatch', { ids }));
+
+	// The gate's table: a first page with nothing cached yet, then a page at
+	// offset 500 whose order the first page's call left behind. One ping loop
+	// spans both round trips, so its longest slice bounds the table's own work.
+	const table: unknown = await (await fetch('/data/table.json')).json();
+	const stopTablePings = ping(client);
+	const firstPage = await timed('evaluateTable: first page (limit 500)', () =>
+		client.call<TablePageBody>('evaluateTable', { definition: table, limit: 500, offset: 0 })
+	);
+	if (firstPage.rows.length !== 500 || !firstPage.truncated) {
+		throw new Error(`the table's first page holds ${firstPage.rows.length} rows`);
+	}
+	const cachedPage = await timed('evaluateTable: page at offset 500 (order cached)', () =>
+		client.call<TablePageBody>('evaluateTable', { definition: table, limit: 500, offset: 500 })
+	);
+	if (cachedPage.rows.length !== 500 || cachedPage.total !== firstPage.total) {
+		throw new Error(`the table's cached page holds ${cachedPage.rows.length} rows`);
+	}
+	measures['longest staged round trip during the table (slice bound)'] = longest(
+		await stopTablePings()
+	).ms;
+
+	// Custom rules staged: `setArtifacts` queues a rescan the store runs before
+	// answering the next `getModelIssues`, so that call's own time is the
+	// rescan's; a ping loop alongside bounds its longest slice.
+	const rules: unknown = await (await fetch('/data/rules.json')).json();
+	await timed('setArtifacts: stage the custom rules', () =>
+		client.call('setArtifacts', { artifacts: rules })
+	);
+	const stopRescanPings = ping(client);
+	await timed('rules rescan: getModelIssues until it settles', () =>
+		client.call('getModelIssues', {})
+	);
+	measures['longest staged round trip during the rescan (slice bound)'] = longest(
+		await stopRescanPings()
+	).ms;
 
 	// Last: the delta's digest is wrong on purpose (the page cannot compute
 	// one), so it ends the replica — after the rewind, the apply and the replay.

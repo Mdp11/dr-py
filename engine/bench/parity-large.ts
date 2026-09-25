@@ -1,16 +1,21 @@
 /**
- * The engine's sweep of model M against the Python oracle's, over the same
- * violations and the same custom rules: `scripts/issues_large.py` writes a
- * batch of ops that breaks every check it can, lands it on the document the
- * snapshot was written from, compiles its rule sets and runs the server's
- * own sweep; here the same batch lands on the snapshot through `applyBatch`,
- * the rule sets it wrote — the payloads route's bodies, each with its parse —
- * compile as the service compiles them, and a `LiveIssues` holding them
- * sweeps it to its end. The two are compared as multisets of `issueKey`.
- * Exits 1, with the first differences, when they differ.
+ * The engine against the Python oracle at model M, over the same
+ * (pre-violation) replica: the gate's table, row for row; then, with the
+ * same violations and the same custom rules applied, the sweep.
+ * `scripts/table_large.py` writes the table oracle's side (`tableSteps`'s
+ * counterpart) over `engine/bench/big-table.json`, before any op lands;
+ * `scripts/issues_large.py` writes a batch of ops that breaks every check it
+ * can, lands it on the document the snapshot was written from, compiles its
+ * rule sets and runs the server's own sweep. Here the table's rows are built
+ * over the freshly opened replica first; then the same violation batch lands
+ * on it through `applyBatch`, the rule sets it wrote — the payloads route's
+ * bodies, each with its parse — compile as the service compiles them, and a
+ * `LiveIssues` holding them sweeps it to its end, compared with the oracle's
+ * issues as multisets of `issueKey`. Exits 1, with the first differences of
+ * whichever side disagrees, when either does.
  *
- * `pixi run engine-parity-large` writes the oracle's side and runs this, once
- * `pixi run engine-bench-data` has written the snapshot.
+ * `pixi run engine-parity-large` writes both oracle sides and runs this,
+ * once `pixi run engine-bench-data` has written the snapshot.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import {
@@ -18,16 +23,24 @@ import {
 	ArtifactSet,
 	cmpCodePoint,
 	compileRuleSets,
+	DEFAULT_TABLE_LIMITS,
 	drain,
 	issueKey,
 	LiveIssues,
 	Metamodel,
+	navigationFetch,
 	openSnapshot,
 	parseJson,
+	pyDumps,
 	readArtifacts,
 	readOps,
+	readTableDefinition,
+	resolveTableRefs,
 	RULE_CHECK_PREFIX,
 	ruleSources,
+	tableSteps,
+	wireCell,
+	wireKey,
 	type Issue,
 	type MetamodelDoc
 } from '../src/index.ts';
@@ -41,12 +54,18 @@ const METAMODEL = new URL('large.snapshot.v2.metamodel.json', DIR);
 const ORACLE = new URL('large.issues.json', DIR);
 const VIOLATIONS = new URL('large.violations.ops.json', DIR);
 const RULES = new URL('large.rules.json', DIR);
+const BIG_TABLE = new URL('big-table.json', import.meta.url);
+const TABLE_ORACLE = new URL('large.table.json', DIR);
 
 for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES]) {
 	if (!existsSync(file)) {
 		console.error(`Missing ${file.pathname}: run \`pixi run engine-bench-data\` first.`);
 		process.exit(1);
 	}
+}
+if (!existsSync(TABLE_ORACLE)) {
+	console.error(`Missing ${TABLE_ORACLE.pathname}: run \`pixi run engine-table-oracle\` first.`);
+	process.exit(1);
 }
 
 function* cut(bytes: Uint8Array): Generator<Uint8Array> {
@@ -72,6 +91,42 @@ const { header, workingCopy } = await openSnapshot(
 	Metamodel.fromJSON(JSON.parse(readFileSync(METAMODEL, 'utf-8')) as MetamodelDoc),
 	() => undefined
 );
+
+// The gate's table, over the replica as opened: before any violation lands.
+const bigTable = resolveTableRefs(
+	readTableDefinition(JSON.parse(readFileSync(BIG_TABLE, 'utf-8')), 'definition'),
+	navigationFetch(new ArtifactSet())
+);
+const tableStart = performance.now();
+const built = drain(tableSteps(workingCopy.model, bigTable, DEFAULT_TABLE_LIMITS));
+const tableMs = performance.now() - tableStart;
+const engineTable = built.keys.map((key, i) =>
+	pyDumps([wireKey(key), built.cells[i]!.map(wireCell)])
+);
+const oracleTable = readFileSync(TABLE_ORACLE, 'utf-8')
+	.split('\n')
+	.filter((line) => line !== '');
+const tableDiffs: string[] = [];
+for (let i = 0; i < Math.max(oracleTable.length, engineTable.length); i++) {
+	if (oracleTable[i] === engineTable[i]) continue;
+	if (tableDiffs.length < SHOWN) {
+		tableDiffs.push(
+			`  row ${i}: oracle ${oracleTable[i] ?? '<missing>'}\n` +
+				`         engine ${engineTable[i] ?? '<missing>'}`
+		);
+	}
+}
+const tableOk = tableDiffs.length === 0 && oracleTable.length === engineTable.length;
+console.log(
+	`Table: ${engineTable.length.toLocaleString('en-US')} rows (base ${built.baseTotal.toLocaleString('en-US')}, ` +
+		`truncated=${built.truncated}), built + sorted + evaluated in ${tableMs.toFixed(0)} ms. ` +
+		(tableOk
+			? 'Parity: equal, row for row.'
+			: `Parity FAILS: rows differ (oracle ${oracleTable.length.toLocaleString('en-US')}, ` +
+				`engine ${engineTable.length.toLocaleString('en-US')}). The first ${SHOWN}:`)
+);
+for (const line of tableDiffs) console.log(line);
+
 // Committed state, as the oracle holds it: the store wraps the working copy after.
 const ops = readOps(parseJson(readFileSync(VIOLATIONS, 'utf-8')));
 applyBatch(workingCopy.model, ops);
@@ -118,7 +173,8 @@ const byCheck = counted(issues.map((i: Issue) => `${i.check} (${i.category})`));
 for (const [check, n] of [...byCheck].sort(([a], [b]) => cmpCodePoint(a, b))) {
 	console.log(`  ${check}: ${n.toLocaleString('en-US')}`);
 }
-if (onlyEngine.length === 0 && onlyOracle.length === 0) {
+const issuesOk = onlyEngine.length === 0 && onlyOracle.length === 0;
+if (issuesOk) {
 	console.log('Parity: the two multisets are equal.');
 } else {
 	console.log(
@@ -130,5 +186,5 @@ if (onlyEngine.length === 0 && onlyOracle.length === 0) {
 		...onlyOracle.map((key) => `  oracle only  ${key}`)
 	];
 	for (const line of differences.slice(0, SHOWN)) console.log(line);
-	process.exit(1);
 }
+if (!tableOk || !issuesOk) process.exit(1);

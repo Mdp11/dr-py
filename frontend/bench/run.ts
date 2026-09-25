@@ -34,6 +34,8 @@ const SLICES = [
 	'longest staged round trip during the open (slice bound)',
 	'longest staged round trip during it (slice bound)'
 ];
+const TABLE_SLICE = 'longest staged round trip during the table (slice bound)';
+const RESCAN_SLICE = 'longest staged round trip during the rescan (slice bound)';
 const TRANSITIONS = [
 	'stage 1,000 update_element ops',
 	'unstage all',
@@ -45,6 +47,10 @@ for (const name of ['large.snapshot.v2.gz', 'large.snapshot.v2.metamodel.json'])
 		console.error(`Missing benchmarks/${name}: run \`pixi run engine-bench-data\` first.`);
 		process.exit(1);
 	}
+}
+if (!existsSync(new URL('large.rules.json', BENCHMARKS))) {
+	console.error('Missing benchmarks/large.rules.json: run `pixi run engine-parity-oracle` first.');
+	process.exit(1);
 }
 
 async function answer(url: string): Promise<Response | null> {
@@ -212,11 +218,15 @@ const verdict = (value: number, budget: number, unit: string) =>
 const open = median(rows.get(OPEN)!);
 const heap = median(rows.get(HEAP)!);
 const slice = Math.max(...SLICES.map((label) => median(rows.get(label)!)));
+const tableSlice = median(rows.get(TABLE_SLICE)!);
+const rescanSlice = median(rows.get(RESCAN_SLICE)!);
 const edits = TRANSITIONS.map(
 	(label) => `${label}: ${verdict(median(rows.get(label)!), TRANSITION_BUDGET_MS, 'ms')}`
 );
 console.log(
 	`\ncold open: ${verdict(open, OPEN_BUDGET_MS, 'ms')}; heap: ${verdict(heap, HEAP_BUDGET_MB, 'MB')}; ` +
 		`longest slice, bounded from outside: ${verdict(slice, SLICE_BUDGET_MS, 'ms')}; ` +
+		`table's longest slice: ${verdict(tableSlice, SLICE_BUDGET_MS, 'ms')}; ` +
+		`rescan's longest slice: ${verdict(rescanSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`${edits.join('; ')}`
 );

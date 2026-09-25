@@ -16,21 +16,29 @@ import {
 	appliesPopulation,
 	ArtifactSet,
 	compileRuleSets,
+	DEFAULT_TABLE_LIMITS,
 	drain,
 	entityHash,
+	evaluateTable,
 	EVALUATIONS,
 	formatDigest,
 	issueListBody,
 	LiveIssues,
 	Metamodel,
 	Model,
+	navigationFetch,
 	openSnapshot,
 	parseExact,
 	READS,
+	readTableDefinition,
+	resolveTableRefs,
+	tableSteps,
+	TableOrderCache,
 	ViewPlacements,
 	type CompiledRules,
 	type Delta,
 	type ElementRec,
+	type EvalContext,
 	type MetamodelDoc,
 	type ModelOp,
 	type RelRec,
@@ -45,11 +53,14 @@ const DUPLICATES = 20_000;
 const CHUNK_BYTES = 1 << 16;
 const OPEN_BUDGET_MS = 3000;
 const HEAP_BUDGET_MB = 400;
+const TABLE_GATE_BUDGET_MS = 3000;
+const TABLE_STEP_BUDGET_MS = 16;
 
 const DIR = new URL('../../benchmarks/', import.meta.url);
 const SNAPSHOT = new URL('large.snapshot.v2', DIR);
 const METAMODEL = new URL('large.snapshot.v2.metamodel.json', DIR);
 const DOCUMENT = new URL('large.model.json', DIR);
+const BIG_TABLE = new URL('big-table.json', import.meta.url);
 
 for (const file of [SNAPSHOT, METAMODEL, DOCUMENT]) {
 	if (!existsSync(file)) {
@@ -80,6 +91,12 @@ const ROWS = {
 	criteriaLongest: '  its longest step',
 	navigation: 'navigation, untyped scope, one relationship hop (Owns): every id sorted',
 	navigationLongest: '  its longest step',
+	tableGate: 'table: the gate’s 112,200-row scope, capped at 50,000, sorted, every cell',
+	tableGateLongest: '  its longest step',
+	tableFirstPage: 'evaluateTable: first page (limit 500), a fresh order cache',
+	tableFirstPageLongest: '  its longest step',
+	tableCachedPage: 'evaluateTable: page at offset 500, same cache (order cached)',
+	tableCachedPageLongest: '  its longest step',
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -507,9 +524,59 @@ function measureRules(wc: WorkingCopy): void {
 
 const bytes = readFileSync(SNAPSHOT);
 const metamodelDoc = JSON.parse(readFileSync(METAMODEL, 'utf-8')) as MetamodelDoc;
+const rawBigTable = JSON.parse(readFileSync(BIG_TABLE, 'utf-8')) as Record<string, unknown>;
+const bigTable = resolveTableRefs(
+	readTableDefinition(rawBigTable, 'definition'),
+	navigationFetch(new ArtifactSet())
+);
 
 const heapMb: number[] = [];
 let counts = '';
+
+/**
+ * The gate's table over the just-opened replica, before anything stages: the
+ * whole build + sort + cells at `DEFAULT_TABLE_LIMITS` (`tableSteps`,
+ * uncached, as the CI gate runs it), then `evaluateTable` as a user calls it —
+ * a first page of 500 with a fresh order cache, then a page at offset 500
+ * that hits it.
+ */
+function measureTable(workingCopy: WorkingCopy): void {
+	const { model } = workingCopy;
+	const built = stepped(
+		'tableGate',
+		'tableGateLongest',
+		tableSteps(model, bigTable, DEFAULT_TABLE_LIMITS)
+	);
+	if (!built.truncated || built.keys.length !== DEFAULT_TABLE_LIMITS.maxRows) {
+		throw new Error(
+			`the gate's table holds ${built.keys.length} rows, truncated=${built.truncated}`
+		);
+	}
+
+	const ctx: EvalContext = {
+		model,
+		artifacts: new ArtifactSet(),
+		placements: new ViewPlacements(),
+		working: { rev: workingCopy.rev, stagedVersion: 0, tableOrders: new TableOrderCache() }
+	};
+	const params = { definition: rawBigTable, limit: 500 };
+	const first = stepped(
+		'tableFirstPage',
+		'tableFirstPageLongest',
+		evaluateTable(ctx, { ...params, offset: 0 })
+	);
+	if (first.rows.length !== 500 || !first.truncated) {
+		throw new Error(`the table's first page holds ${first.rows.length} rows`);
+	}
+	const cached = stepped(
+		'tableCachedPage',
+		'tableCachedPageLongest',
+		evaluateTable(ctx, { ...params, offset: 500 })
+	);
+	if (cached.rows.length !== 500 || cached.total !== first.total) {
+		throw new Error(`the table's cached page holds ${cached.rows.length} rows`);
+	}
+}
 
 async function pass(): Promise<void> {
 	const start = performance.now();
@@ -535,6 +602,7 @@ async function pass(): Promise<void> {
 	stepped('scanRare', null, search(workingCopy.model, 'sensor'));
 	stepped('criteria', 'criteriaLongest', criteriaScan(workingCopy.model));
 	stepped('navigation', 'navigationLongest', navigation(workingCopy.model));
+	measureTable(workingCopy);
 	counts = `${count(header.elements)} elements, ${count(header.relationships)} relationships`;
 	// Weighed before the document is read: the last text a regular expression
 	// ran over stays reachable, and further down that is the whole document.
@@ -583,7 +651,12 @@ console.log(
 	`${'heap after GC with one replica open, MB'.padEnd(width)}  ${heap.toFixed(0).padStart(6)}   [${each}]${collected}`
 );
 const verdict = (within: boolean) => (within ? 'within budget' : 'OVER BUDGET');
+const tableGate = median(timings.get('tableGate')!);
+const tableGateStep = median(timings.get('tableGateLongest')!);
 console.log(
 	`\nopen: ${open.toFixed(0)} of ${OPEN_BUDGET_MS} ms, ${verdict(open <= OPEN_BUDGET_MS)}; ` +
-		`heap: ${heap.toFixed(0)} of ${HEAP_BUDGET_MB} MB, ${verdict(heap <= HEAP_BUDGET_MB)}`
+		`heap: ${heap.toFixed(0)} of ${HEAP_BUDGET_MB} MB, ${verdict(heap <= HEAP_BUDGET_MB)}; ` +
+		`table gate: ${tableGate.toFixed(0)} of ${TABLE_GATE_BUDGET_MS} ms, ` +
+		`${verdict(tableGate <= TABLE_GATE_BUDGET_MS)}, longest step ${tableGateStep.toFixed(1)} ` +
+		`of ${TABLE_STEP_BUDGET_MS} ms, ${verdict(tableGateStep <= TABLE_STEP_BUDGET_MS)}`
 );

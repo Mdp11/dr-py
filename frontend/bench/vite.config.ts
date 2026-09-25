@@ -4,8 +4,9 @@ import { defineConfig, type Connect, type Plugin } from 'vite';
 import { crossOriginIsolation } from '../vite.config.ts';
 
 const BENCHMARKS = new URL('../../benchmarks/', import.meta.url);
+const ENGINE_BENCH = new URL('../../engine/bench/', import.meta.url);
 
-/** What the bench page reads, as the files `pixi run engine-bench-data` wrote. */
+/** What the bench page reads: model M's data, and the gate's table and rules. */
 const DATA: Record<string, { file: URL; type: string }> = {
 	'/data/snapshot.gz': {
 		file: new URL('large.snapshot.v2.gz', BENCHMARKS),
@@ -13,6 +14,14 @@ const DATA: Record<string, { file: URL; type: string }> = {
 	},
 	'/data/metamodel.json': {
 		file: new URL('large.snapshot.v2.metamodel.json', BENCHMARKS),
+		type: 'application/json'
+	},
+	'/data/table.json': {
+		file: new URL('big-table.json', ENGINE_BENCH),
+		type: 'application/json'
+	},
+	'/data/rules.json': {
+		file: new URL('large.rules.json', BENCHMARKS),
 		type: 'application/json'
 	}
 };
