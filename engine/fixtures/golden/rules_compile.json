@@ -1,0 +1,1121 @@
+{
+  "runs": [
+    {
+      "metamodel": {
+        "enums": {
+          "Tone": [
+            "dark",
+            "light"
+          ]
+        },
+        "elements": [
+          {
+            "name": "Root",
+            "abstract": true,
+            "extends": null,
+            "properties": [
+              {
+                "name": "name",
+                "datatype": "string",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "Mid",
+            "abstract": true,
+            "extends": "Root",
+            "properties": [
+              {
+                "name": "level",
+                "datatype": "integer",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "Leaf",
+            "abstract": false,
+            "extends": "Mid",
+            "properties": [
+              {
+                "name": "flag",
+                "datatype": "boolean",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "score",
+                "datatype": "float",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "tags",
+                "datatype": "string",
+                "multiplicity": "0..*",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "day",
+                "datatype": "date",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "tone",
+                "datatype": "Tone",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "peer",
+                "datatype": "Leaf",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "Twig",
+            "abstract": false,
+            "extends": "Leaf",
+            "properties": [],
+            "key": null
+          },
+          {
+            "name": "Other",
+            "abstract": false,
+            "extends": "Root",
+            "properties": [
+              {
+                "name": "code",
+                "datatype": "string",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          }
+        ],
+        "relationships": [
+          {
+            "name": "Link",
+            "abstract": false,
+            "extends": null,
+            "containment": false,
+            "source": "Root",
+            "target": "Root",
+            "mappings": [
+              {
+                "source": "Root",
+                "target": "Root"
+              }
+            ],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": [
+              {
+                "name": "weight",
+                "datatype": "float",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ]
+          },
+          {
+            "name": "SubLink",
+            "abstract": false,
+            "extends": "Link",
+            "containment": false,
+            "source": null,
+            "target": null,
+            "mappings": [],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": []
+          },
+          {
+            "name": "SubSubLink",
+            "abstract": false,
+            "extends": "SubLink",
+            "containment": false,
+            "source": null,
+            "target": null,
+            "mappings": [],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": []
+          },
+          {
+            "name": "Owns",
+            "abstract": false,
+            "extends": null,
+            "containment": true,
+            "source": "Root",
+            "target": "Root",
+            "mappings": [
+              {
+                "source": "Root",
+                "target": "Root"
+              }
+            ],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": []
+          }
+        ]
+      },
+      "steps": [
+        {
+          "do": "rules",
+          "sources": [
+            {
+              "artifact_id": "a-abstract",
+              "name": "Abstract",
+              "yaml": "rules:\n  - name: on-root\n    applies_to: Root\n    then: {property: name, exists: true}\n  - name: on-mid\n    applies_to: Mid\n    then: {property: level, gte: 0}\n"
+            },
+            {
+              "artifact_id": "a-alias",
+              "name": "Aliased",
+              "yaml": "rules:\n  - &r {name: a, applies_to: Leaf, then: {property: flag, exists: true}}\n  - *r\n"
+            },
+            {
+              "artifact_id": "a-all",
+              "name": "All",
+              "yaml": "schema_version: 1\nrules:\n  - name: every-test\n    description: each property test once\n    applies_to: Leaf\n    severity: warning\n    disabled: false\n    when:\n      all:\n        - {property: flag, exists: true}\n        - not: {property: name, equals: null}\n    then:\n      any:\n        - {property: name, equals: \"x\"}\n        - {property: name, not_equals: null}\n        - {property: level, in: [1, \"1\", true, 1.0, 1.5, 9007199254740993, -0.0]}\n        - {property: score, gt: 1}\n        - {property: score, gte: .inf}\n        - {property: score, lt: -.inf}\n        - {property: score, lte: .nan}\n        - {property: tags, contains: \"a\"}\n        - {property: level, equals: 18446744073709551616}\n        - {property: score, equals: 2.5e-8}\n        - {property: flag, not_equals: false}\n        - {property: level, exists: false}\n    message: custom text\n  - name: relationships\n    applies_to: Root\n    then:\n      all:\n        - relationship: {type: Link, direction: outgoing, exists: true}\n        - relationship:\n            type: SubLink\n            direction: incoming\n            to: Mid\n            count: {eq: 2, gte: 1, lte: 3}\n        - relationship:\n            type: Link\n            direction: outgoing\n            to: Leaf\n            where:\n              any:\n                - {property: score, gt: 0.5}\n                - relationship:\n                    type: Owns\n                    direction: incoming\n                    to: Other\n                    where: {property: code, exists: true}\n                    exists: false\n            count: {gte: 0}\n  - name: nulls-as-pydantic-reads-them\n    applies_to: Leaf\n    when: null\n    then:\n      relationship:\n        type: Link\n        direction: outgoing\n        to: null\n        where: null\n        exists: null\n        count: {eq: null, gte: 1}\n    message: null\n"
+            },
+            {
+              "artifact_id": "a-bad",
+              "name": "Broken",
+              "yaml": "rules:\n  - name: broken\n    applies_to: [Leaf\n"
+            },
+            {
+              "artifact_id": "a-drift",
+              "name": "Drift",
+              "yaml": "rules:\n  - name: unknown-applies\n    applies_to: \"it's\"\n    then: {property: flag, exists: true}\n  - name: unknown-property\n    applies_to: Leaf\n    then: {property: \"a\\u200bb\", exists: true}\n  - name: subtype-only-property\n    applies_to: Mid\n    then: {property: flag, exists: true}\n  - name: unknown-relationship\n    applies_to: Leaf\n    then:\n      relationship: {type: Nope, direction: outgoing, exists: true}\n  - name: unknown-to\n    applies_to: Leaf\n    then:\n      relationship: {type: Link, direction: outgoing, to: Ghost, exists: true}\n  - name: when-before-then\n    applies_to: Leaf\n    when: {property: ghost_when, exists: true}\n    then:\n      relationship: {type: Nope, direction: outgoing, exists: true}\n  - name: where-against-to\n    applies_to: Leaf\n    then:\n      relationship:\n        type: Link\n        direction: outgoing\n        to: Other\n        where: {property: flag, exists: true}\n        exists: true\n  - name: where-without-to\n    applies_to: Leaf\n    then:\n      relationship:\n        type: Link\n        direction: outgoing\n        where: {property: anything_at_all, exists: true}\n        exists: true\n  - name: first-of-all\n    applies_to: Leaf\n    then:\n      all:\n        - {property: flag, exists: true}\n        - relationship: {type: SubSubLink, direction: incoming, exists: true}\n        - {property: score, gt: 1}\n        - {property: ghost_later, exists: true}\n  - name: under-not\n    applies_to: Other\n    then:\n      not: {property: score, exists: true}\n  - name: disabled-drift\n    applies_to: Ghost\n    disabled: true\n    then: {property: flag, exists: true}\n  - name: disabled-clean\n    applies_to: Leaf\n    disabled: true\n    then: {property: flag, exists: true}\n"
+            },
+            {
+              "artifact_id": "a-empty",
+              "name": "Empty",
+              "yaml": ""
+            },
+            {
+              "artifact_id": "a-schema",
+              "name": "Schema",
+              "yaml": "rules:\n  - name: twice\n    applies_to: Leaf\n    then: {property: flag, exists: true}\n  - name: twice\n    applies_to: Twig\n    then: {property: flag, exists: false}\n"
+            },
+            {
+              "artifact_id": "a-twin-1",
+              "name": "Twins",
+              "yaml": "rules:\n  - name: twin\n    applies_to: Leaf\n    then: {property: flag, exists: true}\n"
+            },
+            {
+              "artifact_id": "a-twin-2",
+              "name": "Twins",
+              "yaml": "rules:\n  - name: twin\n    applies_to: Twig\n    then: {property: tags, exists: true}\n"
+            },
+            {
+              "artifact_id": "a-bmp",
+              "name": "￿ last",
+              "yaml": "rules: []\n"
+            },
+            {
+              "artifact_id": "a-blank",
+              "name": "😀 blank",
+              "yaml": "# nothing\n"
+            }
+          ],
+          "result": {
+            "parses": [
+              {
+                "ok": true,
+                "document": "{\"rules\":[{\"name\":\"on-root\",\"applies_to\":\"Root\",\"then\":{\"property\":\"name\",\"exists\":true}},{\"name\":\"on-mid\",\"applies_to\":\"Mid\",\"then\":{\"property\":\"level\",\"gte\":0.0}}]}",
+                "errors": []
+              },
+              {
+                "ok": false,
+                "document": null,
+                "errors": [
+                  {
+                    "message": "Malformed rules YAML: YAML aliases are not supported in rule sets (found *r)\n  in \"<unicode string>\", line 3, column 5:\n      - *r\n        ^",
+                    "line": 3,
+                    "column": 5
+                  }
+                ]
+              },
+              {
+                "ok": true,
+                "document": "{\"schema_version\":1,\"rules\":[{\"name\":\"every-test\",\"description\":\"each property test once\",\"applies_to\":\"Leaf\",\"severity\":\"warning\",\"disabled\":false,\"when\":{\"all\":[{\"property\":\"flag\",\"exists\":true},{\"not\":{\"property\":\"name\",\"equals\":null}}]},\"then\":{\"any\":[{\"property\":\"name\",\"equals\":\"x\"},{\"property\":\"name\",\"not_equals\":null},{\"property\":\"level\",\"in\":[1,\"1\",true,1.0,1.5,9007199254740993,-0.0]},{\"property\":\"score\",\"gt\":1.0},{\"property\":\"score\",\"gte\":Infinity},{\"property\":\"score\",\"lt\":-Infinity},{\"property\":\"score\",\"lte\":NaN},{\"property\":\"tags\",\"contains\":\"a\"},{\"property\":\"level\",\"equals\":18446744073709551616},{\"property\":\"score\",\"equals\":2.5e-08},{\"property\":\"flag\",\"not_equals\":false},{\"property\":\"level\",\"exists\":false}]},\"message\":\"custom text\"},{\"name\":\"relationships\",\"applies_to\":\"Root\",\"then\":{\"all\":[{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"exists\":true}},{\"relationship\":{\"type\":\"SubLink\",\"direction\":\"incoming\",\"to\":\"Mid\",\"count\":{\"eq\":2,\"gte\":1,\"lte\":3}}},{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"to\":\"Leaf\",\"where\":{\"any\":[{\"property\":\"score\",\"gt\":0.5},{\"relationship\":{\"type\":\"Owns\",\"direction\":\"incoming\",\"to\":\"Other\",\"where\":{\"property\":\"code\",\"exists\":true},\"exists\":false}}]},\"count\":{\"gte\":0}}}]}},{\"name\":\"nulls-as-pydantic-reads-them\",\"applies_to\":\"Leaf\",\"when\":null,\"then\":{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"to\":null,\"where\":null,\"exists\":null,\"count\":{\"eq\":null,\"gte\":1}}},\"message\":null}]}",
+                "errors": []
+              },
+              {
+                "ok": false,
+                "document": null,
+                "errors": [
+                  {
+                    "message": "Malformed rules YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 3, column 17:\n        applies_to: [Leaf\n                    ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 4, column 1:\n    \n    ^",
+                    "line": 4,
+                    "column": 1
+                  }
+                ]
+              },
+              {
+                "ok": true,
+                "document": "{\"rules\":[{\"name\":\"unknown-applies\",\"applies_to\":\"it's\",\"then\":{\"property\":\"flag\",\"exists\":true}},{\"name\":\"unknown-property\",\"applies_to\":\"Leaf\",\"then\":{\"property\":\"a​b\",\"exists\":true}},{\"name\":\"subtype-only-property\",\"applies_to\":\"Mid\",\"then\":{\"property\":\"flag\",\"exists\":true}},{\"name\":\"unknown-relationship\",\"applies_to\":\"Leaf\",\"then\":{\"relationship\":{\"type\":\"Nope\",\"direction\":\"outgoing\",\"exists\":true}}},{\"name\":\"unknown-to\",\"applies_to\":\"Leaf\",\"then\":{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"to\":\"Ghost\",\"exists\":true}}},{\"name\":\"when-before-then\",\"applies_to\":\"Leaf\",\"when\":{\"property\":\"ghost_when\",\"exists\":true},\"then\":{\"relationship\":{\"type\":\"Nope\",\"direction\":\"outgoing\",\"exists\":true}}},{\"name\":\"where-against-to\",\"applies_to\":\"Leaf\",\"then\":{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"to\":\"Other\",\"where\":{\"property\":\"flag\",\"exists\":true},\"exists\":true}}},{\"name\":\"where-without-to\",\"applies_to\":\"Leaf\",\"then\":{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"where\":{\"property\":\"anything_at_all\",\"exists\":true},\"exists\":true}}},{\"name\":\"first-of-all\",\"applies_to\":\"Leaf\",\"then\":{\"all\":[{\"property\":\"flag\",\"exists\":true},{\"relationship\":{\"type\":\"SubSubLink\",\"direction\":\"incoming\",\"exists\":true}},{\"property\":\"score\",\"gt\":1.0},{\"property\":\"ghost_later\",\"exists\":true}]}},{\"name\":\"under-not\",\"applies_to\":\"Other\",\"then\":{\"not\":{\"property\":\"score\",\"exists\":true}}},{\"name\":\"disabled-drift\",\"applies_to\":\"Ghost\",\"disabled\":true,\"then\":{\"property\":\"flag\",\"exists\":true}},{\"name\":\"disabled-clean\",\"applies_to\":\"Leaf\",\"disabled\":true,\"then\":{\"property\":\"flag\",\"exists\":true}}]}",
+                "errors": []
+              },
+              {
+                "ok": true,
+                "document": "{}",
+                "errors": []
+              },
+              {
+                "ok": false,
+                "document": null,
+                "errors": [
+                  {
+                    "message": "Invalid rule set: 1 validation error for RuleSetDefinition\n  Value error, duplicate rule name 'twice' [type=value_error, input_value={'rules': [{'name': 'twic...ag', 'exists': False}}]}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+                    "line": null,
+                    "column": null
+                  }
+                ]
+              },
+              {
+                "ok": true,
+                "document": "{\"rules\":[{\"name\":\"twin\",\"applies_to\":\"Leaf\",\"then\":{\"property\":\"flag\",\"exists\":true}}]}",
+                "errors": []
+              },
+              {
+                "ok": true,
+                "document": "{\"rules\":[{\"name\":\"twin\",\"applies_to\":\"Twig\",\"then\":{\"property\":\"tags\",\"exists\":true}}]}",
+                "errors": []
+              },
+              {
+                "ok": true,
+                "document": "{\"rules\":[]}",
+                "errors": []
+              },
+              {
+                "ok": true,
+                "document": "{}",
+                "errors": []
+              }
+            ],
+            "status": {
+              "total": 8,
+              "skipped": [
+                {
+                  "artifact_id": "a-alias",
+                  "set_name": "Aliased",
+                  "rule": "",
+                  "reason": "Malformed rules YAML: YAML aliases are not supported in rule sets (found *r)\n  in \"<unicode string>\", line 3, column 5:\n      - *r\n        ^"
+                },
+                {
+                  "artifact_id": "a-bad",
+                  "set_name": "Broken",
+                  "rule": "",
+                  "reason": "Malformed rules YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 3, column 17:\n        applies_to: [Leaf\n                    ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 4, column 1:\n    \n    ^"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "unknown-applies",
+                  "reason": "unknown stereotype \"it's\""
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "unknown-property",
+                  "reason": "stereotype 'Leaf' has no property 'a\\u200bb'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "subtype-only-property",
+                  "reason": "stereotype 'Mid' has no property 'flag'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "unknown-relationship",
+                  "reason": "unknown relationship type 'Nope'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "unknown-to",
+                  "reason": "unknown stereotype 'Ghost'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "when-before-then",
+                  "reason": "stereotype 'Leaf' has no property 'ghost_when'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "where-against-to",
+                  "reason": "stereotype 'Other' has no property 'flag'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "first-of-all",
+                  "reason": "stereotype 'Leaf' has no property 'ghost_later'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "under-not",
+                  "reason": "stereotype 'Other' has no property 'score'"
+                },
+                {
+                  "artifact_id": "a-schema",
+                  "set_name": "Schema",
+                  "rule": "",
+                  "reason": "Invalid rule set: 1 validation error for RuleSetDefinition\n  Value error, duplicate rule name 'twice' [type=value_error, input_value={'rules': [{'name': 'twic...ag', 'exists': False}}]}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+                }
+              ],
+              "eval_errors": {}
+            },
+            "compiled": {
+              "rules": [
+                {
+                  "artifact_id": "a-abstract",
+                  "check": "rule:on-root",
+                  "applies_types": [
+                    "Leaf",
+                    "Mid",
+                    "Other",
+                    "Root",
+                    "Twig"
+                  ],
+                  "paths": []
+                },
+                {
+                  "artifact_id": "a-abstract",
+                  "check": "rule:on-mid",
+                  "applies_types": [
+                    "Leaf",
+                    "Mid",
+                    "Twig"
+                  ],
+                  "paths": []
+                },
+                {
+                  "artifact_id": "a-all",
+                  "check": "rule:every-test",
+                  "applies_types": [
+                    "Leaf",
+                    "Twig"
+                  ],
+                  "paths": []
+                },
+                {
+                  "artifact_id": "a-all",
+                  "check": "rule:relationships",
+                  "applies_types": [
+                    "Leaf",
+                    "Mid",
+                    "Other",
+                    "Root",
+                    "Twig"
+                  ],
+                  "paths": [
+                    [
+                      {
+                        "rel_types": [
+                          "Link",
+                          "SubLink",
+                          "SubSubLink"
+                        ],
+                        "direction": "outgoing",
+                        "far_types": null
+                      }
+                    ],
+                    [
+                      {
+                        "rel_types": [
+                          "SubLink",
+                          "SubSubLink"
+                        ],
+                        "direction": "incoming",
+                        "far_types": [
+                          "Leaf",
+                          "Mid",
+                          "Twig"
+                        ]
+                      }
+                    ],
+                    [
+                      {
+                        "rel_types": [
+                          "Link",
+                          "SubLink",
+                          "SubSubLink"
+                        ],
+                        "direction": "outgoing",
+                        "far_types": [
+                          "Leaf",
+                          "Twig"
+                        ]
+                      }
+                    ],
+                    [
+                      {
+                        "rel_types": [
+                          "Link",
+                          "SubLink",
+                          "SubSubLink"
+                        ],
+                        "direction": "outgoing",
+                        "far_types": [
+                          "Leaf",
+                          "Twig"
+                        ]
+                      },
+                      {
+                        "rel_types": [
+                          "Owns"
+                        ],
+                        "direction": "incoming",
+                        "far_types": [
+                          "Other"
+                        ]
+                      }
+                    ]
+                  ]
+                },
+                {
+                  "artifact_id": "a-all",
+                  "check": "rule:nulls-as-pydantic-reads-them",
+                  "applies_types": [
+                    "Leaf",
+                    "Twig"
+                  ],
+                  "paths": [
+                    [
+                      {
+                        "rel_types": [
+                          "Link",
+                          "SubLink",
+                          "SubSubLink"
+                        ],
+                        "direction": "outgoing",
+                        "far_types": null
+                      }
+                    ]
+                  ]
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "check": "rule:where-without-to",
+                  "applies_types": [
+                    "Leaf",
+                    "Twig"
+                  ],
+                  "paths": [
+                    [
+                      {
+                        "rel_types": [
+                          "Link",
+                          "SubLink",
+                          "SubSubLink"
+                        ],
+                        "direction": "outgoing",
+                        "far_types": null
+                      }
+                    ]
+                  ]
+                },
+                {
+                  "artifact_id": "a-twin-1",
+                  "check": "rule:twin",
+                  "applies_types": [
+                    "Leaf",
+                    "Twig"
+                  ],
+                  "paths": []
+                },
+                {
+                  "artifact_id": "a-twin-2",
+                  "check": "rule:twin",
+                  "applies_types": [
+                    "Twig"
+                  ],
+                  "paths": []
+                }
+              ],
+              "rules_by_type": {
+                "Leaf": [
+                  "rule:on-root",
+                  "rule:on-mid",
+                  "rule:every-test",
+                  "rule:relationships",
+                  "rule:nulls-as-pydantic-reads-them",
+                  "rule:where-without-to",
+                  "rule:twin"
+                ],
+                "Mid": [
+                  "rule:on-root",
+                  "rule:on-mid",
+                  "rule:relationships"
+                ],
+                "Other": [
+                  "rule:on-root",
+                  "rule:relationships"
+                ],
+                "Root": [
+                  "rule:on-root",
+                  "rule:relationships"
+                ],
+                "Twig": [
+                  "rule:on-root",
+                  "rule:on-mid",
+                  "rule:every-test",
+                  "rule:relationships",
+                  "rule:nulls-as-pydantic-reads-them",
+                  "rule:where-without-to",
+                  "rule:twin",
+                  "rule:twin"
+                ]
+              }
+            }
+          },
+          "error": null,
+          "digest": "0000000000000000",
+          "fingerprint": "3e045184e34bca3c",
+          "state": [],
+          "indexes": "{\"by_type\":[],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[],\"duplicates\":[],\"roots\":[]}"
+        }
+      ]
+    },
+    {
+      "metamodel": {
+        "enums": {
+          "Tone": [
+            "dark",
+            "light"
+          ]
+        },
+        "elements": [
+          {
+            "name": "Root",
+            "abstract": true,
+            "extends": null,
+            "properties": [
+              {
+                "name": "name",
+                "datatype": "string",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "Mid",
+            "abstract": true,
+            "extends": "Root",
+            "properties": [
+              {
+                "name": "level",
+                "datatype": "integer",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "Leaf",
+            "abstract": false,
+            "extends": "Mid",
+            "properties": [
+              {
+                "name": "flag",
+                "datatype": "boolean",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "tags",
+                "datatype": "string",
+                "multiplicity": "0..*",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "day",
+                "datatype": "date",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "tone",
+                "datatype": "Tone",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "peer",
+                "datatype": "Leaf",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "Twig",
+            "abstract": false,
+            "extends": "Leaf",
+            "properties": [],
+            "key": null
+          }
+        ],
+        "relationships": [
+          {
+            "name": "Link",
+            "abstract": false,
+            "extends": null,
+            "containment": false,
+            "source": "Root",
+            "target": "Root",
+            "mappings": [
+              {
+                "source": "Root",
+                "target": "Root"
+              }
+            ],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": [
+              {
+                "name": "weight",
+                "datatype": "float",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ]
+          },
+          {
+            "name": "Owns",
+            "abstract": false,
+            "extends": null,
+            "containment": true,
+            "source": "Root",
+            "target": "Root",
+            "mappings": [
+              {
+                "source": "Root",
+                "target": "Root"
+              }
+            ],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": []
+          }
+        ]
+      },
+      "steps": [
+        {
+          "do": "rules",
+          "sources": [
+            {
+              "artifact_id": "a-abstract",
+              "name": "Abstract",
+              "yaml": "rules:\n  - name: on-root\n    applies_to: Root\n    then: {property: name, exists: true}\n  - name: on-mid\n    applies_to: Mid\n    then: {property: level, gte: 0}\n"
+            },
+            {
+              "artifact_id": "a-alias",
+              "name": "Aliased",
+              "yaml": "rules:\n  - &r {name: a, applies_to: Leaf, then: {property: flag, exists: true}}\n  - *r\n"
+            },
+            {
+              "artifact_id": "a-all",
+              "name": "All",
+              "yaml": "schema_version: 1\nrules:\n  - name: every-test\n    description: each property test once\n    applies_to: Leaf\n    severity: warning\n    disabled: false\n    when:\n      all:\n        - {property: flag, exists: true}\n        - not: {property: name, equals: null}\n    then:\n      any:\n        - {property: name, equals: \"x\"}\n        - {property: name, not_equals: null}\n        - {property: level, in: [1, \"1\", true, 1.0, 1.5, 9007199254740993, -0.0]}\n        - {property: score, gt: 1}\n        - {property: score, gte: .inf}\n        - {property: score, lt: -.inf}\n        - {property: score, lte: .nan}\n        - {property: tags, contains: \"a\"}\n        - {property: level, equals: 18446744073709551616}\n        - {property: score, equals: 2.5e-8}\n        - {property: flag, not_equals: false}\n        - {property: level, exists: false}\n    message: custom text\n  - name: relationships\n    applies_to: Root\n    then:\n      all:\n        - relationship: {type: Link, direction: outgoing, exists: true}\n        - relationship:\n            type: SubLink\n            direction: incoming\n            to: Mid\n            count: {eq: 2, gte: 1, lte: 3}\n        - relationship:\n            type: Link\n            direction: outgoing\n            to: Leaf\n            where:\n              any:\n                - {property: score, gt: 0.5}\n                - relationship:\n                    type: Owns\n                    direction: incoming\n                    to: Other\n                    where: {property: code, exists: true}\n                    exists: false\n            count: {gte: 0}\n  - name: nulls-as-pydantic-reads-them\n    applies_to: Leaf\n    when: null\n    then:\n      relationship:\n        type: Link\n        direction: outgoing\n        to: null\n        where: null\n        exists: null\n        count: {eq: null, gte: 1}\n    message: null\n"
+            },
+            {
+              "artifact_id": "a-bad",
+              "name": "Broken",
+              "yaml": "rules:\n  - name: broken\n    applies_to: [Leaf\n"
+            },
+            {
+              "artifact_id": "a-drift",
+              "name": "Drift",
+              "yaml": "rules:\n  - name: unknown-applies\n    applies_to: \"it's\"\n    then: {property: flag, exists: true}\n  - name: unknown-property\n    applies_to: Leaf\n    then: {property: \"a\\u200bb\", exists: true}\n  - name: subtype-only-property\n    applies_to: Mid\n    then: {property: flag, exists: true}\n  - name: unknown-relationship\n    applies_to: Leaf\n    then:\n      relationship: {type: Nope, direction: outgoing, exists: true}\n  - name: unknown-to\n    applies_to: Leaf\n    then:\n      relationship: {type: Link, direction: outgoing, to: Ghost, exists: true}\n  - name: when-before-then\n    applies_to: Leaf\n    when: {property: ghost_when, exists: true}\n    then:\n      relationship: {type: Nope, direction: outgoing, exists: true}\n  - name: where-against-to\n    applies_to: Leaf\n    then:\n      relationship:\n        type: Link\n        direction: outgoing\n        to: Other\n        where: {property: flag, exists: true}\n        exists: true\n  - name: where-without-to\n    applies_to: Leaf\n    then:\n      relationship:\n        type: Link\n        direction: outgoing\n        where: {property: anything_at_all, exists: true}\n        exists: true\n  - name: first-of-all\n    applies_to: Leaf\n    then:\n      all:\n        - {property: flag, exists: true}\n        - relationship: {type: SubSubLink, direction: incoming, exists: true}\n        - {property: score, gt: 1}\n        - {property: ghost_later, exists: true}\n  - name: under-not\n    applies_to: Other\n    then:\n      not: {property: score, exists: true}\n  - name: disabled-drift\n    applies_to: Ghost\n    disabled: true\n    then: {property: flag, exists: true}\n  - name: disabled-clean\n    applies_to: Leaf\n    disabled: true\n    then: {property: flag, exists: true}\n"
+            },
+            {
+              "artifact_id": "a-empty",
+              "name": "Empty",
+              "yaml": ""
+            },
+            {
+              "artifact_id": "a-schema",
+              "name": "Schema",
+              "yaml": "rules:\n  - name: twice\n    applies_to: Leaf\n    then: {property: flag, exists: true}\n  - name: twice\n    applies_to: Twig\n    then: {property: flag, exists: false}\n"
+            },
+            {
+              "artifact_id": "a-twin-1",
+              "name": "Twins",
+              "yaml": "rules:\n  - name: twin\n    applies_to: Leaf\n    then: {property: flag, exists: true}\n"
+            },
+            {
+              "artifact_id": "a-twin-2",
+              "name": "Twins",
+              "yaml": "rules:\n  - name: twin\n    applies_to: Twig\n    then: {property: tags, exists: true}\n"
+            },
+            {
+              "artifact_id": "a-bmp",
+              "name": "￿ last",
+              "yaml": "rules: []\n"
+            },
+            {
+              "artifact_id": "a-blank",
+              "name": "😀 blank",
+              "yaml": "# nothing\n"
+            }
+          ],
+          "result": {
+            "parses": [
+              {
+                "ok": true,
+                "document": "{\"rules\":[{\"name\":\"on-root\",\"applies_to\":\"Root\",\"then\":{\"property\":\"name\",\"exists\":true}},{\"name\":\"on-mid\",\"applies_to\":\"Mid\",\"then\":{\"property\":\"level\",\"gte\":0.0}}]}",
+                "errors": []
+              },
+              {
+                "ok": false,
+                "document": null,
+                "errors": [
+                  {
+                    "message": "Malformed rules YAML: YAML aliases are not supported in rule sets (found *r)\n  in \"<unicode string>\", line 3, column 5:\n      - *r\n        ^",
+                    "line": 3,
+                    "column": 5
+                  }
+                ]
+              },
+              {
+                "ok": true,
+                "document": "{\"schema_version\":1,\"rules\":[{\"name\":\"every-test\",\"description\":\"each property test once\",\"applies_to\":\"Leaf\",\"severity\":\"warning\",\"disabled\":false,\"when\":{\"all\":[{\"property\":\"flag\",\"exists\":true},{\"not\":{\"property\":\"name\",\"equals\":null}}]},\"then\":{\"any\":[{\"property\":\"name\",\"equals\":\"x\"},{\"property\":\"name\",\"not_equals\":null},{\"property\":\"level\",\"in\":[1,\"1\",true,1.0,1.5,9007199254740993,-0.0]},{\"property\":\"score\",\"gt\":1.0},{\"property\":\"score\",\"gte\":Infinity},{\"property\":\"score\",\"lt\":-Infinity},{\"property\":\"score\",\"lte\":NaN},{\"property\":\"tags\",\"contains\":\"a\"},{\"property\":\"level\",\"equals\":18446744073709551616},{\"property\":\"score\",\"equals\":2.5e-08},{\"property\":\"flag\",\"not_equals\":false},{\"property\":\"level\",\"exists\":false}]},\"message\":\"custom text\"},{\"name\":\"relationships\",\"applies_to\":\"Root\",\"then\":{\"all\":[{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"exists\":true}},{\"relationship\":{\"type\":\"SubLink\",\"direction\":\"incoming\",\"to\":\"Mid\",\"count\":{\"eq\":2,\"gte\":1,\"lte\":3}}},{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"to\":\"Leaf\",\"where\":{\"any\":[{\"property\":\"score\",\"gt\":0.5},{\"relationship\":{\"type\":\"Owns\",\"direction\":\"incoming\",\"to\":\"Other\",\"where\":{\"property\":\"code\",\"exists\":true},\"exists\":false}}]},\"count\":{\"gte\":0}}}]}},{\"name\":\"nulls-as-pydantic-reads-them\",\"applies_to\":\"Leaf\",\"when\":null,\"then\":{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"to\":null,\"where\":null,\"exists\":null,\"count\":{\"eq\":null,\"gte\":1}}},\"message\":null}]}",
+                "errors": []
+              },
+              {
+                "ok": false,
+                "document": null,
+                "errors": [
+                  {
+                    "message": "Malformed rules YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 3, column 17:\n        applies_to: [Leaf\n                    ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 4, column 1:\n    \n    ^",
+                    "line": 4,
+                    "column": 1
+                  }
+                ]
+              },
+              {
+                "ok": true,
+                "document": "{\"rules\":[{\"name\":\"unknown-applies\",\"applies_to\":\"it's\",\"then\":{\"property\":\"flag\",\"exists\":true}},{\"name\":\"unknown-property\",\"applies_to\":\"Leaf\",\"then\":{\"property\":\"a​b\",\"exists\":true}},{\"name\":\"subtype-only-property\",\"applies_to\":\"Mid\",\"then\":{\"property\":\"flag\",\"exists\":true}},{\"name\":\"unknown-relationship\",\"applies_to\":\"Leaf\",\"then\":{\"relationship\":{\"type\":\"Nope\",\"direction\":\"outgoing\",\"exists\":true}}},{\"name\":\"unknown-to\",\"applies_to\":\"Leaf\",\"then\":{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"to\":\"Ghost\",\"exists\":true}}},{\"name\":\"when-before-then\",\"applies_to\":\"Leaf\",\"when\":{\"property\":\"ghost_when\",\"exists\":true},\"then\":{\"relationship\":{\"type\":\"Nope\",\"direction\":\"outgoing\",\"exists\":true}}},{\"name\":\"where-against-to\",\"applies_to\":\"Leaf\",\"then\":{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"to\":\"Other\",\"where\":{\"property\":\"flag\",\"exists\":true},\"exists\":true}}},{\"name\":\"where-without-to\",\"applies_to\":\"Leaf\",\"then\":{\"relationship\":{\"type\":\"Link\",\"direction\":\"outgoing\",\"where\":{\"property\":\"anything_at_all\",\"exists\":true},\"exists\":true}}},{\"name\":\"first-of-all\",\"applies_to\":\"Leaf\",\"then\":{\"all\":[{\"property\":\"flag\",\"exists\":true},{\"relationship\":{\"type\":\"SubSubLink\",\"direction\":\"incoming\",\"exists\":true}},{\"property\":\"score\",\"gt\":1.0},{\"property\":\"ghost_later\",\"exists\":true}]}},{\"name\":\"under-not\",\"applies_to\":\"Other\",\"then\":{\"not\":{\"property\":\"score\",\"exists\":true}}},{\"name\":\"disabled-drift\",\"applies_to\":\"Ghost\",\"disabled\":true,\"then\":{\"property\":\"flag\",\"exists\":true}},{\"name\":\"disabled-clean\",\"applies_to\":\"Leaf\",\"disabled\":true,\"then\":{\"property\":\"flag\",\"exists\":true}}]}",
+                "errors": []
+              },
+              {
+                "ok": true,
+                "document": "{}",
+                "errors": []
+              },
+              {
+                "ok": false,
+                "document": null,
+                "errors": [
+                  {
+                    "message": "Invalid rule set: 1 validation error for RuleSetDefinition\n  Value error, duplicate rule name 'twice' [type=value_error, input_value={'rules': [{'name': 'twic...ag', 'exists': False}}]}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+                    "line": null,
+                    "column": null
+                  }
+                ]
+              },
+              {
+                "ok": true,
+                "document": "{\"rules\":[{\"name\":\"twin\",\"applies_to\":\"Leaf\",\"then\":{\"property\":\"flag\",\"exists\":true}}]}",
+                "errors": []
+              },
+              {
+                "ok": true,
+                "document": "{\"rules\":[{\"name\":\"twin\",\"applies_to\":\"Twig\",\"then\":{\"property\":\"tags\",\"exists\":true}}]}",
+                "errors": []
+              },
+              {
+                "ok": true,
+                "document": "{\"rules\":[]}",
+                "errors": []
+              },
+              {
+                "ok": true,
+                "document": "{}",
+                "errors": []
+              }
+            ],
+            "status": {
+              "total": 6,
+              "skipped": [
+                {
+                  "artifact_id": "a-alias",
+                  "set_name": "Aliased",
+                  "rule": "",
+                  "reason": "Malformed rules YAML: YAML aliases are not supported in rule sets (found *r)\n  in \"<unicode string>\", line 3, column 5:\n      - *r\n        ^"
+                },
+                {
+                  "artifact_id": "a-all",
+                  "set_name": "All",
+                  "rule": "every-test",
+                  "reason": "stereotype 'Leaf' has no property 'score'"
+                },
+                {
+                  "artifact_id": "a-all",
+                  "set_name": "All",
+                  "rule": "relationships",
+                  "reason": "unknown relationship type 'SubLink'"
+                },
+                {
+                  "artifact_id": "a-bad",
+                  "set_name": "Broken",
+                  "rule": "",
+                  "reason": "Malformed rules YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 3, column 17:\n        applies_to: [Leaf\n                    ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 4, column 1:\n    \n    ^"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "unknown-applies",
+                  "reason": "unknown stereotype \"it's\""
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "unknown-property",
+                  "reason": "stereotype 'Leaf' has no property 'a\\u200bb'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "subtype-only-property",
+                  "reason": "stereotype 'Mid' has no property 'flag'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "unknown-relationship",
+                  "reason": "unknown relationship type 'Nope'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "unknown-to",
+                  "reason": "unknown stereotype 'Ghost'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "when-before-then",
+                  "reason": "stereotype 'Leaf' has no property 'ghost_when'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "where-against-to",
+                  "reason": "unknown stereotype 'Other'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "first-of-all",
+                  "reason": "unknown relationship type 'SubSubLink'"
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "set_name": "Drift",
+                  "rule": "under-not",
+                  "reason": "unknown stereotype 'Other'"
+                },
+                {
+                  "artifact_id": "a-schema",
+                  "set_name": "Schema",
+                  "rule": "",
+                  "reason": "Invalid rule set: 1 validation error for RuleSetDefinition\n  Value error, duplicate rule name 'twice' [type=value_error, input_value={'rules': [{'name': 'twic...ag', 'exists': False}}]}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+                }
+              ],
+              "eval_errors": {}
+            },
+            "compiled": {
+              "rules": [
+                {
+                  "artifact_id": "a-abstract",
+                  "check": "rule:on-root",
+                  "applies_types": [
+                    "Leaf",
+                    "Mid",
+                    "Root",
+                    "Twig"
+                  ],
+                  "paths": []
+                },
+                {
+                  "artifact_id": "a-abstract",
+                  "check": "rule:on-mid",
+                  "applies_types": [
+                    "Leaf",
+                    "Mid",
+                    "Twig"
+                  ],
+                  "paths": []
+                },
+                {
+                  "artifact_id": "a-all",
+                  "check": "rule:nulls-as-pydantic-reads-them",
+                  "applies_types": [
+                    "Leaf",
+                    "Twig"
+                  ],
+                  "paths": [
+                    [
+                      {
+                        "rel_types": [
+                          "Link"
+                        ],
+                        "direction": "outgoing",
+                        "far_types": null
+                      }
+                    ]
+                  ]
+                },
+                {
+                  "artifact_id": "a-drift",
+                  "check": "rule:where-without-to",
+                  "applies_types": [
+                    "Leaf",
+                    "Twig"
+                  ],
+                  "paths": [
+                    [
+                      {
+                        "rel_types": [
+                          "Link"
+                        ],
+                        "direction": "outgoing",
+                        "far_types": null
+                      }
+                    ]
+                  ]
+                },
+                {
+                  "artifact_id": "a-twin-1",
+                  "check": "rule:twin",
+                  "applies_types": [
+                    "Leaf",
+                    "Twig"
+                  ],
+                  "paths": []
+                },
+                {
+                  "artifact_id": "a-twin-2",
+                  "check": "rule:twin",
+                  "applies_types": [
+                    "Twig"
+                  ],
+                  "paths": []
+                }
+              ],
+              "rules_by_type": {
+                "Leaf": [
+                  "rule:on-root",
+                  "rule:on-mid",
+                  "rule:nulls-as-pydantic-reads-them",
+                  "rule:where-without-to",
+                  "rule:twin"
+                ],
+                "Mid": [
+                  "rule:on-root",
+                  "rule:on-mid"
+                ],
+                "Root": [
+                  "rule:on-root"
+                ],
+                "Twig": [
+                  "rule:on-root",
+                  "rule:on-mid",
+                  "rule:nulls-as-pydantic-reads-them",
+                  "rule:where-without-to",
+                  "rule:twin",
+                  "rule:twin"
+                ]
+              }
+            }
+          },
+          "error": null,
+          "digest": "0000000000000000",
+          "fingerprint": "3e045184e34bca3c",
+          "state": [],
+          "indexes": "{\"by_type\":[],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[],\"duplicates\":[],\"roots\":[]}"
+        }
+      ]
+    }
+  ]
+}

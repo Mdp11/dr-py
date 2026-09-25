@@ -8,6 +8,7 @@ import type { Model } from '../model/model.ts';
 import { getProp, type ElementRec, type Props, type RelRec } from '../model/records.ts';
 import { ReadError } from '../read/errors.ts';
 import { jsStr, toNumber } from '../value/coerce.ts';
+import { pyContains } from '../value/compare.ts';
 import { pyLower } from '../value/lower.ts';
 import { beyondHost, translatePyRegex } from '../value/regex.ts';
 import type { Value } from '../value/types.ts';
@@ -262,19 +263,6 @@ function search(compiled: CompiledCriteria, pattern: string, subject: string): b
 }
 
 // -- matching ------------------------------------------------------------------
-
-const isHigh = (unit: number) => unit >= 0xd800 && unit <= 0xdbff;
-const isLow = (unit: number) => unit >= 0xdc00 && unit <= 0xdfff;
-const splitsPair = (text: string, at: number) =>
-	at > 0 && at < text.length && isHigh(text.charCodeAt(at - 1)) && isLow(text.charCodeAt(at));
-
-/** Python's `needle in haystack`, over code points: a match never splits a surrogate pair. */
-function pyContains(haystack: string, needle: string): boolean {
-	for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
-		if (!splitsPair(haystack, at) && !splitsPair(haystack, at + needle.length)) return true;
-	}
-	return false;
-}
 
 /** `String(raw ?? '')`: missing and `null` are the empty string. */
 const nullishStr = (raw: Value | undefined): string =>

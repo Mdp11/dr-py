@@ -131,6 +131,34 @@ export {
 	type WireRelationship
 } from './read/wire.ts';
 export {
+	appliesPopulation,
+	compileRuleSets,
+	EMPTY_RULES,
+	type CompiledRule,
+	type CompiledRules,
+	type RuleSkip,
+	type RuleSource,
+	type RulesParse
+} from './rules/compile.ts';
+export {
+	MAX_CONDITION_DEPTH,
+	MAX_RULES_PER_SET,
+	readRuleSet,
+	RulesUnreadable,
+	type Condition,
+	type Count,
+	type CountSpec,
+	type PropertyAtom,
+	type PropertyTest,
+	type RelationshipAtom,
+	type Rule,
+	type RuleSetDoc,
+	type Scalar
+} from './rules/document.ts';
+export { evaluateCondition, pyRuleEq, RulesValidator } from './rules/evaluate.ts';
+export { derivePaths, expandScope, type ReversePath, type ReverseStep } from './rules/reach.ts';
+export { RULES_KIND, ruleSources } from './rules/sources.ts';
+export {
 	compileCriteria,
 	matchElement,
 	matchRelationship,
@@ -239,11 +267,17 @@ export {
 export { sha256 } from './snapshot/sha256.ts';
 export { drain, isSteps, sortedInSlices, type Progress, type Steps } from './steps/steps.ts';
 export { jsStr, pyFloatOf, PyOverflowError, toNumber } from './value/coerce.ts';
-export { cmpCodePoint } from './value/compare.ts';
+export { cmpCodePoint, pyContains } from './value/compare.ts';
 export { pyFloatRepr } from './value/float-repr.ts';
 export { pyKey } from './value/key.ts';
 export { pyLower, pyStrip } from './value/lower.ts';
-export { needsExactParse, parseExact, parseJson, parseLines } from './value/parse.ts';
+export {
+	needsExactParse,
+	parseExact,
+	parseJson,
+	parseLines,
+	type ParseOptions
+} from './value/parse.ts';
 export { translatePyRegex, type PyRegex } from './value/regex.ts';
 export { pyRepr, pyReprValue } from './value/repr.ts';
 export { pyDumps } from './value/serialize.ts';

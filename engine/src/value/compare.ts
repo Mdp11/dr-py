@@ -21,3 +21,18 @@ export function cmpCodePoint(a: string, b: string): number {
 	const y = b.codePointAt(i)!;
 	return x < y ? -1 : 1;
 }
+
+const isLow = (unit: number) => unit >= 0xdc00 && unit <= 0xdfff;
+const splitsPair = (text: string, at: number) =>
+	at > 0 &&
+	at < text.length &&
+	isHighSurrogate(text.charCodeAt(at - 1)) &&
+	isLow(text.charCodeAt(at));
+
+/** Python's `needle in haystack`, over code points: a match never splits a surrogate pair. */
+export function pyContains(haystack: string, needle: string): boolean {
+	for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+		if (!splitsPair(haystack, at) && !splitsPair(haystack, at + needle.length)) return true;
+	}
+	return false;
+}

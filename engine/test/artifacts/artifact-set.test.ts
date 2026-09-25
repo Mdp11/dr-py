@@ -289,6 +289,104 @@ describe('reading artifacts', () => {
 		}
 	});
 
+	it("reads a rule set's parse as the payloads route and the shell send it", () => {
+		const rules = { ...nav('r1', 'R'), kind: 'validation_rules' };
+		const [ok] = readArtifacts([{ ...rules, rules: { ok: true, document: '{}', errors: [] } }]);
+		expect(ok).toEqual({
+			id: 'r1',
+			kind: 'validation_rules',
+			name: 'R',
+			rev: 1,
+			payload: {},
+			rules: { ok: true, document: '{}' }
+		});
+		const failed = { ok: false, document: null, errors: [{ message: 'm', line: 1, column: 2 }] };
+		expect(readArtifacts([{ ...rules, rules: failed }])[0]!.rules).toEqual({
+			ok: false,
+			errors: [{ message: 'm' }]
+		});
+		expect(readArtifacts([{ ...nav('n1', 'N'), rules: null }])[0]).not.toHaveProperty('rules');
+
+		const staged = readStagedArtifacts([
+			{
+				op: 'create',
+				id: 'tmp_r',
+				kind: 'validation_rules',
+				name: 'R',
+				payload: {},
+				rules: 'pending'
+			},
+			{ op: 'update', id: 'r1', payload: {}, rules: { ok: true, document: '{}' } },
+			{ op: 'update', id: 'r2', payload: {} },
+			{ op: 'delete', id: 'r3', rules: 'ignored' }
+		]);
+		expect(staged).toEqual([
+			{
+				op: 'create',
+				id: 'tmp_r',
+				kind: 'validation_rules',
+				name: 'R',
+				payload: {},
+				rules: 'pending'
+			},
+			{ op: 'update', id: 'r1', payload: {}, rules: { ok: true, document: '{}' } },
+			{ op: 'update', id: 'r2', payload: {} },
+			{ op: 'delete', id: 'r3' }
+		]);
+	});
+
+	it("refuses a malformed rule set's parse with 422 in its own words", () => {
+		const rules = { ...nav('r1', 'R'), kind: 'validation_rules' };
+		const committed: [unknown, string][] = [
+			['pending', 'artifacts[0].rules: must be an object'],
+			[[], 'artifacts[0].rules: must be an object'],
+			[{ document: '{}' }, 'artifacts[0].rules.ok: must be a boolean'],
+			[{ ok: 'true', document: '{}' }, 'artifacts[0].rules.ok: must be a boolean'],
+			[{ ok: true, document: null }, 'artifacts[0].rules.document: must be a string'],
+			[{ ok: true, document: {} }, 'artifacts[0].rules.document: must be a string'],
+			[{ ok: false, errors: [] }, 'artifacts[0].rules.errors: must be a non-empty list'],
+			[{ ok: false }, 'artifacts[0].rules.errors: must be a non-empty list'],
+			[{ ok: false, errors: ['x'] }, 'artifacts[0].rules.errors[0]: must be an object'],
+			[
+				{ ok: false, errors: [{ line: 1 }] },
+				'artifacts[0].rules.errors[0].message: must be a string'
+			]
+		];
+		for (const [value, detail] of committed) {
+			expect(refusal(() => readArtifacts([{ ...rules, rules: value }]))).toEqual({
+				status: 422,
+				detail
+			});
+		}
+		const entry = { op: 'update', id: 'r1', payload: {} };
+		const staged: [unknown, string][] = [
+			[null, "entries[0].rules: must be an object or 'pending'"],
+			['later', "entries[0].rules: must be an object or 'pending'"],
+			[{ ok: 1 }, 'entries[0].rules.ok: must be a boolean'],
+			[{ ok: false, errors: [{}] }, 'entries[0].rules.errors[0].message: must be a string']
+		];
+		for (const [value, detail] of staged) {
+			expect(refusal(() => readStagedArtifacts([{ ...entry, rules: value }]))).toEqual({
+				status: 422,
+				detail
+			});
+			expect(
+				refusal(() =>
+					readStagedArtifacts([
+						{
+							op: 'create',
+							id: 'tmp_r',
+							kind: 'validation_rules',
+							name: 'R',
+							payload: {},
+							rules: value
+						}
+					])
+				)
+			).toEqual({ status: 422, detail });
+		}
+	});
+
 	it('refuses a whole list for one bad entry, leaving the set as it was', () => {
 		const set = setOf([nav('n1', 'One')], [{ op: 'update', id: 'n1', name: 'Staged' }]);
 		expect(

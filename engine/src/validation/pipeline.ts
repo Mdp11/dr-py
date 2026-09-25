@@ -1,6 +1,8 @@
 import type { Metamodel } from '../metamodel/metamodel.ts';
 import type { Model } from '../model/model.ts';
 import type { ElementRec, RelRec } from '../model/records.ts';
+import type { CompiledRules } from '../rules/compile.ts';
+import { RulesValidator } from '../rules/evaluate.ts';
 import { beyondHost, translatePyRegex } from '../value/regex.ts';
 import type { Issue } from './issue.ts';
 import { Containment } from './validators/containment.ts';
@@ -126,24 +128,28 @@ function stamp(out: Issue[], from: number, checkName: string): void {
  * The pipeline over a scope of ids: each id once, its first occurrence
  * deciding the order; an element runs every element hook, a relationship
  * every relationship hook, an id naming nothing is skipped; then every global
- * hook, in validator order.
+ * hook, in validator order. With `rules`, a `RulesValidator` over them runs
+ * seventh.
  */
 export function validateScoped(
 	model: Model,
 	ids: Iterable<string>,
 	v: Validators,
-	p: FacetPatterns
+	p: FacetPatterns,
+	rules: CompiledRules | null = null
 ): Issue[] {
 	if (v.metamodel !== model.metamodel || p.metamodel !== model.metamodel) {
 		throw new Error('validators built for another metamodel');
 	}
+	const list: readonly Validator[] =
+		rules === null ? v.list : [...v.list, new RulesValidator(rules)];
 	const scope = [...new Set(ids)];
 	const run: Run = { model, patterns: p, out: [] };
 	const out = run.out;
 	for (const id of scope) {
 		const el = model.findElement(id);
 		if (el !== undefined) {
-			for (const validator of v.list) {
+			for (const validator of list) {
 				const from = out.length;
 				validator.validateElement?.(run, el);
 				stamp(out, from, validator.checkName);
@@ -152,13 +158,13 @@ export function validateScoped(
 		}
 		const rel = model.findRelationship(id);
 		if (rel === undefined) continue;
-		for (const validator of v.list) {
+		for (const validator of list) {
 			const from = out.length;
 			validator.validateRelationship?.(run, rel);
 			stamp(out, from, validator.checkName);
 		}
 	}
-	for (const validator of v.list) {
+	for (const validator of list) {
 		const from = out.length;
 		validator.validateGlobal?.(run, scope);
 		stamp(out, from, validator.checkName);

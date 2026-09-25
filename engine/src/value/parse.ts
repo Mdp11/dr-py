@@ -27,12 +27,20 @@ const ESCAPES: Record<string, string> = {
 const NUMBER = /-?(?:0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/y;
 const WHITESPACE = /[ \t\n\r]*/y;
 
+/**
+ * `floatConstants` reads a bare `NaN`, `Infinity` or `-Infinity` as the float
+ * it stands for, as `json.loads` does, instead of keeping its source text.
+ */
+export type ParseOptions = { floatConstants?: boolean };
+
 class ExactParser {
 	private readonly text: string;
+	private readonly floatConstants: boolean;
 	private pos = 0;
 
-	constructor(text: string) {
+	constructor(text: string, options: ParseOptions) {
 		this.text = text;
+		this.floatConstants = options.floatConstants ?? false;
 	}
 
 	parse(): Value {
@@ -67,12 +75,17 @@ class ExactParser {
 		if (ch === 't') return this.literal('true', true);
 		if (ch === 'f') return this.literal('false', false);
 		if (ch === 'n') return this.literal('null', null);
-		// The bare constants keep their source text, as `parse_model_json` does.
-		if (ch === 'N') return this.literal('NaN', 'NaN');
-		if (ch === 'I') return this.literal('Infinity', 'Infinity');
+		// The bare constants keep their source text, as `parse_model_json` does,
+		// unless they are read as floats.
+		if (ch === 'N') return this.literal('NaN', this.constant('NaN', NaN));
+		if (ch === 'I') return this.literal('Infinity', this.constant('Infinity', Infinity));
 		if (ch === '-' && this.text[this.pos + 1] === 'I')
-			return this.literal('-Infinity', '-Infinity');
+			return this.literal('-Infinity', this.constant('-Infinity', -Infinity));
 		return this.number();
+	}
+
+	private constant(text: string, value: number): Value {
+		return this.floatConstants ? new PyFloat(value) : text;
 	}
 
 	private number(): Value {
@@ -164,8 +177,8 @@ class ExactParser {
 }
 
 /** Parses JSON exactly: floats as `PyFloat`, big integers as `bigint`. */
-export function parseExact(text: string): Value {
-	return new ExactParser(text).parse();
+export function parseExact(text: string, options: ParseOptions = {}): Value {
+	return new ExactParser(text, options).parse();
 }
 
 /** Parses one JSON document, exactly, as fast as its content allows. */

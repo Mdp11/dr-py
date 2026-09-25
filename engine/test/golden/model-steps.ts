@@ -4,8 +4,11 @@ import {
 	applyBatch,
 	ArtifactSet,
 	cmpCodePoint,
+	compileRuleSets,
 	DirtyCollector,
 	drain,
+	EMPTY_RULES,
+	expandScope,
 	dumpIndexes,
 	elementLine,
 	ElementRec,
@@ -29,12 +32,14 @@ import {
 	PyFloat,
 	previewBody,
 	pyDumps,
+	readArtifacts,
 	ReadError,
 	readNavigation,
 	READS,
 	relationshipLine,
 	RelRec,
 	resolveRefs,
+	ruleSources,
 	shuffleAdjacency,
 	storeListBody,
 	validateBody,
@@ -46,6 +51,7 @@ import {
 	type BatchResult,
 	type ChainNode,
 	type CommittedArtifact,
+	type CompiledRules,
 	type ElementImage,
 	type MetamodelDoc,
 	type ModelOp,
@@ -103,6 +109,12 @@ export type Step = Partial<Observed> & {
 	restore?: boolean;
 	/** `batch` / `undo`: the result carries the dirty ids, in the order collected. */
 	record_dirty?: boolean;
+	/** `batch`: those dirty ids widened by the compiled rules' reach. */
+	expand?: boolean;
+	/** `rules`: the rule sets to compile, in the order both sides compile them. */
+	sources?: { artifact_id: string; name: string; yaml: string }[];
+	/** `reach`: the ids to reach back from. */
+	ids?: string[];
 	/** `undo`: the index of the landed batch whose inverse ops to run. */
 	of?: number;
 	/** `read`: a method of `READS` or of `EVALUATIONS`, and its params. */
@@ -223,8 +235,81 @@ type Carried = {
 	layer: ArtifactLayer;
 	validation: Validation | null;
 	session: { store: IssueStore; rev: number } | null;
+	rules: CompiledRules | null;
 	options: ModelOptions;
 };
+
+/** `POST /rules/parse`'s body, as a `rules` step records one per source. */
+export type RecordedParse = {
+	ok: boolean;
+	document: string | null;
+	errors: { message: string; line: number | null; column: number | null }[];
+};
+
+/** What a `rules` step records. */
+export type RulesStepResult = { parses: RecordedParse[]; status: unknown; compiled: unknown };
+
+const sortedNames = (names: ReadonlySet<string>) => [...names].sort(cmpCodePoint);
+
+/** `rules_status` as `GET /model/issues` builds it from a compile. */
+export function rulesStatus(compiled: CompiledRules): unknown {
+	return {
+		total: compiled.total,
+		skipped: compiled.skipped.map(({ artifact_id, set_name, rule, reason }) => ({
+			artifact_id,
+			set_name,
+			rule,
+			reason
+		})),
+		eval_errors: Object.fromEntries(compiled.evalErrors)
+	};
+}
+
+/** The recorder's view of a compile: each rule's applies types and paths, the checks per type. */
+export function compiledRecord(compiled: CompiledRules): unknown {
+	return {
+		rules: compiled.rules.map((rule) => ({
+			artifact_id: rule.artifactId,
+			check: rule.check,
+			applies_types: sortedNames(rule.appliesTypes),
+			paths: rule.paths.map((path) =>
+				path.map((step) => ({
+					rel_types: sortedNames(step.relTypes),
+					direction: step.direction,
+					far_types: step.farTypes === null ? null : sortedNames(step.farTypes)
+				}))
+			)
+		})),
+		rules_by_type: Object.fromEntries(
+			[...compiled.rulesByType.keys()]
+				.sort(cmpCodePoint)
+				.map((type) => [type, compiled.rulesByType.get(type)!.map((rule) => rule.check)])
+		)
+	};
+}
+
+/**
+ * A `rules` step's sources as the shell hands them in: committed artifacts
+ * carrying the parse the server recorded for each, read, laid in a set and
+ * listed by `ruleSources`, then compiled over `mm`.
+ */
+export function compileRecorded(step: Step, mm: Metamodel): CompiledRules {
+	const { parses } = step.result as RulesStepResult;
+	const set = new ArtifactSet();
+	set.setCommitted(
+		readArtifacts(
+			step.sources!.map((source, i) => ({
+				id: source.artifact_id,
+				kind: 'validation_rules',
+				name: source.name,
+				artifact_rev: 1,
+				payload: { schema_version: 1, yaml: source.yaml },
+				rules: parses[i]
+			}))
+		)
+	);
+	return compileRuleSets(ruleSources(set, 'committed'), mm);
+}
 
 function validationOf(carried: Carried, model: Model): Validation {
 	const mm = model.metamodel;
@@ -304,8 +389,19 @@ function apply(
 		case 'validate': {
 			const ids = step.scope === 'all_ids' ? allIds(model) : step.scope!;
 			const { validators, patterns } = validationOf(carried, model);
-			return validateScoped(model, ids, validators, patterns).map((i) => wireIssue(i, 'on_server'));
+			return validateScoped(model, ids, validators, patterns, carried.rules).map((i) =>
+				wireIssue(i, 'on_server')
+			);
 		}
+		case 'rules': {
+			const compiled = compileRecorded(step, model.metamodel);
+			expect(compiled.unreadable, `step ${index}: a document the engine refuses`).toBe(false);
+			carried.rules = compiled;
+			const { parses } = step.result as RulesStepResult;
+			return { parses, status: rulesStatus(compiled), compiled: compiledRecord(compiled) };
+		}
+		case 'reach':
+			return expandScope(model, carried.rules ?? EMPTY_RULES, step.ids!);
 		case 'seed': {
 			// The server's sweep: every id, validated and spliced into an empty store.
 			const { validators, patterns } = validationOf(carried, model);
@@ -371,6 +467,9 @@ function apply(
 			const res = applyBatch(model, ops, { restore, idFor: mint, dirty });
 			landed.set(index, res);
 			const out = outcome(model, res);
+			if (step.expand === true) {
+				dirty!.update(expandScope(model, carried.rules ?? EMPTY_RULES, [...dirty!.ids]));
+			}
 			if (step.record_dirty === true) out.dirty = [...dirty!.ids];
 			if (session !== null) {
 				// As the ops route finalizes a landed batch: its dirty scope revalidated and spliced.
@@ -431,6 +530,8 @@ const READ_LIKE = new Set([
 	'navigate',
 	'has_script',
 	'validate',
+	'rules',
+	'reach',
 	'issues',
 	'preview',
 	'validate_staged'
@@ -457,6 +558,7 @@ export function replaySteps(
 		layer,
 		validation: null,
 		session: null,
+		rules: null,
 		options
 	};
 	let minted = 0;

@@ -9,14 +9,18 @@ function on the recorder's model and records the response body; ``view`` and
 artifacts it may fetch. ``navigate`` and ``has_script`` run the navigation
 core itself on a definition whose refs resolve against those artifacts.
 ``validate`` runs the six built-in validators over a scope of ids and records
-the issues as the server's routes send them. ``seed`` gives the recorder a
+the issues as the server's routes send them; after a ``rules`` step, which
+parses and compiles rule sets as the server does, the rules validator runs
+seventh. ``reach`` records the elements those rules reach back to from a list
+of ids. ``seed`` gives the recorder a
 session over its model, its issue store filled by the server's own sweep; from
 then on every landed batch bumps ``model_rev`` and is finalized as
 ``POST /model/ops`` finalizes it, and ``issues`` records ``GET /model/issues``.
 ``preview`` and ``validate_staged`` send their ops to ``POST /commits/preview``
 and to the staged branch of ``POST /model/validate``, which apply them, validate
 and roll back: the recorder holds both to leaving the model and the store as
-they were. A batch with ``record_dirty`` adds its dirty ids to its result.
+they were. A batch with ``record_dirty`` adds its dirty ids to its result,
+widened by the rules' reach when it also carries ``expand``.
 ``insert_element`` and ``insert_relationship`` put an entity in as committed
 state arrives, its type unchecked. After every step the recorder
 adds the outcome (``result`` or ``error``) and what the step left behind: the
@@ -53,7 +57,9 @@ from data_rover.api.routes import read
 from data_rover.api.routes.commits import preview_commit
 from data_rover.api.routes.elements import get_element
 from data_rover.api.routes.ops import _apply_batch, _BatchResult, _finalize
+from data_rover.api.routes.rules import parse_result
 from data_rover.api.routes.validation import list_issues, validate_model
+from data_rover.api.rules import pipeline_for
 from data_rover.api.schemas import (
     ElementOut,
     EvaluateNavigationIn,
@@ -61,6 +67,8 @@ from data_rover.api.schemas import (
     ModelOpIn,
     PreviewRequest,
     RelationshipOut,
+    RuleSkipOut,
+    RulesStatusOut,
     ValidateRequest,
 )
 from data_rover.api.search import SearchQueryIn
@@ -76,6 +84,13 @@ from data_rover.core.navigation.evaluate import EvalLimits, evaluate
 from data_rover.core.navigation.resolve import navigation_has_script, resolve_refs
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
 from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
+from data_rover.core.validation.rules.compile import (
+    CompiledRules,
+    RuleSetSource,
+    compile_rule_sets,
+    empty_compiled,
+)
+from data_rover.core.validation.rules.reach import ReversePath, expand_scope
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
@@ -146,6 +161,76 @@ def validate_step(scope: list[str] | str) -> dict[str, Any]:
     ``"all_ids"``: every element id in state order, then every relationship
     id."""
     return {"do": "validate", "scope": scope}
+
+
+def rules_step(sources: list[tuple[str, str, str]]) -> dict[str, Any]:
+    """A ``rules`` step over ``(artifact_id, name, yaml)`` sources, in the
+    order both sides compile them: by name, then by id, code point order."""
+    ordered = sorted(sources, key=lambda source: (source[1], source[0]))
+    return {
+        "do": "rules",
+        "sources": [
+            {"artifact_id": artifact_id, "name": name, "yaml": text}
+            for artifact_id, name, text in ordered
+        ],
+    }
+
+
+def reach_step(ids: list[str]) -> dict[str, Any]:
+    """A ``reach`` step: the elements the compiled rules reach back to from
+    ``ids``."""
+    return {"do": "reach", "ids": ids}
+
+
+def _paths(paths: tuple[ReversePath, ...]) -> list[list[dict[str, Any]]]:
+    return [
+        [
+            {
+                "rel_types": sorted(step.rel_types),
+                "direction": step.direction,
+                "far_types": None if step.far_types is None else sorted(step.far_types),
+            }
+            for step in path.steps
+        ]
+        for path in paths
+    ]
+
+
+def _compiled(compiled: CompiledRules) -> dict[str, Any]:
+    """What a compile holds besides its status: each rule's applies types and
+    reach paths, and the checks run per type, in order."""
+    return {
+        "rules": [
+            {
+                "artifact_id": rule.artifact_id,
+                "check": rule.check,
+                "applies_types": sorted(rule.applies_types),
+                "paths": _paths(rule.paths),
+            }
+            for rule in compiled.rules
+        ],
+        "rules_by_type": {
+            type_name: [rule.check for rule in compiled.rules_by_type[type_name]]
+            for type_name in sorted(compiled.rules_by_type)
+        },
+    }
+
+
+def _rules_status(compiled: CompiledRules) -> dict[str, Any]:
+    """``rules_status`` as ``GET /model/issues`` builds it."""
+    return RulesStatusOut(
+        total=compiled.total,
+        skipped=[
+            RuleSkipOut(
+                artifact_id=d.artifact_id,
+                set_name=d.set_name,
+                rule=d.rule,
+                reason=d.reason,
+            )
+            for d in compiled.skipped
+        ],
+        eval_errors=dict(compiled.eval_errors),
+    ).model_dump(mode="json")
 
 
 def view_step(view_id: str, folders: list[dict[str, Any]]) -> dict[str, Any]:
@@ -338,6 +423,7 @@ class Recorder:
         self._views: dict[str, View] = {}
         self._artifacts: Artifacts = {}
         self._session: Session | None = None
+        self._rules: CompiledRules | None = None
 
     def _entity(self, step: dict[str, Any]) -> Element | Relationship:
         detached = step.get("detached")
@@ -354,7 +440,12 @@ class Recorder:
         return entity
 
     def _batch(
-        self, ops: list[ModelOpIn], *, restore: bool, record_dirty: bool
+        self,
+        ops: list[ModelOpIn],
+        *,
+        restore: bool,
+        record_dirty: bool,
+        expand: bool = False,
     ) -> dict[str, Any]:
         drawn = self._ids.drawn
         try:
@@ -365,7 +456,15 @@ class Recorder:
         self._landed[len(self._steps)] = res
         outcome = _outcome(self.model, res)
         if record_dirty:
-            outcome["dirty"] = list(res.dirty.ids)
+            dirty = list(res.dirty.ids)
+            if expand:
+                # as ``expand_dirty`` widens it: ``dirty.update(extra)``
+                assert self._session is None, "expand runs on an unseeded recorder"
+                compiled = self._rules or empty_compiled()
+                dirty = list(
+                    dict.fromkeys([*dirty, *expand_scope(self.model, compiled, dirty)])
+                )
+            outcome["dirty"] = dirty
         session = self._session
         if session is not None:
             # an empty batch is answered before anything lands, rev unmoved
@@ -437,10 +536,15 @@ class Recorder:
         match step["do"]:
             case "batch":
                 ops = _MODEL_OPS.validate_python(step["_ops"])
+                expand = bool(step.get("expand", False))
+                assert not expand or step.get("record_dirty"), (
+                    "expand needs record_dirty"
+                )
                 return self._batch(
                     ops,
                     restore=bool(step.get("restore", False)),
                     record_dirty=bool(step.get("record_dirty", False)),
+                    expand=expand,
                 )
             case "undo":
                 return self._batch(
@@ -475,10 +579,35 @@ class Recorder:
                     if scope == "all_ids"
                     else scope
                 )
-                issues = ValidationPipeline(default_validators()).validate(
-                    model, Scope(ids)
+                pipeline = (
+                    ValidationPipeline(default_validators())
+                    if self._rules is None
+                    else pipeline_for(self._rules)
                 )
+                issues = pipeline.validate(model, Scope(ids))
                 return [IssueOut.from_core(i).model_dump(mode="json") for i in issues]
+            case "rules":
+                sources = step["sources"]
+                assert sources == sorted(
+                    sources, key=lambda s: (s["name"], s["artifact_id"])
+                ), "rules sources go in name order, then id"
+                assert self._session is None, "rules run on an unseeded recorder"
+                parses = [parse_result(s["yaml"]) for s in sources]
+                compiled = compile_rule_sets(
+                    [
+                        RuleSetSource(s["artifact_id"], s["name"], s["yaml"])
+                        for s in sources
+                    ],
+                    self.metamodel,
+                )
+                self._rules = compiled
+                return {
+                    "parses": [p.model_dump(mode="json") for p in parses],
+                    "status": _rules_status(compiled),
+                    "compiled": _compiled(compiled),
+                }
+            case "reach":
+                return expand_scope(model, self._rules or empty_compiled(), step["ids"])
             case "artifacts":
                 self._artifacts = dict(step["_artifacts"])
                 return None

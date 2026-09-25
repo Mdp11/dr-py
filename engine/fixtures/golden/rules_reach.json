@@ -1,0 +1,1104 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Base",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "p",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "A",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "A2",
+        "abstract": false,
+        "extends": "A",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "B",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "C",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "D",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "R",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Base",
+        "target": "Base",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Base"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "R2",
+        "abstract": false,
+        "extends": "R",
+        "containment": false,
+        "source": null,
+        "target": null,
+        "mappings": [],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "S",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Base",
+        "target": "Base",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Base"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "T",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Base",
+        "target": "Base",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Base"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a-1\",\"type_name\":\"A\",\"properties\":{},\"id\":\"a-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a-2\",\"type_name\":\"A\",\"properties\":{},\"id\":\"a-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a-3\",\"type_name\":\"A2\",\"properties\":{},\"id\":\"a-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_a-4\",\"type_name\":\"A\",\"properties\":{},\"id\":\"a-4\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-1\",\"type_name\":\"B\",\"properties\":{},\"id\":\"b-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-2\",\"type_name\":\"B\",\"properties\":{},\"id\":\"b-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_b-3\",\"type_name\":\"B\",\"properties\":{},\"id\":\"b-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c-1\",\"type_name\":\"C\",\"properties\":{},\"id\":\"c-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c-2\",\"type_name\":\"C\",\"properties\":{},\"id\":\"c-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c-3\",\"type_name\":\"C\",\"properties\":{},\"id\":\"c-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d-1\",\"type_name\":\"D\",\"properties\":{\"p\":\"x\"},\"id\":\"d-1\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d-2\",\"type_name\":\"D\",\"properties\":{},\"id\":\"d-2\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d-3\",\"type_name\":\"D\",\"properties\":{\"p\":\"y\"},\"id\":\"d-3\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d-4\",\"type_name\":\"D\",\"properties\":{},\"id\":\"d-4\"}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d-5\",\"type_name\":\"D\",\"properties\":{\"p\":\"z\"},\"id\":\"d-5\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_a-1",
+            "a-1"
+          ],
+          [
+            "tmp_a-2",
+            "a-2"
+          ],
+          [
+            "tmp_a-3",
+            "a-3"
+          ],
+          [
+            "tmp_a-4",
+            "a-4"
+          ],
+          [
+            "tmp_b-1",
+            "b-1"
+          ],
+          [
+            "tmp_b-2",
+            "b-2"
+          ],
+          [
+            "tmp_b-3",
+            "b-3"
+          ],
+          [
+            "tmp_c-1",
+            "c-1"
+          ],
+          [
+            "tmp_c-2",
+            "c-2"
+          ],
+          [
+            "tmp_c-3",
+            "c-3"
+          ],
+          [
+            "tmp_d-1",
+            "d-1"
+          ],
+          [
+            "tmp_d-2",
+            "d-2"
+          ],
+          [
+            "tmp_d-3",
+            "d-3"
+          ],
+          [
+            "tmp_d-4",
+            "d-4"
+          ],
+          [
+            "tmp_d-5",
+            "d-5"
+          ]
+        ],
+        "changed_element_ids": [
+          "a-1",
+          "a-2",
+          "a-3",
+          "a-4",
+          "b-1",
+          "b-2",
+          "b-3",
+          "c-1",
+          "c-2",
+          "c-3",
+          "d-1",
+          "d-2",
+          "d-3",
+          "d-4",
+          "d-5"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "a-1",
+            null
+          ],
+          [
+            "a-2",
+            null
+          ],
+          [
+            "a-3",
+            null
+          ],
+          [
+            "a-4",
+            null
+          ],
+          [
+            "b-1",
+            null
+          ],
+          [
+            "b-2",
+            null
+          ],
+          [
+            "b-3",
+            null
+          ],
+          [
+            "c-1",
+            null
+          ],
+          [
+            "c-2",
+            null
+          ],
+          [
+            "c-3",
+            null
+          ],
+          [
+            "d-1",
+            null
+          ],
+          [
+            "d-2",
+            null
+          ],
+          [
+            "d-3",
+            null
+          ],
+          [
+            "d-4",
+            null
+          ],
+          [
+            "d-5",
+            null
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"d-5\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"d-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"d-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"d-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"d-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"c-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"b-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"b-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"b-1\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"a-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"a-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"a-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"a-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"a-1\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"a-2\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"a-3\",\"type_name\":\"A2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"a-4\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"b-1\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"b-2\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"b-3\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"c-1\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"c-2\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"c-3\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"d-1\",\"type_name\":\"D\",\"properties\":{\"p\":\"x\"},\"rev\":1}",
+          "{\"id\":\"d-2\",\"type_name\":\"D\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"d-3\",\"type_name\":\"D\",\"properties\":{\"p\":\"y\"},\"rev\":1}",
+          "{\"id\":\"d-4\",\"type_name\":\"D\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"d-5\",\"type_name\":\"D\",\"properties\":{\"p\":\"z\"},\"rev\":1}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "9a7d4c6b3f38c6a4",
+      "fingerprint": "b4972478fe4fd090",
+      "state": [
+        "{\"id\":\"a-1\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-2\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-3\",\"type_name\":\"A2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-4\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-1\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-2\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-3\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"c-1\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"c-2\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"c-3\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-1\",\"type_name\":\"D\",\"properties\":{\"p\":\"x\"},\"rev\":1}",
+        "{\"id\":\"d-2\",\"type_name\":\"D\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-3\",\"type_name\":\"D\",\"properties\":{\"p\":\"y\"},\"rev\":1}",
+        "{\"id\":\"d-4\",\"type_name\":\"D\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-5\",\"type_name\":\"D\",\"properties\":{\"p\":\"z\"},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"A\",[\"a-1\",\"a-2\",\"a-4\"]],[\"A2\",[\"a-3\"]],[\"B\",[\"b-1\",\"b-2\",\"b-3\"]],[\"C\",[\"c-1\",\"c-2\",\"c-3\"]],[\"D\",[\"d-1\",\"d-2\",\"d-3\",\"d-4\",\"d-5\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"a-1\",\"a-2\",\"a-4\"],[\"a-3\"],[\"b-1\",\"b-2\",\"b-3\"],[\"c-1\",\"c-2\",\"c-3\"],[\"d-1\"],[\"d-2\",\"d-4\"],[\"d-3\"],[\"d-5\"]],\"duplicates\":[[\"a-1\",\"a-2\",\"a-4\"],[\"b-1\",\"b-2\",\"b-3\"],[\"c-1\",\"c-2\",\"c-3\"],[\"d-2\",\"d-4\"]],\"roots\":[[\"a-1\",\"a-1\"],[\"a-2\",\"a-2\"],[\"a-3\",\"a-3\"],[\"a-4\",\"a-4\"],[\"b-1\",\"b-1\"],[\"b-2\",\"b-2\"],[\"b-3\",\"b-3\"],[\"c-1\",\"c-1\"],[\"c-2\",\"c-2\"],[\"c-3\",\"c-3\"],[\"d-1\",\"d-1\"],[\"d-2\",\"d-2\"],[\"d-3\",\"d-3\"],[\"d-4\",\"d-4\"],[\"d-5\",\"d-5\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r-1\",\"type_name\":\"R\",\"source_id\":\"a-1\",\"target_id\":\"b-1\",\"properties\":{},\"id\":\"r-1\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_s-1\",\"type_name\":\"S\",\"source_id\":\"c-1\",\"target_id\":\"b-1\",\"properties\":{},\"id\":\"s-1\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_t-1\",\"type_name\":\"T\",\"source_id\":\"c-1\",\"target_id\":\"d-1\",\"properties\":{},\"id\":\"t-1\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_t-2\",\"type_name\":\"T\",\"source_id\":\"c-1\",\"target_id\":\"d-1\",\"properties\":{},\"id\":\"t-2\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r-2\",\"type_name\":\"R\",\"source_id\":\"a-2\",\"target_id\":\"d-2\",\"properties\":{},\"id\":\"r-2\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_s-2\",\"type_name\":\"S\",\"source_id\":\"c-2\",\"target_id\":\"d-2\",\"properties\":{},\"id\":\"s-2\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_t-3\",\"type_name\":\"T\",\"source_id\":\"c-2\",\"target_id\":\"d-3\",\"properties\":{},\"id\":\"t-3\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r-3\",\"type_name\":\"R2\",\"source_id\":\"a-3\",\"target_id\":\"b-1\",\"properties\":{},\"id\":\"r-3\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r-4\",\"type_name\":\"R\",\"source_id\":\"d-4\",\"target_id\":\"b-1\",\"properties\":{},\"id\":\"r-4\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r-5\",\"type_name\":\"R\",\"source_id\":\"b-2\",\"target_id\":\"b-2\",\"properties\":{},\"id\":\"r-5\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r-6\",\"type_name\":\"R\",\"source_id\":\"a-4\",\"target_id\":\"b-3\",\"properties\":{},\"id\":\"r-6\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_t-4\",\"type_name\":\"T\",\"source_id\":\"c-3\",\"target_id\":\"d-5\",\"properties\":{},\"id\":\"t-4\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_r-1",
+            "r-1"
+          ],
+          [
+            "tmp_s-1",
+            "s-1"
+          ],
+          [
+            "tmp_t-1",
+            "t-1"
+          ],
+          [
+            "tmp_t-2",
+            "t-2"
+          ],
+          [
+            "tmp_r-2",
+            "r-2"
+          ],
+          [
+            "tmp_s-2",
+            "s-2"
+          ],
+          [
+            "tmp_t-3",
+            "t-3"
+          ],
+          [
+            "tmp_r-3",
+            "r-3"
+          ],
+          [
+            "tmp_r-4",
+            "r-4"
+          ],
+          [
+            "tmp_r-5",
+            "r-5"
+          ],
+          [
+            "tmp_r-6",
+            "r-6"
+          ],
+          [
+            "tmp_t-4",
+            "t-4"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "r-1",
+          "s-1",
+          "t-1",
+          "t-2",
+          "r-2",
+          "s-2",
+          "t-3",
+          "r-3",
+          "r-4",
+          "r-5",
+          "r-6",
+          "t-4"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "r-1",
+            null
+          ],
+          [
+            "s-1",
+            null
+          ],
+          [
+            "t-1",
+            null
+          ],
+          [
+            "t-2",
+            null
+          ],
+          [
+            "r-2",
+            null
+          ],
+          [
+            "s-2",
+            null
+          ],
+          [
+            "t-3",
+            null
+          ],
+          [
+            "r-3",
+            null
+          ],
+          [
+            "r-4",
+            null
+          ],
+          [
+            "r-5",
+            null
+          ],
+          [
+            "r-6",
+            null
+          ],
+          [
+            "t-4",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"t-4\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"r-6\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"r-5\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"r-4\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"r-3\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"t-3\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"s-2\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"r-2\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"t-2\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"t-1\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"s-1\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"r-1\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"r-1\",\"type_name\":\"R\",\"source_id\":\"a-1\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"s-1\",\"type_name\":\"S\",\"source_id\":\"c-1\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"t-1\",\"type_name\":\"T\",\"source_id\":\"c-1\",\"target_id\":\"d-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"t-2\",\"type_name\":\"T\",\"source_id\":\"c-1\",\"target_id\":\"d-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"r-2\",\"type_name\":\"R\",\"source_id\":\"a-2\",\"target_id\":\"d-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"s-2\",\"type_name\":\"S\",\"source_id\":\"c-2\",\"target_id\":\"d-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"t-3\",\"type_name\":\"T\",\"source_id\":\"c-2\",\"target_id\":\"d-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"r-3\",\"type_name\":\"R2\",\"source_id\":\"a-3\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"r-4\",\"type_name\":\"R\",\"source_id\":\"d-4\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"r-5\",\"type_name\":\"R\",\"source_id\":\"b-2\",\"target_id\":\"b-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"r-6\",\"type_name\":\"R\",\"source_id\":\"a-4\",\"target_id\":\"b-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"t-4\",\"type_name\":\"T\",\"source_id\":\"c-3\",\"target_id\":\"d-5\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "e5401b3267fa460d",
+      "fingerprint": "fcaddb97550585cf"
+    },
+    {
+      "do": "rules",
+      "sources": [
+        {
+          "artifact_id": "rs-1",
+          "name": "Reach",
+          "yaml": "rules:\n  - name: deep\n    applies_to: A\n    then:\n      relationship:\n        type: R\n        direction: outgoing\n        to: B\n        where:\n          relationship:\n            type: S\n            direction: incoming\n            to: C\n            where:\n              relationship:\n                type: T\n                direction: outgoing\n                where: {property: p, exists: true}\n                exists: true\n            exists: true\n        exists: true\n  - name: back\n    applies_to: B\n    when: {relationship: {type: R, direction: incoming, exists: true}}\n    then: {property: p, exists: true}\n  - name: fan\n    applies_to: C\n    then:\n      not:\n        relationship: {type: T, direction: outgoing, to: D, count: {gte: 2}}\n"
+        }
+      ],
+      "result": {
+        "parses": [
+          {
+            "ok": true,
+            "document": "{\"rules\":[{\"name\":\"deep\",\"applies_to\":\"A\",\"then\":{\"relationship\":{\"type\":\"R\",\"direction\":\"outgoing\",\"to\":\"B\",\"where\":{\"relationship\":{\"type\":\"S\",\"direction\":\"incoming\",\"to\":\"C\",\"where\":{\"relationship\":{\"type\":\"T\",\"direction\":\"outgoing\",\"where\":{\"property\":\"p\",\"exists\":true},\"exists\":true}},\"exists\":true}},\"exists\":true}}},{\"name\":\"back\",\"applies_to\":\"B\",\"when\":{\"relationship\":{\"type\":\"R\",\"direction\":\"incoming\",\"exists\":true}},\"then\":{\"property\":\"p\",\"exists\":true}},{\"name\":\"fan\",\"applies_to\":\"C\",\"then\":{\"not\":{\"relationship\":{\"type\":\"T\",\"direction\":\"outgoing\",\"to\":\"D\",\"count\":{\"gte\":2}}}}}]}",
+            "errors": []
+          }
+        ],
+        "status": {
+          "total": 3,
+          "skipped": [],
+          "eval_errors": {}
+        },
+        "compiled": {
+          "rules": [
+            {
+              "artifact_id": "rs-1",
+              "check": "rule:deep",
+              "applies_types": [
+                "A",
+                "A2"
+              ],
+              "paths": [
+                [
+                  {
+                    "rel_types": [
+                      "R",
+                      "R2"
+                    ],
+                    "direction": "outgoing",
+                    "far_types": [
+                      "B"
+                    ]
+                  }
+                ],
+                [
+                  {
+                    "rel_types": [
+                      "R",
+                      "R2"
+                    ],
+                    "direction": "outgoing",
+                    "far_types": [
+                      "B"
+                    ]
+                  },
+                  {
+                    "rel_types": [
+                      "S"
+                    ],
+                    "direction": "incoming",
+                    "far_types": [
+                      "C"
+                    ]
+                  }
+                ],
+                [
+                  {
+                    "rel_types": [
+                      "R",
+                      "R2"
+                    ],
+                    "direction": "outgoing",
+                    "far_types": [
+                      "B"
+                    ]
+                  },
+                  {
+                    "rel_types": [
+                      "S"
+                    ],
+                    "direction": "incoming",
+                    "far_types": [
+                      "C"
+                    ]
+                  },
+                  {
+                    "rel_types": [
+                      "T"
+                    ],
+                    "direction": "outgoing",
+                    "far_types": null
+                  }
+                ]
+              ]
+            },
+            {
+              "artifact_id": "rs-1",
+              "check": "rule:back",
+              "applies_types": [
+                "B"
+              ],
+              "paths": [
+                [
+                  {
+                    "rel_types": [
+                      "R",
+                      "R2"
+                    ],
+                    "direction": "incoming",
+                    "far_types": null
+                  }
+                ]
+              ]
+            },
+            {
+              "artifact_id": "rs-1",
+              "check": "rule:fan",
+              "applies_types": [
+                "C"
+              ],
+              "paths": [
+                [
+                  {
+                    "rel_types": [
+                      "T"
+                    ],
+                    "direction": "outgoing",
+                    "far_types": [
+                      "D"
+                    ]
+                  }
+                ]
+              ]
+            }
+          ],
+          "rules_by_type": {
+            "A": [
+              "rule:deep"
+            ],
+            "A2": [
+              "rule:deep"
+            ],
+            "B": [
+              "rule:back"
+            ],
+            "C": [
+              "rule:fan"
+            ]
+          }
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "reach",
+      "ids": [
+        "d-1"
+      ],
+      "result": [
+        "a-1",
+        "a-3",
+        "c-1"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "reach",
+      "ids": [
+        "d-3"
+      ],
+      "result": [
+        "a-2",
+        "c-2"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "reach",
+      "ids": [
+        "b-1"
+      ],
+      "result": [
+        "a-1",
+        "a-3"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "reach",
+      "ids": [
+        "b-2",
+        "c-1",
+        "d-2"
+      ],
+      "result": [
+        "a-2",
+        "a-1",
+        "a-3",
+        "b-2"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "reach",
+      "ids": [
+        "r-1",
+        "s-1",
+        "ghost",
+        "t-3",
+        "d-5",
+        "d-1"
+      ],
+      "result": [
+        "a-1",
+        "a-3",
+        "c-1",
+        "c-3"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "expand": true,
+      "ops": [
+        "{\"kind\":\"update_element\",\"id\":\"d-1\",\"properties_patch\":{\"p\":null}}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [
+          "d-1"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "d-1",
+            "{\"id\":\"d-1\",\"type_name\":\"D\",\"properties\":{\"p\":\"x\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"d-1\",\"properties_patch\":{\"p\":\"x\"}}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"d-1\",\"type_name\":\"D\",\"properties\":{},\"rev\":2}"
+        ],
+        "changed_relationships": [],
+        "dirty": [
+          "d-1",
+          "d-2",
+          "d-4",
+          "a-2",
+          "a-1",
+          "a-3",
+          "b-1",
+          "c-1"
+        ]
+      },
+      "error": null,
+      "digest": "aad647d8de3c26cd",
+      "fingerprint": "7cfaf55ad54655d0"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "expand": true,
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"s-1\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "s-1"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "s-1",
+            "{\"id\":\"s-1\",\"type_name\":\"S\",\"source_id\":\"c-1\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"s-1\",\"type_name\":\"S\",\"source_id\":\"c-1\",\"target_id\":\"b-1\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [],
+        "dirty": [
+          "s-1",
+          "c-1",
+          "b-1",
+          "a-1",
+          "a-3"
+        ]
+      },
+      "error": null,
+      "digest": "2633afa2e9d2449f",
+      "fingerprint": "9742bc526099068e"
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "expand": true,
+      "ops": [
+        "{\"kind\":\"delete_element\",\"id\":\"c-2\"}"
+      ],
+      "result": {
+        "id_map": [],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [
+          "c-2"
+        ],
+        "deleted_relationship_ids": [
+          "s-2",
+          "t-3"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "c-2",
+            "{\"id\":\"c-2\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "s-2",
+            "{\"id\":\"s-2\",\"type_name\":\"S\",\"source_id\":\"c-2\",\"target_id\":\"d-2\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "t-3",
+            "{\"id\":\"t-3\",\"type_name\":\"T\",\"source_id\":\"c-2\",\"target_id\":\"d-3\",\"properties\":{},\"rev\":0}"
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"create_element\",\"temp_id\":\"c-2\",\"type_name\":\"C\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"s-2\",\"type_name\":\"S\",\"source_id\":\"c-2\",\"target_id\":\"d-2\",\"properties\":{},\"id\":null}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"t-3\",\"type_name\":\"T\",\"source_id\":\"c-2\",\"target_id\":\"d-3\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [],
+        "dirty": [
+          "c-2",
+          "s-2",
+          "d-2",
+          "t-3",
+          "d-3",
+          "c-1",
+          "c-3",
+          "a-2"
+        ]
+      },
+      "error": null,
+      "digest": "6b459c9efce6f35e",
+      "fingerprint": "782ebadf668507b6",
+      "state": [
+        "{\"id\":\"a-1\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-2\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-3\",\"type_name\":\"A2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-4\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-1\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-2\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-3\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"c-1\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"c-3\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-1\",\"type_name\":\"D\",\"properties\":{},\"rev\":2}",
+        "{\"id\":\"d-2\",\"type_name\":\"D\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-3\",\"type_name\":\"D\",\"properties\":{\"p\":\"y\"},\"rev\":1}",
+        "{\"id\":\"d-4\",\"type_name\":\"D\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-5\",\"type_name\":\"D\",\"properties\":{\"p\":\"z\"},\"rev\":1}",
+        "{\"id\":\"r-1\",\"type_name\":\"R\",\"source_id\":\"a-1\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-1\",\"type_name\":\"T\",\"source_id\":\"c-1\",\"target_id\":\"d-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-2\",\"type_name\":\"T\",\"source_id\":\"c-1\",\"target_id\":\"d-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-2\",\"type_name\":\"R\",\"source_id\":\"a-2\",\"target_id\":\"d-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-3\",\"type_name\":\"R2\",\"source_id\":\"a-3\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-4\",\"type_name\":\"R\",\"source_id\":\"d-4\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-5\",\"type_name\":\"R\",\"source_id\":\"b-2\",\"target_id\":\"b-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-6\",\"type_name\":\"R\",\"source_id\":\"a-4\",\"target_id\":\"b-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-4\",\"type_name\":\"T\",\"source_id\":\"c-3\",\"target_id\":\"d-5\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"A\",[\"a-1\",\"a-2\",\"a-4\"]],[\"A2\",[\"a-3\"]],[\"B\",[\"b-1\",\"b-2\",\"b-3\"]],[\"C\",[\"c-1\",\"c-3\"]],[\"D\",[\"d-1\",\"d-2\",\"d-3\",\"d-4\",\"d-5\"]]],\"out\":[[\"a-1\",[\"r-1\"]],[\"a-2\",[\"r-2\"]],[\"a-3\",[\"r-3\"]],[\"a-4\",[\"r-6\"]],[\"b-2\",[\"r-5\"]],[\"c-1\",[\"t-1\",\"t-2\"]],[\"c-3\",[\"t-4\"]],[\"d-4\",[\"r-4\"]]],\"in\":[[\"b-1\",[\"r-1\",\"r-3\",\"r-4\"]],[\"b-2\",[\"r-5\"]],[\"b-3\",[\"r-6\"]],[\"d-1\",[\"t-1\",\"t-2\"]],[\"d-2\",[\"r-2\"]],[\"d-5\",[\"t-4\"]]],\"out_count\":[[\"a-1\",\"R\",1],[\"a-2\",\"R\",1],[\"a-3\",\"R2\",1],[\"a-4\",\"R\",1],[\"b-2\",\"R\",1],[\"c-1\",\"T\",2],[\"c-3\",\"T\",1],[\"d-4\",\"R\",1]],\"in_count\":[[\"b-1\",\"R\",2],[\"b-1\",\"R2\",1],[\"b-2\",\"R\",1],[\"b-3\",\"R\",1],[\"d-1\",\"T\",2],[\"d-2\",\"R\",1],[\"d-5\",\"T\",1]],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"a-1\",\"a-2\",\"a-4\"],[\"a-3\"],[\"b-1\",\"b-2\",\"b-3\"],[\"c-1\",\"c-3\"],[\"d-1\",\"d-2\",\"d-4\"],[\"d-3\"],[\"d-5\"]],\"duplicates\":[[\"a-1\",\"a-2\",\"a-4\"],[\"b-1\",\"b-2\",\"b-3\"],[\"c-1\",\"c-3\"],[\"d-1\",\"d-2\",\"d-4\"]],\"roots\":[[\"a-1\",\"a-1\"],[\"a-2\",\"a-2\"],[\"a-3\",\"a-3\"],[\"a-4\",\"a-4\"],[\"b-1\",\"b-1\"],[\"b-2\",\"b-2\"],[\"b-3\",\"b-3\"],[\"c-1\",\"c-1\"],[\"c-3\",\"c-3\"],[\"d-1\",\"d-1\"],[\"d-2\",\"d-2\"],[\"d-3\",\"d-3\"],[\"d-4\",\"d-4\"],[\"d-5\",\"d-5\"]]}"
+    },
+    {
+      "do": "reach",
+      "ids": [
+        "c-2",
+        "s-2",
+        "t-3",
+        "d-3",
+        "d-2"
+      ],
+      "result": [
+        "a-2"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "expand": true,
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_s-3\",\"type_name\":\"S\",\"source_id\":\"c-3\",\"target_id\":\"b-3\",\"properties\":{},\"id\":\"s-3\"}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_s-3",
+            "s-3"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "s-3"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "s-3",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"s-3\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"s-3\",\"type_name\":\"S\",\"source_id\":\"c-3\",\"target_id\":\"b-3\",\"properties\":{},\"rev\":0}"
+        ],
+        "dirty": [
+          "c-3",
+          "b-3",
+          "s-3",
+          "a-4"
+        ]
+      },
+      "error": null,
+      "digest": "bf468daf4e424689",
+      "fingerprint": "dd6172ea163fcfc9"
+    },
+    {
+      "do": "reach",
+      "ids": [
+        "d-5"
+      ],
+      "result": [
+        "a-4",
+        "c-3"
+      ],
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "batch",
+      "record_dirty": true,
+      "expand": true,
+      "ops": [
+        "{\"kind\":\"delete_relationship\",\"id\":\"r-4\"}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r-7\",\"type_name\":\"R\",\"source_id\":\"a-2\",\"target_id\":\"b-3\",\"properties\":{},\"id\":\"r-7\"}",
+        "{\"kind\":\"update_element\",\"id\":\"d-3\",\"properties_patch\":{\"p\":null}}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_r-7",
+            "r-7"
+          ]
+        ],
+        "changed_element_ids": [
+          "d-3"
+        ],
+        "changed_relationship_ids": [
+          "r-7"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [
+          "r-4"
+        ],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "d-3",
+            "{\"id\":\"d-3\",\"type_name\":\"D\",\"properties\":{\"p\":\"y\"},\"rev\":1}"
+          ]
+        ],
+        "before_relationships": [
+          [
+            "r-4",
+            "{\"id\":\"r-4\",\"type_name\":\"R\",\"source_id\":\"d-4\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}"
+          ],
+          [
+            "r-7",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"update_element\",\"id\":\"d-3\",\"properties_patch\":{\"p\":\"y\"}}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"r-7\"}",
+          "{\"kind\":\"create_relationship\",\"temp_id\":\"r-4\",\"type_name\":\"R\",\"source_id\":\"d-4\",\"target_id\":\"b-1\",\"properties\":{},\"id\":null}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"d-3\",\"type_name\":\"D\",\"properties\":{},\"rev\":2}"
+        ],
+        "changed_relationships": [
+          "{\"id\":\"r-7\",\"type_name\":\"R\",\"source_id\":\"a-2\",\"target_id\":\"b-3\",\"properties\":{},\"rev\":0}"
+        ],
+        "dirty": [
+          "r-4",
+          "d-4",
+          "b-1",
+          "a-2",
+          "b-3",
+          "r-7",
+          "d-3",
+          "d-1",
+          "d-2",
+          "a-1",
+          "a-3",
+          "a-4",
+          "c-1"
+        ]
+      },
+      "error": null,
+      "digest": "9d6e37e2892e2501",
+      "fingerprint": "f92505be6ecd692e",
+      "state": [
+        "{\"id\":\"a-1\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-2\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-3\",\"type_name\":\"A2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"a-4\",\"type_name\":\"A\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-1\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-2\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"b-3\",\"type_name\":\"B\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"c-1\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"c-3\",\"type_name\":\"C\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-1\",\"type_name\":\"D\",\"properties\":{},\"rev\":2}",
+        "{\"id\":\"d-2\",\"type_name\":\"D\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-3\",\"type_name\":\"D\",\"properties\":{},\"rev\":2}",
+        "{\"id\":\"d-4\",\"type_name\":\"D\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"d-5\",\"type_name\":\"D\",\"properties\":{\"p\":\"z\"},\"rev\":1}",
+        "{\"id\":\"r-1\",\"type_name\":\"R\",\"source_id\":\"a-1\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-1\",\"type_name\":\"T\",\"source_id\":\"c-1\",\"target_id\":\"d-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-2\",\"type_name\":\"T\",\"source_id\":\"c-1\",\"target_id\":\"d-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-2\",\"type_name\":\"R\",\"source_id\":\"a-2\",\"target_id\":\"d-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-3\",\"type_name\":\"R2\",\"source_id\":\"a-3\",\"target_id\":\"b-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-5\",\"type_name\":\"R\",\"source_id\":\"b-2\",\"target_id\":\"b-2\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-6\",\"type_name\":\"R\",\"source_id\":\"a-4\",\"target_id\":\"b-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"t-4\",\"type_name\":\"T\",\"source_id\":\"c-3\",\"target_id\":\"d-5\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"s-3\",\"type_name\":\"S\",\"source_id\":\"c-3\",\"target_id\":\"b-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"r-7\",\"type_name\":\"R\",\"source_id\":\"a-2\",\"target_id\":\"b-3\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"A\",[\"a-1\",\"a-2\",\"a-4\"]],[\"A2\",[\"a-3\"]],[\"B\",[\"b-1\",\"b-2\",\"b-3\"]],[\"C\",[\"c-1\",\"c-3\"]],[\"D\",[\"d-1\",\"d-2\",\"d-3\",\"d-4\",\"d-5\"]]],\"out\":[[\"a-1\",[\"r-1\"]],[\"a-2\",[\"r-2\",\"r-7\"]],[\"a-3\",[\"r-3\"]],[\"a-4\",[\"r-6\"]],[\"b-2\",[\"r-5\"]],[\"c-1\",[\"t-1\",\"t-2\"]],[\"c-3\",[\"s-3\",\"t-4\"]]],\"in\":[[\"b-1\",[\"r-1\",\"r-3\"]],[\"b-2\",[\"r-5\"]],[\"b-3\",[\"r-6\",\"r-7\",\"s-3\"]],[\"d-1\",[\"t-1\",\"t-2\"]],[\"d-2\",[\"r-2\"]],[\"d-5\",[\"t-4\"]]],\"out_count\":[[\"a-1\",\"R\",1],[\"a-2\",\"R\",2],[\"a-3\",\"R2\",1],[\"a-4\",\"R\",1],[\"b-2\",\"R\",1],[\"c-1\",\"T\",2],[\"c-3\",\"S\",1],[\"c-3\",\"T\",1]],\"in_count\":[[\"b-1\",\"R\",1],[\"b-1\",\"R2\",1],[\"b-2\",\"R\",1],[\"b-3\",\"R\",2],[\"b-3\",\"S\",1],[\"d-1\",\"T\",2],[\"d-2\",\"R\",1],[\"d-5\",\"T\",1]],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"a-1\",\"a-2\",\"a-4\"],[\"a-3\"],[\"b-1\",\"b-2\",\"b-3\"],[\"c-1\",\"c-3\"],[\"d-1\",\"d-2\",\"d-3\",\"d-4\"],[\"d-5\"]],\"duplicates\":[[\"a-1\",\"a-2\",\"a-4\"],[\"b-1\",\"b-2\",\"b-3\"],[\"c-1\",\"c-3\"],[\"d-1\",\"d-2\",\"d-3\",\"d-4\"]],\"roots\":[[\"a-1\",\"a-1\"],[\"a-2\",\"a-2\"],[\"a-3\",\"a-3\"],[\"a-4\",\"a-4\"],[\"b-1\",\"b-1\"],[\"b-2\",\"b-2\"],[\"b-3\",\"b-3\"],[\"c-1\",\"c-1\"],[\"c-3\",\"c-3\"],[\"d-1\",\"d-1\"],[\"d-2\",\"d-2\"],[\"d-3\",\"d-3\"],[\"d-4\",\"d-4\"],[\"d-5\",\"d-5\"]]}"
+    }
+  ]
+}
