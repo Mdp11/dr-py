@@ -3,7 +3,8 @@
  * (pre-violation) replica: the gate's table, row for row; then, with the
  * same violations and the same custom rules applied, the sweep.
  * `scripts/table_large.py` writes the table oracle's side (`tableSteps`'s
- * counterpart) over `engine/bench/big-table.json`, before any op lands;
+ * counterpart) over `engine/bench/big-table.json`, before any op lands: its
+ * rows, and beside them its build's totals, which the rows cannot say;
  * `scripts/issues_large.py` writes a batch of ops that breaks every check it
  * can, lands it on the document the snapshot was written from, compiles its
  * rule sets and runs the server's own sweep. Here the table's rows are built
@@ -56,6 +57,7 @@ const VIOLATIONS = new URL('large.violations.ops.json', DIR);
 const RULES = new URL('large.rules.json', DIR);
 const BIG_TABLE = new URL('big-table.json', import.meta.url);
 const TABLE_ORACLE = new URL('large.table.json', DIR);
+const TABLE_ORACLE_META = new URL('large.table.meta.json', DIR);
 
 for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES]) {
 	if (!existsSync(file)) {
@@ -63,9 +65,11 @@ for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES]) {
 		process.exit(1);
 	}
 }
-if (!existsSync(TABLE_ORACLE)) {
-	console.error(`Missing ${TABLE_ORACLE.pathname}: run \`pixi run engine-table-oracle\` first.`);
-	process.exit(1);
+for (const file of [TABLE_ORACLE, TABLE_ORACLE_META]) {
+	if (!existsSync(file)) {
+		console.error(`Missing ${file.pathname}: run \`pixi run engine-table-oracle\` first.`);
+		process.exit(1);
+	}
 }
 
 function* cut(bytes: Uint8Array): Generator<Uint8Array> {
@@ -100,6 +104,25 @@ const bigTable = resolveTableRefs(
 const tableStart = performance.now();
 const built = drain(tableSteps(workingCopy.model, bigTable, DEFAULT_TABLE_LIMITS));
 const tableMs = performance.now() - tableStart;
+// Two empty tables would be equal row for row: the gate's table is the capped one.
+if (!built.truncated || built.keys.length !== DEFAULT_TABLE_LIMITS.maxRows) {
+	console.error(`The gate's table holds ${built.keys.length} rows, truncated=${built.truncated}.`);
+	process.exit(1);
+}
+const oracleMeta = JSON.parse(readFileSync(TABLE_ORACLE_META, 'utf-8')) as {
+	rows: number;
+	base_total: number;
+	truncated: boolean;
+};
+const engineMeta = {
+	rows: built.keys.length,
+	base_total: built.baseTotal,
+	truncated: built.truncated
+};
+const metaOk =
+	oracleMeta.rows === engineMeta.rows &&
+	oracleMeta.base_total === engineMeta.base_total &&
+	oracleMeta.truncated === engineMeta.truncated;
 const engineTable = built.keys.map((key, i) =>
 	pyDumps([wireKey(key), built.cells[i]!.map(wireCell)])
 );
@@ -116,16 +139,23 @@ for (let i = 0; i < Math.max(oracleTable.length, engineTable.length); i++) {
 		);
 	}
 }
-const tableOk = tableDiffs.length === 0 && oracleTable.length === engineTable.length;
+const rowsOk = tableDiffs.length === 0 && oracleTable.length === engineTable.length;
+const tableOk = rowsOk && metaOk;
 console.log(
 	`Table: ${engineTable.length.toLocaleString('en-US')} rows (base ${built.baseTotal.toLocaleString('en-US')}, ` +
 		`truncated=${built.truncated}), built + sorted + evaluated in ${tableMs.toFixed(0)} ms. ` +
-		(tableOk
+		(rowsOk
 			? 'Parity: equal, row for row.'
 			: `Parity FAILS: rows differ (oracle ${oracleTable.length.toLocaleString('en-US')}, ` +
 				`engine ${engineTable.length.toLocaleString('en-US')}). The first ${SHOWN}:`)
 );
 for (const line of tableDiffs) console.log(line);
+if (!metaOk) {
+	console.log(
+		`Parity FAILS: the build's totals differ: oracle ${JSON.stringify(oracleMeta)}, ` +
+			`engine ${JSON.stringify(engineMeta)}.`
+	);
+}
 
 // Committed state, as the oracle holds it: the store wraps the working copy after.
 const ops = readOps(parseJson(readFileSync(VIOLATIONS, 'utf-8')));

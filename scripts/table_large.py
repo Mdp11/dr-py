@@ -9,9 +9,11 @@ evaluator over every row with the default ``TableLimits()`` (50,000 rows,
 receives one JSON line per row, in the built and sorted order: ``[key,
 cells]``, ``key`` a JSON list (a value terminal as ``{"value": ...}``,
 never reached by this table) and ``cells`` a list of objects in
-``TableCellOut``'s field order. ``engine/bench/parity-large.ts`` evaluates
-the same definition over the same (pre-violation) model through
-``tableSteps`` and compares the two, line by line.
+``TableCellOut``'s field order. ``benchmarks/large.table.meta.json``
+receives what the lines cannot say: ``{"rows", "base_total", "truncated"}``.
+``engine/bench/parity-large.ts`` evaluates the same definition over the
+same (pre-violation) model through ``tableSteps`` and compares the two,
+line by line, and the build's totals.
 
 Run from the repo root (``pixi run engine-parity-large`` does, through the
 ``engine-table-oracle`` task):
@@ -143,6 +145,9 @@ def main() -> None:
     )
     parser.add_argument("--table", type=Path, default=ENGINE_BENCH / "big-table.json")
     parser.add_argument("--out", type=Path, default=BENCHMARKS / "large.table.json")
+    parser.add_argument(
+        "--meta", type=Path, default=BENCHMARKS / "large.table.meta.json"
+    )
     args = parser.parse_args()
 
     if not args.model.exists():
@@ -186,6 +191,17 @@ def main() -> None:
                 )
             )
             out.write("\n")
+    args.meta.write_text(
+        json.dumps(
+            {
+                "rows": len(keys),
+                "base_total": built.base_total,
+                "truncated": built.truncated,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     print(
         f"wrote {args.out}: {len(keys):,} rows (base_total {built.base_total:,}, "
         f"truncated={built.truncated}) over {args.model}, swept in {seconds:.1f} s"

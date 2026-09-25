@@ -50,9 +50,9 @@
  */
 import { SvelteMap } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
-import { engineSide } from '$lib/api/engine-route';
+import { engineSide, type Side } from '$lib/api/engine-route';
 import { ApiError } from '$lib/api/errors';
-import { evaluateTable, exportTable, fetchScriptErrors } from '$lib/api/tables';
+import { answeredBy, evaluateTable, exportTable, fetchScriptErrors } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
 	type ExportFormat,
@@ -303,16 +303,21 @@ const _controllers = new Map<string, AbortController>();
 /**
  * Moves at every `scheduleTablesRepage()`: each marks a staged change the
  * engine has applied, which the next request sees and an earlier one may not.
- * A page records the epoch it was asked at (`_pageEpochs`); a chunk is asked
+ * A page records the epoch it was asked at (`_pageOrigins`); a chunk is asked
  * only while its page's epoch is the current one and spliced only if none
  * moved meanwhile, so rows from before and after a staged change never share
  * a grid. `model_rev` and `total` cannot tell them apart: a staged edit moves
  * neither. On the server side it never moves.
  */
 let _repageEpoch = 0;
-/** tabId -> the epoch the installed page was asked at. Control state, never read from templates. */
+/**
+ * tabId -> the epoch the installed page was asked at and the side that
+ * answered it: a chunk the other side answered (the engine gone, or back) is
+ * of another state, staged or committed, and is installed fresh rather than
+ * spliced. Control state, never read from templates.
+ */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
-const _pageEpochs = new Map<string, number>();
+const _pageOrigins = new Map<string, { epoch: number; side: Side }>();
 /** The pending re-page of `scheduleTablesRepage`, if any. */
 let _repageTimer: ReturnType<typeof setTimeout> | null = null;
 /**
@@ -877,9 +882,9 @@ function moveTabState(oldTab: string, newTab: string): void {
 	// What was asked under `oldTab` is orphaned either way (its draft is gone).
 	_controllers.get(oldTab)?.abort();
 	_controllers.delete(oldTab);
-	const epoch = _pageEpochs.get(oldTab);
-	_pageEpochs.delete(oldTab);
-	if (epoch !== undefined) _pageEpochs.set(newTab, epoch);
+	const origin = _pageOrigins.get(oldTab);
+	_pageOrigins.delete(oldTab);
+	if (origin !== undefined) _pageOrigins.set(newTab, origin);
 	// The re-issue below keeps the orphaned load's kind: a background re-page
 	// or a poll stays background, a definition edit stays foreground.
 	const wasForeground = _foregroundLoads.delete(oldTab);
@@ -1263,20 +1268,25 @@ function installPage(tabId: string, page: TablePage, epoch: number): void {
 		warnings: page.warnings,
 		...(page.fallback === undefined ? {} : { fallback: page.fallback })
 	});
-	_pageEpochs.set(tabId, epoch);
+	_pageOrigins.set(tabId, { epoch, side: answeredBy(page) });
 	handleScriptStatus(tabId, page);
 }
 
 /**
  * Splice `page`'s rows into the existing sparse cache. A response from a
  * different model rev (or a changed row count — same rev but a different
- * definition landed a reset in between) cannot be spliced into the current
- * cache; install it fresh instead and let the grid re-request whatever else
- * its window needs.
+ * definition landed a reset in between), or one the other side answered,
+ * cannot be spliced into the current cache; install it fresh instead and let
+ * the grid re-request whatever else its window needs.
  */
 function mergePage(tabId: string, page: TablePage, epoch: number): void {
 	const data = _pages.get(tabId);
-	if (!data || data.model_rev !== page.model_rev || data.total !== page.total) {
+	if (
+		!data ||
+		data.model_rev !== page.model_rev ||
+		data.total !== page.total ||
+		_pageOrigins.get(tabId)?.side !== answeredBy(page)
+	) {
 		installPage(tabId, page, epoch);
 		return;
 	}
@@ -1421,7 +1431,7 @@ export function ensureTableRange(tabId: string, start: number, end: number): voi
 	// asked now would be of two states. The re-page it scheduled (or its
 	// retry) replaces the page, and the grid asks again for the range it then
 	// lacks; a re-page that fails for good shows its error instead.
-	if (_pageEpochs.get(tabId) !== _repageEpoch) return;
+	if (_pageOrigins.get(tabId)?.epoch !== _repageEpoch) return;
 	const gen = _generations.get(tabId) ?? 0;
 	let chunks = _inflightChunks.get(tabId);
 	for (let c = Math.floor(lo / PAGE) * PAGE; c < hi; c += PAGE) {
@@ -1673,7 +1683,7 @@ export async function saveAsTableDraft(tabId: string, name: string): Promise<voi
 export async function reloadTableDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
 	_pages.delete(tabId);
-	_pageEpochs.delete(tabId);
+	_pageOrigins.delete(tabId);
 	_foregroundLoads.delete(tabId);
 	cancelRepageRetry(tabId);
 	_loading.delete(tabId);
@@ -1689,7 +1699,7 @@ export function closeTableDraft(tabId: string): void {
 	const draft = _drafts.get(tabId); // read BEFORE the delete: it owns the lease
 	_drafts.delete(tabId);
 	_pages.delete(tabId);
-	_pageEpochs.delete(tabId);
+	_pageOrigins.delete(tabId);
 	_foregroundLoads.delete(tabId);
 	cancelRepageRetry(tabId);
 	_loading.delete(tabId);
@@ -1820,7 +1830,7 @@ onTablesMoved(() => scheduleTablesRepage());
 export function resetTableEditors(): void {
 	if (_repageTimer !== null) clearTimeout(_repageTimer);
 	_repageTimer = null;
-	_pageEpochs.clear();
+	_pageOrigins.clear();
 	_foregroundLoads.clear();
 	for (const tabId of [..._repageRetries.keys()]) cancelRepageRetry(tabId);
 	_drafts.clear();

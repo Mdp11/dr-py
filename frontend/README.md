@@ -1649,7 +1649,14 @@ sync exists:
   `resetReplica()`): one whose `(rev, staged_version, artifacts_version)`
   is not the last one seen, while `engineSide('tables')` is `engine`, calls
   the `onTablesMoved` listeners — the table store's
-  `scheduleTablesRepage()` (see "Tables on the engine"). The listener
+  `scheduleTablesRepage()` (see "Tables on the engine"); one heard while
+  the side is `server` is not remembered. The listeners are also called,
+  while the side is `engine`, wherever the tables come to the engine with
+  no `changed` to say so: a replica built again reaching `ready` (from
+  `resyncing`, or from `opening` after the sync reported `off`), which
+  also forgets the last tuple seen, since a new worker's versions start
+  over; and the follower's first load (`onLoaded`), which opens the gate.
+  A table asked before either was the server's page. The listener
   registry keeps `replica.svelte.ts` from importing the table store, which
   imports the realtime store, which imports this one.
 - **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
@@ -2093,12 +2100,16 @@ than the commit feed:
   before a newer load, but a chunk can be asked before a staged change and
   answered after it with the same `model_rev` and `total`. So every
   `scheduleTablesRepage()` moves an epoch (`_repageEpoch`): a page records
-  the epoch it was asked at, `ensureTableRange` asks no chunk while that is
-  not the current one (its re-page is coming, is being retried, or failed
-  and shows its error in place of the grid), and a chunk that lands after
-  the epoch moved is dropped. No stamp travels with the page: the engine
-  posts `changed` after applying a change, and a request posted later sees
-  it.
+  the epoch it was asked at (`_pageOrigins`), `ensureTableRange` asks no
+  chunk while that is not the current one (its re-page is coming, is being
+  retried, or failed and shows its error in place of the grid), and a chunk
+  that lands after the epoch moved is dropped. No stamp travels with the
+  page: the engine posts `changed` after applying a change, and a request
+  posted later sees it. A page also records the side that answered it
+  (`answeredBy`, `api/tables.ts`): `route()` hands a call the engine cannot
+  answer (its worker gone, its replica not ready) to the server, whose page
+  is committed state, so a chunk of the other side is installed fresh, never
+  spliced; the re-page the rebuilt replica asks replaces it.
 - **Script tables.** A table the engine refuses (a script, or a pattern) is
   the server's page, over committed state, marked `fallback` (see "Surfaces");
   its pending cells, status poll and script-error recap are the server's, as

@@ -104,8 +104,8 @@ could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on:
 feature there lands on both sides with a fixture until F.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
-`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `C-21`, `C-22`, `C-23` in
-this file; `K-33`, `K-34`, `T-10` in
+`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `C-21`, `C-22`,
+`C-23` in this file; `K-33`, `K-34`, `T-10` in
 `BACKLOG.md`.
 Size: very large.
 
@@ -592,6 +592,15 @@ mirrors it on purpose, throwing the same `unhashable type: 'list'`/`'dict'` mess
 unrefused 500 there too. Fix direction, on both sides with a fixture covering all three call
 sites: treat a non-string, non-id item as a plain value (through `cellText`) instead of assuming
 every element-typed item is an id.
+
+### K-73 · Every open table tab re-pages on each staged change, hidden ones included · `open` · perf · *2026-09-25*
+`table-editor.svelte.ts::repageOpenTables` re-pages every table tab that has evaluated once the
+replica's staged state moves, whether or not the tab is the one on screen. A staged edit moves
+the order cache's stamp (`rev`, `staged_version`), so each re-page misses it and rebuilds and
+sorts the table: at M, the gate's table costs ~190 ms of model-lane work per tab on a miss, and N
+open tabs queue N of those behind every pause in the user's typing, delaying every read and
+transition behind them. Fix direction: re-page only the visible tabs and mark the others stale,
+as a suspended tab already is (`_suspendedStale`), re-paging a stale tab when it is shown.
 
 ---
 

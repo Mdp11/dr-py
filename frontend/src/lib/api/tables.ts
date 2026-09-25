@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
-import { asSent, route } from './engine-route';
+import { asSent, route, type Side } from './engine-route';
 import {
 	TablePageSchema,
 	type ExportFormat,
@@ -15,11 +15,25 @@ interface EvaluateArgs {
 	limit?: number;
 }
 
+/** The pages the engine answered; every other page is the server's. */
+const enginePages = new WeakSet<TablePage>();
+
+/**
+ * The side that answered `page`, as `evaluateTable` returned it: the engine
+ * holds the staged state, the server the committed one, so two pages of
+ * different sides are never one table's rows.
+ */
+export function answeredBy(page: TablePage): Side {
+	return enginePages.has(page) ? 'engine' : 'server';
+}
+
 /**
  * POST /tables/evaluate, the `tables` surface: the engine answers from the
  * working copy, staged edits and artifacts included; a table it refuses (a
  * script, a pattern) is the server's page, on committed state, marked with
- * why. `signal` aborts the call on either side.
+ * why; one the engine cannot answer at all (its worker gone, its replica
+ * rebuilt under it) is the server's page, unmarked. `signal` aborts the call
+ * on either side; `answeredBy` says which side answered.
  */
 export function evaluateTable(
 	args: EvaluateArgs & { signal?: AbortSignal },
@@ -36,7 +50,11 @@ export function evaluateTable(
 		'tables',
 		cfg,
 		(call) =>
-			call('evaluateTable', asSent(body), signal).then((page) => TablePageSchema.parse(page)),
+			call('evaluateTable', asSent(body), signal).then((answer) => {
+				const page = TablePageSchema.parse(answer);
+				enginePages.add(page);
+				return page;
+			}),
 		() =>
 			apiFetch(
 				'/tables/evaluate',

@@ -87,6 +87,10 @@ let _offChanged: (() => void) | null = null;
 let _offTablesChanged: (() => void) | null = null;
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 const _tablesListeners = new Set<() => void>();
+/** The last `changed` tuple the tables followed, on the engine side. */
+let _tablesSeen: string | null = null;
+/** The sync reported `off` since its last `ready`: the tables went to the server meanwhile. */
+let _offSinceReady = false;
 /** The started replica's artifact follower, the project it follows, and its quiet probe's remover. */
 let _follower: {
 	projectId: string;
@@ -135,6 +139,16 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			// relationships list were built from; a plain first open moves
 			// nothing, so it stays out of this.
 			if (previousPhase === 'resyncing' && status.phase === 'ready') markStructureChanged();
+			if (status.phase === 'off') _offSinceReady = true;
+			if (status.phase === 'ready' && previousPhase !== 'ready') {
+				// A replica built again posts no `changed` for what it now holds, and a
+				// table asked meanwhile may have been the server's, over committed state.
+				if (previousPhase === 'resyncing' || (previousPhase === 'opening' && _offSinceReady)) {
+					_tablesSeen = null;
+					tablesMoved();
+				}
+				_offSinceReady = false;
+			}
 			if (
 				_retrying &&
 				(status.phase === 'ready' ||
@@ -346,19 +360,27 @@ export function onTablesMoved(listener: () => void): () => void {
 
 /**
  * With the tables on the engine, a `changed` whose `rev`, `staged_version`
- * or `artifacts_version` moved tells the `onTablesMoved` listeners. On the
- * server a staged change moves no table; the commit feed re-pages those.
+ * or `artifacts_version` moved tells the `onTablesMoved` listeners; one heard
+ * while the tables are the server's is not remembered, so the first after
+ * they come to the engine tells them. On the server a staged change moves no
+ * table; the commit feed re-pages those.
  */
 function followTables(sync: ReplicaSync): void {
 	stopFollowingTables();
-	let seen: string | null = null;
+	_tablesSeen = null;
 	_offTablesChanged = sync.on('changed', (event) => {
-		const at = `${event.rev}:${event.staged_version}:${event.artifacts_version}`;
-		if (at === seen) return;
-		seen = at;
 		if (engineSide('tables') !== 'engine') return;
-		for (const listener of [..._tablesListeners]) listener();
+		const at = `${event.rev}:${event.staged_version}:${event.artifacts_version}`;
+		if (at === _tablesSeen) return;
+		_tablesSeen = at;
+		tablesMoved();
 	});
+}
+
+/** Tells the `onTablesMoved` listeners, while the tables are on the engine. */
+function tablesMoved(): void {
+	if (engineSide('tables') !== 'engine') return;
+	for (const listener of [..._tablesListeners]) listener();
 }
 
 function stopFollowingTables(): void {
@@ -380,10 +402,11 @@ function follow(sync: ReplicaSync, projectId: string): void {
 		staged: stagedArtifactsForEngine,
 		parser: createRulesParser((yaml) => parseRules(yaml, cfg)),
 		pause: () => new Promise<void>((resolve) => setTimeout(resolve, LOAD_RETRY_MS)),
-		// The issues gate opens here too: the server's list, answered until now,
-		// holds none of the staged edits' own issues.
+		// The issues and tables gates open here too: the server's list and pages,
+		// answered until now, hold none of the staged edits.
 		onLoaded: () => {
 			if (issuesOnEngine(_status)) scheduleIssuesRefetch();
+			tablesMoved();
 		}
 	});
 	// A shadow re-test waits out a payload fetch or a rules parse in flight, which may change what it reads.
@@ -565,5 +588,6 @@ export function resetReplica(): void {
 	setStatus(OFF);
 	_noticeDismissed = false;
 	_retrying = false;
+	_offSinceReady = false;
 	_releaseGate();
 }

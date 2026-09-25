@@ -2,7 +2,7 @@
 // working copy's rev, its staged version or the artifacts re-pages every open,
 // evaluated tab once the edits pause, in the background, keeping its rows. The
 // real engine answers through an in-process link; no fake timers.
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
 import { engineSide } from '$lib/api/engine-route';
@@ -20,7 +20,7 @@ import {
 } from '../artifact-edits.svelte';
 import { cancelIssuesRefetch, emit, ensureElements } from '../model.svelte';
 import { handleFeedEvent } from '../realtime.svelte';
-import { getReplicaStatus } from '../replica.svelte';
+import { getReplicaStatus, handReplicaFeed, onTablesMoved } from '../replica.svelte';
 import {
 	ensureTableDraft,
 	ensureTableRange,
@@ -34,7 +34,13 @@ import {
 	suspendTableEvaluation,
 	updateTableDefinition
 } from '../table-editor.svelte';
-import { engineStore, rename, settled, type EngineStore } from './support/engine-store';
+import {
+	engineStore,
+	rename,
+	settled,
+	withWrongDigest,
+	type EngineStore
+} from './support/engine-store';
 
 const API = `${PAGE_ORIGIN}/api/v1/projects/p`;
 
@@ -100,11 +106,24 @@ async function start(
 		artifacts?: [string, object][];
 		/** The server's answer to its `n`th table read (from 1); `SERVED` by default. */
 		serve?: (n: number) => unknown;
+		/** The follower's artifact load is answered only once this resolves; the start does not wait for it. */
+		holdPayloads?: Promise<void>;
 	} = {}
 ): Promise<Started> {
 	const project = fakeProject();
 	for (const [id, artifact] of options.artifacts ?? [])
 		project.artifacts.set(id, artifact as never);
+	const held = options.holdPayloads;
+	if (held !== undefined) {
+		const handlers = project.handlers.bind(project);
+		// Answers nothing itself: once `held` resolves the request falls through to the project's route.
+		project.handlers = (handlerOptions) => [
+			http.get(`${API}/artifacts/payloads`, async () => {
+				await held;
+			}),
+			...handlers(handlerOptions)
+		];
+	}
 	const served: unknown[] = [];
 	server.use(
 		http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] })),
@@ -120,7 +139,7 @@ async function start(
 	const changes: Started['changes'] = [];
 	s.sync.on('changed', (event) => void changes.push({ event, at: Date.now() }));
 	if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
-	if (options.surfaces?.['tables'] !== 'server') {
+	if (options.surfaces?.['tables'] !== 'server' && held === undefined) {
 		await vi.waitFor(() => expect(engineSide('tables')).toBe('engine'));
 	}
 	await sleep(350);
@@ -594,5 +613,149 @@ describe('one re-page path per side', () => {
 		await sleep(700);
 		expect(spy).toHaveBeenCalledOnce();
 		expect(changes.slice(from).some(({ event }) => event.rev === s.project.rev)).toBe(true);
+	});
+});
+
+describe('the open tables re-page when the engine takes the tables over', () => {
+	/** How often the tables were told they moved since it was last zeroed. */
+	let moves = 0;
+	let unhear: (() => void) | null = null;
+	beforeEach(() => {
+		moves = 0;
+		unhear = onTablesMoved(() => void (moves += 1));
+	});
+	afterEach(() => unhear?.());
+
+	/** The server's answer to a chunk at offset 100 of a 160-row table: rows of its own. */
+	const servedChunk = (modelRev: number) => ({
+		...SERVED,
+		rows: Array.from({ length: 60 }, (_, i) => ({
+			key: [`srv-${i}`],
+			cells: [{ kind: 'error', message: 'served', traceback: null }]
+		})),
+		total: 160,
+		base_total: 160,
+		offset: 100,
+		model_rev: modelRev
+	});
+
+	it('after a dead worker is replaced, a page the server answered meanwhile', async () => {
+		const { s, served } = await start();
+		await open('tbl:draft:1');
+		const first = await idAt(0);
+		await stageRename(s, first, 'staged');
+		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'));
+
+		moves = 0;
+		s.link.dispose();
+		const back = s.until((status) => status.phase === 'ready');
+		await loadTablePage('tbl:draft:1', 0);
+		// The engine could not answer: the server did, over committed state.
+		expect(served).toHaveLength(1);
+		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 1 });
+		await back;
+		// Told as the replica is ready, before it posts any `changed`.
+		expect(moves).toBe(1);
+
+		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'));
+		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 160 });
+		expect(served).toHaveLength(1);
+	});
+
+	it('after a model reload re-bootstraps the replica', async () => {
+		const { s, served } = await start();
+		await open('tbl:draft:1');
+		const first = await idAt(0);
+		// A reload: the model moves with no journal row the tail could cross.
+		s.project.silentCommit([
+			{ kind: 'update_element', id: first, properties_patch: { name: 'reloaded' } }
+		]);
+		s.project.opaqueBump();
+		const resyncing = s.until((status) => status.phase === 'resyncing');
+		const back = s.until((status) => status.phase === 'ready');
+
+		moves = 0;
+		handReplicaFeed({ type: 'reset', model_rev: s.project.rev }, undefined);
+		await resyncing;
+		await back;
+		expect(moves).toBe(1);
+
+		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('reloaded'));
+		expect(getReplicaStatus().rev).toBe(s.project.rev);
+		expect(served).toEqual([]);
+	});
+
+	it('after a replica that found no model opens again', async () => {
+		const { s } = await start();
+		await open('tbl:draft:1');
+		const first = await idAt(0);
+		// The replica diverges and its re-bootstrap finds no model: `off`.
+		s.project.fail('descriptor', 404, 1);
+		const peer = s.project.commit([
+			{ kind: 'update_element', id: first, properties_patch: { name: 'peer' } }
+		]);
+		const off = s.until((status) => status.phase === 'off');
+		await s.link.client.call('applyDelta', { text: withWrongDigest(peer) });
+		await off;
+		expect(engineSide('tables')).toBe('server');
+		await loadTablePage('tbl:draft:1', 0);
+		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 1 });
+
+		s.project.opaqueBump();
+		const opening = s.until((status) => status.phase === 'opening');
+		const back = s.until((status) => status.phase === 'ready');
+		moves = 0;
+		handReplicaFeed({ type: 'reset', model_rev: s.project.rev }, undefined);
+		await opening;
+		await back;
+		expect(moves).toBe(1);
+
+		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('peer'));
+		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 160 });
+	});
+
+	it('once the artifacts land, a page the server answered before them', async () => {
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const { served } = await start({ holdPayloads: held });
+		expect(getReplicaStatus()).toMatchObject({ phase: 'ready', seeded: true });
+		expect(engineSide('tables')).toBe('server');
+		await open('tbl:draft:1');
+		expect(served).toHaveLength(1);
+		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 1 });
+
+		release();
+		await vi.waitFor(() => expect(engineSide('tables')).toBe('engine'));
+
+		await vi.waitFor(() => expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 160 }));
+		expect(getTablePage('tbl:draft:1')!.fallback).toBeUndefined();
+		expect(served).toHaveLength(1);
+	});
+
+	it("never splices the server's chunk into the engine's page, though its rev and total are equal", async () => {
+		let modelRev = 0;
+		const { s, served } = await start({ serve: () => servedChunk(modelRev) });
+		modelRev = s.project.rev;
+		await open('tbl:draft:1');
+		const page = getTablePage('tbl:draft:1')!;
+		expect([page.total, page.model_rev]).toEqual([160, modelRev]);
+		expect(page.rows[0]).toBeDefined();
+		const hundredth = await idAt(100);
+
+		s.link.dispose();
+		const back = s.until((status) => status.phase === 'ready');
+		ensureTableRange('tbl:draft:1', 100, 150);
+		await vi.waitFor(() => expect(served).toHaveLength(1));
+		await vi.waitFor(() => expect(getTablePage('tbl:draft:1')!.rows[100]?.key).toEqual(['srv-0']));
+
+		// Installed fresh: the engine's rows are gone, not beside the server's.
+		expect(getTablePage('tbl:draft:1')!.rows[0]).toBeUndefined();
+
+		// The rebuilt replica re-pages the range in view from the engine.
+		await back;
+		await vi.waitFor(() =>
+			expect(getTablePage('tbl:draft:1')!.rows[100]?.key).toEqual([hundredth])
+		);
+		expect(served).toHaveLength(1);
 	});
 });

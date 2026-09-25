@@ -8,6 +8,7 @@ import {
 	ViewPlacements,
 	type ReadParams
 } from '$engine';
+import { EngineGoneError } from '$lib/engine/client';
 import { createEngineSeam } from '$lib/engine/seam';
 import { SURFACES } from '$lib/engine/surfaces';
 import {
@@ -23,7 +24,13 @@ import {
 } from '../types';
 import { setActiveBaseUrl } from '../client';
 import { asSent, installEngineSeam, type Side, type Surface } from '../engine-route';
-import { evaluateTable, exportTable, fetchScriptErrors, previewTableJson } from '../tables';
+import {
+	answeredBy,
+	evaluateTable,
+	exportTable,
+	fetchScriptErrors,
+	previewTableJson
+} from '../tables';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -510,6 +517,7 @@ describe('evaluateTable on the tables surface', () => {
 		expect(page.rows).toHaveLength(5);
 		expect(page.total).toBeGreaterThan(5);
 		expect(page).not.toHaveProperty('fallback');
+		expect(answeredBy(page)).toBe('engine');
 		expect(call).toHaveBeenCalledWith('evaluateTable', sent, {});
 		expect(bodies).toEqual([]);
 	});
@@ -537,6 +545,7 @@ describe('evaluateTable on the tables surface', () => {
 		const page = await evaluateTable({ definition, limit: 10 });
 
 		expect(page).toEqual({ ...TablePageSchema.parse(SERVED), fallback: 'script' });
+		expect(answeredBy(page)).toBe('server');
 		expect(call).toHaveBeenCalledOnce();
 		expect(bodies).toEqual([asSent({ definition, offset: 0, limit: 10 })]);
 	});
@@ -546,7 +555,9 @@ describe('evaluateTable on the tables surface', () => {
 		const { call, bodies } = await over(project, 'server');
 		const definition = namesOf(typeOf(project));
 
-		expect(await evaluateTable({ definition })).toEqual(TablePageSchema.parse(SERVED));
+		const page = await evaluateTable({ definition });
+		expect(page).toEqual(TablePageSchema.parse(SERVED));
+		expect(answeredBy(page)).toBe('server');
 		expect(await evaluateTable({ definition: scripted(), offset: 100 })).toEqual(
 			TablePageSchema.parse(SERVED)
 		);
@@ -556,6 +567,19 @@ describe('evaluateTable on the tables surface', () => {
 			asSent({ definition, offset: 0, limit: 100 }),
 			asSent({ definition: scripted(), offset: 100, limit: 100 })
 		]);
+	});
+
+	it("on the engine, a call the engine cannot answer is the server's page, unmarked", async () => {
+		const project = fakeProject();
+		const { call, bodies } = await over(project, 'engine');
+		const definition = namesOf(typeOf(project));
+		call.mockRejectedValueOnce(new EngineGoneError());
+
+		const page = await evaluateTable({ definition, limit: 10 });
+
+		expect(page).toEqual(TablePageSchema.parse(SERVED));
+		expect(answeredBy(page)).toBe('server');
+		expect(bodies).toEqual([asSent({ definition, offset: 0, limit: 10 })]);
 	});
 
 	it('an aborted signal rejects with an AbortError on either side', async () => {

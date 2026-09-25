@@ -119,10 +119,13 @@ surface's server fallback for a table the engine refuses, a script or an unsuppo
 plus `/tables/export` and `/tables/json-preview`, which stay server calls regardless of the
 surface switch) and `routes/exports.py`, which stay on the server until C's plan 5. `core/table`'s
 evaluator ITSELF left the FEATURE freeze with plan 4, which ported it: `tables` now defaults to
-the engine, so a feature there lands in TypeScript only — EXCEPT a feature exports would also
-need to render: until plan 5 moves exports off the Python evaluator, such a feature lands on
-both sides too, or waits for plan 5, so an export never silently skips what the engine now knows
-how to compute. A bug found in `core/table`'s evaluator, wherever it is reached from, lands on
+the engine, so a feature there lands in TypeScript only — EXCEPT a feature two other readers
+would also need: exports, until plan 5 moves them off the Python evaluator, and a table that
+reaches a script (a script column, or a navigation with a script step), which the engine refuses
+and the server's fallback builds entirely in Python — its rows, its order and every cell — until
+D brings scripts to the browser. Such a feature lands on both sides too, or waits for plan 5 (and
+D, for script tables), so neither an export nor a script table silently skips what the engine now
+knows how to compute. A bug found in `core/table`'s evaluator, wherever it is reached from, lands on
 both sides, with a fixture, until F (MR-1), as MR-3's opening rule already says. `core/navigation`,
 `core/search`, `api/search.py` and the route functions themselves leave the feature freeze only
 once exports default to the engine too, at C's plan 5; `api/search.py` and the route functions
