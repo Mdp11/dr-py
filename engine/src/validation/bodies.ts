@@ -1,3 +1,4 @@
+import { RULE_CHECK_PREFIX, type CompiledRules, type RuleSkip } from '../rules/compile.ts';
 import { issueOwner, wireIssue, type Issue, type IssueOut, type Origin } from './issue.ts';
 import type { LiveIssues } from './live.ts';
 import type { IssueStore } from './store.ts';
@@ -5,14 +6,35 @@ import type { IssueStore } from './store.ts';
 /** The most issues `GET /model/issues` sends; `counts` stays exact past it. */
 export const ISSUES_RESPONSE_MAX = 5000;
 
+/** `GET /model/issues`'s `rules_status`, in its field order. */
+export type RulesStatusBody = {
+	total: number;
+	skipped: RuleSkip[];
+	eval_errors: { [check: string]: number };
+};
+
 /** `GET /model/issues`'s body, in its field order. */
 export type IssueListBody = {
 	model_rev: number;
 	issues: IssueOut[];
 	counts: { [severity: string]: number };
 	truncated: boolean;
-	rules_status: { total: number; skipped: never[]; eval_errors: { [rule: string]: number } };
+	rules_status: RulesStatusBody;
 };
+
+/** A compile's `rules_status`: how many rules it holds, what it left out, what failed to evaluate. */
+export function rulesStatusBody(compiled: CompiledRules): RulesStatusBody {
+	return {
+		total: compiled.total,
+		skipped: compiled.skipped.map(({ artifact_id, set_name, rule, reason }) => ({
+			artifact_id,
+			set_name,
+			rule,
+			reason
+		})),
+		eval_errors: Object.fromEntries(compiled.evalErrors)
+	};
+}
 
 const ON_SERVER = (): Origin => 'on_server';
 
@@ -20,6 +42,7 @@ const ON_SERVER = (): Origin => 'on_server';
 export function storeListBody(
 	store: IssueStore,
 	rev: number,
+	rulesStatus: RulesStatusBody,
 	tagOf: (i: Issue) => Origin = ON_SERVER
 ): IssueListBody {
 	const issues: IssueOut[] = [];
@@ -32,7 +55,7 @@ export function storeListBody(
 		issues,
 		counts: store.counts(),
 		truncated: store.size > ISSUES_RESPONSE_MAX,
-		rules_status: { total: 0, skipped: [], eval_errors: {} }
+		rules_status: rulesStatus
 	};
 }
 
@@ -70,23 +93,24 @@ class Committed {
 
 /**
  * `GET /model/issues` over the working state: the store's issues, each of an
- * owner the staged ops dirty `on_server` while a committed one matches it and
- * `uncommitted` past that, every other one `on_server`. A committed issue the
- * staged ops fixed is not listed.
+ * owner the staged changes dirty `on_server` while a committed one matches it
+ * and `uncommitted` past that, every other one `on_server`. A committed issue
+ * the staged changes fixed is not listed. `rules_status` is the working
+ * rules'.
  */
 export function issueListBody(live: LiveIssues): IssueListBody {
 	const { dirty, committed } = live.origins();
 	const staged = new Set(dirty);
 	const matches = new Committed(committed);
-	return storeListBody(live.store, live.wc.rev, (i) =>
+	return storeListBody(live.store, live.wc.rev, rulesStatusBody(live.rules.working), (i) =>
 		!staged.has(issueOwner(i)) || matches.take(i) ? 'on_server' : 'uncommitted'
 	);
 }
 
 /**
  * The staged branch of `POST /model/validate`: the store's issues of the
- * owners the staged ops leave alone, then theirs, fresh, tagged against the
- * committed ones, then the committed ones left unmatched as `resolved`.
+ * owners the staged changes leave alone, then theirs, fresh, tagged against
+ * the committed ones, then the committed ones left unmatched as `resolved`.
  */
 export function validateBody(live: LiveIssues): IssueOut[] {
 	const { dirty, working, committed } = live.origins();
@@ -104,13 +128,15 @@ export function validateBody(live: LiveIssues): IssueOut[] {
 }
 
 /**
- * The model half of `POST /commits/preview`: the staged ops' dirty set
- * validated on the working state, every issue `on_server`. `would_block` is
- * strict mode and a conformance issue owned inside that set.
+ * The model half of `POST /commits/preview`: the staged ops' dirty set,
+ * widened by the committed rules' reach, validated on the working state with
+ * the committed rules, every issue `on_server`. `would_block` is strict mode
+ * and a conformance issue the ops can be held to: owned by an entity they
+ * touch, or any rule's.
  */
 export function previewBody(live: LiveIssues, strict: boolean): PreviewBody {
-	const { dirty, working } = live.origins();
-	const staged = new Set(dirty);
+	const { hooks, preview } = live.origins();
+	const touched = new Set(hooks);
 	const body: PreviewBody = {
 		conformance_error_count: 0,
 		structural_blockers: [],
@@ -118,13 +144,13 @@ export function previewBody(live: LiveIssues, strict: boolean): PreviewBody {
 		would_block: false
 	};
 	let attributable = false;
-	for (const issue of working) {
+	for (const issue of preview) {
 		body.issues.push(wireIssue(issue, 'on_server'));
 		if (issue.category === 'structural') {
 			body.structural_blockers.push(wireIssue(issue, 'on_server'));
 		} else {
 			body.conformance_error_count++;
-			attributable ||= staged.has(issueOwner(issue));
+			attributable ||= touched.has(issueOwner(issue)) || issue.check.startsWith(RULE_CHECK_PREFIX);
 		}
 	}
 	body.would_block = strict && attributable;

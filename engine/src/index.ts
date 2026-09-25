@@ -227,10 +227,12 @@ export {
 	issueListBody,
 	ISSUES_RESPONSE_MAX,
 	previewBody,
+	rulesStatusBody,
 	storeListBody,
 	validateBody,
 	type IssueListBody,
-	type PreviewBody
+	type PreviewBody,
+	type RulesStatusBody
 } from './validation/bodies.ts';
 export { addNeighbourhood, DirtyCollector } from './validation/dirty.ts';
 export {
@@ -243,7 +245,14 @@ export {
 	type Origin,
 	type Severity
 } from './validation/issue.ts';
-export { LiveIssues, SWEEP_STEP, type LiveIssuesOptions, type Origins } from './validation/live.ts';
+export {
+	LiveIssues,
+	RESCAN_STEP,
+	SWEEP_STEP,
+	type LiveIssuesOptions,
+	type LiveRules,
+	type Origins
+} from './validation/live.ts';
 export {
 	FacetPatterns,
 	PatternUnusable,

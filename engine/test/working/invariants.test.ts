@@ -1,18 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import {
+	appliesPopulation,
+	applyBatch,
+	DirtyCollector,
 	drain,
+	expandScope,
+	issueListBody,
 	LiveIssues,
 	Metamodel,
 	Model,
 	OpError,
 	shuffleAdjacency,
+	validateBody,
 	verifyConsistent,
 	type ModelOp,
+	type Value,
 	type WorkingCopy
 } from '../../src/index.ts';
 import { loadFixture } from '../golden/load.ts';
 import { observe, seededRandom, type StepsFixture } from '../golden/model-steps.ts';
-import { byOwner, sweptFresh } from '../validation/helpers.ts';
+import {
+	answered,
+	byOwner,
+	churnRules,
+	classified,
+	listedTags,
+	sweptFresh
+} from '../validation/helpers.ts';
 import { clone, Server, workingCopy } from './helpers.ts';
 import { RandomOps } from './random-ops.ts';
 
@@ -165,26 +179,32 @@ describe('working-copy invariants over seeded random batches', () => {
 		verifyConsistent(wc.model);
 	});
 
-	it.each(SEEDS)(
-		'seed %i: coalescing, deltas and unstages keep the state a replay of staged() gives, and the issues a sweep finds',
-		(seed) => {
+	it.each(SEEDS.flatMap((seed) => [[seed, 'both'] as const, [seed, 'working'] as const]))(
+		'seed %i, rules swapped %s: coalescing, deltas and unstages keep the state a replay of staged() gives, and the issues a sweep finds',
+		(seed, swap) => {
 			const random = seededRandom(seed);
 			const server = grow(random, 30);
 			const wc = workingCopy(clone(server.model), server.rev);
-			const live = new LiveIssues(wc);
+			const variants = churnRules(metamodel);
+			const committed = variants.a;
+			let working = variants.a;
+			const live = new LiveIssues(wc, { rules: { working, committed } });
 			drain(live.sweepSteps());
 			const mine = new RandomOps(random);
 			const peer = new RandomOps(random, 'tmp_peer');
-			for (let i = 0; i < 40; i++) {
+			for (let i = 0; i < 60; i++) {
 				shuffleAdjacency(wc.model, random);
 				const roll = random();
 				try {
-					if (roll < 0.45) {
+					if (roll < 0.1) {
+						working = working === variants.a ? variants.b : variants.a;
+						live.setRules({ working, committed: swap === 'both' ? working : committed });
+					} else if (roll < 0.5) {
 						const update = mine.batch(wc.model).find((op) => op.kind === 'update_element');
 						if (update !== undefined) live.stage([update], { coalesce: true });
-					} else if (roll < 0.65) {
+					} else if (roll < 0.68) {
 						live.stage(mine.batch(wc.model));
-					} else if (roll < 0.85) {
+					} else if (roll < 0.86) {
 						live.applyDelta(landSome(server, peer).delta);
 					} else {
 						const staged = wc.staged();
@@ -198,16 +218,42 @@ describe('working-copy invariants over seeded random batches', () => {
 				} catch (caught) {
 					if (!(caught instanceof OpError)) throw caught;
 				}
+				drain(live.sweepSteps());
+				expect(live.settled).toBe(true);
 				const fresh = workingCopy(clone(server.model), server.rev);
 				for (const batch of wc.staged()) fresh.stage(batch.ops);
 				const seen = observe(wc.model);
 				expect(seen).toEqual(observe(fresh.model));
 				verifyConsistent(wc.model);
-				expect(byOwner(live.store), `action ${i}`).toEqual(byOwner(sweptFresh(wc)));
-				wc.probeStaged(
-					() => null,
-					() => null
+				expect(byOwner(live.store), `action ${i}`).toEqual(byOwner(sweptFresh(wc, working)));
+
+				// The probe's dirty set: the staged ops as one batch on the committed
+				// state, widened by the working rules' reach, and the changed rules'
+				// population while the working rules are not the committed ones.
+				const oneBatch = workingCopy(clone(server.model), server.rev).model;
+				const hooks = new DirtyCollector();
+				applyBatch(
+					oneBatch,
+					wc.staged().flatMap((batch) => batch.ops),
+					{ dirty: hooks }
 				);
+				const expected = new DirtyCollector();
+				expected.update(hooks.ids);
+				expected.update(expandScope(oneBatch, working, hooks.ids));
+				const liveRules = live.rules;
+				if (liveRules.working !== liveRules.committed) {
+					expected.update(appliesPopulation(wc.model, variants.delta));
+				}
+				const origins = live.origins();
+				expect(origins.hooks, `action ${i}`).toEqual(hooks.ids);
+				expect(origins.dirty, `action ${i}`).toEqual(expected.ids);
+				// Tagged and resolved as two fresh sweeps, of each state under its rules, say.
+				const listed = issueListBody(live);
+				expect(
+					listed.issues.map((issue) => issue.origin),
+					`action ${i}`
+				).toEqual(listedTags(listed, server.model, liveRules.committed));
+				expect(answered(validateBody(live)), `action ${i}`).toEqual(classified(live, server.model));
 				expect(observe(wc.model)).toEqual(seen);
 			}
 			expect(wc.diverged).toBe(false);
@@ -240,5 +286,59 @@ describe('working-copy invariants over seeded random batches', () => {
 			refused.map((i) => batches[i]!.id)
 		);
 		verifyConsistent(adopter.model);
+	});
+});
+
+describe('reach through a rebase', () => {
+	/**
+	 * A part seated on a slot that feeds a coded slot: `seated` holds for `p`,
+	 * two hops from `s2`, which no neighbourhood of `s2` names.
+	 */
+	function seatedChain() {
+		const server = new Server(new Model(metamodel));
+		const element = (id: string, type_name: string, properties: { [key: string]: Value }) =>
+			({ kind: 'create_element', temp_id: `tmp_${id}`, id, type_name, properties }) as ModelOp;
+		const rel = (id: string, type_name: string, source_id: string, target_id: string) =>
+			({
+				kind: 'create_relationship',
+				temp_id: `tmp_${id}`,
+				id,
+				type_name,
+				source_id,
+				target_id
+			}) as ModelOp;
+		server.commit([
+			element('p', 'Part', { name: 'x' }),
+			element('s1', 'Slot', {}),
+			element('s2', 'Slot', { code: 1 }),
+			rel('seats', 'Seats', 'p', 's1'),
+			rel('feeds', 'Feeds', 's1', 's2')
+		]);
+		const wc = workingCopy(clone(server.model), server.rev);
+		const rules = churnRules(metamodel).a;
+		const live = new LiveIssues(wc, { rules: { working: rules, committed: rules } });
+		drain(live.sweepSteps());
+		const seated = () => live.store.issuesOf('p').some((issue) => issue.check === 'rule:seated');
+		expect(seated()).toBe(false);
+		const fresh = () => byOwner(sweptFresh(wc, rules));
+		return { server, live, seated, fresh };
+	}
+
+	const uncode: ModelOp = { kind: 'update_element', id: 's2', properties_patch: { code: 0 } };
+
+	it('a delta that moves a property two hops from the owner revalidates the owner', () => {
+		const { server, live, seated, fresh } = seatedChain();
+		expect(live.applyDelta(server.commit([uncode]).delta).status).toBe('applied');
+		expect(seated()).toBe(true);
+		expect(byOwner(live.store)).toEqual(fresh());
+	});
+
+	it('an unstage that moves a property two hops from the owner revalidates the owner', () => {
+		const { live, seated, fresh } = seatedChain();
+		live.stage([uncode]);
+		expect(seated()).toBe(true);
+		live.unstage('all');
+		expect(seated()).toBe(false);
+		expect(byOwner(live.store)).toEqual(fresh());
 	});
 });

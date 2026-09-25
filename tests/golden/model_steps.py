@@ -13,9 +13,10 @@ the issues as the server's routes send them; after a ``rules`` step, which
 parses and compiles rule sets as the server does, the rules validator runs
 seventh. ``reach`` records the elements those rules reach back to from a list
 of ids. ``seed`` gives the recorder a
-session over its model, its issue store filled by the server's own sweep; from
-then on every landed batch bumps ``model_rev`` and is finalized as
-``POST /model/ops`` finalizes it, and ``issues`` records ``GET /model/issues``.
+session over its model and its rules, its issue store filled by the server's
+own sweep; from then on every landed batch bumps ``model_rev`` and is
+finalized as ``POST /model/ops`` finalizes it, a ``rules`` step lands as a
+commit of rule sets alone, and ``issues`` records ``GET /model/issues``.
 ``preview`` and ``validate_staged`` send their ops to ``POST /commits/preview``
 and to the staged branch of ``POST /model/validate``, which apply them, validate
 and roll back: the recorder holds both to leaving the model and the store as
@@ -59,7 +60,7 @@ from data_rover.api.routes.elements import get_element
 from data_rover.api.routes.ops import _apply_batch, _BatchResult, _finalize
 from data_rover.api.routes.rules import parse_result
 from data_rover.api.routes.validation import list_issues, validate_model
-from data_rover.api.rules import pipeline_for
+from data_rover.api.rules import applies_population, pipeline_for, session_pipeline
 from data_rover.api.schemas import (
     ElementOut,
     EvaluateNavigationIn,
@@ -83,6 +84,7 @@ from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.evaluate import EvalLimits, evaluate
 from data_rover.core.navigation.resolve import navigation_has_script, resolve_refs
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
+from data_rover.core.validation.dirty import DirtyCollector
 from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
 from data_rover.core.validation.rules.compile import (
     CompiledRules,
@@ -482,6 +484,20 @@ class Recorder:
             )
         return outcome
 
+    def _swap_rules(self, session: Session, compiled: CompiledRules) -> None:
+        """As ``POST /commits`` lands a batch of rule-set ops alone: the rules
+        recompiled, then everything the old and the new ones apply to
+        revalidated with the new ones and spliced into the store, and
+        ``model_rev`` moved. With no model op, reach has nothing to widen."""
+        assert session.validation is not None
+        prior = session.compiled_rules
+        session.compiled_rules = compiled
+        dirty = DirtyCollector()
+        dirty.update(applies_population(self.model, prior, compiled))
+        scoped = session_pipeline(session).validate(self.model, dirty.to_scope())
+        session.validation.replace(dirty.ids, scoped)
+        session.model_rev += 1
+
     def _staged(self, step: dict[str, Any]) -> Any:
         """``preview`` or ``validate_staged``: the route over staged ops, which
         must leave the model and the store as they were. The ids a preview
@@ -558,6 +574,8 @@ class Recorder:
                     metamodel=self.metamodel, model=model, views=self._views
                 )
                 session.validation = ValidationState()
+                if self._rules is not None:
+                    session.compiled_rules = self._rules
                 start_validation_sweep(session, sync=True)
                 self._session = session
                 return None
@@ -591,7 +609,6 @@ class Recorder:
                 assert sources == sorted(
                     sources, key=lambda s: (s["name"], s["artifact_id"])
                 ), "rules sources go in name order, then id"
-                assert self._session is None, "rules run on an unseeded recorder"
                 parses = [parse_result(s["yaml"]) for s in sources]
                 compiled = compile_rule_sets(
                     [
@@ -600,6 +617,8 @@ class Recorder:
                     ],
                     self.metamodel,
                 )
+                if self._session is not None:
+                    self._swap_rules(self._session, compiled)
                 self._rules = compiled
                 return {
                     "parses": [p.model_dump(mode="json") for p in parses],

@@ -23,7 +23,7 @@ import {
 	type Client
 } from './helpers.ts';
 
-const fixture = loadFixture<StepsFixture>('validation_steps');
+const fixture = loadFixture<{ runs: StepsFixture[] }>('validation_steps').runs[0]!;
 const DOC = fixture.metamodel;
 
 /** The `validation_steps` model as its `seed` step sweeps it: the first batch, then `g-1` of an unknown type. */

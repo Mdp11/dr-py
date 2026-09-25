@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { expect } from 'vitest';
 import {
+	appliesPopulation,
 	applyBatch,
 	ArtifactSet,
 	cmpCodePoint,
@@ -40,6 +41,7 @@ import {
 	RelRec,
 	resolveRefs,
 	ruleSources,
+	rulesStatusBody,
 	shuffleAdjacency,
 	storeListBody,
 	validateBody,
@@ -223,8 +225,9 @@ export function outcome(model: Model, res: BatchResult): BatchOutcome {
 
 /**
  * What a replay carries from step to step: the batches that landed, by step
- * index, the views, the artifacts with the layer they go into, and once a
- * `seed` step ran, the session's issue store and `model_rev`.
+ * index, the views, the artifacts with the layer they go into, the rules of
+ * the last `rules` step, and once a `seed` step ran, the session's issue store
+ * and `model_rev`.
  */
 type Landed = Map<number, BatchResult>;
 type Validation = { validators: Validators; patterns: FacetPatterns };
@@ -396,6 +399,15 @@ function apply(
 		case 'rules': {
 			const compiled = compileRecorded(step, model.metamodel);
 			expect(compiled.unreadable, `step ${index}: a document the engine refuses`).toBe(false);
+			const { session } = carried;
+			if (session !== null) {
+				// As a commit of rule sets alone lands: what the old and the new
+				// rules apply to, revalidated with the new ones in one run.
+				const { validators, patterns } = validationOf(carried, model);
+				const ids = appliesPopulation(model, carried.rules ?? EMPTY_RULES, compiled);
+				session.store.replace(ids, validateScoped(model, ids, validators, patterns, compiled));
+				session.rev += 1;
+			}
 			carried.rules = compiled;
 			const { parses } = step.result as RulesStepResult;
 			return { parses, status: rulesStatus(compiled), compiled: compiledRecord(compiled) };
@@ -407,22 +419,26 @@ function apply(
 			const { validators, patterns } = validationOf(carried, model);
 			const store = new IssueStore();
 			const ids = allIds(model);
-			store.replace(ids, validateScoped(model, ids, validators, patterns));
+			store.replace(ids, validateScoped(model, ids, validators, patterns, carried.rules));
 			carried.session = { store, rev: 0 };
 			return null;
 		}
 		case 'issues': {
 			const { store, rev } = carried.session!;
-			return storeListBody(store, rev);
+			return storeListBody(store, rev, rulesStatusBody(carried.rules ?? EMPTY_RULES));
 		}
 		case 'preview':
 		case 'validate_staged': {
-			// A replica of the session's state, its store seeded with the session's,
-			// the ops staged on it as one batch.
+			// A replica of the session's state, its store seeded with the session's
+			// and its rules both committed and working, the ops staged on it as one batch.
 			const { store, rev } = carried.session!;
 			const seed = new IssueStore();
 			seed.replace([...store.owners()], [...store.iter()]);
-			const live = new LiveIssues(workingCopy(clone(model, carried.options), rev), { seed });
+			const rules = carried.rules ?? EMPTY_RULES;
+			const live = new LiveIssues(workingCopy(clone(model, carried.options), rev), {
+				seed,
+				rules: { working: rules, committed: rules }
+			});
 			const ops = parseOps(step.ops!);
 			if (ops.length > 0) live.stage(ops);
 			return step.do === 'preview' ? previewBody(live, step.strict!) : validateBody(live);
@@ -472,10 +488,15 @@ function apply(
 			}
 			if (step.record_dirty === true) out.dirty = [...dirty!.ids];
 			if (session !== null) {
-				// As the ops route finalizes a landed batch: its dirty scope revalidated and spliced.
+				// As the ops route finalizes a landed batch: its dirty scope widened by
+				// the rules' reach, revalidated and spliced.
 				const { validators, patterns } = validationOf(carried, model);
+				dirty!.update(expandScope(model, carried.rules ?? EMPTY_RULES, [...dirty!.ids]));
 				session.rev += 1;
-				session.store.replace(dirty!.ids, validateScoped(model, dirty!.ids, validators, patterns));
+				session.store.replace(
+					dirty!.ids,
+					validateScoped(model, dirty!.ids, validators, patterns, carried.rules)
+				);
 			}
 			return out;
 		}

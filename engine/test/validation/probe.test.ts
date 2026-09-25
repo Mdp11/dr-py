@@ -1,11 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+	appliesPopulation,
 	applyBatch,
 	DirtyCollector,
+	drain,
+	expandScope,
+	issueListBody,
+	LiveIssues,
 	Metamodel,
 	Model,
 	OpError,
+	previewBody,
+	RulesValidator,
+	rulesStatusBody,
 	shuffleAdjacency,
+	validateBody,
 	verifyConsistent,
 	type ModelOp,
 	type WorkingCopy
@@ -14,6 +23,7 @@ import { loadFixture } from '../golden/load.ts';
 import { observe, seededRandom, type StepsFixture } from '../golden/model-steps.ts';
 import { clone, Server, workingCopy } from '../working/helpers.ts';
 import { RandomOps } from '../working/random-ops.ts';
+import { answered, churnRules, classified, listedTags, sweptFresh, wireKey } from './helpers.ts';
 
 const metamodel = Metamodel.fromJSON(loadFixture<StepsFixture>('ops_churn').metamodel);
 
@@ -175,4 +185,126 @@ describe('the origin probe', () => {
 		);
 		expect(probe).toEqual({ dirty: [], working: [], committed: observe(server.model) });
 	});
+});
+
+/** What `run` returns, and every element a rules validator validated meanwhile. */
+function watched<T>(run: () => T): { validated: Set<string> } & T {
+	const spy = vi.spyOn(RulesValidator.prototype, 'validateElement');
+	try {
+		const out = run();
+		return { ...out, validated: new Set(spy.mock.calls.map(([, el]) => el.id)) };
+	} finally {
+		spy.mockRestore();
+	}
+}
+
+describe('the origin probe with a staged rule set', () => {
+	const { a, b, delta } = churnRules(metamodel);
+
+	/**
+	 * The scene's replica, or one with nothing staged, once a slot is
+	 * committed, under committed rules `a` and working `b`.
+	 */
+	function staged(seed: number, withEdits: boolean) {
+		const { random, server, wc } = scene(seed);
+		const { delta } = server.commit([
+			{ kind: 'create_element', temp_id: 'tmp_s', type_name: 'Slot', properties: { code: 1 } }
+		]);
+		if (withEdits) expect(wc.applyDelta(delta).status).toBe('applied');
+		const replica = withEdits ? wc : workingCopy(clone(server.model), server.rev);
+		const live = new LiveIssues(replica, { rules: { working: b, committed: a } });
+		drain(live.sweepSteps());
+		shuffleAdjacency(replica.model, random);
+		return { server, wc: replica, live };
+	}
+
+	it.each(SEEDS.flatMap((seed) => [[seed, true] as const, [seed, false] as const]))(
+		'seed %i, staged edits %s: tags and resolves as two fresh sweeps do, and previews on the committed rules',
+		(seed, withEdits) => {
+			const { server, wc, live } = staged(seed, withEdits);
+			expect(wc.staged().length > 0).toBe(withEdits);
+			const working = observe(wc.model);
+			const before = staging(wc);
+			const unchanged = () => {
+				expect(observe(wc.model)).toEqual(working);
+				expect(staging(wc)).toEqual(before);
+				verifyConsistent(wc.model);
+			};
+
+			const listed = issueListBody(live);
+			unchanged();
+			const tags = new Map<string, Set<string>>();
+			for (const issue of listed.issues) {
+				const seen = tags.get(issue.check) ?? new Set();
+				tags.set(issue.check, seen.add(issue.origin));
+			}
+			// A new rule's issues are the working copy's; an unchanged rule's stand on the server.
+			expect(tags.get('rule:owns')).toEqual(new Set(['uncommitted']));
+			expect(tags.get('rule:seated')).toContain('on_server');
+			expect(listed.rules_status).toEqual(rulesStatusBody(b));
+			// The removed rule's issues are resolved.
+			const body = validateBody(live);
+			unchanged();
+			const resolved = body.filter((i) => i.origin === 'resolved').map(wireKey);
+			const removed = [...sweptFresh(workingCopy(clone(server.model)), a).iter()]
+				.filter((i) => i.check === 'rule:named')
+				.map((i) => JSON.stringify([i.severity, i.message, i.targetIds]));
+			expect(removed.length).toBeGreaterThan(0);
+			for (const key of removed) expect(resolved).toContain(key);
+			expect(answered(body)).toEqual(classified(live, server.model));
+			expect(listed.issues.map((i) => i.origin)).toEqual(listedTags(listed, server.model, a));
+
+			const previews = [true, false].map((strict) => previewBody(live, strict));
+			unchanged();
+			const cached = live.origins();
+			expect(live.origins()).toBe(cached);
+			live.setRules({ working: a, committed: a });
+			expect(live.origins()).not.toBe(cached);
+			expect([true, false].map((strict) => previewBody(live, strict))).toEqual(previews);
+			unchanged();
+		}
+	);
+
+	it.each(SEEDS)(
+		'seed %i: a keystroke revalidates no changed-rule owner the staged edits cannot reach',
+		(seed) => {
+			// Nothing else staged: every element a changed rule applies to lies outside its reach.
+			const { wc, live } = staged(seed, false);
+			const tagsOf = () => issueListBody(live).issues.map((i) => `${wireKey(i)} ${i.origin}`);
+			// An element of its own, edited last, so that the keystroke dirties it alone.
+			live.stage([
+				{ kind: 'create_element', temp_id: 'tmp_typing', type_name: 'Part', properties: {} }
+			]);
+			live.stage([{ kind: 'update_element', id: 'tmp_typing', properties_patch: { name: 't' } }]);
+			tagsOf();
+			const keystroke: ModelOp = {
+				kind: 'update_element',
+				id: 'tmp_typing',
+				properties_patch: { name: 'typed' }
+			};
+			expect(live.stage([keystroke], { coalesce: true }).coalesced).toBe(true);
+
+			const { tags, origins, validated } = watched(() => ({
+				tags: tagsOf(),
+				origins: live.origins()
+			}));
+			// The model-dirty part: the hooks and what either rule set reaches from them.
+			const model = wc.model;
+			const reached = new Set([
+				...origins.hooks,
+				...expandScope(model, b, origins.hooks),
+				...expandScope(model, a, origins.hooks)
+			]);
+			const outside = appliesPopulation(model, delta).filter((id) => !reached.has(id));
+			expect(outside.length).toBeGreaterThan(0);
+			expect(outside.filter((id) => validated.has(id))).toEqual([]);
+			expect(validated.size).toBeGreaterThan(0);
+
+			// With its cache of those owners dropped, the probe finds the same tags.
+			live.setRules(live.rules);
+			const cleared = watched(() => ({ tags: tagsOf() }));
+			expect(cleared.tags).toEqual(tags);
+			expect(outside.every((id) => cleared.validated.has(id))).toBe(true);
+		}
+	);
 });

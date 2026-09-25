@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
 	applyBatch,
+	cmpCodePoint,
 	drain,
 	FacetPatterns,
+	issueKey,
 	issueListBody,
 	LiveIssues,
 	Metamodel,
@@ -10,8 +12,11 @@ import {
 	OpError,
 	PatternUnusable,
 	previewBody,
+	PyFloat,
+	RESCAN_STEP,
 	shuffleAdjacency,
 	validateBody,
+	type CompiledRules,
 	type MetamodelDoc,
 	type ModelOp,
 	type Value
@@ -19,9 +24,9 @@ import {
 import { loadFixture } from '../golden/load.ts';
 import { seededRandom, type StepsFixture } from '../golden/model-steps.ts';
 import { clone, Server, workingCopy } from '../working/helpers.ts';
-import { byOwner, sweptFresh } from './helpers.ts';
+import { byOwner, compileSets, sweptFresh, type RuleDoc } from './helpers.ts';
 
-const doc = loadFixture<StepsFixture>('validation_steps').metamodel;
+const doc = loadFixture<{ runs: StepsFixture[] }>('validation_steps').runs[0]!.metamodel;
 const metamodel = Metamodel.fromJSON(doc);
 
 const BASES = ['Blk', 'Other', 'Car', 'Wheel'];
@@ -461,6 +466,235 @@ describe('LiveIssues', () => {
 		expect(first.working.map((i) => i.message)).toEqual(['n: 7 above max 5.0']);
 		live.unstage('all');
 		expect(live.origins()).not.toBe(first);
+	});
+});
+
+const float = (value: number) => new PyFloat(value);
+
+/** Rules over the `validation_steps` metamodel whose atoms reach two hops. */
+const LINKED: RuleDoc = {
+	name: 'linked',
+	applies_to: 'Blk',
+	when: { property: 'name', exists: true },
+	then: {
+		relationship: {
+			type: 'Link',
+			direction: 'outgoing',
+			to: 'Other',
+			exists: true,
+			where: { relationship: { type: 'Owns', direction: 'incoming', exists: false } }
+		}
+	}
+};
+const OWNED: RuleDoc = {
+	name: 'owned',
+	applies_to: 'Other',
+	then: {
+		relationship: {
+			type: 'Owns',
+			direction: 'incoming',
+			to: 'Blk',
+			exists: true,
+			where: { property: 'n', gte: float(3) }
+		}
+	}
+};
+const WHEELED: RuleDoc = {
+	name: 'wheeled',
+	applies_to: 'Car',
+	then: {
+		relationship: {
+			type: 'Needs',
+			direction: 'outgoing',
+			to: 'Wheel',
+			count: { gte: 1 },
+			where: { relationship: { type: 'Owns', direction: 'incoming', exists: true } }
+		}
+	}
+};
+
+/** `ONE` for `Blk` and `Other`; `TWO` drops `Other`'s rule and adds one for `Car`; `THREE` keeps only that. */
+const ONE = compileSets(metamodel, ['rs-1', 'Links', [LINKED, OWNED]]);
+const TWO = compileSets(metamodel, ['rs-1', 'Links', [LINKED]], ['rs-2', 'Cars', [WHEELED]]);
+const THREE = compileSets(metamodel, ['rs-2', 'Cars', [WHEELED]]);
+const both = (rules: CompiledRules) => ({ working: rules, committed: rules });
+
+/** Each owner's issues in order, owners sorted: what `IssueStore.replace` compares. */
+const perOwner = (live: LiveIssues) =>
+	[...live.store.owners()]
+		.sort(cmpCodePoint)
+		.map((owner) => [owner, live.store.issuesOf(owner).map(issueKey)]);
+
+describe('rules in the store', () => {
+	it.each([1, 2, 3])(
+		'seed %i: rule sets changed mid-sweep, mid-rescan, over staged edits and after a delta end where a fresh sweep under the last ones ends',
+		(seed) => {
+			const random = seededRandom(seed);
+			const server = new Server(grown(random, 1500), 1);
+			const wc = workingCopy(clone(server.model), server.rev);
+			const live = new LiveIssues(wc, { sweepStep: 61, rules: both(ONE) });
+			const mine = new Churn(random, 'tmp_mine_');
+			const peer = new Churn(random, 'tmp_peer_');
+			const blks = [...wc.model.elements()].filter((e) => e.typeName === 'Blk').map((e) => e.id);
+			const steps = live.sweepSteps();
+			let script = 0;
+			for (let k = 0; ; k++) {
+				const next = steps.next();
+				if (next.done === true) {
+					expect(next.value).toBe(true);
+					break;
+				}
+				shuffleAdjacency(wc.model, random);
+				if (k === 2) {
+					// a rule set staged while the sweep runs
+					expect(live.seeded).toBe(false);
+					live.setRules({ working: TWO, committed: ONE });
+				} else if (k === 4) {
+					// a rule's owner edited
+					live.stage([
+						update(
+							blks.find((id) => wc.model.findElement(id))!,
+							{ name: 'z' }
+						)
+					]);
+				} else if (script === 0 && next.value === RESCAN_STEP) {
+					// a second change before the rescan of the first ends, which
+					// leaves the `Other`s it has not reached yet to that rescan
+					expect(live.settled).toBe(false);
+					live.setRules({ working: THREE, committed: ONE });
+					script++;
+				} else if (script === 1) {
+					expect(live.settled).toBe(false);
+					live.applyDelta(peerDelta(server, peer));
+					script++;
+				} else if (script === 2) {
+					// the staged set committed, after the delta
+					live.setRules(both(TWO));
+					script++;
+				} else {
+					const roll = random();
+					if (roll < 0.2) attempt(() => live.stage(mine.batch(wc.model)));
+					else if (roll < 0.3 && wc.staged().length > 0) {
+						live.unstage({ batch: wc.staged()[0]!.id });
+					} else if (roll < 0.4) live.applyDelta(peerDelta(server, peer));
+				}
+			}
+			expect(script).toBe(3);
+			expect(live.seeded).toBe(true);
+			expect(live.settled).toBe(true);
+			expect(live.rules).toEqual(both(TWO));
+			expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(wc, TWO)));
+		}
+	);
+
+	it('sweeps first, then rescans in steps that report no progress and leave seeded alone', () => {
+		const live = new LiveIssues(workingCopy(grown(seededRandom(4), 300)), {
+			sweepStep: 50,
+			rules: both(ONE)
+		});
+		const steps = live.sweepSteps();
+		const seen: string[] = [];
+		for (;;) {
+			const next = steps.next();
+			if (next.done === true) break;
+			const { done, total } = next.value;
+			seen.push(next.value === RESCAN_STEP ? 'rescan' : done === total ? 'swept' : 'sweep');
+			expect(live.seeded).toBe(seen.includes('swept'));
+			if (seen.length === 2) live.setRules(both(TWO));
+		}
+		expect(seen.join(' ')).toMatch(/^(sweep )+swept( rescan)+$/);
+		expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(live.wc, TWO)));
+	});
+
+	it('moves its version on a rule-set change and on each rescan step that changes the store', () => {
+		const live = new LiveIssues(workingCopy(grown(seededRandom(5), 300)), {
+			sweepStep: 7,
+			rules: both(ONE)
+		});
+		drain(live.sweepSteps());
+		const { version, rulesVersion } = live;
+		live.setRules(both(TWO));
+		expect(live.version).toBe(version + 1);
+		expect(live.rulesVersion).toBe(rulesVersion + 1);
+		const moves: boolean[] = [];
+		const steps = live.sweepSteps();
+		for (;;) {
+			const before = { store: JSON.stringify(perOwner(live)), version: live.version };
+			const next = steps.next();
+			if (next.done === true) break;
+			const changed = JSON.stringify(perOwner(live)) !== before.store;
+			expect(live.version).toBe(before.version + (changed ? 1 : 0));
+			moves.push(changed);
+		}
+		expect(moves).toContain(true);
+		expect(moves).toContain(false);
+		expect(byOwner(live.store)).toEqual(byOwner(sweptFresh(live.wc, TWO)));
+	});
+
+	it('is not settled from a rule-set change until its rescan ends, and whenSettled resolves then', async () => {
+		const live = new LiveIssues(workingCopy(grown(seededRandom(6), 200)), {
+			sweepStep: 25,
+			rules: both(ONE)
+		});
+		drain(live.sweepSteps());
+		expect(live.settled).toBe(true);
+		await live.whenSettled();
+		live.setRules({ working: TWO, committed: ONE });
+		expect(live.settled).toBe(false);
+		let settled = false;
+		let swept = false;
+		const waiting = live.whenSettled().then(() => (settled = true));
+		const sweeping = live.whenSwept().then(() => (swept = true));
+		const steps = live.sweepSteps();
+		for (;;) {
+			const next = steps.next();
+			await Promise.resolve();
+			await Promise.resolve();
+			if (next.done === true) break;
+			expect(settled).toBe(live.settled);
+			expect(swept).toBe(live.settled);
+		}
+		await Promise.all([waiting, sweeping]);
+		expect(live.settled).toBe(true);
+	});
+
+	it('enqueues nothing when a set is only renamed, but moves its versions', () => {
+		const live = new LiveIssues(workingCopy(grown(seededRandom(7), 200)), { rules: both(ONE) });
+		drain(live.sweepSteps());
+		const { version, rulesVersion } = live;
+		const renamed = compileSets(metamodel, ['rs-1', 'Renamed', [LINKED, OWNED]]);
+		live.setRules(both(renamed));
+		expect(live.settled).toBe(true);
+		expect(live.version).toBe(version + 1);
+		expect(live.rulesVersion).toBe(rulesVersion + 1);
+		expect([...live.sweepSteps()]).toEqual([]);
+	});
+
+	it('settles when the store becomes unusable mid-rescan', async () => {
+		const mm = withPattern('('.repeat(64) + 'a' + ')'.repeat(64) + '*');
+		const model = new Model(mm);
+		for (let i = 0; i < 20; i++) {
+			const element = model.createElement('Other', `o-${i}`);
+			model.setProperty(element, 'name', `o${i}`);
+		}
+		const owned = compileSets(mm, ['rs-1', 'Owned', [OWNED]]);
+		const live = new LiveIssues(workingCopy(model), { sweepStep: 5 });
+		drain(live.sweepSteps());
+		live.setRules(both(owned));
+		const waiting = live.whenSettled();
+		live.sweepSteps().next();
+		expect(live.settled).toBe(false);
+		live.stage([
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_b',
+				type_name: 'Blk',
+				properties: { name: 'b', req: 'r', code: 'a'.repeat(1_000_000) }
+			}
+		]);
+		expect(live.unusable).toBe('pattern');
+		await waiting;
+		expect(live.settled).toBe(true);
 	});
 });
 

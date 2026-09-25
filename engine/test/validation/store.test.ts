@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
 	addNeighbourhood,
 	applyBatch,
+	compileRuleSets,
 	DirtyCollector,
+	EMPTY_RULES,
 	ISSUES_RESPONSE_MAX,
 	IssueStore,
 	Metamodel,
 	Model,
+	rulesStatusBody,
 	storeListBody,
 	type Issue,
 	type ModelOp,
@@ -19,6 +22,8 @@ import { seededRandom, type StepsFixture } from '../golden/model-steps.ts';
 function issue(owner: string, message: string, severity: Severity = 'error'): Issue {
 	return { severity, message, targetIds: [owner], category: 'conformance', check: 'facets' };
 }
+
+const NO_RULES = rulesStatusBody(EMPTY_RULES);
 
 const messages = (store: IssueStore) =>
 	[...store.iter()].map((i) => `${i.targetIds[0]}:${i.message}`);
@@ -135,7 +140,7 @@ describe('storeListBody', () => {
 	it('is the GET /model/issues body, every origin on_server by default', () => {
 		const store = new IssueStore();
 		store.replace(['e-1'], [issue('e-1', 'n: 9 above max 5.0')]);
-		expect(JSON.stringify(storeListBody(store, 6))).toBe(
+		expect(JSON.stringify(storeListBody(store, 6, NO_RULES))).toBe(
 			JSON.stringify({
 				model_rev: 6,
 				issues: [
@@ -153,7 +158,9 @@ describe('storeListBody', () => {
 				rules_status: { total: 0, skipped: [], eval_errors: {} }
 			})
 		);
-		expect(storeListBody(store, 6, () => 'uncommitted').issues[0]!.origin).toBe('uncommitted');
+		expect(storeListBody(store, 6, NO_RULES, () => 'uncommitted').issues[0]!.origin).toBe(
+			'uncommitted'
+		);
 	});
 
 	it('sends the first issues in store order, and exact counts past the cap', () => {
@@ -163,13 +170,53 @@ describe('storeListBody', () => {
 			ids,
 			ids.map((id) => issue(id, 'm'))
 		);
-		const body = storeListBody(store, 1);
+		const body = storeListBody(store, 1, NO_RULES);
 		expect(body.issues).toHaveLength(ISSUES_RESPONSE_MAX);
 		expect(body.issues.at(-1)!.target_ids).toEqual([`e-${ISSUES_RESPONSE_MAX - 1}`]);
 		expect(body.truncated).toBe(true);
 		expect(body.counts).toEqual({ error: ISSUES_RESPONSE_MAX + 1 });
 		store.replace(['e-0'], []);
-		expect(storeListBody(store, 2).truncated).toBe(false);
+		expect(storeListBody(store, 2, NO_RULES).truncated).toBe(false);
+	});
+});
+
+describe('rulesStatusBody', () => {
+	it('is the rules_status of GET /model/issues, in its field order', () => {
+		const mm = Metamodel.fromJSON(
+			loadFixture<{ runs: StepsFixture[] }>('validation_steps').runs[0]!.metamodel
+		);
+		const document = JSON.stringify({
+			rules: [
+				{ name: 'kept', applies_to: 'Blk', then: { property: 'name', exists: true } },
+				{ name: 'drifted', applies_to: 'Nope', then: { property: 'name', exists: true } }
+			]
+		});
+		const compiled = compileRuleSets(
+			[
+				{ artifactId: 'a-1', name: 'Set', parse: { ok: true, document } },
+				{ artifactId: 'a-2', name: 'Broken', parse: { ok: false, errors: [{ message: 'bad' }] } }
+			],
+			mm
+		);
+		compiled.evalErrors.set('rule:kept', 2);
+		expect(JSON.stringify(rulesStatusBody(compiled))).toBe(
+			JSON.stringify({
+				total: 1,
+				skipped: [
+					{
+						artifact_id: 'a-1',
+						set_name: 'Set',
+						rule: 'drifted',
+						reason: "unknown stereotype 'Nope'"
+					},
+					{ artifact_id: 'a-2', set_name: 'Broken', rule: '', reason: 'bad' }
+				],
+				eval_errors: { 'rule:kept': 2 }
+			})
+		);
+		expect(storeListBody(new IssueStore(), 3, rulesStatusBody(compiled)).rules_status).toEqual(
+			rulesStatusBody(compiled)
+		);
 	});
 });
 

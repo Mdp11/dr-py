@@ -6,7 +6,13 @@ one is refused, which leaves the store as it was. Then staged ops go through
 ``POST /commits/preview`` and the staged branch of ``POST /model/validate``:
 they fix, make and duplicate issues, cascade-delete a primary, touch an
 entity whose issue stands, and run strict and not, which leave the model and
-the store as they were."""
+the store as they were.
+
+A second session holds two rule sets whose atoms reach two hops. Its
+batches flip a verdict two hops away in both directions, rename a far
+element and delete a middle one; then the rule sets change: one rule
+changed, one removed, one added. Staged ops break a rule on an element they
+never touch, which blocks a strict preview, and mend it again."""
 
 from __future__ import annotations
 
@@ -15,7 +21,7 @@ from typing import Any
 from data_rover.core.metamodel.schema import Metamodel
 
 from ..driver import scenario
-from ..model_steps import batch, run_steps
+from ..model_steps import batch, rules_step, run_steps
 
 _METAMODEL = {
     "enums": {"Color": ["red", "green"]},
@@ -237,6 +243,209 @@ _STEPS: list[dict[str, Any]] = [
 ]
 
 
+#: part 3: a session with rule sets whose atoms reach across two hops
+_RULES_METAMODEL = {
+    "elements": [
+        {
+            "name": "Node",
+            "abstract": True,
+            "properties": [{"name": "name", "datatype": "string"}],
+        },
+        {
+            "name": "Unit",
+            "extends": "Node",
+            "properties": [{"name": "level", "datatype": "integer"}],
+        },
+        {
+            "name": "Port",
+            "extends": "Node",
+            "properties": [
+                {"name": "open", "datatype": "boolean"},
+                {"name": "speed", "datatype": "integer"},
+            ],
+        },
+        {
+            "name": "Hub",
+            "extends": "Node",
+            "properties": [{"name": "zone", "datatype": "string"}],
+        },
+    ],
+    "relationships": [
+        {"name": "Has", "containment": True, "source": "Unit", "target": "Port"},
+        {"name": "Plugs", "source": "Port", "target": "Hub"},
+        {"name": "Feeds", "source": "Hub", "target": "Hub"},
+    ],
+}
+
+#: a unit reaches a core hub through one of its ports; hubs are fed
+_ALPHA = """\
+rules:
+  - name: unit-reaches-core
+    applies_to: Unit
+    when: {property: name, exists: true}
+    then:
+      relationship:
+        type: Has
+        direction: outgoing
+        to: Port
+        exists: true
+        where:
+          relationship:
+            type: Plugs
+            direction: outgoing
+            to: Hub
+            exists: true
+            where:
+              all:
+                - {property: zone, equals: core}
+                - {property: name, not_equals: offline}
+  - name: hub-fed
+    applies_to: Hub
+    severity: warning
+    then:
+      relationship: {type: Feeds, direction: incoming, count: {gte: 1}}
+"""
+
+#: ports are open; a hub is plugged by a port of a unit of level 2 or more
+_BETA = """\
+rules:
+  - name: port-open
+    applies_to: Port
+    message: port is closed
+    then: {property: open, equals: true}
+  - name: hub-plugged
+    applies_to: Hub
+    description: a hub serves a senior unit
+    then:
+      relationship:
+        type: Plugs
+        direction: incoming
+        to: Port
+        count: {gte: 1}
+        where:
+          relationship:
+            type: Has
+            direction: incoming
+            to: Unit
+            exists: true
+            where: {property: level, gte: 2}
+"""
+
+#: ``hub-fed`` removed, ``port-open`` changed, ``unit-level`` added
+_ALPHA_2 = """\
+rules:
+  - name: unit-reaches-core
+    applies_to: Unit
+    when: {property: name, exists: true}
+    then:
+      relationship:
+        type: Has
+        direction: outgoing
+        to: Port
+        exists: true
+        where:
+          relationship:
+            type: Plugs
+            direction: outgoing
+            to: Hub
+            exists: true
+            where:
+              all:
+                - {property: zone, equals: core}
+                - {property: name, not_equals: offline}
+  - name: unit-level
+    applies_to: Unit
+    then: {property: level, lt: 3}
+"""
+
+_BETA_2 = """\
+rules:
+  - name: port-open
+    applies_to: Port
+    message: port is closed or slow
+    then:
+      all:
+        - {property: open, equals: true}
+        - {property: speed, exists: true}
+  - name: hub-plugged
+    applies_to: Hub
+    description: a hub serves a senior unit
+    then:
+      relationship:
+        type: Plugs
+        direction: incoming
+        to: Port
+        count: {gte: 1}
+        where:
+          relationship:
+            type: Has
+            direction: incoming
+            to: Unit
+            exists: true
+            where: {property: level, gte: 2}
+"""
+
+_RULES_MODEL: list[dict[str, Any]] = [
+    _el("u-1", "Unit", name="u1", level=3),
+    _el("u-2", "Unit", name="u2", level=1),
+    _el("u-3", "Unit", name="u3", level=2),
+    _el("p-1", "Port", name="p1", open=True, speed=10),
+    _el("p-2", "Port", name="p2", open=True),
+    _el("p-3", "Port", name="p3", open=True, speed=7),
+    _el("h-1", "Hub", name="h1", zone="core"),
+    _el("h-2", "Hub", name="h2", zone="edge"),
+    _el("h-3", "Hub", name="h3", zone="core"),
+    _el("h-4", "Hub", name="h4", zone="core"),
+    _rel("has-1", "Has", "u-1", "p-1"),
+    _rel("has-2", "Has", "u-2", "p-2"),
+    _rel("has-3", "Has", "u-3", "p-3"),
+    _rel("pl-1", "Plugs", "p-1", "h-1"),
+    _rel("pl-2", "Plugs", "p-2", "h-2"),
+    _rel("pl-3", "Plugs", "p-3", "h-4"),
+    _rel("f-1", "Feeds", "h-1", "h-2"),
+    _rel("f-2", "Feeds", "h-2", "h-1"),
+    _rel("f-3", "Feeds", "h-1", "h-4"),
+]
+
+_RULES_BATCHES: list[list[dict[str, Any]]] = [
+    # a hub two hops from its unit leaves the core
+    [_update("h-1", zone="edge")],
+    # a unit two hops from its hub grows senior
+    [_update("u-2", level=2)],
+    [_update("h-2", zone="core")],
+    # a far element renamed
+    [_update("h-2", name="offline")],
+    [_update("h-1", zone="core")],
+    # the middle element goes, its relationships with it
+    [_delete("p-1")],
+]
+
+#: breaks ``unit-reaches-core`` on ``u-3``, which it never touches
+_BREAK = [_update("h-4", zone="edge")]
+#: the same, and a core hub for ``p-3`` to plug into
+_BREAK_AND_FIX = [*_BREAK, _rel("pl-9", "Plugs", "p-3", "h-1")]
+
+_RULES_STEPS: list[dict[str, Any]] = [
+    rules_step([("r-alpha", "Alpha", _ALPHA), ("r-beta", "Beta", _BETA)]),
+    batch(_RULES_MODEL),
+    {"do": "seed"},
+    _ISSUES,
+    *(step for ops in _RULES_BATCHES for step in (batch(ops), _ISSUES)),
+    rules_step([("r-alpha", "Alpha", _ALPHA_2), ("r-beta", "Beta", _BETA_2)]),
+    _ISSUES,
+    *(
+        step
+        for ops in (_BREAK, _BREAK_AND_FIX)
+        for step in (_validate_staged(ops), _preview(ops, strict=True))
+    ),
+]
+
+
 @scenario("validation_steps")
 def validation_steps() -> Any:
-    return run_steps(Metamodel.model_validate(_METAMODEL), _STEPS)
+    return {
+        "runs": [
+            run_steps(Metamodel.model_validate(_METAMODEL), _STEPS),
+            run_steps(Metamodel.model_validate(_RULES_METAMODEL), _RULES_STEPS),
+        ]
+    }

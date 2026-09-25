@@ -12,6 +12,9 @@ import { derivePaths, type ReversePath } from './reach.ts';
 export type RulesParse =
 	{ ok: true; document: string } | { ok: false; errors: { message: string }[] };
 
+/** What every rule's check starts with. */
+export const RULE_CHECK_PREFIX = 'rule:';
+
 /** One rule set to compile; `parse` is `null` when the artifact arrived without its parse. */
 export type RuleSource = { artifactId: string; name: string; parse: RulesParse | null };
 
@@ -128,7 +131,7 @@ export function compileRuleSets(sources: readonly RuleSource[], mm: Metamodel): 
 				artifactId,
 				rule,
 				appliesTypes: mm.elementDescendants(rule.appliesTo),
-				check: `rule:${rule.name}`,
+				check: `${RULE_CHECK_PREFIX}${rule.name}`,
 				paths: derivePaths(rule, mm)
 			});
 		}
@@ -156,7 +159,10 @@ export function compileRuleSets(sources: readonly RuleSource[], mm: Metamodel): 
  * Every element a rule of `compiled` applies to: the applies types, sorted,
  * each type's own elements sorted, first-seen order.
  */
-export function appliesPopulation(model: Model, ...compiled: readonly CompiledRules[]): string[] {
+export function appliesPopulation(
+	model: Model,
+	...compiled: readonly Pick<CompiledRules, 'rules'>[]
+): string[] {
 	const types = new Set<string>();
 	for (const c of compiled)
 		for (const cr of c.rules) for (const type of cr.appliesTypes) types.add(type);
