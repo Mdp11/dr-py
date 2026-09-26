@@ -489,11 +489,11 @@ MEDIA_TYPES: dict[str, str] = {
 
 def content_disposition(filename: str) -> str:
     """The attachment header for `filename`. HTTP headers carry Latin-1 at
-    most, so a name outside ASCII travels as RFC 5987 `filename*`, beside a
-    `filename` whose non-ASCII code points are `_`."""
+    most, so a name outside ASCII also travels as RFC 5987 `filename*`,
+    beside a `filename` whose code points past U+00FF are `_`."""
     if filename.isascii():
         return f'attachment; filename="{filename}"'
-    fallback = "".join(ch if ch.isascii() else "_" for ch in filename)
+    fallback = "".join(ch if ord(ch) <= 0xFF else "_" for ch in filename)
     return (
         f'attachment; filename="{fallback}"; '
         f"filename*=UTF-8''{quote(filename, safe='')}"

@@ -1,10 +1,13 @@
-"""Export downloads named outside ASCII: the name travels as RFC 5987
-`filename*`, with an ASCII `filename` fallback; an ASCII name's header is
-unchanged."""
+"""Export downloads named outside ASCII: the name also travels as RFC 5987
+`filename*`, beside a `filename` whose code points past U+00FF are `_`; an
+ASCII name's header is unchanged."""
 
+import json
+from collections.abc import MutableMapping
 from typing import Any
 from urllib.parse import unquote
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
 
@@ -78,14 +81,58 @@ def test_table_export_sends_a_non_ascii_name_as_filename_star(
     assert _names(disposition) == ("__.csv", "日本.csv")
 
 
-def test_a_latin1_name_is_not_ascii(client: TestClient) -> None:
+def _raw_disposition(client: TestClient, path: str, body: dict[str, Any]) -> str:
+    """`Content-Disposition` as the app sends it, read as Latin-1, the way a
+    browser reads it. The TestClient decodes headers as UTF-8, so the request
+    goes to the ASGI app directly."""
+    payload = json.dumps(body).encode()
+    start: dict[str, Any] = {}
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": payload, "more_body": False}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            start.update(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"content-type", b"application/json"),
+            *((k.encode(), v.encode()) for k, v in AUTH_HEADERS.items()),
+        ],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+    anyio.run(client.app, scope, receive, send)
+    assert start["status"] == 200, start
+    (raw,) = [v for k, v in start["headers"] if k == b"content-disposition"]
+    return raw.decode("latin-1")
+
+
+def test_a_latin1_name_keeps_its_plain_filename(client: TestClient) -> None:
     _bootstrap(client)
-    artifact_id = _table(client, "é x")
-    r = client.post(
-        papi("/tables/export"), json={"artifact_id": artifact_id, "format": "json"}
+    artifact_id = _table(client, "Übersicht")
+    body = {"artifact_id": artifact_id, "format": "xlsx"}
+    assert _raw_disposition(client, papi("/tables/export"), body) == (
+        "attachment; filename=\"Übersicht.xlsx\"; filename*=UTF-8''%C3%9Cbersicht.xlsx"
     )
-    assert r.status_code == 200, r.text
-    assert _names(r.headers["content-disposition"]) == ("_ x.json", "é x.json")
+
+
+def test_a_mixed_name_replaces_only_what_latin1_lacks(client: TestClient) -> None:
+    _bootstrap(client)
+    artifact_id = _table(client, "é 日")
+    body = {"artifact_id": artifact_id, "format": "json"}
+    disposition = _raw_disposition(client, papi("/tables/export"), body)
+    assert _names(disposition) == ("é _.json", "é 日.json")
 
 
 def test_an_ascii_name_keeps_its_header(client: TestClient) -> None:
@@ -121,6 +168,16 @@ def test_run_sends_a_non_ascii_bare_member_as_filename_star(
         "entries": [{"source": {"ref": table_id}, "format": "csv", "name": "日本"}],
     }
     assert _names(_run(client, definition, "run")) == ("__.csv", "日本.csv")
+
+
+def test_run_keeps_an_ascii_bare_header(client: TestClient) -> None:
+    _bootstrap(client)
+    table_id = _table(client, "t")
+    definition = {
+        "output": {"mode": "bare"},
+        "entries": [{"source": {"ref": table_id}, "format": "csv", "name": "plain"}],
+    }
+    assert _run(client, definition, "run") == 'attachment; filename="plain.csv"'
 
 
 def test_run_keeps_an_ascii_zip_header(client: TestClient) -> None:
