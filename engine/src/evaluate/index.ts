@@ -1,4 +1,5 @@
 import type { ArtifactSet } from '../artifacts/artifact-set.ts';
+import { exportTable, previewTableJson } from '../export/route.ts';
 import type { Model } from '../model/model.ts';
 import { evaluateNavigation } from '../navigation/route.ts';
 import type { ReadParams } from '../read/params.ts';
@@ -38,5 +39,7 @@ export type Evaluation = (ctx: EvalContext, params: ReadParams) => Steps<unknown
 export const EVALUATIONS: { readonly [method: string]: Evaluation } = {
 	searchModel,
 	evaluateNavigation,
-	evaluateTable
+	evaluateTable,
+	exportTable,
+	previewTableJson
 };

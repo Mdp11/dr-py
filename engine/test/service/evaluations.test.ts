@@ -45,7 +45,9 @@ describe('searchModel', () => {
 		expect(Object.keys(EVALUATIONS)).toEqual([
 			'searchModel',
 			'evaluateNavigation',
-			'evaluateTable'
+			'evaluateTable',
+			'exportTable',
+			'previewTableJson'
 		]);
 		expect(Object.keys(READS)).not.toContain('searchModel');
 	});

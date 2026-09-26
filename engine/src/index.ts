@@ -17,6 +17,44 @@ export {
 	type Evaluation,
 	type WorkingStamp
 } from './evaluate/index.ts';
+export { csvLinesSteps, renderCsv } from './export/csv.ts';
+export {
+	containsErrorMarker,
+	jsonlLinesSteps,
+	jsonlText,
+	jsonText,
+	jsonTextSteps,
+	renderJsonEx,
+	renderJsonExSteps,
+	resolveJsonKeys,
+	shapeJsonDocs,
+	type JsonDoc,
+	type JsonFormat,
+	type JsonOut,
+	type JsonRenderOptions
+} from './export/json.ts';
+export {
+	exportDefinition,
+	exportHeader,
+	exportLayout,
+	normalizedDisplayOrder,
+	normalizedOrder,
+	ROW_NUMBER_SLOT,
+	type ExportLayout
+} from './export/layout.ts';
+export {
+	exportContext,
+	exportRowsSteps,
+	exportTable,
+	MEDIA_TYPES,
+	PREVIEW_MAX_ROWS,
+	previewTableJson,
+	toParts,
+	type ExportFileResult,
+	type ExportFormat,
+	type ExportRows,
+	type JsonPreviewBody
+} from './export/route.ts';
 export { parseKey, parseKeyEntry, type KeyRel, type KeySpec } from './metamodel/key.ts';
 export { Metamodel, type EndConstraint } from './metamodel/metamodel.ts';
 export { Multiplicity } from './metamodel/multiplicity.ts';
@@ -301,10 +339,19 @@ export {
 	type TableRowBody
 } from './table/page.ts';
 export { resolveTableRefs, tableFetch, tableHasScript } from './table/resolve.ts';
-export { evaluateTable, tableSteps, type TableRows } from './table/route.ts';
+export {
+	answered,
+	evaluateTable,
+	orderedRows,
+	resolved,
+	sourceOf,
+	tableSteps,
+	type TableRows
+} from './table/route.ts';
 export {
 	buildRowsSteps,
 	DEFAULT_TABLE_LIMITS,
+	EXPORT_TABLE_LIMITS,
 	type Binding,
 	type RowBuild,
 	type RowKey,

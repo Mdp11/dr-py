@@ -3,6 +3,7 @@ import {
 	ArtifactSet,
 	drain,
 	evaluateTable,
+	EVALUATIONS,
 	Model,
 	orderKey,
 	readTableDefinition,
@@ -12,6 +13,7 @@ import {
 	type CachedOrder,
 	type CommittedArtifact,
 	type EvalContext,
+	type ExportFileResult,
 	type ReadParams,
 	type Steps,
 	type TablePageBody
@@ -308,6 +310,52 @@ describe('the table order cache', () => {
 		expect(inCells).toBeInstanceOf(ReadError);
 		expect(cache.size).toBe(1);
 		expect(refusal(beyond('collapse'))).toEqual(inCells);
+	});
+});
+
+describe('an export and the table order cache', () => {
+	const csv = (definition: object) => ({
+		definition,
+		format: 'csv',
+		date: '20240229',
+		project: 'p'
+	});
+
+	/** The file's bytes as text, and how many times the scan yielded. */
+	function exportRun(ctx: EvalContext, params: ReadParams): { text: string; yields: number } {
+		const steps = EVALUATIONS.exportTable!(ctx, params);
+		let yields = 0;
+		for (;;) {
+			const next = steps.next();
+			if (next.done === true) {
+				const { parts } = next.value as ExportFileResult;
+				const text = parts.map((part) => new TextDecoder().decode(part)).join('');
+				return { text, yields };
+			}
+			yields++;
+		}
+	}
+
+	it('reuses the order of a page of the same table, what is only exported set otherwise', () => {
+		const set = artifacts();
+		const cold = exportRun(context(set, new TableOrderCache()), csv(TABLE));
+		const cache = new TableOrderCache();
+		const built = run(context(set, cache), page(TABLE)).yields;
+		const exported = { ...TABLE, show_row_numbers: true, export_order: [2, 1] };
+		const warm = exportRun(context(set, cache), csv(exported));
+		expect(warm.yields).toBeLessThanOrEqual(cold.yields - built + 2);
+		expect(warm.yields).toBeLessThan(cold.yields / 2);
+		expect(warm.text).toBe(exportRun(context(set, null), csv(exported)).text);
+		expect(cache.size).toBe(1);
+	});
+
+	it('keeps the order it built for a later page', () => {
+		const set = artifacts();
+		const cache = new TableOrderCache();
+		exportRun(context(set, cache), csv(TABLE));
+		const later = run(context(set, cache), page(TABLE, 10));
+		expect(later.yields).toBe(0);
+		expect(later.body).toBe(uncached(set, page(TABLE, 10)));
 	});
 });
 

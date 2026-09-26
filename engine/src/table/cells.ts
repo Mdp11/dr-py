@@ -222,8 +222,9 @@ function* propertyCell(
 
 /**
  * A collapse navigation cell shows at most `min(cell_cap, maxCellElements)`
- * of what it reaches, `total` counting them all. A value anywhere makes it a
- * values cell, an element among values showing as its name.
+ * of what it reaches, or `maxCellElements` when the limits ignore cell caps,
+ * `total` counting them all. A value anywhere makes it a values cell, an
+ * element among values showing as its name.
  */
 function* navigationCell(
 	pass: Pass,
@@ -240,7 +241,10 @@ function* navigationCell(
 	}
 	const roots = yield* resolveSourceElements(pass, key, col.source);
 	const [reached] = yield* navigationReached(pass, col, roots);
-	const cap = Math.min(col.cell_cap, limits.maxCellElements);
+	const cap =
+		limits.ignoreCellCaps === true
+			? limits.maxCellElements
+			: Math.min(col.cell_cap, limits.maxCellElements);
 	if (reached.some((node) => node instanceof PropertyValue)) {
 		const values = reached.map((node) =>
 			typeof node === 'string' ? displayName(model.getElement(node)) : node.value

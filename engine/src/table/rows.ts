@@ -29,10 +29,21 @@ import type {
 } from './schema.ts';
 import { propertyIsElementTyped, rawProperty } from './virtual-props.ts';
 
-export type TableLimits = { maxRows: number; maxCellElements: number };
+/**
+ * How many rows a table keeps and how many elements a collapse navigation
+ * cell shows; with `ignoreCellCaps`, a column's own `cell_cap` does not apply.
+ */
+export type TableLimits = { maxRows: number; maxCellElements: number; ignoreCellCaps?: boolean };
 
 /** The route's limits: 50,000 rows, 20 elements a cell. */
 export const DEFAULT_TABLE_LIMITS: TableLimits = { maxRows: 50_000, maxCellElements: 20 };
+
+/** An export's: the route's rows, and every element a cell reaches. */
+export const EXPORT_TABLE_LIMITS: TableLimits = {
+	maxRows: 50_000,
+	maxCellElements: 1_000_000_000,
+	ignoreCellCaps: true
+};
 
 /** One slot of a row key. */
 export type Binding = Value | PropertyValue;

@@ -56,6 +56,7 @@ import {
 	type CommittedArtifact,
 	type CompiledRules,
 	type ElementImage,
+	type ExportFileResult,
 	type MetamodelDoc,
 	type ModelOp,
 	type ModelOptions,
@@ -136,9 +137,14 @@ export type Step = Partial<Observed> & {
 	ids?: string[];
 	/** `undo`: the index of the landed batch whose inverse ops to run. */
 	of?: number;
-	/** `read`: a method of `READS` or of `EVALUATIONS`, and its params. */
+	/** `read`: a method of `READS` or of `EVALUATIONS`, and its params; `export`: a method of `EVALUATIONS`. */
 	method?: string;
 	params?: ReadParams;
+	/** `read` / `export`: the name of the recorded case. */
+	case?: string;
+	/** `export`: the route's body, and the day its clock read. */
+	body?: ReadParams;
+	date?: string;
 	/** `view` / `drop_view`: the view whose placements `result` lists / to forget. */
 	view_id?: string;
 	/** `artifacts`: the project's committed artifacts from here on, by id. */
@@ -464,6 +470,19 @@ function cellTexts(model: Model, artifacts: ArtifactSet, step: Step): Tagged[][]
 	return cells.map((row) => row.map((cell) => tag(cellText(model, cell))));
 }
 
+/** What the recorder keeps of a shipped file: its text, decoded as UTF-8. */
+function exported(result: ExportFileResult): unknown {
+	const { parts, filename, content_type, truncated } = result;
+	const bytes = new Uint8Array(parts.reduce((n, part) => n + part.byteLength, 0));
+	let at = 0;
+	for (const part of parts) {
+		bytes.set(new Uint8Array(part), at);
+		at += part.byteLength;
+	}
+	const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+	return { status: 200, filename, content_type, truncated, file: { text } };
+}
+
 /**
  * `mint` stands in for the oracle's `SequentialIdGenerator`. A failed call
  * consumes no id, and neither does a refused batch: the oracle runs each on a
@@ -568,6 +587,15 @@ function apply(
 			const fetch = navigationFetch(artifacts);
 			return navigationHasScript(resolveRefs(readNavigation(step.definition, 'definition'), fetch));
 		}
+		case 'export':
+			return exported(
+				drain(
+					EVALUATIONS[step.method!]!(
+						{ model, artifacts, placements },
+						{ ...step.body!, date: step.date!, project: 'p' }
+					)
+				) as ExportFileResult
+			);
 		case 'table_rows':
 			return tableRows(model, artifacts, step);
 		case 'cell_text':
@@ -653,6 +681,7 @@ function apply(
 /** Steps whose result is compared as JSON text. */
 const READ_LIKE = new Set([
 	'read',
+	'export',
 	'navigate',
 	'has_script',
 	'table_rows',
