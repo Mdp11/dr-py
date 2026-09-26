@@ -25,7 +25,9 @@ and roll back: the recorder holds both to leaving the model and the store as
 they were. A batch with ``record_dirty`` adds its dirty ids to its result,
 widened by the rules' reach when it also carries ``expand``.
 ``insert_element`` and ``insert_relationship`` put an entity in as committed
-state arrives, its type unchecked. After every step the recorder
+state arrives, its type unchecked. ``export`` calls an export route with the
+clock pinned to the step's ``date`` and records the file it answers (see
+``_export``). After every step the recorder
 adds the outcome (``result`` or ``error``) and what the step left behind: the
 state digest and a fingerprint of the entity lines plus the index dump. Every
 ``full_every``-th step, and the last, carries the lines and the dump
@@ -45,17 +47,25 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
+import zipfile
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from data_rover.api import table_export_engine
 from data_rover.api.db_models import ArtifactKind, ArtifactRow, Role
 from data_rover.api.deps import Session
 from data_rover.api.routes import artifacts as artifact_routes
+from data_rover.api.routes import exports as export_routes
 from data_rover.api.routes import read
 from data_rover.api.routes import tables as table_routes
 from data_rover.api.routes.commits import preview_commit
@@ -68,12 +78,14 @@ from data_rover.api.schemas import (
     ElementOut,
     EvaluateNavigationIn,
     EvaluateTableIn,
+    ExportTableIn,
     IssueOut,
     ModelOpIn,
     PreviewRequest,
     RelationshipOut,
     RuleSkipOut,
     RulesStatusOut,
+    RunExportIn,
     TableRowOut,
     ValidateRequest,
 )
@@ -267,8 +279,8 @@ Artifacts = dict[str, dict[str, Any]]
 
 
 class _ArtifactDb:
-    """Stands in for the database session the navigation route fetches
-    artifacts through: every artifact belongs to project ``p``."""
+    """Stands in for the database session the routes fetch artifacts
+    through: every artifact belongs to project ``p`` and is named by its id."""
 
     def __init__(self, artifacts: Artifacts) -> None:
         self._artifacts = artifacts
@@ -279,6 +291,8 @@ class _ArtifactDb:
         if artifact is None:
             return None
         return SimpleNamespace(
+            id=artifact_id,
+            name=artifact_id,
             project_id="p",
             kind=ArtifactKind(artifact["kind"]),
             payload=artifact["payload"],
@@ -421,6 +435,18 @@ def _cell_text(model: Model, artifacts: Artifacts, step: dict[str, Any]) -> Any:
     return [[tag(cell_text(model, cell)) for cell in row] for row in cells]
 
 
+def _payload[M: BaseModel](cls: type[M], params: dict[str, Any]) -> M:
+    """``params`` as a route's body, refused as FastAPI refuses a body it
+    cannot read: with pydantic's errors."""
+    try:
+        return cls.model_validate(params)
+    except ValidationError as exc:
+        detail = exc.errors(
+            include_url=False, include_context=False, include_input=False
+        )
+        raise HTTPException(status_code=422, detail=detail) from exc
+
+
 def _read(
     session: Session, artifacts: Artifacts, method: str, params: dict[str, Any]
 ) -> BaseModel:
@@ -486,16 +512,17 @@ def _read(
                 settings=Settings(),
             )
         case "evaluateTable":
-            try:
-                payload = EvaluateTableIn.model_validate(params)
-            except ValidationError as exc:
-                # FastAPI's refusal of a body it cannot read: pydantic's errors.
-                detail = exc.errors(
-                    include_url=False, include_context=False, include_input=False
-                )
-                raise HTTPException(status_code=422, detail=detail) from exc
             return table_routes.evaluate_table(
-                payload,
+                _payload(EvaluateTableIn, params),
+                project_id="p",
+                session=session,
+                db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
+                runner=None,
+                settings=Settings(),
+            )
+        case "previewTableJson":
+            return table_routes.json_preview(
+                _payload(EvaluateTableIn, params),
                 project_id="p",
                 session=session,
                 db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
@@ -503,6 +530,118 @@ def _read(
                 settings=Settings(),
             )
     raise AssertionError(f"unknown read {method!r}")
+
+
+def export_step(case: str, method: str, date: str, **body: Any) -> dict[str, Any]:
+    """An ``export`` step named ``case``: ``exportTable``, ``runExporter`` or
+    ``runExporterDraft`` with its body, on the UTC day ``date``
+    (``YYYYMMDD``)."""
+    return {"do": "export", "case": case, "method": method, "body": body, "date": date}
+
+
+def _clock(date: str) -> type[datetime]:
+    """``datetime`` whose ``now`` is ``date`` at 00:00 UTC."""
+    moment = datetime.strptime(date, "%Y%m%d").replace(tzinfo=UTC)
+
+    class _Fixed(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            return moment
+
+    return _Fixed
+
+
+def _grid(blob: bytes) -> dict[str, Any]:
+    """A one-sheet workbook as openpyxl reads it: every cell's value and type,
+    the column widths it sets, the frozen pane and the autofilter range."""
+    workbook = load_workbook(io.BytesIO(blob))
+    (sheet,) = workbook.worksheets
+    widths: dict[int, float] = {}
+    for dim in sheet.column_dimensions.values():
+        if dim.customWidth:
+            assert dim.min is not None and dim.max is not None
+            for index in range(dim.min, dim.max + 1):
+                widths[index] = dim.width
+    return {
+        "title": sheet.title,
+        "rows": [
+            [{"v": cell.value, "t": cell.data_type} for cell in row]
+            for row in sheet.iter_rows()
+        ],
+        "widths": {get_column_letter(i): widths[i] for i in sorted(widths)},
+        "pane": sheet.freeze_panes,
+        "autofilter": sheet.auto_filter.ref,
+    }
+
+
+def _file(path: str, blob: bytes) -> dict[str, Any]:
+    if path.endswith(".xlsx"):
+        return {"xlsx": _grid(blob)}
+    return {"text": blob.decode("utf-8")}
+
+
+def _shipped(response: Response) -> dict[str, Any]:
+    """What an export answers: its file name and type, whether it is
+    truncated, and the file; a zip as its members in order."""
+    assert type(response) is Response and response.status_code == 200, response
+    disposition = response.headers["content-disposition"]
+    prefix = 'attachment; filename="'
+    assert disposition.startswith(prefix) and disposition.endswith('"'), disposition
+    filename = disposition[len(prefix) : -1]
+    content_type = response.headers["content-type"]
+    blob = bytes(response.body)
+    if content_type == "application/zip":
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            file: dict[str, Any] = {
+                "zip": [
+                    {"path": info.filename, **_file(info.filename, archive.read(info))}
+                    for info in archive.infolist()
+                ]
+            }
+    else:
+        file = _file(filename, blob)
+    return {
+        "status": response.status_code,
+        "filename": filename,
+        "content_type": content_type,
+        "truncated": response.headers.get("x-table-truncated") == "true",
+        "file": file,
+    }
+
+
+_EXPORT_BODY = {
+    "exportTable": {"definition", "artifact_id", "format"},
+    "runExporter": {"artifact_id"},
+    "runExporterDraft": {"definition", "name"},
+}
+
+
+def _export(session: Session, artifacts: Artifacts, step: dict[str, Any]) -> Any:
+    """The export route behind the step's method, called with every argument,
+    while ``table_export_engine`` reads the step's date off its clock."""
+    method, body = step["method"], step["body"]
+    assert set(body) <= _EXPORT_BODY[method], (method, sorted(body))
+    db: Any = _ArtifactDb(artifacts)
+    with mock.patch.object(table_export_engine, "datetime", _clock(step["date"])):
+        if method == "exportTable":
+            response = table_routes.export_table(
+                _payload(ExportTableIn, body),
+                project_id="p",
+                session=session,
+                db=db,
+                runner=None,
+                settings=Settings(),
+            )
+        else:
+            response = export_routes.run_export(
+                _payload(RunExportIn, body),
+                project_id="p",
+                session=session,
+                db=db,
+                runner=None,
+                settings=Settings(),
+            )
+    return _shipped(response)
 
 
 def _outcome(model: Model, res: _BatchResult) -> dict[str, Any]:
@@ -725,6 +864,11 @@ class Recorder:
                 )
                 body = _read(session, self._artifacts, step["method"], step["params"])
                 return body.model_dump(mode="json")
+            case "export":
+                session = Session(
+                    metamodel=self.metamodel, model=model, views=self._views
+                )
+                return _export(session, self._artifacts, step)
             case "validate":
                 scope = step["scope"]
                 ids = (

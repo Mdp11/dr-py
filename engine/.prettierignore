@@ -4,3 +4,4 @@ package-lock.json
 /src/value/digit-tables.ts
 /src/value/regex-tables.ts
 /src/value/casefold-tables.ts
+/src/export/xlsx-widths.ts

@@ -141,7 +141,11 @@ def build_workbook(
                 if col == row_number_col:
                     ws.write_number(r, col, r, cell_fmt)
                 else:
-                    ws.write(r, col, cell_text(model, next(cells)), cell_fmt)
+                    value = cell_text(model, next(cells))
+                    # xlsx has no cell type for these; CSV writes the same text
+                    if isinstance(value, list | dict):
+                        value = str(value)
+                    ws.write(r, col, value, cell_fmt)
 
         if headers:
             ws.autofilter(0, 0, r, len(headers) - 1)

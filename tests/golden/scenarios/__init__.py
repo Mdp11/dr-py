@@ -1,6 +1,7 @@
 """Importing this package registers every scenario."""
 
 from . import (  # noqa: F401
+    export_bytes,
     float_repr,
     frozen_groups,
     json_dumps,

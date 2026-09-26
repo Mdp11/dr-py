@@ -13,7 +13,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import casefold_tables, coerce_tables, lower_tables, regex_tables
+from . import (
+    casefold_tables,
+    coerce_tables,
+    lower_tables,
+    regex_tables,
+    xlsx_widths,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = ROOT / "engine" / "fixtures" / "golden"
@@ -23,6 +29,7 @@ GENERATED: dict[Path, Callable[[], str]] = {
     Path("engine/src/value/lower-tables.ts"): lower_tables.render,
     Path("engine/src/value/digit-tables.ts"): coerce_tables.render,
     Path("engine/src/value/regex-tables.ts"): regex_tables.render,
+    Path("engine/src/export/xlsx-widths.ts"): xlsx_widths.render,
 }
 
 Scenario = Callable[[], Any]
@@ -59,6 +66,7 @@ def write(directory: Path = FIXTURE_DIR) -> None:
     for name, text in files.items():
         (directory / name).write_text(text, encoding="utf-8")
     for rel, make in GENERATED.items():
+        (ROOT / rel).parent.mkdir(parents=True, exist_ok=True)
         (ROOT / rel).write_text(make(), encoding="utf-8")
 
 
