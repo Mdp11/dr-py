@@ -41,6 +41,10 @@ measured in Node and Chromium and reported to the owner before anything is optim
   (string, number, boolean, blank) — not "everything else as strings" as the program spec says;
   the oracle wins. The row-number column is `write_number`. `docProps/core.xml` carries the
   wall clock (`dcterms:created`), so the server's own xlsx is not byte-stable.
+- **Bug (found while planning):** a list or dict value reaches `ws.write` raw, and xlsxwriter
+  raises `TypeError`, so an xlsx export of a table with a multi-valued property column (smart-city's
+  `tags`) answers 500. Fixed on both sides: the value is written as its `str()`, the text CSV
+  already writes.
 - **Zip:** stdlib `zipfile`, DEFLATE level 6, entries dated 1980-01-01, in order (manifest
   first, entries in definition order, partitions in row order). Its bytes depend on zlib and
   the host OS byte, so zips compare as entry lists.
