@@ -61,6 +61,7 @@ from ..table_export_engine import (
     ExportPending,
     TransformUnavailableError,
     build_zip,
+    content_disposition,
     export_context_vars,
     open_transform_host,
     render_json_sample,
@@ -553,7 +554,7 @@ def _execute_export(
             or sanitize_stem(run_name)
             or "export"
         )
-        resp_headers = {"Content-Disposition": f'attachment; filename="{zip_stem}.zip"'}
+        resp_headers = {"Content-Disposition": content_disposition(f"{zip_stem}.zip")}
         if truncated:
             resp_headers["X-Table-Truncated"] = "true"
         if degraded:
@@ -574,7 +575,9 @@ def _execute_export(
                 content=blob,
                 media_type=MEDIA_TYPES.get(ext, "application/octet-stream"),
                 headers={
-                    "Content-Disposition": f'attachment; filename="{member.rpartition("/")[2]}"',
+                    "Content-Disposition": content_disposition(
+                        member.rpartition("/")[2]
+                    ),
                     **{
                         k: v
                         for k, v in resp_headers.items()

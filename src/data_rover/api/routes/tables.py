@@ -81,6 +81,7 @@ from ..table_export_engine import (
     ExportPending,
     TransformUnavailableError,
     build_zip,
+    content_disposition,
     export_context_vars,
     open_transform_host,
     run_table_export,
@@ -629,7 +630,7 @@ def export_table(
             media_type = MEDIA_TYPES.get(
                 filename.rpartition(".")[2], "application/octet-stream"
             )
-        resp_headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        resp_headers = {"Content-Disposition": content_disposition(filename)}
         if result.truncated:
             resp_headers["X-Table-Truncated"] = "true"
         if result.degraded:

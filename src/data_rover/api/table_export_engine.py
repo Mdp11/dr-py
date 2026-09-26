@@ -21,6 +21,7 @@ from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import quote
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
@@ -484,6 +485,19 @@ MEDIA_TYPES: dict[str, str] = {
     "csv": "text/csv; charset=utf-8",
     "jsonl": "application/x-ndjson",
 }
+
+
+def content_disposition(filename: str) -> str:
+    """The attachment header for `filename`. HTTP headers carry Latin-1 at
+    most, so a name outside ASCII travels as RFC 5987 `filename*`, beside a
+    `filename` whose non-ASCII code points are `_`."""
+    if filename.isascii():
+        return f'attachment; filename="{filename}"'
+    fallback = "".join(ch if ch.isascii() else "_" for ch in filename)
+    return (
+        f'attachment; filename="{fallback}"; '
+        f"filename*=UTF-8''{quote(filename, safe='')}"
+    )
 
 
 def build_zip(files: list[tuple[str, bytes]]) -> bytes:

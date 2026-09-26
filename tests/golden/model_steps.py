@@ -55,6 +55,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
+from urllib.parse import unquote
 
 from fastapi import HTTPException, Response
 from openpyxl import load_workbook
@@ -581,13 +582,15 @@ def _file(path: str, blob: bytes) -> dict[str, Any]:
 
 
 def _shipped(response: Response) -> dict[str, Any]:
-    """What an export answers: its file name and type, whether it is
-    truncated, and the file; a zip as its members in order."""
+    """What an export answers: its file name (``filename*`` decoded when
+    sent) and type, whether it is truncated, and the file; a zip as its
+    members in order."""
     assert type(response) is Response and response.status_code == 200, response
     disposition = response.headers["content-disposition"]
+    head, star, encoded = disposition.partition("; filename*=UTF-8''")
     prefix = 'attachment; filename="'
-    assert disposition.startswith(prefix) and disposition.endswith('"'), disposition
-    filename = disposition[len(prefix) : -1]
+    assert head.startswith(prefix) and head.endswith('"'), disposition
+    filename = unquote(encoded, errors="strict") if star else head[len(prefix) : -1]
     content_type = response.headers["content-type"]
     blob = bytes(response.body)
     if content_type == "application/zip":

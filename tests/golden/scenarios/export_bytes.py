@@ -147,10 +147,10 @@ _EVERYTHING = _path(_scope())
 
 _TRANSFORM_CODE = {"code": "def transform(doc):\n    return doc\n"}
 
-#: a Content-Disposition header carries Latin-1 only, so the table's name does;
-#: its 31st code point is a quote the sheet title strips
+#: a sheet title's forbidden characters; its 31st code point is a quote the
+#: title strips
 _LATIN_TITLE = "a[b]:c*d?e/f\\g'" + "é" * 2 + "x" * 13 + "'" + "y" * 24
-#: the same through an exporter entry, which may be named in any script
+#: the same past Latin-1 and the Basic Multilingual Plane
 _ASTRAL_TITLE = "a[b]:c*d?e/f\\g'𝒜日" + "x" * 13 + "'" + "y" * 24
 
 
@@ -700,8 +700,7 @@ def _xlsx() -> list[dict[str, Any]]:
         ),
         _export("xlsx_title", "xlsx", artifact_id=_LATIN_TITLE),
         _export("xlsx_title_blank", "xlsx", artifact_id="'''"),
-        # a name outside Latin-1 cannot go in the Content-Disposition header
-        _export("xlsx_title_not_latin1", "xlsx", artifact_id="日本"),
+        _export("xlsx_title_non_latin1", "xlsx", artifact_id="日本"),
         _export("xlsx_empty", "xlsx", artifact_id="t_empty"),
         _export("xlsx_split", "xlsx", artifact_id="t_people"),
         _export("xlsx_columns", "xlsx", definition=_COLUMNS),
@@ -780,6 +779,15 @@ def _runs() -> list[dict[str, Any]]:
             "run_zip_filename_blank",
             _exporter(_entry("t_blocks", format="csv"), filename="   "),
             name="///",
+        ),
+        _draft(
+            "run_zip_filename_non_ascii",
+            _exporter(_entry("t_blocks", format="csv")),
+            name="日本 𝒜é",
+        ),
+        _draft(
+            "run_bare_non_ascii",
+            _exporter(_entry("t_blocks", format="csv", name="日本 é"), mode="bare"),
         ),
         _draft(
             "run_zip_filename_unknown",

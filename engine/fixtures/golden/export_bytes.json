@@ -11379,18 +11379,98 @@
     },
     {
       "do": "export",
-      "case": "xlsx_title_not_latin1",
+      "case": "xlsx_title_non_latin1",
       "method": "exportTable",
       "body": {
         "format": "xlsx",
         "artifact_id": "日本"
       },
       "date": "20240229",
-      "result": null,
-      "error": {
-        "status": 422,
-        "detail": "'latin-1' codec can't encode characters in position 22-23: ordinal not in range(256)"
+      "result": {
+        "status": 200,
+        "filename": "日本.xlsx",
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "truncated": false,
+        "file": {
+          "xlsx": {
+            "title": "日本",
+            "rows": [
+              [
+                {
+                  "v": "element",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "alpha",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "Beta",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "gamma",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "Delta",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "epsilon",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "Straße",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "zeta",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "Eta",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "theta",
+                  "t": "s"
+                }
+              ],
+              [
+                {
+                  "v": "iota",
+                  "t": "s"
+                }
+              ]
+            ],
+            "widths": {
+              "A": 10.85546875
+            },
+            "pane": "A2",
+            "autofilter": "A1:A11"
+          }
+        }
       },
+      "error": null,
       "unchanged": true
     },
     {
@@ -15276,6 +15356,81 @@
               "text": "Block,S,Tags,Links\r\nzeta,,solo-tag,\r\ntheta,,,Eta\r\nStraße,ß,\"['ß', 'SS']\",\r\niota,,\"['ﬁ', 'Ꭰ']\",\r\ngamma,C,['x'],Straße; Delta\r\nEta,b,\"[1, 1.0, True, '1']\",alpha; Beta\r\nepsilon,,\"['single', 'x']\",alpha\r\nDelta,a,\"['z', 'x', 'x']\",epsilon; Strasze\r\nBeta,,[],gamma; STRASSE\r\nalpha,b,\"['x', 'y']\",Straße; Beta\r\n"
             }
           ]
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "run_zip_filename_non_ascii",
+      "method": "runExporterDraft",
+      "body": {
+        "definition": {
+          "schema_version": 1,
+          "output": {},
+          "entries": [
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "csv"
+            }
+          ]
+        },
+        "name": "日本 𝒜é"
+      },
+      "date": "20240229",
+      "result": {
+        "status": 200,
+        "filename": "日本 𝒜é.zip",
+        "content_type": "application/zip",
+        "truncated": false,
+        "file": {
+          "zip": [
+            {
+              "path": "manifest.json",
+              "text": "{\n  \"manifest_version\": 1,\n  \"project_id\": \"p\",\n  \"artifact_id\": null,\n  \"artifact_name\": \"日本 𝒜é\",\n  \"model_rev\": 0,\n  \"truncated\": false,\n  \"degraded\": false,\n  \"entries\": [\n    {\n      \"name\": \"t_blocks\",\n      \"table_ref\": \"t_blocks\",\n      \"table_name\": \"t_blocks\",\n      \"format\": \"csv\",\n      \"truncated\": false,\n      \"degraded\": false,\n      \"files\": [\n        \"t_blocks.csv\"\n      ],\n      \"transform\": null\n    }\n  ]\n}"
+            },
+            {
+              "path": "t_blocks.csv",
+              "text": "Block,S,Tags,Links\r\nzeta,,solo-tag,\r\ntheta,,,Eta\r\nStraße,ß,\"['ß', 'SS']\",\r\niota,,\"['ﬁ', 'Ꭰ']\",\r\ngamma,C,['x'],Straße; Delta\r\nEta,b,\"[1, 1.0, True, '1']\",alpha; Beta\r\nepsilon,,\"['single', 'x']\",alpha\r\nDelta,a,\"['z', 'x', 'x']\",epsilon; Strasze\r\nBeta,,[],gamma; STRASSE\r\nalpha,b,\"['x', 'y']\",Straße; Beta\r\n"
+            }
+          ]
+        }
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "run_bare_non_ascii",
+      "method": "runExporterDraft",
+      "body": {
+        "definition": {
+          "schema_version": 1,
+          "output": {
+            "mode": "bare"
+          },
+          "entries": [
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "csv",
+              "name": "日本 é"
+            }
+          ]
+        }
+      },
+      "date": "20240229",
+      "result": {
+        "status": 200,
+        "filename": "日本 é.csv",
+        "content_type": "text/csv; charset=utf-8",
+        "truncated": false,
+        "file": {
+          "text": "Block,S,Tags,Links\r\nzeta,,solo-tag,\r\ntheta,,,Eta\r\nStraße,ß,\"['ß', 'SS']\",\r\niota,,\"['ﬁ', 'Ꭰ']\",\r\ngamma,C,['x'],Straße; Delta\r\nEta,b,\"[1, 1.0, True, '1']\",alpha; Beta\r\nepsilon,,\"['single', 'x']\",alpha\r\nDelta,a,\"['z', 'x', 'x']\",epsilon; Strasze\r\nBeta,,[],gamma; STRASSE\r\nalpha,b,\"['x', 'y']\",Straße; Beta\r\n"
         }
       },
       "error": null,
