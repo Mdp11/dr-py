@@ -10,7 +10,7 @@ import { PropertyValue } from '../navigation/evaluate.ts';
 import type { Binding, RowKey } from '../table/rows.ts';
 import { pyStr } from '../value/repr.ts';
 import { bucketed, slotKey } from './json.ts';
-import { sanitizeStem, substitute } from './naming.ts';
+import { sanitizeStem, substitute, TakenNames } from './naming.ts';
 
 const SPLIT_TOKEN = '${name}';
 
@@ -69,15 +69,11 @@ export function renderFilenames(
 ): string[] {
 	const message = validateTemplate(template);
 	if (message !== null) throw new Error(message);
-	const taken = new Set<string>();
+	const taken = new TakenNames();
 	const out: string[] = [];
 	for (const [fallback, name] of items) {
 		const rendered = substitute(template, { ...extra, name, id: fallback });
-		const base = sanitizeStem(rendered) || sanitizeStem(fallback) || 'element';
-		let candidate = base;
-		for (let n = 2; taken.has(candidate); n++) candidate = `${base}_${n}`;
-		taken.add(candidate);
-		out.push(candidate);
+		out.push(taken.claim(sanitizeStem(rendered) || sanitizeStem(fallback) || 'element'));
 	}
 	return out;
 }

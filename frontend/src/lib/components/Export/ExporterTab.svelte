@@ -8,7 +8,11 @@
 	import * as artifactsApi from '$lib/api/artifacts';
 	import type { Fallback } from '$lib/api/engine-route';
 	import { runExporter, runExporterDraft } from '$lib/api/exports';
-	import { retryAndDownload, type ExportProgress } from '$lib/util/export-download';
+	import {
+		EXPORT_FALLBACK_NOTE,
+		retryAndDownload,
+		type ExportProgress
+	} from '$lib/util/export-download';
 	import {
 		addExporterEntry,
 		artifactHeaderById,
@@ -197,11 +201,6 @@
 	// remaining gate is emptiness: the run 422s "exporter has no entries", so
 	// disable with a hint instead.
 	const exportDisabled = $derived(!draft || draft.entries.length === 0);
-	// A run the engine refused is the server's file, of committed state.
-	const EXPORT_FALLBACK_NOTE = {
-		script: 'Exported from committed state: reaches a script',
-		pattern: 'Exported from committed state: a search pattern needs the server'
-	} as const;
 
 	async function runExport(): Promise<void> {
 		const d = draft;
@@ -266,7 +265,7 @@
 					Export
 				{/if}
 			</button>
-			{#if exportStaged}
+			{#if exportStaged && !exportFallback}
 				<span
 					data-testid="export-staged-note"
 					class="text-[11px] text-muted-foreground/70"

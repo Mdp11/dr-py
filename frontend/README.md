@@ -446,9 +446,11 @@ engine store":
      ("Includes staged changes") shows beside the button while anything is
      staged (`exportsIncludeStaged()`, `state/replica.svelte.ts`). A run the
      engine sent to the server (it reaches a script) shows
-     `export-fallback` ("Exported from committed state: reaches a script")
-     until the next run lands unmarked: `retryAndDownload` resolves to the
-     result it downloaded.
+     `export-fallback` ("Exported from committed state: reaches a script";
+     the texts are `EXPORT_FALLBACK_NOTE` in `util/export-download.ts`,
+     shared with `TableView`) until the next run lands unmarked, and the
+     staged note hides meanwhile: `retryAndDownload` resolves to the result
+     it downloaded.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
      refuse the open, it renders that tab **unsaveable and read-only** behind
@@ -2485,7 +2487,8 @@ The loop (`retryAndDownload`) resolves to the last result, which
 unmarked export lands. Beside the Export ▾ trigger, `export-staged-note`
 ("Includes staged changes") shows while `exportsIncludeStaged()` — the
 `exports` surface on the engine and a staged model edit or staged artifact in
-the replica; the server's exports read committed state only.
+the replica — and no `export-fallback` shows; the server's exports read
+committed state only.
 
 Everything the dialog edits is an **export override**: it changes the file and
 never the grid. Include/exclude, output order and the row-number entry are

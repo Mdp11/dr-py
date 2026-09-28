@@ -24,6 +24,7 @@ import {
 	NAME_TOKENS,
 	sanitizeStem,
 	substitute,
+	TakenNames,
 	validateTokens
 } from './naming.ts';
 import {
@@ -77,11 +78,8 @@ function rpartition(text: string, sep: string): [string, string, string] {
  * `stem`, or `stem_2`, `stem_3`, … — the first whose `prefix + stem` no
  * member so far has taken, extension aside — taken in turn.
  */
-function dedupePath(prefix: string, stem: string, taken: Set<string>): string {
-	let candidate = stem;
-	for (let n = 2; taken.has(prefix + candidate); n++) candidate = `${stem}_${n}`;
-	taken.add(prefix + candidate);
-	return candidate;
+function dedupePath(prefix: string, stem: string, taken: TakenNames): string {
+	return taken.claim(prefix + stem).slice(prefix.length);
 }
 
 /**
@@ -212,7 +210,7 @@ function* assembled(
 ): Steps<ExportFileResult> {
 	const wantManifest = def.output.manifest && def.output.mode === 'zip';
 	const files: ZipFile[] = [];
-	const taken = new Set<string>();
+	const taken = new TakenNames();
 	if (wantManifest) taken.add(rpartition(MANIFEST_NAME, '.')[0]);
 	const manifestEntries: ManifestEntry[] = [];
 	let truncated = false;

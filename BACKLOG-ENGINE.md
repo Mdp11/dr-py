@@ -638,19 +638,24 @@ are not compared (the shadow compares an xlsx by name and type alone), and the p
 hold no such cell. Two-sided bug: the owner decides whether the server writes plain strings, after
 which a fixture holds one cell of each kind.
 
-### K-77 · The engine's zip writer has no zip64 · `open` · *2026-09-28*
-`engine/src/export/zip.ts` writes the classic layout, so an archive of more than 65,535 members
-or 4 GiB overflows its 16- and 32-bit fields; Python's `zipfile` writes zip64 records there. A
-single split export cannot reach it (at most 50,000 partitions), but an exporter run with
-several split entries can. Fix direction: write the zip64 end-of-central-directory records and
-extra fields past the limits, and fixture a run over 65,535 members, or refuse the run with an
-error beyond them.
+### K-77 · The engine's zip writer refuses what needs zip64 · `open` · *2026-09-28*
+`engine/src/export/zip.ts` writes the classic layout only, so `zipSteps` refuses with 422 an
+archive of more than 65,535 members (`export too large for a zip: N files (at most 65,535)`,
+before its first step) or one where a member, the members' local part or the central directory
+passes `0xFFFFFFFE` bytes (`export too large for a zip: over 4 GiB`, once deflated), where
+Python's `zipfile` writes zip64 records and the server answers the file. A single split export
+cannot reach the count (at most 50,000 partitions), but an exporter run with several split
+entries can. Fix direction: write the zip64 end-of-central-directory records and extra fields
+past the limits, and fixture a run over 65,535 members.
 
-### K-78 · A 50,000-partition split export spends about 130 ms in one step · `open` · perf · *2026-09-28*
-`renderFilenames` (`engine/src/export/route.ts`) names and deduplicates every partition of a
-split export in one step: about 130 ms at 50,000 partitions, the longest step of the split zip
-(143–155 ms in all). Fix direction: slice the naming, as
-the row rendering and the zip writing are.
+### K-78 · A 50,000-partition split export spends about 145 ms in one step · `open` · perf · *2026-09-28*
+`exportFilesSteps`'s split branch (`engine/src/export/route.ts`) partitions the rows
+(`splitPartitions`), labels every partition (`partitionLabel`) and names them
+(`renderFilenames`, `engine/src/export/split.ts`) in one step: the split zip's longest step at
+M, 146 ms (median of 142–176) with 50,000 uniquely named partitions. The dedupe inside is linear
+(`TakenNames`); `renderFilenames` alone takes about 70–80 ms at 50,000 partitions, unique or
+all of one name. Fix direction: slice the partitioning and naming, as the row rendering and
+the zip writing are.
 
 ### K-79 · One engine service test is flaky under load · `open` · *2026-09-28*
 `engine/test/service/issues.test.ts` "restarts a digest check in flight…" timed out at its 5 s

@@ -1619,6 +1619,51 @@ describe('TableView export format menu', () => {
 			h.exportsStaged = false;
 		}
 	});
+
+	it('says why a pattern export came from committed state', async () => {
+		vi.mocked(downloadTable).mockResolvedValueOnce({
+			kind: 'ready',
+			blob: new Blob(['x']),
+			filename: 't.xlsx',
+			fallback: 'pattern'
+		});
+		const c = render('tbl:draft:1');
+		try {
+			await chooseFormat('xlsx');
+			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
+			await waitFor(() => fallbackNote() !== null);
+			expect(fallbackNote()!.textContent?.trim()).toBe(
+				'Exported from committed state: a search pattern needs the server'
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('drops the staged note while the last export came from committed state', async () => {
+		const note = () => document.querySelector('[data-testid="export-staged-note"]');
+		const blob = new Blob(['x']);
+		vi.mocked(downloadTable)
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx', fallback: 'script' })
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx' });
+		h.exportsStaged = true;
+		const c = render('tbl:draft:1');
+		try {
+			expect(note()).not.toBeNull();
+			await chooseFormat('xlsx');
+			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
+			await waitFor(() => fallbackNote() !== null);
+			expect(note()).toBeNull();
+
+			await chooseFormat('xlsx');
+			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
+			await waitFor(() => fallbackNote() === null);
+			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
+		} finally {
+			unmount(c);
+			h.exportsStaged = false;
+		}
+	});
 });
 
 // The JSON export options (with a live preview) live in the export dialog,

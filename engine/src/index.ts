@@ -57,6 +57,7 @@ export {
 	sanitizeStem,
 	SPLIT_TOKENS,
 	substitute,
+	TakenNames,
 	validateTokens
 } from './export/naming.ts';
 export {

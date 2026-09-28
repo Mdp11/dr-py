@@ -5,8 +5,9 @@
  * (`runExport` in `Export/ExporterTab.svelte`). THE STATUS CODE
  * IS THE RETRY SIGNAL, never the body's `state` — see either caller's
  * docstring for the full rationale; this module only owns the polling shape,
- * not why it exists.
+ * not why it exists. Also the fallback note both callers' chrome shows.
  */
+import type { Fallback } from '$lib/api/engine-route';
 import type { ExportResult } from '$lib/api/tables';
 
 /** Delay between two export retries while the backend's script-cache sweep is
@@ -15,6 +16,12 @@ export const EXPORT_RETRY_MS = 1_000;
 /** Bound on export retries so a stuck sweep surfaces an error instead of
  * spinning silently forever (~2 minutes at EXPORT_RETRY_MS). */
 export const EXPORT_MAX_ATTEMPTS = 120;
+
+/** Why an export the engine refused is the server's file, of committed state. */
+export const EXPORT_FALLBACK_NOTE = {
+	script: 'Exported from committed state: reaches a script',
+	pattern: 'Exported from committed state: a search pattern needs the server'
+} as const satisfies Record<Exclude<Fallback, 'rules'>, string>;
 
 /** Progress of an export that is waiting on the background script sweep. */
 export interface ExportProgress {

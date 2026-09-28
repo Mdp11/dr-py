@@ -749,6 +749,57 @@ describe('ExporterTab', () => {
 		}
 	});
 
+	it('drops the staged note while the last run came from committed state', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		const note = () => document.querySelector('[data-testid="export-staged-note"]');
+		const fallbackNote = () => document.querySelector('[data-testid="export-fallback"]');
+		installEngineSeam({
+			side: (surface) => (surface === 'exports' ? 'engine' : 'server'),
+			call: () => Promise.reject(new Error('not called')),
+			gone: () => false
+		});
+		try {
+			render('exp:art-1');
+			await vi.waitFor(() =>
+				expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+			);
+			stageArtifactCreate('navigation', 'Staged', { kind: 'path' }, null);
+			flushSync();
+			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
+
+			const blob = new Blob(['x'], { type: 'application/zip' });
+			vi.spyOn(exportsApi, 'runExporter')
+				.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip', fallback: 'pattern' })
+				.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip' });
+			vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+			vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+			vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+			const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
+
+			runBtn.click();
+			await vi.waitFor(() => {
+				flushSync();
+				expect(fallbackNote()?.textContent?.trim()).toBe(
+					'Exported from committed state: a search pattern needs the server'
+				);
+			});
+			expect(note()).toBeNull();
+
+			await vi.waitFor(() => {
+				flushSync();
+				expect(runBtn.disabled).toBe(false);
+			});
+			runBtn.click();
+			await vi.waitFor(() => {
+				flushSync();
+				expect(fallbackNote()).toBeNull();
+			});
+			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
+		} finally {
+			installEngineSeam(null);
+		}
+	});
+
 	it('disables Export only while the draft has no entries', async () => {
 		getArtifactSpy.mockImplementation((id: string) =>
 			id === 'art-1' ? Promise.resolve(EXPORT_ARTIFACT) : Promise.resolve(TABLE_ARTIFACT)

@@ -40,6 +40,7 @@
 	} from '$lib/state';
 	import type { Fallback } from '$lib/api/engine-route';
 	import type { ExportFormat } from '$lib/api/types';
+	import { EXPORT_FALLBACK_NOTE } from '$lib/util/export-download';
 	import {
 		AlertTriangle,
 		ArrowDownUp,
@@ -105,11 +106,6 @@
 	const FALLBACK_NOTE = {
 		script: 'Reads committed state: this table runs a script',
 		pattern: 'Reads committed state: a search pattern needs the server'
-	} as const;
-	// An export the engine refused is the server's file, of committed state.
-	const EXPORT_FALLBACK_NOTE = {
-		script: 'Exported from committed state: reaches a script',
-		pattern: 'Exported from committed state: a search pattern needs the server'
 	} as const;
 	// Progress of the background script-value sweep: `computing` means some
 	// cells came back `pending` and the store has a re-poll scheduled (rows are
@@ -705,7 +701,7 @@
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
-				{#if exportStaged}
+				{#if exportStaged && !exportFallback}
 					<span
 						data-testid="export-staged-note"
 						class="text-[11px] text-muted-foreground/70"

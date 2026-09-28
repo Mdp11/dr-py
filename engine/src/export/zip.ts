@@ -17,6 +17,7 @@
  */
 import { Deflate, deflateSync } from 'fflate';
 import { Meter } from '../navigation/evaluate.ts';
+import { ReadError } from '../read/errors.ts';
 import { drain, type Steps } from '../steps/steps.ts';
 import { utf8Encoder } from './utf8.ts';
 
@@ -52,6 +53,10 @@ const DOS_DATE = (1 << 5) | 1;
 const UTF8_FLAG = 0x800;
 const DEFLATED = 8;
 const VERSION = 20;
+/** The most members the end record's 16-bit counts hold: past it the server writes zip64. */
+const MAX_MEMBERS = 0xffff;
+/** The most a 32-bit size or offset holds short of `0xFFFFFFFF`, zip64's marker. */
+const MAX_BYTES = 0xfffffffe;
 
 let crcTable: Int32Array | undefined;
 
@@ -213,19 +218,33 @@ function writeCommon(view: DataView, at: number, member: Deflated): void {
 	view.setUint16(at + 20, member.name.length, true);
 }
 
+/** The refusal of an archive past what the classic layout's fields hold. */
+function tooLarge(detail: string): ReadError {
+	return new ReadError(422, `export too large for a zip: ${detail}`);
+}
+
 /**
  * `members` zipped in the given order, a step every so many bytes deflated
- * or copied. Nothing is returned before the last step.
+ * or copied. Nothing is returned before the last step. With no zip64, more
+ * than 65,535 members refuse before the first step, and a member, the
+ * members' local part or the central directory past `MAX_BYTES` refuses
+ * once it is deflated.
  */
 export function* zipSteps(members: readonly ZipMember[], meter: Meter): Steps<Uint8Array> {
+	if (members.length > MAX_MEMBERS) {
+		throw tooLarge(`${members.length} files (at most 65,535)`);
+	}
 	const deflated: Deflated[] = [];
-	for (const member of members) deflated.push(yield* deflateMember(member, meter));
-
 	let localBytes = 0;
 	let centralBytes = 0;
-	for (const member of deflated) {
-		localBytes += LOCAL_HEADER + member.name.length + member.compressed;
-		centralBytes += CENTRAL_HEADER + member.name.length;
+	for (const member of members) {
+		const next = yield* deflateMember(member, meter);
+		localBytes += LOCAL_HEADER + next.name.length + next.compressed;
+		centralBytes += CENTRAL_HEADER + next.name.length;
+		if (next.size > MAX_BYTES || localBytes > MAX_BYTES || centralBytes > MAX_BYTES) {
+			throw tooLarge('over 4 GiB');
+		}
+		deflated.push(next);
 	}
 	const out = new Uint8Array(localBytes + centralBytes + END_RECORD);
 	const view = new DataView(out.buffer);

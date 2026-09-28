@@ -80,6 +80,38 @@ export function sanitizeStem(name: string): string {
 	return cleaned;
 }
 
+/**
+ * Names taken so far, a new one deduplicated `_2`, `_3`, … against them: the
+ * first of `base`, `base_2`, `base_3`, … not yet taken. A base's search
+ * resumes at the suffix after the last one it claimed — names are only ever
+ * added, so every candidate it passed is still taken — which keeps many
+ * claims of one base linear while still stepping over a name taken
+ * literally (an earlier `x_2` when `x` comes twice).
+ */
+export class TakenNames {
+	private readonly names = new Set<string>();
+	/** Per base claimed: the suffix its next search starts at (`1` stands for the bare base). */
+	private readonly next = new Map<string, number>();
+
+	has(name: string): boolean {
+		return this.names.has(name);
+	}
+
+	add(name: string): void {
+		this.names.add(name);
+	}
+
+	/** `base`, or the first free `base_n`, taken. */
+	claim(base: string): string {
+		let n = this.next.get(base) ?? 1;
+		let candidate = n === 1 ? base : `${base}_${n}`;
+		while (this.names.has(candidate)) candidate = `${base}_${++n}`;
+		this.names.add(candidate);
+		this.next.set(base, n + 1);
+		return candidate;
+	}
+}
+
 /** A folder template's refusal: the core's `ValueError` from `folder_segments`. */
 export class FolderPathError extends Error {}
 

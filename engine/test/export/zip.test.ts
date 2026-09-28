@@ -1,7 +1,14 @@
 import { crc32, inflateRawSync } from 'node:zlib';
 import { unzipSync, zipSync, type Zippable } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { Meter, zipEntries, zipSteps, type ZipFile, type ZipMember } from '../../src/index.ts';
+import {
+	Meter,
+	ReadError,
+	zipEntries,
+	zipSteps,
+	type ZipFile,
+	type ZipMember
+} from '../../src/index.ts';
 import { counted, EveryUnit, NoEnd } from './meters.ts';
 
 const encoder = new TextEncoder();
@@ -256,5 +263,26 @@ describe('zipSteps', () => {
 		expect(counted(zipSteps([big], new NoEnd(0))).yields).toBe(0);
 		const small = Array.from({ length: 1000 }, (_, i) => file(`p${i}.json`, `{"i": ${i}}`));
 		expect(counted(zipSteps(small, new Meter(0))).yields).toBeGreaterThanOrEqual(1000 / 64);
+	});
+
+	it('refuses more than 65,535 members with 422 before its first step', () => {
+		const empty = Array.from({ length: 65_536 }, (_, i) => ({
+			path: `p${i}.json`,
+			bytes: new Uint8Array(0)
+		}));
+		const refusal = (() => {
+			try {
+				zipSteps(empty, new EveryUnit(0)).next();
+			} catch (error) {
+				return error;
+			}
+			return null;
+		})();
+		expect(refusal).toBeInstanceOf(ReadError);
+		expect(refusal).toMatchObject({
+			status: 422,
+			detail: 'export too large for a zip: 65536 files (at most 65,535)'
+		});
+		expect(zipSteps(empty.slice(1), new EveryUnit(0)).next().done).toBe(false);
 	});
 });

@@ -180,12 +180,16 @@ async function blobBytes(result: ExportResult): Promise<Uint8Array> {
 /** The UTC day, computed apart from `utcDate`. */
 const today = () => new Date().toISOString().slice(0, 10).replaceAll('-', '');
 
+/** Matches the day a call stamped when `before` was the day it started: that one, or today's. */
+const dayFrom = (before: string) => expect.stringMatching(new RegExp(`^(${before}|${today()})$`));
+
 describe('the exports surface on the engine', () => {
 	it('exportTable answers the engine’s parts as a Blob, with its name, type and truncated flag', async () => {
 		const project = fakeProject();
 		const { call, served } = await over(project, 'engine');
 		const definition = namesOf(typeOf(project));
 
+		const before = today();
 		const result = await exportTable({ definition: new Proxy(definition, {}), format: 'csv' });
 
 		expect(call).toHaveBeenCalledOnce();
@@ -193,7 +197,7 @@ describe('the exports surface on the engine', () => {
 		expect(method).toBe('exportTable');
 		expect(params).toEqual({
 			...(asSent({ definition, format: 'csv' }) as object),
-			date: today(),
+			date: dayFrom(before),
 			project: 'p'
 		});
 		const expected = direct(project, 'exportTable', params as ReadParams);
@@ -214,10 +218,16 @@ describe('the exports surface on the engine', () => {
 		const artifacts = saved(typeOf(project));
 		replica.sync.setArtifacts(artifacts);
 
+		const before = utcDate();
 		const result = await exportTable({ artifactId: 't1' });
 
 		const params = call.mock.calls[0]![1] as ReadParams;
-		expect(params).toEqual({ artifact_id: 't1', format: 'xlsx', date: utcDate(), project: 'p' });
+		expect(params).toEqual({
+			artifact_id: 't1',
+			format: 'xlsx',
+			date: dayFrom(before),
+			project: 'p'
+		});
 		const expected = direct(project, 'exportTable', params, artifacts);
 		expect(await blobBytes(result)).toEqual(bytesOf(expected.parts!));
 		expect(result).toMatchObject({ kind: 'ready', filename: 'People.xlsx', truncated: false });
@@ -231,16 +241,17 @@ describe('the exports surface on the engine', () => {
 		const artifacts = saved(typeOf(project));
 		replica.sync.setArtifacts(artifacts);
 
+		const before = today();
 		const saved1 = await runExporter('x1');
 		const draft = await runExporterDraft(exporter({ name: 'Draft' }), 'Drafted');
 
 		const [runParams, draftParams] = call.mock.calls.map(([, params]) => params as ReadParams);
 		expect(call.mock.calls.map(([method]) => method)).toEqual(['runExporter', 'runExporterDraft']);
-		expect(runParams).toEqual({ artifact_id: 'x1', date: today(), project: 'p' });
+		expect(runParams).toEqual({ artifact_id: 'x1', date: dayFrom(before), project: 'p' });
 		expect(draftParams).toEqual({
 			definition: asSent(exporter({ name: 'Draft' })),
 			name: 'Drafted',
-			date: today(),
+			date: dayFrom(before),
 			project: 'p'
 		});
 		const expectedRun = direct(project, 'runExporter', runParams!, artifacts);
