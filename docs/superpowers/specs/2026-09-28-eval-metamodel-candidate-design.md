@@ -19,8 +19,8 @@ reported to the owner before anything is optimized.
 
 - The structural half (`diff_metamodels`): it stays on the server, not frozen, not ported.
 - Capping or paging `now_failing` / `now_passing`: uncapped, as the server answers today.
-- Changing who may call what: lint stays owner-only, the rebind preview owner-gated, the diff
-  route viewer-accessible.
+- Changing who may call what: lint stays refused to viewers (editors pass), the rebind preview
+  owner-gated, the diff route viewer-accessible.
 - Plan 6's surfaces (`compare`, `download`, `views`).
 - Optimizing anything before the owner has seen the numbers.
 
@@ -72,14 +72,14 @@ reported to the owner before anything is optimized.
   `null` when `ok` is false. Errors, positions, status and access are unchanged.
 - **`POST /metamodel/structural-diff`** (new): the candidate body as `/metamodel/diff` reads it,
   422 on a bad candidate, answering `MetamodelStructuralDiff` only — `diff_metamodels` outside
-  the mutex, no session model touched. Owner-only, as lint. Engine mode calls it instead of
+  the mutex, no session model touched. Refused to viewers, as lint. Engine mode calls it instead of
   `/metamodel/diff`, so a preview costs the server no model sweep.
 - **`POST /metamodel/diff`** and the rebind preview in `commits.py`: unchanged, frozen, the
   `metamodel` surface's server path.
 
 ## 2. Engine
 
-### Structure — `engine/src/validation/structure.ts`
+### Structure — `engine/src/model/structure.ts`
 
 - `interface Structure { metamodel; parentsOf(el): readonly RelRec[]; groupOf(el): readonly
   ElementRec[] | null; keyOf(el): string }` — `groupOf` is `null` for an element alone in its
@@ -117,7 +117,7 @@ reported to the owner before anything is optimized.
 - **Before the first step:** `Metamodel.fromJSON(document)` (422 with its message);
   `FacetPatterns(candidate)` (501 `reaches an unsupported pattern` when unusable);
   `compileRuleSets(ruleSources(artifacts, 'working'), candidate)` (501 when unreadable, as
-  `live()`). Drifted rules land in `skipped`.
+  `live()`). A drifted rule is skipped whole, so its current issues land in `now_passing`.
 - **Steps:** build the `CandidateStructure`; validate the working copy's elements then
   relationships in state order, 512 ids a step, with the candidate `Validators` and rules;
   append each slice's global issues to per-validator buffers; at the end, entity issues then the
@@ -128,20 +128,23 @@ reported to the owner before anything is optimized.
   `now_failing` in candidate order, `now_passing` in store order, `unchanged_count` the shared
   distinct keys, the two counts raw lengths.
 - **Answer:** `{now_failing, now_passing, unchanged_count, current_error_count,
-  candidate_error_count, skipped}`, issues in `IssueOut` shape. Plain JSON, nothing transferred.
+  candidate_error_count}`, issues in `IssueOut` shape, as the route's model half. Plain JSON, nothing transferred.
 
 ### Dispatch (CT-4)
 
-- **`candidateIssues {metamodel}`**, `metamodel` the document as `open` takes it. A new method
-  kind: parse and compile at arrival; wait for the live store to be settled (409 not-ready while
-  unseeded, as issue reads); then submit a model-lane scan. `run()` re-reads `this.live()` on
+- **`candidateIssues {metamodel}`**, `metamodel` the document as `open` takes it. Parse at
+  arrival; wait for the live store's first sweep and for it to be settled (as `validateModel`
+  waits); then submit a model-lane scan that compiles the working rules under the candidate. A
+  scan that finds the store moved since its wait (a rules change) re-enters the wait instead of
+  answering. `run()` re-reads `this.live()` on
   every start, so a scan re-queued by a control-lane transition rebuilds from scratch; model-lane
   transitions queue behind it, so the working copy does not move mid-scan. `{cancel}` drops it.
 - **`previewCommit {…, rebind: {metamodel}}`**: the model half runs the candidate scan's
   validation (no diff) over the working copy, which already holds the staged model ops — the
   server's hoisted order, the rebind first. `structural_blockers` are the STRUCTURAL issues,
   `conformance_error_count` counts the CONFORMANCE ones, `issues` holds all, `would_block` is
-  false. Same refusals as `candidateIssues`.
+  false. The rules are the COMMITTED ones compiled under the candidate, as the server's
+  `candidate_pipeline` and the engine's `previewCommit` use. Same refusals as `candidateIssues`.
 
 ## 3. Frontend
 
@@ -186,7 +189,7 @@ reported to the owner before anything is optimized.
   for every element (parents, group, key); the sliced run equals an unsliced `validateScoped`;
   the refusals; a cancelled and a re-queued scan; the existing validation goldens unchanged.
 - **Python tests:** lint's `document` equals `GET /metamodel`'s body after a rebind to the same
-  blob; `structural-diff` equals `/metamodel/diff`'s `structural`; its 422 and its owner-only
+  blob; `structural-diff` equals `/metamodel/diff`'s `structural`; its 422 and its viewer
   refusal.
 - **Frontend tests** (in-process engine, MSW for the server): `diffMetamodel` in engine mode
   joins both halves; a 501 and a lint failure fall back; the staged-rebind local preview and
