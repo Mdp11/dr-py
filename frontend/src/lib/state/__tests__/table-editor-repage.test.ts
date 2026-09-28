@@ -182,7 +182,7 @@ async function stageRename(s: EngineStore, id: string, name: string): Promise<vo
 }
 
 describe('a staged edit re-pages the open tables', () => {
-	it('once, at least 300 ms after the change, showing the staged value', async () => {
+	it('once, only once its debounce timer fires, showing the staged value', async () => {
 		const { s, changes } = await start();
 		await open('tbl:draft:1');
 		const first = await idAt(0);
@@ -196,14 +196,19 @@ describe('a staged edit re-pages the open tables', () => {
 
 		await stageRename(s, first, 'staged once');
 
+		// The timer is armed (the change already landed) but has not fired: no
+		// re-page is asked yet — the actual proof the wait is debounced, not a
+		// timestamp comparison that a synchronous re-page would pass too.
+		expect(asked).toHaveLength(0);
+		await flushTablesRepage();
+		expect(asked).toHaveLength(1);
+		expect(asked[0]!.args).toMatchObject({ definition: PEOPLE, offset: 0, limit: 100 });
+
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged once'));
 		const moved = changes.slice(from).filter(({ event }) => event.staged_version > 0);
 		expect(moved.length).toBeGreaterThan(0);
-		expect(asked).toHaveLength(1);
-		// Debounced: the re-page never asks before the last move's timer fired.
-		expect(asked[0]!.at).toBeGreaterThanOrEqual(moved.at(-1)!.at);
-		expect(asked[0]!.args).toMatchObject({ definition: PEOPLE, offset: 0, limit: 100 });
-		await sleep(350);
+		// No later debounce sneaks in a second re-page.
+		await flushTablesRepage();
 		expect(asked).toHaveLength(1);
 		expect(getTableError('tbl:draft:1')).toBeUndefined();
 	});
@@ -219,7 +224,8 @@ describe('a staged edit re-pages the open tables', () => {
 		await stageRename(s, first, 'three');
 
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('three'));
-		await sleep(350);
+		// No later debounce sneaks in a second re-page.
+		await flushTablesRepage();
 		expect(spy).toHaveBeenCalledOnce();
 	});
 
@@ -592,15 +598,21 @@ describe('one re-page path per side', () => {
 		await open('tbl:draft:1');
 		expect(served).toHaveLength(1);
 		const first = 'e_000031';
+		const spy = spyEvaluate();
 
 		await stageRename(s, first, 'staged');
 		// A staged change moves no table on the server side: no debounce to await.
+		// `spy` is asserted synchronously, right where `evaluateTable` is called —
+		// `served` only grows once MSW has parsed the request body, which can lag
+		// a resolved `flushTablesRepage()` by a tick or more.
 		await flushTablesRepage();
+		expect(spy).not.toHaveBeenCalled();
 		expect(served).toHaveLength(1);
 
 		peerCommit(s, first);
 		await vi.waitFor(() => expect(served).toHaveLength(2));
 		await flushTablesRepage();
+		expect(spy).toHaveBeenCalledOnce();
 		expect(served).toHaveLength(2);
 	});
 

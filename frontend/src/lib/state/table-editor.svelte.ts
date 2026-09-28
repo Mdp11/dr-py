@@ -320,7 +320,7 @@ let _repageEpoch = 0;
 const _pageOrigins = new Map<string, { epoch: number; side: Side }>();
 /** The pending re-page of `scheduleTablesRepage`, if any. */
 let _repageTimer: ReturnType<typeof setTimeout> | null = null;
-/** Resolved by `flushTablesRepage` when the pending timer above fires or is dropped. */
+/** Waiters of `flushTablesRepage`, resolved when the pending re-page fires or the editors reset. */
 const _repageFlushWaiters: (() => void)[] = [];
 /**
  * Tabs whose load in flight is a foreground one (a definition edit, a reload;
