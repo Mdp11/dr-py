@@ -15,6 +15,7 @@
 		"format": "prettier --write .",
 		"test": "vitest run",
 		"bench": "node --expose-gc --disable-warning=ExperimentalWarning bench/run.ts",
+		"xlsx-sample": "node --disable-warning=ExperimentalWarning scripts/xlsx-sample.ts",
 		"test:watch": "vitest"
 	},
 	"devDependencies": {

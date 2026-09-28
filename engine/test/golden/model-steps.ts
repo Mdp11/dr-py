@@ -82,6 +82,7 @@ import {
 	type TableLimits,
 	type Wire
 } from '../../src/index.ts';
+import { readXlsx } from '../export/xlsx-reader.ts';
 import { clone, workingCopy } from '../working/helpers.ts';
 import { untag, type Tagged } from './load.ts';
 
@@ -474,24 +475,39 @@ function cellTexts(model: Model, artifacts: ArtifactSet, step: Step): Tagged[][]
 const utf8Text = (bytes: Uint8Array): string =>
 	new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
 
-/**
- * What the recorder keeps of a shipped file: its text, decoded as UTF-8, or —
- * for a zip — its members in order, each its path plus its own text.
- */
-function exported(result: ExportFileResult): unknown {
-	const { parts, filename, content_type, truncated } = result;
+/** A file as the recorder keeps it: a workbook as its grid, anything else as UTF-8 text. */
+const recordedFile = (path: string, bytes: Uint8Array) =>
+	path.endsWith('.xlsx') ? { xlsx: readXlsx(bytes) } : { text: utf8Text(bytes) };
+
+/** A shipped file's parts, joined. */
+function exportBytes(result: ExportFileResult): Uint8Array {
+	const { parts } = result;
 	const bytes = new Uint8Array(parts.reduce((n, part) => n + part.byteLength, 0));
 	let at = 0;
 	for (const part of parts) {
 		bytes.set(new Uint8Array(part), at);
 		at += part.byteLength;
 	}
+	return bytes;
+}
+
+/**
+ * What the recorder keeps of a shipped file: its text, decoded as UTF-8, or
+ * a workbook's grid, or — for a zip — its members in order, each its path
+ * plus its own text or grid.
+ */
+function exported(result: ExportFileResult): unknown {
+	const { filename, content_type, truncated } = result;
+	const bytes = exportBytes(result);
 	if (content_type === 'application/zip') {
 		const members = unzipSync(bytes);
-		const zip = Object.entries(members).map(([path, member]) => ({ path, text: utf8Text(member) }));
+		const zip = Object.entries(members).map(([path, member]) => ({
+			path,
+			...recordedFile(path, member)
+		}));
 		return { status: 200, filename, content_type, truncated, file: { zip } };
 	}
-	return { status: 200, filename, content_type, truncated, file: { text: utf8Text(bytes) } };
+	return { status: 200, filename, content_type, truncated, file: recordedFile(filename, bytes) };
 }
 
 /**

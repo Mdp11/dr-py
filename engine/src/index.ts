@@ -70,6 +70,7 @@ export {
 	validateTemplate,
 	type Partition
 } from './export/split.ts';
+export { buildWorkbook, buildWorkbookSteps, sheetTitle } from './export/xlsx.ts';
 export { zipEntries, type ZipFile } from './export/zip.ts';
 export { parseKey, parseKeyEntry, type KeyRel, type KeySpec } from './metamodel/key.ts';
 export { Metamodel, type EndConstraint } from './metamodel/metamodel.ts';

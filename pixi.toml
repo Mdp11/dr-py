@@ -305,6 +305,11 @@ description = "Benchmark the engine at model M (run engine-bench-data once befor
 cmd = "npm run bench"
 cwd = "engine"
 
+[feature.frontend.tasks.engine-xlsx-sample]
+description = "Rewrite engine/fixtures/xlsx/sample.xlsx, the engine's workbook that tests/golden/test_engine_xlsx.py opens with openpyxl"
+cmd = "npm run xlsx-sample"
+cwd = "engine"
+
 [feature.frontend.tasks.engine-parity-large]
 description = "Compare the engine's table and sweep at model M with the Python oracle's (run engine-bench-data once before)"
 cmd = "node --disable-warning=ExperimentalWarning bench/parity-large.ts"

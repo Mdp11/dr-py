@@ -5,3 +5,4 @@ package-lock.json
 /src/value/regex-tables.ts
 /src/value/casefold-tables.ts
 /src/export/xlsx-widths.ts
+/src/export/xlsx-tables.ts

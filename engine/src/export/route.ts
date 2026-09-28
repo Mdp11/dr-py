@@ -27,6 +27,8 @@ import {
 import { exportDefinition, exportLayout, type ExportLayout } from './layout.ts';
 import { SPLIT_TOKENS, validateTokens } from './naming.ts';
 import { partitionLabel, renderFilenames, splitPartitions, validateTemplate } from './split.ts';
+import { utf8 } from './utf8.ts';
+import { buildWorkbookSteps } from './xlsx.ts';
 import { zipEntries } from './zip.ts';
 
 export type ExportFormat = 'xlsx' | 'json' | 'csv' | 'jsonl';
@@ -74,37 +76,6 @@ export function toParts(bytes: Uint8Array): ArrayBuffer[] {
 		parts.push(bytes.slice(at, at + PART_BYTES).buffer);
 	}
 	return parts;
-}
-
-type Encoder = { encode(text: string): Uint8Array<ArrayBuffer> };
-
-// Looked up rather than declared, as `utf8Decoder` looks up its decoder.
-function utf8Encoder(): Encoder {
-	const host = globalThis as unknown as { TextEncoder?: new () => Encoder };
-	if (host.TextEncoder === undefined) throw new Error('This host has no TextEncoder');
-	return new host.TextEncoder();
-}
-
-const LONE_SURROGATES = /\p{Cs}+/u;
-
-/**
- * `text` as UTF-8. A lone surrogate refuses as Python's encoder does, its
- * position in code points from the start of the text, or of its line when
- * each line is encoded alone.
- */
-function utf8(text: string, byLine: boolean): Uint8Array {
-	const lone = LONE_SURROGATES.exec(text);
-	if (lone !== null) {
-		const start = byLine ? text.lastIndexOf('\n', lone.index - 1) + 1 : 0;
-		const at = Array.from(text.slice(start, lone.index)).length;
-		const run = lone[0];
-		const where =
-			run.length === 1
-				? `character '\\u${run.charCodeAt(0).toString(16)}' in position ${at}`
-				: `characters in position ${at}-${at + run.length - 1}`;
-		throw new ReadError(422, `'utf-8' codec can't encode ${where}: surrogates not allowed`);
-	}
-	return utf8Encoder().encode(text);
 }
 
 // -- params ------------------------------------------------------------------------
@@ -171,9 +142,9 @@ const jsonOptions = (layout: ExportLayout): JsonRenderOptions => ({
 // -- the routes --------------------------------------------------------------------
 
 /**
- * `POST /tables/export` for one CSV, JSON or JSONL file — or, with the
- * table's own `json_split` enabled (JSON-family formats only; CSV ignores
- * it), an `application/zip` named `{name}.zip` of one file a partition.
+ * `POST /tables/export` for one xlsx, CSV, JSON or JSONL file — or, with the
+ * table's own `json_split` enabled (JSON-family formats only; xlsx and CSV
+ * ignore it), an `application/zip` named `{name}.zip` of one file a partition.
  * Before the first step it reads its params and resolves the table through
  * the working copy's artifacts; a table that reaches a script, or carries a
  * transform, refuses with 501 for the server to run, and a bad split
@@ -187,9 +158,8 @@ export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportF
 	const { date, project } = exportContext(params);
 	const defn = resolved(ctx.artifacts, source);
 	if (tableHasScript(defn) || hasTransform(defn)) throw new ReadError(501, 'reaches a script');
-	if (format === 'xlsx') throw new ReadError(422, 'xlsx not supported yet');
 	const split = defn.json_split;
-	const splitOn = format !== 'csv' && split !== null && split.enabled;
+	const splitOn = (format === 'json' || format === 'jsonl') && split !== null && split.enabled;
 	if (splitOn) {
 		const badTemplate = validateTemplate(split!.filename_template);
 		if (badTemplate !== null) throw new ReadError(422, badTemplate);
@@ -206,6 +176,24 @@ export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportF
 	return answered(
 		(function* (): Steps<ExportFileResult> {
 			const { keys, cells, truncated, baseSlots } = yield* rows;
+			if (format === 'xlsx') {
+				const shown = cells.map((row) => layout.order.map((i) => row[i]!));
+				const bytes = yield* buildWorkbookSteps(
+					model,
+					layout.headers,
+					name,
+					shown,
+					layout.rowNumberAt,
+					meter
+				);
+				return {
+					parts: toParts(bytes),
+					filename: `${name}.xlsx`,
+					content_type: MEDIA_TYPES.xlsx,
+					truncated,
+					script_errors: 0
+				};
+			}
 			if (format === 'csv') {
 				const shown = cells.map((row) => layout.order.map((i) => row[i]!));
 				const pieces = yield* csvLinesSteps(
@@ -223,7 +211,7 @@ export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportF
 					script_errors: 0
 				};
 			}
-			// `format` is 'json' | 'jsonl' below: xlsx refused above, csv returned above.
+			// `format` is 'json' | 'jsonl' below: xlsx and csv returned above.
 			if (splitOn) {
 				const eff = exportDefinition(defn);
 				const options = jsonOptions(layout);
