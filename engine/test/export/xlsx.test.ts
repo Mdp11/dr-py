@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import {
 	buildWorkbook,
+	buildWorkbookSteps,
+	Meter,
 	PyFloat,
 	ReadError,
 	sheetTitle,
@@ -9,6 +12,7 @@ import {
 	type Value
 } from '../../src/index.ts';
 import { family } from '../model/fixtures.ts';
+import { counted, EveryUnit, NoEnd } from './meters.ts';
 import { readXlsx, xlsxParts } from './xlsx-reader.ts';
 import { SAMPLE_URL, sampleWorkbook } from './xlsx-sample.ts';
 
@@ -290,5 +294,54 @@ describe('sheetTitle', () => {
 		expect(sheetTitle("a[b]:c*d?e/f\\g'𝒜日xxxxxxxxxxxxx'yyyy")).toBe(
 			"a_b__c_d_e_f_g'𝒜日xxxxxxxxxxxxx"
 		);
+	});
+});
+
+describe('buildWorkbookSteps', () => {
+	/** A grid whose sheet and shared strings each run to many 64 KiB pushes. */
+	const ROWS = 12000;
+	const grid = Array.from({ length: ROWS }, (_, i) => [
+		value(`name ${i} ${'é'.repeat(i % 7)}`),
+		value(new PyFloat(i / 8))
+	]);
+	const build = (meter: Meter, rows = grid) =>
+		counted(buildWorkbookSteps(model, ['Name', 'Size'], 'Big', rows, null, meter));
+
+	it("writes the same workbook whatever the meter's budget, and again", () => {
+		const once = build(new Meter(0)).value;
+		expect(Buffer.compare(build(new EveryUnit(0)).value, once)).toBe(0);
+		expect(Buffer.compare(build(new NoEnd(0)).value, once)).toBe(0);
+		expect(Buffer.compare(build(new Meter(0)).value, once)).toBe(0);
+		const read = readXlsx(once);
+		expect(read.rows).toHaveLength(ROWS + 1);
+		expect(read.rows[ROWS]!.map((cell) => cell.v)).toEqual([
+			`name ${ROWS - 1} ${'é'.repeat((ROWS - 1) % 7)}`,
+			(ROWS - 1) / 8
+		]);
+	});
+
+	it('zips the sheet and the shared strings in steps, one at least every 64 KiB', () => {
+		const { value: bytes, yields } = build(new Meter(0));
+		const parts = unzipSync(bytes);
+		const pushes = ['xl/worksheets/sheet1.xml', 'xl/sharedStrings.xml']
+			.map((path) => Math.ceil(parts[path]!.length / (64 * 1024)) - 1)
+			.reduce((a, b) => a + b);
+		expect(pushes).toBeGreaterThan(10);
+		// A step every 1,024 cells and shared strings, then one every push but a member's last.
+		expect(yields).toBeGreaterThanOrEqual(Math.floor((ROWS * 2 + ROWS + 2) / 1024) + pushes);
+	});
+
+	it('refuses a lone surrogate in the last shared string before any part is zipped', () => {
+		const rows = [...grid.slice(0, -1), [value('last \ud800'), value(1)]];
+		const steps = buildWorkbookSteps(model, ['Name', 'Size'], 'Big', rows, null, new Meter(0));
+		let yields = 0;
+		const error = refusal(() => {
+			for (let next = steps.next(); next.done !== true; next = steps.next()) yields++;
+		});
+		expect(error.detail).toBe(
+			"'utf-8' codec can't encode character '\\ud800' in position 12: surrogates not allowed"
+		);
+		// Every cell and every shared string but the refused one, and not one push.
+		expect(yields).toBe(Math.floor((ROWS * 2 + ROWS + 1) / 1024));
 	});
 });

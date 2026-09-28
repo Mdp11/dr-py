@@ -43,7 +43,7 @@ import {
 	type ExporterDefinition,
 	type ExporterEntry
 } from './schema.ts';
-import { zipEntries, type ZipFile } from './zip.ts';
+import { zipSteps, type ZipFile } from './zip.ts';
 
 /** Who runs: the saved exporter's id (`null` for a draft) and name, and the call's context. */
 export type RunIdentity = {
@@ -195,20 +195,21 @@ export function runExportSteps(
 				if (files instanceof ReadError) throw files;
 				results.push(yield* files);
 			}
-			return assembled(def, run, modelRev, planned, results, vars);
+			return yield* assembled(def, run, modelRev, planned, results, vars, meter);
 		})()
 	);
 }
 
 /** The run's files placed and packaged: a zip led by the manifest, or the one file of a bare run. */
-function assembled(
+function* assembled(
 	def: ExporterDefinition,
 	run: RunIdentity,
 	modelRev: number,
 	planned: readonly Planned[],
 	results: readonly ExportFiles[],
-	vars: Readonly<Record<string, string>>
-): ExportFileResult {
+	vars: Readonly<Record<string, string>>,
+	meter: Meter
+): Steps<ExportFileResult> {
 	const wantManifest = def.output.manifest && def.output.mode === 'zip';
 	const files: ZipFile[] = [];
 	const taken = new Set<string>();
@@ -276,7 +277,8 @@ function assembled(
 		sanitizeStem(substitute(def.output.filename, { name: run.name, ...vars })) ||
 		sanitizeStem(run.name) ||
 		'export';
-	return shipped(zipEntries(files), `${zipStem}.zip`, 'application/zip', truncated);
+	const zipped = yield* zipSteps(files, meter);
+	return shipped(zipped, `${zipStem}.zip`, 'application/zip', truncated);
 }
 
 // -- the route -------------------------------------------------------------------

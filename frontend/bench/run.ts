@@ -36,6 +36,7 @@ const SLICES = [
 ];
 const TABLE_SLICE = 'longest staged round trip during the table (slice bound)';
 const RESCAN_SLICE = 'longest staged round trip during the rescan (slice bound)';
+const EXPORT_SLICE = 'longest staged round trip during the exports (slice bound)';
 const TRANSITIONS = [
 	'stage 1,000 update_element ops',
 	'unstage all',
@@ -220,6 +221,7 @@ const heap = median(rows.get(HEAP)!);
 const slice = Math.max(...SLICES.map((label) => median(rows.get(label)!)));
 const tableSlice = median(rows.get(TABLE_SLICE)!);
 const rescanSlice = median(rows.get(RESCAN_SLICE)!);
+const exportSlice = median(rows.get(EXPORT_SLICE)!);
 const edits = TRANSITIONS.map(
 	(label) => `${label}: ${verdict(median(rows.get(label)!), TRANSITION_BUDGET_MS, 'ms')}`
 );
@@ -228,5 +230,6 @@ console.log(
 		`longest slice, bounded from outside: ${verdict(slice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`table's longest slice: ${verdict(tableSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`rescan's longest slice: ${verdict(rescanSlice, SLICE_BUDGET_MS, 'ms')}; ` +
+		`exports' longest slice: ${verdict(exportSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`${edits.join('; ')}`
 );

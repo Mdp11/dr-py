@@ -7,6 +7,7 @@ import type {
 	DeltaResult,
 	ElementPage,
 	EndResult,
+	ExportFileResult,
 	TablePageBody,
 	TailResult,
 	WireElement
@@ -285,6 +286,31 @@ async function transitions(): Promise<Measures> {
 	measures['longest staged round trip during the table (slice bound)'] = longest(
 		await stopTablePings()
 	).ms;
+
+	// The same table exported, csv then xlsx, over the order the pages left
+	// cached: each file rendered (and the workbook zipped) in the worker, its
+	// parts transferred, a ping loop of its own alongside.
+	let exportSlice = 0;
+	for (const format of ['csv', 'xlsx']) {
+		const stopPings = ping(client);
+		const file = await timed(`exportTable: ${format} (order cached)`, () =>
+			client.call<ExportFileResult>('exportTable', {
+				definition: table,
+				format,
+				date: '20240229',
+				project: PROJECT_ID
+			})
+		);
+		const slice = longest(await stopPings()).ms;
+		const bytes = file.parts.reduce((n, part) => n + part.byteLength, 0);
+		if (bytes === 0 || !file.truncated) {
+			throw new Error(`the ${format} export holds ${bytes} bytes, truncated=${file.truncated}`);
+		}
+		measures[`  its bytes (${format})`] = bytes;
+		measures[`  longest staged round trip during it (${format})`] = slice;
+		exportSlice = Math.max(exportSlice, slice);
+	}
+	measures['longest staged round trip during the exports (slice bound)'] = exportSlice;
 
 	// Custom rules installed: `setArtifacts` queues a rescan the store runs
 	// before answering the next `getModelIssues`, so the pair is timed as ONE

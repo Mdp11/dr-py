@@ -14,14 +14,13 @@
  */
 import type { Model } from '../model/model.ts';
 import { Meter } from '../navigation/evaluate.ts';
-import type { ReadError } from '../read/errors.ts';
 import { drain, type Steps } from '../steps/steps.ts';
 import { cellText } from '../table/cell-text.ts';
 import type { TableCell } from '../table/cells.ts';
 import { DECIMAL_DIGITS, SPACE_POINTS } from '../value/digit-tables.ts';
 import { pyStr } from '../value/repr.ts';
 import { PyFloat, type Value } from '../value/types.ts';
-import { surrogateRefusal, utf8Encoder } from './utf8.ts';
+import { surrogateRefusal } from './utf8.ts';
 import {
 	PLAIN_NAME_RANGES,
 	QUOTED_START_RANGES,
@@ -29,7 +28,7 @@ import {
 	UPPER_REFERENCE
 } from './xlsx-tables.ts';
 import { CHAR_WIDTHS, DEFAULT_CHAR_WIDTH } from './xlsx-widths.ts';
-import { zipEntries } from './zip.ts';
+import { zipSteps, type ZipText } from './zip.ts';
 
 // -- sheet title -------------------------------------------------------------------
 
@@ -538,15 +537,22 @@ function cols(pixels: readonly number[]): string {
 
 // -- the workbook ------------------------------------------------------------------
 
+/** The pieces of `runs` in order, none copied. */
+function* chained(...runs: (readonly string[])[]): Generator<string> {
+	for (const run of runs) yield* run;
+}
+
 const HEADER_STYLE = 1;
 const CELL_STYLE = 2;
 
 /**
  * The workbook's bytes, one step a slice of cells: the header, then each
  * row's cells with the 1-based row number at `rowNumberAt`; a row carries a
- * cell for every header but the row number's. The sheet is named
+ * cell for every header but the row number's; then a tick a shared string;
+ * then the parts zipped by `zipSteps`, the sheet's rows and the shared
+ * strings passed as pieces, never joined. The sheet is named
  * `sheetTitle(sheetName)`. A lone surrogate refuses with Python's encoder
- * error, positioned in the part it breaks first.
+ * error, positioned in the part it breaks first, before any part is zipped.
  */
 export function* buildWorkbookSteps(
 	model: Model,
@@ -586,58 +592,70 @@ export function* buildWorkbookSteps(
 	const absolute = lastCell === 'A1' ? '$A$1' : `$A$1:$${columnName(ncols - 1)}$${lastRow + 1}`;
 	const filterArea = ncols > 0 ? `${quoteSheetName(title)}!${absolute}` : null;
 
-	const { strings, count } = sheet.sst;
-	const items = strings.map(sharedItem);
 	// The workbook part is written before the shared strings.
-	const refusal = surrogateRefusal(sheetTag(title)) ?? firstRefusal(items);
-	if (refusal !== null) throw refusal;
-
-	const worksheet =
-		XML_DECLARATION +
-		`<worksheet xmlns="${MAIN_NS}" xmlns:r="${REL_NS}">` +
-		`<dimension ref="${range}"/>` +
-		'<sheetViews><sheetView tabSelected="1" workbookViewId="0">' +
-		'<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
-		'<selection pane="bottomLeft"/></sheetView></sheetViews>' +
-		'<sheetFormatPr defaultRowHeight="15"/>' +
-		cols(sheet.pixels) +
-		(sheet.rows.length === 0 ? '<sheetData/>' : `<sheetData>${sheet.rows.join('')}</sheetData>`) +
-		(ncols > 0 ? `<autoFilter ref="${range}"/>` : '') +
-		'<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>' +
-		'</worksheet>';
-	const shared = count > 0;
-	const encoder = utf8Encoder();
-	const part = (path: string, text: string) => ({ path, bytes: encoder.encode(text) });
-	return zipEntries([
-		part('[Content_Types].xml', contentTypes(shared)),
-		part('_rels/.rels', ROOT_RELS),
-		part('xl/_rels/workbook.xml.rels', workbookRels(shared)),
-		part('xl/worksheets/sheet1.xml', worksheet),
-		part('xl/workbook.xml', workbook(title, filterArea)),
-		...(shared
-			? [
-					part(
-						'xl/sharedStrings.xml',
-						XML_DECLARATION +
-							`<sst xmlns="${MAIN_NS}" count="${count}" uniqueCount="${strings.length}">` +
-							items.join('') +
-							'</sst>'
-					)
-				]
-			: []),
-		part('xl/styles.xml', styles(ncols === 0 ? 0 : rows.length === 0 ? 1 : 2)),
-		part('xl/theme/theme1.xml', THEME_XML),
-		part('docProps/core.xml', CORE),
-		part('docProps/app.xml', app(title))
-	]);
-}
-
-function firstRefusal(chunks: readonly string[]): ReadError | null {
-	for (const chunk of chunks) {
-		const refusal = surrogateRefusal(chunk);
-		if (refusal !== null) return refusal;
+	const titleRefusal = surrogateRefusal(sheetTag(title));
+	if (titleRefusal !== null) throw titleRefusal;
+	const { strings, count } = sheet.sst;
+	const items: string[] = [];
+	for (const text of strings) {
+		const item = sharedItem(text);
+		const refusal = surrogateRefusal(item);
+		if (refusal !== null) throw refusal;
+		items.push(item);
+		if (meter.tick()) yield meter.end();
 	}
-	return null;
+
+	const worksheet = chained(
+		[
+			XML_DECLARATION +
+				`<worksheet xmlns="${MAIN_NS}" xmlns:r="${REL_NS}">` +
+				`<dimension ref="${range}"/>` +
+				'<sheetViews><sheetView tabSelected="1" workbookViewId="0">' +
+				'<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
+				'<selection pane="bottomLeft"/></sheetView></sheetViews>' +
+				'<sheetFormatPr defaultRowHeight="15"/>' +
+				cols(sheet.pixels) +
+				(sheet.rows.length === 0 ? '<sheetData/>' : '<sheetData>')
+		],
+		sheet.rows,
+		[
+			(sheet.rows.length === 0 ? '' : '</sheetData>') +
+				(ncols > 0 ? `<autoFilter ref="${range}"/>` : '') +
+				'<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>' +
+				'</worksheet>'
+		]
+	);
+	const shared = count > 0;
+	const part = (path: string, pieces: Iterable<string>): ZipText => ({ path, pieces });
+	return yield* zipSteps(
+		[
+			part('[Content_Types].xml', [contentTypes(shared)]),
+			part('_rels/.rels', [ROOT_RELS]),
+			part('xl/_rels/workbook.xml.rels', [workbookRels(shared)]),
+			part('xl/worksheets/sheet1.xml', worksheet),
+			part('xl/workbook.xml', [workbook(title, filterArea)]),
+			...(shared
+				? [
+						part(
+							'xl/sharedStrings.xml',
+							chained(
+								[
+									XML_DECLARATION +
+										`<sst xmlns="${MAIN_NS}" count="${count}" uniqueCount="${strings.length}">`
+								],
+								items,
+								['</sst>']
+							)
+						)
+					]
+				: []),
+			part('xl/styles.xml', [styles(ncols === 0 ? 0 : rows.length === 0 ? 1 : 2)]),
+			part('xl/theme/theme1.xml', [THEME_XML]),
+			part('docProps/core.xml', [CORE]),
+			part('docProps/app.xml', [app(title)])
+		],
+		meter
+	);
 }
 
 /** The whole workbook at once. */

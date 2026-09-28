@@ -36,7 +36,7 @@ import type { JsonDocumentOptions } from './schema.ts';
 import { partitionLabel, renderFilenames, splitPartitions, validateTemplate } from './split.ts';
 import { utf8 } from './utf8.ts';
 import { buildWorkbookSteps } from './xlsx.ts';
-import { zipEntries, type ZipFile } from './zip.ts';
+import { zipSteps, type ZipFile } from './zip.ts';
 
 export type ExportFormat = 'xlsx' | 'json' | 'csv' | 'jsonl';
 
@@ -342,13 +342,15 @@ export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportF
 		vars: templateVars(ctx, context),
 		jsonDoc: null
 	};
-	const files = exportFilesSteps(ctx, job, new Meter(0));
+	const meter = new Meter(0);
+	const files = exportFilesSteps(ctx, job, meter);
 
 	return answered(
 		(function* (): Steps<ExportFileResult> {
 			const out = yield* files;
 			if (out.archive) {
-				return shipped(zipEntries(out.files), `${name}.zip`, 'application/zip', out.truncated);
+				const zipped = yield* zipSteps(out.files, meter);
+				return shipped(zipped, `${name}.zip`, 'application/zip', out.truncated);
 			}
 			const [file] = out.files;
 			return shipped(file!.bytes, file!.path, MEDIA_TYPES[format], out.truncated);

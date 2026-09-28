@@ -107,6 +107,8 @@ const ROWS = {
 	exportXlsxLongest: '  its longest step',
 	exportCsvWarm: 'exportTable: csv again, the order already cached',
 	exportCsvWarmLongest: '  its longest step',
+	exportSplitZip: 'exportTable: json split a row, one zip, a fresh order cache',
+	exportSplitZipLongest: '  its longest step',
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -172,7 +174,14 @@ function stepped<T>(total: Row, longest: Row | null, steps: Steps<T>, first?: Ro
 	}
 }
 
-type ExportRow = 'exportCsv' | 'exportJson' | 'exportXlsx' | 'exportCsvWarm';
+type ExportRow = 'exportCsv' | 'exportJson' | 'exportXlsx' | 'exportCsvWarm' | 'exportSplitZip';
+const EXPORT_ROWS: readonly ExportRow[] = [
+	'exportCsv',
+	'exportJson',
+	'exportXlsx',
+	'exportCsvWarm',
+	'exportSplitZip'
+];
 const exportBytes = new Map<ExportRow, number[]>();
 const exportPeakHeapMb = new Map<ExportRow, number[]>();
 
@@ -578,6 +587,11 @@ const bigTable = resolveTableRefs(
 	readTableDefinition(rawBigTable, 'definition'),
 	navigationFetch(new ArtifactSet())
 );
+/** The same table split a row: one JSON file for each base element, zipped. */
+const splitBigTable = {
+	...rawBigTable,
+	json_split: { enabled: true, filename_template: '${name}' }
+};
 
 const heapMb: number[] = [];
 let counts = '';
@@ -631,7 +645,8 @@ function measureTable(workingCopy: WorkingCopy): void {
  * The gate's export over the just-opened replica: csv, json and xlsx, each
  * with a fresh order cache — an export's cold path — then csv again over the
  * SAME context, whose order `exportCsv` left cached: the warm path a second
- * export of the same table takes.
+ * export of the same table takes. Last, json split a row: tens of thousands
+ * of small files in one zip.
  */
 function measureExport(workingCopy: WorkingCopy): void {
 	const { model } = workingCopy;
@@ -678,6 +693,20 @@ function measureExport(workingCopy: WorkingCopy): void {
 	const warmBytes = warm.parts.reduce((n, part) => n + part.byteLength, 0);
 	if (warmBytes !== csvBytes) {
 		throw new Error(`the warm csv export holds ${warmBytes} bytes, the cold one ${csvBytes}`);
+	}
+
+	const split = steppedExport(
+		'exportSplitZip',
+		'exportSplitZipLongest',
+		'exportSplitZip',
+		exportTable(freshCtx(), {
+			...params,
+			definition: splitBigTable,
+			format: 'json'
+		})
+	);
+	if (split.content_type !== 'application/zip' || !split.truncated) {
+		throw new Error(`the split export is a ${split.content_type}, truncated=${split.truncated}`);
 	}
 }
 
@@ -754,7 +783,7 @@ const each = heapMb.map((mb) => mb.toFixed(0)).join(' ');
 console.log(
 	`${'heap after GC with one replica open, MB'.padEnd(width)}  ${heap.toFixed(0).padStart(6)}   [${each}]${collected}`
 );
-for (const row of ['exportCsv', 'exportJson', 'exportXlsx', 'exportCsvWarm'] as ExportRow[]) {
+for (const row of EXPORT_ROWS) {
 	const bytesVals = exportBytes.get(row)!;
 	const heapVals = exportPeakHeapMb.get(row)!;
 	const bytesEach = bytesVals.map((n) => n.toLocaleString('en-US')).join(' ');
