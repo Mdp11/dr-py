@@ -39,6 +39,19 @@ export function setActiveBaseUrl(url: string | null): void {
 	_activeBaseUrl = url;
 }
 
+// The active project's id, pushed beside its base URL by
+// state/active-project.svelte.ts, for a call that names the project in its
+// params rather than its URL (an export's `${project}` on the engine).
+let _activeProjectId: string | null = null;
+
+export function setActiveProjectId(id: string | null): void {
+	_activeProjectId = id;
+}
+
+export function activeProjectId(): string | null {
+	return _activeProjectId;
+}
+
 // Global 401 hook. The api layer must NOT import lib/state (no upward
 // dependency), so a mid-session-expiry bounce is injected as a callback: the
 // app registers a handler once on load (see lib/state/session-recovery). It is

@@ -1,4 +1,4 @@
-import { setActiveBaseUrl } from '$lib/api/client';
+import { setActiveBaseUrl, setActiveProjectId } from '$lib/api/client';
 
 let activeId = $state<string | null>(null);
 
@@ -12,9 +12,11 @@ export function getActiveProjectId(): string | null {
 export function setActiveProject(id: string): void {
 	activeId = id;
 	setActiveBaseUrl(`/api/v1/projects/${id}`);
+	setActiveProjectId(id);
 }
 
 export function clearActiveProject(): void {
 	activeId = null;
 	setActiveBaseUrl(null);
+	setActiveProjectId(null);
 }

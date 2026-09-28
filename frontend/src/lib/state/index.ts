@@ -198,6 +198,7 @@ export {
 export {
 	beginReplicaCommit,
 	dismissReplicaNotice,
+	exportsIncludeStaged,
 	forgetViewPlacement,
 	forgetViewPlacements,
 	getReplicaNotice,

@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
+import { strToU8, zipSync } from 'fflate';
 import { drain, isSteps, READS, ViewPlacements, type ReadParams, type Steps } from '$engine';
 import { server } from '$lib/api/__tests__/server';
 import { setActiveBaseUrl } from '$lib/api/client';
@@ -12,6 +13,7 @@ import {
 } from '$lib/api/engine-route';
 import { errorForStatus, NotFoundError } from '$lib/api/errors';
 import { listContainmentRoots } from '$lib/api/model-read';
+import { exportDigest, type ExportResult } from '$lib/api/tables';
 import { EngineGoneError } from '../client';
 import { createEngineSeam } from '../seam';
 import { createShadow, shadowEnabled } from '../shadow';
@@ -511,6 +513,163 @@ describe('createShadow', () => {
 				);
 			}
 			expect(report).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('exports, compared by their digests', () => {
+		const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+		const ready = (
+			bytes: Uint8Array<ArrayBuffer> | string,
+			type: string,
+			filename: string,
+			truncated = false
+		): ExportResult => ({
+			kind: 'ready',
+			blob: new Blob([bytes], { type }),
+			filename,
+			truncated
+		});
+		const zipped = (entries: Record<string, string>, level: 0 | 9) =>
+			new Uint8Array(
+				zipSync(
+					Object.fromEntries(Object.entries(entries).map(([path, text]) => [path, strToU8(text)])),
+					{ level, mtime: new Date(1980, 0, 1) }
+				)
+			);
+
+		/** Whether a shadow over `engine` and `server` reports; the server answers alike every time. */
+		async function reports(engine: ExportResult, server: ExportResult): Promise<string[]> {
+			const lines: string[] = [];
+			await run(
+				{
+					surface: 'exports',
+					method: 'exportTable',
+					params: { artifact_id: 't1', format: 'csv' },
+					engine: { ok: true, value: engine },
+					again: () => Promise.resolve(engine),
+					server: () => Promise.resolve(server),
+					digest: (value) => exportDigest(value as ExportResult)
+				},
+				{},
+				(line) => lines.push(line)
+			);
+			return lines;
+		}
+
+		it('a CSV differing by one byte is reported, its text in the line', async () => {
+			const lines = await reports(
+				ready('a,b\r\n1,2\r\n', 'text/csv; charset=utf-8', 't.csv'),
+				ready('a,b\r\n1,3\r\n', 'text/csv;charset=utf-8', 't.csv')
+			);
+			expect(lines).toHaveLength(1);
+			expect(lines[0]).toMatch(/^\[shadow\] exports exportTable /);
+			expect(lines[0]).toContain('1,2');
+			expect(lines[0]).toContain('1,3');
+		});
+
+		it('the same CSV is not, whatever the spacing of its content type', async () => {
+			const text = 'a,b\r\n1,2\r\n';
+			expect(
+				await reports(
+					ready(text, 'text/csv; charset=utf-8', 't.csv'),
+					ready(text, 'text/csv;charset=utf-8', 't.csv')
+				)
+			).toEqual([]);
+		});
+
+		it('a byte-order mark is a byte like any other', async () => {
+			const lines = await reports(
+				ready('a\r\n', 'text/csv; charset=utf-8', 't.csv'),
+				ready('﻿a\r\n', 'text/csv; charset=utf-8', 't.csv')
+			);
+			expect(lines).toHaveLength(1);
+		});
+
+		it('a different filename or truncated flag is reported', async () => {
+			const json = '[]';
+			expect(
+				await reports(
+					ready(json, 'application/json', 'a.json'),
+					ready(json, 'application/json', 'b.json')
+				)
+			).toHaveLength(1);
+			expect(
+				await reports(
+					ready(json, 'application/json', 'a.json', true),
+					ready(json, 'application/json', 'a.json', false)
+				)
+			).toHaveLength(1);
+		});
+
+		it('a zip differing in one entry’s text is reported', async () => {
+			const lines = await reports(
+				ready(zipped({ 'a.csv': 'x\r\n', 'b.json': '[1]' }, 9), 'application/zip', 'e.zip'),
+				ready(zipped({ 'a.csv': 'x\r\n', 'b.json': '[2]' }, 9), 'application/zip', 'e.zip')
+			);
+			expect(lines).toHaveLength(1);
+		});
+
+		it('two zips with different DEFLATE bytes and equal entries are not', async () => {
+			const entries = { 'a.csv': 'x,y\r\n'.repeat(50), 'T/b.jsonl': '{"a":1}\n'.repeat(50) };
+			const engine = zipped(entries, 9);
+			const server = zipped(entries, 0);
+			expect(engine).not.toEqual(server);
+			expect(
+				await reports(
+					ready(engine, 'application/zip', 'e.zip'),
+					ready(server, 'application/zip', 'e.zip')
+				)
+			).toEqual([]);
+		});
+
+		it('an xlsx member of a zip compares by its path alone', async () => {
+			expect(
+				await reports(
+					ready(zipped({ 'a.xlsx': 'one' }, 9), 'application/zip', 'e.zip'),
+					ready(zipped({ 'a.xlsx': 'two' }, 9), 'application/zip', 'e.zip')
+				)
+			).toEqual([]);
+			expect(
+				await reports(
+					ready(zipped({ 'a.xlsx': 'one' }, 9), 'application/zip', 'e.zip'),
+					ready(zipped({ 'b.xlsx': 'one' }, 9), 'application/zip', 'e.zip')
+				)
+			).toHaveLength(1);
+		});
+
+		it('an xlsx with different bytes is not', async () => {
+			expect(
+				await reports(ready('engine bytes', XLSX, 't.xlsx'), ready('server bytes', XLSX, 't.xlsx'))
+			).toEqual([]);
+			expect(
+				await reports(ready('engine bytes', XLSX, 't.xlsx'), ready('engine bytes', XLSX, 'u.xlsx'))
+			).toHaveLength(1);
+		});
+
+		it('a server still preparing is not, first or in a re-test', async () => {
+			const csv = ready('a\r\n', 'text/csv; charset=utf-8', 't.csv');
+			const preparing: ExportResult = { kind: 'preparing', done: 1, total: 3 };
+			expect(await reports(csv, preparing)).toEqual([]);
+
+			const lines: string[] = [];
+			let served = 0;
+			await run(
+				{
+					surface: 'exports',
+					method: 'exportTable',
+					engine: { ok: true, value: csv },
+					again: () => Promise.resolve(csv),
+					server: () =>
+						Promise.resolve(
+							++served === 1 ? ready('b\r\n', 'text/csv; charset=utf-8', 't.csv') : preparing
+						),
+					digest: (value) => exportDigest(value as ExportResult)
+				},
+				{},
+				(line) => lines.push(line)
+			);
+			expect(served).toBe(2);
+			expect(lines).toEqual([]);
 		});
 	});
 

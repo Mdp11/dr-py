@@ -1,5 +1,5 @@
 import { ApiError } from '$lib/api/errors';
-import type { EngineSeam, Outcome, Surface } from '$lib/api/engine-route';
+import { SKIP, type EngineSeam, type Outcome, type Surface } from '$lib/api/engine-route';
 import { EngineGoneError } from './client';
 
 const STORAGE_KEY = 'dr.shadow';
@@ -41,14 +41,18 @@ export type ShadowDeps = {
  * call. An `AbortError` from either side, or an `EngineGoneError` from the
  * engine side (the worker died, or a `stop()` while a re-test was
  * mid-flight), ends the comparison without a report — a comparison the
- * caller can no longer see through is not a mismatch either.
+ * caller can no longer see through is not a mismatch either. A probe that
+ * carries a `digest` compares each side's digest of its answer instead of
+ * the answer, and a digest of `SKIP` on either side ends it silently.
  */
 export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']> {
 	return async function shadow(probe): Promise<void> {
-		const { surface, method, params, engine, again, server } = probe;
+		const { surface, method, params, engine, again, server, digest } = probe;
 		const whileStaged = probe.whileStaged === true;
 		const staged = () => !whileStaged && deps.staged();
 		const moved = (...outcomes: Outcome[]) => whileStaged && outcomes.some(isConflict);
+		const digested = (a: Outcome, b: Outcome) =>
+			Promise.all([digestOf(a, digest), digestOf(b, digest)]);
 		if (isTerminal(engine) || staged() || moved(engine)) return;
 
 		let serverOutcome: Outcome;
@@ -57,7 +61,10 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 		} catch {
 			return;
 		}
-		if (moved(serverOutcome) || same(surface, engine, serverOutcome)) return;
+		if (moved(serverOutcome)) return;
+		const [engineDigest, serverDigest] = await digested(engine, serverOutcome);
+		if (isSkip(engineDigest) || isSkip(serverDigest)) return;
+		if (same(surface, engineDigest, serverDigest)) return;
 
 		for (let round = 0; round < MAX_ROUNDS; round++) {
 			await deps.quiet();
@@ -69,9 +76,10 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 			} catch {
 				return;
 			}
-			const [retestedEngine, retestedServer] = retested;
-			if (staged() || moved(retestedEngine, retestedServer)) return;
+			if (staged() || moved(...retested)) return;
+			const [retestedEngine, retestedServer] = await digested(...retested);
 			if (before !== deps.rev()) continue;
+			if (isSkip(retestedEngine) || isSkip(retestedServer)) return;
 			if (same(surface, retestedEngine, retestedServer)) return;
 			deps.report(reportLine(surface, method, params, retestedEngine, retestedServer));
 			return;
@@ -86,6 +94,26 @@ async function outcomeOf(call: () => Promise<unknown>): Promise<Outcome> {
 		if (isTerminalError(error)) throw error;
 		return { ok: false, error };
 	}
+}
+
+/**
+ * `outcome` with its value replaced by `digest`'s of it, when the probe
+ * carries one; a digest that throws is a failure of its own.
+ */
+async function digestOf(
+	outcome: Outcome,
+	digest: ((value: unknown) => Promise<unknown>) | undefined
+): Promise<Outcome> {
+	if (!outcome.ok || digest === undefined) return outcome;
+	try {
+		return { ok: true, value: await digest(outcome.value) };
+	} catch (error) {
+		return { ok: false, error };
+	}
+}
+
+function isSkip(outcome: Outcome): boolean {
+	return outcome.ok && outcome.value === SKIP;
 }
 
 function isTerminal(outcome: Outcome): boolean {

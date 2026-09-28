@@ -1217,6 +1217,19 @@ export const ExporterDefinitionSchema = z.object({
 });
 export type ExporterDefinition = z.infer<typeof ExporterDefinitionSchema>;
 
+/** An export the engine answered: the file's bytes in parts, and what the server's headers carry. */
+export const EngineExportFileSchema = z.object({
+	parts: z.array(z.instanceof(ArrayBuffer)),
+	filename: z.string(),
+	content_type: z.string(),
+	truncated: z.boolean()
+});
+export type EngineExportFile = z.infer<typeof EngineExportFileSchema>;
+
+/** `POST /tables/json-preview`: a JSON sample of the table's first rows. */
+export const JsonPreviewSchema = z.object({ sample: z.string(), truncated: z.boolean() });
+export type JsonPreview = z.infer<typeof JsonPreviewSchema>;
+
 // ---- Table page (evaluate response) ----------------------------------------
 export const TableColumnSchema = z.object({
 	kind: z.string(),

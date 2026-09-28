@@ -91,6 +91,8 @@ const _tablesListeners = new Set<() => void>();
 let _tablesSeen: string | null = null;
 /** The sync reported `off` since its last `ready`: the tables went to the server meanwhile. */
 let _offSinceReady = false;
+/** Moves whenever a follower's artifacts land or it stops: what the seam's artifact gates read is tracked through it. */
+let _followerEpoch = $state(0);
 /** The started replica's artifact follower, the project it follows, and its quiet probe's remover. */
 let _follower: {
 	projectId: string;
@@ -250,6 +252,8 @@ function installSeam(sync: ReplicaSync): void {
 		navigation: () => _follower?.follower.loaded() ?? false,
 		// So may a table, by its own id or through its navigations.
 		tables: () => _follower?.follower.loaded() ?? false,
+		// And an export, through its tables or its exporter.
+		exports: () => _follower?.follower.loaded() ?? false,
 		// A store swept part-way is not the model's list, and until the artifacts
 		// are held the engine knows none of the rule sets its list must carry.
 		issues: () =>
@@ -405,6 +409,7 @@ function follow(sync: ReplicaSync, projectId: string): void {
 		// The issues and tables gates open here too: the server's list and pages,
 		// answered until now, hold none of the staged edits.
 		onLoaded: () => {
+			_followerEpoch += 1;
 			if (issuesOnEngine(_status)) scheduleIssuesRefetch();
 			tablesMoved();
 		}
@@ -423,9 +428,24 @@ export function artifactKindOf(id: string): string | undefined {
 
 /** A payload answer after this is dropped: it speaks for a replica no longer followed. */
 function stopFollower(): void {
-	_follower?.follower.stop();
-	_follower?.removeQuiet();
+	if (_follower === null) return;
+	_follower.follower.stop();
+	_follower.removeQuiet();
 	_follower = null;
+	_followerEpoch += 1;
+}
+
+/**
+ * Whether an export now would hold staged edits: the exports are on the
+ * engine and the replica holds staged model edits or staged artifacts. The
+ * server's exports read committed state only. Reactive.
+ */
+export function exportsIncludeStaged(): boolean {
+	// What the seam's side reads, tracked: the phase and the follower's load.
+	void _status;
+	void _followerEpoch;
+	if (engineSide('exports') !== 'engine') return false;
+	return anyStaged() || getStagedArtifactDepth() > 0;
 }
 
 /** Every read goes to the server again; the sync forgets the placements, the engine half everything. */

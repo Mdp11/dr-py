@@ -46,6 +46,7 @@ import {
 	beginReplicaCommit,
 	configureReplica,
 	dismissReplicaNotice,
+	exportsIncludeStaged,
 	forgetViewPlacement,
 	forgetViewPlacements,
 	getReplicaNotice,
@@ -1754,6 +1755,70 @@ describe('the artifact follower', () => {
 			const late = await evaluateNavigation({ definition: refUnion('n1') as never });
 			expect(late.total).toBe(organizations);
 			expect(served.served).toBe(1);
+		});
+
+		it("the exports are the server's until the first load lands; the staged note follows them and what is staged", async () => {
+			localStorage.setItem('dr.surfaces', JSON.stringify({ exports: 'engine' }));
+			const project = fakeProject();
+			let release!: () => void;
+			const first = new Promise<void>((resolve) => (release = resolve));
+			serve(project, [first], () => Promise.reject(new Error('not asked')));
+			const replica = realReplica();
+			let note: (() => boolean) | undefined;
+			const dispose = $effect.root(() => {
+				const derived = $derived(exportsIncludeStaged());
+				note = () => derived;
+			});
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.phase === 'ready');
+			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
+
+			try {
+				flushSync();
+				expect(engineSide('exports')).toBe('server');
+				expect(note!()).toBe(false);
+			} finally {
+				release();
+			}
+
+			await vi.waitFor(() => expect(engineSide('exports')).toBe('engine'));
+			flushSync();
+			expect(note!()).toBe(true);
+			clearStagedArtifacts();
+			flushSync();
+			expect(note!()).toBe(false);
+			emit(rename('e_000001', 'staged name'));
+			await stagedSettled();
+			flushSync();
+			expect(note!()).toBe(true);
+			revertAllStaged();
+			await stagedSettled();
+			flushSync();
+			expect(note!()).toBe(false);
+
+			stopReplica();
+			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
+			flushSync();
+			expect(note!()).toBe(false);
+			dispose();
+		});
+
+		it('with the exports on the server, the staged note never shows', async () => {
+			const project = fakeProject();
+			serve(project, [], () => Promise.reject(new Error('not asked')));
+			const replica = realReplica();
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.phase === 'ready');
+			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+
+			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
+			emit(rename('e_000001', 'staged name'));
+			await stagedSettled();
+
+			expect(engineSide('exports')).toBe('server');
+			expect(exportsIncludeStaged()).toBe(false);
 		});
 
 		it('a failed first load is asked once more, then the engine answers', async () => {

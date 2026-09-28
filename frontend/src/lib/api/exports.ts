@@ -1,5 +1,13 @@
 import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
-import { parseAttachmentFilename, type ExportResult } from './tables';
+import { asSent, route } from './engine-route';
+import {
+	engineExport,
+	exportContext,
+	exportDigest,
+	exportResponse,
+	markExport,
+	type ExportResult
+} from './tables';
 import {
 	TransformPreviewOutSchema,
 	type ExporterDefinition,
@@ -7,16 +15,28 @@ import {
 	type TransformPreviewOut
 } from './types';
 
-async function handleRunResponse(res: Response): Promise<ExportResult> {
-	if (res.status === 202) {
-		const body = (await res.json()) as { done?: number; total?: number | null };
-		return { kind: 'preparing', done: body.done ?? 0, total: body.total ?? null };
-	}
-	return {
-		kind: 'ready',
-		blob: await res.blob(),
-		filename: parseAttachmentFilename(res) ?? 'export.zip'
-	};
+/**
+ * `POST /exports/run` with `body`, the `exports` surface: the engine runs
+ * `method` over the working copy, staged edits and artifacts included; a run
+ * any of whose entries reaches a script is the server's file, on committed
+ * state, marked with why.
+ */
+function run(
+	method: 'runExporter' | 'runExporterDraft',
+	body: object,
+	cfg: ClientConfig | undefined
+): Promise<ExportResult> {
+	return route(
+		'exports',
+		cfg,
+		(call) => call(method, { ...(asSent(body) as object), ...exportContext() }).then(engineExport),
+		async () =>
+			exportResponse(
+				await apiFetchRaw('/exports/run', { method: 'POST', body }, cfg),
+				'export.zip'
+			),
+		{ mark: markExport, digest: exportDigest }
+	);
 }
 
 /**
@@ -30,13 +50,8 @@ async function handleRunResponse(res: Response): Promise<ExportResult> {
  * SIGNAL, never the body's `state` — a 202 means the background script-cache
  * sweep hasn't finished computing every cell across the bundled tables yet.
  */
-export async function runExporter(artifactId: string, cfg?: ClientConfig): Promise<ExportResult> {
-	const res = await apiFetchRaw(
-		'/exports/run',
-		{ method: 'POST', body: { artifact_id: artifactId } },
-		cfg
-	);
-	return handleRunResponse(res);
+export function runExporter(artifactId: string, cfg?: ClientConfig): Promise<ExportResult> {
+	return run('runExporter', { artifact_id: artifactId }, cfg);
 }
 
 /**
@@ -44,20 +59,15 @@ export async function runExporter(artifactId: string, cfg?: ClientConfig): Promi
  * `definition`) — how the Export button works for a dirty or
  * never-committed draft. `name` stands in for the artifact name (zip-stem
  * fallback, manifest `artifact_name`). Same 202 protocol as `runExporter`;
- * the server validates the draft exactly like a committed payload, so the
- * 422s (missing table, bad template) surface identically.
+ * the draft is validated exactly like a committed payload, so the 422s
+ * (missing table, bad template) surface identically.
  */
-export async function runExporterDraft(
+export function runExporterDraft(
 	definition: ExporterDefinition,
 	name: string,
 	cfg?: ClientConfig
 ): Promise<ExportResult> {
-	const res = await apiFetchRaw(
-		'/exports/run',
-		{ method: 'POST', body: { definition, name } },
-		cfg
-	);
-	return handleRunResponse(res);
+	return run('runExporterDraft', { definition, name }, cfg);
 }
 
 /**

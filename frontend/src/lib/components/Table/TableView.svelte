@@ -12,6 +12,7 @@
 		canRequestScriptErrors,
 		downloadTable,
 		ensureTableDraft,
+		exportsIncludeStaged,
 		getActiveTab,
 		getScriptErrors,
 		getScriptErrorsPhase,
@@ -37,6 +38,7 @@
 		updateTableDefinition,
 		type ExportProgress
 	} from '$lib/state';
+	import type { Fallback } from '$lib/api/engine-route';
 	import type { ExportFormat } from '$lib/api/types';
 	import {
 		AlertTriangle,
@@ -103,6 +105,11 @@
 	const FALLBACK_NOTE = {
 		script: 'Reads committed state: this table runs a script',
 		pattern: 'Reads committed state: a search pattern needs the server'
+	} as const;
+	// An export the engine refused is the server's file, of committed state.
+	const EXPORT_FALLBACK_NOTE = {
+		script: 'Exported from committed state: reaches a script',
+		pattern: 'Exported from committed state: a search pattern needs the server'
 	} as const;
 	// Progress of the background script-value sweep: `computing` means some
 	// cells came back `pending` and the store has a re-poll scheduled (rows are
@@ -209,6 +216,10 @@
 	// inside the dialog is remembered for the next opening.
 	let exportOpen = $state(false);
 	let exportFormat = $state<ExportFormat>('xlsx');
+	// Why the last export was the server's, over committed state; null once
+	// one comes from the engine again.
+	let exportFallback = $state<Exclude<Fallback, 'rules'> | null>(null);
+	const exportStaged = $derived(exportsIncludeStaged());
 	$effect(() => () => exportAbort?.abort());
 	// Unmounting with the settings dialog still open would leave the tab
 	// suspended forever (nothing else clears that key), so the tab would silently
@@ -538,11 +549,12 @@
 		exporting = true;
 		exportAbort = new AbortController();
 		try {
-			await downloadTable(tabId, {
+			const result = await downloadTable(tabId, {
 				format,
 				onProgress: (p) => (exportProgress = p),
 				signal: exportAbort.signal
 			});
+			if (result?.kind === 'ready') exportFallback = result.fallback ?? null;
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : 'Export failed';
 		} finally {
@@ -693,6 +705,15 @@
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
+				{#if exportStaged}
+					<span
+						data-testid="export-staged-note"
+						class="text-[11px] text-muted-foreground/70"
+						title="The file holds the edits staged and not yet committed"
+					>
+						Includes staged changes
+					</span>
+				{/if}
 				<ArtifactExportButton {tabId} />
 				{#if editable}
 					<button
@@ -734,6 +755,11 @@
 		{#if page?.fallback}
 			<p data-testid="table-fallback" class="px-3 py-1 text-[11px] text-muted-foreground/70">
 				{FALLBACK_NOTE[page.fallback]}
+			</p>
+		{/if}
+		{#if exportFallback}
+			<p data-testid="export-fallback" class="px-3 py-1 text-[11px] text-muted-foreground/70">
+				{EXPORT_FALLBACK_NOTE[exportFallback]}
 			</p>
 		{/if}
 		{#if lockHolder !== null}

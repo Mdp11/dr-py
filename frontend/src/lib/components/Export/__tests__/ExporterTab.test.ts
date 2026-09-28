@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import * as artifactsApi from '$lib/api/artifacts';
 import * as checkoutApi from '$lib/api/checkout';
 import * as exportsApi from '$lib/api/exports';
+import { installEngineSeam } from '$lib/api/engine-route';
 import { ConflictError } from '$lib/api/errors';
 import { TableDefinitionSchema } from '$lib/api/types';
 import { EXPORT_RETRY_MS } from '$lib/util/export-download';
@@ -675,6 +676,77 @@ describe('ExporterTab', () => {
 		expect(draftSpy).not.toHaveBeenCalled();
 		expect(runSpy).toHaveBeenCalledTimes(1);
 		expect(runSpy).toHaveBeenCalledWith('art-1');
+	});
+
+	it('says an export came from committed state once a marked run lands', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+		const fallbackNote = () => document.querySelector('[data-testid="export-fallback"]');
+		expect(fallbackNote()).toBeNull();
+
+		const blob = new Blob(['x'], { type: 'application/zip' });
+		vi.spyOn(exportsApi, 'runExporter')
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip', fallback: 'script' })
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip' });
+		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
+
+		runBtn.click();
+		await vi.waitFor(() => {
+			flushSync();
+			expect(fallbackNote()?.textContent?.trim()).toBe(
+				'Exported from committed state: reaches a script'
+			);
+		});
+
+		await vi.waitFor(() => {
+			flushSync();
+			expect(runBtn.disabled).toBe(false);
+		});
+		runBtn.click();
+		await vi.waitFor(() => {
+			flushSync();
+			expect(fallbackNote()).toBeNull();
+		});
+	});
+
+	it('says a run includes staged changes with the exports on the engine and something staged', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		const note = () => document.querySelector('[data-testid="export-staged-note"]');
+		const seamOn = (side: 'engine' | 'server') =>
+			installEngineSeam({
+				side: (surface) => (surface === 'exports' ? side : 'server'),
+				call: () => Promise.reject(new Error('not called')),
+				gone: () => false
+			});
+		const open = async () => {
+			render('exp:art-1');
+			await vi.waitFor(() =>
+				expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+			);
+		};
+
+		try {
+			seamOn('engine');
+			await open();
+			expect(note()).toBeNull();
+
+			stageArtifactCreate('navigation', 'Staged', { kind: 'path' }, null);
+			flushSync();
+			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
+
+			for (const m of mounted.splice(0)) unmount(m);
+			seamOn('server');
+			await open();
+			expect(note()).toBeNull();
+		} finally {
+			installEngineSeam(null);
+		}
 	});
 
 	it('disables Export only while the draft has no entries', async () => {

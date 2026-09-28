@@ -16,9 +16,16 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, the two evaluations, the issues and the tables, all nine on the engine by default', () => {
+	it('names the five read surfaces, the two evaluations, the issues, the tables and the exports; all but the exports on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
-		expect(SURFACES).toEqual([...READ_SURFACES, 'navigation', 'criteria', 'issues', 'tables']);
+		expect(SURFACES).toEqual([
+			...READ_SURFACES,
+			'navigation',
+			'criteria',
+			'issues',
+			'tables',
+			'exports'
+		]);
 		expect(SURFACE_DEFAULTS).toEqual({
 			elements: 'engine',
 			search: 'engine',
@@ -28,9 +35,20 @@ describe('the surface switches', () => {
 			navigation: 'engine',
 			criteria: 'engine',
 			issues: 'engine',
-			tables: 'engine'
+			tables: 'engine',
+			exports: 'server'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
+	});
+
+	it('staging on the engine does not force the exports, and dr.surfaces moves them', () => {
+		expect(readSurfaces(storing('{"staging": "engine"}')).exports).toBe('server');
+		for (const staging of ['engine', 'legacy']) {
+			expect(readSurfaces(storing(`{"staging": "${staging}", "exports": "engine"}`))).toEqual({
+				...SURFACE_DEFAULTS,
+				exports: 'engine'
+			});
+		}
 	});
 
 	it('staging on the engine does not force the tables, and dr.surfaces moves them', () => {
@@ -229,7 +247,8 @@ describe('the surface switches', () => {
 			navigation: 'server',
 			criteria: 'server',
 			issues: 'server',
-			tables: 'server'
+			tables: 'server',
+			exports: 'server'
 		} as const;
 		for (const staging of ['engine', 'legacy'] as const) {
 			const any = (surfaces: Record<string, string>) =>
@@ -240,6 +259,7 @@ describe('the surface switches', () => {
 			expect(any({ navigation: 'engine' })).toBe(true);
 			expect(any({ criteria: 'engine' })).toBe(true);
 			expect(any({ tables: 'engine' })).toBe(true);
+			expect(any({ exports: 'engine' })).toBe(true);
 		}
 	});
 

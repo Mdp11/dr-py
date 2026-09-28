@@ -52,7 +52,13 @@ import { SvelteMap } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
 import { engineSide, type Side } from '$lib/api/engine-route';
 import { ApiError } from '$lib/api/errors';
-import { answeredBy, evaluateTable, exportTable, fetchScriptErrors } from '$lib/api/tables';
+import {
+	answeredBy,
+	evaluateTable,
+	exportTable,
+	fetchScriptErrors,
+	type ExportResult
+} from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
 	type ExportFormat,
@@ -1733,7 +1739,9 @@ export function closeTableDraft(tabId: string): void {
  * when `signal` aborts (the tab was closed / the user navigated away). The
  * retry/download loop itself is `$lib/util/export-download.ts`'s
  * `retryAndDownload`, shared with `/exports/run` (`ExporterTab.svelte`) —
- * this function's only job is producing the args `exportTable` needs.
+ * this function's only job is producing the args `exportTable` needs. Resolves
+ * to the last result (its `fallback` says the server exported committed
+ * state), `null` for a tab with no draft.
  */
 export async function downloadTable(
 	tabId: string,
@@ -1742,11 +1750,15 @@ export async function downloadTable(
 		onProgress?: (p: ExportProgress) => void;
 		signal?: AbortSignal;
 	}
-): Promise<void> {
+): Promise<ExportResult | null> {
 	const draft = _drafts.get(tabId);
-	if (!draft) return;
-	const args = { ..._evaluateSource(draft), format: opts?.format ?? 'xlsx' };
-	await retryAndDownload(() => exportTable(args), opts);
+	if (!draft) return null;
+	const args = {
+		..._evaluateSource(draft),
+		format: opts?.format ?? 'xlsx',
+		...(opts?.signal === undefined ? {} : { signal: opts.signal })
+	};
+	return retryAndDownload(() => exportTable(args), opts);
 }
 
 /**

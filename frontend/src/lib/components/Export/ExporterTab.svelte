@@ -6,12 +6,14 @@
 	// `state/exporter-editor.svelte.ts`'s module docstring for the
 	// draft/lease/staging model this drives.
 	import * as artifactsApi from '$lib/api/artifacts';
+	import type { Fallback } from '$lib/api/engine-route';
 	import { runExporter, runExporterDraft } from '$lib/api/exports';
 	import { retryAndDownload, type ExportProgress } from '$lib/util/export-download';
 	import {
 		addExporterEntry,
 		artifactHeaderById,
 		canEdit,
+		exportsIncludeStaged,
 		getArtifactHeaders,
 		ensureExporterDraft,
 		getExporterDraft,
@@ -182,14 +184,24 @@
 	let exportError = $state<string | null>(null);
 	let exportAbort: AbortController | null = null;
 	$effect(() => () => exportAbort?.abort());
+	// Why the last run was the server's, over committed state; null once one
+	// comes from the engine again.
+	let exportFallback = $state<Exclude<Fallback, 'rules'> | null>(null);
+	const exportStaged = $derived(exportsIncludeStaged());
 
 	// The Export button is UNGATED on dirty/uncommitted state — a clean
 	// committed draft runs by artifact id (the committed payload), anything
-	// else ships its definition inline as a draft run. Referenced tables still
-	// evaluate from their COMMITTED definitions either way; only this exporter's
-	// own presentation travels as a draft. The one remaining gate is emptiness:
-	// the server 422s "exporter has no entries", so disable with a hint instead.
+	// else ships its definition inline as a draft run. On the server,
+	// referenced tables evaluate from their COMMITTED definitions either way;
+	// on the engine, from the working copy, staged tables included. The one
+	// remaining gate is emptiness: the run 422s "exporter has no entries", so
+	// disable with a hint instead.
 	const exportDisabled = $derived(!draft || draft.entries.length === 0);
+	// A run the engine refused is the server's file, of committed state.
+	const EXPORT_FALLBACK_NOTE = {
+		script: 'Exported from committed state: reaches a script',
+		pattern: 'Exported from committed state: a search pattern needs the server'
+	} as const;
 
 	async function runExport(): Promise<void> {
 		const d = draft;
@@ -209,10 +221,11 @@
 		exporting = true;
 		exportAbort = new AbortController();
 		try {
-			await retryAndDownload(start, {
+			const result = await retryAndDownload(start, {
 				onProgress: (p) => (exportProgress = p),
 				signal: exportAbort.signal
 			});
+			if (result.kind === 'ready') exportFallback = result.fallback ?? null;
 		} catch (e) {
 			exportError = e instanceof Error ? e.message : 'Export failed';
 		} finally {
@@ -253,6 +266,15 @@
 					Export
 				{/if}
 			</button>
+			{#if exportStaged}
+				<span
+					data-testid="export-staged-note"
+					class="text-[11px] text-muted-foreground/70"
+					title="The file holds the edits staged and not yet committed"
+				>
+					Includes staged changes
+				</span>
+			{/if}
 			{#if editable}
 				<button
 					type="button"
@@ -320,6 +342,11 @@
 		{/if}
 		{#if exportError}
 			<p class="px-3 py-1 text-xs text-destructive">{exportError}</p>
+		{/if}
+		{#if exportFallback}
+			<p data-testid="export-fallback" class="px-3 py-1 text-[11px] text-muted-foreground/70">
+				{EXPORT_FALLBACK_NOTE[exportFallback]}
+			</p>
 		{/if}
 		{#if addTableError}
 			<p class="px-3 py-1 text-xs text-destructive">{addTableError}</p>

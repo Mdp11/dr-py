@@ -4,7 +4,7 @@ import { ApiError } from './errors';
 /**
  * A surface: the reads that move between server and engine together — the
  * five model reads, the navigation evaluation, the criteria search, the
- * validation issues and the table pages.
+ * validation issues, the table pages and the exports.
  */
 export type Surface =
 	| 'elements'
@@ -15,7 +15,8 @@ export type Surface =
 	| 'navigation'
 	| 'criteria'
 	| 'issues'
-	| 'tables';
+	| 'tables'
+	| 'exports';
 export type Side = 'engine' | 'server';
 
 /** Why the server answered a call the engine refused: it reaches a script, a pattern, or rules it cannot read. */
@@ -38,7 +39,12 @@ export type RouteOptions<T> = {
 	 * that answered may not be the one the call was routed to.
 	 */
 	recheck?: boolean;
+	/** What the shadow compares of an answer in its place; `SKIP` ends the comparison. */
+	digest?: (value: T) => Promise<unknown>;
 };
+
+/** A digest that says the answer cannot be compared, such as an export the server is still preparing. */
+export const SKIP: unique symbol = Symbol('skip');
 
 /** One read method of the engine, answered with the route's response body. */
 export type EngineCall = <T>(method: string, params: unknown, signal?: AbortSignal) => Promise<T>;
@@ -57,6 +63,8 @@ export type ShadowProbe = {
 	again(): Promise<unknown>;
 	/** The same read from the server, parsed. */
 	server(): Promise<unknown>;
+	/** What to compare of each answer, when not the answer itself. */
+	digest?: (value: unknown) => Promise<unknown>;
 };
 
 /**
@@ -159,6 +167,7 @@ export function route<T>(
 		answer = Promise.reject(error);
 	}
 	const when = options.shadow ?? 'unstaged';
+	const { digest } = options;
 	const probe = (engine: Outcome) => {
 		if (seam.shadow === undefined || when === 'never') return;
 		try {
@@ -169,7 +178,8 @@ export function route<T>(
 				...(when === 'always' ? { whileStaged: true } : {}),
 				engine,
 				again: () => engineCall(seam.call),
-				server: serverCall
+				server: serverCall,
+				...(digest === undefined ? {} : { digest: (value) => digest(value as T) })
 			});
 			// A shadow written as an async function returns a promise despite its type.
 			Promise.resolve(returned).catch(() => undefined);

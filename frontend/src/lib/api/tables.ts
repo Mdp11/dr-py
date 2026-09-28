@@ -1,8 +1,12 @@
-import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
-import { asSent, route, type Side } from './engine-route';
+import { utcDate } from '$lib/util/utc-date';
+import { activeProjectId, apiFetch, apiFetchRaw, type ClientConfig } from './client';
+import { asSent, route, SKIP, type Fallback, type Side } from './engine-route';
 import {
+	EngineExportFileSchema,
+	JsonPreviewSchema,
 	TablePageSchema,
 	type ExportFormat,
+	type JsonPreview,
 	type ScriptErrorsRecap,
 	type TableDefinition,
 	type TablePage
@@ -71,55 +75,52 @@ export function evaluateTable(
 }
 
 /**
- * Outcome of a `/tables/export` call. `'preparing'` means the backend's
- * cache-only export path hasn't finished computing every script cell yet — it
- * answered 202 with `Retry-After: 1` instead of the xlsx body. The caller is
- * expected to retry after a short delay; this type only distinguishes the
- * two outcomes.
+ * Outcome of an export. `'preparing'` means the backend's cache-only export
+ * path hasn't finished computing every script cell yet — it answered 202
+ * with `Retry-After: 1` instead of the file; the caller retries after a short
+ * delay. A `'ready'` file says whether rows were left out (`truncated`) and,
+ * when the engine sent it to the server, why (`fallback`): it then holds the
+ * committed state, not the staged one.
  */
 export type ExportResult =
-	| { kind: 'ready'; blob: Blob; filename: string }
+	| {
+			kind: 'ready';
+			blob: Blob;
+			filename: string;
+			truncated?: boolean;
+			fallback?: Exclude<Fallback, 'rules'>;
+	  }
 	| { kind: 'preparing'; done: number; total: number | null };
 
 /**
- * Parse the `filename` parameter out of a response's `Content-Disposition`
- * header (e.g. `attachment; filename="table.xlsx"`). Returns `undefined` when
- * the header is absent or unparseable — callers supply their own fallback
- * name. Shared by every download-shaped route ({@link exportTable},
- * `api/exports.ts`'s `runExporter`) so attachment parsing lives in
- * exactly one place.
+ * The file name a response's `Content-Disposition` gives (e.g.
+ * `attachment; filename="table.xlsx"`): its RFC 5987 `filename*` percent-
+ * decoded when it carries one (the server adds it for a name outside
+ * ASCII, beside a `filename` with those characters replaced), else its
+ * `filename`. `undefined` when the header is absent or unparseable — callers
+ * supply their own fallback name. Shared by every download-shaped route
+ * ({@link exportTable}, `api/exports.ts`'s `runExporter`).
  */
 export function parseAttachmentFilename(res: Response): string | undefined {
 	const disp = res.headers.get('content-disposition') ?? '';
-	const m = /filename="([^"]+)"/.exec(disp);
-	return m?.[1];
+	const encoded = /filename\*=UTF-8''([^;\s]+)/i.exec(disp)?.[1];
+	if (encoded !== undefined) {
+		try {
+			return decodeURIComponent(encoded);
+		} catch {
+			// A malformed escape: the plain name still stands.
+		}
+	}
+	return /filename="([^"]+)"/.exec(disp)?.[1];
 }
 
-/** Export the current definition (or saved artifact) in any `ExportFormat`.
- * Resolves to `{ kind: 'ready' }` with the Blob once the backend has it, or
- * `{ kind: 'preparing' }` while the script-cache sweep is still filling in
- * cells for this table (backend 202 + Retry-After). The 202 protocol is
- * format-agnostic — the backend runs the identical preamble for every format. */
-export async function exportTable(
-	args: {
-		definition?: TableDefinition;
-		artifactId?: string;
-		format?: ExportFormat;
-	},
-	cfg?: ClientConfig
-): Promise<ExportResult> {
-	const res = await apiFetchRaw(
-		'/tables/export',
-		{
-			method: 'POST',
-			body: {
-				definition: args.definition,
-				artifact_id: args.artifactId,
-				format: args.format ?? 'xlsx'
-			}
-		},
-		cfg
-	);
+/**
+ * A download route's answer: 202 is `preparing` (THE STATUS CODE IS THE
+ * RETRY SIGNAL, never the body's `state`), anything else the file, named by
+ * its `Content-Disposition` or `fallbackName`, truncated when
+ * `X-Table-Truncated` says so.
+ */
+export async function exportResponse(res: Response, fallbackName: string): Promise<ExportResult> {
 	if (res.status === 202) {
 		const body = (await res.json()) as { done?: number; total?: number | null };
 		return { kind: 'preparing', done: body.done ?? 0, total: body.total ?? null };
@@ -127,29 +128,136 @@ export async function exportTable(
 	return {
 		kind: 'ready',
 		blob: await res.blob(),
-		filename: parseAttachmentFilename(res) ?? `table.${args.format ?? 'xlsx'}`
+		filename: parseAttachmentFilename(res) ?? fallbackName,
+		truncated: res.headers.get('x-table-truncated') === 'true'
 	};
+}
+
+/** The file an export method of the engine answered, as the server's would read. */
+export function engineExport(answer: unknown): ExportResult {
+	const file = EngineExportFileSchema.parse(answer);
+	return {
+		kind: 'ready',
+		blob: new Blob(file.parts, { type: file.content_type }),
+		filename: file.filename,
+		truncated: file.truncated
+	};
+}
+
+/** Marks a file the server answered for the engine, with why. */
+export function markExport(result: ExportResult, reason: Exclude<Fallback, 'rules'>): ExportResult {
+	return result.kind === 'ready' ? { ...result, fallback: reason } : result;
+}
+
+/** An export's `date` and `project` on the engine: the server reads its own clock and URL. */
+export function exportContext(): { date: string; project: string } {
+	return { date: utcDate(), project: activeProjectId() ?? '' };
+}
+
+const ZIP = 'application/zip';
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/** `type` with its parameters spaced one way: `res.blob()` may drop the space the server sent. */
+function mediaType(type: string): string {
+	return type
+		.split(';')
+		.map((part) => part.trim())
+		.join('; ');
+}
+
+function decoded(bytes: Uint8Array): string {
+	return new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
+}
+
+/**
+ * What the dev shadow compares of an export: its name, media type and
+ * `truncated`, and a `body` that is the text of a JSON, JSONL or CSV file,
+ * a zip's members in order as `[path, text]` (an xlsx member `[path,
+ * 'xlsx']`), and nothing for an xlsx — the engine's workbooks and zips are
+ * not the server's bytes. A file still `preparing` is `SKIP`.
+ */
+export async function exportDigest(result: ExportResult): Promise<unknown> {
+	if (result.kind === 'preparing') return SKIP;
+	const contentType = mediaType(result.blob.type);
+	const digest = {
+		filename: result.filename,
+		content_type: contentType,
+		truncated: result.truncated ?? false
+	};
+	if (contentType === XLSX) return digest;
+	const bytes = new Uint8Array(await result.blob.arrayBuffer());
+	if (contentType !== ZIP) return { ...digest, body: decoded(bytes) };
+	const { unzipSync } = await import('fflate');
+	const members = Object.entries(unzipSync(bytes)).map(([path, data]) => [
+		path,
+		path.endsWith('.xlsx') ? 'xlsx' : decoded(data)
+	]);
+	return { ...digest, body: members };
+}
+
+/**
+ * Export the current definition (or saved artifact) in any `ExportFormat`
+ * (`POST /tables/export`), the `exports` surface: the engine answers from
+ * the working copy, staged edits and artifacts included; a table it refuses
+ * (a script, a pattern) is the server's file, on committed state, marked
+ * with why. On the server, `{ kind: 'preparing' }` while the script-cache
+ * sweep is still filling in cells for this table (202 + Retry-After) — the
+ * 202 protocol is format-agnostic. `signal` aborts the call on either side.
+ */
+export function exportTable(
+	args: {
+		definition?: TableDefinition;
+		artifactId?: string;
+		format?: ExportFormat;
+		signal?: AbortSignal;
+	},
+	cfg?: ClientConfig
+): Promise<ExportResult> {
+	const format = args.format ?? 'xlsx';
+	const body = { definition: args.definition, artifact_id: args.artifactId, format };
+	const { signal } = args;
+	return route(
+		'exports',
+		cfg,
+		(call) =>
+			call('exportTable', { ...(asSent(body) as object), ...exportContext() }, signal).then(
+				engineExport
+			),
+		async () =>
+			exportResponse(
+				await apiFetchRaw(
+					'/tables/export',
+					{ method: 'POST', body, ...(signal === undefined ? {} : { signal }) },
+					cfg
+				),
+				`table.${format}`
+			),
+		{ mark: markExport, digest: exportDigest }
+	);
 }
 
 /**
  * A bounded, already-rendered JSON sample for the export settings pane
- * (`POST /tables/json-preview`).
+ * (`POST /tables/json-preview`), the `exports` surface.
  *
- * The sample is rendered SERVER-SIDE through the very function the export
- * uses, so the pane can never disagree with the file the user downloads.
- * `truncated` means the sample covers only the head of the table.
+ * The sample is rendered through the very function the export uses, on the
+ * side the export takes, so the pane can never disagree with the file the
+ * user downloads. `truncated` means the sample covers only the head of the
+ * table.
  */
-export async function previewTableJson(
+export function previewTableJson(
 	args: { definition?: TableDefinition; artifactId?: string },
 	cfg?: ClientConfig
-): Promise<{ sample: string; truncated: boolean }> {
-	return apiFetch(
-		'/tables/json-preview',
-		{
-			method: 'POST',
-			body: { definition: args.definition, artifact_id: args.artifactId }
-		},
-		cfg
+): Promise<JsonPreview & { fallback?: Exclude<Fallback, 'rules'> }> {
+	const body = { definition: args.definition, artifact_id: args.artifactId };
+	return route(
+		'exports',
+		cfg,
+		(call) =>
+			call('previewTableJson', asSent(body)).then((answer) => JsonPreviewSchema.parse(answer)),
+		() =>
+			apiFetch('/tables/json-preview', { method: 'POST', body, schema: JsonPreviewSchema }, cfg),
+		{ mark: (preview, reason) => ({ ...preview, fallback: reason }) }
 	);
 }
 

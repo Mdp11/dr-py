@@ -439,8 +439,16 @@ engine store":
      inline as a `definition` via `runExporterDraft`
      (`lib/api/exports.ts`), which the backend validates and runs exactly
      like a committed payload (`RunExportIn.definition`).
-     Referenced tables still evaluate from their own COMMITTED definitions
-     either way — only the exporter's own presentation travels as a draft.
+     On the server, referenced tables evaluate from their own COMMITTED
+     definitions either way — only the exporter's own presentation travels
+     as a draft; with the `exports` surface on the engine the run reads the
+     working copy, staged tables included, and `export-staged-note`
+     ("Includes staged changes") shows beside the button while anything is
+     staged (`exportsIncludeStaged()`, `state/replica.svelte.ts`). A run the
+     engine sent to the server (it reaches a script) shows
+     `export-fallback` ("Exported from committed state: reaches a script")
+     until the next run lands unmarked: `retryAndDownload` resolves to the
+     result it downloaded.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
      refuse the open, it renders that tab **unsaveable and read-only** behind
@@ -1361,6 +1369,7 @@ are answered by the engine or the server, one switch per surface:
 | `criteria`      | `searchModel`                                                                                       |
 | `issues`        | `getModelIssues`, `validateModel`, the model half of `previewCommit`                                |
 | `tables`        | `evaluateTable`                                                                                     |
+| `exports`       | `exportTable`, `previewTableJson`, `runExporter`, `runExporterDraft`                                |
 
 - `lib/api` imports nothing of `lib/engine`: the engine is an injected seam
   (`installEngineSeam(seam | null)`), like the 401 handler. Each function
@@ -1398,9 +1407,28 @@ are answered by the engine or the server, one switch per surface:
   `stale base_rev`, `replica is not ready`): the server answers the whole
   request. `route`'s options also take `shadow` (`'unstaged'`, the default;
   `'always'`, compared with edits staged, for a call that sends them to the
-  server too; `'never'`) and `recheck` (the side is asked again once the
+  server too; `'never'`), `recheck` (the side is asked again once the
   engine answers, and a side gone to the server meanwhile takes the
-  server's answer).
+  server's answer) and `digest` (carried on the shadow's probe: what it
+  compares of each answer in the answer's place).
+- The `exports` surface, `server` by default: `exportTable`,
+  `runExporter` and `runExporterDraft` send the engine the server's body
+  plus `date` (`utcDate()`, `lib/util/utc-date.ts`: the UTC day as
+  `YYYYMMDD`, which the server reads off its own clock) and `project` (the
+  active project's id, `api/client.ts`' `activeProjectId()`, which
+  `state/active-project.svelte.ts` pushes beside the base URL), and turn the
+  engine's `{parts, filename, content_type, truncated}` into the
+  `ExportResult` the server's response gives (`engineExport`: a `Blob` of
+  the parts with `content_type` as its type). The server's side reads the
+  file name from `Content-Disposition`, its `filename*=UTF-8''…`
+  percent-decoded before its `filename="…"`, and `truncated` from
+  `X-Table-Truncated`; a 202 is `preparing`. `previewTableJson` sends the
+  body alone, both sides parsed by `JsonPreviewSchema`. An export that
+  reaches a script (a script column, a transform on the table or on any
+  entry of a run) is the server's file over committed state, marked
+  `fallback: 'script'` (`markExport`; a `preparing` result stays as it is).
+  The shadow compares a download by `exportDigest` (see "Shadow
+  comparison").
 - The `issues` surface: `getModelIssues` is the engine's `getModelIssues {}`
   (`recheck`: an answer from a replica whose sweep has not ended is not
   adopted), `validateModel` with no inline model or scope — and, when it
@@ -1434,7 +1462,8 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS` — `engine` for all nine surfaces — and
+  `SURFACE_DEFAULTS` — `engine` for every surface but `exports`, which is
+  `server` — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
@@ -1446,14 +1475,14 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   shows only in the replica's answers, so a read-surface-only override on its
   own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
   alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
-  take effect. `navigation`, `criteria`, `tables` and `issues` are never
-  forced by `staging`: `navigation`, `criteria` and `tables` because the
+  take effect. `navigation`, `criteria`, `tables`, `exports` and `issues` are never
+  forced by `staging`: `navigation`, `criteria`, `tables` and `exports` because the
   server never evaluated staged edits in either mode, `issues` because its calls send the server the
   staged edits and — on the engine — because a gate (below) can hold it back
   to `server` whatever the switch says. The switches are read once, with the
   rest, and honoured in a build too. `readSurfaces(storage?)` is
   `readSwitches(storage).surfaces`; `anyEngineSurface(switches)` says whether
-  any of the nine is on the engine, `issues` counting only with `staging:
+  any surface is on the engine, `issues` counting only with `staging:
 engine` — on legacy its gate never opens, so an opt-out stored before the
   `issues` switch existed (seven surfaces on `server`, staging on legacy)
   waits for, and is blocked by, nothing.
@@ -1462,9 +1491,10 @@ engine` — on legacy its gate never opens, so an opt-out stored before the
   so, its gate (when given) answers true, and the phase is neither `off`
   nor `server`; `call` is `sync.call`
   (so the read barrier holds); `gone` is `EngineGoneError`. The replica
-  store installs it (see "Wiring"), with three gates: `navigation` and
-  `tables` (the artifact follower has loaded: a table may name itself or
-  its navigations by id) and `issues` — staging on the engine (the
+  store installs it (see "Wiring"), with four gates: `navigation`,
+  `tables` and `exports` (the artifact follower has loaded: a table may
+  name itself or its navigations by id, an export its tables or its
+  exporter) and `issues` — staging on the engine (the
   legacy buffer's edits are not in the working copy), the status's
   `seeded`, which closes it the moment the engine's replica leaves `ready`
   (diverged or closed), and the artifact follower having loaded (until
@@ -1484,7 +1514,18 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   or the same KIND of failure (the same `status` for two `ApiError`s, else
   the same error name); a `summary` comparison drops `issue_counts` and
   `undo_depth` first, since the engine always answers those `null` / `0` and
-  the store keeps the server's own (see "Surfaces" — `getModelSummary`).
+  the store keeps the server's own (see "Surfaces" — `getModelSummary`). A
+  probe that carries a `digest` compares each side's digest instead of its
+  answer (a digest that throws is a failure of its own), and a digest of
+  `SKIP` on either side ends the comparison silently. An export's is
+  `exportDigest` (`api/tables.ts`): `{filename, content_type, truncated,
+body}`, the media type spaced one way (`res.blob()` may drop the space
+  the server sent), `body` the decoded text of a JSON, JSONL or CSV file
+  (a byte-order mark kept), a zip's members in order as `[path, text]`
+  (unzipped with `fflate`, imported dynamically; an `.xlsx` member
+  `[path, 'xlsx']`), and absent for an xlsx — the engine's workbooks and
+  zips are not the server's bytes, so only what they hold compares. A
+  server still `preparing` (202) digests to `SKIP`.
   Equal: nothing happens. Different: it awaits `quiet()`, notes the
   replica's `rev`, runs `again()` and `server()` once more, and notes `rev`
   again — a `rev` that moved during that round makes the round's answers
@@ -2436,6 +2477,14 @@ runs the `downloadTable` retry loop — the backend's 202 +
 does not await it**, because that loop can run for minutes while a script sweep
 fills the cell cache and the progress belongs on the chrome's Export button, not
 behind a modal overlay.
+
+The loop (`retryAndDownload`) resolves to the last result, which
+`downloadTable` returns: `TableView` keeps its `fallback` and shows
+`export-fallback` ("Exported from committed state: reaches a script") until an
+unmarked export lands. Beside the Export ▾ trigger, `export-staged-note`
+("Includes staged changes") shows while `exportsIncludeStaged()` — the
+`exports` surface on the engine and a staged model edit or staged artifact in
+the replica; the server's exports read committed state only.
 
 Everything the dialog edits is an **export override**: it changes the file and
 never the grid. Include/exclude, output order and the row-number entry are

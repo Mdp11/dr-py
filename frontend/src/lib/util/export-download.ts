@@ -6,11 +6,6 @@
  * IS THE RETRY SIGNAL, never the body's `state` — see either caller's
  * docstring for the full rationale; this module only owns the polling shape,
  * not why it exists.
- *
- * Extracted rather than left duplicated because the two loops
- * were byte-identical apart from the one call that produces the next
- * `ExportResult` — `downloadTable`'s public signature is unchanged by this,
- * so there was no reason to keep a second copy.
  */
 import type { ExportResult } from '$lib/api/tables';
 
@@ -36,7 +31,9 @@ export interface ExportProgress {
  * `'preparing'`, reporting each wait through `onProgress`. Retries are
  * bounded (`EXPORT_MAX_ATTEMPTS`) so a wedged sweep ends in a visible error
  * rather than an invisible infinite loop, and the wait is abandoned early
- * when `signal` aborts (the caller's tab/dialog went away mid-wait).
+ * when `signal` aborts (the caller's tab/dialog went away mid-wait). Resolves
+ * to the last result: the file downloaded, with its marks, or the
+ * `'preparing'` one an abort left behind.
  */
 export async function retryAndDownload(
 	run: () => Promise<ExportResult>,
@@ -44,16 +41,16 @@ export async function retryAndDownload(
 		onProgress?: (p: ExportProgress) => void;
 		signal?: AbortSignal;
 	}
-): Promise<void> {
+): Promise<ExportResult> {
 	let result = await run();
 	for (let attempt = 1; result.kind === 'preparing'; attempt++) {
-		if (opts?.signal?.aborted) return;
+		if (opts?.signal?.aborted) return result;
 		if (attempt > EXPORT_MAX_ATTEMPTS) {
 			throw new Error('Export is still being prepared — try again shortly.');
 		}
 		opts?.onProgress?.({ done: result.done, total: result.total, attempt });
 		await new Promise((r) => setTimeout(r, EXPORT_RETRY_MS));
-		if (opts?.signal?.aborted) return;
+		if (opts?.signal?.aborted) return result;
 		result = await run();
 	}
 	const url = URL.createObjectURL(result.blob);
@@ -62,4 +59,5 @@ export async function retryAndDownload(
 	a.download = result.filename;
 	a.click();
 	URL.revokeObjectURL(url);
+	return result;
 }

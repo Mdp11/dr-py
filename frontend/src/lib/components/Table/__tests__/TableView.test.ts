@@ -64,6 +64,8 @@ const h = vi.hoisted(() => ({
 	 * the one on screen (it is portaled to `<body>`, so it would otherwise
 	 * float over whatever tab the user switched to). */
 	activeTab: 'tbl:draft:1' as string | null,
+	/** Mirrors `exportsIncludeStaged`: an export now would hold staged edits. */
+	exportsStaged: false,
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -97,7 +99,12 @@ vi.mock('$lib/state', () => ({
 	getTableLockHolder: () => h.lockHolder,
 	retryTableLock: vi.fn(),
 	getTableWarnings: () => h.warnings,
-	downloadTable: vi.fn(async () => {}),
+	downloadTable: vi.fn(async () => ({
+		kind: 'ready' as const,
+		blob: new Blob([]),
+		filename: 'table.xlsx'
+	})),
+	exportsIncludeStaged: () => h.exportsStaged,
 	saveTableDraft: vi.fn(async () => {}),
 	saveAsTableDraft: vi.fn(async () => {}),
 	reloadTableDraft: vi.fn(),
@@ -1568,6 +1575,48 @@ describe('TableView export format menu', () => {
 			);
 		} finally {
 			unmount(c);
+		}
+	});
+
+	const fallbackNote = () => document.querySelector('[data-testid="export-fallback"]');
+
+	it('says an export came from committed state once a marked one lands, and not after an unmarked one', async () => {
+		const blob = new Blob(['x']);
+		vi.mocked(downloadTable)
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx', fallback: 'script' })
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx' });
+		const c = render('tbl:draft:1');
+		try {
+			expect(fallbackNote()).toBeNull();
+			await chooseFormat('xlsx');
+			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
+			await waitFor(() => fallbackNote() !== null);
+			expect(fallbackNote()!.textContent?.trim()).toBe(
+				'Exported from committed state: reaches a script'
+			);
+
+			await chooseFormat('xlsx');
+			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
+			await waitFor(() => fallbackNote() === null);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('says a table export includes staged changes only while the store says one would', () => {
+		const note = () => document.querySelector('[data-testid="export-staged-note"]');
+		h.exportsStaged = false;
+		let c = render('tbl:draft:1');
+		expect(note()).toBeNull();
+		unmount(c);
+
+		h.exportsStaged = true;
+		c = render('tbl:draft:1');
+		try {
+			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
+		} finally {
+			unmount(c);
+			h.exportsStaged = false;
 		}
 	});
 });
