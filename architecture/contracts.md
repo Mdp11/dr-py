@@ -148,12 +148,25 @@ event     {event, …}                     engine → client, unsolicited
   and a create with none contributes nothing yet).
 - A result is the HTTP response body of the `lib/api` function the method is named after.
   Evaluations are reads over the working copy: `searchModel {target, criteria, limit,
-  offset}`, `evaluateNavigation {definition | artifact_id, row_element_id, limit, offset}` and
-  `evaluateTable {definition | artifact_id, offset, limit}`, each resolving every artifact it
-  names — staged ones included — before its first step, so an artifact call that lands between
-  its slices changes the next call's answer, never its own. `evaluateTable` keeps the order of
-  its last 16 tables while the replica's `rev` and `staged_version` stand: a later page of one
-  evaluates its own cells alone. `getModelIssues {}`, `validateModel {batch_ids}` and `previewCommit {base_rev,
+  offset}`, `evaluateNavigation {definition | artifact_id, row_element_id, limit, offset}`,
+  `evaluateTable {definition | artifact_id, offset, limit}`, `previewTableJson {definition |
+  artifact_id}` and the exports `exportTable {definition | artifact_id, format, date, project}`,
+  `runExporter` and `runExporterDraft` (one body: `{artifact_id | definition, name, date,
+  project}`), each resolving every artifact it names — staged ones included — before its first
+  step, so an artifact call that lands between its slices changes the next call's answer, never
+  its own. `evaluateTable` keeps the order of its last 16 tables while the replica's `rev` and
+  `staged_version` stand: a later page of one evaluates its own cells alone. The engine reads no
+  clock: an export's `date` (`YYYYMMDD`, the UTC day of the call) and `project` (the
+  project's id, non-empty) are params, else a 422 `date must be YYYYMMDD` / `project must be a
+  non-empty string`; its `${rev}` and a manifest's `model_rev` are the committed `rev`. An
+  export answers `{parts, filename, content_type, truncated, script_errors: 0}`: the file's
+  bytes as `ArrayBuffer`s of at most 4 MiB, transferred with the answer rather than copied (the
+  engine's own are detached once it is posted), and the filename and media type the route's
+  `Content-Disposition` and `Content-Type` carry; `previewTableJson` answers `{sample,
+  truncated}`. An export is a scan like any evaluation: a `stage` posted while it runs waits
+  for it, so it answers the state it ran on; a `close` or a divergence under it sends it back to
+  start over on the next replica; either way it is answered once, and never with part of a
+  file. `getModelIssues {}`, `validateModel {batch_ids}` and `previewCommit {base_rev,
   batch_ids, strict}` (the model half only — artifact, view and `metamodel.move_node` ops
   stay a server call the shell merges in) answer the one live issue store over the working
   copy (AD-32), custom rules included — the committed and staged rule sets for the list and
@@ -162,8 +175,9 @@ event     {event, …}                     engine → client, unsolicited
   rules starts a background rescan of the rules' population, and an `issues` call that
   arrives meanwhile is answered once it ends.
 - An evaluation, or an `issues` call, the engine must not answer is refused with 501 before any
-  work: `reaches a script` (a navigation that reaches a configured script step, or a table
-  with a configured script column or such a navigation), `reaches an
+  work: `reaches a script` (a navigation that reaches a configured script step, a table
+  with a configured script column or such a navigation, and for an export a table's or an
+  exporter entry's `transform`), `reaches an
   unsupported pattern` (a criterion or facet pattern the engine cannot match exactly as
   Python's `re` does) or `reaches unreadable rules` (an `issues` call while a rule set in
   either layer arrived without its parse, or with a document the engine's reader refuses —
@@ -260,4 +274,4 @@ core is deleted.
 | Dates | `date` values parse exactly as `datetime.date.fromisoformat` on Python 3.14. |
 | Order | No `Intl`, no locale comparison, no dependence on hash order. `Map` insertion order stands in for `dict` order. Sorts are stable. A plain object stands in for a property `dict`; it lists a canonical array-index key (`"0"`, `"42"`) first whatever the insertion order, so the engine refuses an entity carrying one at any depth of its properties. |
 | Arithmetic | `+ − × ÷` and comparisons only in evaluation paths; no transcendental `Math` functions. |
-| Exports | `json`, `jsonl`, `csv` and `manifest.json` match the oracle byte for byte. `xlsx` matches by cell content, and is byte-identical across the engine's two hosts. |
+| Exports | `json`, `jsonl`, `csv` and `manifest.json` match the oracle byte for byte. `xlsx` matches by cell content, and is byte-identical across the engine's two hosts: sub-project C holds that in Node only, and E's cross-host test (one export in Node and in Chromium, bytes compared) closes it. |

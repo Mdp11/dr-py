@@ -81,6 +81,23 @@ export function portPair(): [Port, Port] {
 	return [port(0), port(1)];
 }
 
+export type Post = { message: unknown; transfer: readonly ArrayBuffer[] | undefined };
+
+/** `port`, with every message it posts recorded beside the transfer list the post carried. */
+export function recording(port: Port): { port: Port; posts: Post[] } {
+	const posts: Post[] = [];
+	return {
+		posts,
+		port: {
+			post: (message, transfer) => {
+				posts.push({ message, transfer });
+				port.post(message, transfer);
+			},
+			onMessage: (handler) => port.onMessage(handler)
+		}
+	};
+}
+
 /** Inflates gzip bytes with Node's zlib, as the worker would with a DecompressionStream. */
 export function inflate(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
 	return pipeline(Readable.from(chunks), createGunzip(), () => undefined);
@@ -100,9 +117,11 @@ export function gzChunks(text: string, size: number): ArrayBuffer[] {
 export type ServiceError = { status: number; detail: string };
 type Event = { event: string; [key: string]: unknown };
 
-/** A client of a service on a fake host: calls, raw posts, cancels and the events it sent. */
-export function connect(host = autoHost()) {
-	const [mine, theirs] = portPair();
+/**
+ * A client of a service on a fake host: calls, raw posts, cancels and the
+ * events it sent. The service is created on the second port of the pair.
+ */
+export function connect(host = autoHost(), [mine, theirs]: [Port, Port] = portPair()) {
 	createService(theirs, { ...host.deps, inflate });
 	let nextId = 0;
 	const pending = new Map<

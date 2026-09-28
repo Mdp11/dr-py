@@ -223,9 +223,19 @@ type Call = {
 	readonly id: string | number;
 	readonly params: ReadParams;
 	cancelled: boolean;
-	answer(result: unknown): void;
+	/** Posts `result`, moving the buffers of `transfer` to the other side. */
+	answer(result: unknown, transfer?: readonly ArrayBuffer[]): void;
 	refuse(error: unknown): void;
 };
+
+/** What an answer moves rather than copies: a result's `parts`, when they are all `ArrayBuffer`s. */
+function transferOf(result: unknown): readonly ArrayBuffer[] | undefined {
+	if (!isObject(result)) return undefined;
+	const { parts } = result;
+	return Array.isArray(parts) && parts.every((part) => part instanceof ArrayBuffer)
+		? (parts as ArrayBuffer[])
+		: undefined;
+}
 
 type Method = (service: Service, call: Call) => void;
 
@@ -458,17 +468,17 @@ class Service {
 
 	private call(id: string | number, params: ReadParams): Call {
 		let settled = false;
-		const post = (message: object) => {
+		const post = (message: object, transfer?: readonly ArrayBuffer[]) => {
 			this.awaiting.delete(id);
 			if (settled || call.cancelled) return;
 			settled = true;
-			this.port.post(message);
+			this.port.post(message, transfer);
 		};
 		const call: Call = {
 			id,
 			params,
 			cancelled: false,
-			answer: (result) => post({ id, ok: true, result }),
+			answer: (result, transfer) => post({ id, ok: true, result }, transfer),
 			refuse: (error) => post({ id, ok: false, error: errorBody(error) })
 		};
 		return call;
@@ -485,9 +495,16 @@ class Service {
 		work.then(call.answer, call.refuse);
 	}
 
-	private submit<T>(call: Call, lane: Lane, job: Job<T>): void {
+	private submit<T>(
+		call: Call,
+		lane: Lane,
+		job: Job<T>,
+		transfer?: (result: T) => readonly ArrayBuffer[] | undefined
+	): void {
 		this.scheduler.submit(call.id, lane, job, (outcome) =>
-			outcome.ok ? call.answer(outcome.value) : call.refuse(outcome.error)
+			outcome.ok
+				? call.answer(outcome.value, transfer?.(outcome.value))
+				: call.refuse(outcome.error)
 		);
 	}
 
@@ -514,28 +531,34 @@ class Service {
 
 	/**
 	 * Each `run()` reads where the replica stands: no transition of the model
-	 * lane runs while the scan does, so the stamp holds to its end.
+	 * lane runs while the scan does, so the stamp holds to its end. A result's
+	 * byte parts are transferred, not copied: nothing keeps them.
 	 */
 	evaluate(method: string, call: Call): void {
-		this.submit(call, 'model', {
-			kind: 'scan',
-			run: () => {
-				const wc = this.ready();
-				return EVALUATIONS[method]!(
-					{
-						model: wc.model,
-						artifacts: this.artifacts,
-						placements: this.placements,
-						working: {
-							rev: wc.rev,
-							stagedVersion: wc.stagedVersion,
-							tableOrders: this.tableOrders
-						}
-					},
-					call.params
-				);
-			}
-		});
+		this.submit<unknown>(
+			call,
+			'model',
+			{
+				kind: 'scan',
+				run: () => {
+					const wc = this.ready();
+					return EVALUATIONS[method]!(
+						{
+							model: wc.model,
+							artifacts: this.artifacts,
+							placements: this.placements,
+							working: {
+								rev: wc.rev,
+								stagedVersion: wc.stagedVersion,
+								tableOrders: this.tableOrders
+							}
+						},
+						call.params
+					);
+				}
+			},
+			transferOf
+		);
 	}
 
 	inspect(call: Call, run: (wc: WorkingCopy) => unknown): void {
