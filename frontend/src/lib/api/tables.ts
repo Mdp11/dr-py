@@ -157,12 +157,9 @@ export function exportContext(): { date: string; project: string } {
 const ZIP = 'application/zip';
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-/** `type` with its parameters spaced one way: `res.blob()` may drop the space the server sent. */
+/** `type` without its parameters: a browser's `res.blob()` keeps only the media type of a fetched body. */
 function mediaType(type: string): string {
-	return type
-		.split(';')
-		.map((part) => part.trim())
-		.join('; ');
+	return (type.split(';')[0] ?? '').trim();
 }
 
 function decoded(bytes: Uint8Array): string {
@@ -170,9 +167,9 @@ function decoded(bytes: Uint8Array): string {
 }
 
 /**
- * What the dev shadow compares of an export: its name, media type and
- * `truncated`, and a `body` that is the text of a JSON, JSONL or CSV file,
- * a zip's members in order as `[path, text]` (an xlsx member `[path,
+ * What the dev shadow compares of an export: its name, media type
+ * (without parameters) and `truncated`, and a `body` that is the text of a
+ * JSON, JSONL or CSV file, a zip's members in order as `[path, text]` (an xlsx member `[path,
  * 'xlsx']`), and nothing for an xlsx — the engine's workbooks and zips are
  * not the server's bytes. A file still `preparing` is `SKIP`.
  */

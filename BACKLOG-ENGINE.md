@@ -15,13 +15,15 @@ both sides with a fixture. `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left the freeze for FEATURES with B's fifth plan, when the
 five read surfaces defaulted to the engine. `core/search`, `core/navigation`, `api/search.py`,
 `routes/read.py::search_model` and `routes/artifacts.py::evaluate_navigation` stay frozen past
-C's first plan flipping navigation and criteria search to the engine: `core/table`'s evaluator
-and `api/routes/{tables,exports}.py` still read them for tables and exports, which stay on the
-server until C's plans 4–5, and `api/search.py` and the route functions are also the 501
-fallback's server side (AD-31); `api/artifact_kinds.py` validates every committed navigation
-payload against them. The freeze lifts for FEATURES once tables and exports default to the
-engine; a bug found in any of them still lands on both sides with a fixture until F (MR-1)
-regardless. `core/table/resolve.py` (ref resolution and script reach) is frozen from C's
+C's first plan flipping navigation and criteria search to the engine until C's plan 5, which
+flipped `exports` to the engine: `core/table`'s evaluator and `api/routes/{tables,exports}.py`
+read them only as the `tables` and `exports` surfaces' server paths now, and `api/search.py` and
+the route functions are also the 501 fallback's server side (AD-31); `api/artifact_kinds.py`
+validates every committed navigation payload against them. The freeze has lifted for FEATURES in
+all of them and in the export writers (`core/table/{csv_export,json_export,export_layout,exporter,naming,split,cell_text}.py`,
+`api/table_export*.py`, `api/export_manifest.py`), except for a table that reaches a script, which
+stays on both sides until D; a bug found in any of them still lands on both sides with a
+fixture until F (MR-1) regardless. `core/table/resolve.py` (ref resolution and script reach) is frozen from C's
 first plan on. `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's
 conformance half (`routes/commits.py::preview_commit`'s model half,
 `api/rules.py::attributable_issues`) are frozen for behaviour from C's plan 2 on and stay so
@@ -81,10 +83,12 @@ the start of A's second plan; `routes/read.py`'s route functions and
 `routes/elements.py::get_element` left it for features once B's fifth plan flipped the
 surfaces' defaults. `core/search`, `core/navigation`, `api/search.py` and the `search_model`
 and `evaluate_navigation` route functions stay frozen past C's first plan's flip of navigation
-and criteria search: `core/table`'s evaluator and `api/routes/{tables,exports}.py` still read
-them for tables and exports, on the server until C's plans 4–5, and `api/search.py` and the
-route functions are also the 501 fallback's server side; `api/artifact_kinds.py` validates
-every committed navigation payload against them; `core/table/resolve.py` (ref resolution and
+and criteria search until C's plan 5 flipped `exports` to the engine, when they left the
+feature freeze (`core/table`'s evaluator and `api/routes/{tables,exports}.py` read them only as
+the server paths of the `tables` and `exports` surfaces now, and the export writers left it too,
+a script table excepted until D); `api/search.py` and the route functions are also the 501
+fallback's server side; `api/artifact_kinds.py` validates every committed navigation payload
+against them; `core/table/resolve.py` (ref resolution and
 script reach) is frozen from C's first plan on too. `core/validation` minus `rules/`,
 `api/validation_sweep.py` and the preview's conformance half
 (`routes/commits.py::preview_commit`'s model half, `api/rules.py::attributable_issues`) are
@@ -104,8 +108,8 @@ could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on:
 feature there lands on both sides with a fixture until F.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
-`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `C-21`, `C-22`,
-`C-23` in this file; `K-33`, `K-34`, `T-10` in
+`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
+`K-76`, `K-77`, `K-78`, `K-79`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
 `BACKLOG.md`.
 Size: very large.
 
@@ -601,6 +605,68 @@ sorts the table: at M, the gate's table costs ~190 ms of model-lane work per tab
 open tabs queue N of those behind every pause in the user's typing, delaying every read and
 transition behind them. Fix direction: re-page only the visible tabs and mark the others stale,
 as a suspended tab already is (`_suspendedStale`), re-paging a stale tab when it is shown.
+
+### K-74 · The degraded export path is unreachable in the engine · `open` · *2026-09-28*
+The server's export writers have a degraded path: a script cell that is not computed writes a
+notice row, the text `#ERROR: not computed` (xlsx and CSV) or `{"$error": …}` (JSON), and an
+exporter run's manifest says `degraded: true`. The engine refuses a table that reaches a script
+(`501`, answered by the server behind the `export-fallback` marker), so it never has an
+uncomputed cell to write and its writers' degraded branches are ported but unexercised outside the
+golden fixtures. It becomes reachable when D brings scripts to the browser; until then nothing
+in the engine produces `degraded: true`. Fix direction: with D, run the degraded fixtures through
+the engine's script evaluation, and add an e2e case for a script table's export on the engine.
+
+### K-75 · `/tables/export` sends its `Content-Disposition` name as the artifact's own · `open` · *2026-09-28*
+Server only, and older than the engine path. `routes/tables.py::export_table` names a
+single-file download after the table artifact (`name`, or `table` for a draft) and
+`table_export_engine.content_disposition` puts an ASCII name between quotes as it is. Commit
+5060552 made a name outside ASCII travel as RFC 5987 `filename*` beside a Latin-1 fallback, so
+the non-ASCII case no longer fails, but an ASCII name is still not sanitized: a `"` ends the
+quoted value early, and any other character of an ASCII name (a control character, a path
+separator, a `;`) reaches the header as it is. Exporter runs pass their zip stem
+through the naming sanitizer; this route does not. Fix direction: run the artifact's name through
+`sanitize_stem` (or escape the quoted value) before it reaches `content_disposition`; the engine
+mirrors whichever the server does, with a fixture.
+
+### K-76 · The server's xlsx writes two kinds of string as markup, not text · `open` · *2026-09-28*
+`api/table_export.py` writes a string cell that starts with `{=` as an array formula, and a
+string that holds `<r>…</r>` as unescaped rich-string markup, which corrupts the workbook. The
+engine's writer writes both as plain strings, so on such a cell the two sides differ; xlsx bytes
+are not compared (the shadow compares an xlsx by name and type alone), and the parity fixtures
+hold no such cell. Two-sided bug: the owner decides whether the server writes plain strings, after
+which a fixture holds one cell of each kind.
+
+### K-77 · The engine's zip writer has no zip64 · `open` · *2026-09-28*
+`engine/src/export/zip.ts` writes the classic layout, so an archive of more than 65,535 members
+or 4 GiB overflows its 16- and 32-bit fields; Python's `zipfile` writes zip64 records there. A
+single split export cannot reach it (at most 50,000 partitions), but an exporter run with
+several split entries can. Fix direction: write the zip64 end-of-central-directory records and
+extra fields past the limits, and fixture a run over 65,535 members, or refuse the run with an
+error beyond them.
+
+### K-78 · A 50,000-partition split export spends about 130 ms in one step · `open` · perf · *2026-09-28*
+`renderFilenames` (`engine/src/export/route.ts`) names and deduplicates every partition of a
+split export in one step: about 130 ms at 50,000 partitions, the longest step of the split zip
+(143–155 ms in all). Fix direction: slice the naming, as
+the row rendering and the zip writing are.
+
+### K-79 · One engine service test is flaky under load · `open` · *2026-09-28*
+`engine/test/service/issues.test.ts` "restarts a digest check in flight…" timed out at its 5 s
+limit in 1 of 4 full `engine-test` runs at a load average of about 25, and passed alone and in
+the other three. Fix direction: find what the test waits on that a loaded host stretches, and wait
+on that signal instead of the clock.
+
+### Considered by the exports plan and deferred
+
+Left out of C's plan 5, each on purpose:
+
+| Items | Reason |
+|---|---|
+| `K-69`, `K-72` | Table sort and cell bugs that fail identically on both sides; exports inherit parity, so a fix with fixtures on both sides belongs to a bug-fix pass |
+| `K-70` | Re-paging with the `tables` surface on the server, not exports |
+| `K-71` | Installing rules; the owner schedules it |
+| `K-73` | Table-tab perf, unrelated to exports |
+| `K-65`, `K-66`, `K-68`, `K-60`'s server half, `C-23`, `K-58`, `K-62`, `K-63`, `T-10`, `T-9`, R13 | Rules, validation or the sweep: not on the exports path |
 
 ---
 

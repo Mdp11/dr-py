@@ -567,12 +567,12 @@ describe('createShadow', () => {
 			expect(lines[0]).toContain('1,3');
 		});
 
-		it('the same CSV is not, whatever the spacing of its content type', async () => {
+		it('the same CSV is not, whatever the parameters of its content type', async () => {
 			const text = 'a,b\r\n1,2\r\n';
 			expect(
 				await reports(
 					ready(text, 'text/csv; charset=utf-8', 't.csv'),
-					ready(text, 'text/csv;charset=utf-8', 't.csv')
+					ready(text, 'text/csv', 't.csv')
 				)
 			).toEqual([]);
 		});
@@ -669,6 +669,50 @@ describe('createShadow', () => {
 				(line) => lines.push(line)
 			);
 			expect(served).toBe(2);
+			expect(lines).toEqual([]);
+		});
+
+		it('an engine failure against a server still preparing is reported', async () => {
+			const lines: string[] = [];
+			const failure = new Error('engine broke');
+			await run(
+				{
+					surface: 'exports',
+					method: 'exportTable',
+					engine: { ok: false, error: failure },
+					again: () => Promise.reject(failure),
+					server: () => Promise.resolve({ kind: 'preparing', done: 1, total: 3 }),
+					digest: (value) => exportDigest(value as ExportResult)
+				},
+				{},
+				(line) => lines.push(line)
+			);
+			expect(lines).toHaveLength(1);
+		});
+
+		it('an edit staged while a re-test digest is awaited ends it silently', async () => {
+			let staged = false;
+			const lines: string[] = [];
+			const csv = ready('a\r\n', 'text/csv; charset=utf-8', 't.csv');
+			const other = ready('b\r\n', 'text/csv; charset=utf-8', 't.csv');
+			let digests = 0;
+			await run(
+				{
+					surface: 'exports',
+					method: 'exportTable',
+					engine: { ok: true, value: csv },
+					again: () => Promise.resolve(csv),
+					server: () => Promise.resolve(other),
+					digest: async (value) => {
+						// The first round's two digests, then the re-test's: staging lands during the latter.
+						if (++digests > 2) staged = true;
+						return exportDigest(value as ExportResult);
+					}
+				},
+				{ staged: () => staged },
+				(line) => lines.push(line)
+			);
+			expect(digests).toBeGreaterThan(2);
 			expect(lines).toEqual([]);
 		});
 	});

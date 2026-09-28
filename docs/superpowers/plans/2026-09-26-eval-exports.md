@@ -722,3 +722,10 @@ Plan 6 (compare, apply-CR, download, view warnings) starts from here:
 - `core/table` is out of the feature freeze except for script tables (until D).
 
 Open from this plan: `K-74`, `K-75`. Still open: `K-65`, `K-66`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, K-60's server half, `C-23`, `K-58`, `K-62`, `K-63`, `T-9`, `T-10`.
+
+## Added during the build
+
+- **Task 7b (added by the owner).** Rendering an xlsx and a zip is sliced across steps, and the engine's zip writer is hand-written in `zipSync`'s layout, so the plan's longest export step is 23 ms in Chromium (491 ms before). Measured on Node, this WSL2 host, 2026-09-28: CSV 597 ms with a 9.5 ms longest step; JSON 797 ms / 15 ms; xlsx about 1,064–1,091 ms / 17–18 ms; a split zip of 50,000 members about 3.3–3.5 s / 143–155 ms (the remaining long step is `renderFilenames`, `K-78`); in the browser the longest export slice is 23 ms (was 491 ms), xlsx 676 ms, CSV 322 ms. Parity at M is equal (CSV 1,946,256 B, JSON 5,815,429 B).
+- **Tooling.** The lint tasks fail on any failing step (`&&`), prettier is cached, and ESLint runs with `--concurrency 4`.
+- **Task 10 fold-ins.** The shadow checks `staged()` again after a re-test's digest await, and skips a `preparing` digest only when both outcomes are ok (an engine failure against a server 202 is reported). The digest compares a content type without its parameters, since a browser's `res.blob()` keeps only the media type of a fetched body (the server's `text/csv; charset=utf-8` reads `text/csv`). The stale "one departure" sentence left `engine/README.md`: the zip writer writes every member, as the server's does.
+- **Backlog.** `K-74` (degraded path unreachable until D), `K-75` (`Content-Disposition` name), `K-76` (server xlsx writes `{=…` and `<r>…</r>` strings as markup), `K-77` (no zip64), `K-78` (`renderFilenames` step), `K-79` (a flaky engine service test under load), and the left-out items of D15 recorded with their reasons in `BACKLOG-ENGINE.md`.

@@ -1805,6 +1805,7 @@ describe('the artifact follower', () => {
 		});
 
 		it('with the exports on the server, the staged note never shows', async () => {
+			localStorage.setItem('dr.surfaces', JSON.stringify({ exports: 'server' }));
 			const project = fakeProject();
 			serve(project, [], () => Promise.reject(new Error('not asked')));
 			const replica = realReplica();

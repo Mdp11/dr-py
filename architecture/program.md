@@ -11,7 +11,7 @@ are promoted into this directory.
 | — | Program design (this directory) | approved 2026-09-18 |
 | A | Engine foundation | done — every golden fixture passes in Node; at M the engine opens a snapshot in 2.3 s of CN-3's 3 s and one open replica holds 231 MB of heap *(measured, Node 22, `pixi run engine-bench`, 2026-09-18)* |
 | B | Replica and frontend seam | done — six plans built (exact server state: `K-30` and `K-31` closed, digest and `prev_rev` on every delta carrier; v2 snapshot writers, the snapshot descriptor, blob and tail routes, `X-Metamodel-Id`; the engine service: CT-4 dispatcher and scheduler, the index build and the digest check in steps, the five read surfaces ported and held to the read routes by fixture — at M the open is 2.4 s, the longest step 12 ms *(measured, Node 22, 2026-09-21)*; the sandbox site and the shell: the replica opens from the cache or the network and follows by delta, tail and re-bootstrap, with a status-bar indicator as its only face; the transport swap: the five read surfaces default to the engine, each behind its own `dr.surfaces` switch with the server as fallback, the workspace waits for `ready` behind an honest progress bar, a tab whose engine could not start shows a dismissible fallback notice and reads from the server, a replica that cannot be rebuilt blocks the workspace behind a `Retry` overlay that keeps uncommitted edits, and shadow comparison holds the engine to the server in dev and in every e2e spec; in the browser (`engine-bench-browser`) the cold open is 1.84 s, the worker's heap 115 MB, the longest slice bounded from outside 51 ms (27 ms once parsing runs), `stage` of 1,000 ops 58 ms and `unstage` 52 ms through the port *(measured, Chromium 148, WSL2, 2026-09-22)*; the forked store: the model store forks into `model-legacy.svelte.ts` and `model-engine.svelte.ts` over a shared half, `staging` defaults to `engine`, the user's edits stage in the replica's working copy and mirror for the synchronous readers, the legacy store stays reachable behind `staging: legacy`, the DiffDrawer gains a conflicts section, and a divergence-recovery test is green) |
-| C | Evaluation | in progress — plan 4 of 8 built (tables evaluated in the engine, staged artifacts included: row build, sort and every cell ported from the Python oracle into `engine/src/table/`, a 16-entry order cache keyed on the resolved definition's semantic text and stamped `(rev, staged_version)`, `artifacts_version` added to `changed` so a staged table or navigation edit re-pages an open table without a reload, a table that reaches a script served by the server from committed state behind a `table-fallback` marker, and two Python table bugs fixed on both sides with fixtures — a capped build now runs every later column over the kept keys, so a capped table's rows are a prefix of the uncapped build's, and a mixed-shape property sort no longer 500s; at M the table gate (112,200-row scope capped at 50,000 rows: build + sort + every cell) is 591 ms of CN-3's 3 s, its longest step 13.3 ms; `evaluateTable`'s first page (500 rows) 194 ms in Node and in Chromium, a cached page 5.9 ms / 9.9 ms; parity with the oracle equal over the 50,000 rows and over 18,523 issues; installing rules in the browser (compile + rescan) 372 ms, its longest slice 50 ms, not optimized here (`K-71`) *(measured, Node 22.22.3, Chromium 141, 4 vCPU Xeon 2.1 GHz, 2026-09-25)*) |
+| C | Evaluation | in progress — plan 5 of 8 built (tables evaluated in the engine, staged artifacts included: row build, sort and every cell ported from the Python oracle into `engine/src/table/`, a 16-entry order cache keyed on the resolved definition's semantic text and stamped `(rev, staged_version)`, `artifacts_version` added to `changed` so a staged table or navigation edit re-pages an open table without a reload, a table that reaches a script served by the server from committed state behind a `table-fallback` marker, and two Python table bugs fixed on both sides with fixtures — a capped build now runs every later column over the kept keys, so a capped table's rows are a prefix of the uncapped build's, and a mixed-shape property sort no longer 500s; at M the table gate (112,200-row scope capped at 50,000 rows: build + sort + every cell) is 591 ms of CN-3's 3 s, its longest step 13.3 ms; `evaluateTable`'s first page (500 rows) 194 ms in Node and in Chromium, a cached page 5.9 ms / 9.9 ms; parity with the oracle equal over the 50,000 rows and over 18,523 issues; installing rules in the browser (compile + rescan) 372 ms, its longest slice 50 ms, not optimized here (`K-71`) *(measured, Node 22.22.3, Chromium 141, 4 vCPU Xeon 2.1 GHz, 2026-09-25)*; plan 5 serves every export from the engine over the working copy, staged edits and staged artifacts included: the four formats (CSV, JSON, JSONL, xlsx), the split zip, and an exporter run with its manifest (`model_rev` the committed rev), rendered in `engine/src/export/` with the Python writers as oracle (held to `export_bytes.json`, and byte-equal at M: CSV 1,946,256 B, JSON 5,815,429 B), the xlsx and the zip written by the engine's own writers in `zipSync`'s layout (`fflate` 0.8.3 is the engine's first runtime dependency), rendering sliced across steps and the bytes transferred across the port as parts; the `exports` surface defaults to the engine behind the dev shadow (which compares digests of the files), the table's and the exporter's Export controls say "Includes staged changes" while edits are staged, and a table that reaches a script is the server's file on committed state behind an `export-fallback` marker; at M, 50,000 rows: CSV 597 ms with a 9.5 ms longest step, JSON 797 ms / 15 ms, xlsx 1,064–1,091 ms / 17–18 ms, a 50,000-member split zip 3.3–3.5 s / 143–155 ms (its longest step is `renderFilenames`, `K-78`); in Chromium the longest export slice is 23 ms (491 ms before slicing), xlsx 676 ms, CSV 322 ms; the degraded-cell path is unreachable in the engine until D (`K-74`) *(measured, Node, WSL2 host, 2026-09-28)*) |
 | D | Scripts in the browser | not started |
 | E | Headless host | not started |
 | F | Thin server and deploy | not started |
@@ -110,29 +110,24 @@ land in TypeScript only. A bug fixed during a port lands on both sides, with a f
 does a bug found after the default flips, for as long as the server path lives (MR-1, until F).
 `routes/read.py`'s route functions and `routes/elements.py::get_element` left the freeze for
 features with B's fifth plan, when the five read surfaces defaulted to the engine; `core/model`,
-`core/metamodel` and the model-op applier stay frozen. `core/navigation`, `core/search`,
-`api/search.py` and the `search_model` and `evaluate_navigation` route functions stay frozen
-too, past C's first plan flipping navigation and criteria search to the engine: `core/table`'s
-evaluator (`core/table/{evaluate,cells,nav_memo,resolve,schema}.py`) still reads them, and two
-server-side readers still reach the evaluator past plan 4 — `routes/tables.py` (the `tables`
-surface's server fallback for a table the engine refuses, a script or an unsupported pattern,
-plus `/tables/export` and `/tables/json-preview`, which stay server calls regardless of the
-surface switch) and `routes/exports.py`, which stay on the server until C's plan 5. `core/table`'s
-evaluator ITSELF left the FEATURE freeze with plan 4, which ported it: `tables` now defaults to
-the engine, so a feature there lands in TypeScript only — EXCEPT a feature two other readers
-would also need: exports, until plan 5 moves them off the Python evaluator, and a table that
-reaches a script (a script column, or a navigation with a script step), which the engine refuses
-and the server's fallback builds entirely in Python — its rows, its order and every cell — until
-D brings scripts to the browser. Such a feature lands on both sides too, or waits for plan 5 (and
-D, for script tables), so neither an export nor a script table silently skips what the engine now
-knows how to compute. A bug found in `core/table`'s evaluator, wherever it is reached from, lands on
-both sides, with a fixture, until F (MR-1), as MR-3's opening rule already says. `core/navigation`,
-`core/search`, `api/search.py` and the route functions themselves leave the feature freeze only
-once exports default to the engine too, at C's plan 5; `api/search.py` and the route functions
-are also the 501 fallback's server side from C's first plan on (AD-31) — a script or an
+`core/metamodel` and the model-op applier stay frozen. `core/table`'s evaluator
+(`core/table/{evaluate,cells,nav_memo,resolve,schema}.py`) left the FEATURE freeze with plan 4, which
+ported it (`tables` defaults to the engine), and its exports exception lifted with plan 5, which
+flipped `exports` to the engine: `/tables/export`, `/tables/json-preview` and `routes/exports.py`
+read the Python evaluator only as the `exports` surface's server path (the switch, and the
+fallback for a table that reaches a script). `core/navigation`, `core/search`, `api/search.py` and
+the `search_model` and `evaluate_navigation` route functions leave the feature freeze then too, as
+do the writers (`core/table/{csv_export,json_export,export_layout,exporter,naming,split,cell_text}.py`),
+`api/table_export*.py` and `api/export_manifest.py`, which froze at plan 5's start: a feature in
+any of them lands in TypeScript only. A bug found in `core/table`'s evaluator, in the writers or in
+any of these areas, wherever it is reached from, lands on both sides, with a fixture, until F
+(MR-1), as MR-3's opening rule already says. A table that reaches a script (a script column, or a
+navigation with a script step) is the one exception that stays until D: the engine refuses it and
+the server's fallback builds it entirely in Python — its rows, its order, every cell and its
+export — so a feature there lands on both sides too, or waits for D. `api/search.py` and the route
+functions are also the 501 fallback's server side from C's first plan on (AD-31) — a script or an
 unsupported pattern reads them whatever plan C is on — and `api/artifact_kinds.py` validates
-every committed navigation payload with `NAVIGATION_ADAPTER`. A bug found in any of them lands
-on both sides, with a fixture, until F, whether or not a feature freeze there has lifted.
+every committed navigation payload with `NAVIGATION_ADAPTER`.
 `core/table/resolve.py` (ref resolution and script reach) is frozen from C's plan 1 on.
 `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's conformance half
 (`routes/commits.py::preview_commit`'s model half, `api/rules.py::attributable_issues`) are

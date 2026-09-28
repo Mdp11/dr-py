@@ -43,7 +43,8 @@ export type ShadowDeps = {
  * mid-flight), ends the comparison without a report — a comparison the
  * caller can no longer see through is not a mismatch either. A probe that
  * carries a `digest` compares each side's digest of its answer instead of
- * the answer, and a digest of `SKIP` on either side ends it silently.
+ * the answer, and a digest of `SKIP` on either side ends it silently when
+ * both sides answered.
  */
 export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']> {
 	return async function shadow(probe): Promise<void> {
@@ -63,7 +64,7 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 		}
 		if (moved(serverOutcome)) return;
 		const [engineDigest, serverDigest] = await digested(engine, serverOutcome);
-		if (isSkip(engineDigest) || isSkip(serverDigest)) return;
+		if (skipped(engineDigest, serverDigest)) return;
 		if (same(surface, engineDigest, serverDigest)) return;
 
 		for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -78,8 +79,9 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 			}
 			if (staged() || moved(...retested)) return;
 			const [retestedEngine, retestedServer] = await digested(...retested);
+			if (staged()) return;
 			if (before !== deps.rev()) continue;
-			if (isSkip(retestedEngine) || isSkip(retestedServer)) return;
+			if (skipped(retestedEngine, retestedServer)) return;
 			if (same(surface, retestedEngine, retestedServer)) return;
 			deps.report(reportLine(surface, method, params, retestedEngine, retestedServer));
 			return;
@@ -114,6 +116,11 @@ async function digestOf(
 
 function isSkip(outcome: Outcome): boolean {
 	return outcome.ok && outcome.value === SKIP;
+}
+
+/** A digest of `SKIP` ends a comparison only when both sides answered: a failure against a server still preparing is a difference. */
+function skipped(a: Outcome, b: Outcome): boolean {
+	return a.ok && b.ok && (isSkip(a) || isSkip(b));
 }
 
 function isTerminal(outcome: Outcome): boolean {

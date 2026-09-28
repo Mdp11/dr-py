@@ -1411,7 +1411,7 @@ are answered by the engine or the server, one switch per surface:
   engine answers, and a side gone to the server meanwhile takes the
   server's answer) and `digest` (carried on the shadow's probe: what it
   compares of each answer in the answer's place).
-- The `exports` surface, `server` by default: `exportTable`,
+- The `exports` surface, `engine` by default like the rest: `exportTable`,
   `runExporter` and `runExporterDraft` send the engine the server's body
   plus `date` (`utcDate()`, `lib/util/utc-date.ts`: the UTC day as
   `YYYYMMDD`, which the server reads off its own clock) and `project` (the
@@ -1462,8 +1462,7 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS` — `engine` for every surface but `exports`, which is
-  `server` — and
+  `SURFACE_DEFAULTS` — `engine` for every surface — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
