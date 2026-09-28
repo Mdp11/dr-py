@@ -320,6 +320,8 @@ let _repageEpoch = 0;
 const _pageOrigins = new Map<string, { epoch: number; side: Side }>();
 /** The pending re-page of `scheduleTablesRepage`, if any. */
 let _repageTimer: ReturnType<typeof setTimeout> | null = null;
+/** Resolved by `flushTablesRepage` when the pending timer above fires or is dropped. */
+const _repageFlushWaiters: (() => void)[] = [];
 /**
  * Tabs whose load in flight is a foreground one (a definition edit, a reload;
  * not a re-page, not a poll): a re-page that supersedes it is foreground too,
@@ -1803,7 +1805,18 @@ export function scheduleTablesRepage(): void {
 	_repageTimer = setTimeout(() => {
 		_repageTimer = null;
 		repageOpenTables();
+		for (const resolve of _repageFlushWaiters.splice(0)) resolve();
 	}, REPAGE_DEBOUNCE_MS);
+}
+
+/**
+ * Test-only: resolves once the timer above has fired (and `repageOpenTables`
+ * has run), or at once when none is pending — lets a test that expects no
+ * re-page wait on the debounce itself rather than a wall-clock margin.
+ */
+export function flushTablesRepage(): Promise<void> {
+	if (_repageTimer === null) return Promise.resolve();
+	return new Promise((resolve) => _repageFlushWaiters.push(resolve));
 }
 
 /**
@@ -1830,6 +1843,7 @@ onTablesMoved(() => scheduleTablesRepage());
 export function resetTableEditors(): void {
 	if (_repageTimer !== null) clearTimeout(_repageTimer);
 	_repageTimer = null;
+	for (const resolve of _repageFlushWaiters.splice(0)) resolve();
 	_pageOrigins.clear();
 	_foregroundLoads.clear();
 	for (const tabId of [..._repageRetries.keys()]) cancelRepageRetry(tabId);

@@ -24,6 +24,7 @@ import { getReplicaStatus, handReplicaFeed, onTablesMoved } from '../replica.sve
 import {
 	ensureTableDraft,
 	ensureTableRange,
+	flushTablesRepage,
 	getTableError,
 	getTableLoading,
 	getTablePage,
@@ -199,7 +200,8 @@ describe('a staged edit re-pages the open tables', () => {
 		const moved = changes.slice(from).filter(({ event }) => event.staged_version > 0);
 		expect(moved.length).toBeGreaterThan(0);
 		expect(asked).toHaveLength(1);
-		expect(asked[0]!.at - moved.at(-1)!.at).toBeGreaterThanOrEqual(299);
+		// Debounced: the re-page never asks before the last move's timer fired.
+		expect(asked[0]!.at).toBeGreaterThanOrEqual(moved.at(-1)!.at);
 		expect(asked[0]!.args).toMatchObject({ definition: PEOPLE, offset: 0, limit: 100 });
 		await sleep(350);
 		expect(asked).toHaveLength(1);
@@ -488,7 +490,8 @@ describe('a staged edit re-pages the open tables', () => {
 		const spy = spyEvaluate();
 
 		await stageRename(s, first, 'staged');
-		await sleep(700);
+		// The debounce fires and finds the tab suspended: marked stale, not loaded.
+		await flushTablesRepage();
 
 		expect(spy).not.toHaveBeenCalled();
 		expect(getTablePage('tbl:draft:2')).toBeUndefined();
@@ -591,12 +594,13 @@ describe('one re-page path per side', () => {
 		const first = 'e_000031';
 
 		await stageRename(s, first, 'staged');
-		await sleep(700);
+		// A staged change moves no table on the server side: no debounce to await.
+		await flushTablesRepage();
 		expect(served).toHaveLength(1);
 
 		peerCommit(s, first);
 		await vi.waitFor(() => expect(served).toHaveLength(2));
-		await sleep(700);
+		await flushTablesRepage();
 		expect(served).toHaveLength(2);
 	});
 
@@ -610,7 +614,8 @@ describe('one re-page path per side', () => {
 		peerCommit(s, first);
 
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('peer'));
-		await sleep(700);
+		// No later debounce sneaks in a second re-page.
+		await flushTablesRepage();
 		expect(spy).toHaveBeenCalledOnce();
 		expect(changes.slice(from).some(({ event }) => event.rev === s.project.rev)).toBe(true);
 	});
