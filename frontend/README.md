@@ -1516,10 +1516,12 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   the store keeps the server's own (see "Surfaces" — `getModelSummary`). A
   probe that carries a `digest` compares each side's digest instead of its
   answer (a digest that throws is a failure of its own), and a digest of
-  `SKIP` on either side ends the comparison silently. An export's is
+  `SKIP` on either side ends the comparison silently only when both
+  sides answered ok (a failure against a server still `preparing` is a
+  difference; staging is checked again after a re-test's digest). An export's is
   `exportDigest` (`api/tables.ts`): `{filename, content_type, truncated,
-body}`, the media type spaced one way (`res.blob()` may drop the space
-  the server sent), `body` the decoded text of a JSON, JSONL or CSV file
+body}`, the media type without its parameters (a fetched body's
+  `res.blob()` keeps only the media type), `body` the decoded text of a JSON, JSONL or CSV file
   (a byte-order mark kept), a zip's members in order as `[path, text]`
   (unzipped with `fflate`, imported dynamically; an `.xlsx` member
   `[path, 'xlsx']`), and absent for an xlsx — the engine's workbooks and

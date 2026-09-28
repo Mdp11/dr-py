@@ -152,8 +152,9 @@ test("a table's CSV is the server's bytes", async ({ page }) => {
 	const download = await exportTable(page, 'csv');
 	expect(download.suggestedFilename()).toMatch(/\.csv$/);
 	const engineBytes = await readFile(await download.path());
+	await expect(page.getByRole('tabpanel').getByTestId('export-fallback')).toHaveCount(0);
 
-	// The page's own API client asks the server for the same definition.
+	// The page asks the server for the same definition, with the API client's headers.
 	const serverBytes = await page.evaluate(
 		async ({ project, artifact }) => {
 			const res = await fetch(`/api/v1/projects/${project}/tables/export`, {
@@ -182,6 +183,7 @@ test('an exporter with two entries and a manifest downloads a zip', async ({ pag
 	await tabpanel.getByTestId('exporter-run').click();
 	const download = await downloading;
 	expect(download.suggestedFilename()).toMatch(/\.zip$/);
+	await expect(tabpanel.getByTestId('export-fallback')).toHaveCount(0);
 
 	const entries = unzipSync(new Uint8Array(await readFile(await download.path())));
 	expect(Object.keys(entries).sort()).toEqual(['alpha.json', 'manifest.json', 'sub/beta.csv']);

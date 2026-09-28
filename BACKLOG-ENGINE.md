@@ -611,26 +611,28 @@ The server's export writers have a degraded path: a script cell that is not comp
 notice row, the text `#ERROR: not computed` (xlsx and CSV) or `{"$error": …}` (JSON), and an
 exporter run's manifest says `degraded: true`. The engine refuses a table that reaches a script
 (`501`, answered by the server behind the `export-fallback` marker), so it never has an
-uncomputed cell to write and its writers' degraded branches are ported but unexercised outside the
-golden fixtures. It becomes reachable when D brings scripts to the browser; until then nothing
-in the engine produces `degraded: true`. Fix direction: with D, run the degraded fixtures through
-the engine's script evaluation, and add an e2e case for a script table's export on the engine.
+uncomputed cell to write. The engine does not port the degraded path itself: it has no notice
+row and no `not computed` text, and `degraded` is fixed at `false` (`engine/src/export/run.ts`);
+only the generic per-cell error text exists (`#ERROR: <message>` in `engine/src/table/cell-text.ts`,
+`$error` in `engine/src/export/json.ts`). Fix direction: with D, port the notice row and the
+`degraded` flag against the degraded fixtures, and add an e2e case for a script table's export on
+the engine.
 
 ### K-75 · `/tables/export` sends its `Content-Disposition` name as the artifact's own · `open` · *2026-09-28*
 Server only, and older than the engine path. `routes/tables.py::export_table` names a
 single-file download after the table artifact (`name`, or `table` for a draft) and
 `table_export_engine.content_disposition` puts an ASCII name between quotes as it is. Commit
 5060552 made a name outside ASCII travel as RFC 5987 `filename*` beside a Latin-1 fallback, so
-the non-ASCII case no longer fails, but an ASCII name is still not sanitized: a `"` ends the
-quoted value early, and any other character of an ASCII name (a control character, a path
-separator, a `;`) reaches the header as it is. Exporter runs pass their zip stem
+the non-ASCII case no longer fails, but neither path sanitizes the name: an ASCII name's `"`
+ends the quoted value early and its control characters, path separators and `;` reach the header
+as they are, and the non-ASCII path's Latin-1 fallback keeps `"` and control characters too. Exporter runs pass their zip stem
 through the naming sanitizer; this route does not. Fix direction: run the artifact's name through
 `sanitize_stem` (or escape the quoted value) before it reaches `content_disposition`; the engine
 mirrors whichever the server does, with a fixture.
 
 ### K-76 · The server's xlsx writes two kinds of string as markup, not text · `open` · *2026-09-28*
-`api/table_export.py` writes a string cell that starts with `{=` as an array formula, and a
-string that holds `<r>…</r>` as unescaped rich-string markup, which corrupts the workbook. The
+`api/table_export.py` writes (through xlsxwriter) a string cell that starts with `{=` and ends with `}` as an array
+formula, and one that starts with `<r>` and ends with `</r>` as unescaped rich-string markup, which corrupts the workbook. The
 engine's writer writes both as plain strings, so on such a cell the two sides differ; xlsx bytes
 are not compared (the shadow compares an xlsx by name and type alone), and the parity fixtures
 hold no such cell. Two-sided bug: the owner decides whether the server writes plain strings, after
@@ -666,7 +668,8 @@ Left out of C's plan 5, each on purpose:
 | `K-70` | Re-paging with the `tables` surface on the server, not exports |
 | `K-71` | Installing rules; the owner schedules it |
 | `K-73` | Table-tab perf, unrelated to exports |
-| `K-65`, `K-66`, `K-68`, `K-60`'s server half, `C-23`, `K-58`, `K-62`, `K-63`, `T-10`, `T-9`, R13 | Rules, validation or the sweep: not on the exports path |
+| `K-65`, `K-66`, `K-68`, `K-60`'s server half, `C-23`, `K-58`, `K-62`, `K-63`, `T-10`, R13 | Rules, validation or the sweep: not on the exports path |
+| `T-9` | A `snippet-flow` locator bug in a spec, not on the exports path |
 
 ---
 
