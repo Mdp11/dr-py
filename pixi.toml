@@ -138,9 +138,7 @@ default-environment = "core-dev"
 description = "Lint + typecheck the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
-ruff check {% if check_only == 'false' %}--fix{% endif %} .
-mypy .
-pyright
+ruff check {% if check_only == 'false' %}--fix{% endif %} . && mypy . && pyright
 """
 cwd = "src/data_rover/core"
 default-environment = "core-dev"
@@ -165,9 +163,7 @@ depends-on = [
 description = "Lint + typecheck the API package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
-ruff check {% if check_only == 'false' %}--fix{% endif %} .
-mypy .
-pyright
+ruff check {% if check_only == 'false' %}--fix{% endif %} . && mypy . && pyright
 """
 cwd = "src/data_rover/api"
 default-environment = "core-dev"
@@ -235,15 +231,14 @@ cwd = "frontend"
 description = "Lint + svelte-check the frontend"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
-npx eslint {% if check_only == 'false' %}--fix{% endif %} .
-npm run check
+npx eslint --concurrency auto {% if check_only == 'false' %}--fix{% endif %} . && npm run check
 """
 cwd = "frontend"
 
 [feature.frontend.tasks.frontend-format]
 description = "Format the frontend"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
-cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
+cmd = "npx prettier --cache --cache-strategy content {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
 cwd = "frontend"
 
 [feature.frontend.tasks.frontend-test]
@@ -289,15 +284,14 @@ cwd = "engine"
 description = "Lint + type-check the engine"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
-npx eslint {% if check_only == 'false' %}--fix{% endif %} .
-npm run check
+npx eslint --concurrency auto {% if check_only == 'false' %}--fix{% endif %} . && npm run check
 """
 cwd = "engine"
 
 [feature.frontend.tasks.engine-format]
 description = "Format the engine"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
-cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
+cmd = "npx prettier --cache --cache-strategy content {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
 cwd = "engine"
 
 [feature.frontend.tasks.engine-bench]
@@ -363,15 +357,14 @@ cwd = "sandbox"
 description = "Lint + type-check the sandbox"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
-npx eslint {% if check_only == 'false' %}--fix{% endif %} .
-npm run check
+npx eslint --concurrency auto {% if check_only == 'false' %}--fix{% endif %} . && npm run check
 """
 cwd = "sandbox"
 
 [feature.frontend.tasks.sandbox-format]
 description = "Format the sandbox"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
-cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
+cmd = "npx prettier --cache --cache-strategy content {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
 cwd = "sandbox"
 
 [feature.frontend.tasks.sandbox-tidy]
