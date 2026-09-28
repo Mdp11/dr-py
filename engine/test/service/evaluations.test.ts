@@ -47,7 +47,9 @@ describe('searchModel', () => {
 			'evaluateNavigation',
 			'evaluateTable',
 			'exportTable',
-			'previewTableJson'
+			'previewTableJson',
+			'runExporter',
+			'runExporterDraft'
 		]);
 		expect(Object.keys(READS)).not.toContain('searchModel');
 	});

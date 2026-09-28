@@ -322,8 +322,12 @@ describe('an export and the table order cache', () => {
 	});
 
 	/** The file's bytes as text, and how many times the scan yielded. */
-	function exportRun(ctx: EvalContext, params: ReadParams): { text: string; yields: number } {
-		const steps = EVALUATIONS.exportTable!(ctx, params);
+	function exportRun(
+		ctx: EvalContext,
+		params: ReadParams,
+		method = 'exportTable'
+	): { text: string; yields: number } {
+		const steps = EVALUATIONS[method]!(ctx, params);
 		let yields = 0;
 		for (;;) {
 			const next = steps.next();
@@ -356,6 +360,26 @@ describe('an export and the table order cache', () => {
 		const later = run(context(set, cache), page(TABLE, 10));
 		expect(later.yields).toBe(0);
 		expect(later.body).toBe(uncached(set, page(TABLE, 10)));
+	});
+
+	it('lets an exporter entry reuse the order of a page of its table', () => {
+		const set = artifacts();
+		const payload = TABLE as unknown as CommittedPayload;
+		set.put([{ id: 't', kind: 'table', name: 't', rev: 1, payload }], []);
+		const body = {
+			definition: {
+				entries: [{ source: { ref: 't' }, format: 'csv', show_row_numbers: true }]
+			},
+			date: '20240229',
+			project: 'p'
+		};
+		const cold = exportRun(context(set, new TableOrderCache()), body, 'runExporterDraft');
+		const cache = new TableOrderCache();
+		run(context(set, cache), { artifact_id: 't', offset: 0, limit: 10 });
+		const warm = exportRun(context(set, cache), body, 'runExporterDraft');
+		expect(warm.yields).toBeLessThan(cold.yields / 2);
+		expect(warm.text).toBe(cold.text);
+		expect(cache.size).toBe(1);
 	});
 });
 

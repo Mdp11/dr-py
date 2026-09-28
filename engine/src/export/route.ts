@@ -1,8 +1,10 @@
 /**
- * `POST /tables/export` and `POST /tables/json-preview` in steps. An export
- * evaluates every row's cells with the export limits, over the order a page of
- * the same table kept, renders its file and answers its bytes as parts, which
- * never pass through `toWire`: nothing is published before the last step.
+ * `POST /tables/export` and `POST /tables/json-preview` in steps, and
+ * `exportFilesSteps`, one table's export as `run_table_export` renders it for
+ * both `/tables/export` and every exporter entry. An export evaluates every
+ * row's cells with the export limits, over the order a page of the same table
+ * kept, renders its files and answers their bytes as parts, which never pass
+ * through `toWire`: nothing is published before the last step.
  */
 import type { EvalContext } from '../evaluate/index.ts';
 import { Meter } from '../navigation/evaluate.ts';
@@ -11,25 +13,30 @@ import { pageOf, type ReadParams } from '../read/params.ts';
 import type { Steps } from '../steps/steps.ts';
 import { evaluateCellsSteps, type TableCell } from '../table/cells.ts';
 import { NavMemo } from '../table/nav-memo.ts';
+import type { CachedOrder } from '../table/order-cache.ts';
 import { tableHasScript } from '../table/resolve.ts';
 import { answered, orderedRows, resolved, sourceOf } from '../table/route.ts';
 import { EXPORT_TABLE_LIMITS, type RowKey } from '../table/rows.ts';
-import type { TableDefinition } from '../table/schema.ts';
+import type { JsonSplitOptions, TableDefinition } from '../table/schema.ts';
+import { pyStr } from '../value/repr.ts';
 import { csvLinesSteps } from './csv.ts';
 import {
+	containsErrorMarker,
 	jsonlLinesSteps,
 	jsonText,
 	jsonTextSteps,
 	renderJsonExSteps,
 	shapeJsonDocs,
+	type JsonDoc,
 	type JsonRenderOptions
 } from './json.ts';
 import { exportDefinition, exportLayout, type ExportLayout } from './layout.ts';
 import { SPLIT_TOKENS, validateTokens } from './naming.ts';
+import type { JsonDocumentOptions } from './schema.ts';
 import { partitionLabel, renderFilenames, splitPartitions, validateTemplate } from './split.ts';
 import { utf8 } from './utf8.ts';
 import { buildWorkbookSteps } from './xlsx.ts';
-import { zipEntries } from './zip.ts';
+import { zipEntries, type ZipFile } from './zip.ts';
 
 export type ExportFormat = 'xlsx' | 'json' | 'csv' | 'jsonl';
 
@@ -78,6 +85,20 @@ export function toParts(bytes: Uint8Array): ArrayBuffer[] {
 	return parts;
 }
 
+/** A file shipped as the route answers it. */
+export const shipped = (
+	bytes: Uint8Array,
+	filename: string,
+	contentType: string,
+	truncated: boolean
+): ExportFileResult => ({
+	parts: toParts(bytes),
+	filename,
+	content_type: contentType,
+	truncated,
+	script_errors: 0
+});
+
 // -- params ------------------------------------------------------------------------
 
 function formatOf(params: ReadParams): ExportFormat {
@@ -100,26 +121,53 @@ export function exportContext(params: ReadParams): { date: string; project: stri
 	return { date, project };
 }
 
+/** The `${rev}` / `${date}` / `${project}` a call's templates read: `rev` is the committed one. */
+export function templateVars(
+	ctx: EvalContext,
+	{ date, project }: { date: string; project: string }
+): { rev: string; date: string; project: string } {
+	return { rev: pyStr(ctx.working?.rev ?? 0), date, project };
+}
+
 /** Whether the table's own `transform` is set, which only `/tables/export` runs. */
 const hasTransform = (defn: TableDefinition): boolean =>
 	defn.transform !== null && (defn.transform.ref !== null || defn.transform.definition !== null);
+
+const isJsonFamily = (format: ExportFormat): format is 'json' | 'jsonl' =>
+	format === 'json' || format === 'jsonl';
+
+/** Whether `split` splits a `format` export: a JSON-family one alone; xlsx and CSV ignore it. */
+const splits = (format: ExportFormat, split: JsonSplitOptions | null): split is JsonSplitOptions =>
+	isJsonFamily(format) && split !== null && split.enabled;
+
+/** The core's refusal of the split template a `format` export would use, else `null`. */
+export function splitRefusal(format: ExportFormat, split: JsonSplitOptions | null): string | null {
+	if (!splits(format, split)) return null;
+	return (
+		validateTemplate(split.filename_template) ??
+		validateTokens(split.filename_template, SPLIT_TOKENS)
+	);
+}
 
 // -- rows --------------------------------------------------------------------------
 
 /**
  * Every row of a resolved `defn` that reaches no script, in order, with its
  * cells under the export limits. The order is `orderedRows`', so a table
- * whose order is kept builds no rows.
+ * whose order is kept builds no rows. `ordered` runs once the rows are in
+ * order, before any cell.
  */
 export function exportRowsSteps(
 	ctx: EvalContext,
 	defn: TableDefinition,
-	meter: Meter
+	meter: Meter,
+	ordered: (order: CachedOrder) => void = () => {}
 ): Steps<ExportRows> {
 	const { model } = ctx;
 	const rows = orderedRows(ctx, defn, meter);
 	return (function* (): Steps<ExportRows> {
 		const order = yield* rows;
+		ordered(order);
 		const cells = yield* evaluateCellsSteps(
 			model,
 			defn,
@@ -133,11 +181,136 @@ export function exportRowsSteps(
 	})();
 }
 
-const jsonOptions = (layout: ExportLayout): JsonRenderOptions => ({
+const jsonOptions = (layout: ExportLayout, keyColumn: number | null): JsonRenderOptions => ({
 	order: layout.rank,
 	rowNumber: layout.rowNumberAt === null ? null : [layout.rowNumberAt, layout.rowNumberKey],
-	keyColumn: null
+	keyColumn
 });
+
+// -- one table's export ------------------------------------------------------------
+
+/**
+ * One table's export: `defn` evaluated, `renderDefn` (the same table, or an
+ * exporter entry's copy of it) rendered, `name` naming the file and the sheet,
+ * `vars` the split filenames' context, `jsonDoc` an entry's document shaping.
+ */
+export type ExportJob = {
+	defn: TableDefinition;
+	renderDefn: TableDefinition;
+	name: string;
+	format: ExportFormat;
+	vars: Readonly<Record<string, string>>;
+	jsonDoc: JsonDocumentOptions | null;
+};
+
+/** What one table's export wrote: one file, or one a partition (`archive`), by its name. */
+export type ExportFiles = { files: ZipFile[]; truncated: boolean; archive: boolean };
+
+/** `json_key_column`: the object shape's key column, `json` only, refused when unset or out of range. */
+function jsonKeyColumn(job: ExportJob): number | null {
+	const { format, jsonDoc, defn, name } = job;
+	if (format !== 'json' || jsonDoc === null || jsonDoc.shape !== 'object') return null;
+	const keyColumn = jsonDoc.key_column;
+	if (keyColumn === null) {
+		throw new ReadError(422, `${name}: json_doc.shape 'object' requires key_column`);
+	}
+	if (!(0 <= keyColumn && keyColumn < defn.columns.length)) {
+		throw new ReadError(
+			422,
+			`${name}: json_doc.key_column ${keyColumn} out of range (table has ${defn.columns.length} columns)`
+		);
+	}
+	return keyColumn;
+}
+
+/**
+ * `run_table_export` in steps, its split template already checked: every
+ * row evaluated from `job.defn`, the file (or, split, one file a partition)
+ * rendered from `job.renderDefn`. JSON is pretty unless the entry says
+ * otherwise; with `on_error: 'fail'`, a document holding an error marker
+ * refuses with 422.
+ */
+export function exportFilesSteps(
+	ctx: EvalContext,
+	job: ExportJob,
+	meter: Meter
+): Steps<ExportFiles> {
+	const { model } = ctx;
+	const { defn, renderDefn, name, format, vars, jsonDoc } = job;
+	const split = renderDefn.json_split;
+	const layout = exportLayout(renderDefn);
+	let keyColumn: number | null = null;
+	const rows = exportRowsSteps(ctx, defn, meter, () => {
+		keyColumn = jsonKeyColumn(job);
+	});
+	const pretty = jsonDoc === null || jsonDoc.pretty;
+
+	function checkOnError(docs: readonly JsonDoc[]): void {
+		if (jsonDoc?.on_error === 'fail' && docs.some(containsErrorMarker)) {
+			throw new ReadError(
+				422,
+				`${name}: export contains error cells and json_doc.on_error is 'fail'`
+			);
+		}
+	}
+
+	return (function* (): Steps<ExportFiles> {
+		const { keys, cells, truncated, baseSlots } = yield* rows;
+		if (format === 'xlsx' || format === 'csv') {
+			const shown = cells.map((row) => layout.order.map((i) => row[i]!));
+			const { headers, rowNumberAt } = layout;
+			let bytes: Uint8Array;
+			if (format === 'xlsx') {
+				bytes = yield* buildWorkbookSteps(model, headers, name, shown, rowNumberAt, meter);
+			} else {
+				const pieces = yield* csvLinesSteps(model, headers, shown, rowNumberAt, meter);
+				bytes = utf8(pieces.join(''), false);
+			}
+			return { files: [{ path: `${name}.${format}`, bytes }], truncated, archive: false };
+		}
+		const eff = exportDefinition(renderDefn);
+		const options = jsonOptions(layout, keyColumn);
+		function* file(
+			partKeys: readonly RowKey[],
+			partCells: readonly TableCell[][]
+		): Steps<Uint8Array> {
+			const [docs, docKeys] = yield* renderJsonExSteps(
+				model,
+				eff,
+				partKeys,
+				partCells,
+				baseSlots,
+				options,
+				meter
+			);
+			checkOnError(docs);
+			const pieces =
+				format === 'jsonl'
+					? yield* jsonlLinesSteps(docs, meter)
+					: yield* jsonTextSteps(shapeJsonDocs('json', docs, docKeys), pretty, meter);
+			return utf8(pieces.join(''), format === 'jsonl');
+		}
+		if (!splits(format, split)) {
+			const bytes = yield* file(keys, cells);
+			return { files: [{ path: `${name}.${format}`, bytes }], truncated, archive: false };
+		}
+		const parts = splitPartitions(keys);
+		const stems = renderFilenames(
+			split.filename_template,
+			parts.map((part) => partitionLabel(model, part.binding)),
+			vars
+		);
+		const files: ZipFile[] = [];
+		for (const [i, part] of parts.entries()) {
+			const bytes = yield* file(
+				part.indices.map((idx) => keys[idx]!),
+				part.indices.map((idx) => cells[idx]!)
+			);
+			files.push({ path: `${stems[i]!}.${format}`, bytes });
+		}
+		return { files, truncated, archive: true };
+	})();
+}
 
 // -- the routes --------------------------------------------------------------------
 
@@ -155,122 +328,30 @@ export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportF
 	const source = sourceOf(params);
 	pageOf(params);
 	const format = formatOf(params);
-	const { date, project } = exportContext(params);
+	const context = exportContext(params);
 	const defn = resolved(ctx.artifacts, source);
 	if (tableHasScript(defn) || hasTransform(defn)) throw new ReadError(501, 'reaches a script');
-	const split = defn.json_split;
-	const splitOn = (format === 'json' || format === 'jsonl') && split !== null && split.enabled;
-	if (splitOn) {
-		const badTemplate = validateTemplate(split!.filename_template);
-		if (badTemplate !== null) throw new ReadError(422, badTemplate);
-		const badTokens = validateTokens(split!.filename_template, SPLIT_TOKENS);
-		if (badTokens !== null) throw new ReadError(422, badTokens);
-	}
+	const badSplit = splitRefusal(format, defn.json_split);
+	if (badSplit !== null) throw new ReadError(422, badSplit);
 	const name = typeof source === 'string' ? ctx.artifacts.resolve(source)!.name : 'table';
-	const { model } = ctx;
-	const meter = new Meter(0);
-	const rows = exportRowsSteps(ctx, defn, meter);
-	const layout = exportLayout(defn);
-	const vars = { rev: String(ctx.working?.rev ?? 0), date, project };
+	const job: ExportJob = {
+		defn,
+		renderDefn: defn,
+		name,
+		format,
+		vars: templateVars(ctx, context),
+		jsonDoc: null
+	};
+	const files = exportFilesSteps(ctx, job, new Meter(0));
 
 	return answered(
 		(function* (): Steps<ExportFileResult> {
-			const { keys, cells, truncated, baseSlots } = yield* rows;
-			if (format === 'xlsx') {
-				const shown = cells.map((row) => layout.order.map((i) => row[i]!));
-				const bytes = yield* buildWorkbookSteps(
-					model,
-					layout.headers,
-					name,
-					shown,
-					layout.rowNumberAt,
-					meter
-				);
-				return {
-					parts: toParts(bytes),
-					filename: `${name}.xlsx`,
-					content_type: MEDIA_TYPES.xlsx,
-					truncated,
-					script_errors: 0
-				};
+			const out = yield* files;
+			if (out.archive) {
+				return shipped(zipEntries(out.files), `${name}.zip`, 'application/zip', out.truncated);
 			}
-			if (format === 'csv') {
-				const shown = cells.map((row) => layout.order.map((i) => row[i]!));
-				const pieces = yield* csvLinesSteps(
-					model,
-					layout.headers,
-					shown,
-					layout.rowNumberAt,
-					meter
-				);
-				return {
-					parts: toParts(utf8(pieces.join(''), false)),
-					filename: `${name}.csv`,
-					content_type: MEDIA_TYPES.csv,
-					truncated,
-					script_errors: 0
-				};
-			}
-			// `format` is 'json' | 'jsonl' below: xlsx and csv returned above.
-			if (splitOn) {
-				const eff = exportDefinition(defn);
-				const options = jsonOptions(layout);
-				const parts = splitPartitions(keys);
-				const stems = renderFilenames(
-					split!.filename_template,
-					parts.map((part) => partitionLabel(model, part.binding)),
-					vars
-				);
-				const files: { path: string; bytes: Uint8Array }[] = [];
-				for (const [i, part] of parts.entries()) {
-					const partKeys = part.indices.map((idx) => keys[idx]!);
-					const partCells = part.indices.map((idx) => cells[idx]!);
-					const [docs, docKeys] = yield* renderJsonExSteps(
-						model,
-						eff,
-						partKeys,
-						partCells,
-						baseSlots,
-						options,
-						meter
-					);
-					const pieces =
-						format === 'jsonl'
-							? yield* jsonlLinesSteps(docs, meter)
-							: yield* jsonTextSteps(shapeJsonDocs(format, docs, docKeys), true, meter);
-					files.push({
-						path: `${stems[i]!}.${format}`,
-						bytes: utf8(pieces.join(''), format === 'jsonl')
-					});
-				}
-				return {
-					parts: toParts(zipEntries(files)),
-					filename: `${name}.zip`,
-					content_type: 'application/zip',
-					truncated,
-					script_errors: 0
-				};
-			}
-			const [docs, docKeys] = yield* renderJsonExSteps(
-				model,
-				exportDefinition(defn),
-				keys,
-				cells,
-				baseSlots,
-				jsonOptions(layout),
-				meter
-			);
-			const pieces =
-				format === 'jsonl'
-					? yield* jsonlLinesSteps(docs, meter)
-					: yield* jsonTextSteps(shapeJsonDocs(format, docs, docKeys), true, meter);
-			return {
-				parts: toParts(utf8(pieces.join(''), format === 'jsonl')),
-				filename: `${name}.${format}`,
-				content_type: MEDIA_TYPES[format],
-				truncated,
-				script_errors: 0
-			};
+			const [file] = out.files;
+			return shipped(file!.bytes, file!.path, MEDIA_TYPES[format], out.truncated);
 		})()
 	);
 }
@@ -313,7 +394,7 @@ export function previewTableJson(ctx: EvalContext, params: ReadParams): Steps<Js
 				window,
 				cells,
 				order.baseSlots,
-				jsonOptions(layout),
+				jsonOptions(layout, null),
 				meter
 			);
 			const shown = truncated && docs.length > 1 ? docs.slice(0, -1) : docs;

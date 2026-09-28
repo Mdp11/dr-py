@@ -43,6 +43,15 @@ export {
 	type ExportLayout
 } from './export/layout.ts';
 export {
+	inlineTransformMarker,
+	MANIFEST_NAME,
+	manifestTransform,
+	renderManifest,
+	type Manifest,
+	type ManifestEntry
+} from './export/manifest.ts';
+export {
+	FolderPathError,
 	folderSegments,
 	NAME_TOKENS,
 	sanitizeStem,
@@ -52,17 +61,42 @@ export {
 } from './export/naming.ts';
 export {
 	exportContext,
+	exportFilesSteps,
 	exportRowsSteps,
 	exportTable,
 	MEDIA_TYPES,
 	PREVIEW_MAX_ROWS,
 	previewTableJson,
+	shipped,
+	splitRefusal,
+	templateVars,
 	toParts,
 	type ExportFileResult,
+	type ExportFiles,
 	type ExportFormat,
+	type ExportJob,
 	type ExportRows,
 	type JsonPreviewBody
 } from './export/route.ts';
+export {
+	exportReachesScript,
+	runExporter,
+	runExporterDraft,
+	runExportSteps,
+	type RunIdentity
+} from './export/run.ts';
+export {
+	hasEntryTransform,
+	MAX_EXPORTER_ENTRIES,
+	overriddenTable,
+	readExporterDefinition,
+	type ColumnOverride,
+	type EntryTransform,
+	type ExporterDefinition,
+	type ExporterEntry,
+	type JsonDocumentOptions,
+	type OutputOptions
+} from './export/schema.ts';
 export {
 	partitionLabel,
 	renderFilenames,

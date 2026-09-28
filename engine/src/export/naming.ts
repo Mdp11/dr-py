@@ -2,9 +2,9 @@
  * The `${token}` template engine behind export naming, a port of
  * `core/table/naming.py`. One vocabulary, several contexts — `${name}` binds
  * to something different in each (a partition's display name for a split
- * filename; later, an exporter entry's own table name or its artifact's
- * name) — so `NAME_TOKENS`/`SPLIT_TOKENS` are separate constants rather than
- * one context-blind set.
+ * filename, an exporter entry's table for its name and folder, the run's name
+ * for its zip filename) — so `NAME_TOKENS`/`SPLIT_TOKENS` are separate
+ * constants rather than one context-blind set.
  *
  * Two-phase, like the core: `validateTokens` runs up front (a typo shipped
  * silently into a filename contract is worse than a loud refusal), while
@@ -80,15 +80,18 @@ export function sanitizeStem(name: string): string {
 	return cleaned;
 }
 
+/** A folder template's refusal: the core's `ValueError` from `folder_segments`. */
+export class FolderPathError extends Error {}
+
 /** Path segments for a rendered folder template; `""` -> `[]` (root). */
 export function folderSegments(rendered: string): string[] {
 	if (rendered === '') return [];
 	if (rendered.startsWith('/') || rendered.startsWith('\\')) {
-		throw new Error('folder path must be relative');
+		throw new FolderPathError('folder path must be relative');
 	}
 	return rendered.split('/').map((raw) => {
 		const cleaned = sanitizeStem(raw);
-		if (cleaned === '') throw new Error('folder path has an empty segment');
+		if (cleaned === '') throw new FolderPathError('folder path has an empty segment');
 		return cleaned;
 	});
 }

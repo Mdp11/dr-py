@@ -121,7 +121,7 @@ export type TableDefinition = {
 
 // -- reading -------------------------------------------------------------------
 
-type Doc = { readonly [key: string]: unknown };
+export type Doc = { readonly [key: string]: unknown };
 
 const isDoc = (value: unknown): value is Doc =>
 	typeof value === 'object' &&
@@ -129,23 +129,23 @@ const isDoc = (value: unknown): value is Doc =>
 	!Array.isArray(value) &&
 	!(value instanceof PyFloat);
 
-function refuse(where: string, message: string): never {
+export function refuse(where: string, message: string): never {
 	throw new ReadError(422, `${where}: ${message}`);
 }
 
 // An absent key takes the default; a `null` does not, as pydantic has it.
-const field = (d: Doc, key: string, fallback?: unknown): unknown =>
+export const field = (d: Doc, key: string, fallback?: unknown): unknown =>
 	Object.hasOwn(d, key) && d[key] !== undefined ? d[key] : fallback;
 
-function doc(raw: unknown, where: string): Doc {
+export function doc(raw: unknown, where: string): Doc {
 	if (!isDoc(raw)) refuse(where, 'must be an object');
 	return raw;
 }
 
-const isInt = (value: unknown): value is number =>
+export const isInt = (value: unknown): value is number =>
 	typeof value === 'number' && Number.isInteger(value);
 
-function str(d: Doc, key: string, where: string, fallback?: string): string {
+export function str(d: Doc, key: string, where: string, fallback?: string): string {
 	const value = field(d, key, fallback);
 	if (typeof value !== 'string') refuse(`${where}.${key}`, 'must be a string');
 	return value;
@@ -159,13 +159,13 @@ function optionalStr(d: Doc, key: string, where: string): string | null {
 	return value;
 }
 
-function bool(d: Doc, key: string, where: string, fallback: boolean): boolean {
+export function bool(d: Doc, key: string, where: string, fallback: boolean): boolean {
 	const value = field(d, key, fallback);
 	if (typeof value !== 'boolean') refuse(`${where}.${key}`, 'must be a boolean');
 	return value;
 }
 
-function int(d: Doc, key: string, where: string, min: number, fallback?: number): number {
+export function int(d: Doc, key: string, where: string, min: number, fallback?: number): number {
 	const value = field(d, key, fallback);
 	if (!isInt(value) || value < min) {
 		refuse(`${where}.${key}`, `must be an integer of at least ${min}`);
@@ -173,13 +173,13 @@ function int(d: Doc, key: string, where: string, min: number, fallback?: number)
 	return value;
 }
 
-function optionalInt(d: Doc, key: string, where: string): number | null {
+export function optionalInt(d: Doc, key: string, where: string): number | null {
 	const value = field(d, key, null);
 	if (value !== null && !isInt(value)) refuse(`${where}.${key}`, 'must be an integer or null');
 	return value;
 }
 
-function oneOf<T extends string>(
+export function oneOf<T extends string>(
 	d: Doc,
 	key: string,
 	where: string,
@@ -201,7 +201,7 @@ function names(d: Doc, key: string, where: string): string[] {
 	return [...(value as string[])];
 }
 
-function ints(d: Doc, key: string, where: string): number[] {
+export function ints(d: Doc, key: string, where: string): number[] {
 	const value = field(d, key, []);
 	if (!Array.isArray(value) || !value.every(isInt)) {
 		refuse(`${where}.${key}`, 'must be a list of integers');
@@ -209,14 +209,14 @@ function ints(d: Doc, key: string, where: string): number[] {
 	return [...(value as number[])];
 }
 
-function list(d: Doc, key: string, where: string): readonly unknown[] {
+export function list(d: Doc, key: string, where: string): readonly unknown[] {
 	const value = field(d, key, []);
 	if (!Array.isArray(value)) refuse(`${where}.${key}`, 'must be a list');
 	return value;
 }
 
 /** An optional sub-document: `null` when absent or null, else read by `read`. */
-function optionalDoc<T>(
+export function optionalDoc<T>(
 	d: Doc,
 	key: string,
 	where: string,
@@ -239,7 +239,7 @@ function readNavigationSource(raw: unknown, where: string): NavigationSource {
 	return { ref, definition };
 }
 
-function readSnippetSource(d: Doc, where: string): SnippetSource {
+export function readSnippetSource(d: Doc, where: string): SnippetSource {
 	const ref = optionalStr(d, 'ref', where);
 	const definition = field(d, 'definition', null);
 	if (definition !== null && !isDoc(definition)) {
@@ -308,7 +308,7 @@ function readInput(raw: unknown, where: string): ScriptInput {
 	return { name, ref: readColumnRef(doc(field(d, 'ref'), at), at) };
 }
 
-function readJsonOptions(d: Doc, where: string): JsonColumnOptions {
+export function readJsonOptions(d: Doc, where: string): JsonColumnOptions {
 	return {
 		key: str(d, 'key', where, ''),
 		item_key: str(d, 'item_key', where, ''),
@@ -318,12 +318,27 @@ function readJsonOptions(d: Doc, where: string): JsonColumnOptions {
 	};
 }
 
-function readExportOptions(d: Doc, where: string): ColumnExportOptions {
+export function readExportOptions(d: Doc, where: string): ColumnExportOptions {
 	const include = field(d, 'include', null);
 	if (include !== null && typeof include !== 'boolean') {
 		refuse(`${where}.include`, 'must be a boolean or null');
 	}
 	return { include, header: str(d, 'header', where, '') };
+}
+
+export function readRowNumberOptions(d: Doc, where: string): RowNumberExportOptions {
+	return {
+		include: bool(d, 'include', where, true),
+		header: str(d, 'header', where, ''),
+		key: str(d, 'key', where, '')
+	};
+}
+
+export function readJsonSplitOptions(d: Doc, where: string): JsonSplitOptions {
+	return {
+		enabled: bool(d, 'enabled', where, false),
+		filename_template: str(d, 'filename_template', where, '')
+	};
 }
 
 function readPresentation(d: Doc, where: string): Presentation {
@@ -501,15 +516,8 @@ export function readTableDefinition(raw: unknown, where: string): TableDefinitio
 		export_order: ints(d, 'export_order', where),
 		display_order: ints(d, 'display_order', where),
 		sort: list(d, 'sort', where).map((key, i) => readSortKey(key, `${where}.sort[${i}]`)),
-		export_row_number: optionalDoc(d, 'export_row_number', where, (sub, at) => ({
-			include: bool(sub, 'include', at, true),
-			header: str(sub, 'header', at, ''),
-			key: str(sub, 'key', at, '')
-		})),
-		json_split: optionalDoc(d, 'json_split', where, (sub, at) => ({
-			enabled: bool(sub, 'enabled', at, false),
-			filename_template: str(sub, 'filename_template', at, '')
-		})),
+		export_row_number: optionalDoc(d, 'export_row_number', where, readRowNumberOptions),
+		json_split: optionalDoc(d, 'json_split', where, readJsonSplitOptions),
 		transform: optionalDoc(d, 'transform', where, readSnippetSource)
 	};
 	checkSources(defn, where);
