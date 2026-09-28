@@ -134,6 +134,11 @@ description = "Write benchmarks/large.table.json: the Python table evaluator's r
 cmd = "python scripts/table_large.py"
 default-environment = "core-dev"
 
+[feature.core-dev.tasks.engine-export-oracle]
+description = "Write benchmarks/large.export.{csv,json}: the Python export route's bytes over model M, which engine-parity-large compares"
+cmd = "python scripts/export_large.py"
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.core-lint]
 description = "Lint + typecheck the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
@@ -305,12 +310,13 @@ cmd = "npm run xlsx-sample"
 cwd = "engine"
 
 [feature.frontend.tasks.engine-parity-large]
-description = "Compare the engine's table and sweep at model M with the Python oracle's (run engine-bench-data once before)"
+description = "Compare the engine's table, export and sweep at model M with the Python oracle's (run engine-bench-data once before)"
 cmd = "node --disable-warning=ExperimentalWarning bench/parity-large.ts"
 cwd = "engine"
 depends-on = [
     { task = "engine-parity-oracle", environment = "core-dev" },
-    { task = "engine-table-oracle", environment = "core-dev" }
+    { task = "engine-table-oracle", environment = "core-dev" },
+    { task = "engine-export-oracle", environment = "core-dev" }
 ]
 
 [feature.frontend.tasks.engine-bench-browser]

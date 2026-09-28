@@ -1,21 +1,25 @@
 /**
  * The engine against the Python oracle at model M, over the same
- * (pre-violation) replica: the gate's table, row for row; then, with the
- * same violations and the same custom rules applied, the sweep.
- * `scripts/table_large.py` writes the table oracle's side (`tableSteps`'s
- * counterpart) over `engine/bench/big-table.json`, before any op lands: its
- * rows, and beside them its build's totals, which the rows cannot say;
- * `scripts/issues_large.py` writes a batch of ops that breaks every check it
- * can, lands it on the document the snapshot was written from, compiles its
- * rule sets and runs the server's own sweep. Here the table's rows are built
- * over the freshly opened replica first; then the same violation batch lands
- * on it through `applyBatch`, the rule sets it wrote — the payloads route's
+ * (pre-violation) replica: the gate's table, row for row; the gate's export,
+ * byte for byte, in csv and in json; then, with the same violations and the
+ * same custom rules applied, the sweep. `scripts/table_large.py` writes the
+ * table oracle's side (`tableSteps`'s counterpart) over
+ * `engine/bench/big-table.json`, before any op lands: its rows, and beside
+ * them its build's totals, which the rows cannot say; `scripts/export_large.py`
+ * writes the SAME table's export over the SAME pre-violation model, through
+ * the real `/tables/export` route, in both formats; `scripts/issues_large.py`
+ * writes a batch of ops that breaks every check it can, lands it on the
+ * document the snapshot was written from, compiles its rule sets and runs
+ * the server's own sweep. Here the table's rows are built over the freshly
+ * opened replica first; the export runs over that same replica, before
+ * anything else touches it; then the same violation batch lands on it
+ * through `applyBatch`, the rule sets it wrote — the payloads route's
  * bodies, each with its parse — compile as the service compiles them, and a
  * `LiveIssues` holding them sweeps it to its end, compared with the oracle's
  * issues as multisets of `issueKey`. Exits 1, with the first differences of
  * whichever side disagrees, when either does.
  *
- * `pixi run engine-parity-large` writes both oracle sides and runs this,
+ * `pixi run engine-parity-large` writes every oracle side and runs this,
  * once `pixi run engine-bench-data` has written the snapshot.
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -26,6 +30,7 @@ import {
 	compileRuleSets,
 	DEFAULT_TABLE_LIMITS,
 	drain,
+	exportTable,
 	issueKey,
 	LiveIssues,
 	Metamodel,
@@ -40,14 +45,21 @@ import {
 	RULE_CHECK_PREFIX,
 	ruleSources,
 	tableSteps,
+	ViewPlacements,
 	wireCell,
 	wireKey,
+	type EvalContext,
+	type ExportFileResult,
+	type ExportFormat,
 	type Issue,
 	type MetamodelDoc
 } from '../src/index.ts';
 
 const SHOWN = 20;
 const CHUNK_BYTES = 1 << 16;
+const CONTEXT_BYTES = 80;
+const EXPORT_DATE = '20240229';
+const EXPORT_PROJECT = 'p';
 
 const DIR = new URL('../../benchmarks/', import.meta.url);
 const SNAPSHOT = new URL('large.snapshot.v2', DIR);
@@ -58,6 +70,8 @@ const RULES = new URL('large.rules.json', DIR);
 const BIG_TABLE = new URL('big-table.json', import.meta.url);
 const TABLE_ORACLE = new URL('large.table.json', DIR);
 const TABLE_ORACLE_META = new URL('large.table.meta.json', DIR);
+const EXPORT_ORACLE_META = new URL('large.export.meta.json', DIR);
+const EXPORT_ORACLE = (format: ExportFormat) => new URL(`large.export.${format}`, DIR);
 
 for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES]) {
 	if (!existsSync(file)) {
@@ -65,9 +79,11 @@ for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES]) {
 		process.exit(1);
 	}
 }
-for (const file of [TABLE_ORACLE, TABLE_ORACLE_META]) {
+for (const file of [TABLE_ORACLE, TABLE_ORACLE_META, EXPORT_ORACLE_META]) {
 	if (!existsSync(file)) {
-		console.error(`Missing ${file.pathname}: run \`pixi run engine-table-oracle\` first.`);
+		console.error(
+			`Missing ${file.pathname}: run \`pixi run engine-table-oracle\` and \`engine-export-oracle\` first.`
+		);
 		process.exit(1);
 	}
 }
@@ -97,8 +113,9 @@ const { header, workingCopy } = await openSnapshot(
 );
 
 // The gate's table, over the replica as opened: before any violation lands.
+const rawBigTable = JSON.parse(readFileSync(BIG_TABLE, 'utf-8')) as Record<string, unknown>;
 const bigTable = resolveTableRefs(
-	readTableDefinition(JSON.parse(readFileSync(BIG_TABLE, 'utf-8')), 'definition'),
+	readTableDefinition(rawBigTable, 'definition'),
 	navigationFetch(new ArtifactSet())
 );
 const tableStart = performance.now();
@@ -155,6 +172,84 @@ if (!metaOk) {
 		`Parity FAILS: the build's totals differ: oracle ${JSON.stringify(oracleMeta)}, ` +
 			`engine ${JSON.stringify(engineMeta)}.`
 	);
+}
+
+// The gate's export, csv and json, over the same replica: still before any
+// violation lands, exactly what the oracle exported.
+const exportOracleMeta = JSON.parse(readFileSync(EXPORT_ORACLE_META, 'utf-8')) as {
+	[format in ExportFormat]?: { filename: string; content_type: string; truncated: boolean };
+};
+
+/** The offset of the first byte `a` and `b` disagree on, or -1 if they are equal. */
+function firstDiff(a: Uint8Array, b: Uint8Array): number {
+	const n = Math.max(a.length, b.length);
+	for (let i = 0; i < n; i++) if (a[i] !== b[i]) return i;
+	return -1;
+}
+
+/** `bytes` around `at`, `CONTEXT_BYTES` either side, decoded best-effort for a human. */
+function around(bytes: Uint8Array, at: number): string {
+	const from = Math.max(0, at - CONTEXT_BYTES);
+	const to = Math.min(bytes.length, at + CONTEXT_BYTES);
+	return new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(from, to));
+}
+
+let exportOk = true;
+for (const format of ['csv', 'json'] as const) {
+	const exportStart = performance.now();
+	const ctx: EvalContext = {
+		model: workingCopy.model,
+		artifacts: new ArtifactSet(),
+		placements: new ViewPlacements()
+	};
+	const result: ExportFileResult = drain(
+		exportTable(ctx, {
+			definition: rawBigTable,
+			format,
+			date: EXPORT_DATE,
+			project: EXPORT_PROJECT
+		})
+	);
+	const exportMs = performance.now() - exportStart;
+	const engineBytes = new Uint8Array(result.parts.reduce((n, part) => n + part.byteLength, 0));
+	let at = 0;
+	for (const part of result.parts) {
+		engineBytes.set(new Uint8Array(part), at);
+		at += part.byteLength;
+	}
+	const oracleBytes = new Uint8Array(readFileSync(EXPORT_ORACLE(format)));
+	const diffAt = firstDiff(oracleBytes, engineBytes);
+	const bytesOk = diffAt === -1;
+	const oracleFileMeta = exportOracleMeta[format];
+	const metaMatches =
+		oracleFileMeta !== undefined &&
+		oracleFileMeta.filename === result.filename &&
+		oracleFileMeta.content_type === result.content_type &&
+		oracleFileMeta.truncated === result.truncated;
+	const ok = bytesOk && metaMatches;
+	exportOk = exportOk && ok;
+	console.log(
+		`Export ${format}: ${engineBytes.length.toLocaleString('en-US')} bytes ` +
+			`(oracle ${oracleBytes.length.toLocaleString('en-US')}), rendered in ${exportMs.toFixed(0)} ms. ` +
+			(ok ? 'Parity: equal, byte for byte.' : 'Parity FAILS:')
+	);
+	if (!bytesOk) {
+		console.log(
+			`  first differing offset ${diffAt.toLocaleString('en-US')}\n` +
+				`    oracle  ...${JSON.stringify(around(oracleBytes, diffAt))}...\n` +
+				`    engine  ...${JSON.stringify(around(engineBytes, diffAt))}...`
+		);
+	}
+	if (!metaMatches) {
+		console.log(
+			`  meta differs: oracle ${JSON.stringify(oracleFileMeta)}, ` +
+				`engine ${JSON.stringify({
+					filename: result.filename,
+					content_type: result.content_type,
+					truncated: result.truncated
+				})}`
+		);
+	}
 }
 
 // Committed state, as the oracle holds it: the store wraps the working copy after.
@@ -217,4 +312,4 @@ if (issuesOk) {
 	];
 	for (const line of differences.slice(0, SHOWN)) console.log(line);
 }
-if (!tableOk || !issuesOk) process.exit(1);
+if (!tableOk || !exportOk || !issuesOk) process.exit(1);

@@ -21,6 +21,7 @@ import {
 	entityHash,
 	evaluateTable,
 	EVALUATIONS,
+	exportTable,
 	formatDigest,
 	issueListBody,
 	LiveIssues,
@@ -39,6 +40,7 @@ import {
 	type Delta,
 	type ElementRec,
 	type EvalContext,
+	type ExportFileResult,
 	type MetamodelDoc,
 	type ModelOp,
 	type RelRec,
@@ -97,6 +99,14 @@ const ROWS = {
 	tableFirstPageLongest: '  its longest step',
 	tableCachedPage: 'evaluateTable: page at offset 500, same cache (order cached)',
 	tableCachedPageLongest: '  its longest step',
+	exportCsv: 'exportTable: csv, a fresh order cache',
+	exportCsvLongest: '  its longest step',
+	exportJson: 'exportTable: json, a fresh order cache',
+	exportJsonLongest: '  its longest step',
+	exportXlsx: 'exportTable: xlsx, a fresh order cache',
+	exportXlsxLongest: '  its longest step',
+	exportCsvWarm: 'exportTable: csv again, the order already cached',
+	exportCsvWarmLongest: '  its longest step',
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -157,6 +167,43 @@ function stepped<T>(total: Row, longest: Row | null, steps: Steps<T>, first?: Ro
 		if (next.done === true) {
 			record(total, performance.now() - start);
 			if (longest !== null) record(longest, worst);
+			return next.value;
+		}
+	}
+}
+
+type ExportRow = 'exportCsv' | 'exportJson' | 'exportXlsx' | 'exportCsvWarm';
+const exportBytes = new Map<ExportRow, number[]>();
+const exportPeakHeapMb = new Map<ExportRow, number[]>();
+
+/**
+ * `stepped`, plus the two an export needs and `evaluateTable` doesn't:
+ * bytes shipped, and the peak `heapUsed` a step reached above the level
+ * just before the call — sampled after every step, since nothing else
+ * marks where inside the render the peak falls.
+ */
+function steppedExport(
+	total: Row,
+	longest: Row,
+	row: ExportRow,
+	steps: Steps<ExportFileResult>
+): ExportFileResult {
+	const baseline = process.memoryUsage().heapUsed;
+	let peak = 0;
+	let worst = 0;
+	const start = performance.now();
+	for (;;) {
+		const before = performance.now();
+		const next = steps.next();
+		const ms = performance.now() - before;
+		worst = Math.max(worst, ms);
+		peak = Math.max(peak, process.memoryUsage().heapUsed - baseline);
+		if (next.done === true) {
+			record(total, performance.now() - start);
+			record(longest, worst);
+			const bytes = next.value.parts.reduce((n, part) => n + part.byteLength, 0);
+			exportBytes.set(row, [...(exportBytes.get(row) ?? []), bytes]);
+			exportPeakHeapMb.set(row, [...(exportPeakHeapMb.get(row) ?? []), peak / 2 ** 20]);
 			return next.value;
 		}
 	}
@@ -578,6 +625,60 @@ function measureTable(workingCopy: WorkingCopy): void {
 	}
 }
 
+/**
+ * The gate's export over the just-opened replica: csv, json and xlsx, each
+ * with a fresh order cache — an export's cold path — then csv again over the
+ * SAME context, whose order `exportCsv` left cached: the warm path a second
+ * export of the same table takes.
+ */
+function measureExport(workingCopy: WorkingCopy): void {
+	const { model } = workingCopy;
+	const freshCtx = (): EvalContext => ({
+		model,
+		artifacts: new ArtifactSet(),
+		placements: new ViewPlacements(),
+		working: { rev: workingCopy.rev, stagedVersion: 0, tableOrders: new TableOrderCache() }
+	});
+	const params = { definition: rawBigTable, date: '20240229', project: 'bench' };
+
+	const csvCtx = freshCtx();
+	const csv = steppedExport(
+		'exportCsv',
+		'exportCsvLongest',
+		'exportCsv',
+		exportTable(csvCtx, { ...params, format: 'csv' })
+	);
+	if (!csv.truncated) throw new Error('the csv export is not truncated');
+
+	const json = steppedExport(
+		'exportJson',
+		'exportJsonLongest',
+		'exportJson',
+		exportTable(freshCtx(), { ...params, format: 'json' })
+	);
+	if (!json.truncated) throw new Error('the json export is not truncated');
+
+	const xlsx = steppedExport(
+		'exportXlsx',
+		'exportXlsxLongest',
+		'exportXlsx',
+		exportTable(freshCtx(), { ...params, format: 'xlsx' })
+	);
+	if (!xlsx.truncated) throw new Error('the xlsx export is not truncated');
+
+	const warm = steppedExport(
+		'exportCsvWarm',
+		'exportCsvWarmLongest',
+		'exportCsvWarm',
+		exportTable(csvCtx, { ...params, format: 'csv' })
+	);
+	const csvBytes = csv.parts.reduce((n, part) => n + part.byteLength, 0);
+	const warmBytes = warm.parts.reduce((n, part) => n + part.byteLength, 0);
+	if (warmBytes !== csvBytes) {
+		throw new Error(`the warm csv export holds ${warmBytes} bytes, the cold one ${csvBytes}`);
+	}
+}
+
 async function pass(): Promise<void> {
 	const start = performance.now();
 	let loaded = start;
@@ -603,6 +704,7 @@ async function pass(): Promise<void> {
 	stepped('criteria', 'criteriaLongest', criteriaScan(workingCopy.model));
 	stepped('navigation', 'navigationLongest', navigation(workingCopy.model));
 	measureTable(workingCopy);
+	measureExport(workingCopy);
 	counts = `${count(header.elements)} elements, ${count(header.relationships)} relationships`;
 	// Weighed before the document is read: the last text a regular expression
 	// ran over stays reachable, and further down that is the whole document.
@@ -650,6 +752,18 @@ const each = heapMb.map((mb) => mb.toFixed(0)).join(' ');
 console.log(
 	`${'heap after GC with one replica open, MB'.padEnd(width)}  ${heap.toFixed(0).padStart(6)}   [${each}]${collected}`
 );
+for (const row of ['exportCsv', 'exportJson', 'exportXlsx', 'exportCsvWarm'] as ExportRow[]) {
+	const bytesVals = exportBytes.get(row)!;
+	const heapVals = exportPeakHeapMb.get(row)!;
+	const bytesEach = bytesVals.map((n) => n.toLocaleString('en-US')).join(' ');
+	const heapEach = heapVals.map((mb) => mb.toFixed(1)).join(' ');
+	console.log(
+		`${`  ${row} bytes out`.padEnd(width)}  ${median(bytesVals).toLocaleString('en-US').padStart(10)}   [${bytesEach}]`
+	);
+	console.log(
+		`${`  ${row} peak heap above baseline, MB`.padEnd(width)}  ${median(heapVals).toFixed(1).padStart(6)}   [${heapEach}]`
+	);
+}
 const verdict = (within: boolean) => (within ? 'within budget' : 'OVER BUDGET');
 const tableGate = median(timings.get('tableGate')!);
 const tableGateStep = median(timings.get('tableGateLongest')!);
