@@ -236,7 +236,7 @@ cwd = "frontend"
 description = "Lint + svelte-check the frontend"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
-npx eslint --concurrency auto {% if check_only == 'false' %}--fix{% endif %} . && npm run check
+npx eslint --concurrency 4 {% if check_only == 'false' %}--fix{% endif %} . && npm run check
 """
 cwd = "frontend"
 
@@ -289,7 +289,7 @@ cwd = "engine"
 description = "Lint + type-check the engine"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
-npx eslint --concurrency auto {% if check_only == 'false' %}--fix{% endif %} . && npm run check
+npx eslint --concurrency 4 {% if check_only == 'false' %}--fix{% endif %} . && npm run check
 """
 cwd = "engine"
 
@@ -363,7 +363,7 @@ cwd = "sandbox"
 description = "Lint + type-check the sandbox"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
-npx eslint --concurrency auto {% if check_only == 'false' %}--fix{% endif %} . && npm run check
+npx eslint --concurrency 4 {% if check_only == 'false' %}--fix{% endif %} . && npm run check
 """
 cwd = "sandbox"
 
