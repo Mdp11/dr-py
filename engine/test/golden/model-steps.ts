@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { unzipSync } from 'fflate';
 import { expect } from 'vitest';
 import {
 	appliesPopulation,
@@ -470,7 +471,13 @@ function cellTexts(model: Model, artifacts: ArtifactSet, step: Step): Tagged[][]
 	return cells.map((row) => row.map((cell) => tag(cellText(model, cell))));
 }
 
-/** What the recorder keeps of a shipped file: its text, decoded as UTF-8. */
+const utf8Text = (bytes: Uint8Array): string =>
+	new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+
+/**
+ * What the recorder keeps of a shipped file: its text, decoded as UTF-8, or —
+ * for a zip — its members in order, each its path plus its own text.
+ */
 function exported(result: ExportFileResult): unknown {
 	const { parts, filename, content_type, truncated } = result;
 	const bytes = new Uint8Array(parts.reduce((n, part) => n + part.byteLength, 0));
@@ -479,8 +486,12 @@ function exported(result: ExportFileResult): unknown {
 		bytes.set(new Uint8Array(part), at);
 		at += part.byteLength;
 	}
-	const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-	return { status: 200, filename, content_type, truncated, file: { text } };
+	if (content_type === 'application/zip') {
+		const members = unzipSync(bytes);
+		const zip = Object.entries(members).map(([path, member]) => ({ path, text: utf8Text(member) }));
+		return { status: 200, filename, content_type, truncated, file: { zip } };
+	}
+	return { status: 200, filename, content_type, truncated, file: { text: utf8Text(bytes) } };
 }
 
 /**

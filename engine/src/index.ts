@@ -43,6 +43,14 @@ export {
 	type ExportLayout
 } from './export/layout.ts';
 export {
+	folderSegments,
+	NAME_TOKENS,
+	sanitizeStem,
+	SPLIT_TOKENS,
+	substitute,
+	validateTokens
+} from './export/naming.ts';
+export {
 	exportContext,
 	exportRowsSteps,
 	exportTable,
@@ -55,6 +63,14 @@ export {
 	type ExportRows,
 	type JsonPreviewBody
 } from './export/route.ts';
+export {
+	partitionLabel,
+	renderFilenames,
+	splitPartitions,
+	validateTemplate,
+	type Partition
+} from './export/split.ts';
+export { zipEntries, type ZipFile } from './export/zip.ts';
 export { parseKey, parseKeyEntry, type KeyRel, type KeySpec } from './metamodel/key.ts';
 export { Metamodel, type EndConstraint } from './metamodel/metamodel.ts';
 export { Multiplicity } from './metamodel/multiplicity.ts';

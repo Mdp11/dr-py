@@ -150,9 +150,10 @@ function groupPlan(defn: TableDefinition, baseSlots: number): GroupPlan {
 /**
  * A slot's identity as a Python dict key: `1`, `1.0` and `True` are one key;
  * a value terminal equals only a terminal of the same type and value. A list
- * or dict is unhashable there.
+ * or dict is unhashable there. Shared with `split.ts`'s partition buckets —
+ * the one equality signature every bucketing here keys on.
  */
-function slotKey(b: Binding): string {
+export function slotKey(b: Binding): string {
 	if (b instanceof PropertyValue) return 'p' + JSON.stringify(b.key);
 	if (typeof b === 'object' && b !== null && !(b instanceof PyFloat)) {
 		throw new Error(`unhashable type: '${Array.isArray(b) ? 'list' : 'dict'}'`);
@@ -161,7 +162,7 @@ function slotKey(b: Binding): string {
 }
 
 /** Items bucketed by `keyOf`, buckets and their items in first-appearance order. */
-function bucketed<T>(items: readonly T[], keyOf: (item: T) => string | null): T[][] {
+export function bucketed<T>(items: readonly T[], keyOf: (item: T) => string | null): T[][] {
 	const buckets = new Map<string, T[]>();
 	for (const item of items) {
 		const key = keyOf(item);

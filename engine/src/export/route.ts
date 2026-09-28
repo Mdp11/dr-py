@@ -25,6 +25,9 @@ import {
 	type JsonRenderOptions
 } from './json.ts';
 import { exportDefinition, exportLayout, type ExportLayout } from './layout.ts';
+import { SPLIT_TOKENS, validateTokens } from './naming.ts';
+import { partitionLabel, renderFilenames, splitPartitions, validateTemplate } from './split.ts';
+import { zipEntries } from './zip.ts';
 
 export type ExportFormat = 'xlsx' | 'json' | 'csv' | 'jsonl';
 
@@ -168,51 +171,111 @@ const jsonOptions = (layout: ExportLayout): JsonRenderOptions => ({
 // -- the routes --------------------------------------------------------------------
 
 /**
- * `POST /tables/export` for one CSV, JSON or JSONL file. Before the first step
- * it reads its params and resolves the table through the working copy's
- * artifacts; a table that reaches a script, or carries a transform, refuses
- * with 501 for the server to run. The file is named after the saved table, or
- * `table`. JSON is written pretty; a split is ignored for CSV.
+ * `POST /tables/export` for one CSV, JSON or JSONL file — or, with the
+ * table's own `json_split` enabled (JSON-family formats only; CSV ignores
+ * it), an `application/zip` named `{name}.zip` of one file a partition.
+ * Before the first step it reads its params and resolves the table through
+ * the working copy's artifacts; a table that reaches a script, or carries a
+ * transform, refuses with 501 for the server to run, and a bad split
+ * template with 422. The file is named after the saved table, or `table`.
+ * JSON is written pretty.
  */
 export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportFileResult> {
 	const source = sourceOf(params);
 	pageOf(params);
 	const format = formatOf(params);
-	exportContext(params);
+	const { date, project } = exportContext(params);
 	const defn = resolved(ctx.artifacts, source);
 	if (tableHasScript(defn) || hasTransform(defn)) throw new ReadError(501, 'reaches a script');
 	if (format === 'xlsx') throw new ReadError(422, 'xlsx not supported yet');
-	if (format !== 'csv' && defn.json_split !== null && defn.json_split.enabled) {
-		throw new ReadError(422, 'split not supported yet');
+	const split = defn.json_split;
+	const splitOn = format !== 'csv' && split !== null && split.enabled;
+	if (splitOn) {
+		const badTemplate = validateTemplate(split!.filename_template);
+		if (badTemplate !== null) throw new ReadError(422, badTemplate);
+		const badTokens = validateTokens(split!.filename_template, SPLIT_TOKENS);
+		if (badTokens !== null) throw new ReadError(422, badTokens);
 	}
 	const name = typeof source === 'string' ? ctx.artifacts.resolve(source)!.name : 'table';
 	const { model } = ctx;
 	const meter = new Meter(0);
 	const rows = exportRowsSteps(ctx, defn, meter);
 	const layout = exportLayout(defn);
+	const vars = { rev: String(ctx.working?.rev ?? 0), date, project };
 
 	return answered(
 		(function* (): Steps<ExportFileResult> {
 			const { keys, cells, truncated, baseSlots } = yield* rows;
-			let pieces: string[];
 			if (format === 'csv') {
 				const shown = cells.map((row) => layout.order.map((i) => row[i]!));
-				pieces = yield* csvLinesSteps(model, layout.headers, shown, layout.rowNumberAt, meter);
-			} else {
-				const [docs, docKeys] = yield* renderJsonExSteps(
+				const pieces = yield* csvLinesSteps(
 					model,
-					exportDefinition(defn),
-					keys,
-					cells,
-					baseSlots,
-					jsonOptions(layout),
+					layout.headers,
+					shown,
+					layout.rowNumberAt,
 					meter
 				);
-				pieces =
-					format === 'jsonl'
-						? yield* jsonlLinesSteps(docs, meter)
-						: yield* jsonTextSteps(shapeJsonDocs(format, docs, docKeys), true, meter);
+				return {
+					parts: toParts(utf8(pieces.join(''), false)),
+					filename: `${name}.csv`,
+					content_type: MEDIA_TYPES.csv,
+					truncated,
+					script_errors: 0
+				};
 			}
+			// `format` is 'json' | 'jsonl' below: xlsx refused above, csv returned above.
+			if (splitOn) {
+				const eff = exportDefinition(defn);
+				const options = jsonOptions(layout);
+				const parts = splitPartitions(keys);
+				const stems = renderFilenames(
+					split!.filename_template,
+					parts.map((part) => partitionLabel(model, part.binding)),
+					vars
+				);
+				const files: { path: string; bytes: Uint8Array }[] = [];
+				for (const [i, part] of parts.entries()) {
+					const partKeys = part.indices.map((idx) => keys[idx]!);
+					const partCells = part.indices.map((idx) => cells[idx]!);
+					const [docs, docKeys] = yield* renderJsonExSteps(
+						model,
+						eff,
+						partKeys,
+						partCells,
+						baseSlots,
+						options,
+						meter
+					);
+					const pieces =
+						format === 'jsonl'
+							? yield* jsonlLinesSteps(docs, meter)
+							: yield* jsonTextSteps(shapeJsonDocs(format, docs, docKeys), true, meter);
+					files.push({
+						path: `${stems[i]!}.${format}`,
+						bytes: utf8(pieces.join(''), format === 'jsonl')
+					});
+				}
+				return {
+					parts: toParts(zipEntries(files)),
+					filename: `${name}.zip`,
+					content_type: 'application/zip',
+					truncated,
+					script_errors: 0
+				};
+			}
+			const [docs, docKeys] = yield* renderJsonExSteps(
+				model,
+				exportDefinition(defn),
+				keys,
+				cells,
+				baseSlots,
+				jsonOptions(layout),
+				meter
+			);
+			const pieces =
+				format === 'jsonl'
+					? yield* jsonlLinesSteps(docs, meter)
+					: yield* jsonTextSteps(shapeJsonDocs(format, docs, docKeys), true, meter);
 			return {
 				parts: toParts(utf8(pieces.join(''), format === 'jsonl')),
 				filename: `${name}.${format}`,
