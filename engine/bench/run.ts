@@ -188,6 +188,8 @@ function steppedExport(
 	row: ExportRow,
 	steps: Steps<ExportFileResult>
 ): ExportFileResult {
+	globalThis.gc?.();
+	globalThis.gc?.();
 	const baseline = process.memoryUsage().heapUsed;
 	let peak = 0;
 	let worst = 0;
