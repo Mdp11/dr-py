@@ -357,6 +357,13 @@ export {
 	type Severity
 } from './validation/issue.ts';
 export {
+	readViewDoc,
+	validateViewDoc,
+	type ArtifactRefDoc,
+	type FolderDoc,
+	type ViewDoc
+} from './view/validate.ts';
+export {
 	LiveIssues,
 	RESCAN_STEP,
 	SWEEP_STEP,

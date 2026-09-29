@@ -9,6 +9,7 @@ import { searchModel } from '../search/search-model.ts';
 import type { Steps } from '../steps/steps.ts';
 import type { TableOrderCache } from '../table/order-cache.ts';
 import { evaluateTable } from '../table/route.ts';
+import { validateView } from '../view/validate.ts';
 
 /**
  * Where the working copy stands — the rev its committed state is at, and its
@@ -44,5 +45,6 @@ export const EVALUATIONS: { readonly [method: string]: Evaluation } = {
 	exportTable,
 	previewTableJson,
 	runExporter,
-	runExporterDraft
+	runExporterDraft,
+	validateView
 };

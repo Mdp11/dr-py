@@ -174,7 +174,11 @@ event     {event, …}                     engine → client, unsolicited
   back to start over; `{cancel}` drops it unanswered. Where the server's stream breaks off
   mid-file, the engine refuses the whole file with 422: a non-finite float as `Out of range
   float values are not JSON compliant`, a lone surrogate in Python's encoder words, its
-  position counted in code points from the start of the file. `getModelIssues {}`,
+  position counted in code points from the start of the file. `validateView {view}` answers
+  the view document's warnings, as `GET /views/{id}` sends them, over the WORKING model and the
+  working artifacts (a staged artifact create is known, a staged delete is not): the six
+  `view` warnings as `IssueOut`s with origin `on_server`, in the order the server gives them; a
+  `view` that is not a view document is a 422 `view…`. `getModelIssues {}`,
   `validateModel {batch_ids}` and `previewCommit {base_rev, batch_ids, strict}` (the model
   half only — artifact, view and `metamodel.move_node` ops stay a server call the shell merges
   in) answer the one live issue store over the working

@@ -181,7 +181,9 @@ export type Step = Partial<Observed> & {
 	rev?: number;
 	/** `candidate` / `preview_rebind`: the candidate metamodel document. */
 	metamodel?: MetamodelDoc;
-	/** `download`: ops, one line of JSON text each, staged over the model before it reads. */
+	/** `validate_view`: the view document. */
+	view?: unknown;
+	/** `download` / `validate_view`: ops, one line of JSON text each, staged over the model before it reads. */
 	stage?: string[];
 	result: string | string[] | BatchOutcome | object | boolean | null;
 	error: StepError | null;
@@ -696,6 +698,13 @@ function apply(
 			expectSameBytes(bytes, new TextEncoder().encode(step.result as string), `step ${index}`);
 			return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 		}
+		case 'validate_view': {
+			// The view checked over the working model (the step's ops staged) and the artifacts.
+			const { model: working } = stagedReplica(model, step, carried);
+			return drain(
+				EVALUATIONS['validateView']!({ model: working, artifacts, placements }, { view: step.view })
+			);
+		}
 		case 'issues': {
 			const { store, rev } = carried.session!;
 			return storeListBody(store, rev, rulesStatusBody(carried.rules ?? EMPTY_RULES));
@@ -846,7 +855,8 @@ const READ_LIKE = new Set([
 	'preview',
 	'validate_staged',
 	'candidate',
-	'preview_rebind'
+	'preview_rebind',
+	'validate_view'
 ]);
 
 /**
