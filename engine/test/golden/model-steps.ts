@@ -51,6 +51,7 @@ import {
 	ruleSources,
 	rulesStatusBody,
 	shuffleAdjacency,
+	stagedAdmitted,
 	storeListBody,
 	validateBody,
 	validateScoped,
@@ -568,6 +569,12 @@ function exported(result: ExportFileResult): unknown {
 	return { status: 200, filename, content_type, truncated, file: recordedFile(filename, bytes) };
 }
 
+/** The service's refusal of a rebind preview whose staged ops the candidate does not admit. */
+export const REFUSED_OPS = { status: 501, detail: 'reaches ops the candidate refuses' } as const;
+
+/** Thrown by a replayed `preview_rebind` the engine refuses as `REFUSED_OPS`. */
+class RefusedOps extends Error {}
+
 /**
  * `mint` stands in for the oracle's `SequentialIdGenerator`. A failed call
  * consumes no id, and neither does a refused batch: the oracle runs each on a
@@ -641,11 +648,13 @@ function apply(
 		case 'preview_rebind': {
 			// `POST /commits/preview` over a rebind to the document ahead of the ops:
 			// a replica of the session's state, the ops staged on it, scanned whole
-			// under the document with the committed rule sources recompiled for it.
+			// under the document with the committed rule sources recompiled for it —
+			// unless the document does not admit the staged ops.
 			const wc = workingCopy(clone(model, carried.options), carried.session!.rev);
 			wc.stage(parseOps(step.ops!));
 			const { sources } = carried;
 			const candidate = prepareCandidate(step.metamodel, (mm) => compileRuleSets(sources, mm));
+			if (!stagedAdmitted(wc, candidate.metamodel)) throw new RefusedOps();
 			return rebindPreviewBody(drain(candidateScan(wc.model, candidate)));
 		}
 		case 'issues': {
@@ -844,10 +853,14 @@ export function replaySteps(
 				error = { status: caught.status, detail: caught.detail };
 			} else if (caught instanceof NavKeyError) error = { kind: 'key', message: caught.id };
 			else if (caught instanceof NavValueError) error = { kind: 'value', message: caught.message };
+			else if (caught instanceof RefusedOps) error = { ...REFUSED_OPS };
 			else throw caught;
 		}
 		const recorded = step.error;
-		if (recorded !== null && 'status' in recorded && typeof recorded.detail !== 'string') {
+		if (step.do === 'preview_rebind' && recorded !== null) {
+			// The oracle refuses the ops in its own words; the engine leaves them to it.
+			expect(error, label).toEqual(REFUSED_OPS);
+		} else if (recorded !== null && 'status' in recorded && typeof recorded.detail !== 'string') {
 			// FastAPI's refusal of a body: the engine refuses it in its own words.
 			expect(error !== null && 'status' in error ? error.status : error, label).toBe(
 				recorded.status

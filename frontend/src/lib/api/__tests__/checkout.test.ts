@@ -376,6 +376,49 @@ describe('previewCommit on the engine', () => {
 			expect(engine.over.methods()).not.toContain('previewCommit');
 		});
 
+		it("staged ops the candidate refuses are the server's whole, which answers its 422", async () => {
+			const project = fakeProject();
+			// The candidate drops `name`, which the staged rename sets.
+			const candidate = JSON.parse(JSON.stringify(project.doc)) as {
+				elements: { name: string; properties: { name: string }[] }[];
+			};
+			const named = candidate.elements.find((element) => element.name === 'NamedElement')!;
+			named.properties = named.properties.filter((property) => property.name !== 'name');
+			const probes: ShadowProbe[] = [];
+			const engine = await issuesEngine(made, {
+				project,
+				surfaces: { metamodel: 'engine' },
+				lint: () => ({ ok: true, errors: [], document: candidate }),
+				shadow: (probe) => void probes.push(probe)
+			});
+			const { ops, batchIds } = await staged(engine);
+			const all = [rebind, ...ops, moveNode];
+			const bodies: unknown[] = [];
+			server.use(
+				http.post(`${project.baseUrl}/commits/preview`, async ({ request }) => {
+					bodies.push(await request.json());
+					return HttpResponse.json(
+						{ detail: "Organization' has no property 'name" },
+						{ status: 422 }
+					);
+				})
+			);
+
+			const failure = await previewCommit(0, all, undefined, { strict: false, batchIds }).catch(
+				(error: unknown) => error
+			);
+
+			expect(engine.over.methods()).toContain('previewCommit');
+			expect(bodies).toEqual([{ base_rev: 0, ops: all }]);
+			expect(failure).toBeInstanceOf(ValidationError);
+			expect(failure).toMatchObject({
+				status: 422,
+				message: "Organization' has no property 'name"
+			});
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(probes).toEqual([]);
+		});
+
 		it('a staged create beside it is previewed locally, its temp id named, and never shadowed', async () => {
 			const project = fakeProject();
 			const probes: ShadowProbe[] = [];

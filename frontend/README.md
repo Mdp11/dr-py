@@ -1404,7 +1404,9 @@ are answered by the engine or the server, one switch per surface:
   cannot read, or that reached it without the server's parse — the
   follower sends every parse, so only a document the engine's reader
   refuses, or a payload item with no parse, gets here), is answered
-  by the server the same way, never marked. So is a 409 the engine answers when the staged batches, the
+  by the server the same way, never marked, and so is a rebind preview's
+  `reaches ops the candidate refuses` (a staged op the candidate does not
+  admit, which the server refuses with its own 422). So is a 409 the engine answers when the staged batches, the
   `base_rev` or the replica moved under the call (`stale staged batches`,
   `stale base_rev`, `replica is not ready`): the server answers the whole
   request. `route`'s options also take `shadow` (`'unstaged'`, the default;
@@ -2679,7 +2681,8 @@ Rebind button — the buffer is staged commit CONTENT and lands through the same
   the engine (the default; `lib/engine/README.md`) the replica answers the model half over
   the working copy and `POST /metamodel/structural-diff` the document half,
   and `metamodel-staged-note` ("Includes staged changes") shows above the
-  panel while `metamodelIncludesStaged()` holds; an invalid candidate is
+  panel when `metamodelIncludesStaged()` held as the preview's answer landed
+  (`previewIncludesStaged`, recorded with the preview); an invalid candidate is
   still "The candidate metamodel is invalid.". The result is recorded **against
   the exact buffer it was computed for** (`previewCurrent`), so a preview goes
   stale the moment the next character is typed and the panel says so. Preview

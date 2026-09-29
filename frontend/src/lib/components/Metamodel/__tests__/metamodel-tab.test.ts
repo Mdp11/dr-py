@@ -290,19 +290,28 @@ describe('the staged note over the preview', () => {
 		return c;
 	}
 
-	it('shows while a preview now would include staged changes, and hides when it would not', async () => {
+	it('shows while the preview on screen included staged changes when it was answered', async () => {
 		seamOn('engine');
 		let c = await previewed();
 		try {
 			expect(getMetamodelEditor().preview).toEqual(DIFF);
 			expect(note()).toBeNull();
 
+			// A stage after the preview does not change what it holds.
 			stageArtifactCreate('navigation', 'Staged', { kind: 'path' }, null);
 			flushSync();
+			expect(note()).toBeNull();
+			await previewMetamodelChanges();
+			await settle();
+			expect(getMetamodelEditor().previewIncludesStaged).toBe(true);
 			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
 
+			// Nor does an unstage: the note stays until the next preview.
 			resetArtifactEdits();
 			flushSync();
+			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
+			await previewMetamodelChanges();
+			await settle();
 			expect(note()).toBeNull();
 		} finally {
 			unmount(c);

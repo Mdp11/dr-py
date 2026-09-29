@@ -76,6 +76,7 @@ const EDITOR: MetamodelEditorView = {
 	lintErrors: [],
 	preview: null,
 	previewCurrent: false,
+	previewIncludesStaged: false,
 	previewing: false,
 	previewError: null
 };

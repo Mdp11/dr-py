@@ -80,8 +80,9 @@ describe('a candidate metamodel diffs as the oracle diffs it', () => {
 			replayStaged(diffs!, options, 'staged');
 		});
 
-		it(`previews a rebind over staged ops as the oracle does${label}`, () => {
-			expect(previews!.steps.filter((step) => step.do === 'preview_rebind')).toHaveLength(4);
+		it(`previews a rebind over staged ops as the oracle does, or refuses the ops it refuses${label}`, () => {
+			expect(previews!.steps.filter((step) => step.do === 'preview_rebind')).toHaveLength(6);
+			expect(previews!.steps.filter((step) => step.error !== null)).toHaveLength(2);
 			replaySteps(previews!, options);
 		});
 	}

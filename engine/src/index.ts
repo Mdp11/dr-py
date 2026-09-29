@@ -337,6 +337,7 @@ export {
 	candidateScan,
 	prepareCandidate,
 	rebindPreviewBody,
+	stagedAdmitted,
 	type Candidate,
 	type CandidateDiff
 } from './validation/candidate.ts';

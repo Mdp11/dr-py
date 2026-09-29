@@ -11,7 +11,13 @@ import {
 	type StageResult
 } from '../../src/index.ts';
 import { loadFixture } from '../golden/load.ts';
-import { loadModelFile, parseOps, ruleSetDocs, type StepsFixture } from '../golden/model-steps.ts';
+import {
+	loadModelFile,
+	parseOps,
+	REFUSED_OPS,
+	ruleSetDocs,
+	type StepsFixture
+} from '../golden/model-steps.ts';
 import { clone, Server } from '../working/helpers.ts';
 import {
 	autoHost,
@@ -121,6 +127,43 @@ const CONTAINMENT = (() => {
 	doc.relationships.find((rel) => rel.name === 'Refines')!.containment = true;
 	return doc;
 })();
+
+/** The live document with `edit` applied to a copy. */
+function edited(edit: (doc: MetamodelDoc) => void): MetamodelDoc {
+	const doc = structuredClone(DOC);
+	edit(doc);
+	return doc;
+}
+
+const elementType = (doc: MetamodelDoc, name: string) =>
+	doc.elements.find((element) => element.name === name)!;
+const relationshipType = (doc: MetamodelDoc, name: string) =>
+	doc.relationships.find((rel) => rel.name === name)!;
+
+/** Removes the entry named `name` from `items`. */
+function dropNamed(items: { name: string }[], name: string): void {
+	items.splice(
+		items.findIndex((item) => item.name === name),
+		1
+	);
+}
+
+/** Organization without its `industry`. */
+const NO_INDUSTRY = edited((doc) =>
+	dropNamed(elementType(doc, 'Organization').properties, 'industry')
+);
+/** MemberOf without its `is_lead`. */
+const NO_IS_LEAD = edited((doc) =>
+	dropNamed(relationshipType(doc, 'MemberOf').properties, 'is_lead')
+);
+/** Team made abstract. */
+const ABSTRACT_TEAM = edited((doc) => {
+	elementType(doc, 'Team').abstract = true;
+});
+/** No Team type at all. */
+const NO_TEAM = edited((doc) => dropNamed(doc.elements, 'Team'));
+/** No MemberOf type at all. */
+const NO_MEMBER_OF = edited((doc) => dropNamed(doc.relationships, 'MemberOf'));
 
 const ORGANIZATIONS = ['e_000001', 'e_000002', 'e_000003', 'e_000004', 'e_000005'];
 
@@ -326,6 +369,30 @@ describe('candidateIssues', () => {
 		expect(answersTo(client, 'scan')).toBe(1);
 	});
 
+	it('scans the state it begins on: a stage queued ahead of the scan is in it, once, before what queued behind it', async () => {
+		const { host, client } = await held();
+		const scanning = client.callAs<CandidateDiff>('scan', 'candidateIssues', {
+			metamodel: INDUSTRY
+		});
+		const staging = client.callAs<StageResult>('stage', 'stage', { ops: [dropIndustry] });
+		await settle();
+		// The transition that queues the scan, behind the stage.
+		await turns(host, 1);
+		const listing = client.callAs<IssueListBody>('listed', 'getModelIssues');
+		await settle();
+		host.auto = true;
+		host.turn();
+		const diff = await scanning;
+		expect(diff.now_failing).toEqual([missing('Organization', 'industry', 'e_000001')]);
+		expect((await staging).batch.id).toBe(1);
+		await listing;
+		await settle();
+		const order = client.answers
+			.map((answer) => (answer as { id: unknown }).id)
+			.filter((id) => id === 'scan' || id === 'listed');
+		expect(order).toEqual(['scan', 'listed']);
+	});
+
 	it('never answers a call cancelled while it waits for a rescan, and serves the next', async () => {
 		const { host, client } = await held();
 		await client.call('setArtifacts', { artifacts: COMMITTED_RULES });
@@ -491,6 +558,113 @@ describe('previewCommit with a rebind', () => {
 		expect(body.issues).toContainEqual(missing('FunctionalRequirement', 'trace_id', 'tmp_new'));
 	});
 
+	/** Stages `ops` alone as batch 1, the ones before unstaged. */
+	async function stageOnly(client: Client, ops: ModelOp[]): Promise<void> {
+		await client.call('unstage', { what: 'all' });
+		const { batch } = await client.call<StageResult>('stage', { ops });
+		// Batch ids keep counting: the preview names the one just staged.
+		batchId = batch.id;
+	}
+	let batchId = 1;
+	const previewStaged = (client: Client, metamodel: unknown) =>
+		preview(client, metamodel, { batch_ids: [batchId] });
+
+	const newTeam: ModelOp = {
+		kind: 'create_element',
+		temp_id: 'tmp_team',
+		type_name: 'Team',
+		properties: { name: 'New team' }
+	};
+	const newMember: ModelOp = {
+		kind: 'create_relationship',
+		temp_id: 'tmp_member',
+		type_name: 'MemberOf',
+		source_id: 'e_000031',
+		target_id: 'e_000007',
+		properties: { is_lead: false }
+	};
+
+	it('refuses 501 staged ops naming a property the candidate drops, which the server refuses', async () => {
+		const client = await ready();
+		const refused = [
+			// the patch that removes the key, as the one that sets it
+			[[dropIndustry], NO_INDUSTRY],
+			[[{ ...dropIndustry, properties_patch: { industry: 'Energy' } }], NO_INDUSTRY],
+			[
+				[
+					{
+						kind: 'create_element',
+						temp_id: 'tmp_org',
+						type_name: 'Organization',
+						properties: { name: 'New org', industry: 'Energy' }
+					}
+				],
+				NO_INDUSTRY
+			],
+			// an update of an entity the batch created, by its temp id
+			[
+				[
+					{ ...newTeam, properties: {} },
+					{ kind: 'update_element', id: 'tmp_team', properties_patch: { size: 4 } }
+				],
+				edited((doc) => dropNamed(elementType(doc, 'Team').properties, 'size'))
+			],
+			[
+				[{ kind: 'update_relationship', id: 'r_000090', properties_patch: { is_lead: null } }],
+				NO_IS_LEAD
+			],
+			[[newMember], NO_IS_LEAD]
+		] as const;
+		for (const [ops, doc] of refused) {
+			await stageOnly(client, [...ops]);
+			expect(await refusal(previewStaged(client, doc)), JSON.stringify(ops)).toEqual(REFUSED_OPS);
+		}
+	});
+
+	it('refuses 501 a staged create of a type the candidate removes or makes abstract', async () => {
+		const client = await ready();
+		for (const [ops, doc] of [
+			[[newTeam], NO_TEAM],
+			[[newTeam], ABSTRACT_TEAM],
+			[[newMember], NO_MEMBER_OF]
+		] as const) {
+			await stageOnly(client, [...ops]);
+			expect(await refusal(previewStaged(client, doc)), JSON.stringify(ops)).toEqual(REFUSED_OPS);
+			// The live document admits the same ops.
+			expect((await previewStaged(client, DOC)).would_block).toBe(false);
+		}
+	});
+
+	it('refuses 501 a staged delete while the candidate moves containment, and answers it otherwise', async () => {
+		const client = await ready();
+		await stageOnly(client, [{ kind: 'delete_element', id: 'e_000207' }]);
+		expect(await refusal(previewStaged(client, CONTAINMENT))).toEqual(REFUSED_OPS);
+		const body = await previewStaged(client, REQUIRED);
+		expect(body.issues).toContainEqual(missing('Organization', 'registry_id', 'e_000001'));
+		expect(body.issues.some((i) => i.target_ids.includes('e_000207'))).toBe(false);
+	});
+
+	it('answers staged ops the candidate admits, under the candidate', async () => {
+		const client = await ready();
+		await stageOnly(client, [
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_org',
+				type_name: 'Organization',
+				properties: { name: 'New org' }
+			},
+			{ kind: 'update_element', id: 'tmp_org', properties_patch: { industry: 'Energy' } },
+			dropIndustry,
+			newMember,
+			{ kind: 'update_relationship', id: 'r_000090', properties_patch: { is_lead: null } }
+		]);
+		const body = await previewStaged(client, REQUIRED);
+		expect(body.issues).toContainEqual(missing('Organization', 'registry_id', 'tmp_org'));
+		expect(body.issues).toContainEqual(missing('Organization', 'registry_id', 'e_000001'));
+		// Containment moved is no refusal without a staged delete.
+		expect((await previewStaged(client, CONTAINMENT)).would_block).toBe(false);
+	});
+
 	it('answers each preview_rebind step of the golden run as the oracle does', async () => {
 		const [rulesStep, batchStep, seedStep, ...steps] = previews!.steps;
 		expect([rulesStep!.do, batchStep!.do, seedStep!.do]).toEqual(['rules', 'batch', 'seed']);
@@ -501,16 +675,19 @@ describe('previewCommit with a rebind', () => {
 			artifacts: ruleSetDocs(rulesStep!).map((doc) => ({ ...doc, artifact_rev: 1 }))
 		});
 		await openReplica(client, model, previews!.metamodel);
-		expect(steps.map((step) => step.do)).toEqual(Array(4).fill('preview_rebind'));
+		expect(steps.map((step) => step.do)).toEqual(Array(6).fill('preview_rebind'));
+		expect(steps.filter((step) => step.error !== null)).toHaveLength(2);
 		for (const step of steps) {
 			const { batch } = await client.call<StageResult>('stage', {
 				ops: step.ops!.map((line) => JSON.parse(line) as unknown)
 			});
-			const body = await preview(client, step.metamodel, {
+			const answered = preview(client, step.metamodel, {
 				batch_ids: [batch.id],
 				strict: step.strict
 			});
-			expect(JSON.stringify(body), step.case).toBe(JSON.stringify(step.result));
+			if (step.error === null) {
+				expect(JSON.stringify(await answered), step.case).toBe(JSON.stringify(step.result));
+			} else expect(await refusal(answered), step.case).toEqual(REFUSED_OPS);
 			await client.call('unstage', { what: 'all' });
 		}
 	});

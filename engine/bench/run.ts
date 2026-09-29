@@ -37,6 +37,7 @@ import {
 	prepareCandidate,
 	READS,
 	readTableDefinition,
+	rebindPreviewBody,
 	resolveTableRefs,
 	tableSteps,
 	TableOrderCache,
@@ -148,6 +149,9 @@ const ROWS = {
 	candidateStructure: "candidate scan: the candidate's containment and uniqueness, built in steps",
 	candidate: 'candidate scan: the swept store’s model validated under a metamodel edit',
 	candidateLongest: '  its longest step',
+	candidateDiff: '  the diff against the store, after its last step',
+	candidateRebindBody: '  the rebind preview body instead of the diff',
+	candidateBlock: '  its longest block: a step, or the last step and the diff',
 	candidateHeapMb: '  peak heap above baseline, MB'
 };
 type Row = keyof typeof ROWS;
@@ -605,7 +609,9 @@ function measureRules(wc: WorkingCopy): void {
  * document `live` holds) recompiled under the candidate as `candidateIssues`
  * does: the build of the candidate's structure alone, then the whole scan
  * (structure and validation), its longest step and the peak `heapUsed` a step
- * reached above the level just before it. The diff runs after, untimed.
+ * reached above the level just before it. The service answers from the last
+ * step, so the diff (or the rebind preview's body) runs in the same block as
+ * that step: both are timed, and the longest block counts the diff in.
  */
 function measureCandidate(model: Model, live: LiveIssues, rules: string): void {
 	const candidate = prepareCandidate(candidateDoc, (mm) =>
@@ -619,13 +625,14 @@ function measureCandidate(model: Model, live: LiveIssues, rules: string): void {
 	const baseline = process.memoryUsage().heapUsed;
 	let peak = 0;
 	let worst = 0;
+	let last: number;
 	const start = performance.now();
 	let issues;
 	for (;;) {
 		const before = performance.now();
 		const next = steps.next();
-		const ms = performance.now() - before;
-		worst = Math.max(worst, ms);
+		last = performance.now() - before;
+		worst = Math.max(worst, last);
 		peak = Math.max(peak, process.memoryUsage().heapUsed - baseline);
 		if (next.done === true) {
 			issues = next.value;
@@ -635,10 +642,12 @@ function measureCandidate(model: Model, live: LiveIssues, rules: string): void {
 	record('candidate', performance.now() - start);
 	record('candidateLongest', worst);
 	record('candidateHeapMb', peak / 2 ** 20);
+	const diff = timed('candidateDiff', () => candidateDiff(live.store.iter(), issues));
+	const diffMs = timings.get('candidateDiff')!.at(-1)!;
+	timed('candidateRebindBody', () => rebindPreviewBody(issues));
+	record('candidateBlock', Math.max(worst, last + diffMs));
 	// M holds no issue, so only what the edit adds is expected.
-	if (candidateDiff(live.store.iter(), issues).now_failing.length === 0) {
-		throw new Error('the candidate edit changes nothing');
-	}
+	if (diff.now_failing.length === 0) throw new Error('the candidate edit changes nothing');
 }
 
 const bytes = readFileSync(SNAPSHOT);

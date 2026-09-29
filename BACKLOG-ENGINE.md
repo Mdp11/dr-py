@@ -111,8 +111,8 @@ feature there lands on both sides with a fixture until F. The diff route's model
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
-`K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `C-21`, `C-22`,
-`C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
+`C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -677,22 +677,28 @@ outside the shell (a script, a peer) can hold the mutex for seconds, and a role 
 whole-model budget on the route is the stopgap.
 
 ### K-81 · "Includes staged changes" can show over a preview the engine did not answer from the working copy · `open` · *2026-09-29*
-`metamodelIncludesStaged()` is true while the `metamodel` surface is `engine` and the store holds
-a staged model edit or the artifact buffer an entry, so the note (`metamodel-staged-note`) reads
-the state now, not the answer's. It can show over a preview that fell back to the server, whose
-`/metamodel/diff` reads committed state only (and whose rebind preview sees only the ops it is
-sent), and over one computed before the edit was staged; re-running Preview settles the second,
-not the first. `exportsIncludeStaged()` has the same semantics for the export note. Fix
+The editor records `metamodelIncludesStaged()` with the preview when its answer lands
+(`previewIncludesStaged`), so a stage or an unstage after it no longer moves the note
+(`metamodel-staged-note`). The flag still reads the side the `metamodel` surface has, not the
+side that answered: it shows over a preview that fell back to the server (a `gone` engine, a
+moved 409, the rules 501), whose `/metamodel/diff` reads committed state only.
+`exportsIncludeStaged()` reads the state now for the export note, so it has both gaps. Fix
 direction: stamp the answer with the side and the `staged_version` it was computed at, and show
 the note from the stamp for both notes.
 
-### K-82 · The candidate scan's longest browser slice is 27 ms, over the 16 ms budget · `open` · perf · *2026-09-29*
+### K-82 · The candidate scan's last block runs the whole diff, and its browser slice is 27 ms · `open` · perf · *2026-09-29*
 `engine-bench-browser` at M (Chromium 148, WSL2, 2026-09-29): `candidateIssues` 775 ms with a
 longest slice, bounded from outside by the ping loop, of 27 ms; the open (51 ms) and the rescan
-(36 ms) rows exceed 16 ms too, so the candidate is not the only row over. In Node the longest step
-is 8.5 ms, so the overrun is not one step's own cost. Fix direction: find what the browser's slice
-holds beyond the step (the worker's yield, the answer's transfer) and bring the slice under the
-budget.
+(36 ms) rows exceed 16 ms too, so the candidate is not the only row over. In Node
+(`engine-bench`, 2026-09-29) the longest scan step is 9.3 ms, but the service answers from the
+scan's last block, which runs `candidateDiff` (or `rebindPreviewBody`) whole after the last
+step: O(store + candidate issues). Over M's issue-free store the diff is 9.3 ms (the rebind body
+1.2 ms) and the longest block 9.5 ms; over `engine-parity-large`'s violated store (18,523 issues,
+26,096 under the candidate) the diff alone is 60–69 ms over two runs (the rebind body 5 ms), one
+block with the last step. So the true longest block of a preview over a store with issues is the
+diff, not a step, and the browser row over M's empty store does not show it. Fix direction: once the owner has seen the numbers, step
+the diff (both maps are built in passes that can yield) or move it after the scan's last
+comparison into its own steps, and measure the browser row over a store with issues.
 
 ### K-83 · A server answer returned inside an engine call is shadow-probed with an empty method · `open` · dev · *2026-09-29*
 When an engine body answers with the server's own preview (a rebind blob the lint refuses, an ok
@@ -705,6 +711,31 @@ probe for it, as the 501 fallbacks do.
 A YAML document whose tags raise a `ValueError` in a constructor is a 422 on the new route and a
 500 on the old one; the lint that gates both never lets one through, so only a direct caller sees
 it. Fix direction: pick 422 on both, in the same commit as the route's own fixture.
+
+### K-86 · The rebind preview can render a cycle or a duplicate key differently from the server's with staged ops · `open` · *2026-09-29*
+The engine scans the working copy as one fresh run, its structure built from the state it holds.
+The server rebuilds the committed state under the candidate and applies the staged ops to it one
+by one, so its containment parents and its uniqueness groups carry that history: a containment
+cycle is reported from the element the server's walk reaches first, and `duplicate_keys`
+renders the key of whichever member arrived second, both of which staged ops that move a group
+or a cycle can change. The difference is only in the rendering: the same values reach the
+message only for `1` / `1.0` / `True` (which Python holds equal and renders as it met them), and
+the cycle start only for a model with more than one cycle. The golden
+`preview_rebind` steps, which stage no such op, match exactly. Fix direction: record a fixture
+whose staged ops move a group with `1` and `1.0` members and join two cycles, and port the
+server's history into the rendering if the owner wants that exactness.
+
+### K-87 · A bug in the candidate's preparation reads as "The candidate metamodel is invalid." · `open` · *2026-09-29*
+The service maps anything `prepareCandidate` throws but `PatternUnusable` and `RulesUnreadable`
+to 422 `metamodel: …`, on arrival and again at the scan's first step when the rule sources moved.
+`Metamodel.fromJSON` does not validate its input and throws a plain `TypeError` on a malformed
+document, so the 422 cannot be narrowed to its throws without a validating reader; a JS bug in
+`FacetPatterns`, `Validators` or the rules compile therefore answers 422 as well. The shell takes
+no 422 to the server: the editor says "The candidate metamodel is invalid." and a rebind preview
+fails, with no server fallback, over a document the server's lint accepted. Fix direction: give
+`Metamodel.fromJSON` (or the candidate path) a reader that refuses a malformed document with its
+own error, map only that to 422, and let anything else reach the client as a 500 the route
+probes and rethrows.
 
 ### K-85 · One e2e spec, `dnd.spec.ts`, timed out once under a full run · `open` · *2026-09-29*
 `dnd.spec.ts` "drag a placed element to the view root unplaces it" hit its 2 minute timeout in 1

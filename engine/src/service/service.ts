@@ -34,6 +34,7 @@ import {
 	candidateScan,
 	prepareCandidate,
 	rebindPreviewBody,
+	stagedAdmitted,
 	type Candidate
 } from '../validation/candidate.ts';
 import type { Issue } from '../validation/issue.ts';
@@ -133,6 +134,7 @@ const STAGE_POST_STATE_MAX = 500;
 /** The refusals the client answers from the server (501), and the ones it retries there (409). */
 const UNSUPPORTED_PATTERN = 'reaches an unsupported pattern';
 const UNREADABLE_RULES = 'reaches unreadable rules';
+const REFUSED_OPS = 'reaches ops the candidate refuses';
 const NOT_READY = 'replica is not ready';
 const STALE_BATCHES = 'stale staged batches';
 const STALE_BASE = 'stale base_rev';
@@ -338,6 +340,7 @@ const METHODS: { readonly [method: string]: Method } = {
 				doc: rebind.metamodel,
 				layer: 'committed',
 				check,
+				admits: stagedAdmitted,
 				answer: (_live, issues) => rebindPreviewBody(issues)
 			});
 		}
@@ -425,19 +428,22 @@ const MOVED = Symbol('moved');
 /**
  * A call over the working copy under a candidate metamodel: the document, the
  * layer whose rule sets are compiled under it, the check that refuses a stale
- * call, and the answer over the store and the candidate's issues.
+ * call, whether the working copy is one the server reaches under the
+ * candidate (always, when absent), and the answer over the store and the
+ * candidate's issues.
  */
 type CandidateCall = {
 	readonly doc: unknown;
 	readonly layer: 'working' | 'committed';
 	readonly check: (wc: WorkingCopy) => void;
+	readonly admits?: (wc: WorkingCopy, candidate: Metamodel) => boolean;
 	readonly answer: (live: LiveIssues, issues: readonly Issue[]) => unknown;
 };
 
 /** A candidate, with the rule sources compiled under it. */
 type Prepared = { readonly sources: readonly RuleSource[]; readonly candidate: Candidate };
 
-/** Where the store stood when a candidate scan was queued: the probe's cache key, on that store. */
+/** Where the store stood when a candidate scan began: the probe's cache key, on that store. */
 type Stamp = {
 	readonly live: LiveIssues;
 	readonly rev: number;
@@ -777,12 +783,12 @@ class Service {
 	 * `candidateIssues` and a rebinding `previewCommit`: the whole working copy
 	 * scanned under a candidate metamodel, in a model-lane scan queued once the
 	 * store has been swept and is settled. The document is read on arrival, so
-	 * a malformed one is refused before it queues. The scan checks the store
-	 * against where it stood when the scan was queued, at its first step and
-	 * after its last: a store that moved meanwhile — a transition before the
-	 * scan began, a rule-set change between its slices, a replica closed under
-	 * it — sends the call back to wait and scan again, so that an answer pairs
-	 * one state and one pair of rule sets.
+	 * a malformed one is refused before it queues. The scan checks the call
+	 * again and records where the store stands at its first step, and compares
+	 * after its last: a store that moved meanwhile — a rule-set change between
+	 * its slices, a replica closed under it — or one not settled when it began
+	 * sends the call back to wait and scan again, so that an answer pairs one
+	 * state and one pair of rule sets.
 	 */
 	candidate(call: Call, spec: CandidateCall): void {
 		const prepared = { value: this.prepare(spec, null) };
@@ -792,16 +798,10 @@ class Service {
 				this.wait(call, live.whenSwept(), () => this.settled(call, scan, live));
 				return WAITING;
 			}
-			const stamp: Stamp = {
-				live,
-				rev: live.wc.rev,
-				stagedVersion: live.wc.stagedVersion,
-				rulesVersion: live.rulesVersion
-			};
 			this.scheduler.submit(
 				call.id,
 				'model',
-				{ kind: 'scan', run: () => this.candidateSteps(stamp, spec, prepared) },
+				{ kind: 'scan', run: () => this.candidateSteps(spec, prepared) },
 				(outcome) => {
 					if (!outcome.ok) {
 						const { error } = outcome;
@@ -815,17 +815,29 @@ class Service {
 		this.settled(call, scan);
 	}
 
-	/** One run of a candidate scan: `MOVED` unless the store stands at `stamp` at both ends. */
-	private *candidateSteps(
-		stamp: Stamp,
-		spec: CandidateCall,
-		prepared: { value: Prepared }
-	): Steps<unknown> {
-		if (this.movedFrom(stamp)) return MOVED;
+	/**
+	 * One run of a candidate scan: `MOVED` unless the store is seeded and
+	 * settled when it begins and stands where it began after its last step.
+	 * Staged ops the candidate does not admit are refused before any scanning.
+	 */
+	private *candidateSteps(spec: CandidateCall, prepared: { value: Prepared }): Steps<unknown> {
+		const live = this.live();
+		spec.check(live.wc);
+		if (!live.seeded || !live.settled) return MOVED;
+		const stamp: Stamp = {
+			live,
+			rev: live.wc.rev,
+			stagedVersion: live.wc.stagedVersion,
+			rulesVersion: live.rulesVersion
+		};
 		prepared.value = this.prepare(spec, prepared.value);
-		const issues = yield* candidateScan(stamp.live.wc.model, prepared.value.candidate);
+		const { candidate } = prepared.value;
+		if (spec.admits !== undefined && !spec.admits(live.wc, candidate.metamodel)) {
+			throw new Refused(501, REFUSED_OPS);
+		}
+		const issues = yield* candidateScan(live.wc.model, candidate);
 		if (this.movedFrom(stamp)) return MOVED;
-		return spec.answer(stamp.live, issues);
+		return spec.answer(live, issues);
 	}
 
 	/** Whether the store is no longer at `stamp`, or has a rescan due; refused as `live()` refuses. */

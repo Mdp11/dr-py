@@ -11,7 +11,9 @@ new required property, containment on ``Refines``, Team keyed on its size and
 Person's own key dropped, ``NonFunctionalRequirement`` removed, a tightened
 pattern, and the live metamodel itself. The second run previews a rebind to the
 containment and the removal candidates over a staged create and update,
-strict and not."""
+strict and not, then two rebinds to the removal candidate that the route
+refuses: over a patch of a property the candidate no longer gives the type, and
+over a create of the type it removes."""
 
 from __future__ import annotations
 
@@ -144,6 +146,41 @@ _STAGED: list[dict[str, Any]] = [
 ]
 
 
+#: staged beside a rebind to the removal candidate, each refused by it: a
+#: performance requirement's inherited ``target_value`` removed, which
+#: ``Requirement`` does not declare, and a new non-functional requirement
+_REFUSED: dict[str, list[dict[str, Any]]] = {
+    "removed-patch": [
+        {
+            "kind": "update_element",
+            "id": "e_000246",
+            "properties_patch": {"target_value": None},
+        }
+    ],
+    "removed-create": [
+        _el(
+            "nfr-s",
+            "NonFunctionalRequirement",
+            name="Staged NFR",
+            criticality="High",
+            **_VERSIONED,
+        )
+    ],
+}
+
+#: what the route answers each of them, a ``KeyError``'s quotes stripped
+_REFUSALS = {
+    "removed-patch": {
+        "status": 422,
+        "detail": "PerformanceRequirement' has no property 'target_value",
+    },
+    "removed-create": {
+        "status": 422,
+        "detail": "Unknown element type 'NonFunctionalRequirement",
+    },
+}
+
+
 def _named(items: list[dict[str, Any]], name: str) -> dict[str, Any]:
     (item,) = (item for item in items if item["name"] == name)
     return item
@@ -260,10 +297,20 @@ def metamodel_candidate() -> Any:
                 for name in ("containment", "removed")
                 for strict in (True, False)
             ),
+            *(
+                {
+                    "do": "preview_rebind",
+                    "case": case,
+                    "metamodel": docs["removed"],
+                    "_ops": ops,
+                    "strict": False,
+                }
+                for case, ops in _REFUSED.items()
+            ),
         ],
         full_every=None,
         model_file=_MODEL_FILE,
     )
     for step in previews["steps"]:
-        assert step["error"] is None, step["error"]
+        assert step["error"] == _REFUSALS.get(step.get("case")), step["error"]
     return {"runs": [diffs, previews]}

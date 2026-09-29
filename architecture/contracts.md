@@ -180,26 +180,34 @@ event     {event, …}                     engine → client, unsolicited
   copy validated under the candidate as one run over the whole model does, with the working
   rule sets compiled under it, both keyed as the route keys them, every issue `on_server`.
   `previewCommit` takes an optional `rebind: {metamodel}`: the batch rebinds the metamodel,
-  and it answers the server's rebind preview, `{conformance_error_count, structural_blockers,
-  issues, would_block: false}`, over the whole working copy under the candidate with the
-  committed rule sets — the staged model ops already in it, where the server hoists them. Both
-  read the document on arrival (a malformed one is a 422 `metamodel: …`, as `open`), then wait
-  for the store's first sweep to have ended and for it to be settled, and scan in steps. A
-  transition before the scan begins, a rule-set change between its slices, or a replica
-  closed under it sends the call back to wait and scan again: it is answered once, from one
-  state and one pair of rule sets. A stage or a delta posted while it scans waits for it.
+  and it answers `{conformance_error_count, structural_blockers, issues, would_block: false}`
+  over the whole working copy under the candidate with the committed rule sets — the staged
+  model ops already in it, where the server hoists them. That is the server's rebind preview
+  only for staged ops the candidate admits: the server applies them under the candidate, so a
+  create of a type it lacks or has abstract, a create or update naming a property it does not
+  give the type, or a delete while any relationship type's containment differs (the cascade
+  may differ) is refused by the engine with 501 `reaches ops the candidate refuses`, checked
+  when its scan begins, and the server answers — its own 422 included. Both read the document
+  on arrival (a malformed one is a 422 `metamodel: …`, as `open`), then wait for the store's
+  first sweep to have ended and for it to be settled, and scan in steps. The scan checks the
+  call again and takes the store's state when it begins; a rule-set change between its slices,
+  a replica closed under it, or a store not settled when it began sends the call back to wait
+  and scan again: it is answered once, from one state and one pair of rule sets. A stage or a
+  delta posted while it scans waits for it.
 - An evaluation, an `issues` call or a candidate call the engine must not answer is refused
-  with 501 before any work: `reaches a script` (a navigation that reaches a configured script step, a table
+  with 501: `reaches a script` (a navigation that reaches a configured script step, a table
   with a configured script column or such a navigation, and for an export a table's or an
   exporter entry's `transform`), `reaches an
   unsupported pattern` (a criterion or facet pattern the engine cannot match exactly as
   Python's `re` does, the candidate's included) or `reaches unreadable rules` (an `issues` or
   candidate call while a rule set in either layer arrived without its parse, or with a document
   the engine's reader refuses — only a shell and a sandbox bundle of different versions send
-  one). The client answers exactly
-  those three from the server — a navigation's page marked with the reason (AD-31), an
-  `issues` call's answer unmarked, exactly as the server always gave it; any other 501 is an
-  error.
+  one), and a rebind preview `reaches ops the candidate refuses` (above). Each is refused
+  before any work but one: a pattern the host cannot run on a subject's value is found only
+  when a validation reaches that value, so a sweep or a candidate scan can refuse it midway,
+  having answered nothing. The client answers exactly those four from the server — a
+  navigation's page marked with the reason (AD-31), an `issues` call's or a rebind preview's
+  answer unmarked, exactly as the server always gave it; any other 501 is an error.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed

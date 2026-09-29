@@ -106,6 +106,16 @@ function fallbackOf(error: unknown): Fallback | null {
 	return Object.hasOwn(FALLBACKS, error.message) ? FALLBACKS[error.message]! : null;
 }
 
+/**
+ * The engine's 501 for a rebind preview whose staged ops the candidate does
+ * not admit: the server answers the whole batch, its own refusal included.
+ */
+const REFUSED_OPS = 'reaches ops the candidate refuses';
+
+function refusedOps(error: unknown): boolean {
+	return error instanceof ApiError && error.status === 501 && error.message === REFUSED_OPS;
+}
+
 /** The engine's 409s for a call whose staged batches, `base_rev` or replica moved under it. */
 const MOVED = new Set(['stale staged batches', 'stale base_rev', 'replica is not ready']);
 
@@ -135,9 +145,10 @@ export function asSent(body: object): unknown {
  * call and parses its body with the server's schema. A 501 the engine
  * refuses a script, a pattern or unreadable rules with is answered by the
  * server — for a script or a pattern handed to `options.mark` with its
- * reason — and not shadowed; any other 501 is the caller's. So is a 409 that
- * says the staged batches, the `base_rev` or the replica moved under the
- * call: the server answers it whole.
+ * reason — and not shadowed, and so is the 501 for staged ops a rebind's
+ * candidate does not admit, unmarked; any other 501 is the caller's. A 409
+ * that says the staged batches, the `base_rev` or the replica moved under
+ * the call is answered by the server whole.
  */
 export function route<T>(
 	surface: Surface,
@@ -196,7 +207,7 @@ export function route<T>(
 			return value;
 		},
 		(error: unknown) => {
-			if (seam.gone(error) || movedUnder(error)) return serverCall();
+			if (seam.gone(error) || movedUnder(error) || refusedOps(error)) return serverCall();
 			const reason = fallbackOf(error);
 			if (reason !== null) {
 				const { mark } = options;

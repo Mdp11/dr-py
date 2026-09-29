@@ -1,10 +1,13 @@
 import { Metamodel } from '../metamodel/metamodel.ts';
 import type { MetamodelDoc } from '../metamodel/types.ts';
+import { TEMP_ID_PREFIX } from '../model/load.ts';
 import type { Model } from '../model/model.ts';
+import type { Props } from '../model/records.ts';
 import { candidateStructureSteps } from '../model/structure.ts';
 import type { CompiledRules } from '../rules/compile.ts';
 import { RulesUnreadable } from '../rules/document.ts';
 import type { Steps } from '../steps/steps.ts';
+import type { WorkingCopy } from '../working/working-copy.ts';
 import type { PreviewBody } from './bodies.ts';
 import { candidateKey, wireIssue, type Issue, type IssueOut } from './issue.ts';
 import { FacetPatterns, PatternUnusable, Validators, WholeRun } from './pipeline.ts';
@@ -143,4 +146,85 @@ export function rebindPreviewBody(issues: readonly Issue[]): PreviewBody {
 		} else body.conformance_error_count++;
 	}
 	return body;
+}
+
+/** Whether some relationship type is containment under one metamodel and not the other. */
+function containmentMoved(current: Metamodel, candidate: Metamodel): boolean {
+	const names = [...current.relationships, ...candidate.relationships].map((rt) => rt.name);
+	return names.some((name) => current.isContainment(name) !== candidate.isContainment(name));
+}
+
+/**
+ * Whether the server, applying the staged ops over the committed state under
+ * `candidate` as a rebind's commit and its preview do, reaches the working
+ * state `wc` holds. A create must name a type the candidate has, an element
+ * type not abstract, and a create or an update only properties the candidate
+ * gives the entity's type. A delete cascades by containment, so any delete
+ * while a relationship type's containment differs is not admitted: the
+ * cascade may remove other elements there. The working copy applied the same
+ * ops under its own metamodel, so every check that does not read the
+ * metamodel held already. `false` whenever it cannot say.
+ */
+export function stagedAdmitted(wc: WorkingCopy, candidate: Metamodel): boolean {
+	const current = wc.model.metamodel;
+	const idMap = new Map<string, string>();
+	const resolve = (id: string) => idMap.get(id) ?? id;
+	// The type each id was last created with, by the ops so far.
+	const createdElements = new Map<string, string>();
+	const createdRelationships = new Map<string, string>();
+	const declared = (names: ReadonlySet<string>, props: Props | undefined) =>
+		props === undefined || Object.keys(props).every((key) => names.has(key));
+	const createdId = (op: { temp_id: string; id?: string | null }) => {
+		if (!op.temp_id.startsWith(TEMP_ID_PREFIX)) return null;
+		const id = op.id ?? op.temp_id;
+		idMap.set(op.temp_id, id);
+		return id;
+	};
+	for (const { ops } of wc.staged()) {
+		for (const op of ops) {
+			switch (op.kind) {
+				case 'create_element': {
+					const type = candidate.elementType(op.type_name);
+					if (type === undefined || type.abstract) return false;
+					const names = candidate.effectiveElementPropertyNames(op.type_name);
+					if (!declared(names, op.properties)) return false;
+					const id = createdId(op);
+					if (id === null) return false;
+					createdElements.set(id, op.type_name);
+					break;
+				}
+				case 'update_element': {
+					const id = resolve(op.id);
+					const typeName = createdElements.get(id) ?? wc.committedElement(id)?.typeName;
+					if (typeName === undefined) return false;
+					const names = candidate.effectiveElementPropertyNames(typeName);
+					if (!declared(names, op.properties_patch)) return false;
+					break;
+				}
+				case 'delete_element':
+					if (containmentMoved(current, candidate)) return false;
+					break;
+				case 'create_relationship': {
+					if (candidate.relationshipType(op.type_name) === undefined) return false;
+					const names = candidate.effectiveRelationshipPropertyNames(op.type_name);
+					if (!declared(names, op.properties)) return false;
+					const id = createdId(op);
+					if (id === null) return false;
+					createdRelationships.set(id, op.type_name);
+					break;
+				}
+				case 'update_relationship': {
+					const id = resolve(op.id);
+					const typeName = createdRelationships.get(id) ?? wc.committedRelationship(id)?.typeName;
+					if (typeName === undefined) return false;
+					const names = candidate.effectiveRelationshipPropertyNames(typeName);
+					if (!declared(names, op.properties_patch)) return false;
+					break;
+				}
+				case 'delete_relationship':
+					break;
+			}
+		}
+	}
+	return true;
 }

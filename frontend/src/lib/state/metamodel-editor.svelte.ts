@@ -12,6 +12,7 @@ import {
 	onMetamodelDiscardAll,
 	registerMetamodelDraftProvider
 } from './metamodel-stage.svelte';
+import { metamodelIncludesStaged } from './replica.svelte';
 
 /**
  * The live metamodel editor's state — buffer, draft, lint,
@@ -52,6 +53,8 @@ export interface MetamodelEditorView {
 	lintErrors: MetamodelLintError[];
 	preview: MetamodelDiff | null;
 	previewCurrent: boolean;
+	/** Whether the preview included staged changes when it was answered. */
+	previewIncludesStaged: boolean;
 	previewing: boolean;
 	previewError: string | null;
 }
@@ -67,6 +70,7 @@ let _draftRestored = $state(false);
 let _lintErrors = $state<MetamodelLintError[]>([]);
 let _preview = $state<MetamodelDiff | null>(null);
 let _previewFor = $state<string | null>(null);
+let _previewStaged = $state(false);
 let _previewing = $state(false);
 let _previewError = $state<string | null>(null);
 let _lockedBy = $state<string | null>(null);
@@ -146,6 +150,7 @@ export function getMetamodelEditor(): MetamodelEditorView {
 		lintErrors: _lintErrors,
 		preview: _preview,
 		previewCurrent: _preview !== null && _previewFor === _buffer,
+		previewIncludesStaged: _preview !== null && _previewStaged,
 		previewing: _previewing,
 		previewError: _previewError
 	};
@@ -277,6 +282,9 @@ export async function previewMetamodelChanges(): Promise<void> {
 		if (gen !== _gen) return;
 		_preview = diff;
 		_previewFor = buf;
+		// Read with the answer, not on every render: a later stage or unstage
+		// does not change what this preview holds.
+		_previewStaged = metamodelIncludesStaged();
 	} catch (e) {
 		if (gen !== _gen) return;
 		_previewError =

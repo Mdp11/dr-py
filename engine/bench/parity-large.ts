@@ -49,6 +49,7 @@ import {
 	readArtifacts,
 	readOps,
 	readTableDefinition,
+	rebindPreviewBody,
 	resolveTableRefs,
 	RULE_CHECK_PREFIX,
 	ruleSources,
@@ -350,7 +351,14 @@ function comparable(diff: { now_passing: IssueOut[] }): Record<string, unknown> 
 	keyed.sort(([a], [b]) => cmpCodePoint(a, b));
 	return { ...diff, now_passing: keyed.map(([, i]) => i) };
 }
-const engineDiff = comparable(candidateDiff(live.store.iter(), scanned));
+// The service answers the diff in the scan's last block: its time adds to that step's.
+const diffStart = performance.now();
+const scannedDiff = candidateDiff(live.store.iter(), scanned);
+const diffMs = performance.now() - diffStart;
+const bodyStart = performance.now();
+rebindPreviewBody(scanned);
+const bodyMs = performance.now() - bodyStart;
+const engineDiff = comparable(scannedDiff);
 const oracleDiff = comparable(
 	JSON.parse(readFileSync(CANDIDATE_ORACLE, 'utf-8')) as { now_passing: IssueOut[] }
 );
@@ -386,7 +394,9 @@ const failing = (engineDiff['now_failing'] as unknown[]).length;
 const passing = (engineDiff['now_passing'] as unknown[]).length;
 const candidateOk = candidateDiffs.length === 0 && failing > 0 && passing > 0;
 console.log(
-	`Candidate: ${scanned.length.toLocaleString('en-US')} issues under the edit, scanned in ${scanMs.toFixed(0)} ms. ` +
+	`Candidate: ${scanned.length.toLocaleString('en-US')} issues under the edit, scanned in ${scanMs.toFixed(0)} ms, ` +
+		`diffed against the store in ${diffMs.toFixed(0)} ms ` +
+		`(a rebind preview's body instead: ${bodyMs.toFixed(0)} ms). ` +
 		(candidateOk
 			? `Parity: equal (${failing.toLocaleString('en-US')} now_failing, ${passing.toLocaleString('en-US')} now_passing).`
 			: `Parity FAILS: ${candidateDiffs.length} difference(s) (${failing} now_failing, ${passing} now_passing). The first ${SHOWN}:`)

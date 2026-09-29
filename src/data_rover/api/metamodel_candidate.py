@@ -1,9 +1,10 @@
 """The model half of ``POST /metamodel/diff``: the live model validated under a
 candidate metamodel, diffed against the session's issue store.
 
-The route calls both functions under ``session.write_mutex``. They take no
-session, so the engine's candidate diff is checked against them outside a
-request.
+The route reads the store and calls ``candidate_issues`` under
+``session.write_mutex``, then ``model_half`` over what they returned, after the
+mutex. They take no session, so the engine's candidate diff is checked against
+them outside a request.
 """
 
 from __future__ import annotations
