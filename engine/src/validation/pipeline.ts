@@ -26,15 +26,28 @@ export type Run = {
 };
 
 /**
+ * A validator's global hook in a run over the whole model, made for that run:
+ * fed every element, then every relationship, in state order, then finished.
+ */
+export interface WholeGlobal {
+	element?(el: ElementRec): void;
+	relationship?(rel: RelRec): void;
+	finish?(): void;
+}
+
+/**
  * A validator appends what it finds to `run.out`. The entity hooks are
  * O(entity) over the model's indexes and memoized metamodel lookups; the
  * global hook runs once per run, after every entity, over the scope's ids.
+ * A validator with a global hook also has `validateWhole`, its global hook
+ * over the whole model, which appends to `out`.
  */
 export interface Validator {
 	readonly checkName: string;
 	validateElement?(run: Run, el: ElementRec): void;
 	validateRelationship?(run: Run, rel: RelRec): void;
 	validateGlobal?(run: Run, scope: readonly string[]): void;
+	validateWhole?(run: Run, out: Issue[]): WholeGlobal;
 }
 
 /**
@@ -133,6 +146,19 @@ function stamp(out: Issue[], from: number, checkName: string): void {
 /** A pass's issues, and where each validator's global issues begin, in list order. */
 type Pass = { readonly out: Issue[]; readonly globals: readonly number[] };
 
+/** The run's validators, a `RulesValidator` over `rules` last; throws unless all share the structure's metamodel. */
+function validatorsOf(
+	v: Validators,
+	p: FacetPatterns,
+	rules: CompiledRules | null,
+	structure: Structure
+): readonly Validator[] {
+	if (v.metamodel !== structure.metamodel || p.metamodel !== structure.metamodel) {
+		throw new Error('validators built for another metamodel');
+	}
+	return rules === null ? v.list : [...v.list, new RulesValidator(rules)];
+}
+
 function pass(
 	model: Model,
 	ids: Iterable<string>,
@@ -141,11 +167,7 @@ function pass(
 	rules: CompiledRules | null,
 	structure: Structure
 ): Pass {
-	if (v.metamodel !== structure.metamodel || p.metamodel !== structure.metamodel) {
-		throw new Error('validators built for another metamodel');
-	}
-	const list: readonly Validator[] =
-		rules === null ? v.list : [...v.list, new RulesValidator(rules)];
+	const list = validatorsOf(v, p, rules, structure);
 	const scope = [...new Set(ids)];
 	const run: Run = { model, structure, patterns: p, out: [] };
 	const out = run.out;
@@ -212,4 +234,72 @@ export function validateSplit(
 		entity: out.slice(0, globals[0]),
 		global: globals.map((from, i) => out.slice(from, globals[i + 1] ?? out.length))
 	};
+}
+
+/**
+ * `ValidationPipeline.validate(model)`: the run over the whole model
+ * (`Scope.all()`), fed every element, then every relationship, in state
+ * order, in slices as the caller likes. Each goes through the entity hooks and
+ * through each validator's `validateWhole`, which answers unlike the global
+ * hook of a scoped run over every id: one containment cycle for the model,
+ * duplicates group by group. `finish` answers the entity issues, then each
+ * validator's global issues, in validator order. The validators, the patterns
+ * and `structure` share one metamodel; nothing may write the model while the
+ * run is fed.
+ */
+export class WholeRun {
+	private readonly run: Run;
+	private readonly list: readonly Validator[];
+	private readonly globals: { checkName: string; out: Issue[]; hook: WholeGlobal }[] = [];
+
+	constructor(
+		model: Model,
+		v: Validators,
+		p: FacetPatterns,
+		rules: CompiledRules | null,
+		structure: Structure
+	) {
+		this.list = validatorsOf(v, p, rules, structure);
+		this.run = { model, structure, patterns: p, out: [] };
+		for (const validator of this.list) {
+			if (validator.validateWhole !== undefined) {
+				const out: Issue[] = [];
+				const hook = validator.validateWhole(this.run, out);
+				this.globals.push({ checkName: validator.checkName, out, hook });
+			} else if (validator.validateGlobal !== undefined) {
+				throw new Error(`${validator.checkName} has no global hook over the whole model`);
+			}
+		}
+	}
+
+	element(el: ElementRec): void {
+		const out = this.run.out;
+		for (const validator of this.list) {
+			const from = out.length;
+			validator.validateElement?.(this.run, el);
+			stamp(out, from, validator.checkName);
+		}
+		for (const { hook } of this.globals) hook.element?.(el);
+	}
+
+	relationship(rel: RelRec): void {
+		const out = this.run.out;
+		for (const validator of this.list) {
+			const from = out.length;
+			validator.validateRelationship?.(this.run, rel);
+			stamp(out, from, validator.checkName);
+		}
+		for (const { hook } of this.globals) hook.relationship?.(rel);
+	}
+
+	finish(): Issue[] {
+		const out = this.run.out;
+		for (const { checkName, out: found, hook } of this.globals) {
+			hook.finish?.();
+			const from = out.length;
+			for (const issue of found) out.push(issue);
+			stamp(out, from, checkName);
+		}
+		return out;
+	}
 }

@@ -1,7 +1,7 @@
 import type { ElementRec } from '../../model/records.ts';
 import type { Structure } from '../../model/structure.ts';
-import { errorIssue } from '../issue.ts';
-import type { Run, Validator } from '../pipeline.ts';
+import { errorIssue, type Issue } from '../issue.ts';
+import type { Run, Validator, WholeGlobal } from '../pipeline.ts';
 
 /**
  * Whether the first-parent chain from `start` reaches a cycle. `safe` holds
@@ -22,10 +22,14 @@ function reachesCycle(structure: Structure, start: ElementRec, safe: Set<Element
 	return true;
 }
 
+const cycleIssue = (id: string) =>
+	errorIssue(`Containment cycle detected involving element ${id}`, [id], 'structural');
+
 /**
  * An element has at most one containment parent. In the scope, every element
  * whose first-parent chain reaches a cycle is reported, the ones hanging
- * below the cycle included.
+ * below the cycle included; over the whole model, only the first contained
+ * element whose chain does.
  */
 export class Containment implements Validator {
 	readonly checkName = 'containment';
@@ -47,11 +51,26 @@ export class Containment implements Validator {
 		const safe = new Set<ElementRec>();
 		for (const id of scope) {
 			const el = run.model.findElement(id);
-			if (el !== undefined && reachesCycle(run.structure, el, safe)) {
-				run.out.push(
-					errorIssue(`Containment cycle detected involving element ${id}`, [id], 'structural')
-				);
-			}
+			if (el !== undefined && reachesCycle(run.structure, el, safe)) run.out.push(cycleIssue(id));
 		}
+	}
+
+	/**
+	 * Contained elements in the order their first containment parent comes in
+	 * the relationships, as the parents map is keyed; the first whose chain
+	 * reaches a cycle is the one reported.
+	 */
+	validateWhole(run: Run, out: Issue[]): WholeGlobal {
+		const safe = new Set<ElementRec>();
+		let found = false;
+		return {
+			relationship(rel) {
+				if (found || run.structure.parentsOf(rel.target)[0] !== rel) return;
+				if (reachesCycle(run.structure, rel.target, safe)) {
+					out.push(cycleIssue(rel.target.id));
+					found = true;
+				}
+			}
+		};
 	}
 }

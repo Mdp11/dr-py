@@ -1,8 +1,8 @@
 import type { Metamodel } from '../../metamodel/metamodel.ts';
 import { getProp, type ElementRec } from '../../model/records.ts';
 import { cmpCodePoint } from '../../value/compare.ts';
-import { errorIssue } from '../issue.ts';
-import type { Run, Validator } from '../pipeline.ts';
+import { errorIssue, type Issue } from '../issue.ts';
+import type { Run, Validator, WholeGlobal } from '../pipeline.ts';
 import { pyReprFrozen } from '../values.ts';
 
 /**
@@ -10,7 +10,10 @@ import { pyReprFrozen } from '../values.ts';
  * element in a group of two or more that is not its primary — the member
  * with the least `ord` — is reported against the primary, its identity
  * rendered from its OWN key: members are equal as Python compares values,
- * not in how they render (`1`, `1.0` and `True`).
+ * not in how they render (`1`, `1.0` and `True`). Over the whole model the
+ * groups come in their primaries' order, each member after the primary in
+ * `ord` order, and every one renders the key of the group's SECOND member:
+ * the one whose arrival made the group a duplicate as a rebuild fills it.
  */
 export class Uniqueness implements Validator {
 	readonly checkName = 'uniqueness';
@@ -49,6 +52,29 @@ export class Uniqueness implements Validator {
 				);
 			}
 		}
+	}
+
+	validateWhole(run: Run, out: Issue[]): WholeGlobal {
+		// A group is reported when its first member is met, and only then.
+		const met = new Set<ElementRec>();
+		return {
+			element: (el) => {
+				if (met.has(el)) return;
+				const group = run.structure.groupOf(el);
+				if (group === null || group.length < 2) return;
+				const [primary, ...dups] = [...group].sort((a, b) => a.ord - b.ord);
+				const identity = this.descriptor(dups[0]!);
+				for (const member of group) met.add(member);
+				for (const dup of dups) {
+					out.push(
+						errorIssue(
+							`Duplicate ${dup.typeName} element ${dup.id}: matches ${primary!.id} (${identity})`,
+							[dup.id, primary!.id]
+						)
+					);
+				}
+			}
+		};
 	}
 
 	private descriptor(el: ElementRec): string {

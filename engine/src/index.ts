@@ -332,8 +332,17 @@ export {
 	type PreviewBody,
 	type RulesStatusBody
 } from './validation/bodies.ts';
+export {
+	candidateDiff,
+	candidateScan,
+	prepareCandidate,
+	rebindPreviewBody,
+	type Candidate,
+	type CandidateDiff
+} from './validation/candidate.ts';
 export { addNeighbourhood, DirtyCollector } from './validation/dirty.ts';
 export {
+	candidateKey,
 	issueKey,
 	issueOwner,
 	wireIssue,
@@ -358,8 +367,10 @@ export {
 	validateScoped,
 	validateSplit,
 	Validators,
+	WholeRun,
 	type Run,
-	type Validator
+	type Validator,
+	type WholeGlobal
 } from './validation/pipeline.ts';
 export { IssueStore } from './validation/store.ts';
 export { pyIsoDate, pyReprFrozen, pyStrNumber, valueConforms } from './validation/values.ts';

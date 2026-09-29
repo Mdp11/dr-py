@@ -1,7 +1,7 @@
 import type { Metamodel } from '../metamodel/metamodel.ts';
 import { getProp, type ElementRec } from '../model/records.ts';
 import type { Issue } from '../validation/issue.ts';
-import type { Run, Validator } from '../validation/pipeline.ts';
+import type { Run, Validator, WholeGlobal } from '../validation/pipeline.ts';
 import { pyContains } from '../value/compare.ts';
 import { PyFloat, type Value } from '../value/types.ts';
 import type { CompiledRule, CompiledRules } from './compile.ts';
@@ -169,5 +169,9 @@ export class RulesValidator implements Validator {
 		const merged = this.compiled.evalErrors;
 		for (const [check, n] of this.errors) merged.set(check, (merged.get(check) ?? 0) + n);
 		this.errors.clear();
+	}
+
+	validateWhole(): WholeGlobal {
+		return { finish: () => this.validateGlobal() };
 	}
 }

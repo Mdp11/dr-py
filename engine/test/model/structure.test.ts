@@ -346,8 +346,9 @@ describe('candidateStructureSteps', () => {
 		expect(visits).toBe(total - 1);
 		expect(Math.max(...perStep)).toBeLessThanOrEqual(2048);
 		expect(progress.length).toBeGreaterThanOrEqual(2);
-		expect(progress.every((p) => p.total === total && p.done < total)).toBe(true);
+		expect(progress.every((p) => p.total === total)).toBe(true);
 		expect(progress.every((p, i) => i === 0 || progress[i - 1]!.done < p.done)).toBe(true);
+		expect(progress.at(-1)!.done).toBe(total);
 
 		expectSameStructure(model, next.value, candidateOf(model));
 		expectSameStructure(model, liveStructure(model), next.value);

@@ -1,3 +1,5 @@
+import { cmpCodePoint } from '../value/compare.ts';
+
 export type Severity = 'error' | 'warning';
 
 /** `structural` is model-graph corruption, which fails a commit; `conformance` never does. */
@@ -45,6 +47,20 @@ export function issueOwner(i: Issue): string {
 /** Equal keys are the same issue when issues are compared as multisets. */
 export function issueKey(i: Issue): string {
 	return JSON.stringify([i.severity, i.category, i.check, i.message, i.targetIds]);
+}
+
+/**
+ * An issue's identity when two validation runs are diffed: category,
+ * severity, check, message and the targets in code point order.
+ */
+export function candidateKey(i: Issue): string {
+	return JSON.stringify([
+		i.category,
+		i.severity,
+		i.check,
+		i.message,
+		[...i.targetIds].sort(cmpCodePoint)
+	]);
 }
 
 export function wireIssue(i: Issue, origin: Origin): IssueOut {

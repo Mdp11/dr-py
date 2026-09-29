@@ -46,10 +46,11 @@ const NO_PARENTS: readonly RelRec[] = [];
 
 /**
  * The model's structure under `mm`, as the indexes would keep it were `mm` the
- * model's metamodel, in steps of 2,048 entity visits: containment parents in
- * relationship order, and groups of equal key text, so no two keys ever share
- * one. It reads the records and writes none. Nothing may write the model
- * between two steps: the passes hold iterators over it.
+ * model's metamodel, in steps of 2,048 entity visits and a last one at the
+ * total: containment parents in relationship order, and groups of equal key
+ * text, so no two keys ever share one. It reads the records and writes none.
+ * Nothing may write the model between two steps: the passes hold iterators
+ * over it.
  */
 export function* candidateStructureSteps(model: Model, mm: Metamodel): Steps<Structure> {
 	const total = model.relationshipCount + model.elementCount + 1;
@@ -88,6 +89,7 @@ export function* candidateStructureSteps(model: Model, mm: Metamodel): Steps<Str
 		}
 		if (visited()) yield { done, total };
 	}
+	yield { done: total, total };
 	return {
 		metamodel: mm,
 		parentsOf,

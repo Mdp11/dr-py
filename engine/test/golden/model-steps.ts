@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
 import { expect } from 'vitest';
 import {
 	appliesPopulation,
 	applyBatch,
 	ArtifactSet,
+	candidateDiff,
+	candidateKey,
+	candidateScan,
 	cmpCodePoint,
 	compileRuleSets,
 	DirtyCollector,
@@ -31,12 +35,14 @@ import {
 	navigationHasScript,
 	OpError,
 	parseJson,
+	prepareCandidate,
 	PyFloat,
 	previewBody,
 	pyRepr,
 	pyDumps,
 	readArtifacts,
 	ReadError,
+	readStagedArtifacts,
 	readNavigation,
 	READS,
 	relationshipLine,
@@ -53,17 +59,20 @@ import {
 	ViewPlacements,
 	wireIssue,
 	type BatchResult,
+	type CandidateDiff,
 	type ChainNode,
 	type CommittedArtifact,
 	type CompiledRules,
 	type ElementImage,
 	type ExportFileResult,
+	type IssueOut,
 	type MetamodelDoc,
 	type ModelOp,
 	type ModelOptions,
 	type Props,
 	type ReadParams,
 	type RelImage,
+	type RuleSource,
 	type StagedArtifact,
 	type Value,
 	buildRowsSteps,
@@ -165,6 +174,8 @@ export type Step = Partial<Observed> & {
 	scope?: string[] | 'all_ids';
 	/** `insert_element` / `insert_relationship`: the entity's `rev`; `value` holds its properties. */
 	rev?: number;
+	/** `candidate`: the candidate metamodel document. */
+	metamodel?: MetamodelDoc;
 	result: string | string[] | BatchOutcome | object | boolean | null;
 	error: StepError | null;
 	unchanged?: true;
@@ -173,7 +184,21 @@ export type Step = Partial<Observed> & {
 export type NavigateLimits = { max_visited: number; max_chains: number };
 export type TableStepLimits = { max_rows: number; max_cell_elements: number };
 
-export type StepsFixture = { metamodel: MetamodelDoc; steps: Step[] };
+/** A run, from an empty model or from the model file `model_file` names, relative to the repository. */
+export type StepsFixture = { metamodel: MetamodelDoc; model_file?: string; steps: Step[] };
+
+/** The run's starting model: empty, or its model file loaded in order and indexed. */
+export function loadModelFile(fixture: StepsFixture, options: ModelOptions = {}): Model {
+	const model = new Model(Metamodel.fromJSON(fixture.metamodel), options);
+	if (fixture.model_file !== undefined) {
+		const file = new URL(`../../../${fixture.model_file}`, import.meta.url);
+		const doc = parseJson(readFileSync(file, 'utf-8')) as { [key: string]: Value[] };
+		for (const element of doc['elements']!) model.loadElement(element);
+		for (const rel of doc['relationships']!) model.loadRelationship(rel);
+		model.rebuildIndexes();
+	}
+	return model;
+}
 
 /** Where a replay puts the artifacts of an `artifacts` step. */
 export type ArtifactLayer = 'committed' | 'staged';
@@ -258,8 +283,8 @@ export function outcome(model: Model, res: BatchResult): BatchOutcome {
 /**
  * What a replay carries from step to step: the batches that landed, by step
  * index, the views, the artifacts with the layer they go into, the rules of
- * the last `rules` step, and once a `seed` step ran, the session's issue store
- * and `model_rev`.
+ * the last `rules` step with the sources they compiled from, and once a
+ * `seed` step ran, the session's issue store and `model_rev`.
  */
 type Landed = Map<number, BatchResult>;
 type Validation = { validators: Validators; patterns: FacetPatterns };
@@ -271,6 +296,7 @@ type Carried = {
 	validation: Validation | null;
 	session: { store: IssueStore; rev: number } | null;
 	rules: CompiledRules | null;
+	sources: RuleSource[];
 	options: ModelOptions;
 };
 
@@ -324,26 +350,52 @@ export function compiledRecord(compiled: CompiledRules): unknown {
 }
 
 /**
- * A `rules` step's sources as the shell hands them in: committed artifacts
- * carrying the parse the server recorded for each, read, laid in a set and
- * listed by `ruleSources`, then compiled over `mm`.
+ * A `rules` step's sources as the shell hands them in, each carrying the
+ * parse the server recorded for it, read and laid in a set: committed, or
+ * staged as creates over an empty committed layer.
  */
-export function compileRecorded(step: Step, mm: Metamodel): CompiledRules {
+export function rulesArtifacts(step: Step, layer: ArtifactLayer = 'committed'): ArtifactSet {
 	const { parses } = step.result as RulesStepResult;
+	const docs = step.sources!.map((source, i) => ({
+		id: source.artifact_id,
+		kind: 'validation_rules',
+		name: source.name,
+		payload: { schema_version: 1, yaml: source.yaml },
+		rules: parses[i]
+	}));
 	const set = new ArtifactSet();
-	set.setCommitted(
-		readArtifacts(
-			step.sources!.map((source, i) => ({
-				id: source.artifact_id,
-				kind: 'validation_rules',
-				name: source.name,
-				artifact_rev: 1,
-				payload: { schema_version: 1, yaml: source.yaml },
-				rules: parses[i]
-			}))
-		)
-	);
-	return compileRuleSets(ruleSources(set, 'committed'), mm);
+	if (layer === 'committed') {
+		set.setCommitted(readArtifacts(docs.map((doc) => ({ ...doc, artifact_rev: 1 }))));
+	} else set.setStaged(readStagedArtifacts(docs.map((doc) => ({ op: 'create', ...doc }))));
+	return set;
+}
+
+/** A `rules` step's sources as `ruleSources` lists the committed rule sets of `rulesArtifacts`. */
+export const recordedSources = (step: Step): RuleSource[] =>
+	ruleSources(rulesArtifacts(step), 'committed');
+
+/** A `rules` step's sources compiled over `mm`. */
+export function compileRecorded(step: Step, mm: Metamodel): CompiledRules {
+	return compileRuleSets(recordedSources(step), mm);
+}
+
+const outKey = (i: IssueOut) =>
+	candidateKey({
+		severity: i.severity,
+		message: i.message,
+		targetIds: i.target_ids,
+		category: i.category,
+		check: i.check
+	});
+
+/**
+ * A candidate diff as a replay compares it: `now_passing` sorted by the
+ * diff's key, since each store keeps its own order; the rest as it is.
+ */
+export function comparableDiff(diff: CandidateDiff): CandidateDiff {
+	const keyed = diff.now_passing.map((i): [string, IssueOut] => [outKey(i), i]);
+	keyed.sort(([a], [b]) => cmpCodePoint(a, b));
+	return { ...diff, now_passing: keyed.map(([, i]) => i) };
 }
 
 function validationOf(carried: Carried, model: Model): Validation {
@@ -544,7 +596,8 @@ function apply(
 			);
 		}
 		case 'rules': {
-			const compiled = compileRecorded(step, model.metamodel);
+			const sources = recordedSources(step);
+			const compiled = compileRuleSets(sources, model.metamodel);
 			expect(compiled.unreadable, `step ${index}: a document the engine refuses`).toBe(false);
 			const { session } = carried;
 			if (session !== null) {
@@ -556,6 +609,7 @@ function apply(
 				session.rev += 1;
 			}
 			carried.rules = compiled;
+			carried.sources = sources;
 			const { parses } = step.result as RulesStepResult;
 			return { parses, status: rulesStatus(compiled), compiled: compiledRecord(compiled) };
 		}
@@ -569,6 +623,14 @@ function apply(
 			store.replace(ids, validateScoped(model, ids, validators, patterns, carried.rules));
 			carried.session = { store, rev: 0 };
 			return null;
+		}
+		case 'candidate': {
+			// The model half of `POST /metamodel/diff`: the session's store against
+			// the model scanned under the document, the rule sources recompiled for it.
+			const { sources } = carried;
+			const candidate = prepareCandidate(step.metamodel, (mm) => compileRuleSets(sources, mm));
+			const issues = drain(candidateScan(model, candidate));
+			return comparableDiff(candidateDiff(carried.session!.store.iter(), issues));
 		}
 		case 'issues': {
 			const { store, rev } = carried.session!;
@@ -718,7 +780,8 @@ const READ_LIKE = new Set([
 	'reach',
 	'issues',
 	'preview',
-	'validate_staged'
+	'validate_staged',
+	'candidate'
 ]);
 
 /**
@@ -733,7 +796,7 @@ export function replaySteps(
 	options: ModelOptions = {},
 	layer: ArtifactLayer = 'committed'
 ): void {
-	const model = new Model(Metamodel.fromJSON(fixture.metamodel), options);
+	const model = loadModelFile(fixture, options);
 	const random = seededRandom(20260918);
 	const carried: Carried = {
 		landed: new Map(),
@@ -743,6 +806,7 @@ export function replaySteps(
 		validation: null,
 		session: null,
 		rules: null,
+		sources: [],
 		options
 	};
 	let minted = 0;
@@ -774,7 +838,9 @@ export function replaySteps(
 		} else expect(error, label).toEqual(recorded);
 		// A body is compared as text: values and key order at once.
 		if (READ_LIKE.has(step.do)) {
-			expect(JSON.stringify(result), label).toBe(JSON.stringify(step.result));
+			const recordedResult =
+				step.do === 'candidate' ? comparableDiff(step.result as CandidateDiff) : step.result;
+			expect(JSON.stringify(result), label).toBe(JSON.stringify(recordedResult));
 		} else expect(result, label).toEqual(step.result);
 		const seen = observe(model);
 		if (step.unchanged) {
