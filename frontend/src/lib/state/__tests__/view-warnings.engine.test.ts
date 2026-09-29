@@ -18,7 +18,7 @@ import { discardAll } from '../checkout.svelte';
 import * as editGate from '../edit-gate';
 import { cancelIssuesRefetch, emit, stagedSettled } from '../model.svelte';
 import { handleFeedEvent } from '../realtime.svelte';
-import { handReplicaFeed } from '../replica.svelte';
+import { handReplicaFeed, onViewsClosed, stopReplica } from '../replica.svelte';
 import {
 	clearViewState,
 	getView,
@@ -118,7 +118,11 @@ type Served = { view: View; warnings: Issue[]; hold: Hold | null };
  */
 async function open(
 	side: 'engine' | 'server',
-	{ payloads, shadow = false }: { payloads?: Hold; shadow?: boolean } = {}
+	{
+		payloads,
+		shadow = false,
+		loads = [NAV]
+	}: { payloads?: Hold; shadow?: boolean; loads?: (typeof NAV)[] } = {}
 ) {
 	if (shadow) localStorage.setItem('dr.shadow', '1');
 	const project: FakeProject = fakeProject();
@@ -130,7 +134,7 @@ async function open(
 				`${PAGE_ORIGIN}/api/v1/projects/${project.projectId}/artifacts/payloads`,
 				async () => {
 					await payloads.arrive();
-					return HttpResponse.json({ items: [NAV] });
+					return HttpResponse.json({ items: loads });
 				}
 			),
 			...handlers(options)
@@ -311,20 +315,19 @@ describe('the view warnings as the views gate opens and closes', () => {
 		expect(validations() - before).toBe(1);
 	});
 
-	it('open from the follower loading after the replica is ready: the server’s warnings, then the engine’s', async () => {
+	it('open from the follower loading after the replica is ready: the server’s warnings, then the engine’s, with one engine call', async () => {
 		const payloads = hold();
-		const { validations } = await open('engine', { payloads });
+		// No artifact loads, so no `changed` of the artifacts asks: only the load's own hand-over does.
+		const { validations } = await open('engine', { payloads, loads: [] });
 		await payloads.reached;
 		await refreshView();
 		expect(getViewWarnings()).toEqual([SENTINEL]);
 		expect(validations()).toBe(0);
 
 		payloads.release();
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+		await vi.waitFor(() => expect(getViewWarnings()).not.toContainEqual(SENTINEL));
 		await answered();
-		// The load's own hand-over and the `changed` of its artifacts each ask; one may run again after the other.
-		expect(validations()).toBeGreaterThan(0);
-		expect(validations()).toBeLessThanOrEqual(2);
+		expect(validations()).toBe(1);
 	});
 
 	it("close: the engine's warnings give way to the server's, with one view fetch", async () => {
@@ -341,6 +344,22 @@ describe('the view warnings as the views gate opens and closes', () => {
 		expect(gets).toEqual(['v1', 'v1']);
 		snapshot.release();
 		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+	});
+
+	it('stopping the replica tells no closed listener and asks the server nothing', async () => {
+		const { gets } = await open('engine');
+		await refreshView();
+		const closed = vi.fn();
+		const off = onViewsClosed(closed);
+		await new Promise<void>((resolve) => setTimeout(resolve, 20));
+		const before = gets.length;
+
+		stopReplica();
+		await new Promise<void>((resolve) => setTimeout(resolve, 20));
+		off();
+
+		expect(closed).not.toHaveBeenCalled();
+		expect(gets.length).toBe(before);
 	});
 });
 

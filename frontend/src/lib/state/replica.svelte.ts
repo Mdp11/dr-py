@@ -520,14 +520,14 @@ export function artifactKindOf(id: string): string | undefined {
 }
 
 /** A payload answer after this is dropped: it speaks for a replica no longer followed. */
-function stopFollower(): void {
+function stopFollower(notify = true): void {
 	if (_follower === null) return;
 	const viewsWereOpen = viewsOnEngine(_status);
 	_follower.follower.stop();
 	_follower.removeQuiet();
 	_follower = null;
 	_followerEpoch += 1;
-	if (viewsWereOpen) viewsClosed();
+	if (notify && viewsWereOpen) viewsClosed();
 }
 
 /**
@@ -564,7 +564,8 @@ export function stopReplica(): void {
 	stopFollowingViews();
 	detachEngine();
 	_placedViews.clear();
-	stopFollower();
+	// The page is going: a refresh now would post placements to a replica no longer followed.
+	stopFollower(false);
 	_sync?.stop();
 	_releaseGate();
 }
