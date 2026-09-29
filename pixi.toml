@@ -151,7 +151,7 @@ default-environment = "core-dev"
 depends-on = ["engine-parity-oracle"]
 
 [feature.core-dev.tasks.engine-compare-oracle]
-description = "Write benchmarks/large.compare{.model,}.json and large.apply-cr.json: a derived other model file and the Python compare and apply-CR answers over model M, which engine-parity-large and engine-bench use"
+description = "Write benchmarks/large.compare{.model,}.json and large.apply-cr.json: a derived other model file and the Python compare and apply-CR answers over model M, which engine-parity-large, engine-bench and engine-bench-browser use"
 cmd = "python scripts/compare_large.py"
 default-environment = "core-dev"
 
@@ -330,7 +330,7 @@ cmd = "npm run xlsx-sample"
 cwd = "engine"
 
 [feature.frontend.tasks.engine-parity-large]
-description = "Compare the engine's table, export, download and sweep at model M with the Python oracle's (run engine-bench-data once before)"
+description = "Compare the engine's table, export, download, compare, apply-CR, sweep and candidate diff at model M with the Python oracle's (run engine-bench-data once before)"
 cmd = "node --disable-warning=ExperimentalWarning bench/parity-large.ts"
 cwd = "engine"
 depends-on = [
