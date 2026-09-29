@@ -2676,7 +2676,7 @@ Rebind button — the buffer is staged commit CONTENT and lands through the same
 - **Preview** — on demand, never on a timer: `POST /metamodel/diff` sandboxes
   the candidate and returns which model issues would start/stop failing plus a
   structural diff (`MetamodelPreviewPanel`). With the `metamodel` surface on
-  the engine (`lib/engine/README.md`) the replica answers the model half over
+  the engine (the default; `lib/engine/README.md`) the replica answers the model half over
   the working copy and `POST /metamodel/structural-diff` the document half,
   and `metamodel-staged-note` ("Includes staged changes") shows above the
   panel while `metamodelIncludesStaged()` holds; an invalid candidate is

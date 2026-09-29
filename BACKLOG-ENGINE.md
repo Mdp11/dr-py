@@ -109,7 +109,7 @@ feature there lands on both sides with a fixture until F.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
-`K-76`, `K-77`, `K-78`, `K-79`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
+`K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
 `BACKLOG.md`.
 Size: very large.
 
@@ -663,6 +663,44 @@ limit in 1 of 4 full `engine-test` runs at a load average of about 25, and passe
 the other three. Fix direction: find what the test waits on that a loaded host stretches, and wait
 on that signal instead of the clock.
 
+### K-80 · The server's `/metamodel/diff` stays O(model) under the write mutex, open to viewers · `open` · perf · *2026-09-29*
+With the `metamodel` surface on the engine, the editor's Preview and a rebound commit's preview
+no longer reach `POST /metamodel/diff` (`api/metamodel_candidate.py::model_half`), but the route
+stays: it is the fallback (a `gone` engine, a lint that gives no document, the moved 409s) and the
+shadow's oracle. It still validates the whole model under the candidate, so it is O(model) inside the
+write mutex, and a viewer may call it. Fix direction: none before F, which retires the server's evaluation; until then a caller
+outside the shell (a script, a peer) can hold the mutex for seconds, and a role check or a
+whole-model budget on the route is the stopgap.
+
+### K-81 · "Includes staged changes" can show over a preview the engine did not answer from the working copy · `open` · *2026-09-29*
+`metamodelIncludesStaged()` is true while the `metamodel` surface is `engine` and the store holds
+a staged edit, so the note (`metamodel-staged-note`) reads the state now, not the answer's. It can
+show over a preview that fell back to the server (which never sees staged model edits, except the
+rebind's own ops) and over one computed before the edit was staged; re-running Preview settles
+the second, not the first. `exportsIncludeStaged()` has the same semantics for the export note.
+Fix direction: stamp the answer with the side and the `staged_version` it was computed at, and
+show the note from the stamp for both notes.
+
+### K-82 · The candidate scan's longest browser slice is 27 ms, over the 16 ms budget · `open` · perf · *2026-09-29*
+`engine-bench-browser` at M (Chromium 148, WSL2, 2026-09-29): `candidateIssues` 775 ms with a
+longest slice, bounded from outside by the ping loop, of 27 ms; the open (51 ms) and the rescan
+(36 ms) rows exceed 16 ms too, so the candidate is not the only row over. In Node the longest step
+is 8.5 ms, so the overrun is not one step's own cost. Fix direction: find what the browser's slice
+holds beyond the step (the worker's yield, the answer's transfer) and bring the slice under the
+budget.
+
+### K-83 · A server answer returned inside an engine call is shadow-probed with an empty method · `open` · dev · *2026-09-29*
+When an engine body answers with the server's own preview (a rebind blob the lint refuses, an ok
+lint without a document), the shadow is handed the server's value as the engine's and asks the
+server again, with `method: ''`. Only dev with `dr.shadow` sees it, as a duplicate server call.
+Fix direction: return a marker from the engine body that the answer was the server's, and run no
+probe for it, as the 501 fallbacks do.
+
+### K-84 · `POST /metamodel/structural-diff` answers 422 where `/metamodel/diff` answers 500 on a YAML constructor error · `open` · *2026-09-29*
+A YAML document whose tags raise a `ValueError` in a constructor is a 422 on the new route and a
+500 on the old one; the lint that gates both never lets one through, so only a direct caller sees
+it. Fix direction: pick 422 on both, in the same commit as the route's own fixture.
+
 ### Considered by the exports plan and deferred
 
 Left out of C's plan 5, each on purpose:
@@ -685,4 +723,4 @@ Left out of C's plan 5, each on purpose:
 | C-20 | `done` (2026-09-24, feat/eval-navigation) — `check_metamodel` refuses a property that redeclares an ancestor's, so the two readings never differ on a metamodel that reaches the engine; `_effective_props`' comment now says so. | 2026-09-18 |
 | C-21 | `api/routes/commits.py:785` and `:923` list "apply-cr baseline reset" among what bumps `model_rev` opaquely; apply-CR is a dry run that stages a batch and never resets the baseline. Drop it from both comments (C-12 applies: reword only, no reshaping). | 2026-09-19 |
 | C-22 | `api/routes/artifacts.py::evaluate_navigation`'s `except LookupError` also catches the evaluator's `KeyError`: an unknown `row_element_id` behind a filter or a property step answers 422 `unknown navigation artifact 'x'`, and with no steps the page's `_tree_item` answers 404 `x`. The top-level `artifact_id` refusal names the id unquoted (`unknown navigation artifact n1`, `LookupError` formatted with `str`) where a nested ref's is quoted. The engine mirrors all three (fixture `nav_eval`). Fix on both sides with a fixture. | 2026-09-24 |
-| C-23 | A containment cycle has two readings. `POST /model/validate` with nothing staged runs `Scope.all()` on the server, which names ONE representative of a cycle; the engine ports scoped runs only, so its store (the sweep's, as the server's own store is) reports every element whose first-parent chain reaches the cycle, those hanging below it included, and the engine's `validateModel` answers that store. The server already disagrees with itself the same way (its sweep and its full branch). Pick one reading on both sides when the candidate validation is decided. | 2026-09-24 |
+| C-23 | A containment cycle has two readings. `POST /model/validate` with nothing staged runs `Scope.all()` on the server, which names ONE representative of a cycle; the engine ports scoped runs only, so its store (the sweep's, as the server's own store is) reports every element whose first-parent chain reaches the cycle, those hanging below it included, and the engine's `validateModel` answers that store. The server already disagrees with itself the same way (its sweep and its full branch). Pick one reading on both sides when the candidate validation is decided. The candidate validation (C's plan 7) is decided for its own side: it runs the `Scope.all()` reading, one representative per cycle, and reports uniqueness group by group; the live store keeps the first-parent-chain reading. | 2026-09-24 |

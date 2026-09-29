@@ -16,7 +16,7 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports and the metamodel; all but the metamodel on the engine by default', () => {
+	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports and the metamodel; every one on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
 		expect(SURFACES).toEqual([
 			...READ_SURFACES,
@@ -38,7 +38,7 @@ describe('the surface switches', () => {
 			issues: 'engine',
 			tables: 'engine',
 			exports: 'engine',
-			metamodel: 'server'
+			metamodel: 'engine'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
@@ -56,11 +56,13 @@ describe('the surface switches', () => {
 	});
 
 	it('staging on the engine does not force the metamodel, and dr.surfaces moves it', () => {
-		expect(readSurfaces(storing('{"staging": "engine"}')).metamodel).toBe('server');
+		expect(readSurfaces(storing('{"staging": "engine", "metamodel": "server"}')).metamodel).toBe(
+			'server'
+		);
 		for (const staging of ['engine', 'legacy']) {
-			expect(readSurfaces(storing(`{"staging": "${staging}", "metamodel": "engine"}`))).toEqual({
+			expect(readSurfaces(storing(`{"staging": "${staging}", "metamodel": "server"}`))).toEqual({
 				...SURFACE_DEFAULTS,
-				metamodel: 'engine'
+				metamodel: 'server'
 			});
 		}
 	});
