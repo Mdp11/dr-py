@@ -3,7 +3,7 @@ state order, each entity dumped as the server dumps it.
 
 Over ``ops_batches``' metamodel, the first batch writes values whose text is
 easy to get wrong: ``1.0``, ``1e-07``, ``-0.0``, ``1e16``, ``2**64``, astral
-and control characters, a lone space, an empty properties map, and nested
+and control characters, a lone U+2028, an empty properties map, and nested
 lists and dicts, which no datatype admits, in the string ``extra``. The file
 is then downloaded after an update (the element keeps its place), after a
 delete and re-create under the same id (the element goes last), after a
@@ -79,7 +79,11 @@ _FIRST = [
     _el(
         "tmp_c3",
         "City",
-        properties={"name": " ", "area": 1e16, "extra": [[1, [2.5, "x"]], {"k": True}]},
+        properties={
+            "name": "\u2028",
+            "area": 1e16,
+            "extra": [[1, [2.5, "x"]], {"k": True}],
+        },
     ),
     _el("tmp_d1", "District", properties={}),
     _el("tmp_p1", "Person", properties={"name": "p1"}),

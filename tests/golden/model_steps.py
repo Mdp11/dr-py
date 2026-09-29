@@ -1109,13 +1109,14 @@ class Recorder:
                 return None
             case "download":
                 committed = "".join(iter_model_json(model))
-                working = self._over_stage(
-                    step, lambda staged: "".join(iter_model_json(staged))
-                )
-                # a stage the working model's file would not show proves nothing
-                assert "_stage" not in step or working != committed, (
-                    f"step {len(self._steps)}: the stage leaves the file as it is"
-                )
+                if "_stage" in step:
+                    working = self._over_stage(
+                        step, lambda staged: "".join(iter_model_json(staged))
+                    )
+                    # a stage the working model's file would not show proves nothing
+                    assert working != committed, (
+                        f"step {len(self._steps)}: the stage leaves the file as it is"
+                    )
                 return committed
             case "validate_view":
                 view = View.model_validate(step["view"])
