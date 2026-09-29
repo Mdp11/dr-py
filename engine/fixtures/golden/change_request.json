@@ -4508,14 +4508,12 @@
               ],
               "deleted": [
                 {
-                  "id": "r-m2",
-                  "type_name": "MemberOf",
-                  "source_id": "p2",
-                  "target_id": "t2",
-                  "properties": {
-                    "since": "2024-01-01"
-                  },
-                  "rev": 1
+                  "id": "r-z-own",
+                  "type_name": "Owns",
+                  "source_id": "org",
+                  "target_id": "t1",
+                  "properties": {},
+                  "rev": 0
                 }
               ]
             }
@@ -4547,14 +4545,12 @@
             "relationships": {
               "added": [
                 {
-                  "id": "r-m2",
-                  "type_name": "MemberOf",
-                  "source_id": "p2",
-                  "target_id": "t1",
-                  "properties": {
-                    "since": "2024-01-01"
-                  },
-                  "rev": 1
+                  "id": "r-z-own",
+                  "type_name": "Owns",
+                  "source_id": "org",
+                  "target_id": "t2",
+                  "properties": {},
+                  "rev": 0
                 }
               ],
               "modified": [],
@@ -4698,26 +4694,22 @@
                   }
                 },
                 {
-                  "id": "r-m2",
+                  "id": "r-z-own",
                   "before": {
-                    "id": "r-m2",
-                    "type_name": "MemberOf",
-                    "source_id": "p2",
-                    "target_id": "t2",
-                    "properties": {
-                      "since": "2024-01-01"
-                    },
-                    "rev": 1
+                    "id": "r-z-own",
+                    "type_name": "Owns",
+                    "source_id": "org",
+                    "target_id": "t1",
+                    "properties": {},
+                    "rev": 0
                   },
                   "after": {
-                    "id": "r-m2",
-                    "type_name": "MemberOf",
-                    "source_id": "p2",
-                    "target_id": "t1",
-                    "properties": {
-                      "since": "2024-01-01"
-                    },
-                    "rev": 1
+                    "id": "r-z-own",
+                    "type_name": "Owns",
+                    "source_id": "org",
+                    "target_id": "t2",
+                    "properties": {},
+                    "rev": 0
                   }
                 }
               ],
@@ -4784,18 +4776,16 @@
           },
           {
             "kind": "delete_relationship",
-            "id": "r-m2"
+            "id": "r-z-own"
           },
           {
             "kind": "create_relationship",
             "temp_id": "tmp_4",
-            "type_name": "MemberOf",
-            "source_id": "p2",
-            "target_id": "t1",
-            "properties": {
-              "since": "2024-01-01"
-            },
-            "id": "r-m2"
+            "type_name": "Owns",
+            "source_id": "org",
+            "target_id": "t2",
+            "properties": {},
+            "id": "r-z-own"
           }
         ]
       },

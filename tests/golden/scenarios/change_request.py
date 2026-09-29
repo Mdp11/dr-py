@@ -376,6 +376,8 @@ def _proposals() -> dict[str, list[dict[str, Any]]]:
                 e_deleted=[_el("t4")],
             )
         ],
+        # t3 and r-z-own, deleted by CR 0 and re-added by CR 1, go after
+        # everything that keeps its place: t4 and the in-place rewire r-a-mem
         "moves last": [
             _cr(
                 e_added=[_new("n1", "Team", name="N1")],
@@ -383,9 +385,9 @@ def _proposals() -> dict[str, list[dict[str, Any]]]:
                 e_deleted=[_el("t3")],
                 r_added=[_new_rel("n-rel", "MemberOf", "p1", "n1")],
                 r_modified=[_mod(_rel("r-a-mem"), _rel("r-a-mem", target_id="t2"))],
-                r_deleted=[_rel("r-m2")],
+                r_deleted=[_rel("r-z-own")],
             ),
-            _cr(e_added=[_new("t3", "Team", name="T3 again")], r_added=[_rel("r-m2", target_id="t1")]),
+            _cr(e_added=[_new("t3", "Team", name="T3 again")], r_added=[_rel("r-z-own", target_id="t2")]),
         ],
         "vanishes": [
             _cr(e_deleted=[_el("t4")], r_deleted=[_rel("r-y-resp")]),
@@ -595,8 +597,16 @@ def _checked(run: dict[str, Any], labels: list[str]) -> None:
     )
     moved = _changes(by["moves last"])
     assert moved["elements"]["modified"] == ["t1", "t4", "t3"]
-    assert moved["relationships"]["modified"] == ["r-a-mem", "r-m2"]
-    assert by["moves last"]["result"]["ops"][-1]["temp_id"] == "tmp_4"
+    assert moved["relationships"]["modified"] == ["r-a-mem", "r-z-own"]
+    assert [
+        (op["kind"], op["id"], op.get("temp_id"))
+        for op in by["moves last"]["result"]["ops"][-4:]
+    ] == [
+        ("delete_relationship", "r-a-mem", None),
+        ("create_relationship", "r-a-mem", "tmp_3"),
+        ("delete_relationship", "r-z-own", None),
+        ("create_relationship", "r-z-own", "tmp_4"),
+    ]
     assert _changes(by["vanishes"])["elements"]["modified"] == ["t2"]
     assert _changes(by["vanishes"])["relationships"]["added"] == []
     assert "t2" not in _changes(by["patches"])["elements"]["modified"]
