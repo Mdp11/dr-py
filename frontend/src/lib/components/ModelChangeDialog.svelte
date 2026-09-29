@@ -253,14 +253,16 @@
 
 	function onProceed(): Promise<void> {
 		return run(async () => {
-			const crs = mode === 'compare' ? [(await ensureCompared()).cr] : crFiles.map((f) => f.cr);
+			const diff = mode === 'compare' ? await ensureCompared() : null;
+			const crs = diff ? [diff.cr] : crFiles.map((f) => f.cr);
 			const res = await proposeCr(crs);
 			if (!res.ok) {
 				conflicts = { crIndex: mode === 'compare' ? null : res.crIndex, items: res.conflicts };
 				return;
 			}
-			// the server proposed over committed state: staged edits would be overwritten
-			if (!res.workingCopy && hasStagedOps()) {
+			// a server answer, of the diff or of the proposal, read committed state:
+			// staging it over staged edits would overwrite them or leave them in place
+			if (!(res.workingCopy && (diff?.workingCopy ?? true)) && hasStagedOps()) {
 				stagedBlocked = true;
 				return;
 			}

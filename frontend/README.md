@@ -1909,7 +1909,9 @@ a button. Both requests go through the `compare` surface (`server` by default;
   gate the buttons, because the engine proposes over the working copy. The
   dialog then decides from the ANSWER: `compareModel` / `proposeCr` results carry
   `workingCopy`, true only when the engine answered. A server answer (engine
-  gone, a fallback) over staged edits stages nothing and shows the same hint;
+  gone, a fallback) over staged edits stages nothing and shows the same hint —
+  in compare mode the diff's answer counts too, checked at Replace time, so a
+  cached server diff followed by newly staged edits is refused;
   `mcd-staged-note` ("Includes staged changes") shows only for a `workingCopy`
   answer given while edits were staged; and only a server answer is cached by
   `ensureCompared` (an engine answer depends on staged state). In compare mode
