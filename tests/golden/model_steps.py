@@ -754,6 +754,8 @@ class Recorder:
                 r["properties"],
                 r["rev"],
             )
+        # Both loaders take over the property dicts they are given, so each
+        # reads its own parse.
         bulk = build_model_from_dicts(
             self.metamodel, parse_model_json(blob), strict=False
         )
@@ -1146,11 +1148,12 @@ class Recorder:
         its outcome and what it left behind."""
         # The last step that changed anything carries the full state, unless
         # the run carries no checkpoints.
-        for entry in reversed(self._steps):
-            if self._full_every is not None and "unchanged" not in entry:
-                assert self._last is not None
-                entry.update(self._last)
-                break
+        if self._full_every is not None:
+            for entry in reversed(self._steps):
+                if "unchanged" not in entry:
+                    assert self._last is not None
+                    entry.update(self._last)
+                    break
         doc: dict[str, Any] = {"metamodel": self.metamodel.model_dump(mode="json")}
         if self._model_file is not None:
             doc["model_file"] = self._model_file

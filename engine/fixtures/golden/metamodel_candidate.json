@@ -2077,6 +2077,13 @@
             "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-bc\",\"type_name\":\"Refines\",\"source_id\":\"fr-b\",\"target_id\":\"fr-c\",\"properties\":{},\"id\":\"ref-bc\"}",
             "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-de\",\"type_name\":\"Refines\",\"source_id\":\"fr-d\",\"target_id\":\"fr-e\",\"properties\":{},\"id\":\"ref-de\"}",
             "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-ed\",\"type_name\":\"Refines\",\"source_id\":\"fr-e\",\"target_id\":\"fr-d\",\"properties\":{},\"id\":\"ref-ed\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_fr-f\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9006\",\"criticality\":\"High\",\"feature_id\":\"FR-9006\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"fr-f\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_fr-g\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9006\",\"criticality\":\"High\",\"feature_id\":\"FR-9006\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"fr-g\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-ag\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-g\",\"properties\":{},\"id\":\"ref-ag\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_fr-h\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9007\",\"criticality\":\"High\",\"feature_id\":\"FR-9007\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"fr-h\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_fr-i\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9007\",\"criticality\":\"High\",\"feature_id\":\"FR-9007\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"fr-i\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-ah\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-h\",\"properties\":{},\"id\":\"ref-ah\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-ai\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-i\",\"properties\":{},\"id\":\"ref-ai\"}",
             "{\"kind\":\"create_element\",\"temp_id\":\"tmp_team-int\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Int\",\"size\":1,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"team-int\"}",
             "{\"kind\":\"create_element\",\"temp_id\":\"tmp_team-float\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Float\",\"size\":1.0,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"team-float\"}",
             "{\"kind\":\"create_element\",\"temp_id\":\"tmp_team-bool\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Bool\",\"size\":true,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"team-bool\"}",
@@ -2128,6 +2135,34 @@
                 "ref-ed"
               ],
               [
+                "tmp_fr-f",
+                "fr-f"
+              ],
+              [
+                "tmp_fr-g",
+                "fr-g"
+              ],
+              [
+                "tmp_ref-ag",
+                "ref-ag"
+              ],
+              [
+                "tmp_fr-h",
+                "fr-h"
+              ],
+              [
+                "tmp_fr-i",
+                "fr-i"
+              ],
+              [
+                "tmp_ref-ah",
+                "ref-ah"
+              ],
+              [
+                "tmp_ref-ai",
+                "ref-ai"
+              ],
+              [
                 "tmp_team-int",
                 "team-int"
               ],
@@ -2162,6 +2197,10 @@
               "fr-c",
               "fr-d",
               "fr-e",
+              "fr-f",
+              "fr-g",
+              "fr-h",
+              "fr-i",
               "team-int",
               "team-float",
               "team-bool",
@@ -2175,7 +2214,10 @@
               "ref-ac",
               "ref-bc",
               "ref-de",
-              "ref-ed"
+              "ref-ed",
+              "ref-ag",
+              "ref-ah",
+              "ref-ai"
             ],
             "deleted_element_ids": [],
             "deleted_relationship_ids": [],
@@ -2200,6 +2242,22 @@
               ],
               [
                 "fr-e",
+                null
+              ],
+              [
+                "fr-f",
+                null
+              ],
+              [
+                "fr-g",
+                null
+              ],
+              [
+                "fr-h",
+                null
+              ],
+              [
+                "fr-i",
                 null
               ],
               [
@@ -2251,6 +2309,18 @@
               [
                 "ref-ed",
                 null
+              ],
+              [
+                "ref-ag",
+                null
+              ],
+              [
+                "ref-ah",
+                null
+              ],
+              [
+                "ref-ai",
+                null
               ]
             ],
             "inverse_ops": [
@@ -2261,6 +2331,13 @@
               "{\"kind\":\"delete_element\",\"id\":\"team-bool\"}",
               "{\"kind\":\"delete_element\",\"id\":\"team-float\"}",
               "{\"kind\":\"delete_element\",\"id\":\"team-int\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"ref-ai\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"ref-ah\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"fr-i\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"fr-h\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"ref-ag\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"fr-g\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"fr-f\"}",
               "{\"kind\":\"delete_relationship\",\"id\":\"ref-ed\"}",
               "{\"kind\":\"delete_relationship\",\"id\":\"ref-de\"}",
               "{\"kind\":\"delete_relationship\",\"id\":\"ref-bc\"}",
@@ -2278,6 +2355,10 @@
               "{\"id\":\"fr-c\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9003\",\"criticality\":\"High\",\"feature_id\":\"FR-9003\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
               "{\"id\":\"fr-d\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9004\",\"criticality\":\"High\",\"feature_id\":\"FR-9004\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
               "{\"id\":\"fr-e\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9005\",\"criticality\":\"High\",\"feature_id\":\"FR-9005\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
+              "{\"id\":\"fr-f\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9006\",\"criticality\":\"High\",\"feature_id\":\"FR-9006\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
+              "{\"id\":\"fr-g\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9006\",\"criticality\":\"High\",\"feature_id\":\"FR-9006\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
+              "{\"id\":\"fr-h\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9007\",\"criticality\":\"High\",\"feature_id\":\"FR-9007\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
+              "{\"id\":\"fr-i\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9007\",\"criticality\":\"High\",\"feature_id\":\"FR-9007\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
               "{\"id\":\"team-int\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Int\",\"size\":1,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":5}",
               "{\"id\":\"team-float\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Float\",\"size\":1.0,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":5}",
               "{\"id\":\"team-bool\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Bool\",\"size\":true,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":5}",
@@ -2291,12 +2372,15 @@
               "{\"id\":\"ref-ac\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-c\",\"properties\":{},\"rev\":0}",
               "{\"id\":\"ref-bc\",\"type_name\":\"Refines\",\"source_id\":\"fr-b\",\"target_id\":\"fr-c\",\"properties\":{},\"rev\":0}",
               "{\"id\":\"ref-de\",\"type_name\":\"Refines\",\"source_id\":\"fr-d\",\"target_id\":\"fr-e\",\"properties\":{},\"rev\":0}",
-              "{\"id\":\"ref-ed\",\"type_name\":\"Refines\",\"source_id\":\"fr-e\",\"target_id\":\"fr-d\",\"properties\":{},\"rev\":0}"
+              "{\"id\":\"ref-ed\",\"type_name\":\"Refines\",\"source_id\":\"fr-e\",\"target_id\":\"fr-d\",\"properties\":{},\"rev\":0}",
+              "{\"id\":\"ref-ag\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-g\",\"properties\":{},\"rev\":0}",
+              "{\"id\":\"ref-ah\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-h\",\"properties\":{},\"rev\":0}",
+              "{\"id\":\"ref-ai\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-i\",\"properties\":{},\"rev\":0}"
             ]
           },
           "error": null,
-          "digest": "3f855b21d65ea037",
-          "fingerprint": "7882af63d1287628"
+          "digest": "4feb14a7280d1846",
+          "fingerprint": "1e19b7f4ab2e38ba"
         },
         {
           "do": "seed",
@@ -4363,9 +4447,9 @@
               }
             ],
             "now_passing": [],
-            "unchanged_count": 24,
-            "current_error_count": 24,
-            "candidate_error_count": 29
+            "unchanged_count": 26,
+            "current_error_count": 26,
+            "candidate_error_count": 31
           },
           "error": null,
           "unchanged": true
@@ -6389,10 +6473,22 @@
                 "origin": "on_server"
               }
             ],
-            "now_passing": [],
-            "unchanged_count": 24,
-            "current_error_count": 24,
-            "candidate_error_count": 26
+            "now_passing": [
+              {
+                "severity": "error",
+                "message": "Duplicate FunctionalRequirement element fr-g: matches fr-f (feature_id='FR-9006')",
+                "target_ids": [
+                  "fr-g",
+                  "fr-f"
+                ],
+                "category": "conformance",
+                "check": "uniqueness",
+                "origin": "on_server"
+              }
+            ],
+            "unchanged_count": 25,
+            "current_error_count": 26,
+            "candidate_error_count": 27
           },
           "error": null,
           "unchanged": true
@@ -8441,9 +8537,9 @@
                 "origin": "on_server"
               }
             ],
-            "unchanged_count": 23,
-            "current_error_count": 24,
-            "candidate_error_count": 26
+            "unchanged_count": 25,
+            "current_error_count": 26,
+            "candidate_error_count": 28
           },
           "error": null,
           "unchanged": true
@@ -10904,9 +11000,9 @@
                 "origin": "on_server"
               }
             ],
-            "unchanged_count": 16,
-            "current_error_count": 24,
-            "candidate_error_count": 57
+            "unchanged_count": 18,
+            "current_error_count": 26,
+            "candidate_error_count": 59
           },
           "error": null,
           "unchanged": true
@@ -12951,9 +13047,9 @@
               }
             ],
             "now_passing": [],
-            "unchanged_count": 24,
-            "current_error_count": 24,
-            "candidate_error_count": 28
+            "unchanged_count": 26,
+            "current_error_count": 26,
+            "candidate_error_count": 30
           },
           "error": null,
           "unchanged": true
@@ -14957,9 +15053,9 @@
           "result": {
             "now_failing": [],
             "now_passing": [],
-            "unchanged_count": 24,
-            "current_error_count": 24,
-            "candidate_error_count": 24
+            "unchanged_count": 26,
+            "current_error_count": 26,
+            "candidate_error_count": 26
           },
           "error": null,
           "unchanged": true
@@ -17043,6 +17139,13 @@
             "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-bc\",\"type_name\":\"Refines\",\"source_id\":\"fr-b\",\"target_id\":\"fr-c\",\"properties\":{},\"id\":\"ref-bc\"}",
             "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-de\",\"type_name\":\"Refines\",\"source_id\":\"fr-d\",\"target_id\":\"fr-e\",\"properties\":{},\"id\":\"ref-de\"}",
             "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-ed\",\"type_name\":\"Refines\",\"source_id\":\"fr-e\",\"target_id\":\"fr-d\",\"properties\":{},\"id\":\"ref-ed\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_fr-f\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9006\",\"criticality\":\"High\",\"feature_id\":\"FR-9006\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"fr-f\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_fr-g\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9006\",\"criticality\":\"High\",\"feature_id\":\"FR-9006\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"fr-g\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-ag\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-g\",\"properties\":{},\"id\":\"ref-ag\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_fr-h\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9007\",\"criticality\":\"High\",\"feature_id\":\"FR-9007\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"fr-h\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_fr-i\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9007\",\"criticality\":\"High\",\"feature_id\":\"FR-9007\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"fr-i\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-ah\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-h\",\"properties\":{},\"id\":\"ref-ah\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_ref-ai\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-i\",\"properties\":{},\"id\":\"ref-ai\"}",
             "{\"kind\":\"create_element\",\"temp_id\":\"tmp_team-int\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Int\",\"size\":1,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"team-int\"}",
             "{\"kind\":\"create_element\",\"temp_id\":\"tmp_team-float\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Float\",\"size\":1.0,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"team-float\"}",
             "{\"kind\":\"create_element\",\"temp_id\":\"tmp_team-bool\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Bool\",\"size\":true,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"id\":\"team-bool\"}",
@@ -17094,6 +17197,34 @@
                 "ref-ed"
               ],
               [
+                "tmp_fr-f",
+                "fr-f"
+              ],
+              [
+                "tmp_fr-g",
+                "fr-g"
+              ],
+              [
+                "tmp_ref-ag",
+                "ref-ag"
+              ],
+              [
+                "tmp_fr-h",
+                "fr-h"
+              ],
+              [
+                "tmp_fr-i",
+                "fr-i"
+              ],
+              [
+                "tmp_ref-ah",
+                "ref-ah"
+              ],
+              [
+                "tmp_ref-ai",
+                "ref-ai"
+              ],
+              [
                 "tmp_team-int",
                 "team-int"
               ],
@@ -17128,6 +17259,10 @@
               "fr-c",
               "fr-d",
               "fr-e",
+              "fr-f",
+              "fr-g",
+              "fr-h",
+              "fr-i",
               "team-int",
               "team-float",
               "team-bool",
@@ -17141,7 +17276,10 @@
               "ref-ac",
               "ref-bc",
               "ref-de",
-              "ref-ed"
+              "ref-ed",
+              "ref-ag",
+              "ref-ah",
+              "ref-ai"
             ],
             "deleted_element_ids": [],
             "deleted_relationship_ids": [],
@@ -17166,6 +17304,22 @@
               ],
               [
                 "fr-e",
+                null
+              ],
+              [
+                "fr-f",
+                null
+              ],
+              [
+                "fr-g",
+                null
+              ],
+              [
+                "fr-h",
+                null
+              ],
+              [
+                "fr-i",
                 null
               ],
               [
@@ -17217,6 +17371,18 @@
               [
                 "ref-ed",
                 null
+              ],
+              [
+                "ref-ag",
+                null
+              ],
+              [
+                "ref-ah",
+                null
+              ],
+              [
+                "ref-ai",
+                null
               ]
             ],
             "inverse_ops": [
@@ -17227,6 +17393,13 @@
               "{\"kind\":\"delete_element\",\"id\":\"team-bool\"}",
               "{\"kind\":\"delete_element\",\"id\":\"team-float\"}",
               "{\"kind\":\"delete_element\",\"id\":\"team-int\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"ref-ai\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"ref-ah\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"fr-i\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"fr-h\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"ref-ag\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"fr-g\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"fr-f\"}",
               "{\"kind\":\"delete_relationship\",\"id\":\"ref-ed\"}",
               "{\"kind\":\"delete_relationship\",\"id\":\"ref-de\"}",
               "{\"kind\":\"delete_relationship\",\"id\":\"ref-bc\"}",
@@ -17244,6 +17417,10 @@
               "{\"id\":\"fr-c\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9003\",\"criticality\":\"High\",\"feature_id\":\"FR-9003\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
               "{\"id\":\"fr-d\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9004\",\"criticality\":\"High\",\"feature_id\":\"FR-9004\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
               "{\"id\":\"fr-e\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9005\",\"criticality\":\"High\",\"feature_id\":\"FR-9005\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
+              "{\"id\":\"fr-f\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9006\",\"criticality\":\"High\",\"feature_id\":\"FR-9006\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
+              "{\"id\":\"fr-g\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9006\",\"criticality\":\"High\",\"feature_id\":\"FR-9006\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
+              "{\"id\":\"fr-h\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9007\",\"criticality\":\"High\",\"feature_id\":\"FR-9007\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
+              "{\"id\":\"fr-i\",\"type_name\":\"FunctionalRequirement\",\"properties\":{\"name\":\"Requirement FR-9007\",\"criticality\":\"High\",\"feature_id\":\"FR-9007\",\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":6}",
               "{\"id\":\"team-int\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Int\",\"size\":1,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":5}",
               "{\"id\":\"team-float\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Float\",\"size\":1.0,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":5}",
               "{\"id\":\"team-bool\",\"type_name\":\"Team\",\"properties\":{\"name\":\"Team Bool\",\"size\":true,\"created_at\":\"2024-05-01\",\"version\":\"1.0.0\",\"status\":\"Active\"},\"rev\":5}",
@@ -17257,12 +17434,15 @@
               "{\"id\":\"ref-ac\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-c\",\"properties\":{},\"rev\":0}",
               "{\"id\":\"ref-bc\",\"type_name\":\"Refines\",\"source_id\":\"fr-b\",\"target_id\":\"fr-c\",\"properties\":{},\"rev\":0}",
               "{\"id\":\"ref-de\",\"type_name\":\"Refines\",\"source_id\":\"fr-d\",\"target_id\":\"fr-e\",\"properties\":{},\"rev\":0}",
-              "{\"id\":\"ref-ed\",\"type_name\":\"Refines\",\"source_id\":\"fr-e\",\"target_id\":\"fr-d\",\"properties\":{},\"rev\":0}"
+              "{\"id\":\"ref-ed\",\"type_name\":\"Refines\",\"source_id\":\"fr-e\",\"target_id\":\"fr-d\",\"properties\":{},\"rev\":0}",
+              "{\"id\":\"ref-ag\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-g\",\"properties\":{},\"rev\":0}",
+              "{\"id\":\"ref-ah\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-h\",\"properties\":{},\"rev\":0}",
+              "{\"id\":\"ref-ai\",\"type_name\":\"Refines\",\"source_id\":\"fr-a\",\"target_id\":\"fr-i\",\"properties\":{},\"rev\":0}"
             ]
           },
           "error": null,
-          "digest": "3f855b21d65ea037",
-          "fingerprint": "7882af63d1287628"
+          "digest": "4feb14a7280d1846",
+          "fingerprint": "1e19b7f4ab2e38ba"
         },
         {
           "do": "seed",
@@ -19272,7 +19452,7 @@
             "{\"kind\":\"update_element\",\"id\":\"e_000207\",\"properties_patch\":{\"priority\":9}}"
           ],
           "result": {
-            "conformance_error_count": 26,
+            "conformance_error_count": 27,
             "structural_blockers": [
               {
                 "severity": "error",
@@ -19564,6 +19744,17 @@
                 ],
                 "category": "structural",
                 "check": "containment",
+                "origin": "on_server"
+              },
+              {
+                "severity": "error",
+                "message": "Duplicate FunctionalRequirement element fr-i: matches fr-h (feature_id='FR-9007')",
+                "target_ids": [
+                  "fr-i",
+                  "fr-h"
+                ],
+                "category": "conformance",
+                "check": "uniqueness",
                 "origin": "on_server"
               },
               {
@@ -21585,7 +21776,7 @@
             "{\"kind\":\"update_element\",\"id\":\"e_000207\",\"properties_patch\":{\"priority\":9}}"
           ],
           "result": {
-            "conformance_error_count": 26,
+            "conformance_error_count": 27,
             "structural_blockers": [
               {
                 "severity": "error",
@@ -21877,6 +22068,17 @@
                 ],
                 "category": "structural",
                 "check": "containment",
+                "origin": "on_server"
+              },
+              {
+                "severity": "error",
+                "message": "Duplicate FunctionalRequirement element fr-i: matches fr-h (feature_id='FR-9007')",
+                "target_ids": [
+                  "fr-i",
+                  "fr-h"
+                ],
+                "category": "conformance",
+                "check": "uniqueness",
                 "origin": "on_server"
               },
               {
@@ -23863,7 +24065,7 @@
             "{\"kind\":\"update_element\",\"id\":\"e_000207\",\"properties_patch\":{\"priority\":9}}"
           ],
           "result": {
-            "conformance_error_count": 59,
+            "conformance_error_count": 61,
             "structural_blockers": [],
             "issues": [
               {
@@ -24444,6 +24646,28 @@
                 ],
                 "category": "conformance",
                 "check": "endpoint_typing",
+                "origin": "on_server"
+              },
+              {
+                "severity": "error",
+                "message": "Duplicate FunctionalRequirement element fr-g: matches fr-f (feature_id='FR-9006')",
+                "target_ids": [
+                  "fr-g",
+                  "fr-f"
+                ],
+                "category": "conformance",
+                "check": "uniqueness",
+                "origin": "on_server"
+              },
+              {
+                "severity": "error",
+                "message": "Duplicate FunctionalRequirement element fr-i: matches fr-h (feature_id='FR-9007')",
+                "target_ids": [
+                  "fr-i",
+                  "fr-h"
+                ],
+                "category": "conformance",
+                "check": "uniqueness",
                 "origin": "on_server"
               },
               {
@@ -26430,7 +26654,7 @@
             "{\"kind\":\"update_element\",\"id\":\"e_000207\",\"properties_patch\":{\"priority\":9}}"
           ],
           "result": {
-            "conformance_error_count": 59,
+            "conformance_error_count": 61,
             "structural_blockers": [],
             "issues": [
               {
@@ -27011,6 +27235,28 @@
                 ],
                 "category": "conformance",
                 "check": "endpoint_typing",
+                "origin": "on_server"
+              },
+              {
+                "severity": "error",
+                "message": "Duplicate FunctionalRequirement element fr-g: matches fr-f (feature_id='FR-9006')",
+                "target_ids": [
+                  "fr-g",
+                  "fr-f"
+                ],
+                "category": "conformance",
+                "check": "uniqueness",
+                "origin": "on_server"
+              },
+              {
+                "severity": "error",
+                "message": "Duplicate FunctionalRequirement element fr-i: matches fr-h (feature_id='FR-9007')",
+                "target_ids": [
+                  "fr-i",
+                  "fr-h"
+                ],
+                "category": "conformance",
+                "check": "uniqueness",
                 "origin": "on_server"
               },
               {

@@ -3,7 +3,8 @@ diffs its model half and ``POST /commits/preview`` previews a rebind.
 
 Both runs start from the example model with one rule set, whose element rule
 names a type the fourth candidate removes, and a batch that sets up what the
-candidates change: ``Refines`` chains with a fork and a loop, three teams whose
+candidates change: ``Refines`` chains with a fork and a loop, duplicate
+requirements one or both of which ``Refines`` targets, three teams whose
 sizes are ``1``, ``1.0`` and ``True``, and persons who share a first and last
 name or a display name. After ``seed`` the first run diffs six candidates: a
 new required property, containment on ``Refines``, Team keyed on its size and
@@ -109,6 +110,15 @@ _SETUP: list[dict[str, Any]] = [
     _rel("ref-bc", "Refines", "fr-b", "fr-c"),
     _rel("ref-de", "Refines", "fr-d", "fr-e"),
     _rel("ref-ed", "Refines", "fr-e", "fr-d"),
+    # duplicates split once one of them has a parent the other lacks, and
+    # stay grouped when both have the same one
+    _fr("fr-f", "FR-9006"),
+    _fr("fr-g", "FR-9006"),
+    _rel("ref-ag", "Refines", "fr-a", "fr-g"),
+    _fr("fr-h", "FR-9007"),
+    _fr("fr-i", "FR-9007"),
+    _rel("ref-ah", "Refines", "fr-a", "fr-h"),
+    _rel("ref-ai", "Refines", "fr-a", "fr-i"),
     # uncontained teams whose sizes Python holds equal
     _team("team-int", "Team Int", 1),
     _team("team-float", "Team Float", 1.0),
@@ -230,6 +240,9 @@ def metamodel_candidate() -> Any:
     for name in ("required", "containment", "key", "removed", "pattern"):
         assert results[name]["now_failing"], f"{name} fails nothing new"
     assert any(result["now_passing"] for result in results.values())
+    # a candidate parent splits a duplicate group; a shared one keeps it
+    split = [i["target_ids"] for i in results["containment"]["now_passing"]]
+    assert split == [["fr-g", "fr-f"]], split
     identical = results["identical"]
     assert not identical["now_failing"] and not identical["now_passing"]
     previews = run_steps(
