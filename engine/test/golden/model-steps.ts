@@ -84,6 +84,7 @@ import {
 	orderRowsSteps,
 	PropertyValue,
 	readTableDefinition,
+	rebindPreviewBody,
 	resolveTableRefs,
 	tableHasScript,
 	toWire,
@@ -168,13 +169,13 @@ export type Step = Partial<Observed> & {
 	offset?: number;
 	limit?: number;
 	row_elements?: string[] | null;
-	/** `preview`: the session's strict mode. */
+	/** `preview` / `preview_rebind`: the session's strict mode. */
 	strict?: boolean;
 	/** `validate`: the ids to validate, in order, or every id in state order. */
 	scope?: string[] | 'all_ids';
 	/** `insert_element` / `insert_relationship`: the entity's `rev`; `value` holds its properties. */
 	rev?: number;
-	/** `candidate`: the candidate metamodel document. */
+	/** `candidate` / `preview_rebind`: the candidate metamodel document. */
 	metamodel?: MetamodelDoc;
 	result: string | string[] | BatchOutcome | object | boolean | null;
 	error: StepError | null;
@@ -355,19 +356,24 @@ export function compiledRecord(compiled: CompiledRules): unknown {
  * staged as creates over an empty committed layer.
  */
 export function rulesArtifacts(step: Step, layer: ArtifactLayer = 'committed'): ArtifactSet {
+	const docs = ruleSetDocs(step);
+	const set = new ArtifactSet();
+	if (layer === 'committed') {
+		set.setCommitted(readArtifacts(docs.map((doc) => ({ ...doc, artifact_rev: 1 }))));
+	} else set.setStaged(readStagedArtifacts(docs.map((doc) => ({ op: 'create', ...doc }))));
+	return set;
+}
+
+/** A `rules` step's sources as the artifact documents the shell sends, without their rev or op. */
+export function ruleSetDocs(step: Step) {
 	const { parses } = step.result as RulesStepResult;
-	const docs = step.sources!.map((source, i) => ({
+	return step.sources!.map((source, i) => ({
 		id: source.artifact_id,
 		kind: 'validation_rules',
 		name: source.name,
 		payload: { schema_version: 1, yaml: source.yaml },
 		rules: parses[i]
 	}));
-	const set = new ArtifactSet();
-	if (layer === 'committed') {
-		set.setCommitted(readArtifacts(docs.map((doc) => ({ ...doc, artifact_rev: 1 }))));
-	} else set.setStaged(readStagedArtifacts(docs.map((doc) => ({ op: 'create', ...doc }))));
-	return set;
 }
 
 /** A `rules` step's sources as `ruleSources` lists the committed rule sets of `rulesArtifacts`. */
@@ -632,6 +638,16 @@ function apply(
 			const issues = drain(candidateScan(model, candidate));
 			return comparableDiff(candidateDiff(carried.session!.store.iter(), issues));
 		}
+		case 'preview_rebind': {
+			// `POST /commits/preview` over a rebind to the document ahead of the ops:
+			// a replica of the session's state, the ops staged on it, scanned whole
+			// under the document with the committed rule sources recompiled for it.
+			const wc = workingCopy(clone(model, carried.options), carried.session!.rev);
+			wc.stage(parseOps(step.ops!));
+			const { sources } = carried;
+			const candidate = prepareCandidate(step.metamodel, (mm) => compileRuleSets(sources, mm));
+			return rebindPreviewBody(drain(candidateScan(wc.model, candidate)));
+		}
 		case 'issues': {
 			const { store, rev } = carried.session!;
 			return storeListBody(store, rev, rulesStatusBody(carried.rules ?? EMPTY_RULES));
@@ -781,7 +797,8 @@ const READ_LIKE = new Set([
 	'issues',
 	'preview',
 	'validate_staged',
-	'candidate'
+	'candidate',
+	'preview_rebind'
 ]);
 
 /**

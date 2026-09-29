@@ -174,14 +174,29 @@ event     {event, …}                     engine → client, unsolicited
   The three wait for a rule-set change to be applied: an artifact method that changes the
   rules starts a background rescan of the rules' population, and an `issues` call that
   arrives meanwhile is answered once it ends.
-- An evaluation, or an `issues` call, the engine must not answer is refused with 501 before any
-  work: `reaches a script` (a navigation that reaches a configured script step, a table
+  `candidateIssues {metamodel}` — a candidate document as `GET /metamodel` serves it — answers
+  the model half of `POST /metamodel/diff`, `{now_failing, now_passing, unchanged_count,
+  current_error_count, candidate_error_count}`: the store's issues against the whole working
+  copy validated under the candidate as one run over the whole model does, with the working
+  rule sets compiled under it, both keyed as the route keys them, every issue `on_server`.
+  `previewCommit` takes an optional `rebind: {metamodel}`: the batch rebinds the metamodel,
+  and it answers the server's rebind preview, `{conformance_error_count, structural_blockers,
+  issues, would_block: false}`, over the whole working copy under the candidate with the
+  committed rule sets — the staged model ops already in it, where the server hoists them. Both
+  read the document on arrival (a malformed one is a 422 `metamodel: …`, as `open`), then wait
+  for the store's first sweep to have ended and for it to be settled, and scan in steps. A
+  transition before the scan begins, a rule-set change between its slices, or a replica
+  closed under it sends the call back to wait and scan again: it is answered once, from one
+  state and one pair of rule sets. A stage or a delta posted while it scans waits for it.
+- An evaluation, an `issues` call or a candidate call the engine must not answer is refused
+  with 501 before any work: `reaches a script` (a navigation that reaches a configured script step, a table
   with a configured script column or such a navigation, and for an export a table's or an
   exporter entry's `transform`), `reaches an
   unsupported pattern` (a criterion or facet pattern the engine cannot match exactly as
-  Python's `re` does) or `reaches unreadable rules` (an `issues` call while a rule set in
-  either layer arrived without its parse, or with a document the engine's reader refuses —
-  only a shell and a sandbox bundle of different versions send one). The client answers exactly
+  Python's `re` does, the candidate's included) or `reaches unreadable rules` (an `issues` or
+  candidate call while a rule set in either layer arrived without its parse, or with a document
+  the engine's reader refuses — only a shell and a sandbox bundle of different versions send
+  one). The client answers exactly
   those three from the server — a navigation's page marked with the reason (AD-31), an
   `issues` call's answer unmarked, exactly as the server always gave it; any other 501 is an
   error.

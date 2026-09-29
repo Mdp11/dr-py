@@ -23,12 +23,22 @@ import {
 	type RuleSource,
 	type RulesParse
 } from '../rules/compile.ts';
+import { RulesUnreadable } from '../rules/document.ts';
 import { ruleSources } from '../rules/sources.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
 import { TableOrderCache } from '../table/order-cache.ts';
 import { issueListBody, previewBody, validateBody } from '../validation/bodies.ts';
+import {
+	candidateDiff,
+	candidateScan,
+	prepareCandidate,
+	rebindPreviewBody,
+	type Candidate
+} from '../validation/candidate.ts';
+import type { Issue } from '../validation/issue.ts';
 import { LiveIssues, type SweepStep } from '../validation/live.ts';
+import { PatternUnusable } from '../validation/pipeline.ts';
 import { pyRepr } from '../value/repr.ts';
 import { readDeltaText, readTailText } from '../working/delta.ts';
 import type {
@@ -204,6 +214,20 @@ function readOwn(raw: unknown): OwnCommit | undefined {
 	return { batchIds: batchIds as number[], idMap: new Map(Object.entries(idMap as object)) };
 }
 
+/** `previewCommit`'s `rebind`: absent or `null` for a batch that rebinds nothing. */
+function readRebind(raw: unknown): { metamodel: unknown } | null {
+	if (raw === undefined || raw === null) return null;
+	if (!isObject(raw)) throw new Refused(422, 'rebind must be {metamodel}');
+	return { metamodel: raw['metamodel'] };
+}
+
+/** A candidate document's refusal: the 501s the client takes to the server, else a 422 as `open` gives. */
+function candidateRefusal(error: unknown): Refused {
+	if (error instanceof PatternUnusable) return new Refused(501, UNSUPPORTED_PATTERN);
+	if (error instanceof RulesUnreadable) return new Refused(501, UNREADABLE_RULES);
+	return new Refused(422, `metamodel: ${error instanceof Error ? error.message : String(error)}`);
+}
+
 function readUnstage(raw: unknown): Unstage {
 	if (raw === 'all') return raw;
 	if (isObject(raw)) {
@@ -303,15 +327,28 @@ const METHODS: { readonly [method: string]: Method } = {
 		const baseRev = integer(call.params, 'base_rev');
 		const ids = batchIds(call.params);
 		const strict = flag(call.params, 'strict');
-		service.issues(
-			call,
-			(live) => previewBody(live, strict),
-			(wc) => {
-				if (wc.rev !== baseRev) throw new Refused(409, STALE_BASE);
-				requireStaged(wc, ids);
-			}
-		);
+		const rebind = readRebind(call.params['rebind']);
+		const check = (wc: WorkingCopy) => {
+			if (wc.rev !== baseRev) throw new Refused(409, STALE_BASE);
+			requireStaged(wc, ids);
+		};
+		if (rebind === null) service.issues(call, (live) => previewBody(live, strict), check);
+		else {
+			service.candidate(call, {
+				doc: rebind.metamodel,
+				layer: 'committed',
+				check,
+				answer: (_live, issues) => rebindPreviewBody(issues)
+			});
+		}
 	},
+	candidateIssues: (service, call) =>
+		service.candidate(call, {
+			doc: call.params['metamodel'],
+			layer: 'working',
+			check: () => undefined,
+			answer: (live, issues) => candidateDiff(live.store.iter(), issues)
+		}),
 	staged: now((service) => service.wc?.staged().map(wireBatch) ?? []),
 	conflicts: now((service) => service.wc?.conflicts().map(wireConflict) ?? []),
 	stagedDiff: inspect(stagedDiff),
@@ -381,6 +418,32 @@ type Compiled = { readonly sources: readonly RuleSource[]; readonly rules: Compi
 
 /** What a transition returns for a call it leaves waiting: nothing is answered. */
 const WAITING = Symbol('waiting');
+
+/** What a candidate scan returns when the store moved under it: its call waits and scans again. */
+const MOVED = Symbol('moved');
+
+/**
+ * A call over the working copy under a candidate metamodel: the document, the
+ * layer whose rule sets are compiled under it, the check that refuses a stale
+ * call, and the answer over the store and the candidate's issues.
+ */
+type CandidateCall = {
+	readonly doc: unknown;
+	readonly layer: 'working' | 'committed';
+	readonly check: (wc: WorkingCopy) => void;
+	readonly answer: (live: LiveIssues, issues: readonly Issue[]) => unknown;
+};
+
+/** A candidate, with the rule sources compiled under it. */
+type Prepared = { readonly sources: readonly RuleSource[]; readonly candidate: Candidate };
+
+/** Where the store stood when a candidate scan was queued: the probe's cache key, on that store. */
+type Stamp = {
+	readonly live: LiveIssues;
+	readonly rev: number;
+	readonly stagedVersion: number;
+	readonly rulesVersion: number;
+};
 
 type Opening = {
 	readonly projectId: string;
@@ -708,6 +771,87 @@ class Service {
 				else if (outcome.value !== WAITING) call.answer(outcome.value);
 			}
 		);
+	}
+
+	/**
+	 * `candidateIssues` and a rebinding `previewCommit`: the whole working copy
+	 * scanned under a candidate metamodel, in a model-lane scan queued once the
+	 * store has been swept and is settled. The document is read on arrival, so
+	 * a malformed one is refused before it queues. The scan checks the store
+	 * against where it stood when the scan was queued, at its first step and
+	 * after its last: a store that moved meanwhile — a transition before the
+	 * scan began, a rule-set change between its slices, a replica closed under
+	 * it — sends the call back to wait and scan again, so that an answer pairs
+	 * one state and one pair of rule sets.
+	 */
+	candidate(call: Call, spec: CandidateCall): void {
+		const prepared = { value: this.prepare(spec, null) };
+		const scan = (live: LiveIssues): typeof WAITING => {
+			spec.check(live.wc);
+			if (!live.seeded) {
+				this.wait(call, live.whenSwept(), () => this.settled(call, scan, live));
+				return WAITING;
+			}
+			const stamp: Stamp = {
+				live,
+				rev: live.wc.rev,
+				stagedVersion: live.wc.stagedVersion,
+				rulesVersion: live.rulesVersion
+			};
+			this.scheduler.submit(
+				call.id,
+				'model',
+				{ kind: 'scan', run: () => this.candidateSteps(stamp, spec, prepared) },
+				(outcome) => {
+					if (!outcome.ok) {
+						const { error } = outcome;
+						call.refuse(error instanceof PatternUnusable ? candidateRefusal(error) : error);
+					} else if (outcome.value === MOVED) this.settled(call, scan);
+					else call.answer(outcome.value);
+				}
+			);
+			return WAITING;
+		};
+		this.settled(call, scan);
+	}
+
+	/** One run of a candidate scan: `MOVED` unless the store stands at `stamp` at both ends. */
+	private *candidateSteps(
+		stamp: Stamp,
+		spec: CandidateCall,
+		prepared: { value: Prepared }
+	): Steps<unknown> {
+		if (this.movedFrom(stamp)) return MOVED;
+		prepared.value = this.prepare(spec, prepared.value);
+		const issues = yield* candidateScan(stamp.live.wc.model, prepared.value.candidate);
+		if (this.movedFrom(stamp)) return MOVED;
+		return spec.answer(stamp.live, issues);
+	}
+
+	/** Whether the store is no longer at `stamp`, or has a rescan due; refused as `live()` refuses. */
+	private movedFrom(stamp: Stamp): boolean {
+		const live = this.live();
+		return (
+			live !== stamp.live ||
+			live.wc.rev !== stamp.rev ||
+			live.wc.stagedVersion !== stamp.stagedVersion ||
+			live.rulesVersion !== stamp.rulesVersion ||
+			!live.settled
+		);
+	}
+
+	/** `spec`'s candidate with its layer's rule sets compiled under it: `before` while they compile alike. */
+	private prepare(spec: CandidateCall, before: Prepared | null): Prepared {
+		const sources = ruleSources(this.artifacts, spec.layer);
+		if (before !== null && sameSources(before.sources, sources)) return before;
+		try {
+			return {
+				sources,
+				candidate: prepareCandidate(spec.doc, (mm) => compileRuleSets(sources, mm))
+			};
+		} catch (error) {
+			throw candidateRefusal(error);
+		}
 	}
 
 	/** Holds `call` until `until` resolves, then runs `then`; `dropIssues` refuses it meanwhile. */

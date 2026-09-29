@@ -61,7 +61,7 @@ function replayStaged(run: StepsFixture, options: ModelOptions, rules: ArtifactL
 }
 
 describe('a candidate metamodel diffs as the oracle diffs it', () => {
-	const [diffs] = loadFixture<{ runs: StepsFixture[] }>('metamodel_candidate').runs;
+	const [diffs, previews] = loadFixture<{ runs: StepsFixture[] }>('metamodel_candidate').runs;
 	const hashes: [string, ModelOptions][] = [
 		['', {}],
 		[', every uniqueness key in one bucket', { hashKey: () => 0 }]
@@ -78,6 +78,11 @@ describe('a candidate metamodel diffs as the oracle diffs it', () => {
 
 		it(`over the working copy, the batch and the rule set staged${label}`, () => {
 			replayStaged(diffs!, options, 'staged');
+		});
+
+		it(`previews a rebind over staged ops as the oracle does${label}`, () => {
+			expect(previews!.steps.filter((step) => step.do === 'preview_rebind')).toHaveLength(4);
+			replaySteps(previews!, options);
 		});
 	}
 });
