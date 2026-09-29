@@ -5,7 +5,7 @@ import { ApiError } from './errors';
  * A surface: the reads that move between server and engine together — the
  * five model reads, the navigation evaluation, the criteria search, the
  * validation issues, the table pages, the exports, the metamodel previews,
- * the model download and the view warnings.
+ * the model download, the view warnings and the compare with apply-CR.
  */
 export type Surface =
 	| 'elements'
@@ -20,7 +20,8 @@ export type Surface =
 	| 'exports'
 	| 'metamodel'
 	| 'download'
-	| 'views';
+	| 'views'
+	| 'compare';
 export type Side = 'engine' | 'server';
 
 /** Why the server answered a call the engine refused: it reaches a script, a pattern, or rules it cannot read. */
@@ -56,8 +57,17 @@ export type RouteOptions<T> = {
 /** A digest that says the answer cannot be compared, such as an export the server is still preparing. */
 export const SKIP: unique symbol = Symbol('skip');
 
-/** One read method of the engine, answered with the route's response body. */
-export type EngineCall = <T>(method: string, params: unknown, signal?: AbortSignal) => Promise<T>;
+/**
+ * One read method of the engine, answered with the route's response body.
+ * `transfer` moves those buffers of `params` to the engine: detached once
+ * posted, so a call that sends them again reads them afresh.
+ */
+export type EngineCall = <T>(
+	method: string,
+	params: unknown,
+	signal?: AbortSignal,
+	transfer?: ArrayBuffer[]
+) => Promise<T>;
 
 export type Outcome = { ok: true; value: unknown } | { ok: false; error: unknown };
 
@@ -104,14 +114,19 @@ export function engineSide(surface: Surface): Side {
 	return installed === null ? 'server' : installed.side(surface);
 }
 
-const FALLBACKS: { readonly [detail: string]: Fallback } = {
+/** Why the server answered: a `Fallback`, or input the engine does not read as the server does. */
+type Refusal = Fallback | 'file' | 'change request';
+
+const FALLBACKS: { readonly [detail: string]: Refusal } = {
 	'reaches a script': 'script',
 	'reaches an unsupported pattern': 'pattern',
-	'reaches unreadable rules': 'rules'
+	'reaches unreadable rules': 'rules',
+	'reaches an unreadable file': 'file',
+	'reaches an unreadable change request': 'change request'
 };
 
 /** The engine's refusal that sends a call to the server, if `error` is one. */
-function fallbackOf(error: unknown): Fallback | null {
+function fallbackOf(error: unknown): Refusal | null {
 	if (!(error instanceof ApiError) || error.status !== 501) return null;
 	return Object.hasOwn(FALLBACKS, error.message) ? FALLBACKS[error.message]! : null;
 }
@@ -153,10 +168,11 @@ export function asSent(body: object): unknown {
  * Answers a read from the engine or the server. A call that names its server
  * (`baseUrl` or `fetch`) goes there. `engineCall` makes exactly one engine
  * call and parses its body with the server's schema. A 501 the engine
- * refuses a script, a pattern or unreadable rules with is answered by the
- * server — for a script or a pattern handed to `options.mark` with its
- * reason — and not shadowed, and so is the 501 for staged ops a rebind's
- * candidate does not admit, unmarked; any other 501 is the caller's. A 409
+ * refuses a script, a pattern, unreadable rules, an unreadable file or an
+ * unreadable change request with is answered by the server — for a script
+ * or a pattern handed to `options.mark` with its reason — and not shadowed,
+ * and so is the 501 for staged ops a rebind's candidate does not admit,
+ * unmarked; any other 501 is the caller's. A 409
  * that says the staged batches, the `base_rev` or the replica moved under
  * the call is answered by the server whole.
  */
@@ -178,10 +194,10 @@ export function route<T>(
 	}
 	let method = '';
 	let params: unknown = undefined;
-	const recorded: EngineCall = (m, p, signal) => {
+	const recorded: EngineCall = (m, p, signal, transfer) => {
 		method = m;
 		params = p;
-		return seam.call(m, p, signal);
+		return seam.call(m, p, signal, transfer);
 	};
 	let answer: Promise<T>;
 	try {
@@ -222,9 +238,9 @@ export function route<T>(
 			const reason = fallbackOf(error);
 			if (reason !== null) {
 				const { mark } = options;
-				return mark === undefined || reason === 'rules'
-					? serverCall()
-					: serverCall().then((value) => mark(value, reason));
+				return mark !== undefined && (reason === 'script' || reason === 'pattern')
+					? serverCall().then((value) => mark(value, reason))
+					: serverCall();
 			}
 			probe({ ok: false, error });
 			throw error;

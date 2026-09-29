@@ -18,7 +18,8 @@ export const SURFACES = [
 	'exports',
 	'metamodel',
 	'download',
-	'views'
+	'views',
+	'compare'
 ] as const satisfies readonly Surface[];
 
 /** The side each surface takes unless `localStorage['dr.surfaces']` says otherwise. */
@@ -35,7 +36,8 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	exports: 'engine',
 	metamodel: 'engine',
 	download: 'engine',
-	views: 'engine'
+	views: 'engine',
+	compare: 'server'
 });
 
 /** Where the user's model edits are staged: the replica's working copy, or the store's own buffer. */
@@ -56,9 +58,10 @@ const STORAGE_KEY = 'dr.surfaces';
  * never evaluates staged edits, so `navigation`, `criteria`, `tables` and
  * `exports` keep their own switches, and so do `issues` and `metamodel`,
  * which the server answers for staged edits it is sent, `download`, which
- * reads committed state on either side, and `views`, whose server side
- * warns over the committed view. No storage, a
- * storage that throws or a text that is not a JSON object give the defaults.
+ * reads committed state on either side, `views`, whose server side warns
+ * over the committed view, and `compare`, whose server side diffs and
+ * applies change requests over committed state. No storage, a storage that
+ * throws or a text that is not a JSON object give the defaults.
  */
 export function readSwitches(storage?: Pick<Storage, 'getItem'>): Switches {
 	const switches: Switches = { surfaces: { ...SURFACE_DEFAULTS }, staging: STAGING_DEFAULT };
@@ -92,13 +95,14 @@ export function readSurfaces(storage?: Pick<Storage, 'getItem'>): Record<Surface
 	return readSwitches(storage).surfaces;
 }
 
-/** The surfaces the engine answers only with staging on it: they read the issues of the working copy, or warn over it. */
-const STAGED_ONLY: ReadonlySet<Surface> = new Set(['issues', 'metamodel', 'views']);
+/** The surfaces the engine answers only with staging on it: they read the issues of the working copy, warn over it or diff against it. */
+const STAGED_ONLY: ReadonlySet<Surface> = new Set(['issues', 'metamodel', 'views', 'compare']);
 
 /**
- * Whether some surface can be answered by the engine. `issues`, `metamodel`
- * and `views` count only with staging on the engine: the legacy buffer's
- * edits are not in the replica, so its issues are always the server's.
+ * Whether some surface can be answered by the engine. `issues`, `metamodel`,
+ * `views` and `compare` count only with staging on the engine: the legacy
+ * buffer's edits are not in the replica, so its issues are always the
+ * server's.
  */
 export function anyEngineSurface({ surfaces, staging }: Readonly<Switches>): boolean {
 	return SURFACES.some(

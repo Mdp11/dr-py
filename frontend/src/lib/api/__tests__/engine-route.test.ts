@@ -20,9 +20,24 @@ function seamOf(
 	sides: Partial<Record<Surface, Side>> = {},
 	shadow?: EngineSeam['shadow']
 ) {
-	const calls: { method: string; params: unknown; signal?: AbortSignal }[] = [];
-	const call = (<T>(method: string, params: unknown, signal?: AbortSignal): Promise<T> => {
-		calls.push({ method, params, ...(signal === undefined ? {} : { signal }) });
+	const calls: {
+		method: string;
+		params: unknown;
+		signal?: AbortSignal;
+		transfer?: ArrayBuffer[];
+	}[] = [];
+	const call = (<T>(
+		method: string,
+		params: unknown,
+		signal?: AbortSignal,
+		transfer?: ArrayBuffer[]
+	): Promise<T> => {
+		calls.push({
+			method,
+			params,
+			...(signal === undefined ? {} : { signal }),
+			...(transfer === undefined ? {} : { transfer })
+		});
 		return answer(method, params, signal) as Promise<T>;
 	}) as EngineCall;
 	const seam: EngineSeam = {
@@ -148,6 +163,33 @@ describe('route', () => {
 		expect(calls[1]).toMatchObject({ method: 'getModelSummary', params: { id: 'x' } });
 		await expect(probe.server()).resolves.toBe('from server');
 		expect(server).toHaveBeenCalledOnce();
+	});
+
+	it("the engine read's transfer list reaches the seam, and again() runs the read afresh", async () => {
+		const probes: ShadowProbe[] = [];
+		const { seam, calls } = seamOf(
+			() => Promise.resolve({ n: 1 }),
+			{},
+			(probe) => void probes.push(probe)
+		);
+		installEngineSeam(seam);
+		const buffers: ArrayBuffer[] = [];
+		const engine = (call: EngineCall) => {
+			const file = new ArrayBuffer(8);
+			buffers.push(file);
+			return call<{ n: number }>('compareModel', { file }, undefined, [file]).then((b) => b.n);
+		};
+
+		await expect(route('compare', undefined, engine, serverOf())).resolves.toBe(1);
+		await probes[0]!.again();
+
+		expect(buffers).toHaveLength(2);
+		expect(buffers[0]).not.toBe(buffers[1]);
+		expect(calls).toEqual([
+			{ method: 'compareModel', params: { file: buffers[0] }, transfer: [buffers[0]] },
+			{ method: 'compareModel', params: { file: buffers[1] }, transfer: [buffers[1]] }
+		]);
+		expect(probes[0]!.params).toEqual({ file: buffers[0] });
 	});
 
 	it('the shadow is handed an engine error as the outcome', async () => {
@@ -326,6 +368,27 @@ describe('the server fallback', () => {
 		await flush();
 		expect(shadow).not.toHaveBeenCalled();
 	});
+
+	it.each(['reaches an unreadable file', 'reaches an unreadable change request'])(
+		'a 501 "%s" is answered by the server, never marked, with no shadow',
+		async (detail) => {
+			const shadow = vi.fn();
+			const { seam } = seamOf(() => Promise.reject(refusal(501, detail)), {}, shadow);
+			installEngineSeam(seam);
+			const server = serverOf('from server');
+			const marker = vi.fn(mark);
+			await expect(
+				route('compare', undefined, engineRead({}), server, { mark: marker })
+			).resolves.toBe('from server');
+			await expect(route('compare', undefined, engineRead({}), server)).resolves.toBe(
+				'from server'
+			);
+			expect(server).toHaveBeenCalledTimes(2);
+			expect(marker).not.toHaveBeenCalled();
+			await flush();
+			expect(shadow).not.toHaveBeenCalled();
+		}
+	);
 
 	it('with the shell sending parses, a rules project reaches the server only for an unreadable document', async () => {
 		// The engine answers rule sets now: the refusal a project with any rule set once got is the caller's.

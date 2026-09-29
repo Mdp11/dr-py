@@ -263,8 +263,8 @@ function _anyEngine(): boolean {
 }
 
 /**
- * Routes the read surfaces through `sync`; navigations, tables, issues and
- * view warnings only once the follower has loaded the artifacts. In dev, with
+ * Routes the read surfaces through `sync`; navigations, tables, issues, view
+ * warnings and compares only once the follower has loaded the artifacts. In dev, with
  * `dr.shadow` set, the seam is installed again with a shadow once that module
  * has loaded, idle while the model store's engine half has an edit staged, an
  * artifact entry or a view op is staged, or the follower still lays a
@@ -292,7 +292,9 @@ function installSeam(sync: ReplicaSync): void {
 		// A candidate is diffed against that list.
 		metamodel: issues,
 		// A view's warnings name the artifacts it places.
-		views: issues
+		views: issues,
+		// A compare diffs the working copy, which only staging on the engine holds.
+		compare: issues
 	};
 	installEngineSeam(createEngineSeam(sync, surfaces, undefined, gates));
 	_removeQuietProbe = addQuietProbe(() => sync.settled());

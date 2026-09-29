@@ -25,8 +25,11 @@ export function createEngineSeam(
 			const { phase } = sync.status();
 			return phase === 'off' || phase === 'server' ? 'server' : 'engine';
 		},
-		call: <T>(method: string, params: unknown, signal?: AbortSignal) =>
-			sync.call<T>(method, params, signal === undefined ? {} : { signal }),
+		call: <T>(method: string, params: unknown, signal?: AbortSignal, transfer?: ArrayBuffer[]) =>
+			sync.call<T>(method, params, {
+				...(signal === undefined ? {} : { signal }),
+				...(transfer === undefined ? {} : { transfer })
+			}),
 		gone: (error) => error instanceof EngineGoneError,
 		...(shadow === undefined ? {} : { shadow })
 	};

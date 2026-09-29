@@ -1472,8 +1472,7 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS` — `engine` for every surface but `download` and
-  `views` — and
+  `SURFACE_DEFAULTS` — `engine` for every surface but `compare` — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
@@ -1485,16 +1484,17 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   shows only in the replica's answers, so a read-surface-only override on its
   own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
   alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
-  take effect. `navigation`, `criteria`, `tables`, `exports`, `issues`, `download` and `views` are never
+  take effect. `navigation`, `criteria`, `tables`, `exports`, `issues`, `download`, `views` and `compare` are never
   forced by `staging`: `navigation`, `criteria`, `tables` and `exports` because the
   server never evaluated staged edits in either mode, `issues` because its calls send the server the
   staged edits and — on the engine — because a gate (below) can hold it back
   to `server` whatever the switch says, `download` because it reads committed
   state on either side, `views` because the server warns over the committed
-  view and, on the engine, the `issues` gate holds it back too. The switches are read once, with the
+  view and, on the engine, the `issues` gate holds it back too, `compare` because the server diffs
+  and applies change requests over committed state, gated as `views` is. The switches are read once, with the
   rest, and honoured in a build too. `readSurfaces(storage?)` is
   `readSwitches(storage).surfaces`; `anyEngineSurface(switches)` says whether
-  any surface is on the engine, `issues`, `metamodel` and `views` counting only with `staging:
+  any surface is on the engine, `issues`, `metamodel`, `views` and `compare` counting only with `staging:
 engine` — on legacy their gate never opens, so an opt-out stored before the
   `issues` switch existed (seven surfaces on `server`, staging on legacy)
   waits for, and is blocked by, nothing.
@@ -1881,7 +1881,9 @@ Both Model-menu items open `components/ModelChangeDialog.svelte`
 (`mode: 'compare' | 'apply-cr'`), whose lower half is the shared
 `ProposalPreview.svelte` (a `CompareDiff` over the proposal, a conflicts block,
 an error line). **Nothing runs on file selection** — every request sits behind
-a button:
+a button. Both requests go through the `compare` surface (`server` by default;
+`lib/engine/README.md` has the engine side), and a conflict is the same
+`{ok: false, …}` result whichever side answered:
 
 - **Compare…**: `Choose model…` → From/To + ⇄ Swap → **Preview diff**
   (`POST /model/compare`, cached per file + `model_rev`; inverted client-side

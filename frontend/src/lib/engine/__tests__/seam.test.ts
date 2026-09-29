@@ -30,6 +30,30 @@ describe('the engine seam', () => {
 		expect(seam.side('navigation')).toBe('server');
 	});
 
+	it("call hands the sync the read's signal and the buffers it transfers", async () => {
+		const seen: unknown[][] = [];
+		const sync = {
+			status: () => OFF,
+			call: <T>(method: string, params?: unknown, options?: unknown): Promise<T> => {
+				seen.push([method, params, options]);
+				return Promise.resolve(null as T);
+			}
+		};
+		const seam = createEngineSeam(sync, SURFACE_DEFAULTS);
+		const file = new ArrayBuffer(4);
+		const { signal } = new AbortController();
+
+		await seam.call('compareModel', { file }, signal, [file]);
+		await seam.call('compareModel', { file }, undefined, [file]);
+		await seam.call('getModelSummary', {});
+
+		expect(seen).toEqual([
+			['compareModel', { file }, { signal, transfer: [file] }],
+			['compareModel', { file }, { transfer: [file] }],
+			['getModelSummary', {}, {}]
+		]);
+	});
+
 	it('an open gate does not override a surface switched to the server', () => {
 		const status = { current: { ...OFF, phase: 'ready', rev: 0 } as ReplicaStatus };
 		const seam = createEngineSeam(

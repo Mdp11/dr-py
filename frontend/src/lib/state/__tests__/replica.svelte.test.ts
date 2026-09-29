@@ -1936,6 +1936,35 @@ describe('the artifact follower', () => {
 			}
 		);
 
+		it('the compare is gated as the issues are, and never with staging on legacy', async () => {
+			localStorage.setItem('dr.surfaces', JSON.stringify({ compare: 'engine' }));
+			const project = fakeProject();
+			let release!: () => void;
+			const first = new Promise<void>((resolve) => (release = resolve));
+			serve(project, [first], () => Promise.reject(new Error('not asked')));
+			const replica = realReplica();
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.seeded);
+
+			try {
+				expect(engineSide('compare')).toBe('server');
+			} finally {
+				release();
+			}
+			await vi.waitFor(() => expect(engineSide('compare')).toBe('engine'));
+			stopReplica();
+			expect(engineSide('compare')).toBe('server');
+
+			resetReplica();
+			localStorage.setItem('dr.surfaces', JSON.stringify({ compare: 'engine', staging: 'legacy' }));
+			const legacy = realReplica();
+			startReplica();
+			await legacy.until((s) => s.seeded);
+			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+			expect(engineSide('compare')).toBe('server');
+		});
+
 		it('a failed first load is asked once more, then the engine answers', async () => {
 			const project = fakeProject();
 			project.artifacts.set('n1', nav('n1', 1, 'Organization'));

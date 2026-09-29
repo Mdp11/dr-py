@@ -116,6 +116,12 @@ export type CallOptions = {
 	signal?: AbortSignal;
 	/** The call changes the replica: held for the phase alone, never for a `rev`. */
 	transition?: boolean;
+	/**
+	 * Buffers of `params` moved to the engine, detached once posted. A read's
+	 * only: a transition posted again after its worker died would send them
+	 * detached.
+	 */
+	transfer?: ArrayBuffer[];
 };
 
 export type ReplicaSync = {
@@ -1265,7 +1271,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		},
 
 		call<T>(method: string, params?: unknown, options: CallOptions = {}) {
-			const { signal } = options;
+			const { signal, transfer } = options;
 			const transition = options.transition === true;
 			const r = run;
 			if (r === null || refuses()) return Promise.reject(new EngineGoneError());
@@ -1275,7 +1281,10 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 			const post = (): Promise<T> => {
 				const made = link;
 				if (made === null) return Promise.reject(new EngineGoneError());
-				const sent = made.client.call<T>(method, params, signal === undefined ? {} : { signal });
+				const sent = made.client.call<T>(method, params, {
+					...(signal === undefined ? {} : { signal }),
+					...(transfer === undefined ? {} : { transfer })
+				});
 				return sent.catch((error: unknown) => {
 					if (!(error instanceof EngineGoneError) || run !== r) throw error;
 					// The worker died under the call: the replica is rebuilt on a new one,

@@ -1,6 +1,6 @@
 // The `issues` surface over the real engine: a replica of a fake project,
-// swept, behind a seam whose issues, metamodel and views gates are the
-// replica's `seeded`.
+// swept, behind a seam whose issues, metamodel, views and compare gates are
+// the replica's `seeded`.
 import { http, HttpResponse } from 'msw';
 import type { MetamodelDoc, StageResult } from '$engine';
 import { createEngineSeam } from '$lib/engine/seam';
@@ -179,7 +179,8 @@ export async function issuesEngine(
 		createEngineSeam(sync, surfaces, options.shadow, {
 			issues: () => seeded(),
 			metamodel: () => seeded(),
-			views: () => seeded()
+			views: () => seeded(),
+			compare: () => seeded()
 		})
 	);
 	return {

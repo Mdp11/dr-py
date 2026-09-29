@@ -271,6 +271,34 @@ describe('reading from the replica', () => {
 		await expect(summaryOf(over)).resolves.toMatchObject({ model_rev: 0 });
 	});
 
+	it('a read moves the buffers it transfers once posted, and copies them without', async () => {
+		const project = fakeProject();
+		const held = hold();
+		server.use(...project.handlers({ hold: held }));
+		const over = open(project);
+		await held.reached;
+		const text = '{"elements": []}';
+		const file = () => new TextEncoder().encode(text).slice().buffer;
+		const params = (bytes: ArrayBuffer) => ({
+			file: bytes,
+			created_at: '2026-01-01T00:00:00.000Z'
+		});
+		const copied = file();
+		const moved = file();
+
+		const early = over.sync.call<{ other_element_count: number }>('compareModel', params(moved), {
+			transfer: [moved]
+		});
+		expect(await pending(early)).toBe(true);
+		expect(moved.byteLength).toBe(text.length);
+		held.release();
+
+		await expect(early).resolves.toMatchObject({ other_element_count: 0 });
+		expect(moved.byteLength).toBe(0);
+		await over.sync.call('compareModel', params(copied));
+		expect(copied.byteLength).toBe(text.length);
+	});
+
 	it('stop refuses the waiters', async () => {
 		const project = fakeProject();
 		const held = hold();

@@ -1,8 +1,11 @@
 import type { z } from 'zod';
 import { apiFetch, type ClientConfig } from './client';
+import { asSent, route } from './engine-route';
 import { ConflictError } from './errors';
 import {
 	CompareOutSchema,
+	EngineCompareSchema,
+	EngineProposeSchema,
 	ProposeCrConflictSchema,
 	ProposeCrOutSchema,
 	type ChangesDoc,
@@ -23,44 +26,88 @@ export type ProposeCrResult =
 	| { ok: true; modelRev: number; cr: ChangesDoc; ops: ModelOp[] }
 	| { ok: false; modelRev: number; crIndex: number; conflicts: Conflict[] };
 
+/** `value` without its `cr.createdAt`, which each side reads off its own clock. */
+function maskCreatedAt(value: CompareOut | ProposeCrResult): Promise<unknown> {
+	if (!('cr' in value)) return Promise.resolve(value);
+	const cr: Partial<ChangesDoc> = { ...value.cr };
+	delete cr.createdAt;
+	return Promise.resolve({ ...value, cr });
+}
+
 /**
- * POST /model/compare — diff the SESSION model against a model file
- * (direction session → file; invert client-side with `invertChangeRequest`).
- * The picked File streams as the raw body: no JS-side parse. Read-only.
+ * POST /model/compare — diff the model against a model file (direction
+ * model → file; invert client-side with `invertChangeRequest`). The server
+ * diffs the committed model, the picked File streaming as the raw body with
+ * no JS-side parse; the engine diffs the working copy, staged edits
+ * included, the file's bytes moved to it. A file the engine cannot read is
+ * the server's. Read-only.
  */
 export function compareModel(file: Blob, cfg?: ClientConfig): Promise<CompareOut> {
-	return apiFetch('/model/compare', { method: 'POST', body: file, schema: CompareOutSchema }, cfg);
+	return route<CompareOut>(
+		'compare',
+		cfg,
+		async (call) => {
+			const bytes = await file.arrayBuffer();
+			const params = { file: bytes, created_at: new Date().toISOString() };
+			return EngineCompareSchema.parse(await call('compareModel', params, undefined, [bytes]));
+		},
+		() => apiFetch('/model/compare', { method: 'POST', body: file, schema: CompareOutSchema }, cfg),
+		{ shadow: 'unstaged', digest: maskCreatedAt }
+	);
+}
+
+function proposed(body: z.infer<typeof ProposeCrOutSchema>): ProposeCrResult {
+	return { ok: true, modelRev: body.model_rev, cr: body.cr, ops: body.ops as unknown as ModelOp[] };
+}
+
+function conflicted(body: z.infer<typeof ProposeCrConflictSchema>): ProposeCrResult {
+	return {
+		ok: false,
+		modelRev: body.model_rev,
+		crIndex: body.cr_index,
+		conflicts: body.conflicts
+	};
 }
 
 /**
  * POST /model/apply-cr — dry-run proposal: the CRs are applied in order
- * transiently server-side and come back as the combined `cr` (for preview)
- * plus the `ops` batch to stage. Nothing is applied. A 409 names the first
- * conflicting CR by index.
+ * transiently, over the committed model on the server or the working copy
+ * on the engine, and come back as the combined `cr` (for preview) plus the
+ * `ops` batch to stage. Nothing is applied. The first conflicting CR, by
+ * index, answers `ok: false` whichever side answered: the server's 409, the
+ * engine's `conflict`. Change requests the engine does not read as the
+ * server does are the server's.
  */
-export async function proposeCr(
-	crs: ChangeRequest[],
-	cfg?: ClientConfig
-): Promise<ProposeCrResult> {
+export function proposeCr(crs: ChangeRequest[], cfg?: ClientConfig): Promise<ProposeCrResult> {
+	return route<ProposeCrResult>(
+		'compare',
+		cfg,
+		async (call) => {
+			const params = { crs: asSent(crs), created_at: new Date().toISOString() };
+			const answer = EngineProposeSchema.parse(await call('proposeCr', params));
+			return 'conflict' in answer ? conflicted(answer.conflict) : proposed(answer);
+		},
+		() => serverProposal(crs, cfg),
+		{ shadow: 'unstaged', digest: maskCreatedAt }
+	);
+}
+
+async function serverProposal(crs: ChangeRequest[], cfg?: ClientConfig): Promise<ProposeCrResult> {
 	try {
-		const res = await apiFetch<z.infer<typeof ProposeCrOutSchema>>(
-			'/model/apply-cr',
-			{ method: 'POST', body: { crs }, schema: ProposeCrOutSchema },
-			cfg
+		return proposed(
+			await apiFetch<z.infer<typeof ProposeCrOutSchema>>(
+				'/model/apply-cr',
+				{ method: 'POST', body: { crs }, schema: ProposeCrOutSchema },
+				cfg
+			)
 		);
-		return { ok: true, modelRev: res.model_rev, cr: res.cr, ops: res.ops as unknown as ModelOp[] };
 	} catch (err) {
 		if (err instanceof ConflictError) {
 			const parsed = ProposeCrConflictSchema.safeParse(err.body);
 			// an unrecognized 409 body still stops the flow — the report is then
 			// empty rather than invented, and modelRev -1 can never match a rev
 			if (!parsed.success) return { ok: false, modelRev: -1, crIndex: 0, conflicts: [] };
-			return {
-				ok: false,
-				modelRev: parsed.data.model_rev,
-				crIndex: parsed.data.cr_index,
-				conflicts: parsed.data.conflicts
-			};
+			return conflicted(parsed.data);
 		}
 		throw err;
 	}

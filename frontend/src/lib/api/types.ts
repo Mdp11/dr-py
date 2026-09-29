@@ -778,6 +778,15 @@ export const ProposeCrConflictSchema = z.object({
 	model_rev: z.number().int()
 });
 
+/** The engine's `compareModel` answer: the route's body. */
+export const EngineCompareSchema = CompareOutSchema;
+
+/** The engine's `proposeCr` answer: the route's body, or its 409 body under `conflict`. */
+export const EngineProposeSchema = z.union([
+	ProposeCrOutSchema,
+	z.object({ conflict: ProposeCrConflictSchema })
+]);
+
 // ---------------------------------------------------------------------------
 // Snippet execution — mirrors api/schemas.py SnippetRunOut/SnippetLintOut.
 // ---------------------------------------------------------------------------
