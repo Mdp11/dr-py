@@ -379,6 +379,70 @@ describe('TopBar', () => {
 
 			unmount(c);
 		});
+
+		it('Export asks where to save within the click, before the download has arrived', async () => {
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+			let arrive!: (blob: Blob) => void;
+			vi.mocked(downloadModel).mockReturnValueOnce(new Promise((resolve) => (arrive = resolve)));
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+			menuItem('Export')!.click();
+
+			expect(saveResponseToFile).toHaveBeenCalledOnce();
+			const [response] = vi.mocked(saveResponseToFile).mock.calls[0]!;
+			arrive(new Blob(['{"elements": []}'], { type: 'application/json' }));
+			expect(await response.text()).toBe('{"elements": []}');
+
+			unmount(c);
+		});
+
+		it('Export reports a download that fails while the file is written', async () => {
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+			const failure = new Error('download failed');
+			vi.mocked(downloadModel).mockRejectedValueOnce(failure);
+			// As a picked file is written: the body piped into its writable.
+			vi.mocked(saveResponseToFile).mockImplementationOnce(async (response) => {
+				await response.body!.pipeTo(new WritableStream());
+				return { filename: 'model.json', handle: null };
+			});
+			const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+			menuItem('Export')!.click();
+			await vi.waitFor(() => expect(logged).toHaveBeenCalledWith('Export failed', failure));
+
+			logged.mockRestore();
+			unmount(c);
+		});
+
+		it('Export says nothing when the save is cancelled, even if the download then fails', async () => {
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+			let fail!: (error: Error) => void;
+			vi.mocked(downloadModel).mockReturnValueOnce(new Promise((_, reject) => (fail = reject)));
+			vi.mocked(saveResponseToFile).mockRejectedValueOnce(
+				new DOMException('The user aborted a request.', 'AbortError')
+			);
+			const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+			menuItem('Export')!.click();
+			fail(new Error('download failed'));
+			await new Promise((r) => setTimeout(r, 0));
+
+			expect(logged).not.toHaveBeenCalled();
+
+			logged.mockRestore();
+			unmount(c);
+		});
 	});
 
 	describe('view change counter', () => {

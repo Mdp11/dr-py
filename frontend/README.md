@@ -558,8 +558,12 @@ engine store":
    Blob — `GET /model/download`'s body, or with the `download` surface on the
    engine the replica's own file of committed state — into a File System
    Access writable (or writes server-side via `POST /model/save`), so the
-   browser never materializes the serialized model as a string. Export
-   reflects the committed model, not the staged buffer.
+   browser never materializes the serialized model as a string. TopBar opens
+   the save picker within the click, before the Blob has arrived (the picker
+   needs the click's user activation, which lapses long before a large model
+   is in), handing `saveResponseToFile` a `Response` over a stream that reads
+   the Blob once it is in; a download that fails errors that stream, and the
+   save with it. Export reflects the committed model, not the staged buffer.
 
 #### The engine store
 

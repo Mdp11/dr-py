@@ -147,10 +147,34 @@
 		popLastStaged();
 	}
 
+	/**
+	 * A body read from `blob` once it arrives. The stream pulls as soon as it
+	 * is built, so a download that fails errors it even when nothing reads it
+	 * (a cancelled picker), and a reader sees that failure.
+	 */
+	function bodyOf(blob: Promise<Blob>): ReadableStream<Uint8Array> {
+		let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+		return new ReadableStream<Uint8Array>({
+			async pull(controller) {
+				reader ??= (await blob).stream().getReader();
+				const { done, value } = await reader.read();
+				if (done) controller.close();
+				else controller.enqueue(value);
+			},
+			cancel(reason) {
+				return reader?.cancel(reason);
+			}
+		});
+	}
+
 	async function onExport(): Promise<void> {
+		// The save picker needs the click's user activation, which lapses long
+		// before a large model has arrived: it opens now, and the file follows.
 		try {
-			const blob = await downloadModel();
-			await saveResponseToFile(new Response(blob), modelFilename ?? 'model.json');
+			await saveResponseToFile(
+				new Response(bodyOf(downloadModel())),
+				modelFilename ?? 'model.json'
+			);
 		} catch (err) {
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			console.error('Export failed', err);
