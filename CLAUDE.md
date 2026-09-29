@@ -56,7 +56,7 @@ pixi run engine-test / engine-check
 pixi run sandbox-test / sandbox-check / sandbox-build / sandbox-start
 pixi run golden-fixtures                  # regenerate engine/fixtures/golden from the Python core
 pixi run engine-xlsx-sample               # rewrite engine/fixtures/xlsx/sample.xlsx after an xlsx writer change
-pixi run engine-bench / engine-bench-browser   # after `pixi run engine-bench-data` once
+pixi run engine-bench / engine-bench-browser   # after `pixi run engine-bench-data` once; they write the candidate oracle's files first
 pixi run engine-parity-large   # engine sweep vs the oracle at M (after engine-bench-data)
 ```
 

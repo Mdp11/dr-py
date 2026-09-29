@@ -309,6 +309,7 @@ cwd = "engine"
 description = "Benchmark the engine at model M (run engine-bench-data once before)"
 cmd = "npm run bench"
 cwd = "engine"
+depends-on = [{ task = "engine-candidate-oracle", environment = "core-dev" }]
 
 [feature.frontend.tasks.engine-xlsx-sample]
 description = "Rewrite engine/fixtures/xlsx/sample.xlsx, the engine's workbook that tests/golden/test_engine_xlsx.py opens with openpyxl"

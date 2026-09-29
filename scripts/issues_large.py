@@ -421,6 +421,29 @@ def check_rules_fire(
         raise SystemExit(f"rules that fire on none or on all: {', '.join(bad)}")
 
 
+def swept_violated(
+    metamodel: Metamodel, doc: Doc, ops: list[Op], compiled: CompiledRules
+) -> tuple[Model, list[Issue], int, float]:
+    """Model ``doc`` with ``ops`` landed, and the issues of the server's own
+    sweep over a session holding ``compiled``, in store order, with the
+    entities swept and the sweep's seconds. Exits when the sweep does not run
+    to its end."""
+    model = build_model_from_dicts(metamodel, doc, strict=False)
+    _apply_batch(
+        model, TypeAdapter(list[ModelOpIn]).validate_python(ops), restore=False
+    )
+    state = ValidationState()
+    session = Session(
+        metamodel=metamodel, model=model, validation=state, compiled_rules=compiled
+    )
+    start = time.perf_counter()
+    progress = start_validation_sweep(session, sync=True)
+    seconds = time.perf_counter() - start
+    if progress.error or progress.done != progress.total:
+        raise SystemExit("the sweep did not run to its end")
+    return model, list(state.iter_issues()), progress.total, seconds
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", type=Path, default=BENCHMARKS / "large.model.json")
@@ -445,23 +468,10 @@ def main() -> None:
     doc = parse_model_json(args.model.read_bytes())
     ops = Violations(doc).build()
     args.ops.write_text(json.dumps(ops, ensure_ascii=False), encoding="utf-8")
-    model = build_model_from_dicts(metamodel, doc, strict=False)
-    _apply_batch(
-        model, TypeAdapter(list[ModelOpIn]).validate_python(ops), restore=False
-    )
     artifacts = rule_artifacts()
     args.rules.write_text(json.dumps(artifacts, ensure_ascii=False), encoding="utf-8")
     compiled = compiled_rules(artifacts, metamodel)
-    state = ValidationState()
-    session = Session(
-        metamodel=metamodel, model=model, validation=state, compiled_rules=compiled
-    )
-    start = time.perf_counter()
-    progress = start_validation_sweep(session, sync=True)
-    seconds = time.perf_counter() - start
-    if progress.error or progress.done != progress.total:
-        raise SystemExit("the sweep did not run to its end")
-    issues = list(state.iter_issues())
+    model, issues, total, seconds = swept_violated(metamodel, doc, ops, compiled)
     keys = sorted(issue_key(issue) for issue in issues)
     args.out.write_text(json.dumps(keys, ensure_ascii=False), encoding="utf-8")
     checks = Counter(f"{i.check} ({i.category.value})" for i in issues)
@@ -469,7 +479,7 @@ def main() -> None:
     print(
         f"wrote {args.ops}: {len(ops):,} ops; {args.rules}: {compiled.total} rules; "
         f"{args.out}: {len(keys):,} issues, {ruled:,} of them the rules', "
-        f"over {progress.total:,} entities, swept in {seconds:.1f} s"
+        f"over {total:,} entities, swept in {seconds:.1f} s"
     )
     for check, n in sorted(checks.items()):
         print(f"  {check}: {n:,}")

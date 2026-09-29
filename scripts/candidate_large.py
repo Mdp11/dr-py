@@ -1,7 +1,7 @@
 """Write the Python oracle's candidate diff at model M, with violations injected.
 
 Takes the smart-city metamodel and edits it four ways, deterministically: one
-relationship type becomes a containment, one element type gains a key, one
+relationship type becomes a containment, one element type gains a key (replacing the one it inherits), one
 gains a required property and one required property is dropped. The candidate
 document goes to ``benchmarks/large.candidate.metamodel.json`` as
 ``GET /metamodel`` answers it. Model M, with the violation ops and the custom
@@ -25,7 +25,6 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from pydantic import TypeAdapter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -35,21 +34,16 @@ from issues_large import (  # noqa: E402
     BENCHMARKS,
     compiled_rules,
     rule_artifacts,
+    swept_violated,
 )
 
 from data_rover.api.metamodel_candidate import (  # noqa: E402
     candidate_issues,
     model_half,
 )
-from data_rover.api.routes._snapshot import build_model_from_dicts  # noqa: E402
-from data_rover.api.routes.ops import _apply_batch  # noqa: E402
-from data_rover.api.schemas import ModelOpIn  # noqa: E402
 from data_rover.api.serialize import parse_model_json  # noqa: E402
-from data_rover.api.session import Session  # noqa: E402
-from data_rover.api.validation_sweep import start_validation_sweep  # noqa: E402
 from data_rover.core.metamodel.loader import load_metamodel_file  # noqa: E402
 from data_rover.core.metamodel.schema import Metamodel, PropertyDef  # noqa: E402
-from data_rover.core.validation.state import ValidationState  # noqa: E402
 
 #: the relationship type turned into a containment
 CONTAINMENT = "MemberOf"
@@ -79,7 +73,7 @@ def derive(metamodel: Metamodel) -> Metamodel:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--model", type=Path, default=BENCHMARKS / "large.model.json")
     parser.add_argument(
         "--metamodel",
@@ -108,20 +102,9 @@ def main() -> None:
     )
 
     doc = parse_model_json(args.model.read_bytes())
-    model = build_model_from_dicts(metamodel, doc, strict=False)
     ops = json.loads(args.ops.read_text(encoding="utf-8"))
-    _apply_batch(
-        model, TypeAdapter(list[ModelOpIn]).validate_python(ops), restore=False
-    )
     compiled = compiled_rules(rule_artifacts(), metamodel)
-    state = ValidationState()
-    session = Session(
-        metamodel=metamodel, model=model, validation=state, compiled_rules=compiled
-    )
-    progress = start_validation_sweep(session, sync=True)
-    if progress.error or progress.done != progress.total:
-        raise SystemExit("the sweep did not run to its end")
-    current = list(state.iter_issues())
+    model, current, _, _ = swept_violated(metamodel, doc, ops, compiled)
 
     start = time.perf_counter()
     under = candidate_issues(model, candidate, compiled.sources)

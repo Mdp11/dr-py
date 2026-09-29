@@ -343,7 +343,8 @@ async function transitions(): Promise<Measures> {
 	measures['longest staged round trip during candidateIssues (slice bound)'] = longest(
 		await stopCandidatePings()
 	).ms;
-	if (diff.now_failing.length === 0 || diff.now_passing.length === 0) {
+	// M holds no issue, so only what the edit adds is expected.
+	if (diff.now_failing.length === 0) {
 		throw new Error('the candidate edit changes nothing');
 	}
 

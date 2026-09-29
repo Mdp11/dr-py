@@ -19,7 +19,8 @@
  * issues as multisets of `issueKey`. Then the candidate scan over that swept
  * store: `scripts/candidate_large.py` writes a metamodel edit and the Python
  * diff of the model validated under it, and the engine's `candidateDiff`
- * must equal it, list for list in order. Exits 1, with the first differences
+ * must equal it, list for list in order (`now_passing` sorted by key: each
+ * store keeps its own order). Exits 1, with the first differences
  * of whichever side disagrees, when any does.
  *
  * `pixi run engine-parity-large` writes every oracle side and runs this,

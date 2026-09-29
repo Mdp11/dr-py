@@ -315,8 +315,12 @@ const BENCH_RULES = (replicas: string) =>
 	}).replace('"@replicas"', replicas);
 
 /** One rule set compiled whole against `wc`'s metamodel. */
+function ruleSource(document: string) {
+	return { artifactId: 'bench', name: 'Bench', parse: { ok: true as const, document } };
+}
+
 function compiledRules(wc: WorkingCopy, document: string): CompiledRules {
-	const source = { artifactId: 'bench', name: 'Bench', parse: { ok: true as const, document } };
+	const source = ruleSource(document);
 	const compiled = compileRuleSets([source], wc.model.metamodel);
 	if (compiled.unreadable || compiled.skipped.length > 0) {
 		throw new Error('the bench rules do not compile whole');
@@ -508,11 +512,13 @@ function measureIssues(wc: WorkingCopy): void {
 	// A rule over every element of the largest type, where there was none.
 	const [largest] = [...model.indexes.byType].reduce((a, b) => (b[1].size > a[1].size ? b : a));
 	const rule = { name: 'named', applies_to: largest, then: { property: 'name', exists: true } };
-	const overLargest = compiledRules(wc, JSON.stringify({ rules: [rule] }));
+	const largestRules = JSON.stringify({ rules: [rule] });
+	const overLargest = compiledRules(wc, largestRules);
 	live.setRules({ working: overLargest, committed: overLargest });
 	if (!stepped('rescan', 'rescanLongest', live.sweepSteps())) {
 		throw new Error('the rescan ended unusable');
 	}
+	measureCandidate(model, live, largestRules);
 
 	// Staged past the store: its dirty sets would sort the growing group once an op.
 	const like = sample(elements, 1, 11, named)[0]!;
@@ -595,16 +601,16 @@ function measureRules(wc: WorkingCopy): void {
 }
 
 /**
- * The candidate scan over the swept store of a fresh `LiveIssues`: the build
- * of the candidate's structure alone, then the whole scan (structure and
- * validation), its longest step and the peak `heapUsed` a step reached above
- * the level just before it. The diff runs after, untimed, against the store.
+ * The candidate scan over `live`'s settled store, its rule set `rules` (the
+ * document `live` holds) recompiled under the candidate as `candidateIssues`
+ * does: the build of the candidate's structure alone, then the whole scan
+ * (structure and validation), its longest step and the peak `heapUsed` a step
+ * reached above the level just before it. The diff runs after, untimed.
  */
-function measureCandidate(wc: WorkingCopy): void {
-	const { model } = wc;
-	const live = new LiveIssues(wc);
-	if (!drain(live.sweepSteps())) throw new Error('the sweep ended unusable');
-	const candidate = prepareCandidate(candidateDoc, (mm) => compileRuleSets([], mm));
+function measureCandidate(model: Model, live: LiveIssues, rules: string): void {
+	const candidate = prepareCandidate(candidateDoc, (mm) =>
+		compileRuleSets([ruleSource(rules)], mm)
+	);
 	stepped('candidateStructure', null, candidateStructureSteps(model, candidate.metamodel));
 
 	const steps = candidateScan(model, candidate);
@@ -629,8 +635,8 @@ function measureCandidate(wc: WorkingCopy): void {
 	record('candidate', performance.now() - start);
 	record('candidateLongest', worst);
 	record('candidateHeapMb', peak / 2 ** 20);
-	const diff = candidateDiff(live.store.iter(), issues);
-	if (diff.now_failing.length === 0 || diff.now_passing.length === 0) {
+	// M holds no issue, so only what the edit adds is expected.
+	if (candidateDiff(live.store.iter(), issues).now_failing.length === 0) {
 		throw new Error('the candidate edit changes nothing');
 	}
 }
@@ -816,7 +822,6 @@ async function pass(): Promise<void> {
 	measureIssues(workingCopy);
 	measureKeystrokes(workingCopy);
 	measureRules(workingCopy);
-	measureCandidate(workingCopy);
 }
 
 for (let i = 0; i < PASSES; i++) await pass();
