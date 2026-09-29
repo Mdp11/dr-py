@@ -156,19 +156,30 @@ describe('validateViewDoc', () => {
 			messages(
 				view([
 					folder('p', { elements: ['nope', 'nope'] }),
-					folder('q', { elements: [containedId] })
+					folder('q', { elements: [containedId, containedId] })
 				])
-			).map((m) => m.split(':')[1]!.trim().split(' ')[0])
-		).toEqual(['folder', 'folder', 'element']);
+			)
+		).toEqual([
+			`view "it's": folder 'p' references unknown element 'nope'`,
+			`view "it's": folder 'p' references unknown element 'nope'`,
+			`view "it's": element '${containedId}' has a containment parent and cannot be placed in folder 'q'; placement ignored`,
+			`view "it's": element '${containedId}' has a containment parent and cannot be placed in folder 'q'; placement ignored`
+		]);
 	});
 
-	it('walks a 2,000-deep folder chain without overflowing the stack', () => {
-		let bottom = folder('f2000', { elements: ['nope'] });
-		for (let i = 1999; i >= 0; i--) bottom = folder(`f${i}`, { folders: [bottom] });
-		const issues = run(view([bottom]));
-		expect(issues).toHaveLength(1);
-		expect(issues[0]!.targetIds).toEqual(['nope']);
-		expect(issues[0]!.message).toMatch(
+	it('reads and walks a 2,000-deep folder chain from raw JSON without overflowing the stack', () => {
+		let bottom: unknown = { name: 'f2000', elements: ['nope'] };
+		for (let i = 1999; i >= 0; i--) bottom = { name: `f${i}`, folders: [bottom] };
+		const raw = JSON.parse(JSON.stringify({ name: "it's", folders: [bottom] }));
+		const out = drain(
+			EVALUATIONS['validateView']!(
+				{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements() },
+				{ view: raw }
+			)
+		) as { message: string; target_ids: string[] }[];
+		expect(out).toHaveLength(1);
+		expect(out[0]!.target_ids).toEqual(['nope']);
+		expect(out[0]!.message).toMatch(
 			/^view "it's": folder 'f0\/f1\/.*\/f2000' references unknown element 'nope'$/
 		);
 	});
@@ -226,8 +237,11 @@ describe('readViewDoc', () => {
 	};
 
 	it('refuses a non-string name and a non-array folders', () => {
-		expect(refusal({ name: 3 })).toMatch(/^422 view[.:]/);
-		expect(refusal({ name: 'v', folders: {} })).toMatch(/^422 view[.:]/);
+		expect(refusal({ name: 3 })).toBe('422 view.name: must be a string');
+		expect(refusal({ name: 'v', folders: {} })).toBe('422 view.folders: must be a list');
+		expect(refusal({ name: 'v', folders: [{ name: 'f', folders: [{ name: 1 }] }] })).toBe(
+			'422 view.folders[0].folders[0].name: must be a string'
+		);
 		expect(refusal(null)).toMatch(/^422 view[.:]/);
 		expect(refusal({ name: 'v', folders: [{ name: 'f', elements: [1] }] })).toMatch(
 			/^422 view[.:]/

@@ -56,18 +56,48 @@ function readRef(value: unknown, path: string): ArtifactRefDoc {
 	return { id: readString(doc, 'id', path), kind: readString(doc, 'kind', path) };
 }
 
-function readFolder(value: unknown, path: string): FolderDoc {
+/** A folder's own fields read, its child folders not yet: those stay raw in `children`. */
+type Reading = { folder: FolderDoc; children: unknown[]; path: string; next: number };
+
+function beginFolder(value: unknown, path: string): Reading {
 	const doc = readObject(value, path);
-	return {
+	const children = readList(doc, 'folders', path, (child) => child);
+	const folder: FolderDoc = {
 		id: readString(doc, 'id', path, ''),
 		name: readString(doc, 'name', path),
-		folders: readList(doc, 'folders', path, readFolder),
+		folders: [],
 		elements: readList(doc, 'elements', path, (v, p) => {
 			if (typeof v !== 'string') refuse(p, 'must be a string');
 			return v;
 		}),
 		artifacts: readList(doc, 'artifacts', path, readRef)
 	};
+	return { folder, children, path, next: 0 };
+}
+
+/** The folders of `raw`, read from an explicit stack so a deep chain costs no call stack. */
+function readFolders(raw: unknown[], path: string): FolderDoc[] {
+	const out: FolderDoc[] = [];
+	const stack: { into: FolderDoc[]; children: unknown[]; path: string; next: number }[] = [
+		{ into: out, children: raw, path, next: 0 }
+	];
+	while (stack.length > 0) {
+		const top = stack[stack.length - 1]!;
+		if (top.next === top.children.length) {
+			stack.pop();
+			continue;
+		}
+		const i = top.next++;
+		const reading = beginFolder(top.children[i], `${top.path}[${i}]`);
+		top.into.push(reading.folder);
+		stack.push({
+			into: reading.folder.folders,
+			children: reading.children,
+			path: `${reading.path}.folders`,
+			next: 0
+		});
+	}
+	return out;
 }
 
 /**
@@ -79,7 +109,10 @@ export function readViewDoc(value: unknown): ViewDoc {
 	const doc = readObject(value, 'view');
 	return {
 		name: readString(doc, 'name', 'view'),
-		folders: readList(doc, 'folders', 'view', readFolder),
+		folders: readFolders(
+			readList(doc, 'folders', 'view', (child) => child),
+			'view.folders'
+		),
 		artifacts: readList(doc, 'artifacts', 'view', readRef)
 	};
 }
