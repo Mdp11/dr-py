@@ -469,6 +469,7 @@ export {
 export { pyCasefold } from './value/casefold.ts';
 export { jsStr, pyFloatOf, PyOverflowError, toNumber } from './value/coerce.ts';
 export { cmpCodePoint, pyContains } from './value/compare.ts';
+export { pyEq } from './value/eq.ts';
 export { pyFloatRepr } from './value/float-repr.ts';
 export { pyKey } from './value/key.ts';
 export { pyLower, pyStrip } from './value/lower.ts';
