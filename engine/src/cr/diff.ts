@@ -42,7 +42,8 @@ export type Diff = { elements: CrKindOps<CrElement>; relationships: CrKindOps<Cr
 /** Entities visited per step. */
 const STEP_ENTITIES = 2048;
 
-const workingElement = (rec: ElementRec): CrElement => ({
+/** A working element as a change request lists it, sharing its property bag. */
+export const workingElement = (rec: ElementRec): CrElement => ({
 	id: rec.id,
 	type_name: rec.typeName,
 	properties: rec.props,
@@ -56,7 +57,8 @@ const otherElement = (e: OtherElement): CrElement => ({
 	rev: e.rev
 });
 
-const workingRel = (rec: RelRec): CrRelationship => ({
+/** A working relationship as a change request lists it, sharing its property bag. */
+export const workingRel = (rec: RelRec): CrRelationship => ({
 	id: rec.id,
 	type_name: rec.typeName,
 	source_id: rec.source.id,

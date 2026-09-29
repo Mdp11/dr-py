@@ -4,10 +4,13 @@ import {
 	drain,
 	Model,
 	modelLines,
+	proposeSteps,
+	readCrs,
 	type CompareAnswer,
-	type Delta
+	type Delta,
+	type ProposeAnswer
 } from '../../src/index.ts';
-import { nodeMetamodel, NODE_DOC } from '../model/fixtures.ts';
+import { family, nodeMetamodel, NODE_DOC } from '../model/fixtures.ts';
 import { clone, Server, workingCopy } from '../working/helpers.ts';
 import {
 	autoHost,
@@ -254,5 +257,233 @@ describe('a compare over the scheduler', () => {
 		await settle();
 		expect(answered).toBe(false);
 		expect(answersTo(client, 'c')).toBe(0);
+	});
+});
+
+type Json = { [key: string]: unknown };
+
+/** A change request document, as the shell sends it. */
+const crOf = (elements: Json = {}, relationships: Json = {}): Json => ({
+	format: 'datarover.cr/v1',
+	createdAt: CREATED_AT,
+	ops: { elements, relationships }
+});
+
+/** An element of `model` as a change request lists it, `props` laid over its properties. */
+function elementOf(model: Model, id: string, props: Json = {}): Json {
+	const rec = model.getElement(id);
+	return { id, type_name: rec.typeName, properties: { ...rec.props, ...props }, rev: rec.rev };
+}
+
+const renamed = (model: Model, id: string, name: string): Json => ({
+	id,
+	before: elementOf(model, id),
+	after: elementOf(model, id, { name })
+});
+
+/** The proposal computed directly over a working copy of `model` at `rev`. */
+const proposed = (model: Model, rev: number, crs: unknown) =>
+	drain(
+		proposeSteps(workingCopy(clone(model), rev), { crs: readCrs(crs), created_at: CREATED_AT })
+	);
+
+type Proposal = Extract<ProposeAnswer, { ops: unknown }>;
+
+type CrOpsOut = {
+	elements: {
+		added: Json[];
+		modified: { id: string; before: Json; after: Json }[];
+		deleted: Json[];
+	};
+	relationships: { added: Json[]; modified: Json[]; deleted: Json[] };
+};
+
+describe('proposeCr', () => {
+	it('answers the proposal, a conflict as a result, and the gate’s refusal as a 422', async () => {
+		const client = connect(autoHost());
+		const model = family();
+		await openReplica(client, model, NODE_DOC, { rev: 2 });
+
+		const crs = [crOf({ modified: [renamed(model, 'a', 'A2')] })];
+		const answer = await client.call<Proposal>('proposeCr', { crs, created_at: CREATED_AT });
+		expect(Object.keys(answer)).toEqual(['model_rev', 'cr', 'ops']);
+		expect(answer.ops).toEqual([
+			{ kind: 'update_element', id: 'a', properties_patch: { name: 'A2' } }
+		]);
+		expect(JSON.stringify(answer)).toBe(JSON.stringify(proposed(family(), 2, crs)));
+
+		const conflicting = [crOf({ added: [elementOf(model, 'a')] })];
+		expect(await client.call('proposeCr', { crs: conflicting, created_at: CREATED_AT })).toEqual({
+			conflict: {
+				cr_index: 0,
+				conflicts: [
+					{
+						kind: 'id_exists',
+						entity: 'element',
+						id: 'a',
+						reason: "Element 'a' already exists in the model"
+					}
+				],
+				model_rev: 2
+			}
+		});
+
+		const unknown = [crOf({ added: [{ id: 'n1', type_name: 'Nope' }] })];
+		expect(
+			await refusal(client.call('proposeCr', { crs: unknown, created_at: CREATED_AT }))
+		).toEqual({ status: 422, detail: "Unknown element type 'Nope'" });
+	});
+
+	it('refuses change requests it cannot read with the 501 the server takes over, and a missing created_at, at arrival', async () => {
+		// No replica is open: a call that queued would never be answered.
+		const client = connect(autoHost());
+		const unreadable = { status: 501, detail: 'reaches an unreadable change request' };
+		expect(await refusal(client.call('proposeCr', { crs: [], created_at: CREATED_AT }))).toEqual(
+			unreadable
+		);
+		expect(
+			await refusal(
+				client.call('proposeCr', {
+					crs: [crOf({ added: [{ id: 'n1', type_name: 'Node', rev: '3' }] })],
+					created_at: CREATED_AT
+				})
+			)
+		).toEqual(unreadable);
+		expect(await refusal(client.call('proposeCr', { crs: [crOf()] }))).toEqual({
+			status: 422,
+			detail: 'created_at must be a string'
+		});
+	});
+
+	it('replaces the working copy with a file while an edit is staged: the answered ops, staged, leave the file', async () => {
+		const client = connect(autoHost());
+		const model = family();
+		await openReplica(client, model, NODE_DOC, { rev: 1 });
+		await client.call('stage', {
+			ops: [{ kind: 'update_element', id: 'a', properties_patch: { name: 'A staged' } }]
+		});
+		// `a` has another name, `b` is gone with its relationships, `e` is new and refers to `a`.
+		const text = JSON.stringify({
+			elements: [
+				{ id: 'a', type_name: 'Node', properties: { name: 'A file' } },
+				{ id: 'c', type_name: 'Node', properties: { name: 'C' } },
+				{ id: 'd', type_name: 'Node', properties: { name: 'D' } },
+				{ id: 'e', type_name: 'Node', properties: { name: 'E' } }
+			],
+			relationships: [
+				{ id: 'a-c', type_name: 'Refers', source_id: 'a', target_id: 'c' },
+				{ id: 'e-a', type_name: 'Refers', source_id: 'e', target_id: 'a' }
+			]
+		});
+		const compare = () =>
+			client.call<CompareAnswer>('compareModel', { file: bytesOf(text), created_at: CREATED_AT });
+
+		const { cr } = await compare();
+		const compared = cr['ops'] as CrOpsOut;
+		// `a`'s change is from its staged name.
+		expect(
+			compared.elements.modified.map((m) => [m.id, (m.before['properties'] as Json)['name']])
+		).toEqual([['a', 'A staged']]);
+		// As the shell sends it: through JSON.
+		const answer = await client.call<Proposal>('proposeCr', {
+			crs: [JSON.parse(JSON.stringify(cr))],
+			created_at: CREATED_AT
+		});
+		expect(answer.ops.filter((op) => op['kind'] === 'update_element')).toEqual([
+			{ kind: 'update_element', id: 'a', properties_patch: { name: 'A file' } }
+		]);
+		// Temp ids of the caller's own, as the shell remaps them.
+		const fresh = (id: unknown) =>
+			typeof id === 'string' && id.startsWith('tmp_') ? `tmp_replace_${id.slice(4)}` : id;
+		const ops = answer.ops.map((op) => {
+			const out: Json = { ...op };
+			for (const key of ['temp_id', 'source_id', 'target_id']) {
+				if (key in out) out[key] = fresh(out[key]);
+			}
+			return out;
+		});
+		await client.call('stage', { ops });
+
+		const empty = { added: [], modified: [], deleted: [] };
+		expect((await compare()).cr['ops']).toEqual({ elements: empty, relationships: empty });
+	});
+
+	it('leaves the working copy as it was', async () => {
+		const client = connect(autoHost());
+		const model = family();
+		await openReplica(client, model, NODE_DOC, { rev: 1 });
+		await client.call('stage', {
+			ops: [{ kind: 'update_element', id: 'a', properties_patch: { name: 'A staged' } }]
+		});
+		const file = () => bytesOf(fileText(family(), 1));
+		const seen = async () =>
+			JSON.stringify([
+				await client.call('stagedDiff'),
+				await client.call('compareModel', { file: file(), created_at: CREATED_AT })
+			]);
+		const before = await seen();
+		const answer = await client.call<Proposal>('proposeCr', {
+			crs: [
+				crOf(
+					{
+						added: [{ id: 'n1', type_name: 'Node', properties: { name: 'N1' } }],
+						deleted: [elementOf(model, 'c')]
+					},
+					{
+						deleted: [
+							{ id: 'a-c', type_name: 'Refers', source_id: 'a', target_id: 'c', properties: {} }
+						]
+					}
+				)
+			],
+			created_at: CREATED_AT
+		});
+		expect(answer.ops.map((op) => op['kind'])).toEqual([
+			'create_element',
+			'delete_relationship',
+			'delete_element'
+		]);
+		expect(await seen()).toBe(before);
+	});
+});
+
+describe('a proposal over the scheduler', () => {
+	/** Every element of the ring renamed: a proposal of several steps. */
+	const renameAll = () => {
+		const model = ring();
+		return [
+			crOf({
+				modified: [...model.elements()].map((rec) => renamed(model, rec.id, `renamed ${rec.id}`))
+			})
+		];
+	};
+
+	it('starts over on a control-lane delta between its slices, and answers once, over the new state', async () => {
+		const server = new Server(clone(ring()));
+		const { delta } = server.commit([dropLast]);
+		const { host, client } = await paused();
+
+		const proposing = client.callAs<Proposal>('p', 'proposeCr', {
+			crs: renameAll(),
+			created_at: CREATED_AT
+		});
+		await settle();
+		expect(host.waiting).toBe(1);
+		expect(answersTo(client, 'p')).toBe(0);
+		await client.call('close');
+		host.auto = true;
+		host.turn();
+		await openThroughTail(client, ring(), [delta]);
+
+		const answer = await proposing;
+		expect(answer.model_rev).toBe(1);
+		expect(answer.cr['baseline']).toEqual({
+			filename: null,
+			elementCount: COUNT,
+			relationshipCount: COUNT - 1
+		});
+		expect(JSON.stringify(answer)).toBe(JSON.stringify(proposed(server.model, 1, renameAll())));
+		await settle();
+		expect(answersTo(client, 'p')).toBe(1);
 	});
 });

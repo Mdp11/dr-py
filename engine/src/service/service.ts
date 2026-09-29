@@ -1,5 +1,6 @@
 import { ArtifactSet, readArtifacts, readStagedArtifacts } from '../artifacts/artifact-set.ts';
 import { compareSteps, UploadedFile } from '../cr/compare.ts';
+import { proposeSteps, readCrs, type ChangeRequest } from '../cr/propose.ts';
 import { modelFileSteps } from '../download/model-file.ts';
 import { EVALUATIONS } from '../evaluate/index.ts';
 import { Metamodel } from '../metamodel/metamodel.ts';
@@ -177,15 +178,25 @@ function flag(params: ReadParams, key: string): boolean {
 	return value;
 }
 
-/** `compareModel`'s params: the file's bytes, kept whole for a scan that starts over, and the clock's reading. */
-function readCompare(params: ReadParams): { file: UploadedFile; createdAt: string } {
-	const file = params['file'];
-	if (!(file instanceof ArrayBuffer)) throw new Refused(422, 'file must be an ArrayBuffer');
+/** The client's clock reading, which a change request carries as its `createdAt`. */
+function createdAtOf(params: ReadParams): string {
 	const createdAt = params['created_at'];
 	if (typeof createdAt !== 'string' || createdAt === '') {
 		throw new Refused(422, 'created_at must be a string');
 	}
-	return { file: new UploadedFile(file), createdAt };
+	return createdAt;
+}
+
+/** `compareModel`'s params: the file's bytes, kept whole for a scan that starts over, and the clock's reading. */
+function readCompare(params: ReadParams): { file: UploadedFile; createdAt: string } {
+	const file = params['file'];
+	if (!(file instanceof ArrayBuffer)) throw new Refused(422, 'file must be an ArrayBuffer');
+	return { file: new UploadedFile(file), createdAt: createdAtOf(params) };
+}
+
+/** `proposeCr`'s params: the change requests, read once for every start, and the clock's reading. */
+function readPropose(params: ReadParams): { crs: ChangeRequest[]; createdAt: string } {
+	return { crs: readCrs(params['crs']), createdAt: createdAtOf(params) };
 }
 
 function batchIds(params: ReadParams): number[] {
@@ -369,6 +380,10 @@ const METHODS: { readonly [method: string]: Method } = {
 	compareModel: (service, call) => {
 		const { file, createdAt } = readCompare(call.params);
 		service.scanWorking(call, (wc) => compareSteps(wc, { file, created_at: createdAt }));
+	},
+	proposeCr: (service, call) => {
+		const { crs, createdAt } = readPropose(call.params);
+		service.scanWorking(call, (wc) => proposeSteps(wc, { crs, created_at: createdAt }));
 	},
 
 	staged: now((service) => service.wc?.staged().map(wireBatch) ?? []),

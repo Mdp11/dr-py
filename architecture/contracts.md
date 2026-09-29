@@ -190,7 +190,24 @@ event     {event, …}                     engine → client, unsolicited
   which the client answers from the server. The file's shape is refused with the route's 422s,
   in its order and words. It is a scan as a download is: a `stage` or a delta posted while it
   runs waits for it; a `close` or a divergence sends it back to start over on the next
-  replica, the file not parsed again; `{cancel}` drops it unanswered. `getModelIssues {}`,
+  replica, the file not parsed again; `{cancel}` drops it unanswered. `proposeCr {crs, created_at}`
+  answers `POST /model/apply-cr` over the WORKING model: `crs` the request body's change
+  requests as the client would send them, `created_at` as `compareModel`'s, both read at
+  arrival. Change requests the engine does not read as pydantic would — not 1 to 20 of them,
+  a wrong `format`, a missing `createdAt`, a `null` where a dict or a list goes, a `rev` that
+  is not an integer (`"3"` and `true` included, which pydantic coerces) — are 501 `reaches an
+  unreadable change request`, which the client answers from the server. The change requests
+  apply in turn over an overlay of the working copy, which nothing writes to; the first that
+  conflicts with the state its predecessors left answers, as an ok result, `{conflict:
+  {cr_index, conflicts, model_rev}}`, the 409 body's shape, every conflict of its six buckets
+  in order. Otherwise it answers `ProposeCrResponse` `{model_rev, cr, ops}`: `model_rev` the
+  committed `rev`, `cr` the combined working → result `datarover.cr/v1` document (the working
+  counts as its baseline, `created_at` as its `createdAt`), `ops` the batch that lands it in
+  the route's order, temp ids `tmp_1`, `tmp_2`, …, values as pydantic writes them. The route's
+  gate and its retype refusal are 422s in its words. A duplicate id among a change request's
+  deletes is one delete, as on the server. It is a scan as a compare is: a `close` or a
+  divergence sends it back to start over on the next replica, the change requests not read
+  again; `{cancel}` drops it unanswered. `getModelIssues {}`,
   `validateModel {batch_ids}` and `previewCommit {base_rev, batch_ids, strict}` (the model
   half only — artifact, view and `metamodel.move_node` ops stay a server call the shell merges
   in) answer the one live issue store over the working

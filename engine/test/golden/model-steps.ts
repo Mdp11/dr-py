@@ -36,13 +36,16 @@ import {
 	navigationFetch,
 	navigationHasScript,
 	OpError,
+	parseExact,
 	parseJson,
 	prepareCandidate,
+	proposeSteps,
 	PyFloat,
 	previewBody,
 	pyRepr,
 	pyDumps,
 	readArtifacts,
+	readCrsText,
 	ReadError,
 	readStagedArtifacts,
 	readNavigation,
@@ -184,12 +187,15 @@ export type Step = Partial<Observed> & {
 	metamodel?: MetamodelDoc;
 	/** `validate_view`: the view document. */
 	view?: unknown;
-	/** `download` / `validate_view` / `compare`: ops, one line of JSON text each, staged over the model before it reads. */
+	/** `download` / `validate_view` / `compare` / `apply_cr`: ops, one line of JSON text each, staged over the model before it reads. */
 	stage?: string[];
-	/** `compare`: the uploaded file, as UTF-8 text or as base64 bytes, and the clock's reading. */
+	/** `compare`: the uploaded file, as UTF-8 text or as base64 bytes; `compare` / `apply_cr`: the clock's reading. */
 	file?: string;
 	file_b64?: string;
 	created_at?: string;
+	/** `apply_cr`: the request body's change requests, as JSON, and as text parsed exactly from the fixture (`withExactCrs`). */
+	crs?: unknown;
+	crs_text?: string;
 	/** The engine leaves the step to the server with its `FALLBACKS` refusal, whatever Python answered. */
 	fallback?: true;
 	result: string | string[] | BatchOutcome | object | boolean | null;
@@ -202,6 +208,22 @@ export type TableStepLimits = { max_rows: number; max_cell_elements: number };
 
 /** A run, from an empty model or from the model file `model_file` names, relative to the repository. */
 export type StepsFixture = { metamodel: MetamodelDoc; model_file?: string; steps: Step[] };
+
+/**
+ * The fixture `name` with each `apply_cr` step's `crs` also as text, from an
+ * exact parse of the file: `JSON.parse` loses an integer past 2^53 and a
+ * float's `.0`, which the oracle read as they are.
+ */
+export function withExactCrs(fixture: StepsFixture, name: string): StepsFixture {
+	const url = new URL(`../../fixtures/golden/${name}.json`, import.meta.url);
+	const exact = parseExact(readFileSync(url, 'utf-8')) as { steps: { crs?: Value }[] };
+	return {
+		...fixture,
+		steps: fixture.steps.map((step, i) =>
+			step.do === 'apply_cr' ? { ...step, crs_text: pyDumps(exact.steps[i]!.crs!) } : step
+		)
+	};
+}
 
 /** The run's starting model: empty, or its model file loaded in order and indexed. */
 export function loadModelFile(fixture: StepsFixture, options: ModelOptions = {}): Model {
@@ -613,7 +635,8 @@ function expectSameBytes(actual: Uint8Array, expected: Uint8Array, label: string
 
 /** What the engine answers a `fallback` step, by kind: a 501 the client takes to the server. */
 const FALLBACKS: { readonly [step: string]: { status: number; detail: string } } = {
-	compare: { status: 501, detail: 'reaches an unreadable file' }
+	compare: { status: 501, detail: 'reaches an unreadable file' },
+	apply_cr: { status: 501, detail: 'reaches an unreadable change request' }
 };
 
 /** The service's refusal of a rebind preview whose staged ops the candidate does not admit. */
@@ -719,6 +742,14 @@ function apply(
 			const file = Uint8Array.from(bytes).buffer;
 			const wc = stagedReplica(model, step, carried);
 			return drain(compareSteps(wc, { file, created_at: step.created_at! }));
+		}
+		case 'apply_cr': {
+			// `POST /model/apply-cr` over the working copy; a conflict as the 409 the route answers.
+			if (step.crs_text === undefined) throw new Error(`step ${index}: no exact crs text`);
+			const crs = readCrsText(step.crs_text);
+			const wc = stagedReplica(model, step, carried);
+			const answer = drain(proposeSteps(wc, { crs, created_at: step.created_at! }));
+			return 'conflict' in answer ? { status: 409, body: answer.conflict } : answer;
 		}
 		case 'validate_view': {
 			// The view checked over the working model (the step's ops staged) and the artifacts.
@@ -879,7 +910,8 @@ const READ_LIKE = new Set([
 	'candidate',
 	'preview_rebind',
 	'validate_view',
-	'compare'
+	'compare',
+	'apply_cr'
 ]);
 
 /**

@@ -23,6 +23,21 @@ export {
 	type Diff
 } from './cr/diff.ts';
 export { CR_FORMAT, crDocument, crWire, type CrBaseline } from './cr/document.ts';
+export { opsForChange, type WireOp } from './cr/ops.ts';
+export { CrOverlay } from './cr/overlay.ts';
+export {
+	combinedDiffSteps,
+	proposeSteps,
+	readCrs,
+	readCrsText,
+	UNREADABLE_CR,
+	type ChangeRequest,
+	type Combined,
+	type CrConflict,
+	type ProposeAnswer,
+	type ProposeConflict,
+	type ProposeParams
+} from './cr/propose.ts';
 export {
 	decodeModelFile,
 	parseModelFile,
