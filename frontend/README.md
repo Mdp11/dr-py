@@ -1720,6 +1720,8 @@ sync exists:
   `engineSide('views')` is `engine` calls the `onViewsMoved` listeners — the
   view store's recompute (see "View editing state") — and so does the views
   gate opening, its status half in `onStatus` or the follower's first load.
+  The gate shutting (in `onStatus`, or `stopFollower`) calls the
+  `onViewsClosed` listeners, which the view store answers with a refresh.
   `replica.svelte.ts` imports nothing of `view.svelte.ts`: the view store
   subscribes, eagerly at module scope, since nothing it imports reaches
   back into it through the replica store.
@@ -1962,8 +1964,10 @@ a project's view through `POST /views` after deleting whatever views exist.)
   both undo-history display and the DiffDrawer's View tab.
 - **The warnings.** With the `views` surface on the server
   `_warnings` are `GET /views/{id}`'s, over the committed view, set by
-  every `refreshView()`. With it on the engine (the default, and its gate, the `issues`
-  one, open) they are recomputed from `_view` AS STAGED, over the working
+  every `refreshView()`; when the gate shuts under warnings on the engine
+  (a resync, the follower stopping) the `onViewsClosed` listener is
+  `refreshView()`, so the server's take their place. With it on the engine (the default, and its
+  gate, the `issues` one, open) they are recomputed from `_view` AS STAGED, over the working
   model and the working artifacts (`viewWarnings`, `validateView` in the
   engine): at the end of every `refreshView()` (whose `warnings` are then
   ignored; a refresh of the same view keeps the ones shown until the answer,

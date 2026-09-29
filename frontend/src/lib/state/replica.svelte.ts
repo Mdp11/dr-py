@@ -95,6 +95,8 @@ let _tablesSeen: string | null = null;
 let _offViewsChanged: (() => void) | null = null;
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 const _viewsListeners = new Set<() => void>();
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
+const _viewsClosedListeners = new Set<() => void>();
 /** The last `changed` tuple the view warnings followed, on the engine side. */
 let _viewsSeen: string | null = null;
 /** The sync reported `off` since its last `ready`: the tables went to the server meanwhile. */
@@ -141,6 +143,8 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			if (!issuesWereOpen && issuesOnEngine(status)) scheduleIssuesRefetch();
 			// So were the view warnings, over the committed view.
 			if (!viewsWereOpen && viewsOnEngine(status)) viewsMoved();
+			// And back to the server's when the gate shuts.
+			if (viewsWereOpen && !viewsOnEngine(status)) viewsClosed();
 			observe?.(status);
 			// Only `opening`: `resyncing` also reports progress, but a re-bootstrap
 			// is not the journey's open, and `ready`'s own `verify` progress is not
@@ -452,6 +456,23 @@ function followViews(sync: ReplicaSync): void {
 	});
 }
 
+/**
+ * `listener` is called when the views gate shuts (a resync, the follower
+ * stopping): the view warnings on the engine are no longer backed by
+ * anything, and the server's take their place. The returned function
+ * unsubscribes.
+ */
+export function onViewsClosed(listener: () => void): () => void {
+	_viewsClosedListeners.add(listener);
+	return () => {
+		_viewsClosedListeners.delete(listener);
+	};
+}
+
+function viewsClosed(): void {
+	for (const listener of [..._viewsClosedListeners]) listener();
+}
+
 /** Tells the `onViewsMoved` listeners, while the view warnings are on the engine. */
 function viewsMoved(): void {
 	if (engineSide('views') !== 'engine') return;
@@ -501,10 +522,12 @@ export function artifactKindOf(id: string): string | undefined {
 /** A payload answer after this is dropped: it speaks for a replica no longer followed. */
 function stopFollower(): void {
 	if (_follower === null) return;
+	const viewsWereOpen = viewsOnEngine(_status);
 	_follower.follower.stop();
 	_follower.removeQuiet();
 	_follower = null;
 	_followerEpoch += 1;
+	if (viewsWereOpen) viewsClosed();
 }
 
 /**

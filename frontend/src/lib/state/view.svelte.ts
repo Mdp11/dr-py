@@ -67,6 +67,7 @@ import { addQuietProbe } from '$lib/engine/quiet';
 import {
 	forgetViewPlacement,
 	forgetViewPlacements,
+	onViewsClosed,
 	onViewsMoved,
 	registerViewPlacement
 } from './replica.svelte';
@@ -919,6 +920,10 @@ onViewDiscarded(() => refreshView());
 // a staged model edit, an artifact. Eager for the same reason as the discard
 // tap: replica.svelte.ts imports nothing that reaches this module.
 onViewsMoved(() => recomputeWarnings());
+
+// The views gate shut: the engine's warnings no longer hold, so the server's
+// come back with the view.
+onViewsClosed(() => void refreshView());
 
 // Post-commit reconciliation: a commit that carried view
 // ops refetches server truth ONCE (concretizes tmp_ folder ids — no client

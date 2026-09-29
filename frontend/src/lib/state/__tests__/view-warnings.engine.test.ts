@@ -26,7 +26,7 @@ import {
 	refreshView,
 	stagePlaceElementsAt
 } from '../view.svelte';
-import { engineStore, type EngineStore } from './support/engine-store';
+import { engineStore, withWrongDigest, type EngineStore } from './support/engine-store';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
@@ -272,6 +272,75 @@ describe('the view warnings with the views on the engine', () => {
 		payloads.release();
 		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
 		expect(validations()).toBeGreaterThan(0);
+	});
+});
+
+describe('the view warnings as the views gate opens and closes', () => {
+	let heldSnapshot: Hold | null = null;
+
+	// A failed test must not leave the replica's download held.
+	afterEach(() => {
+		heldSnapshot?.release();
+		heldSnapshot = null;
+	});
+
+	/** A peer's commit with the wrong digest: the replica resyncs, its download held until `snapshot` is released. */
+	function resyncHeld(project: FakeProject) {
+		const snapshot = hold();
+		heldSnapshot = snapshot;
+		server.use(...project.handlers({ hold: snapshot }));
+		const committed = project.commit([]);
+		handReplicaFeed(JSON.parse(committed.eventText) as FeedEvent, withWrongDigest(committed));
+		return snapshot;
+	}
+
+	it("open from the replica reaching ready: the server's warnings, then the engine's, with one engine call", async () => {
+		const { project, validations } = await open('engine');
+		await refreshView();
+		await vi.waitFor(() => expect(validations()).toBe(1));
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+
+		const snapshot = resyncHeld(project);
+		await vi.waitFor(() => expect(engineSide('views')).toBe('server'));
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([SENTINEL]));
+		const before = validations();
+
+		snapshot.release();
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+		await answered();
+		expect(validations() - before).toBe(1);
+	});
+
+	it('open from the follower loading after the replica is ready: the server’s warnings, then the engine’s', async () => {
+		const payloads = hold();
+		const { validations } = await open('engine', { payloads });
+		await payloads.reached;
+		await refreshView();
+		expect(getViewWarnings()).toEqual([SENTINEL]);
+		expect(validations()).toBe(0);
+
+		payloads.release();
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+		await answered();
+		// The load's own hand-over and the `changed` of its artifacts each ask; one may run again after the other.
+		expect(validations()).toBeGreaterThan(0);
+		expect(validations()).toBeLessThanOrEqual(2);
+	});
+
+	it("close: the engine's warnings give way to the server's, with one view fetch", async () => {
+		const { project, gets, validations } = await open('engine');
+		await refreshView();
+		await vi.waitFor(() => expect(validations()).toBe(1));
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+		expect(gets).toEqual(['v1']);
+
+		const snapshot = resyncHeld(project);
+
+		await vi.waitFor(() => expect(engineSide('views')).toBe('server'));
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([SENTINEL]));
+		expect(gets).toEqual(['v1', 'v1']);
+		snapshot.release();
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
 	});
 });
 

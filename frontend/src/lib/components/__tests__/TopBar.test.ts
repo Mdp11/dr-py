@@ -64,6 +64,7 @@ import {
 } from '$lib/state';
 import { downloadModel } from '$lib/api/model-read';
 import { saveResponseToFile } from '$lib/util/fileSave';
+import { getLockNotice, setLockNotice } from '$lib/state/lock-notice.svelte';
 import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
 // The workspace tab store is deliberately NOT mocked (the `...actual` spread
 // keeps it real), so the menu item is asserted through the tab it opens.
@@ -99,6 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	resetConfirm();
+	setLockNotice(null);
 	resetArtifactEdits();
 	resetWorkspaceTabs();
 	document.body.innerHTML = '';
@@ -401,7 +403,7 @@ describe('TopBar', () => {
 
 		it('Export reports a download that fails while the file is written', async () => {
 			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
-			const failure = new Error('download failed');
+			const failure = new Error('boom');
 			vi.mocked(downloadModel).mockRejectedValueOnce(failure);
 			// As a picked file is written: the body piped into its writable.
 			vi.mocked(saveResponseToFile).mockImplementationOnce(async (response) => {
@@ -416,6 +418,7 @@ describe('TopBar', () => {
 			openModelMenu();
 			menuItem('Export')!.click();
 			await vi.waitFor(() => expect(logged).toHaveBeenCalledWith('Export failed', failure));
+			expect(getLockNotice()).toBe('Export failed: boom');
 
 			logged.mockRestore();
 			unmount(c);
@@ -439,6 +442,7 @@ describe('TopBar', () => {
 			await new Promise((r) => setTimeout(r, 0));
 
 			expect(logged).not.toHaveBeenCalled();
+			expect(getLockNotice()).toBeNull();
 
 			logged.mockRestore();
 			unmount(c);

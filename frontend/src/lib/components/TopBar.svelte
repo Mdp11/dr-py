@@ -31,7 +31,7 @@
 	} from '$lib/state';
 	import { downloadModel } from '$lib/api/model-read';
 	import { saveResponseToFile } from '$lib/util/fileSave';
-	import { getView } from '$lib/state';
+	import { getView, setLockNotice } from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
 	import {
 		AlertCircle,
@@ -178,6 +178,7 @@
 		} catch (err) {
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			console.error('Export failed', err);
+			setLockNotice(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 </script>
