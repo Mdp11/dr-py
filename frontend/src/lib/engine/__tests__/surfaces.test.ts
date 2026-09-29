@@ -16,7 +16,7 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, the two evaluations, the issues, the tables and the exports; all on the engine by default', () => {
+	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports and the metamodel; all but the metamodel on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
 		expect(SURFACES).toEqual([
 			...READ_SURFACES,
@@ -24,7 +24,8 @@ describe('the surface switches', () => {
 			'criteria',
 			'issues',
 			'tables',
-			'exports'
+			'exports',
+			'metamodel'
 		]);
 		expect(SURFACE_DEFAULTS).toEqual({
 			elements: 'engine',
@@ -36,7 +37,8 @@ describe('the surface switches', () => {
 			criteria: 'engine',
 			issues: 'engine',
 			tables: 'engine',
-			exports: 'engine'
+			exports: 'engine',
+			metamodel: 'server'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
@@ -49,6 +51,16 @@ describe('the surface switches', () => {
 			expect(readSurfaces(storing(`{"staging": "${staging}", "exports": "server"}`))).toEqual({
 				...SURFACE_DEFAULTS,
 				exports: 'server'
+			});
+		}
+	});
+
+	it('staging on the engine does not force the metamodel, and dr.surfaces moves it', () => {
+		expect(readSurfaces(storing('{"staging": "engine"}')).metamodel).toBe('server');
+		for (const staging of ['engine', 'legacy']) {
+			expect(readSurfaces(storing(`{"staging": "${staging}", "metamodel": "engine"}`))).toEqual({
+				...SURFACE_DEFAULTS,
+				metamodel: 'engine'
 			});
 		}
 	});
@@ -239,7 +251,7 @@ describe('the surface switches', () => {
 		}
 	});
 
-	it('anyEngineSurface says whether one surface is on the engine; issues only with staging there', () => {
+	it('anyEngineSurface says whether one surface is on the engine; issues and the metamodel only with staging there', () => {
 		const allServer = {
 			elements: 'server',
 			search: 'server',
@@ -250,7 +262,8 @@ describe('the surface switches', () => {
 			criteria: 'server',
 			issues: 'server',
 			tables: 'server',
-			exports: 'server'
+			exports: 'server',
+			metamodel: 'server'
 		} as const;
 		for (const staging of ['engine', 'legacy'] as const) {
 			const any = (surfaces: Record<string, string>) =>
@@ -262,6 +275,7 @@ describe('the surface switches', () => {
 			expect(any({ criteria: 'engine' })).toBe(true);
 			expect(any({ tables: 'engine' })).toBe(true);
 			expect(any({ exports: 'engine' })).toBe(true);
+			expect(any({ metamodel: 'engine' })).toBe(staging === 'engine');
 		}
 	});
 

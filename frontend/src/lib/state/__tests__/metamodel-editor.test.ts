@@ -21,7 +21,7 @@ import {
 } from '../metamodel-stage.svelte';
 import * as mmApi from '$lib/api/metamodel';
 import * as lockApi from '$lib/api/checkout';
-import { ConflictError } from '$lib/api/errors';
+import { ApiError, ConflictError, ValidationError } from '$lib/api/errors';
 import type { LockResponse, MetamodelDiff, RawMetamodel } from '$lib/api/types';
 
 /**
@@ -285,6 +285,24 @@ describe('previewMetamodelChanges', () => {
 		expect(v.previewCurrent).toBe(false);
 		// The stale diff is kept on screen, just no longer current.
 		expect(v.preview).toEqual(DIFF);
+	});
+
+	it('a 422 says the candidate is invalid; any other failure asks to try again', async () => {
+		stubLintOk();
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		const diff = vi
+			.spyOn(mmApi, 'diffMetamodel')
+			.mockRejectedValueOnce(new ValidationError(422, null, 'Invalid metamodel'))
+			.mockRejectedValueOnce(new ApiError(501, null, 'reaches a script'));
+		await initMetamodelEditor(PROJECT);
+		editMetamodelBuffer(`${BASE}p`);
+
+		await previewMetamodelChanges();
+		expect(getMetamodelEditor().previewError).toBe('The candidate metamodel is invalid.');
+
+		await previewMetamodelChanges();
+		expect(getMetamodelEditor().previewError).toBe('Preview failed; try again.');
+		expect(diff).toHaveBeenCalledTimes(2);
 	});
 });
 

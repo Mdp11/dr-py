@@ -20,6 +20,7 @@
 		initMetamodelDiagram,
 		initMetamodelEditor,
 		initMetamodelPanel,
+		metamodelIncludesStaged,
 		previewMetamodelChanges,
 		retryMetamodelLease,
 		setMetamodelView
@@ -38,6 +39,8 @@
 	/** First message-only lint error (no line anchor) for the strip below the
 	 * editor; positioned errors render in the gutter instead. */
 	const stripError = $derived(ed.lintErrors.find((e) => e.line === null) ?? null);
+	/** A preview on the engine reads the working copy, staged edits included. */
+	const previewHoldsStaged = $derived(metamodelIncludesStaged());
 
 	/** `as const` so the ids stay the literal union `setMetamodelView` takes. */
 	const SURFACES = [
@@ -222,6 +225,15 @@
 				{#if !ed.previewCurrent}
 					<p class="mb-1 text-[10px] text-muted-foreground/70">
 						The buffer changed since this preview — re-run Preview before committing.
+					</p>
+				{/if}
+				{#if previewHoldsStaged}
+					<p
+						data-testid="metamodel-staged-note"
+						class="mb-1 text-[11px] text-muted-foreground/70"
+						title="The preview holds the edits staged and not yet committed"
+					>
+						Includes staged changes
 					</p>
 				{/if}
 				<MetamodelPreviewPanel diff={ed.preview} />

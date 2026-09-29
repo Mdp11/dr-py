@@ -407,9 +407,15 @@ export const RulesParseSchema = z.object({
 });
 export type RulesParseOut = z.infer<typeof RulesParseSchema>;
 
+/**
+ * `POST /metamodel/lint`'s body. `document` is the parsed metamodel as
+ * `GET /metamodel` serves it — what the engine's `open` takes — and `null`
+ * when `ok` is false.
+ */
 export const MetamodelLintSchema = z.object({
 	ok: z.boolean(),
-	errors: z.array(MetamodelLintErrorSchema).default([])
+	errors: z.array(MetamodelLintErrorSchema).default([]),
+	document: z.unknown().nullable().optional()
 });
 export type MetamodelLint = z.infer<typeof MetamodelLintSchema>;
 

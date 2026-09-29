@@ -15,7 +15,8 @@ export const SURFACES = [
 	'criteria',
 	'issues',
 	'tables',
-	'exports'
+	'exports',
+	'metamodel'
 ] as const satisfies readonly Surface[];
 
 /** The side each surface takes unless `localStorage['dr.surfaces']` says otherwise. */
@@ -29,7 +30,8 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	criteria: 'engine',
 	issues: 'engine',
 	tables: 'engine',
-	exports: 'engine'
+	exports: 'engine',
+	metamodel: 'server'
 });
 
 /** Where the user's model edits are staged: the replica's working copy, or the store's own buffer. */
@@ -48,9 +50,9 @@ const STORAGE_KEY = 'dr.surfaces';
  * engine puts every read surface on the engine, whatever the object says of
  * it: a staged edit is visible only in the replica's answers. The server
  * never evaluates staged edits, so `navigation`, `criteria`, `tables` and
- * `exports` keep their own switches, and so does `issues`, which the server
- * answers for staged edits it is sent. No storage, a storage that throws or a text
- * that is not a JSON object give the defaults.
+ * `exports` keep their own switches, and so do `issues` and `metamodel`,
+ * which the server answers for staged edits it is sent. No storage, a
+ * storage that throws or a text that is not a JSON object give the defaults.
  */
 export function readSwitches(storage?: Pick<Storage, 'getItem'>): Switches {
 	const switches: Switches = { surfaces: { ...SURFACE_DEFAULTS }, staging: STAGING_DEFAULT };
@@ -84,13 +86,17 @@ export function readSurfaces(storage?: Pick<Storage, 'getItem'>): Record<Surface
 	return readSwitches(storage).surfaces;
 }
 
+/** The surfaces the engine answers only with staging on it: they read the issues of the working copy. */
+const STAGED_ONLY: ReadonlySet<Surface> = new Set(['issues', 'metamodel']);
+
 /**
- * Whether some surface can be answered by the engine. `issues` counts only
- * with staging on the engine: the legacy buffer's edits are not in the
- * replica, so its issues are always the server's.
+ * Whether some surface can be answered by the engine. `issues` and
+ * `metamodel` count only with staging on the engine: the legacy buffer's
+ * edits are not in the replica, so its issues are always the server's.
  */
 export function anyEngineSurface({ surfaces, staging }: Readonly<Switches>): boolean {
 	return SURFACES.some(
-		(surface) => surfaces[surface] === 'engine' && (surface !== 'issues' || staging === 'engine')
+		(surface) =>
+			surfaces[surface] === 'engine' && (!STAGED_ONLY.has(surface) || staging === 'engine')
 	);
 }

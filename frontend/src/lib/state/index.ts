@@ -205,6 +205,7 @@ export {
 	getReplicaStatus,
 	isReplicaBlocked,
 	isReplicaRetrying,
+	metamodelIncludesStaged,
 	registerViewPlacement,
 	replicaGate,
 	replicaMetamodelAdopted,

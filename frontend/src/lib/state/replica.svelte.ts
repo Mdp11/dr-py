@@ -247,6 +247,12 @@ function installSeam(sync: ReplicaSync): void {
 	const switches = (_switches ??= readSwitches());
 	const surfaces = switches.surfaces;
 	const token = _seamToken;
+	// A store swept part-way is not the model's list, and until the artifacts
+	// are held the engine knows none of the rule sets its list must carry.
+	const issues = () =>
+		getStagingSide() === 'engine' &&
+		sync.status().seeded &&
+		(_follower?.follower.loaded() ?? false);
 	const gates: SurfaceGates = {
 		// A navigation may name artifacts: the engine answers once it holds them.
 		navigation: () => _follower?.follower.loaded() ?? false,
@@ -254,12 +260,9 @@ function installSeam(sync: ReplicaSync): void {
 		tables: () => _follower?.follower.loaded() ?? false,
 		// And an export, through its tables or its exporter.
 		exports: () => _follower?.follower.loaded() ?? false,
-		// A store swept part-way is not the model's list, and until the artifacts
-		// are held the engine knows none of the rule sets its list must carry.
-		issues: () =>
-			getStagingSide() === 'engine' &&
-			sync.status().seeded &&
-			(_follower?.follower.loaded() ?? false)
+		issues,
+		// A candidate is diffed against that list.
+		metamodel: issues
 	};
 	installEngineSeam(createEngineSeam(sync, surfaces, undefined, gates));
 	_removeQuietProbe = addQuietProbe(() => sync.settled());
@@ -445,6 +448,19 @@ export function exportsIncludeStaged(): boolean {
 	void _status;
 	void _followerEpoch;
 	if (engineSide('exports') !== 'engine') return false;
+	return anyStaged() || getStagedArtifactDepth() > 0;
+}
+
+/**
+ * Whether a metamodel preview now would hold staged edits: the metamodel
+ * previews are on the engine and the replica holds staged model edits or
+ * staged artifacts. The server's diff reads committed state only. Reactive.
+ */
+export function metamodelIncludesStaged(): boolean {
+	// What the seam's side reads, tracked: the status and the follower's load.
+	void _status;
+	void _followerEpoch;
+	if (engineSide('metamodel') !== 'engine') return false;
 	return anyStaged() || getStagedArtifactDepth() > 0;
 }
 

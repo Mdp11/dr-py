@@ -1,8 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, it, expect, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import type { Op } from '$lib/state/ops';
+import { fakeProject } from '$lib/engine/__tests__/support/project-server';
+import type { ModelOp, Op } from '$lib/state/ops';
 import { acquireLocks, previewCommit, commitChanges, openProject } from '../checkout';
 import { getCurrentUserId } from '../client';
+import type { ShadowProbe } from '../engine-route';
+import { ValidationError } from '../errors';
 import {
 	issuesEngine,
 	rename,
@@ -270,14 +273,158 @@ describe('previewCommit on the engine', () => {
 		});
 	});
 
-	it('a rebind sends every op to the server', async () => {
-		const engine = await issuesEngine(made);
-		const { ops, batchIds } = await staged(engine);
-		const all: Op[] = [{ kind: 'metamodel.rebind', blob: 'x' }, ...ops, artifactOp];
+	describe('with a rebind', () => {
+		const rebind: Op = { kind: 'metamodel.rebind', blob: '# candidate\n' };
+		const moveNode: Op = { kind: 'metamodel.move_node', node: 'Organization', pos: { x: 1, y: 2 } };
 
-		await previewCommit(0, all, undefined, { strict: false, batchIds });
+		it('previews locally under the linted document, the move_node rest merged from the server', async () => {
+			const project = fakeProject();
+			const engine = await issuesEngine(made, {
+				project,
+				surfaces: { metamodel: 'engine' },
+				lint: () => ({ ok: true, errors: [], document: project.doc })
+			});
+			const { ops, batchIds } = await staged(engine);
+			const bodies: unknown[] = [];
+			server.use(
+				http.post(`${project.baseUrl}/commits/preview`, async ({ request }) => {
+					bodies.push(await request.json());
+					return HttpResponse.json({
+						conformance_error_count: 2,
+						structural_blockers: [blocker],
+						issues: [blocker],
+						would_block: true
+					});
+				})
+			);
 
-		expect(engine.requests).toEqual([{ route: 'preview', body: { base_rev: 0, ops: all } }]);
+			const preview = await previewCommit(0, [rebind, ...ops, moveNode], undefined, {
+				strict: true,
+				batchIds
+			});
+
+			expect(
+				engine.over.calls.filter((call) => call.method === 'previewCommit').map((c) => c.params)
+			).toEqual([
+				{ base_rev: 0, batch_ids: batchIds, strict: true, rebind: { metamodel: project.doc } }
+			]);
+			expect(bodies).toEqual([{ base_rev: 0, ops: [moveNode] }]);
+			expect(engine.requests).toEqual([{ route: 'lint', body: rebind.blob }]);
+			expect(preview).toEqual({
+				conformance_error_count: 3,
+				structural_blockers: [blocker],
+				issues: [tooLong, blocker],
+				would_block: true
+			});
+		});
+
+		it("the candidate is the lint's document", async () => {
+			const engine = await issuesEngine(made, { surfaces: { metamodel: 'engine' } });
+			const { ops, batchIds } = await staged(engine);
+
+			const preview = await previewCommit(0, [rebind, ...ops], undefined, {
+				strict: false,
+				batchIds
+			});
+
+			expect(preview.issues).not.toContainEqual(tooLong);
+			expect(preview.would_block).toBe(false);
+			expect(engine.requests).toEqual([{ route: 'lint', body: rebind.blob }]);
+		});
+
+		it("without the staged batches named it is the server's whole", async () => {
+			const engine = await issuesEngine(made, { surfaces: { metamodel: 'engine' } });
+			const { ops } = await staged(engine);
+			const all = [rebind, ...ops, moveNode];
+
+			await previewCommit(0, all);
+
+			expect(engine.requests).toEqual([{ route: 'preview', body: { base_rev: 0, ops: all } }]);
+			expect(engine.over.methods()).not.toContain('previewCommit');
+		});
+
+		it("with the switch on the server it is the server's whole", async () => {
+			const engine = await issuesEngine(made, { surfaces: { metamodel: 'server' } });
+			const { ops, batchIds } = await staged(engine);
+			const all = [rebind, ...ops, artifactOp];
+
+			await previewCommit(0, all, undefined, { strict: false, batchIds });
+
+			expect(engine.requests).toEqual([{ route: 'preview', body: { base_rev: 0, ops: all } }]);
+			expect(engine.over.methods()).not.toContain('previewCommit');
+		});
+
+		it("an invalid blob answers the server's 422", async () => {
+			const engine = await issuesEngine(made, {
+				surfaces: { metamodel: 'engine' },
+				lint: () => ({ ok: false, errors: [{ message: 'bad', line: 1, column: 1 }] })
+			});
+			const { ops, batchIds } = await staged(engine);
+			const all = [rebind, ...ops];
+			server.use(
+				http.post(`${engine.project.baseUrl}/commits/preview`, () =>
+					HttpResponse.json({ detail: 'metamodel: bad at line 1' }, { status: 422 })
+				)
+			);
+
+			const failure = await previewCommit(0, all, undefined, { strict: false, batchIds }).catch(
+				(error: unknown) => error
+			);
+
+			expect(failure).toBeInstanceOf(ValidationError);
+			expect(failure).toMatchObject({ status: 422, message: 'metamodel: bad at line 1' });
+			expect(engine.over.methods()).not.toContain('previewCommit');
+		});
+
+		it('a staged create beside it is previewed locally, its temp id named, and never shadowed', async () => {
+			const project = fakeProject();
+			const probes: ShadowProbe[] = [];
+			const engine = await issuesEngine(made, {
+				project,
+				surfaces: { metamodel: 'engine' },
+				lint: () => ({ ok: true, errors: [], document: project.doc }),
+				shadow: (probe) => void probes.push(probe)
+			});
+			const create: ModelOp = {
+				kind: 'create_element',
+				temp_id: 'tmp_new',
+				type_name: 'Organization',
+				properties: { name: TOO_LONG }
+			};
+			const batchIds = [await engine.stage([create])];
+
+			const preview = await previewCommit(0, [rebind, create], undefined, {
+				strict: false,
+				batchIds
+			});
+
+			expect(engine.over.methods()).toContain('previewCommit');
+			expect(engine.requests.map((request) => request.route)).toEqual(['lint']);
+			expect(preview.issues).toContainEqual(expect.objectContaining({ message: TOO_LONG_MESSAGE }));
+			expect(
+				preview.issues.find((issue) => issue.message === TOO_LONG_MESSAGE)!.target_ids[0]
+			).toMatch(/^tmp_/);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(probes).toEqual([]);
+		});
+
+		it('without a create it is shadowed while staged', async () => {
+			const probes: ShadowProbe[] = [];
+			const engine = await issuesEngine(made, {
+				surfaces: { metamodel: 'engine' },
+				shadow: (probe) => void probes.push(probe)
+			});
+			const { ops, batchIds } = await staged(engine);
+
+			await previewCommit(0, [rebind, ...ops], undefined, { strict: false, batchIds });
+
+			expect(probes).toHaveLength(1);
+			expect(probes[0]).toMatchObject({
+				surface: 'metamodel',
+				method: 'previewCommit',
+				whileStaged: true
+			});
+		});
 	});
 
 	it('without the staged batches named, the server previews every op', async () => {

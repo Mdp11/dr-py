@@ -476,6 +476,79 @@ describe('createShadow', () => {
 		});
 	});
 
+	describe('metamodel', () => {
+		const issue = (message: string, check = 'facets') => ({
+			severity: 'error',
+			message,
+			target_ids: [message.slice(0, 4)],
+			category: 'conformance',
+			check,
+			origin: 'on_server'
+		});
+		const a = issue('e-1a: bad');
+		const b = issue('e-2b: bad', 'multiplicity');
+		const c = issue('e-3c: bad');
+		const structural = {
+			enums: { added: [], removed: [], changed: [] },
+			element_types: { added: [], removed: [], changed: [] },
+			relationship_types: { added: [], removed: [], changed: [] }
+		};
+		const diff = (nowFailing: unknown[], nowPassing: unknown[]) => ({
+			now_failing: nowFailing,
+			now_passing: nowPassing,
+			unchanged_count: 4,
+			current_error_count: 6,
+			candidate_error_count: 6,
+			structural
+		});
+
+		async function differs(
+			method: string,
+			engineValue: unknown,
+			serverValue: unknown
+		): Promise<boolean> {
+			const report = vi.fn();
+			await run(
+				{
+					surface: 'metamodel',
+					method,
+					params: {},
+					engine: { ok: true, value: engineValue },
+					again: () => Promise.resolve(engineValue),
+					server: () => Promise.resolve(serverValue)
+				},
+				{},
+				report
+			);
+			return report.mock.calls.length > 0;
+		}
+
+		it('a diff compares its two lists whatever their order', async () => {
+			expect(await differs('candidateIssues', diff([a, b], [c, a]), diff([b, a], [a, c]))).toBe(
+				false
+			);
+		});
+
+		it('a diff differing in one issue is reported', async () => {
+			const other = { ...b, check: 'facets' };
+			expect(await differs('candidateIssues', diff([a, b], [c]), diff([a, other], [c]))).toBe(true);
+			expect(await differs('candidateIssues', diff([a, b], [c]), diff([a, b], [c, a]))).toBe(true);
+		});
+
+		it('a rebind preview compares as an issues preview does', async () => {
+			const preview = (blockers: unknown[], issues: unknown[]) => ({
+				conformance_error_count: 2,
+				structural_blockers: blockers,
+				issues,
+				would_block: false
+			});
+			expect(
+				await differs('previewCommit', preview([a, b], [a, b, c]), preview([b, a], [c, b, a]))
+			).toBe(false);
+			expect(await differs('previewCommit', preview([], [a, b]), preview([], [a, c]))).toBe(true);
+		});
+	});
+
 	describe('a probe compared while staged', () => {
 		const conflict = () => errorForStatus(409, { detail: 'stale staged batches' }, 'stale');
 

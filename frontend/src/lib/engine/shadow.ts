@@ -156,9 +156,17 @@ function same(surface: Surface, a: Outcome, b: Outcome): boolean {
  * `structural_blockers` and `issues`, and `rules_status.skipped`, which
  * lists rule sets in an order the server's collation decides. A body
  * `truncated` at the cap compares without its `issues`: each side keeps its
- * own subset.
+ * own subset. `metamodel` compares a diff's `now_failing` and `now_passing`
+ * as multisets, and a rebind preview as `issues` compares a preview.
  */
 function present(surface: Surface, value: unknown): unknown {
+	if (surface === 'metamodel') {
+		if (!isRecord(value) || !Object.hasOwn(value, 'now_failing')) return present('issues', value);
+		const lists = Object.entries(value).map(([key, item]) =>
+			DIFF_LISTS.has(key) && Array.isArray(item) ? [key, byIssueKey(item)] : [key, item]
+		);
+		return Object.fromEntries(lists);
+	}
 	if (surface === 'issues') {
 		if (Array.isArray(value)) return byIssueKey(value);
 		if (!isRecord(value)) return value;
@@ -177,6 +185,7 @@ function present(surface: Surface, value: unknown): unknown {
 }
 
 const ISSUE_LISTS = new Set(['issues', 'structural_blockers']);
+const DIFF_LISTS = new Set(['now_failing', 'now_passing']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);

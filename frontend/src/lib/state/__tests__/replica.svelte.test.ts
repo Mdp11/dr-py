@@ -47,6 +47,7 @@ import {
 	configureReplica,
 	dismissReplicaNotice,
 	exportsIncludeStaged,
+	metamodelIncludesStaged,
 	forgetViewPlacement,
 	forgetViewPlacements,
 	getReplicaNotice,
@@ -1821,6 +1822,73 @@ describe('the artifact follower', () => {
 			expect(engineSide('exports')).toBe('server');
 			expect(exportsIncludeStaged()).toBe(false);
 		});
+
+		it("the metamodel's staged note follows the issues' gate and what is staged", async () => {
+			localStorage.setItem('dr.surfaces', JSON.stringify({ metamodel: 'engine' }));
+			const project = fakeProject();
+			let release!: () => void;
+			const first = new Promise<void>((resolve) => (release = resolve));
+			serve(project, [first], () => Promise.reject(new Error('not asked')));
+			const replica = realReplica();
+			let note: (() => boolean) | undefined;
+			const dispose = $effect.root(() => {
+				const derived = $derived(metamodelIncludesStaged());
+				note = () => derived;
+			});
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.seeded);
+			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
+
+			try {
+				flushSync();
+				expect(engineSide('metamodel')).toBe('server');
+				expect(note!()).toBe(false);
+			} finally {
+				release();
+			}
+
+			await vi.waitFor(() => expect(engineSide('metamodel')).toBe('engine'));
+			flushSync();
+			expect(note!()).toBe(true);
+			clearStagedArtifacts();
+			flushSync();
+			expect(note!()).toBe(false);
+			emit(rename('e_000001', 'staged name'));
+			await stagedSettled();
+			flushSync();
+			expect(note!()).toBe(true);
+			revertAllStaged();
+			await stagedSettled();
+			flushSync();
+			expect(note!()).toBe(false);
+
+			stopReplica();
+			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
+			flushSync();
+			expect(note!()).toBe(false);
+			dispose();
+		});
+
+		it.each([{ metamodel: 'server' }, { metamodel: 'engine', staging: 'legacy' }])(
+			'with %o the staged note of the metamodel never shows',
+			async (switches) => {
+				localStorage.setItem('dr.surfaces', JSON.stringify(switches));
+				const project = fakeProject();
+				serve(project, [], () => Promise.reject(new Error('not asked')));
+				const replica = realReplica();
+				setActiveProject('p');
+				startReplica();
+				await replica.until((s) => s.seeded);
+				await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+
+				stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
+
+				expect(engineSide('metamodel')).toBe('server');
+				expect(metamodelIncludesStaged()).toBe(false);
+				clearStagedArtifacts();
+			}
+		);
 
 		it('a failed first load is asked once more, then the engine answers', async () => {
 			const project = fakeProject();

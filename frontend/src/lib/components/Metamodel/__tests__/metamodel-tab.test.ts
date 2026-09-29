@@ -15,6 +15,8 @@ import {
 	stageNodeMove
 } from '../../../state/metamodel-stage.svelte';
 import { setActiveProject } from '../../../state/active-project.svelte';
+import { resetArtifactEdits, stageArtifactCreate } from '../../../state/artifact-edits.svelte';
+import { installEngineSeam } from '$lib/api/engine-route';
 import * as mmApi from '$lib/api/metamodel';
 import * as lockApi from '$lib/api/checkout';
 import type { LockResponse, MetamodelDiff } from '$lib/api/types';
@@ -254,6 +256,64 @@ describe('MetamodelTab', () => {
 			// the session and every peer locked out of the metamodel.
 			await vi.waitFor(() => expect(release).toHaveBeenCalledWith('t-mm', undefined));
 			expect(isCheckedOutByMe('mm')).toBe(false);
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('the staged note over the preview', () => {
+	afterEach(() => {
+		installEngineSeam(null);
+		resetArtifactEdits();
+	});
+
+	const note = () => document.querySelector('[data-testid="metamodel-staged-note"]');
+	const seamOn = (side: 'engine' | 'server') =>
+		installEngineSeam({
+			side: (surface) => (surface === 'metamodel' ? side : 'server'),
+			call: () => Promise.reject(new Error('not called')),
+			gone: () => false
+		});
+
+	async function previewed(): Promise<ReturnType<typeof mount>> {
+		setProjectInfo({ role: 'owner', lockTtlSeconds: 300 });
+		vi.spyOn(mmApi, 'lintMetamodel').mockResolvedValue({ ok: true, errors: [] });
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		vi.spyOn(mmApi, 'diffMetamodel').mockResolvedValue(DIFF);
+		const c = mount(MetamodelTab, { target: document.body });
+		await settle();
+		editMetamodelBuffer(`${BASE}candidate: true\n`);
+		await previewMetamodelChanges();
+		await settle();
+		return c;
+	}
+
+	it('shows while a preview now would include staged changes, and hides when it would not', async () => {
+		seamOn('engine');
+		let c = await previewed();
+		try {
+			expect(getMetamodelEditor().preview).toEqual(DIFF);
+			expect(note()).toBeNull();
+
+			stageArtifactCreate('navigation', 'Staged', { kind: 'path' }, null);
+			flushSync();
+			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
+
+			resetArtifactEdits();
+			flushSync();
+			expect(note()).toBeNull();
+		} finally {
+			unmount(c);
+		}
+
+		seamOn('server');
+		stageArtifactCreate('navigation', 'Staged', { kind: 'path' }, null);
+		c = await previewed();
+		try {
+			expect(getMetamodelEditor().preview).toEqual(DIFF);
+			expect(note()).toBeNull();
 		} finally {
 			unmount(c);
 		}

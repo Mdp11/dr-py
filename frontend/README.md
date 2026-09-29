@@ -2675,7 +2675,12 @@ Rebind button — the buffer is staged commit CONTENT and lands through the same
   failed lint call clears the gutter rather than blocking anything.
 - **Preview** — on demand, never on a timer: `POST /metamodel/diff` sandboxes
   the candidate and returns which model issues would start/stop failing plus a
-  structural diff (`MetamodelPreviewPanel`). The result is recorded **against
+  structural diff (`MetamodelPreviewPanel`). With the `metamodel` surface on
+  the engine (`lib/engine/README.md`) the replica answers the model half over
+  the working copy and `POST /metamodel/structural-diff` the document half,
+  and `metamodel-staged-note` ("Includes staged changes") shows above the
+  panel while `metamodelIncludesStaged()` holds; an invalid candidate is
+  still "The candidate metamodel is invalid.". The result is recorded **against
   the exact buffer it was computed for** (`previewCurrent`), so a preview goes
   stale the moment the next character is typed and the panel says so. Preview
   is advisory — nothing gates commit on having run one.
