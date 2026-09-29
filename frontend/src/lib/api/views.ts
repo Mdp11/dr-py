@@ -7,9 +7,13 @@
  */
 import { z } from 'zod';
 import { apiFetch, type ClientConfig } from './client';
+import { asSent, route } from './engine-route';
 import {
+	IssueListSchema,
 	ViewStateResponseSchema,
 	ViewSummarySchema,
+	type Issue,
+	type View,
 	type ViewStateResponse,
 	type ViewSummary
 } from './types';
@@ -27,6 +31,25 @@ export function getView(viewId: string, cfg?: ClientConfig): Promise<ViewStateRe
 		`/views/${encodeURIComponent(viewId)}`,
 		{ method: 'GET', schema: ViewStateResponseSchema },
 		cfg
+	);
+}
+
+/**
+ * The warnings of `view`, the active view `viewId` as it is staged. On the
+ * engine they are computed over `view`, the working model and the working
+ * artifacts; the server's are those of `GET /views/{id}`, over the committed
+ * view, model and artifacts.
+ */
+export function viewWarnings(viewId: string, view: View, cfg?: ClientConfig): Promise<Issue[]> {
+	return route(
+		'views',
+		cfg,
+		(call) =>
+			call<unknown>('validateView', { view: asSent(view) }).then((answer) =>
+				IssueListSchema.parse(answer)
+			),
+		() => getView(viewId, cfg).then((response) => response.warnings),
+		{ shadow: 'unstaged' }
 	);
 }
 

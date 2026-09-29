@@ -16,7 +16,7 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports, the metamodel and the download; every one but the download on the engine by default', () => {
+	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports, the metamodel, the download and the views; every one but the download and the views on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
 		expect(SURFACES).toEqual([
 			...READ_SURFACES,
@@ -26,7 +26,8 @@ describe('the surface switches', () => {
 			'tables',
 			'exports',
 			'metamodel',
-			'download'
+			'download',
+			'views'
 		]);
 		expect(SURFACE_DEFAULTS).toEqual({
 			elements: 'engine',
@@ -40,7 +41,8 @@ describe('the surface switches', () => {
 			tables: 'engine',
 			exports: 'engine',
 			metamodel: 'engine',
-			download: 'server'
+			download: 'server',
+			views: 'server'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
@@ -75,6 +77,16 @@ describe('the surface switches', () => {
 			expect(readSurfaces(storing(`{"staging": "${staging}", "download": "engine"}`))).toEqual({
 				...SURFACE_DEFAULTS,
 				download: 'engine'
+			});
+		}
+	});
+
+	it('staging on the engine does not force the views, and dr.surfaces moves them', () => {
+		for (const staging of ['engine', 'legacy']) {
+			expect(readSurfaces(storing(`{"staging": "${staging}"}`)).views).toBe('server');
+			expect(readSurfaces(storing(`{"staging": "${staging}", "views": "engine"}`))).toEqual({
+				...SURFACE_DEFAULTS,
+				views: 'engine'
 			});
 		}
 	});
@@ -265,7 +277,7 @@ describe('the surface switches', () => {
 		}
 	});
 
-	it('anyEngineSurface says whether one surface is on the engine; issues and the metamodel only with staging there', () => {
+	it('anyEngineSurface says whether one surface is on the engine; issues, the metamodel and the views only with staging there', () => {
 		const allServer = {
 			elements: 'server',
 			search: 'server',
@@ -278,7 +290,8 @@ describe('the surface switches', () => {
 			tables: 'server',
 			exports: 'server',
 			metamodel: 'server',
-			download: 'server'
+			download: 'server',
+			views: 'server'
 		} as const;
 		for (const staging of ['engine', 'legacy'] as const) {
 			const any = (surfaces: Record<string, string>) =>
@@ -292,6 +305,7 @@ describe('the surface switches', () => {
 			expect(any({ exports: 'engine' })).toBe(true);
 			expect(any({ metamodel: 'engine' })).toBe(staging === 'engine');
 			expect(any({ download: 'engine' })).toBe(true);
+			expect(any({ views: 'engine' })).toBe(staging === 'engine');
 		}
 	});
 

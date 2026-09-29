@@ -12,7 +12,8 @@
  * set with the server's parse of its YAML. With the issues on
  * the engine, the live issue list is refetched whenever the replica's issue
  * store moves; with the tables on the engine, the open tables re-page
- * whenever what they read moves.
+ * whenever what they read moves, and with the views on the engine, the view
+ * store recomputes the active view's warnings whenever what they read moves.
  */
 
 import type { WireBatch } from '$engine';
@@ -61,6 +62,7 @@ import {
 } from './model-engine.svelte';
 import { markStructureChanged, scheduleIssuesRefetch } from './model-shared.svelte';
 import { journeyReplica } from './open-journey';
+import { getStagedViewDepth } from './view-edits.svelte';
 
 let _status = $state.raw<ReplicaStatus>(OFF);
 let _sync: ReplicaSync | null = null;
@@ -89,6 +91,12 @@ let _offTablesChanged: (() => void) | null = null;
 const _tablesListeners = new Set<() => void>();
 /** The last `changed` tuple the tables followed, on the engine side. */
 let _tablesSeen: string | null = null;
+/** Unsubscribes the view warnings' recompute from the sync's `changed` events. */
+let _offViewsChanged: (() => void) | null = null;
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
+const _viewsListeners = new Set<() => void>();
+/** The last `changed` tuple the view warnings followed, on the engine side. */
+let _viewsSeen: string | null = null;
 /** The sync reported `off` since its last `ready`: the tables went to the server meanwhile. */
 let _offSinceReady = false;
 /** Moves whenever a follower's artifacts land or it stops: what the seam's artifact gates read is tracked through it. */
@@ -127,9 +135,12 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			if (_sync !== made) return;
 			const previousPhase = _status.phase;
 			const issuesWereOpen = issuesOnEngine(_status);
+			const viewsWereOpen = viewsOnEngine(_status);
 			setStatus(status);
 			// The live list was the server's until now: the engine's replaces it.
 			if (!issuesWereOpen && issuesOnEngine(status)) scheduleIssuesRefetch();
+			// So were the view warnings, over the committed view.
+			if (!viewsWereOpen && viewsOnEngine(status)) viewsMoved();
 			observe?.(status);
 			// Only `opening`: `resyncing` also reports progress, but a re-bootstrap
 			// is not the journey's open, and `ready`'s own `verify` progress is not
@@ -224,6 +235,17 @@ function issuesOnEngine(status: ReplicaStatus): boolean {
 	);
 }
 
+/** Whether the view warnings are the engine's at `status`: their switch says so and the issues' gate is open. */
+function viewsOnEngine(status: ReplicaStatus): boolean {
+	return (
+		_switches !== null &&
+		_switches.surfaces.views === 'engine' &&
+		stagingOnEngine(status) &&
+		status.seeded &&
+		(_follower?.follower.loaded() ?? false)
+	);
+}
+
 function stagingOnEngine(status: ReplicaStatus): boolean {
 	if (_switches === null || _switches.staging !== 'engine') return false;
 	return status.phase !== 'off' && status.phase !== 'server';
@@ -235,12 +257,12 @@ function _anyEngine(): boolean {
 }
 
 /**
- * Routes the read surfaces through `sync`; navigations, tables and issues
- * only once the follower has loaded the artifacts. In dev, with `dr.shadow` set, the
- * seam is installed again with a shadow once that module has loaded, idle
- * while the model store's engine half has an edit staged, an artifact entry
- * is staged, or the follower still lays a commit's entries over the
- * committed artifacts; a build holds none of it.
+ * Routes the read surfaces through `sync`; navigations, tables, issues and
+ * view warnings only once the follower has loaded the artifacts. In dev, with
+ * `dr.shadow` set, the seam is installed again with a shadow once that module
+ * has loaded, idle while the model store's engine half has an edit staged, an
+ * artifact entry or a view op is staged, or the follower still lays a
+ * commit's entries over the committed artifacts; a build holds none of it.
  */
 function installSeam(sync: ReplicaSync): void {
 	uninstallSeam();
@@ -262,7 +284,9 @@ function installSeam(sync: ReplicaSync): void {
 		exports: () => _follower?.follower.loaded() ?? false,
 		issues,
 		// A candidate is diffed against that list.
-		metamodel: issues
+		metamodel: issues,
+		// A view's warnings name the artifacts it places.
+		views: issues
 	};
 	installEngineSeam(createEngineSeam(sync, surfaces, undefined, gates));
 	_removeQuietProbe = addQuietProbe(() => sync.settled());
@@ -276,6 +300,7 @@ function installSeam(sync: ReplicaSync): void {
 					staged: () =>
 						anyStaged() ||
 						getStagedArtifactDepth() > 0 ||
+						getStagedViewDepth() > 0 ||
 						(_follower?.follower.hasOverlay() ?? false),
 					report: (line) => console.error(line)
 				});
@@ -327,6 +352,7 @@ export function startReplica(): void {
 	if (_switches?.staging === 'engine') attachEngine(engineHandle(sync));
 	followIssues(sync);
 	followTables(sync);
+	followViews(sync);
 	sync.open(projectId);
 	// Before the follower mirrors the buffer: one staged in another project is dropped.
 	bindStagedArtifacts(projectId);
@@ -396,6 +422,46 @@ function stopFollowingTables(): void {
 }
 
 /**
+ * `listener` is called whenever what the view warnings on the engine read
+ * have moved: the replica's committed rev, its staged edits or its
+ * artifacts, or the gate opening on them. The returned function unsubscribes.
+ */
+export function onViewsMoved(listener: () => void): () => void {
+	_viewsListeners.add(listener);
+	return () => {
+		_viewsListeners.delete(listener);
+	};
+}
+
+/**
+ * With the view warnings on the engine, a `changed` whose `rev`,
+ * `staged_version` or `artifacts_version` moved tells the `onViewsMoved`
+ * listeners; one heard while they are the server's is not remembered.
+ */
+function followViews(sync: ReplicaSync): void {
+	stopFollowingViews();
+	_viewsSeen = null;
+	_offViewsChanged = sync.on('changed', (event) => {
+		if (engineSide('views') !== 'engine') return;
+		const at = `${event.rev}:${event.staged_version}:${event.artifacts_version}`;
+		if (at === _viewsSeen) return;
+		_viewsSeen = at;
+		viewsMoved();
+	});
+}
+
+/** Tells the `onViewsMoved` listeners, while the view warnings are on the engine. */
+function viewsMoved(): void {
+	if (engineSide('views') !== 'engine') return;
+	for (const listener of [..._viewsListeners]) listener();
+}
+
+function stopFollowingViews(): void {
+	_offViewsChanged?.();
+	_offViewsChanged = null;
+}
+
+/**
  * A follower for `projectId`, unless one follows it already. Its fetches are
  * scoped to that project whatever project is active by the time they go.
  */
@@ -409,12 +475,13 @@ function follow(sync: ReplicaSync, projectId: string): void {
 		staged: stagedArtifactsForEngine,
 		parser: createRulesParser((yaml) => parseRules(yaml, cfg)),
 		pause: () => new Promise<void>((resolve) => setTimeout(resolve, LOAD_RETRY_MS)),
-		// The issues and tables gates open here too: the server's list and pages,
-		// answered until now, hold none of the staged edits.
+		// The issues, tables and views gates open here too: the server's list,
+		// pages and warnings, answered until now, hold none of the staged edits.
 		onLoaded: () => {
 			_followerEpoch += 1;
 			if (issuesOnEngine(_status)) scheduleIssuesRefetch();
 			tablesMoved();
+			viewsMoved();
 		}
 	});
 	// A shadow re-test waits out a payload fetch or a rules parse in flight, which may change what it reads.
@@ -469,6 +536,7 @@ export function stopReplica(): void {
 	uninstallSeam();
 	stopFollowingIssues();
 	stopFollowingTables();
+	stopFollowingViews();
 	detachEngine();
 	_placedViews.clear();
 	stopFollower();
@@ -616,6 +684,7 @@ export function resetReplica(): void {
 	uninstallSeam();
 	stopFollowingIssues();
 	stopFollowingTables();
+	stopFollowingViews();
 	detachEngine();
 	_switches = null;
 	_placedViews.clear();

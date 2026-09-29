@@ -65,6 +65,7 @@ import {
 	stopReplica,
 	subscribeReplicaStatus
 } from '../replica.svelte';
+import { getStagedViewDepth, resetViewEdits, stageViewOp } from '../view-edits.svelte';
 import * as modelEngine from '../model-engine.svelte';
 import {
 	applyDelta,
@@ -760,6 +761,51 @@ describe('the status listeners and the engine handle', () => {
 			expect(served).toBe(2);
 		} finally {
 			resetArtifactEdits();
+		}
+	});
+
+	it('the shadow compares nothing while only a view op is staged', async () => {
+		onStaging('engine');
+		localStorage.setItem('dr.shadow', '1');
+		const project = fakeProject();
+		let served = 0;
+		server.use(
+			...project.handlers(),
+			http.post('*/model/elements/batch', () => {
+				served += 1;
+				return HttpResponse.json({ items: [] });
+			})
+		);
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready');
+		await macrotask();
+		const shadowLines = () =>
+			errors.mock.calls.filter(([line]) =>
+				String(line).startsWith('[shadow] elements getElementsBatch {"ids":["e_000001"]}')
+			);
+
+		try {
+			stageViewOp(
+				{ kind: 'place_element', view_id: 'v1', element_id: 'e_000001', folder_id: 'f1' },
+				'Placed e_000001'
+			);
+			expect(getStagedViewDepth()).toBe(1);
+			expect(getStagedArtifactDepth()).toBe(0);
+			await getElementsBatch(['e_000001']);
+			await macrotask();
+			await macrotask();
+			expect(served).toBe(0);
+			expect(shadowLines()).toEqual([]);
+
+			resetViewEdits();
+			await getElementsBatch(['e_000001']);
+			await vi.waitFor(() => expect(shadowLines()).toHaveLength(1));
+			expect(served).toBe(2);
+		} finally {
+			resetViewEdits();
 		}
 	});
 

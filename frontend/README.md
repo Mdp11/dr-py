@@ -1472,7 +1472,8 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS` — `engine` for every surface but `download` — and
+  `SURFACE_DEFAULTS` — `engine` for every surface but `download` and
+  `views` — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
@@ -1484,16 +1485,17 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   shows only in the replica's answers, so a read-surface-only override on its
   own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
   alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
-  take effect. `navigation`, `criteria`, `tables`, `exports`, `issues` and `download` are never
+  take effect. `navigation`, `criteria`, `tables`, `exports`, `issues`, `download` and `views` are never
   forced by `staging`: `navigation`, `criteria`, `tables` and `exports` because the
   server never evaluated staged edits in either mode, `issues` because its calls send the server the
   staged edits and — on the engine — because a gate (below) can hold it back
   to `server` whatever the switch says, `download` because it reads committed
-  state on either side. The switches are read once, with the
+  state on either side, `views` because the server warns over the committed
+  view and, on the engine, the `issues` gate holds it back too. The switches are read once, with the
   rest, and honoured in a build too. `readSurfaces(storage?)` is
   `readSwitches(storage).surfaces`; `anyEngineSurface(switches)` says whether
-  any surface is on the engine, `issues` counting only with `staging:
-engine` — on legacy its gate never opens, so an opt-out stored before the
+  any surface is on the engine, `issues`, `metamodel` and `views` counting only with `staging:
+engine` — on legacy their gate never opens, so an opt-out stored before the
   `issues` switch existed (seven surfaces on `server`, staging on legacy)
   waits for, and is blocked by, nothing.
 - `createEngineSeam(sync, surfaces, shadow?, gates?)` makes the seam of a
@@ -1574,12 +1576,13 @@ body}`, the media type without its parameters (a fetched body's
   called, after each `quiet()` and after each re-test round, so a
   comparison under way when an edit is staged ends silently. The replica
   store hands it
-  `anyStaged() || getStagedArtifactDepth() > 0 || hasOverlay()`:
+  `anyStaged() || getStagedArtifactDepth() > 0 || getStagedViewDepth() > 0 || hasOverlay()`:
   `anyStaged` of `lib/engine/staged-probe.ts` asks the model store's engine
   half `hasStagedOps()` while it is attached (with staging on
   legacy nothing is staged in the replica, and it is false); an entry in the
   staged artifact buffer is mirrored into the engine's artifact set, which
-  the server has not seen either; and the artifact follower's `hasOverlay()`
+  the server has not seen either; a staged view op is in the view the
+  `views` surface sends the engine and not in the server's; and the artifact follower's `hasOverlay()`
   holds from a commit's announcement until its payload refresh lands (or,
   for a failed refresh, until newer committed news): the buffer is empty
   then, but the engine still reads the commit's entries over the committed
@@ -1712,6 +1715,14 @@ sync exists:
   A table asked before either was the server's page. The listener
   registry keeps `replica.svelte.ts` from importing the table store, which
   imports the realtime store, which imports this one.
+- **The view warnings.** `followViews` does the same for the `views`
+  surface: a new `(rev, staged_version, artifacts_version)` while
+  `engineSide('views')` is `engine` calls the `onViewsMoved` listeners — the
+  view store's recompute (see "View editing state") — and so does the views
+  gate opening, its status half in `onStatus` or the follower's first load.
+  `replica.svelte.ts` imports nothing of `view.svelte.ts`: the view store
+  subscribes, eagerly at module scope, since nothing it imports reaches
+  back into it through the replica store.
 - **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
   drawer's revert (`HistoryDrawer.svelte::doRevert`) both call
   `beginReplicaCommit()` right before the POST, hand `commitChanges` /
@@ -1948,6 +1959,20 @@ a project's view through `POST /views` after deleting whatever views exist.)
   deleted or renamed folder's prior name is unrecoverable from the blob
   itself, so the label is the only record of what the user actually did, for
   both undo-history display and the DiffDrawer's View tab.
+- **The warnings.** With the `views` surface on the server (the default)
+  `_warnings` are `GET /views/{id}`'s, over the committed view, set by
+  every `refreshView()`. With it on the engine (and its gate, the `issues`
+  one, open) they are recomputed from `_view` AS STAGED, over the working
+  model and the working artifacts (`viewWarnings`, `validateView` in the
+  engine): at the end of every `refreshView()` (whose `warnings` are then
+  ignored; a refresh of the same view keeps the ones shown until the answer,
+  another view's are cleared), after every staged op (each mutator applies
+  and stages through one helper that asks for it), and on every
+  `onViewsMoved` from the replica store — a peer's model-only commit that
+  deletes a placed element, a staged model edit, a staged artifact delete.
+  One computation runs at a time, without timers: a request made while one
+  runs makes it run once more after, and an answer is applied only if the
+  active view and `_view` are still the ones it was asked for.
 - **Every `stage*` mutator in `view.svelte.ts` follows the same three-phase
   shape**: GUARD (client-side precondition checks — name clash, cycle,
   no-op — mirroring `applyViewOp`'s own checks, so a doomed gesture never

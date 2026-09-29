@@ -19,8 +19,14 @@
  * `applyViewOp` for the optimistic update, then `stageViewOp` to queue it for
  * commit). A mutator returns `Promise<boolean>`: `true` means staged (or a
  * legitimate no-op), `false` means the gate refused and nothing changed.
+ *
+ * `_warnings` are the server's, over the committed view, unless the `views`
+ * surface is on the engine: there they are recomputed from `_view` as staged,
+ * over the working model and artifacts, after every refresh, every staged op
+ * and every move of the replica.
  */
 import * as viewsApi from '$lib/api/views';
+import { engineSide } from '$lib/api/engine-route';
 import { NotFoundError } from '$lib/api/errors';
 import type { ArtifactRef, Folder, Issue, View, ViewSummary } from '$lib/api/types';
 import {
@@ -58,7 +64,12 @@ import { confirm } from './confirm.svelte';
 import { elementDisplayName } from '$lib/util/element-name';
 import { placedElementIds } from '$lib/engine/placements';
 import { addQuietProbe } from '$lib/engine/quiet';
-import { forgetViewPlacement, forgetViewPlacements, registerViewPlacement } from './replica.svelte';
+import {
+	forgetViewPlacement,
+	forgetViewPlacements,
+	onViewsMoved,
+	registerViewPlacement
+} from './replica.svelte';
 
 export { cloneView } from './view-ops';
 export { getActiveViewId } from './active-view.svelte';
@@ -110,6 +121,51 @@ function requireActiveViewId(): string {
 function setState(view: View | null, warnings: Issue[]): void {
 	_view = view;
 	_warnings = warnings;
+}
+
+/** A warnings computation is running, and whether one was asked for since it began. */
+let _computing = false;
+let _computeAgain = false;
+
+/**
+ * With the view warnings on the engine, recomputes them for the active view
+ * as staged. One computation runs at a time: a request made meanwhile runs
+ * it once more after, and an answer is applied only while it is for the
+ * view and document the store still holds.
+ */
+function recomputeWarnings(): void {
+	if (engineSide('views') !== 'engine') return;
+	if (_computing) {
+		_computeAgain = true;
+		return;
+	}
+	_computing = true;
+	void (async () => {
+		try {
+			let current = false;
+			while (!current) {
+				_computeAgain = false;
+				const viewId = getActiveViewId();
+				const view = _view;
+				const warnings =
+					viewId === null || view === null
+						? []
+						: await viewsApi.viewWarnings(viewId, view).catch(() => null);
+				current = !_computeAgain && viewId === getActiveViewId() && view === _view;
+				if (current && warnings !== null) _warnings = warnings;
+			}
+		} finally {
+			_computing = false;
+		}
+	})();
+}
+
+/** Applies a staged op to `_view` and queues it for commit; the warnings follow. */
+function applyAndStage(op: ViewOp, label: string, unplacedElementIds?: string[]): void {
+	if (_view === null) throw new Error('No active view');
+	_view = applyViewOp(_view, op);
+	stageViewOp(op, label, unplacedElementIds);
+	recomputeWarnings();
 }
 
 /** The view whose committed placements the replica holds, if any. */
@@ -237,6 +293,7 @@ export async function refreshView(): Promise<void> {
 				res = { view: null, warnings: [] };
 			}
 		}
+		const sameView = _placedViewId !== null && _placedViewId === activeId;
 		// Before `setState`: the tree refetches on `_view`'s identity and must
 		// find these placements already posted.
 		registerCommitted(activeId, res.view);
@@ -255,7 +312,11 @@ export async function refreshView(): Promise<void> {
 				conflicted = true;
 			}
 		}
-		setState(next, res.warnings);
+		// On the engine the warnings are recomputed below; until then the ones
+		// shown for this view stay, and another view's go.
+		const onEngine = engineSide('views') === 'engine';
+		setState(next, !onEngine ? res.warnings : sameView ? _warnings : []);
+		if (onEngine) recomputeWarnings();
 		// Guarded on its own: a throw escaping here would land in the OUTER catch
 		// below, which nulls `_view` — turning a recoverable journal conflict into
 		// a blank sidebar. The unwind is best-effort by construction anyway (the
@@ -461,8 +522,7 @@ export async function stageCreateFolder(parentId: string, name: string): Promise
 		parent_id: parentId,
 		name
 	};
-	_view = applyViewOp(_view, op); // optimistic; applyViewOp re-checks and throws on drift
-	stageViewOp(op, label);
+	applyAndStage(op, label); // optimistic; applyViewOp re-checks and throws on drift
 	return true;
 }
 
@@ -478,8 +538,7 @@ export async function stageRenameFolder(id: string, name: string): Promise<boole
 	if (!(await folderEditLock([id]))) return false; // gate showed the notice
 	const label = `Renamed folder "${folder.name}" → "${name}"`;
 	const op: ViewOp = { kind: 'rename_folder', view_id: requireActiveViewId(), id, name };
-	_view = applyViewOp(_view, op); // optimistic; applyViewOp re-checks and throws on drift
-	stageViewOp(op, label);
+	applyAndStage(op, label); // optimistic; applyViewOp re-checks and throws on drift
 	return true;
 }
 
@@ -492,8 +551,7 @@ export async function stageDeleteFolder(id: string): Promise<boolean> {
 	const label = `Deleted folder "${folder.name}"`;
 	const unplacedElementIds = subtreeElementIds(folder); // capture BEFORE the pop — see docstring
 	const op: ViewOp = { kind: 'delete_folder', view_id: requireActiveViewId(), id };
-	_view = applyViewOp(_view, op);
-	stageViewOp(op, label, unplacedElementIds);
+	applyAndStage(op, label, unplacedElementIds);
 	return true;
 }
 
@@ -527,8 +585,7 @@ export async function stageMoveFolder(id: string, toParentId: string): Promise<b
 		id,
 		to_parent_id: toParentId
 	};
-	_view = applyViewOp(_view, op);
-	stageViewOp(op, label);
+	applyAndStage(op, label);
 	return true;
 }
 
@@ -604,8 +661,7 @@ export async function stagePlaceElementsAt(
 				folder_id: home
 			};
 			const label = `Removed ${elLabel(id)} from "${folderDisplayName(_view, home)}"`;
-			_view = applyViewOp(_view, op);
-			stageViewOp(op, label, [id]); // excluded-pool injection payload
+			applyAndStage(op, label, [id]); // excluded-pool injection payload
 			continue;
 		}
 		if (home === null) {
@@ -616,8 +672,7 @@ export async function stagePlaceElementsAt(
 				folder_id: folderId,
 				index: at
 			};
-			_view = applyViewOp(_view, op);
-			stageViewOp(op, `Placed ${elLabel(id)} in "${destName}"`);
+			applyAndStage(op, `Placed ${elLabel(id)} in "${destName}"`);
 		} else {
 			let requestedIndex = at;
 			if (home === folderId && at !== undefined) {
@@ -635,8 +690,7 @@ export async function stagePlaceElementsAt(
 				to_folder_id: folderId,
 				index: requestedIndex
 			};
-			_view = applyViewOp(_view, op);
-			stageViewOp(op, `Moved ${elLabel(id)} to "${destName}"`);
+			applyAndStage(op, `Moved ${elLabel(id)} to "${destName}"`);
 		}
 		if (at !== undefined && !cursorHeld) at += 1;
 	}
@@ -669,8 +723,7 @@ export async function stagePlaceArtifact(folderId: string, ref: ArtifactRef): Pr
 		artifact_kind: ref.kind,
 		folder_id: folderId
 	};
-	_view = applyViewOp(_view, op);
-	stageViewOp(op, label);
+	applyAndStage(op, label);
 	return true;
 }
 
@@ -695,8 +748,7 @@ export async function stageMoveArtifact(
 		from_folder_id: fromFolderId,
 		to_folder_id: toFolderId
 	};
-	_view = applyViewOp(_view, op);
-	stageViewOp(op, label);
+	applyAndStage(op, label);
 	return true;
 }
 
@@ -731,8 +783,7 @@ export async function stageRemoveArtifactRef(
 		artifact_id: artifactId,
 		folder_id: folderId
 	};
-	_view = applyViewOp(_view, op);
-	stageViewOp(op, label);
+	applyAndStage(op, label);
 	return true;
 }
 
@@ -753,8 +804,7 @@ export async function stageClearView(): Promise<boolean> {
 	for (const f of [..._view.folders]) {
 		const op: ViewOp = { kind: 'delete_folder', view_id: viewId, id: f.id };
 		const unplacedElementIds = subtreeElementIds(f); // capture BEFORE the pop
-		_view = applyViewOp(_view, op);
-		stageViewOp(op, `Deleted folder "${f.name}"`, unplacedElementIds);
+		applyAndStage(op, `Deleted folder "${f.name}"`, unplacedElementIds);
 	}
 	for (const ref of [..._view.artifacts]) {
 		const op: ViewOp = {
@@ -763,8 +813,7 @@ export async function stageClearView(): Promise<boolean> {
 			artifact_id: ref.id,
 			folder_id: VIEW_ROOT_ID
 		};
-		_view = applyViewOp(_view, op);
-		stageViewOp(op, `Removed artifact "${ref.id}" from "the top level"`);
+		applyAndStage(op, `Removed artifact "${ref.id}" from "the top level"`);
 	}
 	return true;
 }
@@ -839,6 +888,11 @@ export async function discardViewChanges(): Promise<void> {
 // and a listener still sitting in a pending setTimeout would miss it, silently
 // reinstating the very bug this registration exists to prevent.
 onViewDiscarded(() => refreshView());
+
+// The replica moved under the view warnings on the engine: a peer's commit,
+// a staged model edit, an artifact. Eager for the same reason as the discard
+// tap: replica.svelte.ts imports nothing that reaches this module.
+onViewsMoved(() => recomputeWarnings());
 
 // Post-commit reconciliation: a commit that carried view
 // ops refetches server truth ONCE (concretizes tmp_ folder ids — no client
