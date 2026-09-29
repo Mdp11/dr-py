@@ -37,6 +37,7 @@ const SLICES = [
 const TABLE_SLICE = 'longest staged round trip during the table (slice bound)';
 const RESCAN_SLICE = 'longest staged round trip during the rescan (slice bound)';
 const EXPORT_SLICE = 'longest staged round trip during the exports (slice bound)';
+const CANDIDATE_SLICE = 'longest staged round trip during candidateIssues (slice bound)';
 const TRANSITIONS = [
 	'stage 1,000 update_element ops',
 	'unstage all',
@@ -51,6 +52,13 @@ for (const name of ['large.snapshot.v2.gz', 'large.snapshot.v2.metamodel.json'])
 }
 if (!existsSync(new URL('large.rules.json', BENCHMARKS))) {
 	console.error('Missing benchmarks/large.rules.json: run `pixi run engine-parity-oracle` first.');
+	process.exit(1);
+}
+
+if (!existsSync(new URL('large.candidate.metamodel.json', BENCHMARKS))) {
+	console.error(
+		'Missing benchmarks/large.candidate.metamodel.json: run `pixi run engine-candidate-oracle` first.'
+	);
 	process.exit(1);
 }
 
@@ -222,6 +230,7 @@ const slice = Math.max(...SLICES.map((label) => median(rows.get(label)!)));
 const tableSlice = median(rows.get(TABLE_SLICE)!);
 const rescanSlice = median(rows.get(RESCAN_SLICE)!);
 const exportSlice = median(rows.get(EXPORT_SLICE)!);
+const candidateSlice = median(rows.get(CANDIDATE_SLICE)!);
 const edits = TRANSITIONS.map(
 	(label) => `${label}: ${verdict(median(rows.get(label)!), TRANSITION_BUDGET_MS, 'ms')}`
 );
@@ -231,5 +240,6 @@ console.log(
 		`table's longest slice: ${verdict(tableSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`rescan's longest slice: ${verdict(rescanSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`exports' longest slice: ${verdict(exportSlice, SLICE_BUDGET_MS, 'ms')}; ` +
+		`candidateIssues' longest slice: ${verdict(candidateSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`${edits.join('; ')}`
 );

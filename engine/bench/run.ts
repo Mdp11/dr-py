@@ -6,7 +6,8 @@
  * issue store's sweep, and the same edits through it, each revalidating; the
  * issue list the panel reads after a keystroke over many staged batches; and
  * the store with custom rules: its sweep, a rescan, a stage widened by the
- * rules' reach and a probe across a staged rule change.
+ * rules' reach and a probe across a staged rule change; and the candidate
+ * scan of a metamodel edit over the swept store.
  *
  * `pixi run engine-bench-data` writes the input once, `pixi run engine-bench`
  * measures. Timings drift between sessions: compare only numbers of one run.
@@ -15,6 +16,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import {
 	appliesPopulation,
 	ArtifactSet,
+	candidateDiff,
+	candidateScan,
+	candidateStructureSteps,
 	compileRuleSets,
 	DEFAULT_TABLE_LIMITS,
 	drain,
@@ -30,6 +34,7 @@ import {
 	navigationFetch,
 	openSnapshot,
 	parseExact,
+	prepareCandidate,
 	READS,
 	readTableDefinition,
 	resolveTableRefs,
@@ -62,6 +67,7 @@ const DIR = new URL('../../benchmarks/', import.meta.url);
 const SNAPSHOT = new URL('large.snapshot.v2', DIR);
 const METAMODEL = new URL('large.snapshot.v2.metamodel.json', DIR);
 const DOCUMENT = new URL('large.model.json', DIR);
+const CANDIDATE = new URL('large.candidate.metamodel.json', DIR);
 const BIG_TABLE = new URL('big-table.json', import.meta.url);
 
 for (const file of [SNAPSHOT, METAMODEL, DOCUMENT]) {
@@ -69,6 +75,10 @@ for (const file of [SNAPSHOT, METAMODEL, DOCUMENT]) {
 		console.error(`Missing ${file.pathname}: run \`pixi run engine-bench-data\` first.`);
 		process.exit(1);
 	}
+}
+if (!existsSync(CANDIDATE)) {
+	console.error(`Missing ${CANDIDATE.pathname}: run \`pixi run engine-candidate-oracle\` first.`);
+	process.exit(1);
 }
 
 /** What is measured, in the order it is shown. */
@@ -134,7 +144,11 @@ const ROWS = {
 	rulesSweepLongest: '  its longest step after the first',
 	rulesStage: 'stage 1,000 ops + revalidation with reach',
 	rulesProbe: 'origin probe, 100 staged batches + a staged rule change',
-	rulesPopulation: "  the changed rule's population, once"
+	rulesPopulation: "  the changed rule's population, once",
+	candidateStructure: "candidate scan: the candidate's containment and uniqueness, built in steps",
+	candidate: 'candidate scan: the swept store’s model validated under a metamodel edit',
+	candidateLongest: '  its longest step',
+	candidateHeapMb: '  peak heap above baseline, MB'
 };
 type Row = keyof typeof ROWS;
 
@@ -580,7 +594,49 @@ function measureRules(wc: WorkingCopy): void {
 	if (!sound) throw new Error('the bench drove the replica off its digest');
 }
 
+/**
+ * The candidate scan over the swept store of a fresh `LiveIssues`: the build
+ * of the candidate's structure alone, then the whole scan (structure and
+ * validation), its longest step and the peak `heapUsed` a step reached above
+ * the level just before it. The diff runs after, untimed, against the store.
+ */
+function measureCandidate(wc: WorkingCopy): void {
+	const { model } = wc;
+	const live = new LiveIssues(wc);
+	if (!drain(live.sweepSteps())) throw new Error('the sweep ended unusable');
+	const candidate = prepareCandidate(candidateDoc, (mm) => compileRuleSets([], mm));
+	stepped('candidateStructure', null, candidateStructureSteps(model, candidate.metamodel));
+
+	const steps = candidateScan(model, candidate);
+	globalThis.gc?.();
+	globalThis.gc?.();
+	const baseline = process.memoryUsage().heapUsed;
+	let peak = 0;
+	let worst = 0;
+	const start = performance.now();
+	let issues;
+	for (;;) {
+		const before = performance.now();
+		const next = steps.next();
+		const ms = performance.now() - before;
+		worst = Math.max(worst, ms);
+		peak = Math.max(peak, process.memoryUsage().heapUsed - baseline);
+		if (next.done === true) {
+			issues = next.value;
+			break;
+		}
+	}
+	record('candidate', performance.now() - start);
+	record('candidateLongest', worst);
+	record('candidateHeapMb', peak / 2 ** 20);
+	const diff = candidateDiff(live.store.iter(), issues);
+	if (diff.now_failing.length === 0 || diff.now_passing.length === 0) {
+		throw new Error('the candidate edit changes nothing');
+	}
+}
+
 const bytes = readFileSync(SNAPSHOT);
+const candidateDoc: unknown = JSON.parse(readFileSync(CANDIDATE, 'utf-8'));
 const metamodelDoc = JSON.parse(readFileSync(METAMODEL, 'utf-8')) as MetamodelDoc;
 const rawBigTable = JSON.parse(readFileSync(BIG_TABLE, 'utf-8')) as Record<string, unknown>;
 const bigTable = resolveTableRefs(
@@ -760,6 +816,7 @@ async function pass(): Promise<void> {
 	measureIssues(workingCopy);
 	measureKeystrokes(workingCopy);
 	measureRules(workingCopy);
+	measureCandidate(workingCopy);
 }
 
 for (let i = 0; i < PASSES; i++) await pass();

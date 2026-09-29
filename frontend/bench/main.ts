@@ -331,6 +331,22 @@ async function transitions(): Promise<Measures> {
 	await client.call('setArtifacts', { artifacts: [] });
 	await client.call('getModelIssues', {});
 
+	// The candidate diff over the settled store: the whole model validated
+	// under a metamodel edit and diffed, a ping loop alongside.
+	const candidate: unknown = await (await fetch('/data/candidate.json')).json();
+	const stopCandidatePings = ping(client);
+	const diff = await timed('candidateIssues: the model validated under a metamodel edit', () =>
+		client.call<{ now_failing: unknown[]; now_passing: unknown[] }>('candidateIssues', {
+			metamodel: candidate
+		})
+	);
+	measures['longest staged round trip during candidateIssues (slice bound)'] = longest(
+		await stopCandidatePings()
+	).ms;
+	if (diff.now_failing.length === 0 || diff.now_passing.length === 0) {
+		throw new Error('the candidate edit changes nothing');
+	}
+
 	// Last: the delta's digest is wrong on purpose (the page cannot compute
 	// one), so it ends the replica — after the rewind, the apply and the replay.
 	await timed('stage 100 single-op batches, one after another', async () => {

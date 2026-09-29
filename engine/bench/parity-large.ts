@@ -16,8 +16,11 @@
  * through `applyBatch`, the rule sets it wrote — the payloads route's
  * bodies, each with its parse — compile as the service compiles them, and a
  * `LiveIssues` holding them sweeps it to its end, compared with the oracle's
- * issues as multisets of `issueKey`. Exits 1, with the first differences of
- * whichever side disagrees, when either does.
+ * issues as multisets of `issueKey`. Then the candidate scan over that swept
+ * store: `scripts/candidate_large.py` writes a metamodel edit and the Python
+ * diff of the model validated under it, and the engine's `candidateDiff`
+ * must equal it, list for list in order. Exits 1, with the first differences
+ * of whichever side disagrees, when any does.
  *
  * `pixi run engine-parity-large` writes every oracle side and runs this,
  * once `pixi run engine-bench-data` has written the snapshot.
@@ -26,6 +29,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import {
 	applyBatch,
 	ArtifactSet,
+	candidateDiff,
+	candidateKey,
+	candidateScan,
 	cmpCodePoint,
 	compileRuleSets,
 	DEFAULT_TABLE_LIMITS,
@@ -37,6 +43,7 @@ import {
 	navigationFetch,
 	openSnapshot,
 	parseJson,
+	prepareCandidate,
 	pyDumps,
 	readArtifacts,
 	readOps,
@@ -52,6 +59,7 @@ import {
 	type ExportFileResult,
 	type ExportFormat,
 	type Issue,
+	type IssueOut,
 	type MetamodelDoc
 } from '../src/index.ts';
 
@@ -67,13 +75,15 @@ const METAMODEL = new URL('large.snapshot.v2.metamodel.json', DIR);
 const ORACLE = new URL('large.issues.json', DIR);
 const VIOLATIONS = new URL('large.violations.ops.json', DIR);
 const RULES = new URL('large.rules.json', DIR);
+const CANDIDATE = new URL('large.candidate.metamodel.json', DIR);
+const CANDIDATE_ORACLE = new URL('large.candidate.json', DIR);
 const BIG_TABLE = new URL('big-table.json', import.meta.url);
 const TABLE_ORACLE = new URL('large.table.json', DIR);
 const TABLE_ORACLE_META = new URL('large.table.meta.json', DIR);
 const EXPORT_ORACLE_META = new URL('large.export.meta.json', DIR);
 const EXPORT_ORACLE = (format: ExportFormat) => new URL(`large.export.${format}`, DIR);
 
-for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES]) {
+for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES, CANDIDATE, CANDIDATE_ORACLE]) {
 	if (!existsSync(file)) {
 		console.error(`Missing ${file.pathname}: run \`pixi run engine-bench-data\` first.`);
 		process.exit(1);
@@ -312,4 +322,73 @@ if (issuesOk) {
 	];
 	for (const line of differences.slice(0, SHOWN)) console.log(line);
 }
-if (!tableOk || !exportOk || !issuesOk) process.exit(1);
+
+// The candidate scan over the swept store, the rule sets recompiled against the candidate.
+const scanStart = performance.now();
+const scanned = drain(
+	candidateScan(
+		workingCopy.model,
+		prepareCandidate(JSON.parse(readFileSync(CANDIDATE, 'utf-8')), (mm) =>
+			compileRuleSets(ruleSources(artifacts, 'committed'), mm)
+		)
+	)
+);
+const scanMs = performance.now() - scanStart;
+
+/** `now_passing` sorted by the diff's key: each store keeps its own order. */
+function comparable(diff: { now_passing: IssueOut[] }): Record<string, unknown> {
+	const key = (i: IssueOut) =>
+		candidateKey({
+			severity: i.severity,
+			message: i.message,
+			targetIds: i.target_ids,
+			category: i.category,
+			check: i.check
+		});
+	const keyed = diff.now_passing.map((i): [string, IssueOut] => [key(i), i]);
+	keyed.sort(([a], [b]) => cmpCodePoint(a, b));
+	return { ...diff, now_passing: keyed.map(([, i]) => i) };
+}
+const engineDiff = comparable(candidateDiff(live.store.iter(), scanned));
+const oracleDiff = comparable(
+	JSON.parse(readFileSync(CANDIDATE_ORACLE, 'utf-8')) as { now_passing: IssueOut[] }
+);
+
+/** `value` as JSON with every object's keys sorted, so key order is no difference. */
+function canonical(value: unknown): string {
+	return JSON.stringify(value, (_key, v: unknown) =>
+		v !== null && typeof v === 'object' && !Array.isArray(v)
+			? Object.fromEntries(Object.entries(v).sort(([a], [b]) => cmpCodePoint(a, b)))
+			: v
+	);
+}
+
+const candidateDiffs: string[] = [];
+for (const field of Object.keys({ ...oracleDiff, ...engineDiff })) {
+	const a = oracleDiff[field];
+	const b = engineDiff[field];
+	if (!Array.isArray(a) || !Array.isArray(b)) {
+		if (canonical(a) !== canonical(b)) {
+			candidateDiffs.push(`  ${field}: oracle ${canonical(a)}, engine ${canonical(b)}`);
+		}
+		continue;
+	}
+	for (let i = 0; i < Math.max(a.length, b.length); i++) {
+		if (canonical(a[i]) === canonical(b[i])) continue;
+		candidateDiffs.push(
+			`  ${field}[${i}]: oracle ${a[i] === undefined ? '<missing>' : canonical(a[i])}\n` +
+				`    engine ${b[i] === undefined ? '<missing>' : canonical(b[i])}`
+		);
+	}
+}
+const failing = (engineDiff['now_failing'] as unknown[]).length;
+const passing = (engineDiff['now_passing'] as unknown[]).length;
+const candidateOk = candidateDiffs.length === 0 && failing > 0 && passing > 0;
+console.log(
+	`Candidate: ${scanned.length.toLocaleString('en-US')} issues under the edit, scanned in ${scanMs.toFixed(0)} ms. ` +
+		(candidateOk
+			? `Parity: equal (${failing.toLocaleString('en-US')} now_failing, ${passing.toLocaleString('en-US')} now_passing).`
+			: `Parity FAILS: ${candidateDiffs.length} difference(s) (${failing} now_failing, ${passing} now_passing). The first ${SHOWN}:`)
+);
+for (const line of candidateDiffs.slice(0, SHOWN)) console.log(line);
+if (!tableOk || !exportOk || !issuesOk || !candidateOk) process.exit(1);
