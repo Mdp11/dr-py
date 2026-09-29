@@ -1232,6 +1232,14 @@ export const EngineExportFileSchema = z.object({
 });
 export type EngineExportFile = z.infer<typeof EngineExportFileSchema>;
 
+/** The engine's answer to `downloadModel`: the model file's bytes, name and media type. */
+export const EngineModelFileSchema = z.object({
+	parts: z.array(z.instanceof(ArrayBuffer)),
+	filename: z.string(),
+	content_type: z.string()
+});
+export type EngineModelFile = z.infer<typeof EngineModelFileSchema>;
+
 /** `POST /tables/json-preview`: a JSON sample of the table's first rows. */
 export const JsonPreviewSchema = z.object({ sample: z.string(), truncated: z.boolean() });
 export type JsonPreview = z.infer<typeof JsonPreviewSchema>;

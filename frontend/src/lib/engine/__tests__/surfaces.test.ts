@@ -16,7 +16,7 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports and the metamodel; every one on the engine by default', () => {
+	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports, the metamodel and the download; every one but the download on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
 		expect(SURFACES).toEqual([
 			...READ_SURFACES,
@@ -25,7 +25,8 @@ describe('the surface switches', () => {
 			'issues',
 			'tables',
 			'exports',
-			'metamodel'
+			'metamodel',
+			'download'
 		]);
 		expect(SURFACE_DEFAULTS).toEqual({
 			elements: 'engine',
@@ -38,7 +39,8 @@ describe('the surface switches', () => {
 			issues: 'engine',
 			tables: 'engine',
 			exports: 'engine',
-			metamodel: 'engine'
+			metamodel: 'engine',
+			download: 'server'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
@@ -63,6 +65,16 @@ describe('the surface switches', () => {
 			expect(readSurfaces(storing(`{"staging": "${staging}", "metamodel": "server"}`))).toEqual({
 				...SURFACE_DEFAULTS,
 				metamodel: 'server'
+			});
+		}
+	});
+
+	it('staging on the engine does not force the download, and dr.surfaces moves it', () => {
+		for (const staging of ['engine', 'legacy']) {
+			expect(readSurfaces(storing(`{"staging": "${staging}"}`)).download).toBe('server');
+			expect(readSurfaces(storing(`{"staging": "${staging}", "download": "engine"}`))).toEqual({
+				...SURFACE_DEFAULTS,
+				download: 'engine'
 			});
 		}
 	});
@@ -265,7 +277,8 @@ describe('the surface switches', () => {
 			issues: 'server',
 			tables: 'server',
 			exports: 'server',
-			metamodel: 'server'
+			metamodel: 'server',
+			download: 'server'
 		} as const;
 		for (const staging of ['engine', 'legacy'] as const) {
 			const any = (surfaces: Record<string, string>) =>
@@ -278,6 +291,7 @@ describe('the surface switches', () => {
 			expect(any({ tables: 'engine' })).toBe(true);
 			expect(any({ exports: 'engine' })).toBe(true);
 			expect(any({ metamodel: 'engine' })).toBe(staging === 'engine');
+			expect(any({ download: 'engine' })).toBe(true);
 		}
 	});
 

@@ -44,7 +44,7 @@ vi.mock('$lib/state/validate-action', () => ({
 	runValidation: vi.fn(async () => {})
 }));
 
-vi.mock('$lib/api/model-read', () => ({ downloadModel: vi.fn(async () => new Response()) }));
+vi.mock('$lib/api/model-read', () => ({ downloadModel: vi.fn(async () => new Blob()) }));
 vi.mock('$lib/util/fileSave', () => ({ saveResponseToFile: vi.fn(async () => {}) }));
 
 import { getStrictMode } from '$lib/state';

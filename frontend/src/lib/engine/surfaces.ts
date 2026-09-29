@@ -16,7 +16,8 @@ export const SURFACES = [
 	'issues',
 	'tables',
 	'exports',
-	'metamodel'
+	'metamodel',
+	'download'
 ] as const satisfies readonly Surface[];
 
 /** The side each surface takes unless `localStorage['dr.surfaces']` says otherwise. */
@@ -31,7 +32,8 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	issues: 'engine',
 	tables: 'engine',
 	exports: 'engine',
-	metamodel: 'engine'
+	metamodel: 'engine',
+	download: 'server'
 });
 
 /** Where the user's model edits are staged: the replica's working copy, or the store's own buffer. */
@@ -51,7 +53,8 @@ const STORAGE_KEY = 'dr.surfaces';
  * it: a staged edit is visible only in the replica's answers. The server
  * never evaluates staged edits, so `navigation`, `criteria`, `tables` and
  * `exports` keep their own switches, and so do `issues` and `metamodel`,
- * which the server answers for staged edits it is sent. No storage, a
+ * which the server answers for staged edits it is sent, and `download`,
+ * which reads committed state on either side. No storage, a
  * storage that throws or a text that is not a JSON object give the defaults.
  */
 export function readSwitches(storage?: Pick<Storage, 'getItem'>): Switches {

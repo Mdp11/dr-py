@@ -46,7 +46,7 @@ vi.mock('$lib/state/validate-action', () => ({
 	runValidation: vi.fn(async () => {})
 }));
 
-vi.mock('$lib/api/model-read', () => ({ downloadModel: vi.fn(async () => new Response()) }));
+vi.mock('$lib/api/model-read', () => ({ downloadModel: vi.fn(async () => new Blob()) }));
 vi.mock('$lib/util/fileSave', () => ({ saveResponseToFile: vi.fn(async () => {}) }));
 
 // Imported AFTER the vi.mock factory above so these are the mocked bindings;
@@ -54,6 +54,7 @@ vi.mock('$lib/util/fileSave', () => ({ saveResponseToFile: vi.fn(async () => {})
 // keeps it real) so the Commit gate is exercised against the real staged
 // buffer rather than a stub.
 import {
+	getFilename,
 	getMetamodel,
 	getModelSummary,
 	getStagedConflicts,
@@ -62,6 +63,7 @@ import {
 	setHistoryDrawerOpen
 } from '$lib/state';
 import { downloadModel } from '$lib/api/model-read';
+import { saveResponseToFile } from '$lib/util/fileSave';
 import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
 // The workspace tab store is deliberately NOT mocked (the `...actual` spread
 // keeps it real), so the menu item is asserted through the tab it opens.
@@ -106,6 +108,7 @@ afterEach(() => {
 	vi.mocked(getStagedViewDepth).mockReturnValue(0);
 	vi.mocked(getStagedConflicts).mockReturnValue([]);
 	vi.mocked(getMetamodel).mockReturnValue(null);
+	vi.mocked(getFilename).mockReturnValue(null);
 	vi.clearAllMocks();
 });
 
@@ -337,7 +340,31 @@ describe('TopBar', () => {
 			unmount(c);
 		});
 
-		it('Export downloads the model when one is loaded', async () => {
+		it('Export saves the downloaded model under its file name', async () => {
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+			vi.mocked(getFilename).mockReturnValue('city.model.json');
+			vi.mocked(downloadModel).mockResolvedValueOnce(
+				new Blob(['{"elements": []}'], { type: 'application/json' })
+			);
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+			menuItem('Export')!.click();
+			flushSync();
+			await vi.waitFor(() => expect(saveResponseToFile).toHaveBeenCalledOnce());
+
+			expect(downloadModel).toHaveBeenCalledOnce();
+			const [response, name] = vi.mocked(saveResponseToFile).mock.calls[0]!;
+			expect(response).toBeInstanceOf(Response);
+			expect(await response.text()).toBe('{"elements": []}');
+			expect(name).toBe('city.model.json');
+
+			unmount(c);
+		});
+
+		it('Export names the file model.json when the model has no file name', async () => {
 			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
 
 			const c = mount(TopBar, { target: document.body });
@@ -346,9 +373,9 @@ describe('TopBar', () => {
 			openModelMenu();
 			menuItem('Export')!.click();
 			flushSync();
-			await new Promise((r) => setTimeout(r, 0));
+			await vi.waitFor(() => expect(saveResponseToFile).toHaveBeenCalledOnce());
 
-			expect(downloadModel).toHaveBeenCalled();
+			expect(vi.mocked(saveResponseToFile).mock.calls[0]![1]).toBe('model.json');
 
 			unmount(c);
 		});

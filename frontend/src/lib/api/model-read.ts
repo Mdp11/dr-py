@@ -1,10 +1,12 @@
 import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
 import { asSent, route, type Surface } from './engine-route';
+import { mediaType } from './tables';
 import {
 	ChangesDocSchema,
 	ChangesSummarySchema,
 	ElementListSchema,
 	ElementPageSchema,
+	EngineModelFileSchema,
 	ModelSummarySchema,
 	NeighborhoodSchema,
 	RelationshipPageSchema,
@@ -343,11 +345,36 @@ export function getChangesSummary(cfg?: ClientConfig): Promise<ChangesSummary> {
 }
 
 /**
- * GET /model/download — the session model as a streaming attachment.
- * Returns the raw `Response` so the caller can pipe `response.body` (e.g.
- * into a FileSystem writable) without materializing the JSON as a string.
+ * GET /model/download, the `download` surface: the committed model's file
+ * as a Blob, never parsed. The engine writes it from its replica, whatever
+ * is staged there, byte for byte the server's; the server's is its body.
  * Non-2xx still raises the usual typed `ApiError`s.
  */
-export function downloadModel(cfg?: ClientConfig): Promise<Response> {
-	return apiFetchRaw('/model/download', { method: 'GET' }, cfg);
+export function downloadModel(cfg?: ClientConfig): Promise<Blob> {
+	return route(
+		'download',
+		cfg,
+		(call) =>
+			call('downloadModel', {}).then((answer) => {
+				const file = EngineModelFileSchema.parse(answer);
+				return new Blob(file.parts, { type: file.content_type });
+			}),
+		async () => (await apiFetchRaw('/model/download', { method: 'GET' }, cfg)).blob(),
+		{ shadow: 'always', digest: downloadDigest }
+	);
+}
+
+/**
+ * What the dev shadow compares of a model file: its media type without
+ * parameters, its size and the hex SHA-256 of its bytes.
+ */
+export async function downloadDigest(
+	blob: Blob
+): Promise<{ type: string; size: number; sha256: string }> {
+	const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
+	return {
+		type: mediaType(blob.type),
+		size: blob.size,
+		sha256: Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('')
+	};
 }

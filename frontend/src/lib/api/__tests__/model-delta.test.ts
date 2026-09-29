@@ -319,7 +319,7 @@ describe('model-read client', () => {
 		expect(res).toEqual({ batches: 2, ops: 3, adds: 1, modifies: 1, deletes: 1, complete: true });
 	});
 
-	it('downloadModel returns the raw Response without parsing', async () => {
+	it('downloadModel answers the body unparsed, as a Blob', async () => {
 		server.use(
 			http.get(`${BASE}/model/download`, () =>
 				HttpResponse.text('{"elements": []}', {
@@ -327,9 +327,9 @@ describe('model-read client', () => {
 				})
 			)
 		);
-		const res = await downloadModel(cfg);
-		expect(res).toBeInstanceOf(Response);
-		expect(await res.text()).toBe('{"elements": []}');
+		const blob = await downloadModel(cfg);
+		expect(blob).toBeInstanceOf(Blob);
+		expect(await blob.text()).toBe('{"elements": []}');
 	});
 
 	it('downloadModel raises typed errors on failure', async () => {

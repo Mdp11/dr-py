@@ -149,8 +149,8 @@
 
 	async function onExport(): Promise<void> {
 		try {
-			const resp = await downloadModel();
-			await saveResponseToFile(resp, modelFilename ?? 'model.json');
+			const blob = await downloadModel();
+			await saveResponseToFile(new Response(blob), modelFilename ?? 'model.json');
 		} catch (err) {
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			console.error('Export failed', err);

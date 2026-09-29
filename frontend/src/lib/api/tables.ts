@@ -158,7 +158,7 @@ const ZIP = 'application/zip';
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** `type` without its parameters: a browser's `res.blob()` keeps only the media type of a fetched body. */
-function mediaType(type: string): string {
+export function mediaType(type: string): string {
 	return (type.split(';')[0] ?? '').trim();
 }
 

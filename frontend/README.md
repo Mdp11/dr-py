@@ -554,10 +554,12 @@ engine store":
    eternal skeleton.
 8. **Export** streams the last committed session state to a file: a picked
    file goes up as a raw `fetch` body (`POST /model/upload`, no JS-side parse)
-   or by server path (`POST /model/load`); export pipes `GET /model/download`
-   into a File System Access writable (or writes server-side via
-   `POST /model/save`), so the browser never materializes the serialized model
-   as a string. Export reflects the committed model, not the staged buffer.
+   or by server path (`POST /model/load`); export saves `downloadModel()`'s
+   Blob — `GET /model/download`'s body, or with the `download` surface on the
+   engine the replica's own file of committed state — into a File System
+   Access writable (or writes server-side via `POST /model/save`), so the
+   browser never materializes the serialized model as a string. Export
+   reflects the committed model, not the staged buffer.
 
 #### The engine store
 
@@ -1466,7 +1468,7 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS` — `engine` for every surface — and
+  `SURFACE_DEFAULTS` — `engine` for every surface but `download` — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
@@ -1478,11 +1480,12 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   shows only in the replica's answers, so a read-surface-only override on its
   own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
   alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
-  take effect. `navigation`, `criteria`, `tables`, `exports` and `issues` are never
+  take effect. `navigation`, `criteria`, `tables`, `exports`, `issues` and `download` are never
   forced by `staging`: `navigation`, `criteria`, `tables` and `exports` because the
   server never evaluated staged edits in either mode, `issues` because its calls send the server the
   staged edits and — on the engine — because a gate (below) can hold it back
-  to `server` whatever the switch says. The switches are read once, with the
+  to `server` whatever the switch says, `download` because it reads committed
+  state on either side. The switches are read once, with the
   rest, and honoured in a build too. `readSurfaces(storage?)` is
   `readSwitches(storage).surfaces`; `anyEngineSurface(switches)` says whether
   any surface is on the engine, `issues` counting only with `staging:
