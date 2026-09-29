@@ -38,9 +38,15 @@ export function getView(viewId: string, cfg?: ClientConfig): Promise<ViewStateRe
  * The warnings of `view`, the active view `viewId` as it is staged. On the
  * engine they are computed over `view`, the working model and the working
  * artifacts; the server's are those of `GET /views/{id}`, over the committed
- * view, model and artifacts.
+ * view, model and artifacts. `stale` says `view` may lag the server's
+ * document, which ends the shadow's comparison.
  */
-export function viewWarnings(viewId: string, view: View, cfg?: ClientConfig): Promise<Issue[]> {
+export function viewWarnings(
+	viewId: string,
+	view: View,
+	cfg?: ClientConfig,
+	stale?: () => boolean
+): Promise<Issue[]> {
 	return route(
 		'views',
 		cfg,
@@ -49,7 +55,7 @@ export function viewWarnings(viewId: string, view: View, cfg?: ClientConfig): Pr
 				IssueListSchema.parse(answer)
 			),
 		() => getView(viewId, cfg).then((response) => response.warnings),
-		{ shadow: 'unstaged' }
+		{ shadow: 'unstaged', ...(stale === undefined ? {} : { stale }) }
 	);
 }
 

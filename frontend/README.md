@@ -1972,7 +1972,12 @@ a project's view through `POST /views` after deleting whatever views exist.)
   deletes a placed element, a staged model edit, a staged artifact delete.
   One computation runs at a time, without timers: a request made while one
   runs makes it run once more after, and an answer is applied only if the
-  active view and `_view` are still the ones it was asked for.
+  active view and `_view` are still the ones it was asked for. Its shadow
+  comparison stands down (`viewWarnings`' `stale`) while `_view` may lag the
+  server's document: a `refreshView()` or a view event's reconciliation is
+  in flight (both counted in `_refreshing`), or the view moved since the
+  call — a peer's view commit or a discard's refetch would otherwise be
+  reported as a difference.
 - **Every `stage*` mutator in `view.svelte.ts` follows the same three-phase
   shape**: GUARD (client-side precondition checks — name clash, cycle,
   no-op — mirroring `applyViewOp`'s own checks, so a doomed gesture never

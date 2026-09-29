@@ -156,8 +156,10 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			if (status.phase === 'ready' && previousPhase !== 'ready') {
 				// A replica built again posts no `changed` for what it now holds, and a
 				// table asked meanwhile may have been the server's, over committed state.
+				// Its versions start over, so no last tuple seen still holds.
 				if (previousPhase === 'resyncing' || (previousPhase === 'opening' && _offSinceReady)) {
 					_tablesSeen = null;
+					_viewsSeen = null;
 					tablesMoved();
 				}
 				_offSinceReady = false;

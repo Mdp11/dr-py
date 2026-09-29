@@ -45,6 +45,12 @@ export type RouteOptions<T> = {
 	recheck?: boolean;
 	/** What the shadow compares of an answer in its place; `SKIP` ends the comparison. */
 	digest?: (value: T) => Promise<unknown>;
+	/**
+	 * Whether what the call was asked about may no longer be what the server
+	 * holds, such as a document the caller is still refetching: the shadow's
+	 * comparison then ends silently.
+	 */
+	stale?: () => boolean;
 };
 
 /** A digest that says the answer cannot be compared, such as an export the server is still preparing. */
@@ -69,6 +75,8 @@ export type ShadowProbe = {
 	server(): Promise<unknown>;
 	/** What to compare of each answer, when not the answer itself. */
 	digest?: (value: unknown) => Promise<unknown>;
+	/** Ends the comparison silently whenever it says true, staged or not. */
+	stale?: () => boolean;
 };
 
 /**
@@ -182,7 +190,7 @@ export function route<T>(
 		answer = Promise.reject(error);
 	}
 	const when = options.shadow ?? 'unstaged';
-	const { digest } = options;
+	const { digest, stale } = options;
 	const probe = (engine: Outcome) => {
 		if (seam.shadow === undefined || when === 'never') return;
 		try {
@@ -194,7 +202,8 @@ export function route<T>(
 				engine,
 				again: () => engineCall(seam.call),
 				server: serverCall,
-				...(digest === undefined ? {} : { digest: (value) => digest(value as T) })
+				...(digest === undefined ? {} : { digest: (value) => digest(value as T) }),
+				...(stale === undefined ? {} : { stale })
 			});
 			// A shadow written as an async function returns a promise despite its type.
 			Promise.resolve(returned).catch(() => undefined);

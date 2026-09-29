@@ -173,6 +173,45 @@ describe('createShadow', () => {
 		expect(report).not.toHaveBeenCalled();
 	});
 
+	it('a probe gone stale ends silently, even one compared while staged', async () => {
+		for (const whileStaged of [false, true]) {
+			let stale = false;
+			const report = vi.fn();
+			const serverCall = vi.fn(() => Promise.resolve({ total: 9 }));
+			await run(
+				{
+					engine: { ok: true, value: { total: 1 } },
+					whileStaged,
+					stale: () => stale,
+					again: () => Promise.resolve({ total: 1 }),
+					server: serverCall
+				},
+				{
+					quiet: () => {
+						stale = true;
+						return Promise.resolve();
+					}
+				},
+				report
+			);
+			expect(serverCall).toHaveBeenCalledOnce();
+			expect(report).not.toHaveBeenCalled();
+
+			await run(
+				{
+					engine: { ok: true, value: { total: 1 } },
+					whileStaged,
+					stale: () => true,
+					again: () => Promise.resolve({ total: 1 }),
+					server: serverCall
+				},
+				{},
+				report
+			);
+			expect(serverCall).toHaveBeenCalledOnce();
+		}
+	});
+
 	it('an edit staged during a re-test round ends it silently', async () => {
 		let staged = false;
 		const report = vi.fn();

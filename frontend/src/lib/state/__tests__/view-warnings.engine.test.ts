@@ -14,7 +14,10 @@ import {
 } from '$lib/engine/__tests__/support/project-server';
 import { setActiveViewId } from '../active-view.svelte';
 import { resetArtifactEdits, stageArtifactDelete } from '../artifact-edits.svelte';
+import { discardAll } from '../checkout.svelte';
 import * as editGate from '../edit-gate';
+import { cancelIssuesRefetch, emit, stagedSettled } from '../model.svelte';
+import { handleFeedEvent } from '../realtime.svelte';
 import { handReplicaFeed } from '../replica.svelte';
 import {
 	clearViewState,
@@ -37,10 +40,13 @@ afterEach(async () => {
 	// with no view left, it asks nothing more.
 	clearViewState();
 	await answered();
+	// A staged edit or a commit schedules one; it would land after the handlers go.
+	cancelIssuesRefetch();
 	resetArtifactEdits();
 	store?.dispose();
 	store = null;
 	answered = () => Promise.resolve();
+	localStorage.removeItem('dr.shadow');
 	vi.restoreAllMocks();
 });
 
@@ -99,13 +105,22 @@ const contained = (id: string) =>
 
 const SENTINEL = warning('the server said so');
 
+/** What `GET /views/v1` answers; a `hold` stops it until released. */
+type Served = { view: View; warnings: Issue[]; hold: Hold | null };
+
 /**
  * The replica store over a fake project holding `NAV`, `views` on `side`;
- * `GET /views/v1` answers `committedView()` with the sentinel warning, and
- * `gets` counts it. On the engine, resolves once the views gate is open,
- * unless `payloads` holds the follower's artifact load.
+ * `GET /views/v1` answers `served` — `committedView()` with the sentinel
+ * warning at first — and `gets` counts it. On the engine, resolves once the
+ * views gate is open, unless `payloads` holds the follower's artifact load.
+ * With `shadow`, the dev shadow is on and `GET /model/issues` answers an
+ * empty list.
  */
-async function open(side: 'engine' | 'server', payloads?: Hold) {
+async function open(
+	side: 'engine' | 'server',
+	{ payloads, shadow = false }: { payloads?: Hold; shadow?: boolean } = {}
+) {
+	if (shadow) localStorage.setItem('dr.shadow', '1');
 	const project: FakeProject = fakeProject();
 	project.artifacts.set(NAV.id, NAV);
 	if (payloads !== undefined) {
@@ -123,11 +138,18 @@ async function open(side: 'engine' | 'server', payloads?: Hold) {
 	}
 	store = await engineStore({ project, surfaces: { views: side } });
 	const gets: string[] = [];
+	const served: Served = { view: committedView(), warnings: [SENTINEL], hold: null };
+	const base = `${PAGE_ORIGIN}/api/v1/projects/${project.projectId}`;
 	server.use(
-		http.get(`${PAGE_ORIGIN}/api/v1/projects/${project.projectId}/views/:id`, ({ params }) => {
+		http.get(`${base}/views/:id`, async ({ params }) => {
 			gets.push(String(params['id']));
-			return HttpResponse.json({ view: committedView(), warnings: [SENTINEL], view_rev: 1 });
-		})
+			const { view, warnings, hold: held } = served;
+			if (held !== null) await held.arrive();
+			return HttpResponse.json({ view, warnings, view_rev: 1 });
+		}),
+		http.get(`${base}/model/issues`, () =>
+			HttpResponse.json({ model_rev: project.rev, issues: [], counts: {} })
+		)
 	);
 	const calls = vi.spyOn(store.sync, 'call');
 	const validations = () => calls.mock.calls.filter(([method]) => method === 'validateView').length;
@@ -138,20 +160,24 @@ async function open(side: 'engine' | 'server', payloads?: Hold) {
 	if (side === 'engine' && payloads === undefined) {
 		await vi.waitFor(() => expect(engineSide('views')).toBe('engine'));
 	}
+	// The replica store installs the shadow once its module has loaded.
+	if (shadow) await import('$lib/engine/shadow');
+	await new Promise<void>((resolve) => setTimeout(resolve, 0));
 	vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
 	setActiveViewId('v1');
-	return { project, gets, validations };
+	return { project, gets, validations, served };
 }
 
 describe('the view warnings with the views on the engine', () => {
 	it("after a refresh are the engine's, never the server's", async () => {
-		const { gets, validations } = await open('engine');
+		const { gets, validations, served } = await open('engine');
+		served.view.folders[0]!.elements.push('e_000006');
 
 		await refreshView();
 
 		expect(getViewWarnings()).not.toContainEqual(SENTINEL);
 		await vi.waitFor(() => expect(validations()).toBe(1));
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([contained('e_000006')]));
 		expect(gets).toEqual(['v1']);
 	});
 
@@ -235,7 +261,7 @@ describe('the view warnings with the views on the engine', () => {
 
 	it('a refresh before the gate opens shows the server’s warnings until the engine can answer', async () => {
 		const payloads = hold();
-		const { validations } = await open('engine', payloads);
+		const { validations } = await open('engine', { payloads });
 		await payloads.reached;
 		expect(engineSide('views')).toBe('server');
 
@@ -262,5 +288,88 @@ describe('the view warnings with the views on the server', () => {
 		expect(getViewWarnings()).toEqual([SENTINEL]);
 		expect(validations()).toBe(0);
 		expect(gets).toEqual(['v1']);
+	});
+});
+
+describe('the views shadow', () => {
+	/** The `[shadow] views` lines reported so far. */
+	function viewLines() {
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+		return () =>
+			errors.mock.calls
+				.map(([line]) => String(line))
+				.filter((line) => line.startsWith('[shadow] views'));
+	}
+
+	/** Every engine call, and the shadow comparisons behind them, have run out. */
+	async function drained(store: EngineStore) {
+		for (let round = 0; round < 5; round++) {
+			await answered();
+			await store.sync.settled();
+		}
+	}
+
+	it('reports a real difference while nothing is pending', async () => {
+		const lines = viewLines();
+		await open('engine', { shadow: true });
+
+		await refreshView();
+		await vi.waitFor(() => expect(lines()).toHaveLength(1));
+
+		expect(lines()[0]).toMatch(/^\[shadow\] views validateView \{"view":\{"name":"Smart",/);
+	});
+
+	it("stays silent while a peer's view commit is ahead of the store's view", async () => {
+		const lines = viewLines();
+		const { project, served, validations } = await open('engine', { shadow: true });
+		served.warnings = [];
+		await refreshView();
+		await vi.waitFor(() => expect(validations()).toBe(1));
+		await drained(store!);
+
+		// The peer places a contained element; its commit moves the rev, and the
+		// store's refetch of the view is held until the replica has moved.
+		const peerView = committedView();
+		peerView.folders[0]!.elements.push('e_000006');
+		const held = hold();
+		Object.assign(served, { view: peerView, warnings: [contained('e_000006')], hold: held });
+		const committed = project.commit([]);
+		const raw = committed.eventText.replace('"scope":["model"]', '"scope":["view"]');
+		expect(raw).not.toBe(committed.eventText);
+		handleFeedEvent(JSON.parse(raw) as FeedEvent, raw);
+		await vi.waitFor(() => expect(validations()).toBe(2));
+		await answered();
+		held.release();
+
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([contained('e_000006')]));
+		await drained(store!);
+		expect(lines()).toEqual([]);
+	});
+
+	it('stays silent while a discard of everything refetches the view', async () => {
+		const lines = viewLines();
+		const { served, validations } = await open('engine', { shadow: true });
+		served.warnings = [];
+		await refreshView();
+		await vi.waitFor(() => expect(validations()).toBe(1));
+		emit({ kind: 'update_element', id: 'e_000003', properties_patch: { name: 'staged' } });
+		await stagedSettled();
+		await stagePlaceElementsAt(FOLDER, ['e_000006']);
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([contained('e_000006')]));
+		await drained(store!);
+
+		// The refetch the discard awaits is held until the replica has reverted.
+		const held = hold();
+		served.hold = held;
+		const before = validations();
+		const discarded = discardAll();
+		await vi.waitFor(() => expect(validations()).toBeGreaterThan(before));
+		await answered();
+		held.release();
+		await discarded;
+
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+		await drained(store!);
+		expect(lines()).toEqual([]);
 	});
 });

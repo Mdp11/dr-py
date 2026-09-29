@@ -125,4 +125,16 @@ describe('the views surface', () => {
 		expect(gets).toEqual([]);
 		expect(lines).toEqual([]);
 	});
+
+	it('while the caller says its document is stale, no comparison runs', async () => {
+		const { lines, shadow, done } = recording(() => engine.over.sync.status().rev);
+		const engine = await issuesEngine(made, { surfaces: { views: 'engine' }, shadow });
+		const gets = serveView(engine, () => [SENTINEL]);
+
+		await expect(viewWarnings('v1', VIEW, undefined, () => true)).resolves.toEqual([CONTAINED]);
+		await done();
+
+		expect(gets).toEqual([]);
+		expect(lines).toEqual([]);
+	});
 });

@@ -44,13 +44,14 @@ export type ShadowDeps = {
  * caller can no longer see through is not a mismatch either. A probe that
  * carries a `digest` compares each side's digest of its answer instead of
  * the answer, and a digest of `SKIP` on either side ends it silently when
- * both sides answered.
+ * both sides answered. A probe whose `stale()` says true is treated as one
+ * with an edit staged, whatever `whileStaged` says.
  */
 export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']> {
 	return async function shadow(probe): Promise<void> {
 		const { surface, method, params, engine, again, server, digest } = probe;
 		const whileStaged = probe.whileStaged === true;
-		const staged = () => !whileStaged && deps.staged();
+		const staged = () => probe.stale?.() === true || (!whileStaged && deps.staged());
 		const moved = (...outcomes: Outcome[]) => whileStaged && outcomes.some(isConflict);
 		const digested = (a: Outcome, b: Outcome) =>
 			Promise.all([digestOf(a, digest), digestOf(b, digest)]);

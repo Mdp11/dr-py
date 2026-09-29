@@ -147,10 +147,18 @@ function recomputeWarnings(): void {
 				_computeAgain = false;
 				const viewId = getActiveViewId();
 				const view = _view;
+				// The shadow stands down while `view` may not be the server's
+				// document plus the journal: a refetch runs, or `_view` moved on.
+				const stale = () => _refreshing > 0 || viewId !== getActiveViewId() || view !== _view;
 				const warnings =
 					viewId === null || view === null
 						? []
-						: await viewsApi.viewWarnings(viewId, view).catch(() => null);
+						: await viewsApi
+								.viewWarnings(viewId, view, undefined, stale)
+								.catch((error: unknown) => {
+									console.error('View warnings failed', error);
+									return null;
+								});
 				current = !_computeAgain && viewId === getActiveViewId() && view === _view;
 				if (current && warnings !== null) _warnings = warnings;
 			}
@@ -187,9 +195,21 @@ function registerCommitted(viewId: string | null, view: View | null): void {
 	}
 }
 
-/** `refreshView()` calls in flight, and who waits for there to be none. */
+/**
+ * `refreshView()` calls and view-event reconciliations in flight — while
+ * any runs, `_view` may lag the server's document — and who waits for
+ * there to be none.
+ */
 let _refreshing = 0;
 let _refreshWaiters: (() => void)[] = [];
+
+function refreshEnded(): void {
+	_refreshing -= 1;
+	if (_refreshing > 0) return;
+	const waiters = _refreshWaiters;
+	_refreshWaiters = [];
+	for (const resolve of waiters) resolve();
+}
 
 // After a commit of view ops the server's excluded pool is ahead of the
 // registered placements until the refetch lands: a shadow re-test waits.
@@ -327,12 +347,7 @@ export async function refreshView(): Promise<void> {
 		setState(null, []);
 	} finally {
 		_viewResolved = true;
-		_refreshing -= 1;
-		if (_refreshing === 0) {
-			const waiters = _refreshWaiters;
-			_refreshWaiters = [];
-			for (const resolve of waiters) resolve();
-		}
+		refreshEnded();
 	}
 }
 
@@ -426,9 +441,19 @@ export async function removeView(id: string): Promise<void> {
  * {@link adoptSavedView}: refresh the list, refetch the active view when
  * `updatedId` names it, and if the active view is gone, drop its journal (its folders no
  * longer exist anywhere), release the leases, fall back per `loadViews` and
- * refetch. A created view only needs the list refreshed.
+ * refetch. A created view only needs the list refreshed. It counts as a
+ * refresh in flight: the server's document may already be ahead of `_view`.
  */
 async function reconcileAfterViewEvent(updatedId: string | null = null): Promise<void> {
+	_refreshing += 1;
+	try {
+		await reconcileViews(updatedId);
+	} finally {
+		refreshEnded();
+	}
+}
+
+async function reconcileViews(updatedId: string | null): Promise<void> {
 	const prior = getActiveViewId();
 	const priorName = _views.find((v) => v.id === prior)?.name ?? null;
 	const changed = await loadViews();
