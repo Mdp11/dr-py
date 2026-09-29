@@ -59,7 +59,7 @@ read surfaces default to the engine behind per-surface switches, the wait for `r
 fallback notice and the retry overlay, shadow comparison in dev and e2e, and the browser
 benchmark; the forked store — `staging` defaults to `engine`, the user's edits stage in the
 replica's working copy, the legacy store lives behind `staging: legacy`) — and watches `K-32`.
-C (evaluation) is in progress, C's plan 3 of 8 built: the engine holds the project's artifacts —
+C (evaluation) is in progress, C's plans 1–5 and 7 of 8 built (this paragraph tells plans 1–3): the engine holds the project's artifacts —
 the committed payloads the shell fetches and follows, the staged entries mirrored from the
 frontend's buffer (AD-30) — and serves navigation and criteria search over the working copy,
 by default (`navigation` and `criteria` surfaces, held to the routes by fixture and by shadow
@@ -105,12 +105,14 @@ key relationship's endpoints' uniqueness groups on connect, disconnect and casca
 away a relationship named in a key now makes the keyed ends' old and new group members
 attributable, so a strict commit that used to land can get a 422, as a key-property edit already
 could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on: a bug or a
-feature there lands on both sides with a fixture until F.
+feature there lands on both sides with a fixture until F. The diff route's model half
+(`api/metamodel_candidate.py`) and `build_rebind_view` are frozen for behaviour from C's plan 7 on;
+`diff_metamodels` is not.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
-`K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in
-`BACKLOG.md`.
+`K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `C-21`, `C-22`,
+`C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -664,22 +666,25 @@ the other three. Fix direction: find what the test waits on that a loaded host s
 on that signal instead of the clock.
 
 ### K-80 · The server's `/metamodel/diff` stays O(model) under the write mutex, open to viewers · `open` · perf · *2026-09-29*
-With the `metamodel` surface on the engine, the editor's Preview and a rebound commit's preview
-no longer reach `POST /metamodel/diff` (`api/metamodel_candidate.py::model_half`), but the route
-stays: it is the fallback (a `gone` engine, a lint that gives no document, the moved 409s) and the
-shadow's oracle. It still validates the whole model under the candidate, so it is O(model) inside the
-write mutex, and a viewer may call it. Fix direction: none before F, which retires the server's evaluation; until then a caller
+With the `metamodel` surface on the engine, the editor's Preview no longer reaches
+`POST /metamodel/diff` and a rebound commit's preview no longer reaches `POST /commits/preview`
+with the rebind, but both routes stay: they are the fallback (a `gone` engine, a lint that gives no
+document, the 501 pattern and rules answers, the moved 409s) and the shadow's oracle. The diff
+route still validates the whole model under the candidate (`candidate_issues`) inside the write
+mutex, so it is O(model) there, and a viewer may call it (`model_half` itself runs after the
+mutex). Fix direction: none before F, which retires the server's evaluation; until then a caller
 outside the shell (a script, a peer) can hold the mutex for seconds, and a role check or a
 whole-model budget on the route is the stopgap.
 
 ### K-81 · "Includes staged changes" can show over a preview the engine did not answer from the working copy · `open` · *2026-09-29*
 `metamodelIncludesStaged()` is true while the `metamodel` surface is `engine` and the store holds
-a staged edit, so the note (`metamodel-staged-note`) reads the state now, not the answer's. It can
-show over a preview that fell back to the server (which never sees staged model edits, except the
-rebind's own ops) and over one computed before the edit was staged; re-running Preview settles
-the second, not the first. `exportsIncludeStaged()` has the same semantics for the export note.
-Fix direction: stamp the answer with the side and the `staged_version` it was computed at, and
-show the note from the stamp for both notes.
+a staged model edit or the artifact buffer an entry, so the note (`metamodel-staged-note`) reads
+the state now, not the answer's. It can show over a preview that fell back to the server, whose
+`/metamodel/diff` reads committed state only (and whose rebind preview sees only the ops it is
+sent), and over one computed before the edit was staged; re-running Preview settles the second,
+not the first. `exportsIncludeStaged()` has the same semantics for the export note. Fix
+direction: stamp the answer with the side and the `staged_version` it was computed at, and show
+the note from the stamp for both notes.
 
 ### K-82 · The candidate scan's longest browser slice is 27 ms, over the 16 ms budget · `open` · perf · *2026-09-29*
 `engine-bench-browser` at M (Chromium 148, WSL2, 2026-09-29): `candidateIssues` 775 ms with a
@@ -700,6 +705,12 @@ probe for it, as the 501 fallbacks do.
 A YAML document whose tags raise a `ValueError` in a constructor is a 422 on the new route and a
 500 on the old one; the lint that gates both never lets one through, so only a direct caller sees
 it. Fix direction: pick 422 on both, in the same commit as the route's own fixture.
+
+### K-85 · One e2e spec, `dnd.spec.ts`, timed out once under a full run · `open` · *2026-09-29*
+`dnd.spec.ts` "drag a placed element to the view root unplaces it" hit its 2 minute timeout in 1
+of 4 full e2e runs (the first one of C's plan 7, task 9) and passed alone and in the other three.
+Nothing in that run had touched drag and drop. Fix direction: find what the spec waits on that a
+loaded host stretches, and wait on that signal instead of the clock.
 
 ### Considered by the exports plan and deferred
 
