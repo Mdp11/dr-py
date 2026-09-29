@@ -32,7 +32,12 @@ its dirty ids to its result, widened by the rules' reach when it also carries
 ``insert_element`` and ``insert_relationship`` put an entity in as committed
 state arrives, its type unchecked. ``export`` calls an export route with the
 clock pinned to the step's ``date`` and records the file it answers (see
-``_export``). After every step the recorder
+``_export``). ``download`` records the file ``GET /model/download`` streams,
+and ``validate_view`` a view document's warnings as ``GET /views/{id}``
+computes them against the artifacts kept. Either may carry ``stage`` ops,
+applied and rolled back on a seeded recorder as ``validate_staged``'s are:
+the download is still the committed file, the warnings are over the model
+with the ops applied. After every step the recorder
 adds the outcome (``result`` or ``error``) and what the step left behind: the
 state digest and a fingerprint of the entity lines plus the index dump. Every
 ``full_every``-th step, and the last, carries the lines and the dump
@@ -89,6 +94,7 @@ from data_rover.api.routes.ops import (
     _BatchResult,
     _ensure_validation_seeded,
     _finalize,
+    _rollback,
 )
 from data_rover.api.routes.rules import parse_result
 from data_rover.api.routes.validation import list_issues, validate_model
@@ -109,7 +115,11 @@ from data_rover.api.schemas import (
     ValidateRequest,
 )
 from data_rover.api.search import SearchQueryIn
-from data_rover.api.serialize import iter_entity_lines, parse_model_json
+from data_rover.api.serialize import (
+    iter_entity_lines,
+    iter_model_json,
+    parse_model_json,
+)
 from data_rover.api.settings import Settings
 from data_rover.api.state_digest import model_digest
 from data_rover.api.validation_sweep import start_validation_sweep
@@ -148,6 +158,7 @@ from data_rover.core.validation.rules.reach import ReversePath, expand_scope
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
+from data_rover.core.view.validation import validate_view
 
 from .driver import ROOT
 from .index_dump import dump_indexes
@@ -292,6 +303,27 @@ def view_step(view_id: str, folders: list[dict[str, Any]]) -> dict[str, Any]:
     """A ``view`` step. The folders ride along under ``_folders``; the recorder
     records the element ids the view places, as a client would register them."""
     return {"do": "view", "view_id": view_id, "_folders": folders}
+
+
+def _staging(stage: list[dict[str, Any]] | None) -> dict[str, Any]:
+    return {} if stage is None else {"_stage": stage}
+
+
+def download_step(stage: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """A ``download`` step: the file ``GET /model/download`` streams. With
+    ``stage``, raw ops the recorder holds to applying cleanly; the file is the
+    committed one all the same."""
+    return {"do": "download", **_staging(stage)}
+
+
+def validate_view_step(
+    view: dict[str, Any], stage: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """A ``validate_view`` step: the warnings of the view document ``view``
+    as ``GET /views/{id}`` computes them, every artifact of the last
+    ``artifacts`` step known. With ``stage``, over the model with those raw
+    ops applied."""
+    return {"do": "validate_view", "view": view, **_staging(stage)}
 
 
 #: an artifact as the recorder keeps it: its kind and its payload
@@ -923,6 +955,31 @@ class Recorder:
 
         return self._dry(step, call)
 
+    def _over_stage(self, step: dict[str, Any], read: Callable[[Model], Any]) -> Any:
+        """``read`` over the model with the step's ``stage`` applied, then
+        rolled back as the staged branch of ``POST /model/validate`` rolls
+        back; without ``stage``, over the model as it is. A stage the applier
+        refuses fails the run."""
+        if "_stage" not in step:
+            return read(self.model)
+        ops = _MODEL_OPS.validate_python(step["_stage"])
+        assert ops, "a stage holds ops"
+
+        def call(session: Session) -> Any:
+            with session.write_mutex:
+                try:
+                    res = _apply_batch(self.model, ops, restore=False)
+                except HTTPException as exc:
+                    raise AssertionError(
+                        f"step {len(self._steps)}: the stage is refused: {exc.detail}"
+                    ) from exc
+                try:
+                    return read(self.model)
+                finally:
+                    _rollback(self.model, res)
+
+        return self._dry(step, call)
+
     def _candidate(self, step: dict[str, Any]) -> Any:
         """``POST /metamodel/diff``'s model half: the store the route reads,
         against the model validated under the step's metamodel document with
@@ -1050,6 +1107,26 @@ class Recorder:
             case "drop_view":
                 self._views.pop(step["view_id"], None)
                 return None
+            case "download":
+                committed = "".join(iter_model_json(model))
+                working = self._over_stage(
+                    step, lambda staged: "".join(iter_model_json(staged))
+                )
+                # a stage the working model's file would not show proves nothing
+                assert "_stage" not in step or working != committed, (
+                    f"step {len(self._steps)}: the stage leaves the file as it is"
+                )
+                return committed
+            case "validate_view":
+                view = View.model_validate(step["view"])
+                known = set(self._artifacts)
+                return self._over_stage(
+                    step,
+                    lambda staged: [
+                        IssueOut.from_core(i).model_dump(mode="json")
+                        for i in validate_view(view, staged, known_artifact_ids=known)
+                    ],
+                )
             case "create_element":
                 return model.create_element(step["type"]).id
             case "restore_element":
@@ -1107,10 +1184,9 @@ class Recorder:
                 artifact_id: {"kind": item["kind"], "payload": tag(item["payload"])}
                 for artifact_id, item in step["_artifacts"].items()
             }
-        if "_ops" in step:
-            entry["ops"] = [
-                _line(op) for op in _MODEL_OPS.validate_python(step["_ops"])
-            ]
+        for raw, key in (("_ops", "ops"), ("_stage", "stage")):
+            if raw in step:
+                entry[key] = [_line(op) for op in _MODEL_OPS.validate_python(step[raw])]
         try:
             entry["result"] = self._apply(step)
             entry["error"] = None

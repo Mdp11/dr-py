@@ -10,6 +10,7 @@ from . import (  # noqa: F401
     metamodel_candidate,
     model_cascades,
     model_churn,
+    model_download,
     model_indexes,
     model_load,
     model_mutations,
@@ -37,4 +38,5 @@ from . import (  # noqa: F401
     validation_dirty,
     validation_kinds,
     validation_steps,
+    view_warnings,
 )

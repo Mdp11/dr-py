@@ -1,0 +1,800 @@
+{
+  "runs": [
+    {
+      "metamodel": {
+        "enums": {},
+        "elements": [
+          {
+            "name": "Thing",
+            "abstract": true,
+            "extends": null,
+            "properties": [
+              {
+                "name": "name",
+                "datatype": "string",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "City",
+            "abstract": false,
+            "extends": "Thing",
+            "properties": [
+              {
+                "name": "population",
+                "datatype": "integer",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "area",
+                "datatype": "float",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "mayor",
+                "datatype": "Person",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "twins",
+                "datatype": "City",
+                "multiplicity": "0..*",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "extra",
+                "datatype": "string",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "District",
+            "abstract": false,
+            "extends": "Thing",
+            "properties": [],
+            "key": null
+          },
+          {
+            "name": "Person",
+            "abstract": false,
+            "extends": "Thing",
+            "properties": [],
+            "key": null
+          }
+        ],
+        "relationships": [
+          {
+            "name": "Owns",
+            "abstract": false,
+            "extends": null,
+            "containment": true,
+            "source": "Thing",
+            "target": "Thing",
+            "mappings": [
+              {
+                "source": "Thing",
+                "target": "Thing"
+              }
+            ],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": []
+          },
+          {
+            "name": "Knows",
+            "abstract": false,
+            "extends": null,
+            "containment": false,
+            "source": "Person",
+            "target": "Person",
+            "mappings": [
+              {
+                "source": "Person",
+                "target": "Person"
+              }
+            ],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": [
+              {
+                "name": "since",
+                "datatype": "integer",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "via",
+                "datatype": "Person",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "do": "batch",
+          "ops": [
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c1\",\"type_name\":\"City\",\"properties\":{\"name\":\"héllo ✓ 𝄞\",\"population\":18446744073709551616,\"area\":1.0,\"extra\":{\"outer\":{\"inner\":[1,-0.0,null]},\"empty\":{},\"list\":[]}},\"id\":null}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c2\",\"type_name\":\"City\",\"properties\":{\"name\":\"\",\"area\":1e-07,\"population\":7},\"id\":null}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c3\",\"type_name\":\"City\",\"properties\":{\"name\":\" \",\"area\":1e+16,\"extra\":[[1,[2.5,\"x\"]],{\"k\":true}]},\"id\":null}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_d1\",\"type_name\":\"District\",\"properties\":{},\"id\":null}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p1\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p1\"},\"id\":null}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_p2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p2\"},\"id\":null}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_o1\",\"type_name\":\"Owns\",\"source_id\":\"tmp_c1\",\"target_id\":\"tmp_d1\",\"properties\":{},\"id\":null}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_k1\",\"type_name\":\"Knows\",\"source_id\":\"tmp_p1\",\"target_id\":\"tmp_p2\",\"properties\":{\"since\":1990},\"id\":null}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_k2\",\"type_name\":\"Knows\",\"source_id\":\"tmp_p2\",\"target_id\":\"tmp_p1\",\"properties\":{\"since\":18446744073709551616},\"id\":null}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_o2\",\"type_name\":\"Owns\",\"source_id\":\"tmp_c2\",\"target_id\":\"tmp_p1\",\"properties\":{},\"id\":null}"
+          ],
+          "result": {
+            "id_map": [
+              [
+                "tmp_c1",
+                "id-1"
+              ],
+              [
+                "tmp_c2",
+                "id-2"
+              ],
+              [
+                "tmp_c3",
+                "id-3"
+              ],
+              [
+                "tmp_d1",
+                "id-4"
+              ],
+              [
+                "tmp_p1",
+                "id-5"
+              ],
+              [
+                "tmp_p2",
+                "id-6"
+              ],
+              [
+                "tmp_o1",
+                "id-7"
+              ],
+              [
+                "tmp_k1",
+                "id-8"
+              ],
+              [
+                "tmp_k2",
+                "id-9"
+              ],
+              [
+                "tmp_o2",
+                "id-10"
+              ]
+            ],
+            "changed_element_ids": [
+              "id-1",
+              "id-2",
+              "id-3",
+              "id-4",
+              "id-5",
+              "id-6"
+            ],
+            "changed_relationship_ids": [
+              "id-7",
+              "id-8",
+              "id-9",
+              "id-10"
+            ],
+            "deleted_element_ids": [],
+            "deleted_relationship_ids": [],
+            "recreated_element_ids": [],
+            "recreated_relationship_ids": [],
+            "before_elements": [
+              [
+                "id-1",
+                null
+              ],
+              [
+                "id-2",
+                null
+              ],
+              [
+                "id-3",
+                null
+              ],
+              [
+                "id-4",
+                null
+              ],
+              [
+                "id-5",
+                null
+              ],
+              [
+                "id-6",
+                null
+              ]
+            ],
+            "before_relationships": [
+              [
+                "id-7",
+                null
+              ],
+              [
+                "id-8",
+                null
+              ],
+              [
+                "id-9",
+                null
+              ],
+              [
+                "id-10",
+                null
+              ]
+            ],
+            "inverse_ops": [
+              "{\"kind\":\"delete_relationship\",\"id\":\"id-10\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"id-9\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"id-8\"}",
+              "{\"kind\":\"delete_relationship\",\"id\":\"id-7\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"id-6\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"id-5\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"id-4\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+              "{\"kind\":\"delete_element\",\"id\":\"id-1\"}"
+            ],
+            "changed_elements": [
+              "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"héllo ✓ 𝄞\",\"population\":18446744073709551616,\"area\":1.0,\"extra\":{\"outer\":{\"inner\":[1,-0.0,null]},\"empty\":{},\"list\":[]}},\"rev\":4}",
+              "{\"id\":\"id-2\",\"type_name\":\"City\",\"properties\":{\"name\":\"\",\"area\":1e-07,\"population\":7},\"rev\":3}",
+              "{\"id\":\"id-3\",\"type_name\":\"City\",\"properties\":{\"name\":\" \",\"area\":1e+16,\"extra\":[[1,[2.5,\"x\"]],{\"k\":true}]},\"rev\":3}",
+              "{\"id\":\"id-4\",\"type_name\":\"District\",\"properties\":{},\"rev\":0}",
+              "{\"id\":\"id-5\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+              "{\"id\":\"id-6\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p2\"},\"rev\":1}"
+            ],
+            "changed_relationships": [
+              "{\"id\":\"id-7\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-4\",\"properties\":{},\"rev\":0}",
+              "{\"id\":\"id-8\",\"type_name\":\"Knows\",\"source_id\":\"id-5\",\"target_id\":\"id-6\",\"properties\":{\"since\":1990},\"rev\":1}",
+              "{\"id\":\"id-9\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{\"since\":18446744073709551616},\"rev\":1}",
+              "{\"id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-5\",\"properties\":{},\"rev\":0}"
+            ]
+          },
+          "error": null,
+          "digest": "b810cfe0a0c6bd67",
+          "fingerprint": "8df737fc383e179a",
+          "state": [
+            "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"héllo ✓ 𝄞\",\"population\":18446744073709551616,\"area\":1.0,\"extra\":{\"outer\":{\"inner\":[1,-0.0,null]},\"empty\":{},\"list\":[]}},\"rev\":4}",
+            "{\"id\":\"id-2\",\"type_name\":\"City\",\"properties\":{\"name\":\"\",\"area\":1e-07,\"population\":7},\"rev\":3}",
+            "{\"id\":\"id-3\",\"type_name\":\"City\",\"properties\":{\"name\":\" \",\"area\":1e+16,\"extra\":[[1,[2.5,\"x\"]],{\"k\":true}]},\"rev\":3}",
+            "{\"id\":\"id-4\",\"type_name\":\"District\",\"properties\":{},\"rev\":0}",
+            "{\"id\":\"id-5\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p1\"},\"rev\":1}",
+            "{\"id\":\"id-6\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p2\"},\"rev\":1}",
+            "{\"id\":\"id-7\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-4\",\"properties\":{},\"rev\":0}",
+            "{\"id\":\"id-8\",\"type_name\":\"Knows\",\"source_id\":\"id-5\",\"target_id\":\"id-6\",\"properties\":{\"since\":1990},\"rev\":1}",
+            "{\"id\":\"id-9\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{\"since\":18446744073709551616},\"rev\":1}",
+            "{\"id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-5\",\"properties\":{},\"rev\":0}"
+          ],
+          "indexes": "{\"by_type\":[[\"City\",[\"id-1\",\"id-2\",\"id-3\"]],[\"District\",[\"id-4\"]],[\"Person\",[\"id-5\",\"id-6\"]]],\"out\":[[\"id-1\",[\"id-7\"]],[\"id-2\",[\"id-10\"]],[\"id-5\",[\"id-8\"]],[\"id-6\",[\"id-9\"]]],\"in\":[[\"id-4\",[\"id-7\"]],[\"id-5\",[\"id-10\",\"id-9\"]],[\"id-6\",[\"id-8\"]]],\"out_count\":[[\"id-1\",\"Owns\",1],[\"id-2\",\"Owns\",1],[\"id-5\",\"Knows\",1],[\"id-6\",\"Knows\",1]],\"in_count\":[[\"id-4\",\"Owns\",1],[\"id-5\",\"Knows\",1],[\"id-5\",\"Owns\",1],[\"id-6\",\"Knows\",1]],\"parents\":[[\"id-4\",[\"id-1\"],[\"id-7\"]],[\"id-5\",[\"id-2\"],[\"id-10\"]]],\"refs\":[],\"referencers\":[],\"uniq_groups\":[[\"id-1\"],[\"id-2\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"]],\"duplicates\":[],\"roots\":[[\" \",\"id-3\"],[\"héllo ✓ 𝄞\",\"id-1\"],[\"p2\",\"id-6\"],[\"\",\"id-2\"]]}"
+        },
+        {
+          "do": "seed",
+          "result": null,
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "download",
+          "result": "{\n  \"elements\": [\n    {\n      \"id\": \"id-1\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"héllo ✓ 𝄞\",\n        \"population\": 18446744073709551616,\n        \"area\": 1.0,\n        \"extra\": {\n          \"outer\": {\n            \"inner\": [\n              1,\n              -0.0,\n              null\n            ]\n          },\n          \"empty\": {},\n          \"list\": []\n        }\n      },\n      \"rev\": 4\n    },\n    {\n      \"id\": \"id-2\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"\",\n        \"area\": 1e-07,\n        \"population\": 7\n      },\n      \"rev\": 3\n    },\n    {\n      \"id\": \"id-3\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \" \",\n        \"area\": 1e+16,\n        \"extra\": [\n          [\n            1,\n            [\n              2.5,\n              \"x\"\n            ]\n          ],\n          {\n            \"k\": true\n          }\n        ]\n      },\n      \"rev\": 3\n    },\n    {\n      \"id\": \"id-4\",\n      \"type_name\": \"District\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-5\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p1\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-6\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p2\"\n      },\n      \"rev\": 1\n    }\n  ],\n  \"relationships\": [\n    {\n      \"id\": \"id-7\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-1\",\n      \"target_id\": \"id-4\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-8\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-5\",\n      \"target_id\": \"id-6\",\n      \"properties\": {\n        \"since\": 1990\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-9\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-6\",\n      \"target_id\": \"id-5\",\n      \"properties\": {\n        \"since\": 18446744073709551616\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-10\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-2\",\n      \"target_id\": \"id-5\",\n      \"properties\": {},\n      \"rev\": 0\n    }\n  ]\n}",
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "batch",
+          "ops": [
+            "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":null,\"area\":-0.0,\"extra\":\"added\"}}"
+          ],
+          "result": {
+            "id_map": [],
+            "changed_element_ids": [
+              "id-2"
+            ],
+            "changed_relationship_ids": [],
+            "deleted_element_ids": [],
+            "deleted_relationship_ids": [],
+            "recreated_element_ids": [],
+            "recreated_relationship_ids": [],
+            "before_elements": [
+              [
+                "id-2",
+                "{\"id\":\"id-2\",\"type_name\":\"City\",\"properties\":{\"name\":\"\",\"area\":1e-07,\"population\":7},\"rev\":3}"
+              ]
+            ],
+            "before_relationships": [],
+            "inverse_ops": [
+              "{\"kind\":\"update_element\",\"id\":\"id-2\",\"properties_patch\":{\"name\":\"\",\"area\":1e-07,\"extra\":null}}"
+            ],
+            "changed_elements": [
+              "{\"id\":\"id-2\",\"type_name\":\"City\",\"properties\":{\"area\":-0.0,\"population\":7,\"extra\":\"added\"},\"rev\":6}"
+            ],
+            "changed_relationships": []
+          },
+          "error": null,
+          "digest": "409819dc2ff433e4",
+          "fingerprint": "d0ae8b92bb6ac5ca"
+        },
+        {
+          "do": "download",
+          "result": "{\n  \"elements\": [\n    {\n      \"id\": \"id-1\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"héllo ✓ 𝄞\",\n        \"population\": 18446744073709551616,\n        \"area\": 1.0,\n        \"extra\": {\n          \"outer\": {\n            \"inner\": [\n              1,\n              -0.0,\n              null\n            ]\n          },\n          \"empty\": {},\n          \"list\": []\n        }\n      },\n      \"rev\": 4\n    },\n    {\n      \"id\": \"id-2\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"area\": -0.0,\n        \"population\": 7,\n        \"extra\": \"added\"\n      },\n      \"rev\": 6\n    },\n    {\n      \"id\": \"id-3\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \" \",\n        \"area\": 1e+16,\n        \"extra\": [\n          [\n            1,\n            [\n              2.5,\n              \"x\"\n            ]\n          ],\n          {\n            \"k\": true\n          }\n        ]\n      },\n      \"rev\": 3\n    },\n    {\n      \"id\": \"id-4\",\n      \"type_name\": \"District\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-5\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p1\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-6\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p2\"\n      },\n      \"rev\": 1\n    }\n  ],\n  \"relationships\": [\n    {\n      \"id\": \"id-7\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-1\",\n      \"target_id\": \"id-4\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-8\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-5\",\n      \"target_id\": \"id-6\",\n      \"properties\": {\n        \"since\": 1990\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-9\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-6\",\n      \"target_id\": \"id-5\",\n      \"properties\": {\n        \"since\": 18446744073709551616\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-10\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-2\",\n      \"target_id\": \"id-5\",\n      \"properties\": {},\n      \"rev\": 0\n    }\n  ]\n}",
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "download",
+          "stage": [
+            "{\"kind\":\"update_element\",\"id\":\"id-1\",\"properties_patch\":{\"name\":\"staged\",\"population\":null}}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_s\",\"type_name\":\"City\",\"properties\":{\"name\":\"new\"},\"id\":null}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-6\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_r\",\"type_name\":\"Person\",\"properties\":{\"name\":\"back\"},\"id\":\"id-6\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_n\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"tmp_r\",\"properties\":{},\"id\":null}"
+          ],
+          "result": "{\n  \"elements\": [\n    {\n      \"id\": \"id-1\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"héllo ✓ 𝄞\",\n        \"population\": 18446744073709551616,\n        \"area\": 1.0,\n        \"extra\": {\n          \"outer\": {\n            \"inner\": [\n              1,\n              -0.0,\n              null\n            ]\n          },\n          \"empty\": {},\n          \"list\": []\n        }\n      },\n      \"rev\": 4\n    },\n    {\n      \"id\": \"id-2\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"area\": -0.0,\n        \"population\": 7,\n        \"extra\": \"added\"\n      },\n      \"rev\": 6\n    },\n    {\n      \"id\": \"id-3\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \" \",\n        \"area\": 1e+16,\n        \"extra\": [\n          [\n            1,\n            [\n              2.5,\n              \"x\"\n            ]\n          ],\n          {\n            \"k\": true\n          }\n        ]\n      },\n      \"rev\": 3\n    },\n    {\n      \"id\": \"id-4\",\n      \"type_name\": \"District\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-5\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p1\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-6\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p2\"\n      },\n      \"rev\": 1\n    }\n  ],\n  \"relationships\": [\n    {\n      \"id\": \"id-7\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-1\",\n      \"target_id\": \"id-4\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-8\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-5\",\n      \"target_id\": \"id-6\",\n      \"properties\": {\n        \"since\": 1990\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-9\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-6\",\n      \"target_id\": \"id-5\",\n      \"properties\": {\n        \"since\": 18446744073709551616\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-10\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-2\",\n      \"target_id\": \"id-5\",\n      \"properties\": {},\n      \"rev\": 0\n    }\n  ]\n}",
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "batch",
+          "ops": [
+            "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_c3\",\"type_name\":\"City\",\"properties\":{\"name\":\"again\"},\"id\":\"id-3\"}"
+          ],
+          "result": {
+            "id_map": [
+              [
+                "tmp_c3",
+                "id-3"
+              ]
+            ],
+            "changed_element_ids": [
+              "id-3"
+            ],
+            "changed_relationship_ids": [],
+            "deleted_element_ids": [],
+            "deleted_relationship_ids": [],
+            "recreated_element_ids": [
+              "id-3"
+            ],
+            "recreated_relationship_ids": [],
+            "before_elements": [
+              [
+                "id-3",
+                "{\"id\":\"id-3\",\"type_name\":\"City\",\"properties\":{\"name\":\" \",\"area\":1e+16,\"extra\":[[1,[2.5,\"x\"]],{\"k\":true}]},\"rev\":3}"
+              ]
+            ],
+            "before_relationships": [],
+            "inverse_ops": [
+              "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+              "{\"kind\":\"create_element\",\"temp_id\":\"id-3\",\"type_name\":\"City\",\"properties\":{\"name\":\" \",\"area\":1e+16,\"extra\":[[1,[2.5,\"x\"]],{\"k\":true}]},\"id\":null}"
+            ],
+            "changed_elements": [
+              "{\"id\":\"id-3\",\"type_name\":\"City\",\"properties\":{\"name\":\"again\"},\"rev\":1}"
+            ],
+            "changed_relationships": []
+          },
+          "error": null,
+          "digest": "f9c2b050ef2b5e26",
+          "fingerprint": "03daa29845b57065"
+        },
+        {
+          "do": "download",
+          "result": "{\n  \"elements\": [\n    {\n      \"id\": \"id-1\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"héllo ✓ 𝄞\",\n        \"population\": 18446744073709551616,\n        \"area\": 1.0,\n        \"extra\": {\n          \"outer\": {\n            \"inner\": [\n              1,\n              -0.0,\n              null\n            ]\n          },\n          \"empty\": {},\n          \"list\": []\n        }\n      },\n      \"rev\": 4\n    },\n    {\n      \"id\": \"id-2\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"area\": -0.0,\n        \"population\": 7,\n        \"extra\": \"added\"\n      },\n      \"rev\": 6\n    },\n    {\n      \"id\": \"id-4\",\n      \"type_name\": \"District\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-5\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p1\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-6\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p2\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-3\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"again\"\n      },\n      \"rev\": 1\n    }\n  ],\n  \"relationships\": [\n    {\n      \"id\": \"id-7\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-1\",\n      \"target_id\": \"id-4\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-8\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-5\",\n      \"target_id\": \"id-6\",\n      \"properties\": {\n        \"since\": 1990\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-9\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-6\",\n      \"target_id\": \"id-5\",\n      \"properties\": {\n        \"since\": 18446744073709551616\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-10\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-2\",\n      \"target_id\": \"id-5\",\n      \"properties\": {},\n      \"rev\": 0\n    }\n  ]\n}",
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "download",
+          "stage": [
+            "{\"kind\":\"update_element\",\"id\":\"id-4\",\"properties_patch\":{\"name\":\"d\"}}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-1\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_s\",\"type_name\":\"District\",\"properties\":{},\"id\":null}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_r\",\"type_name\":\"City\",\"properties\":{\"name\":\"third\"},\"id\":\"id-3\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_n\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{},\"id\":null}"
+          ],
+          "result": "{\n  \"elements\": [\n    {\n      \"id\": \"id-1\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"héllo ✓ 𝄞\",\n        \"population\": 18446744073709551616,\n        \"area\": 1.0,\n        \"extra\": {\n          \"outer\": {\n            \"inner\": [\n              1,\n              -0.0,\n              null\n            ]\n          },\n          \"empty\": {},\n          \"list\": []\n        }\n      },\n      \"rev\": 4\n    },\n    {\n      \"id\": \"id-2\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"area\": -0.0,\n        \"population\": 7,\n        \"extra\": \"added\"\n      },\n      \"rev\": 6\n    },\n    {\n      \"id\": \"id-4\",\n      \"type_name\": \"District\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-5\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p1\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-6\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p2\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-3\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"again\"\n      },\n      \"rev\": 1\n    }\n  ],\n  \"relationships\": [\n    {\n      \"id\": \"id-7\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-1\",\n      \"target_id\": \"id-4\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-8\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-5\",\n      \"target_id\": \"id-6\",\n      \"properties\": {\n        \"since\": 1990\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-9\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-6\",\n      \"target_id\": \"id-5\",\n      \"properties\": {\n        \"since\": 18446744073709551616\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-10\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-2\",\n      \"target_id\": \"id-5\",\n      \"properties\": {},\n      \"rev\": 0\n    }\n  ]\n}",
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "batch",
+          "ops": [
+            "{\"kind\":\"delete_relationship\",\"id\":\"id-9\"}",
+            "{\"kind\":\"delete_relationship\",\"id\":\"id-8\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_k\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{\"since\":2001},\"id\":\"id-8\"}"
+          ],
+          "result": {
+            "id_map": [
+              [
+                "tmp_k",
+                "id-8"
+              ]
+            ],
+            "changed_element_ids": [],
+            "changed_relationship_ids": [
+              "id-8"
+            ],
+            "deleted_element_ids": [],
+            "deleted_relationship_ids": [
+              "id-9"
+            ],
+            "recreated_element_ids": [],
+            "recreated_relationship_ids": [
+              "id-8"
+            ],
+            "before_elements": [],
+            "before_relationships": [
+              [
+                "id-9",
+                "{\"id\":\"id-9\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{\"since\":18446744073709551616},\"rev\":1}"
+              ],
+              [
+                "id-8",
+                "{\"id\":\"id-8\",\"type_name\":\"Knows\",\"source_id\":\"id-5\",\"target_id\":\"id-6\",\"properties\":{\"since\":1990},\"rev\":1}"
+              ]
+            ],
+            "inverse_ops": [
+              "{\"kind\":\"delete_relationship\",\"id\":\"id-8\"}",
+              "{\"kind\":\"create_relationship\",\"temp_id\":\"id-8\",\"type_name\":\"Knows\",\"source_id\":\"id-5\",\"target_id\":\"id-6\",\"properties\":{\"since\":1990},\"id\":null}",
+              "{\"kind\":\"create_relationship\",\"temp_id\":\"id-9\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{\"since\":18446744073709551616},\"id\":null}"
+            ],
+            "changed_elements": [],
+            "changed_relationships": [
+              "{\"id\":\"id-8\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{\"since\":2001},\"rev\":1}"
+            ]
+          },
+          "error": null,
+          "digest": "fc46f948f12d8d79",
+          "fingerprint": "e6c264340db9a8da"
+        },
+        {
+          "do": "download",
+          "result": "{\n  \"elements\": [\n    {\n      \"id\": \"id-1\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"héllo ✓ 𝄞\",\n        \"population\": 18446744073709551616,\n        \"area\": 1.0,\n        \"extra\": {\n          \"outer\": {\n            \"inner\": [\n              1,\n              -0.0,\n              null\n            ]\n          },\n          \"empty\": {},\n          \"list\": []\n        }\n      },\n      \"rev\": 4\n    },\n    {\n      \"id\": \"id-2\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"area\": -0.0,\n        \"population\": 7,\n        \"extra\": \"added\"\n      },\n      \"rev\": 6\n    },\n    {\n      \"id\": \"id-4\",\n      \"type_name\": \"District\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-5\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p1\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-6\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p2\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-3\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"again\"\n      },\n      \"rev\": 1\n    }\n  ],\n  \"relationships\": [\n    {\n      \"id\": \"id-7\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-1\",\n      \"target_id\": \"id-4\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-10\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-2\",\n      \"target_id\": \"id-5\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-8\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-6\",\n      \"target_id\": \"id-5\",\n      \"properties\": {\n        \"since\": 2001\n      },\n      \"rev\": 1\n    }\n  ]\n}",
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "download",
+          "stage": [
+            "{\"kind\":\"update_element\",\"id\":\"id-6\",\"properties_patch\":{\"name\":\"q\"}}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_s\",\"type_name\":\"Person\",\"properties\":{\"name\":\"s\"},\"id\":null}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-5\"}",
+            "{\"kind\":\"create_element\",\"temp_id\":\"tmp_r\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p1\"},\"id\":\"id-5\"}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_n\",\"type_name\":\"Knows\",\"source_id\":\"tmp_r\",\"target_id\":\"id-6\",\"properties\":{},\"id\":null}",
+            "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_m\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"tmp_s\",\"properties\":{},\"id\":null}"
+          ],
+          "result": "{\n  \"elements\": [\n    {\n      \"id\": \"id-1\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"héllo ✓ 𝄞\",\n        \"population\": 18446744073709551616,\n        \"area\": 1.0,\n        \"extra\": {\n          \"outer\": {\n            \"inner\": [\n              1,\n              -0.0,\n              null\n            ]\n          },\n          \"empty\": {},\n          \"list\": []\n        }\n      },\n      \"rev\": 4\n    },\n    {\n      \"id\": \"id-2\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"area\": -0.0,\n        \"population\": 7,\n        \"extra\": \"added\"\n      },\n      \"rev\": 6\n    },\n    {\n      \"id\": \"id-4\",\n      \"type_name\": \"District\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-5\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p1\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-6\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p2\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-3\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"again\"\n      },\n      \"rev\": 1\n    }\n  ],\n  \"relationships\": [\n    {\n      \"id\": \"id-7\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-1\",\n      \"target_id\": \"id-4\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-10\",\n      \"type_name\": \"Owns\",\n      \"source_id\": \"id-2\",\n      \"target_id\": \"id-5\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-8\",\n      \"type_name\": \"Knows\",\n      \"source_id\": \"id-6\",\n      \"target_id\": \"id-5\",\n      \"properties\": {\n        \"since\": 2001\n      },\n      \"rev\": 1\n    }\n  ]\n}",
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "batch",
+          "ops": [
+            "{\"kind\":\"delete_relationship\",\"id\":\"id-7\"}",
+            "{\"kind\":\"delete_relationship\",\"id\":\"id-8\"}",
+            "{\"kind\":\"delete_relationship\",\"id\":\"id-10\"}"
+          ],
+          "result": {
+            "id_map": [],
+            "changed_element_ids": [],
+            "changed_relationship_ids": [],
+            "deleted_element_ids": [],
+            "deleted_relationship_ids": [
+              "id-7",
+              "id-8",
+              "id-10"
+            ],
+            "recreated_element_ids": [],
+            "recreated_relationship_ids": [],
+            "before_elements": [],
+            "before_relationships": [
+              [
+                "id-7",
+                "{\"id\":\"id-7\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-4\",\"properties\":{},\"rev\":0}"
+              ],
+              [
+                "id-8",
+                "{\"id\":\"id-8\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{\"since\":2001},\"rev\":1}"
+              ],
+              [
+                "id-10",
+                "{\"id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-5\",\"properties\":{},\"rev\":0}"
+              ]
+            ],
+            "inverse_ops": [
+              "{\"kind\":\"create_relationship\",\"temp_id\":\"id-10\",\"type_name\":\"Owns\",\"source_id\":\"id-2\",\"target_id\":\"id-5\",\"properties\":{},\"id\":null}",
+              "{\"kind\":\"create_relationship\",\"temp_id\":\"id-8\",\"type_name\":\"Knows\",\"source_id\":\"id-6\",\"target_id\":\"id-5\",\"properties\":{\"since\":2001},\"id\":null}",
+              "{\"kind\":\"create_relationship\",\"temp_id\":\"id-7\",\"type_name\":\"Owns\",\"source_id\":\"id-1\",\"target_id\":\"id-4\",\"properties\":{},\"id\":null}"
+            ],
+            "changed_elements": [],
+            "changed_relationships": []
+          },
+          "error": null,
+          "digest": "60a9853c322f79be",
+          "fingerprint": "8e9f74886f4d2941"
+        },
+        {
+          "do": "download",
+          "result": "{\n  \"elements\": [\n    {\n      \"id\": \"id-1\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"héllo ✓ 𝄞\",\n        \"population\": 18446744073709551616,\n        \"area\": 1.0,\n        \"extra\": {\n          \"outer\": {\n            \"inner\": [\n              1,\n              -0.0,\n              null\n            ]\n          },\n          \"empty\": {},\n          \"list\": []\n        }\n      },\n      \"rev\": 4\n    },\n    {\n      \"id\": \"id-2\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"area\": -0.0,\n        \"population\": 7,\n        \"extra\": \"added\"\n      },\n      \"rev\": 6\n    },\n    {\n      \"id\": \"id-4\",\n      \"type_name\": \"District\",\n      \"properties\": {},\n      \"rev\": 0\n    },\n    {\n      \"id\": \"id-5\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p1\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-6\",\n      \"type_name\": \"Person\",\n      \"properties\": {\n        \"name\": \"p2\"\n      },\n      \"rev\": 1\n    },\n    {\n      \"id\": \"id-3\",\n      \"type_name\": \"City\",\n      \"properties\": {\n        \"name\": \"again\"\n      },\n      \"rev\": 1\n    }\n  ],\n  \"relationships\": []\n}",
+          "error": null,
+          "unchanged": true
+        },
+        {
+          "do": "batch",
+          "ops": [
+            "{\"kind\":\"delete_element\",\"id\":\"id-1\"}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-4\"}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-5\"}",
+            "{\"kind\":\"delete_element\",\"id\":\"id-6\"}"
+          ],
+          "result": {
+            "id_map": [],
+            "changed_element_ids": [],
+            "changed_relationship_ids": [],
+            "deleted_element_ids": [
+              "id-1",
+              "id-2",
+              "id-3",
+              "id-4",
+              "id-5",
+              "id-6"
+            ],
+            "deleted_relationship_ids": [],
+            "recreated_element_ids": [],
+            "recreated_relationship_ids": [],
+            "before_elements": [
+              [
+                "id-1",
+                "{\"id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"héllo ✓ 𝄞\",\"population\":18446744073709551616,\"area\":1.0,\"extra\":{\"outer\":{\"inner\":[1,-0.0,null]},\"empty\":{},\"list\":[]}},\"rev\":4}"
+              ],
+              [
+                "id-2",
+                "{\"id\":\"id-2\",\"type_name\":\"City\",\"properties\":{\"area\":-0.0,\"population\":7,\"extra\":\"added\"},\"rev\":6}"
+              ],
+              [
+                "id-3",
+                "{\"id\":\"id-3\",\"type_name\":\"City\",\"properties\":{\"name\":\"again\"},\"rev\":1}"
+              ],
+              [
+                "id-4",
+                "{\"id\":\"id-4\",\"type_name\":\"District\",\"properties\":{},\"rev\":0}"
+              ],
+              [
+                "id-5",
+                "{\"id\":\"id-5\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p1\"},\"rev\":1}"
+              ],
+              [
+                "id-6",
+                "{\"id\":\"id-6\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p2\"},\"rev\":1}"
+              ]
+            ],
+            "before_relationships": [],
+            "inverse_ops": [
+              "{\"kind\":\"create_element\",\"temp_id\":\"id-6\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p2\"},\"id\":null}",
+              "{\"kind\":\"create_element\",\"temp_id\":\"id-5\",\"type_name\":\"Person\",\"properties\":{\"name\":\"p1\"},\"id\":null}",
+              "{\"kind\":\"create_element\",\"temp_id\":\"id-4\",\"type_name\":\"District\",\"properties\":{},\"id\":null}",
+              "{\"kind\":\"create_element\",\"temp_id\":\"id-3\",\"type_name\":\"City\",\"properties\":{\"name\":\"again\"},\"id\":null}",
+              "{\"kind\":\"create_element\",\"temp_id\":\"id-2\",\"type_name\":\"City\",\"properties\":{\"area\":-0.0,\"population\":7,\"extra\":\"added\"},\"id\":null}",
+              "{\"kind\":\"create_element\",\"temp_id\":\"id-1\",\"type_name\":\"City\",\"properties\":{\"name\":\"héllo ✓ 𝄞\",\"population\":18446744073709551616,\"area\":1.0,\"extra\":{\"outer\":{\"inner\":[1,-0.0,null]},\"empty\":{},\"list\":[]}},\"id\":null}"
+            ],
+            "changed_elements": [],
+            "changed_relationships": []
+          },
+          "error": null,
+          "digest": "0000000000000000",
+          "fingerprint": "3e045184e34bca3c",
+          "state": [],
+          "indexes": "{\"by_type\":[],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[],\"duplicates\":[],\"roots\":[]}"
+        },
+        {
+          "do": "download",
+          "result": "{\n  \"elements\": [],\n  \"relationships\": []\n}",
+          "error": null,
+          "unchanged": true
+        }
+      ]
+    },
+    {
+      "metamodel": {
+        "enums": {},
+        "elements": [
+          {
+            "name": "Thing",
+            "abstract": true,
+            "extends": null,
+            "properties": [
+              {
+                "name": "name",
+                "datatype": "string",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "City",
+            "abstract": false,
+            "extends": "Thing",
+            "properties": [
+              {
+                "name": "population",
+                "datatype": "integer",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "area",
+                "datatype": "float",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "mayor",
+                "datatype": "Person",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "twins",
+                "datatype": "City",
+                "multiplicity": "0..*",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "extra",
+                "datatype": "string",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ],
+            "key": null
+          },
+          {
+            "name": "District",
+            "abstract": false,
+            "extends": "Thing",
+            "properties": [],
+            "key": null
+          },
+          {
+            "name": "Person",
+            "abstract": false,
+            "extends": "Thing",
+            "properties": [],
+            "key": null
+          }
+        ],
+        "relationships": [
+          {
+            "name": "Owns",
+            "abstract": false,
+            "extends": null,
+            "containment": true,
+            "source": "Thing",
+            "target": "Thing",
+            "mappings": [
+              {
+                "source": "Thing",
+                "target": "Thing"
+              }
+            ],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": []
+          },
+          {
+            "name": "Knows",
+            "abstract": false,
+            "extends": null,
+            "containment": false,
+            "source": "Person",
+            "target": "Person",
+            "mappings": [
+              {
+                "source": "Person",
+                "target": "Person"
+              }
+            ],
+            "source_multiplicity": "0..*",
+            "target_multiplicity": "0..*",
+            "properties": [
+              {
+                "name": "since",
+                "datatype": "integer",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              },
+              {
+                "name": "via",
+                "datatype": "Person",
+                "multiplicity": "0..1",
+                "min": null,
+                "max": null,
+                "pattern": null,
+                "max_length": null
+              }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "do": "download",
+          "result": "{\n  \"elements\": [],\n  \"relationships\": []\n}",
+          "error": null,
+          "digest": "0000000000000000",
+          "fingerprint": "3e045184e34bca3c",
+          "state": [],
+          "indexes": "{\"by_type\":[],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[],\"referencers\":[],\"uniq_groups\":[],\"duplicates\":[],\"roots\":[]}"
+        }
+      ]
+    }
+  ]
+}
