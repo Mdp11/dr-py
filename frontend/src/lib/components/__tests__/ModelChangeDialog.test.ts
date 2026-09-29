@@ -4,6 +4,7 @@ import * as crApi from '$lib/api/changeRequest';
 import * as stageProposed from '$lib/state/stage-proposed';
 import * as fileSave from '$lib/util/fileSave';
 import { canEdit, hasStagedOps } from '$lib/state';
+import { installEngineSeam } from '$lib/api/engine-route';
 import ModelChangeDialog from '../ModelChangeDialog.svelte';
 
 vi.mock('$lib/state', async (orig) => {
@@ -71,6 +72,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	installEngineSeam(null);
 	if (app) unmount(app);
 	app = null;
 	host.remove();
@@ -260,6 +262,92 @@ describe('ModelChangeDialog — compare mode', () => {
 		// a viewer can still preview and create a CR
 		expect(byTestId<HTMLButtonElement>('mcd-preview').disabled).toBe(false);
 		expect(byTestId<HTMLButtonElement>('mcd-create-cr').disabled).toBe(false);
+	});
+});
+
+describe('ModelChangeDialog — compare on the engine', () => {
+	const engineOn = () =>
+		installEngineSeam({
+			side: (surface) => (surface === 'compare' ? 'engine' : 'server'),
+			call: () => Promise.reject(new Error('the routed functions are spied')),
+			gone: () => false
+		});
+
+	it('Replace stays enabled over staged edits, with no gate hint', () => {
+		engineOn();
+		vi.mocked(hasStagedOps).mockReturnValue(true);
+		open('compare');
+		pickFiles([modelFile()]);
+		expect(byTestId<HTMLButtonElement>('mcd-replace').disabled).toBe(false);
+		expect(document.body.querySelector('[data-testid="mcd-gate-hint"]')).toBeNull();
+	});
+
+	it('Preview says it includes staged changes only when edits were staged', async () => {
+		engineOn();
+		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
+		vi.mocked(hasStagedOps).mockReturnValue(true);
+		open('compare');
+		pickFiles([modelFile()]);
+		byTestId('mcd-preview').click();
+		await settle();
+		expect(byTestId('mcd-staged-note').textContent?.trim()).toBe('Includes staged changes');
+
+		vi.mocked(hasStagedOps).mockReturnValue(false);
+		byTestId('mcd-preview').click();
+		await settle();
+		expect(document.body.querySelector('[data-testid="mcd-staged-note"]')).toBeNull();
+	});
+
+	it('server mode never shows the note', async () => {
+		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
+		vi.mocked(hasStagedOps).mockReturnValue(true);
+		open('compare');
+		pickFiles([modelFile()]);
+		byTestId('mcd-preview').click();
+		await settle();
+		expect(document.body.querySelector('[data-testid="mcd-staged-note"]')).toBeNull();
+	});
+
+	it('Preview then Replace compares twice: no cache', async () => {
+		engineOn();
+		const compare = vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
+		vi.spyOn(crApi, 'proposeCr').mockResolvedValue({
+			ok: true,
+			modelRev: 3,
+			cr: CR_DOC,
+			ops: [CREATE_OP]
+		});
+		vi.spyOn(stageProposed, 'stageProposedOps').mockResolvedValue({ ok: true, count: 1 });
+		open('compare');
+		pickFiles([modelFile()]);
+		byTestId('mcd-preview').click();
+		await settle();
+		byTestId('mcd-replace').click();
+		await settle();
+		expect(compare).toHaveBeenCalledTimes(2);
+	});
+
+	it('Replace stages with the answer rev and the CR prestate', async () => {
+		engineOn();
+		vi.mocked(hasStagedOps).mockReturnValue(true);
+		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
+		vi.spyOn(crApi, 'proposeCr').mockResolvedValue({
+			ok: true,
+			modelRev: 4,
+			cr: CR_DOC,
+			ops: [CREATE_OP]
+		});
+		const stage = vi
+			.spyOn(stageProposed, 'stageProposedOps')
+			.mockResolvedValue({ ok: true, count: 1 });
+		open('compare');
+		pickFiles([modelFile()]);
+		byTestId('mcd-replace').click();
+		await settle();
+		expect(stage).toHaveBeenCalledWith([CREATE_OP], 4, {
+			elements: [EL('a', 'A'), EL('b', 'B')],
+			relationships: []
+		});
 	});
 });
 

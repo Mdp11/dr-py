@@ -1904,7 +1904,11 @@ a button. Both requests go through the `compare` surface (`server` by default;
   edits (DiffDrawer, Ctrl+S, commit).
 - **Gates**: Replace / Stage edits need `canEdit()` AND an empty model staged
   buffer (`hasStagedOps()` false — the proposal is computed against the
-  committed model); a hint says why. In compare mode Preview and Create CR are
+  committed model); a hint says why. With the `compare` surface on the engine
+  the proposal is computed over the working copy, so staged edits no longer gate
+  Replace / Stage edits, `ensureCompared` caches nothing (the answer depends on
+  staged state), and Preview / Create CR show `mcd-staged-note` ("Includes
+  staged changes") when edits were staged at the answer. In compare mode Preview and Create CR are
   viewer-allowed (`POST /model/compare` is a read-only POST); in apply-cr mode
   Preview is gated on `canEdit()` too, since it goes through
   `POST /model/apply-cr`, which is deliberately treated as a write.
