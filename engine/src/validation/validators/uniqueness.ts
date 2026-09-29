@@ -21,21 +21,23 @@ export class Uniqueness implements Validator {
 	}
 
 	validateGlobal(run: Run, scope: readonly string[]): void {
-		const indexes = run.model.indexes;
-		// Uniqueness key → the group's primary, so that a group is gathered once a run.
-		const primaries = new Map<string, ElementRec>();
+		const { model, structure } = run;
+		const scoped = new Set<ElementRec>();
 		for (const id of scope) {
-			const el = run.model.findElement(id);
-			// Alone in its bucket, an element is alone in its group.
-			if (el === undefined || !(indexes.buckets.get(el.uniq) instanceof Set)) continue;
-			const key = indexes.uniqKey(el);
-			let primary = primaries.get(key);
+			const el = model.findElement(id);
+			if (el !== undefined) scoped.add(el);
+		}
+		// Scoped member → its group's primary, so that a group is gathered once a
+		// run: a group may cost its whole bucket, and it is not asked per member.
+		const primaries = new Map<ElementRec, ElementRec>();
+		for (const el of scoped) {
+			let primary = primaries.get(el);
 			if (primary === undefined) {
+				const group = structure.groupOf(el);
+				if (group === null || group.length < 2) continue;
 				primary = el;
-				for (const member of indexes.uniqGroupOf(el)) {
-					if (member.ord < primary.ord) primary = member;
-				}
-				primaries.set(key, primary);
+				for (const member of group) if (member.ord < primary.ord) primary = member;
+				for (const member of group) if (scoped.has(member)) primaries.set(member, primary);
 			}
 			if (primary !== el) {
 				run.out.push(

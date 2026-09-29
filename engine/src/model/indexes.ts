@@ -1,12 +1,12 @@
-import type { KeyRel, KeySpec } from '../metamodel/key.ts';
+import type { KeySpec } from '../metamodel/key.ts';
 import { drain, type Steps } from '../steps/steps.ts';
-import { cmpCodePoint } from '../value/compare.ts';
-import { pyKey } from '../value/key.ts';
-import type { Value } from '../value/types.ts';
 import type { Model } from './model.ts';
 import { displayName } from './naming.ts';
 import { ElementRec, getProp, type Props, type RelRec } from './records.ts';
 import { RootOrder } from './root-order.ts';
+import { uniqKeyText } from './uniq-key.ts';
+
+const ownParents = (element: ElementRec): readonly RelRec[] => element.parents;
 
 function attach(list: RelRec[], rel: RelRec, at: 'outAt' | 'inAt'): void {
 	rel[at] = list.length;
@@ -263,36 +263,7 @@ export class IndexSet {
 
 	/** `uniqKey` computed from the element as it now stands. */
 	private freshKey(element: ElementRec): string {
-		const owner = element.parents.length > 0 ? element.parents[0]!.source.id : null;
-		const spec = this.keySpec(element.typeName);
-		const signature: Value =
-			spec === null
-				? element.props
-				: [
-						spec.properties.map((name) => getProp(element.props, name) ?? null),
-						spec.relationships.map((keyRel) => this.relEndpoints(element, keyRel))
-					];
-		return pyKey([element.typeName, owner, signature]);
-	}
-
-	private keySpec(typeName: string): KeySpec | null {
-		let spec = this.keySpecs.get(typeName);
-		if (spec === undefined) {
-			spec = this.model.metamodel.effectiveElementKeySpec(typeName);
-			this.keySpecs.set(typeName, spec);
-		}
-		return spec;
-	}
-
-	/** Sorted endpoint ids of the element's edges of exactly this type; subtypes do not count. */
-	private relEndpoints(element: ElementRec, keyRel: KeyRel): string[] {
-		const ids: string[] = [];
-		if (keyRel.direction === 'out') {
-			for (const rel of element.out) if (rel.typeName === keyRel.relType) ids.push(rel.target.id);
-		} else {
-			for (const rel of element.in) if (rel.typeName === keyRel.relType) ids.push(rel.source.id);
-		}
-		return ids.sort(cmpCodePoint);
+		return uniqKeyText(this.model.metamodel, ownParents, element, this.keySpecs);
 	}
 
 	/** Files the element under the hash of `text`, its fresh key. */

@@ -1,6 +1,7 @@
 import type { Metamodel } from '../metamodel/metamodel.ts';
 import type { Model } from '../model/model.ts';
 import type { ElementRec, RelRec } from '../model/records.ts';
+import { liveStructure, type Structure } from '../model/structure.ts';
 import type { CompiledRules } from '../rules/compile.ts';
 import { RulesValidator } from '../rules/evaluate.ts';
 import { beyondHost, translatePyRegex } from '../value/regex.ts';
@@ -12,9 +13,14 @@ import { Multiplicity } from './validators/multiplicity.ts';
 import { TypeConformance } from './validators/type-conformance.ts';
 import { Uniqueness } from './validators/uniqueness.ts';
 
-/** One validation run: the model, the facet patterns, and the issues found so far. */
+/**
+ * One validation run: the model, its structure under the run's metamodel, the
+ * facet patterns, and the issues found so far. Containment parents and
+ * uniqueness groups are read from `structure`, never from the records.
+ */
 export type Run = {
 	readonly model: Model;
+	readonly structure: Structure;
 	readonly patterns: FacetPatterns;
 	readonly out: Issue[];
 };
@@ -124,27 +130,24 @@ function stamp(out: Issue[], from: number, checkName: string): void {
 	for (let i = from; i < out.length; i++) if (out[i]!.check === '') out[i]!.check = checkName;
 }
 
-/**
- * The pipeline over a scope of ids: each id once, its first occurrence
- * deciding the order; an element runs every element hook, a relationship
- * every relationship hook, an id naming nothing is skipped; then every global
- * hook, in validator order. With `rules`, a `RulesValidator` over them runs
- * seventh.
- */
-export function validateScoped(
+/** A pass's issues, and where each validator's global issues begin, in list order. */
+type Pass = { readonly out: Issue[]; readonly globals: readonly number[] };
+
+function pass(
 	model: Model,
 	ids: Iterable<string>,
 	v: Validators,
 	p: FacetPatterns,
-	rules: CompiledRules | null = null
-): Issue[] {
-	if (v.metamodel !== model.metamodel || p.metamodel !== model.metamodel) {
+	rules: CompiledRules | null,
+	structure: Structure
+): Pass {
+	if (v.metamodel !== structure.metamodel || p.metamodel !== structure.metamodel) {
 		throw new Error('validators built for another metamodel');
 	}
 	const list: readonly Validator[] =
 		rules === null ? v.list : [...v.list, new RulesValidator(rules)];
 	const scope = [...new Set(ids)];
-	const run: Run = { model, patterns: p, out: [] };
+	const run: Run = { model, structure, patterns: p, out: [] };
 	const out = run.out;
 	for (const id of scope) {
 		const el = model.findElement(id);
@@ -164,10 +167,49 @@ export function validateScoped(
 			stamp(out, from, validator.checkName);
 		}
 	}
+	const globals: number[] = [];
 	for (const validator of list) {
 		const from = out.length;
+		globals.push(from);
 		validator.validateGlobal?.(run, scope);
 		stamp(out, from, validator.checkName);
 	}
-	return out;
+	return { out, globals };
+}
+
+/**
+ * The pipeline over a scope of ids: each id once, its first occurrence
+ * deciding the order; an element runs every element hook, a relationship
+ * every relationship hook, an id naming nothing is skipped; then every global
+ * hook, in validator order. With `rules`, a `RulesValidator` over them runs
+ * seventh. The validators, the patterns and `structure` share one metamodel.
+ */
+export function validateScoped(
+	model: Model,
+	ids: Iterable<string>,
+	v: Validators,
+	p: FacetPatterns,
+	rules: CompiledRules | null = null,
+	structure: Structure = liveStructure(model)
+): Issue[] {
+	return pass(model, ids, v, p, rules, structure).out;
+}
+
+/**
+ * `validateScoped` split: the entity hooks' issues, and each global hook's
+ * own, one list per validator in list order, the rules' last when given.
+ */
+export function validateSplit(
+	model: Model,
+	ids: Iterable<string>,
+	v: Validators,
+	p: FacetPatterns,
+	rules: CompiledRules | null,
+	structure: Structure
+): { entity: Issue[]; global: Issue[][] } {
+	const { out, globals } = pass(model, ids, v, p, rules, structure);
+	return {
+		entity: out.slice(0, globals[0]),
+		global: globals.map((from, i) => out.slice(from, globals[i + 1] ?? out.length))
+	};
 }

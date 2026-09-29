@@ -1,4 +1,4 @@
-import type { Model } from '../model/model.ts';
+import type { Metamodel } from '../metamodel/metamodel.ts';
 import { getProp, type ElementRec } from '../model/records.ts';
 import type { Issue } from '../validation/issue.ts';
 import type { Run, Validator } from '../validation/pipeline.ts';
@@ -90,8 +90,7 @@ function evaluateProperty(el: ElementRec, atom: PropertyAtom): boolean {
 const countOk = (n: number, bound: Count | null, holds: (n: number, b: Num) => boolean) =>
 	bound === null || holds(n, bound);
 
-function evaluateRelationship(model: Model, el: ElementRec, atom: RelationshipAtom): boolean {
-	const mm = model.metamodel;
+function evaluateRelationship(mm: Metamodel, el: ElementRec, atom: RelationshipAtom): boolean {
 	const relTypes = mm.relationshipDescendants(atom.type);
 	const farTypes = atom.to === null ? null : mm.elementDescendants(atom.to);
 	const outgoing = atom.direction === 'outgoing';
@@ -101,7 +100,7 @@ function evaluateRelationship(model: Model, el: ElementRec, atom: RelationshipAt
 		if (farTypes !== null || atom.where !== null) {
 			const far = outgoing ? rel.target : rel.source;
 			if (farTypes !== null && !farTypes.has(far.typeName)) continue;
-			if (atom.where !== null && !evaluateCondition(model, far, atom.where)) continue;
+			if (atom.where !== null && !evaluateCondition(mm, far, atom.where)) continue;
 		}
 		n++;
 	}
@@ -112,13 +111,13 @@ function evaluateRelationship(model: Model, el: ElementRec, atom: RelationshipAt
 	);
 }
 
-/** Whether `el` satisfies `cond`, in the model it belongs to. */
-export function evaluateCondition(model: Model, el: ElementRec, cond: Condition): boolean {
-	if ('all' in cond) return cond.all.every((sub) => evaluateCondition(model, el, sub));
-	if ('any' in cond) return cond.any.some((sub) => evaluateCondition(model, el, sub));
-	if ('not' in cond) return !evaluateCondition(model, el, cond.not);
+/** Whether `el` satisfies `cond` under `mm`, over the adjacency of the model it belongs to. */
+export function evaluateCondition(mm: Metamodel, el: ElementRec, cond: Condition): boolean {
+	if ('all' in cond) return cond.all.every((sub) => evaluateCondition(mm, el, sub));
+	if ('any' in cond) return cond.any.some((sub) => evaluateCondition(mm, el, sub));
+	if ('not' in cond) return !evaluateCondition(mm, el, cond.not);
 	if ('property' in cond) return evaluateProperty(el, cond);
-	return evaluateRelationship(model, el, cond);
+	return evaluateRelationship(mm, el, cond);
 }
 
 function issueFor(cr: CompiledRule, el: ElementRec): Issue {
@@ -155,10 +154,11 @@ export class RulesValidator implements Validator {
 	validateElement(run: Run, el: ElementRec): void {
 		const rules = this.compiled.rulesByType.get(el.typeName);
 		if (rules === undefined) return;
+		const mm = run.structure.metamodel;
 		for (const cr of rules) {
 			try {
-				if (cr.rule.when !== null && !evaluateCondition(run.model, el, cr.rule.when)) continue;
-				if (!evaluateCondition(run.model, el, cr.rule.then)) run.out.push(issueFor(cr, el));
+				if (cr.rule.when !== null && !evaluateCondition(mm, el, cr.rule.when)) continue;
+				if (!evaluateCondition(mm, el, cr.rule.then)) run.out.push(issueFor(cr, el));
 			} catch {
 				this.errors.set(cr.check, (this.errors.get(cr.check) ?? 0) + 1);
 			}

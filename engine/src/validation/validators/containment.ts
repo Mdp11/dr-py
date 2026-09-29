@@ -1,4 +1,5 @@
 import type { ElementRec } from '../../model/records.ts';
+import type { Structure } from '../../model/structure.ts';
 import { errorIssue } from '../issue.ts';
 import type { Run, Validator } from '../pipeline.ts';
 
@@ -7,12 +8,12 @@ import type { Run, Validator } from '../pipeline.ts';
  * elements known to reach a root, shared across one run; a chain that reaches
  * a cycle adds nothing to it.
  */
-function reachesCycle(start: ElementRec, safe: Set<ElementRec>): boolean {
+function reachesCycle(structure: Structure, start: ElementRec, safe: Set<ElementRec>): boolean {
 	const seen = new Set<ElementRec>();
 	let node: ElementRec | null = start;
 	while (node !== null && !seen.has(node) && !safe.has(node)) {
 		seen.add(node);
-		node = node.parents[0]?.source ?? null;
+		node = structure.parentsOf(node)[0]?.source ?? null;
 	}
 	if (node === null || safe.has(node)) {
 		for (const element of seen) safe.add(element);
@@ -30,7 +31,7 @@ export class Containment implements Validator {
 	readonly checkName = 'containment';
 
 	validateElement(run: Run, el: ElementRec): void {
-		const n = el.parents.length;
+		const n = run.structure.parentsOf(el).length;
 		if (n > 1) {
 			run.out.push(
 				errorIssue(
@@ -46,7 +47,7 @@ export class Containment implements Validator {
 		const safe = new Set<ElementRec>();
 		for (const id of scope) {
 			const el = run.model.findElement(id);
-			if (el !== undefined && reachesCycle(el, safe)) {
+			if (el !== undefined && reachesCycle(run.structure, el, safe)) {
 				run.out.push(
 					errorIssue(`Containment cycle detected involving element ${id}`, [id], 'structural')
 				);
