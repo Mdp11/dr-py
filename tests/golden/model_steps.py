@@ -22,8 +22,13 @@ commit of rule sets alone, and ``issues`` records ``GET /model/issues``.
 ``preview`` and ``validate_staged`` send their ops to ``POST /commits/preview``
 and to the staged branch of ``POST /model/validate``, which apply them, validate
 and roll back: the recorder holds both to leaving the model and the store as
-they were. A batch with ``record_dirty`` adds its dirty ids to its result,
-widened by the rules' reach when it also carries ``expand``.
+they were. ``candidate`` diffs the store against the model validated under a
+candidate metamodel document, as ``POST /metamodel/diff`` computes its model
+half; ``preview_rebind`` sends a ``metamodel.rebind`` to that document ahead of
+its ops to ``POST /commits/preview`` as the owner, held to leaving the model,
+the metamodel and the store as they were. A batch with ``record_dirty`` adds
+its dirty ids to its result, widened by the rules' reach when it also carries
+``expand``.
 ``insert_element`` and ``insert_relationship`` put an entity in as committed
 state arrives, its type unchecked. ``export`` calls an export route with the
 clock pinned to the step's ``date`` and records the file it answers (see
@@ -34,6 +39,11 @@ state digest and a fingerprint of the entity lines plus the index dump. Every
 themselves, so a mismatch can be read, not just seen. A step that changed
 nothing says ``"unchanged": true`` instead. The engine's golden runner replays
 the same steps and compares all of it.
+
+A run may start from a model file, named by the document's ``model_file`` and
+loaded as committed state arrives; its steps then compare with the loaded
+model. Such a run can carry no checkpoints (``full_every=None``): the file is
+the state, and its lines would dwarf the fixture.
 
 A batch runs on the recorder's own model, as it does on a session's. A refused
 batch leaves no trace — the applier puts every touched entity back, ``rev``
@@ -50,13 +60,14 @@ import hashlib
 import io
 import json
 import zipfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 from urllib.parse import unquote
 
+import yaml
 from fastapi import HTTPException, Response
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
@@ -65,13 +76,20 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from data_rover.api import table_export_engine
 from data_rover.api.db_models import ArtifactKind, ArtifactRow, Role
 from data_rover.api.deps import Session
+from data_rover.api.metamodel_candidate import candidate_issues, model_half
 from data_rover.api.routes import artifacts as artifact_routes
 from data_rover.api.routes import exports as export_routes
 from data_rover.api.routes import read
 from data_rover.api.routes import tables as table_routes
+from data_rover.api.routes._snapshot import build_model_from_dicts
 from data_rover.api.routes.commits import preview_commit
 from data_rover.api.routes.elements import get_element
-from data_rover.api.routes.ops import _apply_batch, _BatchResult, _finalize
+from data_rover.api.routes.ops import (
+    _apply_batch,
+    _BatchResult,
+    _ensure_validation_seeded,
+    _finalize,
+)
 from data_rover.api.routes.rules import parse_result
 from data_rover.api.routes.validation import list_issues, validate_model
 from data_rover.api.rules import applies_population, pipeline_for, session_pipeline
@@ -91,7 +109,7 @@ from data_rover.api.schemas import (
     ValidateRequest,
 )
 from data_rover.api.search import SearchQueryIn
-from data_rover.api.serialize import iter_entity_lines
+from data_rover.api.serialize import iter_entity_lines, parse_model_json
 from data_rover.api.settings import Settings
 from data_rover.api.state_digest import model_digest
 from data_rover.api.validation_sweep import start_validation_sweep
@@ -131,6 +149,7 @@ from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
+from .driver import ROOT
 from .index_dump import dump_indexes
 from .tagged import tag
 
@@ -691,11 +710,21 @@ class _Ids:
 class Recorder:
     """One scenario in the making: a model with sequential ids, and its log."""
 
-    def __init__(self, metamodel: Metamodel, *, full_every: int = 5) -> None:
+    def __init__(
+        self,
+        metamodel: Metamodel,
+        *,
+        full_every: int | None = 5,
+        model_file: str | None = None,
+    ) -> None:
+        assert model_file is None or full_every is None, (
+            "a run from a model file carries no checkpoints"
+        )
         self.metamodel = metamodel
         self._ids = _Ids()
         self.model = Model(metamodel, self._ids)
         self._full_every = full_every
+        self._model_file = model_file
         self._steps: list[dict[str, Any]] = []
         self._last: dict[str, Any] | None = None
         self._landed: dict[int, _BatchResult] = {}
@@ -703,6 +732,33 @@ class Recorder:
         self._artifacts: Artifacts = {}
         self._session: Session | None = None
         self._rules: CompiledRules | None = None
+        if model_file is not None:
+            self._load(model_file)
+            self._last = observe(self.model)
+
+    def _load(self, model_file: str) -> None:
+        """The file's entities inserted as committed state arrives, held to
+        what the bulk loader makes of the same file."""
+        blob = (ROOT / model_file).read_bytes()
+        raw = parse_model_json(blob)
+        for e in raw["elements"]:
+            self.model.insert_element(
+                e["id"], e["type_name"], e["properties"], e["rev"]
+            )
+        for r in raw["relationships"]:
+            self.model.insert_relationship(
+                r["id"],
+                r["type_name"],
+                r["source_id"],
+                r["target_id"],
+                r["properties"],
+                r["rev"],
+            )
+        bulk = build_model_from_dicts(
+            self.metamodel, parse_model_json(blob), strict=False
+        )
+        if observe(self.model) != observe(bulk):
+            raise AssertionError(f"{model_file} loads unlike the bulk loader")
 
     def _entity(self, step: dict[str, Any]) -> Element | Relationship:
         detached = step.get("detached")
@@ -775,15 +831,14 @@ class Recorder:
         session.validation.replace(dirty.ids, scoped)
         session.model_rev += 1
 
-    def _staged(self, step: dict[str, Any]) -> Any:
-        """``preview`` or ``validate_staged``: the route over staged ops, which
-        must leave the model and the store as they were. The ids a preview
-        mints for its creates go back to the generator."""
+    def _dry(self, step: dict[str, Any], call: Callable[[Session], Any]) -> Any:
+        """``call`` over the seeded session, which must leave the model, the
+        metamodel and the store as they were. The ids it mints for creates go
+        back to the generator."""
         session = self._session
         assert session is not None and session.validation is not None, (
             f"{step['do']} needs a seeded recorder"
         )
-        ops = _MODEL_OPS.validate_python(step["_ops"])
         store = [
             (owner, list(issues))
             for owner, issues in session.validation.issues_by_owner.items()
@@ -791,6 +846,32 @@ class Recorder:
         before = observe(self.model)
         drawn = self._ids.drawn
         try:
+            result = call(session)
+        finally:
+            self._ids.drawn = drawn
+        if observe(self.model) != before:
+            raise AssertionError(f"step {len(self._steps)}: {step['do']} left a trace")
+        if session.metamodel is not self.metamodel or (
+            self.model.metamodel is not self.metamodel
+        ):
+            raise AssertionError(
+                f"step {len(self._steps)}: {step['do']} changed the metamodel"
+            )
+        after = [
+            (owner, list(issues))
+            for owner, issues in session.validation.issues_by_owner.items()
+        ]
+        if after != store:
+            raise AssertionError(
+                f"step {len(self._steps)}: {step['do']} changed the store"
+            )
+        return result
+
+    def _staged(self, step: dict[str, Any]) -> Any:
+        """``preview`` or ``validate_staged``: the route over staged ops."""
+        ops = _MODEL_OPS.validate_python(step["_ops"])
+
+        def call(session: Session) -> Any:
             if step["do"] == "preview":
                 session.strict_mode = bool(step["strict"])
                 body = preview_commit(
@@ -801,28 +882,60 @@ class Recorder:
                     membership=SimpleNamespace(role=Role.editor),  # type: ignore[arg-type]
                 )
                 assert isinstance(body, BaseModel), body
-                result: Any = body.model_dump(mode="json")
-            else:
-                assert ops, "an empty validate_staged takes the full branch"
-                issues = validate_model(
-                    ValidateRequest(ops=list(ops), base_rev=session.model_rev),
-                    session=session,
-                )
-                assert isinstance(issues, list), issues
-                result = [i.model_dump(mode="json") for i in issues]
-        finally:
-            self._ids.drawn = drawn
-        if observe(self.model) != before:
-            raise AssertionError(f"step {len(self._steps)}: {step['do']} left a trace")
-        after = [
-            (owner, list(issues))
-            for owner, issues in session.validation.issues_by_owner.items()
-        ]
-        if after != store:
-            raise AssertionError(
-                f"step {len(self._steps)}: {step['do']} changed the store"
+                return body.model_dump(mode="json")
+            assert ops, "an empty validate_staged takes the full branch"
+            issues = validate_model(
+                ValidateRequest(ops=list(ops), base_rev=session.model_rev),
+                session=session,
             )
-        return result
+            assert isinstance(issues, list), issues
+            return [i.model_dump(mode="json") for i in issues]
+
+        return self._dry(step, call)
+
+    def _preview_rebind(self, step: dict[str, Any]) -> Any:
+        """``POST /commits/preview`` as the owner over a rebind to the step's
+        metamodel document, its YAML first, then the step's ops. With no
+        artifact op the route never reads ``db``."""
+        blob = yaml.safe_dump(step["metamodel"])
+
+        def call(session: Session) -> Any:
+            session.strict_mode = bool(step["strict"])
+            body = preview_commit(
+                PreviewRequest.model_validate(
+                    {
+                        "base_rev": session.model_rev,
+                        "ops": [
+                            {"kind": "metamodel.rebind", "blob": blob},
+                            *step["_ops"],
+                        ],
+                    }
+                ),
+                project_id="p",
+                session=session,
+                db=None,  # type: ignore[arg-type]
+                membership=SimpleNamespace(role=Role.owner),  # type: ignore[arg-type]
+            )
+            assert isinstance(body, BaseModel), body
+            return body.model_dump(mode="json")
+
+        return self._dry(step, call)
+
+    def _candidate(self, step: dict[str, Any]) -> Any:
+        """``POST /metamodel/diff``'s model half: the store the route reads,
+        against the model validated under the step's metamodel document with
+        the session's rule sources recompiled for it."""
+
+        def call(session: Session) -> Any:
+            candidate = Metamodel.model_validate(step["metamodel"])
+            with session.write_mutex:
+                current = _ensure_validation_seeded(session, self.model).all_issues()
+                issues = candidate_issues(
+                    self.model, candidate, session.compiled_rules.sources
+                )
+            return model_half(current, issues)
+
+        return self._dry(step, call)
 
     def _apply(self, step: dict[str, Any]) -> Any:
         model = self.model
@@ -861,6 +974,10 @@ class Recorder:
                 return list_issues(session=self._session).model_dump(mode="json")
             case "preview" | "validate_staged":
                 return self._staged(step)
+            case "preview_rebind":
+                return self._preview_rebind(step)
+            case "candidate":
+                return self._candidate(step)
             case "read":
                 session = Session(
                     metamodel=self.metamodel, model=model, views=self._views
@@ -1016,7 +1133,8 @@ class Recorder:
         else:
             entry["digest"] = seen["digest"]
             entry["fingerprint"] = seen["fingerprint"]
-            if len(self._steps) % self._full_every == 0:
+            full = self._full_every
+            if full is not None and len(self._steps) % full == 0:
                 entry.update(seen)
         self._steps.append(entry)
         self._last = seen
@@ -1024,23 +1142,30 @@ class Recorder:
 
     def document(self) -> dict[str, Any]:
         """The scenario document: the metamodel as ``GET /metamodel`` serves
-        it, then every step with its outcome and what it left behind."""
-        # The last step that changed anything always carries the full state.
+        it, the model file the run starts from if any, then every step with
+        its outcome and what it left behind."""
+        # The last step that changed anything carries the full state, unless
+        # the run carries no checkpoints.
         for entry in reversed(self._steps):
-            if "unchanged" not in entry:
+            if self._full_every is not None and "unchanged" not in entry:
                 assert self._last is not None
                 entry.update(self._last)
                 break
-        return {
-            "metamodel": self.metamodel.model_dump(mode="json"),
-            "steps": self._steps,
-        }
+        doc: dict[str, Any] = {"metamodel": self.metamodel.model_dump(mode="json")}
+        if self._model_file is not None:
+            doc["model_file"] = self._model_file
+        doc["steps"] = self._steps
+        return doc
 
 
 def run_steps(
-    metamodel: Metamodel, steps: Iterable[dict[str, Any]], *, full_every: int = 5
+    metamodel: Metamodel,
+    steps: Iterable[dict[str, Any]],
+    *,
+    full_every: int | None = 5,
+    model_file: str | None = None,
 ) -> dict[str, Any]:
-    recorder = Recorder(metamodel, full_every=full_every)
+    recorder = Recorder(metamodel, full_every=full_every, model_file=model_file)
     for step in steps:
         recorder.run(step)
     return recorder.document()

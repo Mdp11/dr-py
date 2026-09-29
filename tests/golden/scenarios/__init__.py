@@ -7,6 +7,7 @@ from . import (  # noqa: F401
     json_dumps,
     json_parse,
     metamodel_caches,
+    metamodel_candidate,
     model_cascades,
     model_churn,
     model_indexes,
