@@ -1,4 +1,5 @@
 import { ArtifactSet, readArtifacts, readStagedArtifacts } from '../artifacts/artifact-set.ts';
+import { modelFileSteps } from '../download/model-file.ts';
 import { EVALUATIONS } from '../evaluate/index.ts';
 import { Metamodel } from '../metamodel/metamodel.ts';
 import type { MetamodelDoc } from '../metamodel/types.ts';
@@ -352,6 +353,8 @@ const METHODS: { readonly [method: string]: Method } = {
 			check: () => undefined,
 			answer: (live, issues) => candidateDiff(live.store.iter(), issues)
 		}),
+	downloadModel: (service, call) => service.scanWorking(call, (wc) => modelFileSteps(wc)),
+
 	staged: now((service) => service.wc?.staged().map(wireBatch) ?? []),
 	conflicts: now((service) => service.wc?.conflicts().map(wireConflict) ?? []),
 	stagedDiff: inspect(stagedDiff),
@@ -628,6 +631,14 @@ class Service {
 			},
 			transferOf
 		);
+	}
+
+	/**
+	 * A scan of the working copy itself, as an evaluation is: `run` makes the
+	 * steps afresh on every start. A result's byte parts are transferred.
+	 */
+	scanWorking(call: Call, run: (wc: WorkingCopy) => Steps<unknown>): void {
+		this.submit<unknown>(call, 'model', { kind: 'scan', run: () => run(this.ready()) }, transferOf);
 	}
 
 	inspect(call: Call, run: (wc: WorkingCopy) => unknown): void {

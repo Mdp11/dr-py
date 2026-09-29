@@ -28,6 +28,7 @@ import {
 	Model,
 	ModelError,
 	modelDigest,
+	modelFileSteps,
 	modelLines,
 	NavKeyError,
 	NavValueError,
@@ -91,8 +92,10 @@ import {
 	toWire,
 	type RowKey,
 	type TableLimits,
-	type Wire
+	type Wire,
+	type WorkingCopy
 } from '../../src/index.ts';
+import { joined } from '../download/helpers.ts';
 import { readXlsx } from '../export/xlsx-reader.ts';
 import { clone, workingCopy } from '../working/helpers.ts';
 import { untag, type Tagged } from './load.ts';
@@ -178,6 +181,8 @@ export type Step = Partial<Observed> & {
 	rev?: number;
 	/** `candidate` / `preview_rebind`: the candidate metamodel document. */
 	metamodel?: MetamodelDoc;
+	/** `download`: ops, one line of JSON text each, staged over the model before it reads. */
+	stage?: string[];
 	result: string | string[] | BatchOutcome | object | boolean | null;
 	error: StepError | null;
 	unchanged?: true;
@@ -569,6 +574,34 @@ function exported(result: ExportFileResult): unknown {
 	return { status: 200, filename, content_type, truncated, file: recordedFile(filename, bytes) };
 }
 
+/**
+ * A replica at the session's `rev` with the step's `stage` staged on a copy
+ * of the model; without one, a replica of the model itself, whose order
+ * carries the run's churn, and which nothing writes to.
+ */
+function stagedReplica(model: Model, step: Step, carried: Carried): WorkingCopy {
+	const rev = carried.session?.rev ?? 0;
+	if (step.stage === undefined) return workingCopy(model, rev);
+	const wc = workingCopy(clone(model, carried.options), rev);
+	wc.stage(parseOps(step.stage));
+	return wc;
+}
+
+/** Fails with the first byte where `actual` leaves `expected`, the text around it quoted. */
+function expectSameBytes(actual: Uint8Array, expected: Uint8Array, label: string): void {
+	const length = Math.min(actual.length, expected.length);
+	let at = 0;
+	while (at < length && actual[at] === expected[at]) at++;
+	if (at === length && actual.length === expected.length) return;
+	const decoder = new TextDecoder();
+	const around = (bytes: Uint8Array) =>
+		JSON.stringify(decoder.decode(bytes.subarray(Math.max(0, at - 40), at + 40)));
+	expect.fail(
+		`${label}: byte ${at} of ${actual.length} differs from the recorded ${expected.length}; ` +
+			`engine ${around(actual)}, recorded ${around(expected)}`
+	);
+}
+
 /** The service's refusal of a rebind preview whose staged ops the candidate does not admit. */
 export const REFUSED_OPS = { status: 501, detail: 'reaches ops the candidate refuses' } as const;
 
@@ -656,6 +689,12 @@ function apply(
 			const candidate = prepareCandidate(step.metamodel, (mm) => compileRuleSets(sources, mm));
 			if (!stagedAdmitted(wc, candidate.metamodel)) throw new RefusedOps();
 			return rebindPreviewBody(drain(candidateScan(wc.model, candidate)));
+		}
+		case 'download': {
+			// `GET /model/download` over committed state, the step's ops staged on top.
+			const bytes = joined(drain(modelFileSteps(stagedReplica(model, step, carried))).parts);
+			expectSameBytes(bytes, new TextEncoder().encode(step.result as string), `step ${index}`);
+			return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 		}
 		case 'issues': {
 			const { store, rev } = carried.session!;

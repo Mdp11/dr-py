@@ -11,6 +11,8 @@ export {
 export { dumpIndexes, type IndexDump } from './debug/dump-indexes.ts';
 export { shuffleAdjacency } from './debug/shuffle-adjacency.ts';
 export { verifyConsistent } from './debug/verify-consistent.ts';
+export { modelFileSteps, type ModelFile } from './download/model-file.ts';
+export { PartWriter } from './download/parts.ts';
 export {
 	EVALUATIONS,
 	type EvalContext,
@@ -66,6 +68,7 @@ export {
 	exportRowsSteps,
 	exportTable,
 	MEDIA_TYPES,
+	PART_BYTES,
 	PREVIEW_MAX_ROWS,
 	previewTableJson,
 	shipped,

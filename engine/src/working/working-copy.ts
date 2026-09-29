@@ -138,6 +138,29 @@ function batchChanges(result: BatchResult): ChangeSet {
 	return changes;
 }
 
+/**
+ * The records of `live` that no staged batch touched, merged by `ord` with
+ * the committed images of the ones one did: the committed state in order.
+ * The images are sorted when the iteration begins.
+ */
+function* inCommittedOrder<R extends { id: string; ord: number }, I extends { ord: number }>(
+	live: Iterable<R>,
+	committed: ReadonlyMap<string, I | null>,
+	view: (record: R) => I
+): Generator<I, void, undefined> {
+	const images: I[] = [];
+	for (const image of committed.values()) if (image !== null) images.push(image);
+	images.sort((a, b) => a.ord - b.ord);
+	let next = 0;
+	for (const record of live) {
+		// A record under a touched id is staged state, whatever its `ord`.
+		if (committed.has(record.id)) continue;
+		while (next < images.length && images[next]!.ord < record.ord) yield images[next++]!;
+		yield view(record);
+	}
+	while (next < images.length) yield images[next++]!;
+}
+
 function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
 	return a.length === b.length && a.every((item, i) => item === b[i]);
 }
@@ -300,6 +323,36 @@ export class WorkingCopy {
 		if (image !== undefined) return image;
 		const rel = this.model.findRelationship(id);
 		return rel === undefined ? null : relImage(rel);
+	}
+
+	/**
+	 * The committed elements in state order, whatever is staged: the model's
+	 * own where no staged batch has been, each committed image at its
+	 * committed place where one has. An element of the model comes as a view
+	 * of its record, its property bag shared, not copied. Read it while the
+	 * model does not move.
+	 */
+	committedElementsInOrder(): IterableIterator<ElementImage> {
+		return inCommittedOrder(this.model.elements(), this.committedElements, (element) => ({
+			id: element.id,
+			typeName: element.typeName,
+			props: element.props,
+			rev: element.rev,
+			ord: element.ord
+		}));
+	}
+
+	/** `committedElementsInOrder` for the relationships, each on its committed ends. */
+	committedRelationshipsInOrder(): IterableIterator<RelImage> {
+		return inCommittedOrder(this.model.relationships(), this.committedRelationships, (rel) => ({
+			id: rel.id,
+			typeName: rel.typeName,
+			props: rel.props,
+			rev: rel.rev,
+			ord: rel.ord,
+			sourceId: rel.source.id,
+			targetId: rel.target.id
+		}));
 	}
 
 	/**

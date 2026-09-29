@@ -74,7 +74,8 @@ export type ExportRows = {
 /** Rows the preview renders. */
 export const PREVIEW_MAX_ROWS = 200;
 
-const PART_BYTES = 4 * 1024 * 1024;
+/** The most bytes one part of a shipped file holds. */
+export const PART_BYTES = 4 * 1024 * 1024;
 
 /** `bytes` as parts of at most 4 MiB, each a copy on a buffer of its own. */
 export function toParts(bytes: Uint8Array): ArrayBuffer[] {

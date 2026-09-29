@@ -166,9 +166,18 @@ event     {event, …}                     engine → client, unsolicited
   truncated}`. An export is a scan like any evaluation: a `stage` posted while it runs waits
   for it, so it answers the state it ran on; a `close` or a divergence under it sends it back to
   start over on the next replica; either way it is answered once, and never with part of a
-  file. `getModelIssues {}`, `validateModel {batch_ids}` and `previewCommit {base_rev,
-  batch_ids, strict}` (the model half only — artifact, view and `metamodel.move_node` ops
-  stay a server call the shell merges in) answer the one live issue store over the working
+  file. `downloadModel {}` (params ignored) answers `GET /model/download`'s file over the
+  COMMITTED state, whatever is staged: `{parts, filename: 'model.json', content_type:
+  'application/json'}`, the bytes in `ArrayBuffer`s of at most 4 MiB, transferred as an
+  export's are. It is a scan as an export is: a `stage` or a delta posted while it runs waits
+  for it, so it answers the committed state it began on; a `close` or a divergence sends it
+  back to start over; `{cancel}` drops it unanswered. Where the server's stream breaks off
+  mid-file, the engine refuses the whole file with 422: a non-finite float as `Out of range
+  float values are not JSON compliant`, a lone surrogate in Python's encoder words, its
+  position counted in code points from the start of the file. `getModelIssues {}`,
+  `validateModel {batch_ids}` and `previewCommit {base_rev, batch_ids, strict}` (the model
+  half only — artifact, view and `metamodel.move_node` ops stay a server call the shell merges
+  in) answer the one live issue store over the working
   copy (AD-32), custom rules included — the committed and staged rule sets for the list and
   `validateModel`, the committed ones for the preview, as the server's preview does (AD-33).
   The three wait for a rule-set change to be applied: an artifact method that changes the
