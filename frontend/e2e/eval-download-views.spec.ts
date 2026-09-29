@@ -157,7 +157,16 @@ for (const side of ['engine', 'server'] as const) {
 			await bootstrap(page, side, VIEW);
 
 			const committed = await serverDownload(page);
+			// On the engine the shadow asks the server for the same file: the request
+			// it makes shows the comparison ran, so a clean console is not vacuous.
+			const shadowAsked =
+				side === 'engine'
+					? page.waitForRequest((req) => /\/model\/download$/.test(new URL(req.url()).pathname), {
+							timeout: 60_000
+						})
+					: null;
 			expect((await exportedBytes(page)).equals(committed)).toBeTruthy();
+			await shadowAsked;
 
 			// Stage a property edit: the file stays the committed state.
 			await expandFolder(page, 'Grouped');
@@ -201,16 +210,18 @@ for (const side of ['engine', 'server'] as const) {
 				.getByRole('dialog', { name: /delete element/i })
 				.getByRole('button', { name: 'Delete', exact: true })
 				.click();
-			await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+			try {
+				await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
 
-			if (side === 'engine') {
-				await expect(warningCount(page)).toHaveText('1', { timeout: 15_000 });
-			} else {
-				await expect(warningCount(page)).toHaveCount(0);
+				if (side === 'engine') {
+					await expect(warningCount(page)).toHaveText('1', { timeout: 15_000 });
+				} else {
+					await expect(warningCount(page)).toHaveCount(0);
+				}
+			} finally {
+				// Discarding the delete takes the warning away again.
+				await discardAll(page);
 			}
-
-			// Discarding the delete takes the warning away again.
-			await discardAll(page);
 			await expect(warningCount(page)).toHaveCount(0, { timeout: 15_000 });
 		});
 	});

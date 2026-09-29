@@ -59,7 +59,7 @@ read surfaces default to the engine behind per-surface switches, the wait for `r
 fallback notice and the retry overlay, shadow comparison in dev and e2e, and the browser
 benchmark; the forked store — `staging` defaults to `engine`, the user's edits stage in the
 replica's working copy, the legacy store lives behind `staging: legacy`) — and watches `K-32`.
-C (evaluation) is in progress, C's plans 1–5 and 7 of 8 built (this paragraph tells plans 1–3): the engine holds the project's artifacts —
+C (evaluation) is in progress, C's plans 1–5, 6a and 7 of 8 built (this paragraph tells plans 1–3): the engine holds the project's artifacts —
 the committed payloads the shell fetches and follows, the staged entries mirrored from the
 frontend's buffer (AD-30) — and serves navigation and criteria search over the working copy,
 by default (`navigation` and `criteria` surfaces, held to the routes by fixture and by shadow
@@ -108,11 +108,15 @@ could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on:
 feature there lands on both sides with a fixture until F. The diff route's model half
 (`api/metamodel_candidate.py`) and `build_rebind_view` are frozen for behaviour from C's plan 7 on;
 `diff_metamodels` is not.
+`api/serialize.py::iter_model_json` and the download route (`GET /model/download`), and
+`core/view/validation.py` and the `GET /views/{id}` route that serves its warnings, are frozen for
+behaviour from C's plan 6a on; the engine replays them from the `model_download` and
+`view_warnings` fixtures.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -768,6 +772,13 @@ in the browser before the save picker's writable receives any of it, where the r
 used to stream into it. The engine side builds its Blob from the 4 MiB parts the same way.
 Fix direction: on the server side, tee the body into the save while the digest reads the other
 branch, or drop the server side when the engine's is the only one left (F).
+
+### K-91 · One frontend test, the download route's engine case, timed out once under a full run · `open` · *2026-09-29*
+`frontend/src/lib/api/__tests__/download-route.test.ts` "answers the engine's committed bytes as
+an application/json Blob and asks the server nothing", the first test of its file, hit its 5 s
+limit in 1 of 2 full `dr-test` runs and passed in the rerun, on a loaded host (its cold worker
+start and a 4 MiB-part file share the clock). Fix direction: find what the test waits on that a
+loaded host stretches, and wait on that signal instead of the clock.
 
 ### Considered by the exports plan and deferred
 
