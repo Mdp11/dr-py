@@ -47,6 +47,7 @@ import {
 	configureReplica,
 	dismissReplicaNotice,
 	exportsIncludeStaged,
+	compareOnEngine,
 	metamodelIncludesStaged,
 	forgetViewPlacement,
 	forgetViewPlacements,
@@ -1848,6 +1849,38 @@ describe('the artifact follower', () => {
 			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
 			flushSync();
 			expect(note!()).toBe(false);
+			dispose();
+		});
+
+		it('compareOnEngine follows the follower loading and unloading', async () => {
+			localStorage.setItem('dr.surfaces', JSON.stringify({ compare: 'engine' }));
+			const project = fakeProject();
+			let release!: () => void;
+			const first = new Promise<void>((resolve) => (release = resolve));
+			serve(project, [first], () => Promise.reject(new Error('not asked')));
+			const replica = realReplica();
+			let on: (() => boolean) | undefined;
+			const dispose = $effect.root(() => {
+				const derived = $derived(compareOnEngine());
+				on = () => derived;
+			});
+			setActiveProject('p');
+			startReplica();
+			await replica.until((s) => s.phase === 'ready');
+
+			try {
+				flushSync();
+				expect(on!()).toBe(false);
+			} finally {
+				release();
+			}
+
+			await vi.waitFor(() => expect(engineSide('compare')).toBe('engine'));
+			flushSync();
+			expect(on!()).toBe(true);
+			stopReplica();
+			flushSync();
+			expect(on!()).toBe(false);
 			dispose();
 		});
 

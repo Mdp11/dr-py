@@ -50,7 +50,8 @@ const COMPARE_OUT = {
 	model_rev: 3,
 	cr: CR_DOC,
 	other_element_count: 7,
-	other_relationship_count: 2
+	other_relationship_count: 2,
+	workingCopy: false
 };
 
 const CREATE_OP = {
@@ -210,7 +211,13 @@ describe('ModelChangeDialog — compare mode', () => {
 		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
 		const propose = vi
 			.spyOn(crApi, 'proposeCr')
-			.mockResolvedValue({ ok: true, modelRev: 3, cr: CR_DOC, ops: [CREATE_OP] });
+			.mockResolvedValue({
+				ok: true,
+				modelRev: 3,
+				cr: CR_DOC,
+				ops: [CREATE_OP],
+				workingCopy: false
+			});
 		const stage = vi
 			.spyOn(stageProposed, 'stageProposedOps')
 			.mockResolvedValue({ ok: true, count: 1 });
@@ -233,7 +240,8 @@ describe('ModelChangeDialog — compare mode', () => {
 			ok: false,
 			modelRev: 3,
 			crIndex: 0,
-			conflicts: [{ kind: 'before_mismatch', entity: 'element', id: 'a', reason: 'moved' }]
+			conflicts: [{ kind: 'before_mismatch', entity: 'element', id: 'a', reason: 'moved' }],
+			workingCopy: false
 		});
 		const stage = vi.spyOn(stageProposed, 'stageProposedOps');
 		open('compare');
@@ -272,19 +280,38 @@ describe('ModelChangeDialog — compare on the engine', () => {
 			call: () => Promise.reject(new Error('the routed functions are spied')),
 			gone: () => false
 		});
+	const ENGINE_COMPARE = { ...COMPARE_OUT, workingCopy: true };
+	const SERVER_COMPARE = COMPARE_OUT;
+	const proposal = (workingCopy: boolean, modelRev = 3): crApi.ProposeCrResult => ({
+		ok: true,
+		modelRev,
+		cr: CR_DOC,
+		ops: [CREATE_OP],
+		workingCopy
+	});
+	const noteShown = () => document.body.querySelector('[data-testid="mcd-staged-note"]') !== null;
+	const hintShown = () => document.body.querySelector('[data-testid="mcd-gate-hint"]');
 
-	it('Replace stays enabled over staged edits, with no gate hint', () => {
+	it('Replace and Stage edits are enabled over staged edits, with no gate hint', async () => {
 		engineOn();
 		vi.mocked(hasStagedOps).mockReturnValue(true);
 		open('compare');
 		pickFiles([modelFile()]);
 		expect(byTestId<HTMLButtonElement>('mcd-replace').disabled).toBe(false);
-		expect(document.body.querySelector('[data-testid="mcd-gate-hint"]')).toBeNull();
+		expect(hintShown()).toBeNull();
+		unmount(app!);
+		app = null;
+
+		open('apply-cr');
+		pickFiles([crFile('a.cr.json')]);
+		await settle();
+		expect(byTestId<HTMLButtonElement>('mcd-stage').disabled).toBe(false);
+		expect(hintShown()).toBeNull();
 	});
 
-	it('Preview says it includes staged changes only when edits were staged', async () => {
+	it('compare Preview shows the note only for an engine answer over staged edits', async () => {
 		engineOn();
-		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
+		const compare = vi.spyOn(crApi, 'compareModel').mockResolvedValue(ENGINE_COMPARE);
 		vi.mocked(hasStagedOps).mockReturnValue(true);
 		open('compare');
 		pickFiles([modelFile()]);
@@ -295,28 +322,37 @@ describe('ModelChangeDialog — compare on the engine', () => {
 		vi.mocked(hasStagedOps).mockReturnValue(false);
 		byTestId('mcd-preview').click();
 		await settle();
-		expect(document.body.querySelector('[data-testid="mcd-staged-note"]')).toBeNull();
-	});
+		expect(noteShown()).toBe(false);
 
-	it('server mode never shows the note', async () => {
-		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
+		// the server answered (a fallback): no note
 		vi.mocked(hasStagedOps).mockReturnValue(true);
-		open('compare');
-		pickFiles([modelFile()]);
+		compare.mockResolvedValue(SERVER_COMPARE);
 		byTestId('mcd-preview').click();
 		await settle();
-		expect(document.body.querySelector('[data-testid="mcd-staged-note"]')).toBeNull();
+		expect(noteShown()).toBe(false);
 	});
 
-	it('Preview then Replace compares twice: no cache', async () => {
+	it('apply-cr Preview shows the note for an engine answer, not for a server one', async () => {
 		engineOn();
-		const compare = vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
-		vi.spyOn(crApi, 'proposeCr').mockResolvedValue({
-			ok: true,
-			modelRev: 3,
-			cr: CR_DOC,
-			ops: [CREATE_OP]
-		});
+		const propose = vi.spyOn(crApi, 'proposeCr').mockResolvedValue(proposal(true));
+		vi.mocked(hasStagedOps).mockReturnValue(true);
+		open('apply-cr');
+		pickFiles([crFile('a.cr.json')]);
+		await settle();
+		byTestId('mcd-preview').click();
+		await settle();
+		expect(byTestId('mcd-staged-note').textContent?.trim()).toBe('Includes staged changes');
+
+		propose.mockResolvedValue(proposal(false));
+		byTestId('mcd-preview').click();
+		await settle();
+		expect(noteShown()).toBe(false);
+	});
+
+	it('Preview then Replace: an engine answer is not cached, a server answer is', async () => {
+		engineOn();
+		const compare = vi.spyOn(crApi, 'compareModel').mockResolvedValue(ENGINE_COMPARE);
+		vi.spyOn(crApi, 'proposeCr').mockResolvedValue(proposal(true));
 		vi.spyOn(stageProposed, 'stageProposedOps').mockResolvedValue({ ok: true, count: 1 });
 		open('compare');
 		pickFiles([modelFile()]);
@@ -325,18 +361,25 @@ describe('ModelChangeDialog — compare on the engine', () => {
 		byTestId('mcd-replace').click();
 		await settle();
 		expect(compare).toHaveBeenCalledTimes(2);
+		unmount(app!);
+		app = null;
+
+		compare.mockClear();
+		compare.mockResolvedValue(SERVER_COMPARE);
+		open('compare');
+		pickFiles([modelFile()]);
+		byTestId('mcd-preview').click();
+		await settle();
+		byTestId('mcd-replace').click();
+		await settle();
+		expect(compare).toHaveBeenCalledTimes(1);
 	});
 
 	it('Replace stages with the answer rev and the CR prestate', async () => {
 		engineOn();
 		vi.mocked(hasStagedOps).mockReturnValue(true);
-		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
-		vi.spyOn(crApi, 'proposeCr').mockResolvedValue({
-			ok: true,
-			modelRev: 4,
-			cr: CR_DOC,
-			ops: [CREATE_OP]
-		});
+		vi.spyOn(crApi, 'compareModel').mockResolvedValue(ENGINE_COMPARE);
+		vi.spyOn(crApi, 'proposeCr').mockResolvedValue(proposal(true, 4));
 		const stage = vi
 			.spyOn(stageProposed, 'stageProposedOps')
 			.mockResolvedValue({ ok: true, count: 1 });
@@ -348,6 +391,31 @@ describe('ModelChangeDialog — compare on the engine', () => {
 			elements: [EL('a', 'A'), EL('b', 'B')],
 			relationships: []
 		});
+	});
+
+	it('a server answer over staged edits stages nothing and says why', async () => {
+		engineOn();
+		vi.mocked(hasStagedOps).mockReturnValue(true);
+		vi.spyOn(crApi, 'compareModel').mockResolvedValue(SERVER_COMPARE);
+		vi.spyOn(crApi, 'proposeCr').mockResolvedValue(proposal(false));
+		const stage = vi.spyOn(stageProposed, 'stageProposedOps');
+
+		open('compare');
+		pickFiles([modelFile()]);
+		byTestId('mcd-replace').click();
+		await settle();
+		expect(stage).not.toHaveBeenCalled();
+		expect(byTestId('mcd-gate-hint').textContent).toMatch(/commit or discard/i);
+		unmount(app!);
+		app = null;
+
+		open('apply-cr');
+		pickFiles([crFile('a.cr.json')]);
+		await settle();
+		byTestId('mcd-stage').click();
+		await settle();
+		expect(stage).not.toHaveBeenCalled();
+		expect(byTestId('mcd-gate-hint').textContent).toMatch(/commit or discard/i);
 	});
 });
 
@@ -376,7 +444,13 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 	it('reorder changes the request order; Preview proposes and renders the combined cr', async () => {
 		const propose = vi
 			.spyOn(crApi, 'proposeCr')
-			.mockResolvedValue({ ok: true, modelRev: 3, cr: CR_DOC, ops: [CREATE_OP] });
+			.mockResolvedValue({
+				ok: true,
+				modelRev: 3,
+				cr: CR_DOC,
+				ops: [CREATE_OP],
+				workingCopy: false
+			});
 		const first = { ...CR_FILE_DOC, createdAt: 'first' };
 		const second = { ...CR_FILE_DOC, createdAt: 'second' };
 		open('apply-cr');
@@ -427,7 +501,8 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 			ok: false,
 			modelRev: 3,
 			crIndex: 1,
-			conflicts: [{ kind: 'missing', entity: 'element', id: 'zzz', reason: 'gone' }]
+			conflicts: [{ kind: 'missing', entity: 'element', id: 'zzz', reason: 'gone' }],
+			workingCopy: false
 		});
 		open('apply-cr');
 		pickFiles([crFile('a.cr.json'), crFile('b.cr.json')]);
@@ -443,7 +518,8 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 			ok: true,
 			modelRev: 3,
 			cr: CR_DOC,
-			ops: [CREATE_OP]
+			ops: [CREATE_OP],
+			workingCopy: false
 		});
 		const stage = vi
 			.spyOn(stageProposed, 'stageProposedOps')
@@ -475,7 +551,8 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 			ok: true,
 			modelRev: 3,
 			cr: CR_DOC,
-			ops: [CREATE_OP]
+			ops: [CREATE_OP],
+			workingCopy: false
 		});
 		vi.spyOn(stageProposed, 'stageProposedOps').mockResolvedValue({ ok: false, reason: 'stale' });
 		open('apply-cr');

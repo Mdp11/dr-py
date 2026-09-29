@@ -199,6 +199,7 @@ export {
 	beginReplicaCommit,
 	dismissReplicaNotice,
 	exportsIncludeStaged,
+	compareOnEngine,
 	forgetViewPlacement,
 	forgetViewPlacements,
 	getReplicaNotice,

@@ -1903,15 +1903,19 @@ a button. Both requests go through the `compare` surface (`server` by default;
   or nothing. From there the edits are ordinary staged
   edits (DiffDrawer, Ctrl+S, commit).
 - **Gates**: Replace / Stage edits need `canEdit()` AND an empty model staged
-  buffer (`hasStagedOps()` false — the proposal is computed against the
-  committed model); a hint says why. With the `compare` surface on the engine
-  the proposal is computed over the working copy, so staged edits no longer gate
-  Replace / Stage edits, `ensureCompared` caches nothing (the answer depends on
-  staged state), and Preview / Create CR show `mcd-staged-note` ("Includes
-  staged changes") when edits were staged at the answer. In compare mode Preview and Create CR are
-  viewer-allowed (`POST /model/compare` is a read-only POST); in apply-cr mode
-  Preview is gated on `canEdit()` too, since it goes through
-  `POST /model/apply-cr`, which is deliberately treated as a write.
+  buffer (`hasStagedOps()` false — the server proposes against the committed
+  model); a hint says why. While `compareOnEngine()` (reactive: the `compare`
+  surface's side, tracked with the follower's load) holds, staged edits do not
+  gate the buttons, because the engine proposes over the working copy. The
+  dialog then decides from the ANSWER: `compareModel` / `proposeCr` results carry
+  `workingCopy`, true only when the engine answered. A server answer (engine
+  gone, a fallback) over staged edits stages nothing and shows the same hint;
+  `mcd-staged-note` ("Includes staged changes") shows only for a `workingCopy`
+  answer given while edits were staged; and only a server answer is cached by
+  `ensureCompared` (an engine answer depends on staged state). In compare mode
+  Preview and Create CR are viewer-allowed (`POST /model/compare` is a read-only
+  POST); in apply-cr mode Preview is gated on `canEdit()` too, since it goes
+  through `POST /model/apply-cr`, which is deliberately treated as a write.
 
 ### Named views and the active view
 

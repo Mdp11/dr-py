@@ -10,10 +10,10 @@
 		getFilename,
 		getModelRev,
 		getModelSummary,
+		compareOnEngine,
 		hasStagedOps,
 		setLockNotice
 	} from '$lib/state';
-	import { engineSide } from '$lib/api/engine-route';
 	import { stageProposedOps } from '$lib/state/stage-proposed';
 	import {
 		composeCrFilename,
@@ -54,12 +54,14 @@
 	let fileInputRef = $state<HTMLInputElement | null>(null);
 
 	const editable = $derived(canEdit());
-	// on the engine the answer reads the working copy, staged edits included, so
-	// staged edits neither block Replace nor allow a cached answer
-	const onEngine = $derived(engineSide('compare') === 'engine');
+	// Before any answer, the engine is expected to read the working copy, so staged
+	// edits do not gate Replace. The answer says which side really gave it.
+	const onEngine = $derived(compareOnEngine());
 	const bufferDirty = $derived(!onEngine && hasStagedOps());
-	// whether edits were staged when the shown answer was computed
+	// whether the shown answer holds the staged edits that were there when it came
 	let answeredStaged = $state(false);
+	// a server answer over staged edits was refused for staging
+	let stagedBlocked = $state(false);
 	const hasSource = $derived(mode === 'compare' ? otherFile !== null : crFiles.length > 0);
 	// the server refuses a longer batch at request-parse time; saying so here
 	// beats surfacing the raw pydantic message
@@ -90,6 +92,7 @@
 		conflicts = null;
 		error = null;
 		answeredStaged = false;
+		stagedBlocked = false;
 	}
 
 	function reset(): void {
@@ -151,18 +154,18 @@
 		clearOutput();
 	}
 
+	// only a server answer is cached: it reads committed state, while an engine
+	// answer depends on the staged edits and was computed without an upload to save
 	async function ensureCompared(): Promise<CompareOut> {
 		const rev = getModelRev();
-		if (onEngine) {
-			if (!otherFile) throw new Error('Choose a model file first');
-			const out = await compareModel(otherFile);
-			answeredStaged = hasStagedOps();
-			return out;
+		if (compared && compared.rev === rev) {
+			answeredStaged = false;
+			return compared.out;
 		}
-		if (compared && compared.rev === rev) return compared.out;
 		if (!otherFile) throw new Error('Choose a model file first');
 		const out = await compareModel(otherFile);
-		compared = { rev, out };
+		answeredStaged = out.workingCopy && hasStagedOps();
+		if (!out.workingCopy) compared = { rev, out };
 		return out;
 	}
 
@@ -207,7 +210,7 @@
 				return;
 			}
 			const res = await proposeCr(crFiles.map((f) => f.cr));
-			answeredStaged = onEngine && hasStagedOps();
+			answeredStaged = res.workingCopy && hasStagedOps();
 			if (!res.ok) {
 				conflicts = { crIndex: res.crIndex, items: res.conflicts };
 				return;
@@ -254,6 +257,11 @@
 			const res = await proposeCr(crs);
 			if (!res.ok) {
 				conflicts = { crIndex: mode === 'compare' ? null : res.crIndex, items: res.conflicts };
+				return;
+			}
+			// the server proposed over committed state: staged edits would be overwritten
+			if (!res.workingCopy && hasStagedOps()) {
+				stagedBlocked = true;
 				return;
 			}
 			const outcome = await stageProposedOps(res.ops, res.modelRev, crPrestate(res.cr));
@@ -386,7 +394,7 @@
 						the server to propose the edits, which viewers may not do).
 					{/if}
 				</p>
-			{:else if hasSource && bufferDirty}
+			{:else if stagedBlocked || (hasSource && bufferDirty)}
 				<p class="text-xs text-muted-foreground" data-testid="mcd-gate-hint">
 					Commit or discard your staged edits first.
 				</p>

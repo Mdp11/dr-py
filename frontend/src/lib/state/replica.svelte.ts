@@ -533,6 +533,16 @@ function stopFollower(notify = true): void {
 }
 
 /**
+ * Whether compare and apply-CR read the engine now, before any answer says
+ * which side gave it. Reactive.
+ */
+export function compareOnEngine(): boolean {
+	void _status;
+	void _followerEpoch;
+	return engineSide('compare') === 'engine';
+}
+
+/**
  * Whether an export now would hold staged edits: the exports are on the
  * engine and the replica holds staged model edits or staged artifacts. The
  * server's exports read committed state only. Reactive.

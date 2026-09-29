@@ -102,11 +102,13 @@ const SERVED_COMPARE = {
 /** What the server answers an apply-CR the test answers itself. */
 const SERVED_PROPOSAL = { model_rev: 7, cr: { ...EMPTY_CR, complete: true }, ops: [] };
 
-/** `value` without `cr.createdAt`, whichever side answered it. */
+/** `value` without `cr.createdAt` and `workingCopy`, whichever side answered it. */
 function masked<T extends { cr: ChangesDoc }>(value: T): Omit<T, 'cr'> & { cr: Answer } {
 	const cr: Answer = { ...value.cr };
 	delete cr['createdAt'];
-	return { ...value, cr };
+	const out: Answer = { ...value, cr };
+	delete out['workingCopy'];
+	return out as never;
 }
 
 /**
@@ -196,6 +198,7 @@ describe('the compare surface on the engine', () => {
 
 		expect(requests).toEqual([]);
 		expect(asked(engine, 'compareModel')).toBe(1);
+		expect(answer.workingCopy).toBe(true);
 		expect(answer.cr.createdAt).toMatch(ISO_MILLISECONDS);
 		expect(answer.cr.createdAt).not.toBe(SERVER_CLOCK);
 		const direct = await engine.over.link!.client.call('compareModel', {
@@ -224,6 +227,7 @@ describe('the compare surface on the engine', () => {
 		expect(asked(engine, 'proposeCr')).toBe(2);
 		expect(proposal).toMatchObject({
 			ok: true,
+			workingCopy: true,
 			modelRev: engine.project.rev,
 			ops: [{ kind: 'update_element', id: 'e_000001', properties_patch: { name: 'from file' } }]
 		});
@@ -232,6 +236,7 @@ describe('the compare surface on the engine', () => {
 			ok: false,
 			modelRev: engine.project.rev,
 			crIndex: 1,
+			workingCopy: true,
 			conflicts: [
 				{
 					kind: 'id_exists',
@@ -248,13 +253,17 @@ describe('the compare surface on the engine', () => {
 		let served: Answer = SERVED_COMPARE;
 		const requests = serve(engine, { answer: () => HttpResponse.json(served) });
 
-		await expect(compareModel(utf16('{"elements": []}'))).resolves.toEqual(SERVED_COMPARE);
+		await expect(compareModel(utf16('{"elements": []}'))).resolves.toEqual({
+			...SERVED_COMPARE,
+			workingCopy: false
+		});
 		served = SERVED_PROPOSAL;
 		await expect(proposeCr([LAX])).resolves.toEqual({
 			ok: true,
 			modelRev: 7,
 			cr: SERVED_PROPOSAL.cr,
-			ops: []
+			ops: [],
+			workingCopy: false
 		});
 
 		expect(requests).toEqual(['compare', 'apply-cr']);
@@ -292,7 +301,10 @@ describe('the compare surface on the engine', () => {
 		const requests = serve(engine, { answer: () => HttpResponse.json(SERVED_COMPARE) });
 		engine.over.link!.dispose();
 
-		await expect(compareModel(modelFile(engine))).resolves.toEqual(SERVED_COMPARE);
+		await expect(compareModel(modelFile(engine))).resolves.toEqual({
+			...SERVED_COMPARE,
+			workingCopy: false
+		});
 
 		expect(requests).toEqual(['compare']);
 		await engine.over.sync.settled();

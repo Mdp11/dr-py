@@ -82,7 +82,8 @@ describe('proposeCr', () => {
 			ok: false,
 			modelRev: 4,
 			crIndex: 1,
-			conflicts: [{ kind: 'missing', entity: 'element', id: 'zzz', reason: 'gone' }]
+			conflicts: [{ kind: 'missing', entity: 'element', id: 'zzz', reason: 'gone' }],
+			workingCopy: false
 		});
 	});
 
