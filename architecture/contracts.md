@@ -178,7 +178,19 @@ event     {event, …}                     engine → client, unsolicited
   the view document's warnings, as `GET /views/{id}` sends them, over the WORKING model and the
   working artifacts (a staged artifact create is known, a staged delete is not): the six
   `view` warnings as `IssueOut`s with origin `on_server`, in the order the server gives them; a
-  `view` that is not a view document is a 422 `view…`. `getModelIssues {}`,
+  `view` that is not a view document is a 422 `view…`. `compareModel {file, created_at}`
+  answers `POST /model/compare` over the WORKING model: `file` the uploaded bytes as a
+  transferred `ArrayBuffer`, `created_at` the client's clock (`toISOString()`, the engine reads
+  none), both read at arrival, else a 422 `file must be an ArrayBuffer` / `created_at must be a
+  string`. It answers `{model_rev, cr, other_element_count, other_relationship_count}`:
+  `model_rev` the committed `rev`, `cr` the working → file `datarover.cr/v1` document with the
+  working counts as its baseline and `created_at` as its `createdAt`, a non-finite float `null`
+  as pydantic writes it. The file must be UTF-8 (one byte order mark dropped) and JSON without
+  a raw control character in a string; anything else is 501 `reaches an unreadable file`,
+  which the client answers from the server. The file's shape is refused with the route's 422s,
+  in its order and words. It is a scan as a download is: a `stage` or a delta posted while it
+  runs waits for it; a `close` or a divergence sends it back to start over on the next
+  replica, the file not parsed again; `{cancel}` drops it unanswered. `getModelIssues {}`,
   `validateModel {batch_ids}` and `previewCommit {base_rev, batch_ids, strict}` (the model
   half only — artifact, view and `metamodel.move_node` ops stay a server call the shell merges
   in) answer the one live issue store over the working

@@ -6,6 +6,14 @@ import type { Props } from './records.ts';
 /** The ops protocol's provisional ids; a stored entity never carries one. */
 export const TEMP_ID_PREFIX = 'tmp_';
 
+/** The refusal of a loaded entity whose id carries the reserved prefix; `kind` is `Element` or `Relationship`. */
+export function reservedIdText(kind: string, id: string): string {
+	return (
+		`${kind} id ${pyRepr(id)} uses the reserved ${pyRepr(TEMP_ID_PREFIX)} prefix ` +
+		'(client-side temporary ids of the ops protocol); loaded models must not contain such ids'
+	);
+}
+
 type Dict = { [key: string]: Value };
 
 function isDict(value: Value | undefined): value is Dict {

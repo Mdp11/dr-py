@@ -1,4 +1,5 @@
 import { ArtifactSet, readArtifacts, readStagedArtifacts } from '../artifacts/artifact-set.ts';
+import { compareSteps, UploadedFile } from '../cr/compare.ts';
 import { modelFileSteps } from '../download/model-file.ts';
 import { EVALUATIONS } from '../evaluate/index.ts';
 import { Metamodel } from '../metamodel/metamodel.ts';
@@ -174,6 +175,17 @@ function flag(params: ReadParams, key: string): boolean {
 	const value = params[key];
 	if (typeof value !== 'boolean') throw new Refused(422, `${key} must be a boolean`);
 	return value;
+}
+
+/** `compareModel`'s params: the file's bytes, kept whole for a scan that starts over, and the clock's reading. */
+function readCompare(params: ReadParams): { file: UploadedFile; createdAt: string } {
+	const file = params['file'];
+	if (!(file instanceof ArrayBuffer)) throw new Refused(422, 'file must be an ArrayBuffer');
+	const createdAt = params['created_at'];
+	if (typeof createdAt !== 'string' || createdAt === '') {
+		throw new Refused(422, 'created_at must be a string');
+	}
+	return { file: new UploadedFile(file), createdAt };
 }
 
 function batchIds(params: ReadParams): number[] {
@@ -354,6 +366,10 @@ const METHODS: { readonly [method: string]: Method } = {
 			answer: (live, issues) => candidateDiff(live.store.iter(), issues)
 		}),
 	downloadModel: (service, call) => service.scanWorking(call, (wc) => modelFileSteps(wc)),
+	compareModel: (service, call) => {
+		const { file, createdAt } = readCompare(call.params);
+		service.scanWorking(call, (wc) => compareSteps(wc, { file, created_at: createdAt }));
+	},
 
 	staged: now((service) => service.wc?.staged().map(wireBatch) ?? []),
 	conflicts: now((service) => service.wc?.conflicts().map(wireConflict) ?? []),

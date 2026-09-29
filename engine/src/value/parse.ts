@@ -30,17 +30,21 @@ const WHITESPACE = /[ \t\n\r]*/y;
 /**
  * `floatConstants` reads a bare `NaN`, `Infinity` or `-Infinity` as the float
  * it stands for, as `json.loads` does, instead of keeping its source text.
+ * `controlCharacters: false` refuses a raw U+0000–U+001F inside a string, as
+ * `json.loads` does; by default one is taken as it stands.
  */
-export type ParseOptions = { floatConstants?: boolean };
+export type ParseOptions = { floatConstants?: boolean; controlCharacters?: boolean };
 
 class ExactParser {
 	private readonly text: string;
 	private readonly floatConstants: boolean;
+	private readonly controlCharacters: boolean;
 	private pos = 0;
 
 	constructor(text: string, options: ParseOptions) {
 		this.text = text;
 		this.floatConstants = options.floatConstants ?? false;
+		this.controlCharacters = options.controlCharacters ?? true;
 	}
 
 	parse(): Value {
@@ -125,7 +129,8 @@ class ExactParser {
 					this.pos += 2;
 				}
 				start = this.pos;
-			} else this.pos++;
+			} else if (!this.controlCharacters && ch < ' ') this.fail('Invalid control character');
+			else this.pos++;
 		}
 	}
 

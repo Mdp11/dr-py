@@ -8,6 +8,30 @@ export {
 	type WireArtifact,
 	type WireStagedArtifact
 } from './artifacts/artifact-set.ts';
+export {
+	compareSteps,
+	UploadedFile,
+	type CompareAnswer,
+	type CompareParams
+} from './cr/compare.ts';
+export {
+	diffSteps,
+	type CrElement,
+	type CrKindOps,
+	type CrModified,
+	type CrRelationship,
+	type Diff
+} from './cr/diff.ts';
+export { CR_FORMAT, crDocument, crWire, type CrBaseline } from './cr/document.ts';
+export {
+	decodeModelFile,
+	parseModelFile,
+	readModelFile,
+	UNREADABLE_FILE,
+	type OtherElement,
+	type OtherModel,
+	type OtherRel
+} from './cr/read-file.ts';
 export { dumpIndexes, type IndexDump } from './debug/dump-indexes.ts';
 export { shuffleAdjacency } from './debug/shuffle-adjacency.ts';
 export { verifyConsistent } from './debug/verify-consistent.ts';

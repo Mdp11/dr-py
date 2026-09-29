@@ -86,19 +86,24 @@ export class NavValueError extends Error {
 // gathered or matched, a set member combined, a chain collected, an id sorted.
 const STEP_UNITS = 1024;
 
-/** Counts the units of one call, shared by everything it evaluates, and cuts them into steps. */
+/**
+ * Counts the units of one call, shared by everything it evaluates, and cuts
+ * them into steps of `stepUnits`.
+ */
 export class Meter {
 	readonly total: number;
+	readonly stepUnits: number;
 	done = 0;
 	private stepStart = 0;
 
-	constructor(total: number) {
+	constructor(total: number, stepUnits = STEP_UNITS) {
 		this.total = total;
+		this.stepUnits = stepUnits;
 	}
 
 	/** Counts one unit; true when the step is full and must end. */
 	tick(): boolean {
-		return ++this.done - this.stepStart >= STEP_UNITS;
+		return ++this.done - this.stepStart >= this.stepUnits;
 	}
 
 	/** Ends the step: what to yield. */
@@ -109,12 +114,12 @@ export class Meter {
 
 	/** Sorts `items` in place or into a new array; use the result. */
 	*sort<T>(items: T[], compare: (a: T, b: T) => number): Steps<T[]> {
-		if (items.length <= STEP_UNITS) {
+		if (items.length <= this.stepUnits) {
 			for (let i = 0; i < items.length; i++) if (this.tick()) yield this.end();
 			return items.sort(compare);
 		}
 		if (this.done > this.stepStart) yield this.end();
-		const steps = sortedInSlices(items, compare, STEP_UNITS);
+		const steps = sortedInSlices(items, compare, this.stepUnits);
 		let sorted = 0;
 		for (;;) {
 			const next = steps.next();

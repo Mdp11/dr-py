@@ -10,6 +10,7 @@ import {
 	candidateKey,
 	candidateScan,
 	cmpCodePoint,
+	compareSteps,
 	compileRuleSets,
 	DirtyCollector,
 	drain,
@@ -183,8 +184,14 @@ export type Step = Partial<Observed> & {
 	metamodel?: MetamodelDoc;
 	/** `validate_view`: the view document. */
 	view?: unknown;
-	/** `download` / `validate_view`: ops, one line of JSON text each, staged over the model before it reads. */
+	/** `download` / `validate_view` / `compare`: ops, one line of JSON text each, staged over the model before it reads. */
 	stage?: string[];
+	/** `compare`: the uploaded file, as UTF-8 text or as base64 bytes, and the clock's reading. */
+	file?: string;
+	file_b64?: string;
+	created_at?: string;
+	/** The engine leaves the step to the server with its `FALLBACKS` refusal, whatever Python answered. */
+	fallback?: true;
 	result: string | string[] | BatchOutcome | object | boolean | null;
 	error: StepError | null;
 	unchanged?: true;
@@ -604,6 +611,11 @@ function expectSameBytes(actual: Uint8Array, expected: Uint8Array, label: string
 	);
 }
 
+/** What the engine answers a `fallback` step, by kind: a 501 the client takes to the server. */
+const FALLBACKS: { readonly [step: string]: { status: number; detail: string } } = {
+	compare: { status: 501, detail: 'reaches an unreadable file' }
+};
+
 /** The service's refusal of a rebind preview whose staged ops the candidate does not admit. */
 export const REFUSED_OPS = { status: 501, detail: 'reaches ops the candidate refuses' } as const;
 
@@ -697,6 +709,16 @@ function apply(
 			const bytes = joined(drain(modelFileSteps(stagedReplica(model, step, carried))).parts);
 			expectSameBytes(bytes, new TextEncoder().encode(step.result as string), `step ${index}`);
 			return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+		}
+		case 'compare': {
+			// `POST /model/compare` over the working copy, the step's ops staged on it.
+			const bytes =
+				step.file_b64 === undefined
+					? Buffer.from(step.file!, 'utf8')
+					: Buffer.from(step.file_b64, 'base64');
+			const file = Uint8Array.from(bytes).buffer;
+			const wc = stagedReplica(model, step, carried);
+			return drain(compareSteps(wc, { file, created_at: step.created_at! }));
 		}
 		case 'validate_view': {
 			// The view checked over the working model (the step's ops staged) and the artifacts.
@@ -856,7 +878,8 @@ const READ_LIKE = new Set([
 	'validate_staged',
 	'candidate',
 	'preview_rebind',
-	'validate_view'
+	'validate_view',
+	'compare'
 ]);
 
 /**
@@ -906,7 +929,9 @@ export function replaySteps(
 			else throw caught;
 		}
 		const recorded = step.error;
-		if (step.do === 'preview_rebind' && recorded !== null) {
+		if (step.fallback === true) {
+			expect(error, label).toEqual(FALLBACKS[step.do]);
+		} else if (step.do === 'preview_rebind' && recorded !== null) {
 			// The oracle refuses the ops in its own words; the engine leaves them to it.
 			expect(error, label).toEqual(REFUSED_OPS);
 		} else if (recorded !== null && 'status' in recorded && typeof recorded.detail !== 'string') {
@@ -916,7 +941,8 @@ export function replaySteps(
 			);
 		} else expect(error, label).toEqual(recorded);
 		// A body is compared as text: values and key order at once.
-		if (READ_LIKE.has(step.do)) {
+		if (step.fallback === true) expect(result, label).toBeNull();
+		else if (READ_LIKE.has(step.do)) {
 			const recordedResult =
 				step.do === 'candidate' ? comparableDiff(step.result as CandidateDiff) : step.result;
 			expect(JSON.stringify(result), label).toBe(JSON.stringify(recordedResult));
