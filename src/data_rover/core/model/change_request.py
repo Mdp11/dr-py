@@ -246,7 +246,7 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
         )
 
     for e in cr.elements_deleted:
-        del new_elements[e.id]
+        new_elements.pop(e.id, None)
 
     for r in cr.relationships_added:
         new_relationships[r.id] = _copy_relationship(r)
@@ -263,7 +263,7 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
         )
 
     for r in cr.relationships_deleted:
-        del new_relationships[r.id]
+        new_relationships.pop(r.id, None)
 
     result = Model(model.metamodel)
     result.elements = new_elements

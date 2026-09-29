@@ -132,7 +132,9 @@ def test_missing_modified_element():
     model = Model(_mm())  # empty
     before = Element(id="ghost", type_name="Block", properties={"name": "X"})
     after = Element(id="ghost", type_name="Block", properties={"name": "Y"})
-    cr = ChangeRequest(elements_modified=[ModifiedElement(id="ghost", before=before, after=after)])
+    cr = ChangeRequest(
+        elements_modified=[ModifiedElement(id="ghost", before=before, after=after)]
+    )
     with pytest.raises(CRConflictError) as exc_info:
         apply_change_request(model, cr)
     conflicts = exc_info.value.conflicts
@@ -193,7 +195,9 @@ def test_rev_ignored_for_match():
     # CR before has rev=0, which differs from current rev=5, but content matches
     before = Element(id="e1", type_name="Block", properties={"name": "A"}, rev=0)
     after = Element(id="e1", type_name="Block", properties={"name": "B"}, rev=0)
-    cr = ChangeRequest(elements_modified=[ModifiedElement(id="e1", before=before, after=after)])
+    cr = ChangeRequest(
+        elements_modified=[ModifiedElement(id="e1", before=before, after=after)]
+    )
     result = apply_change_request(model, cr)
     # Should succeed — no conflict raised
     assert result.elements["e1"].properties["name"] == "B"
@@ -213,7 +217,9 @@ def test_abort_all_multiple_conflicts():
     after_ghost = Element(id="ghost", type_name="Block", properties={"name": "Y"})
     cr = ChangeRequest(
         elements_added=[dup],
-        elements_modified=[ModifiedElement(id="ghost", before=before_ghost, after=after_ghost)],
+        elements_modified=[
+            ModifiedElement(id="ghost", before=before_ghost, after=after_ghost)
+        ],
     )
     with pytest.raises(CRConflictError) as exc_info:
         apply_change_request(model, cr)
@@ -231,9 +237,15 @@ def test_abort_all_multiple_conflicts():
 
 def test_clean_apply_add_modify_delete_elements():
     model = Model(_mm())
-    model.elements["keep"] = Element(id="keep", type_name="Block", properties={"name": "Keep"})
-    model.elements["mod"] = Element(id="mod", type_name="Block", properties={"name": "Old"})
-    model.elements["del"] = Element(id="del", type_name="Block", properties={"name": "Del"})
+    model.elements["keep"] = Element(
+        id="keep", type_name="Block", properties={"name": "Keep"}
+    )
+    model.elements["mod"] = Element(
+        id="mod", type_name="Block", properties={"name": "Old"}
+    )
+    model.elements["del"] = Element(
+        id="del", type_name="Block", properties={"name": "Del"}
+    )
 
     new_e = Element(id="new", type_name="Block", properties={"name": "New"})
     before_mod = Element(id="mod", type_name="Block", properties={"name": "Old"})
@@ -242,7 +254,9 @@ def test_clean_apply_add_modify_delete_elements():
 
     cr = ChangeRequest(
         elements_added=[new_e],
-        elements_modified=[ModifiedElement(id="mod", before=before_mod, after=after_mod)],
+        elements_modified=[
+            ModifiedElement(id="mod", before=before_mod, after=after_mod)
+        ],
         elements_deleted=[del_snap],
     )
     result = apply_change_request(model, cr)
@@ -270,7 +284,9 @@ def test_modify_bumps_rev():
 
     before = Element(id="e1", type_name="Block", properties={"name": "A"}, rev=3)
     after = Element(id="e1", type_name="Block", properties={"name": "B"}, rev=3)
-    cr = ChangeRequest(elements_modified=[ModifiedElement(id="e1", before=before, after=after)])
+    cr = ChangeRequest(
+        elements_modified=[ModifiedElement(id="e1", before=before, after=after)]
+    )
     result = apply_change_request(model, cr)
     assert result.elements["e1"].rev == 4  # 3 + 1
 
@@ -325,7 +341,9 @@ def test_missing_modified_relationship():
     before_r = Relationship(id="r99", type_name="Link", source_id="a", target_id="b")
     after_r = Relationship(id="r99", type_name="Link", source_id="a", target_id="b")
     cr = ChangeRequest(
-        relationships_modified=[ModifiedRelationship(id="r99", before=before_r, after=after_r)]
+        relationships_modified=[
+            ModifiedRelationship(id="r99", before=before_r, after=after_r)
+        ]
     )
     with pytest.raises(CRConflictError) as exc_info:
         apply_change_request(model, cr)
@@ -347,7 +365,9 @@ def test_before_mismatch_modified_relationship():
     wrong_before = Relationship(id="r1", type_name="Link", source_id="a", target_id="c")
     after_r = Relationship(id="r1", type_name="Link", source_id="a", target_id="b")
     cr = ChangeRequest(
-        relationships_modified=[ModifiedRelationship(id="r1", before=wrong_before, after=after_r)]
+        relationships_modified=[
+            ModifiedRelationship(id="r1", before=wrong_before, after=after_r)
+        ]
     )
     with pytest.raises(CRConflictError) as exc_info:
         apply_change_request(model, cr)
@@ -424,9 +444,13 @@ def test_modified_relationship_uses_op_id_not_after_id():
 
     before_r = Relationship(id="r1", type_name="Link", source_id="a", target_id="b")
     # after.id is intentionally different from the op id "r1"
-    after_r = Relationship(id="DIFFERENT", type_name="Link", source_id="a", target_id="b")
+    after_r = Relationship(
+        id="DIFFERENT", type_name="Link", source_id="a", target_id="b"
+    )
     cr = ChangeRequest(
-        relationships_modified=[ModifiedRelationship(id="r1", before=before_r, after=after_r)]
+        relationships_modified=[
+            ModifiedRelationship(id="r1", before=before_r, after=after_r)
+        ]
     )
     result = apply_change_request(model, cr)
 
@@ -490,7 +514,9 @@ def test_clean_apply_modify_and_delete_relationships():
     del_snap = Relationship(id="del", type_name="Link", source_id="b", target_id="c")
 
     cr = ChangeRequest(
-        relationships_modified=[ModifiedRelationship(id="mod", before=before_mod, after=after_mod)],
+        relationships_modified=[
+            ModifiedRelationship(id="mod", before=before_mod, after=after_mod)
+        ],
         relationships_deleted=[del_snap],
     )
     result = apply_change_request(model, cr)
@@ -518,7 +544,27 @@ def test_relationship_modify_bumps_rev():
     before_r = Relationship(id="r1", type_name="Link", source_id="a", target_id="b")
     after_r = Relationship(id="r1", type_name="Link", source_id="b", target_id="a")
     cr = ChangeRequest(
-        relationships_modified=[ModifiedRelationship(id="r1", before=before_r, after=after_r)]
+        relationships_modified=[
+            ModifiedRelationship(id="r1", before=before_r, after=after_r)
+        ]
     )
     result = apply_change_request(model, cr)
     assert result.relationships["r1"].rev == 8  # 7 + 1
+
+
+def test_duplicate_deletes_apply_as_one_delete():
+    """An id listed twice in ``deleted`` is deleted once, for either kind."""
+    model = Model(_mm())
+    model.elements["a"] = Element(id="a", type_name="Block", properties={})
+    model.elements["b"] = Element(id="b", type_name="Block", properties={})
+    model.relationships["r1"] = Relationship(
+        id="r1", type_name="Link", source_id="a", target_id="b"
+    )
+    b = Element(id="b", type_name="Block", properties={})
+    r1 = Relationship(id="r1", type_name="Link", source_id="a", target_id="b")
+    cr = ChangeRequest(elements_deleted=[b, b], relationships_deleted=[r1, r1])
+    result = apply_change_request(model, cr)
+    assert list(result.elements) == ["a"]
+    assert result.relationships == {}
+    result.indexes.verify_consistent()
+    assert list(model.elements) == ["a", "b"] and list(model.relationships) == ["r1"]

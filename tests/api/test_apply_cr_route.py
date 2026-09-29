@@ -46,7 +46,9 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(f"{API}/metamodel", content=MM, headers={"content-type": "application/x-yaml"})
+    res = c.post(
+        f"{API}/metamodel", content=MM, headers={"content-type": "application/x-yaml"}
+    )
     assert res.status_code == 200, res.text
     return c
 
@@ -69,12 +71,19 @@ def seeded(client: TestClient) -> TestClient:
 def viewer_headers(client: TestClient) -> dict[str, str]:
     with db_session() as s:
         tenancy.upsert_user(s, user_id="viewer-1", email="v@example.com")
-        tenancy.add_member(s, project_id="default", user_id="viewer-1", role=Role.viewer)
+        tenancy.add_member(
+            s, project_id="default", user_id="viewer-1", role=Role.viewer
+        )
     return {"x-user-id": "viewer-1", "x-user-email": "v@example.com"}
 
 
 def _el(eid: str, name: str, type_name: str = "Item", **props) -> dict:
-    return {"id": eid, "type_name": type_name, "properties": {"name": name, **props}, "rev": 0}
+    return {
+        "id": eid,
+        "type_name": type_name,
+        "properties": {"name": name, **props},
+        "rev": 0,
+    }
 
 
 def _rel(rid: str, type_name: str, src: str, tgt: str, **props) -> dict:
@@ -124,7 +133,9 @@ def _propose(client: TestClient, crs: list[dict], **kw):
     return client.post(f"{API}/model/apply-cr", json={"crs": crs}, **kw)
 
 
-def test_propose_returns_ops_and_combined_cr_without_touching_session(seeded: TestClient) -> None:
+def test_propose_returns_ops_and_combined_cr_without_touching_session(
+    seeded: TestClient,
+) -> None:
     rev = get_session().model_rev
     res = _propose(seeded, [_cr(e_added=[_el("n1", "N")])])
     assert res.status_code == 200, res.text
@@ -140,7 +151,11 @@ def test_propose_returns_ops_and_combined_cr_without_touching_session(seeded: Te
         }
     ]
     assert [e["id"] for e in body["cr"]["ops"]["elements"]["added"]] == ["n1"]
-    assert body["cr"]["baseline"] == {"filename": None, "elementCount": 2, "relationshipCount": 1}
+    assert body["cr"]["baseline"] == {
+        "filename": None,
+        "elementCount": 2,
+        "relationshipCount": 1,
+    }
     assert get_session().model_rev == rev
     model = get_session().model
     assert model is not None and "n1" not in model.elements
@@ -170,8 +185,12 @@ def test_propose_conflict_reports_index_of_failing_cr(seeded: TestClient) -> Non
     assert [(c["kind"], c["id"]) for c in body["conflicts"]] == [("missing", "zzz")]
 
 
-def test_propose_before_mismatch_against_session_is_409_at_index_0(seeded: TestClient) -> None:
-    res = _propose(seeded, [_cr(e_modified=[_mod("a", _el("a", "WRONG"), _el("a", "A2"))])])
+def test_propose_before_mismatch_against_session_is_409_at_index_0(
+    seeded: TestClient,
+) -> None:
+    res = _propose(
+        seeded, [_cr(e_modified=[_mod("a", _el("a", "WRONG"), _el("a", "A2"))])]
+    )
     assert res.status_code == 409
     assert res.json()["cr_index"] == 0
     assert res.json()["conflicts"][0]["kind"] == "before_mismatch"
@@ -191,15 +210,25 @@ def test_propose_gate_dangling_delete_422(seeded: TestClient) -> None:
 
 
 def test_propose_retype_422(seeded: TestClient) -> None:
-    res = _propose(seeded, [_cr(e_modified=[_mod("a", _el("a", "A"), _el("a", "A", type_name="Other"))])])
+    res = _propose(
+        seeded,
+        [_cr(e_modified=[_mod("a", _el("a", "A"), _el("a", "A", type_name="Other"))])],
+    )
     assert res.status_code == 422, res.text
     assert "'a'" in res.json()["detail"] and "type" in res.json()["detail"]
 
 
-def test_propose_orders_relationship_delete_before_element_delete(seeded: TestClient) -> None:
+def test_propose_orders_relationship_delete_before_element_delete(
+    seeded: TestClient,
+) -> None:
     res = _propose(
         seeded,
-        [_cr(e_deleted=[_el("b", "B")], r_deleted=[_rel("r-ab", "Contains", "a", "b")])],
+        [
+            _cr(
+                e_deleted=[_el("b", "B")],
+                r_deleted=[_rel("r-ab", "Contains", "a", "b")],
+            )
+        ],
     )
     assert res.status_code == 200, res.text
     assert [(op["kind"], op["id"]) for op in res.json()["ops"]] == [
@@ -209,10 +238,16 @@ def test_propose_orders_relationship_delete_before_element_delete(seeded: TestCl
 
 
 def test_propose_modified_becomes_patch(seeded: TestClient) -> None:
-    res = _propose(seeded, [_cr(e_modified=[_mod("a", _el("a", "A"), _el("a", "A2", note="n"))])])
+    res = _propose(
+        seeded, [_cr(e_modified=[_mod("a", _el("a", "A"), _el("a", "A2", note="n"))])]
+    )
     assert res.status_code == 200, res.text
     assert res.json()["ops"] == [
-        {"kind": "update_element", "id": "a", "properties_patch": {"name": "A2", "note": "n"}}
+        {
+            "kind": "update_element",
+            "id": "a",
+            "properties_patch": {"name": "A2", "note": "n"},
+        }
     ]
 
 
@@ -231,5 +266,17 @@ def test_propose_without_model_404(client: TestClient) -> None:
 
 
 def test_propose_viewer_403(seeded: TestClient, viewer_headers: dict[str, str]) -> None:
-    res = seeded.post(f"{API}/model/apply-cr", json={"crs": [_cr()]}, headers=viewer_headers)
+    res = seeded.post(
+        f"{API}/model/apply-cr", json={"crs": [_cr()]}, headers=viewer_headers
+    )
     assert res.status_code == 403, res.text
+
+
+def test_propose_duplicate_deletes_are_one_delete(seeded: TestClient) -> None:
+    rel = _rel("r-ab", "Contains", "a", "b")
+    res = _propose(seeded, [_cr(e_deleted=[_el("b", "B")] * 2, r_deleted=[rel, rel])])
+    assert res.status_code == 200, res.text
+    assert [(op["kind"], op["id"]) for op in res.json()["ops"]] == [
+        ("delete_relationship", "r-ab"),
+        ("delete_element", "b"),
+    ]

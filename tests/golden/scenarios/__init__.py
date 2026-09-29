@@ -1,6 +1,7 @@
 """Importing this package registers every scenario."""
 
 from . import (  # noqa: F401
+    change_request,
     export_bytes,
     float_repr,
     frozen_groups,
@@ -20,6 +21,7 @@ from . import (  # noqa: F401
     ops_recreate,
     ops_refused,
     py_coerce,
+    py_eq,
     py_lower,
     py_regex,
     py_repr,

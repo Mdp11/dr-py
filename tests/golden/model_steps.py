@@ -34,14 +34,18 @@ state arrives, its type unchecked. ``export`` calls an export route with the
 clock pinned to the step's ``date`` and records the file it answers (see
 ``_export``). ``download`` records the file ``GET /model/download`` streams,
 and ``validate_view`` a view document's warnings as ``GET /views/{id}``
-computes them against the artifacts kept. Either may carry ``stage`` ops,
-applied and rolled back on a seeded recorder as ``validate_staged``'s are:
-the download is still the committed file, the warnings are over the model
-with the ops applied. After every step the recorder
-adds the outcome (``result`` or ``error``) and what the step left behind: the
-state digest and a fingerprint of the entity lines plus the index dump. Every
-``full_every``-th step, and the last, carries the lines and the dump
-themselves, so a mismatch can be read, not just seen. A step that changed
+computes them against the artifacts kept. ``compare`` records what
+``POST /model/compare`` answers for a file, and ``apply_cr`` what
+``POST /model/apply-cr`` answers for a list of change requests (its 409 as
+``{"status": 409, "body": …}``), each on a seeded recorder with the clock
+pinned to the step's ``created_at``. Any of these four may carry ``stage``
+ops, applied and rolled back on a seeded recorder as ``validate_staged``'s
+are: the download is still the committed file, the warnings, the diff and
+the proposal are over the model with the ops applied. After every step the
+recorder adds the outcome (``result`` or ``error``) and what the step left
+behind: the state digest and a fingerprint of the entity lines plus the index
+dump. Every ``full_every``-th step, and the last, carries the lines and the
+dump themselves, so a mismatch can be read, not just seen. A step that changed
 nothing says ``"unchanged": true`` instead. The engine's golden runner replays
 the same steps and compares all of it.
 
@@ -60,6 +64,8 @@ generator, which is the recorder's scaffolding and no part of the state.
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import copy
 import hashlib
 import io
@@ -74,15 +80,19 @@ from urllib.parse import unquote
 
 import yaml
 from fastapi import HTTPException, Response
+from fastapi.responses import JSONResponse
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from starlette.requests import Request
+from starlette.types import Message
 
 from data_rover.api import table_export_engine
 from data_rover.api.db_models import ArtifactKind, ArtifactRow, Role
 from data_rover.api.deps import Session
 from data_rover.api.metamodel_candidate import candidate_issues, model_half
 from data_rover.api.routes import artifacts as artifact_routes
+from data_rover.api.routes import change_request as cr_routes
 from data_rover.api.routes import exports as export_routes
 from data_rover.api.routes import read
 from data_rover.api.routes import tables as table_routes
@@ -107,6 +117,7 @@ from data_rover.api.schemas import (
     IssueOut,
     ModelOpIn,
     PreviewRequest,
+    ProposeCrRequest,
     RelationshipOut,
     RuleSkipOut,
     RulesStatusOut,
@@ -324,6 +335,75 @@ def validate_view_step(
     ``artifacts`` step known. With ``stage``, over the model with those raw
     ops applied."""
     return {"do": "validate_view", "view": view, **_staging(stage)}
+
+
+def _fallback(fallback: bool) -> dict[str, Any]:
+    return {"fallback": True} if fallback else {}
+
+
+def compare_step(
+    file: str | None,
+    created_at: str,
+    stage: list[dict[str, Any]] | None = None,
+    *,
+    file_b64: str | None = None,
+    fallback: bool = False,
+) -> dict[str, Any]:
+    """A ``compare`` step: ``POST /model/compare`` with ``file`` as its UTF-8
+    bytes, or with the bytes ``file_b64`` encodes where they are not UTF-8
+    text, answered at ``created_at``. With ``stage``, over the model with
+    those raw ops applied. ``fallback`` marks a file the engine hands to the
+    server unread."""
+    assert (file is None) != (file_b64 is None), "a compare sends one file"
+    sent = {"file": file} if file_b64 is None else {"file_b64": file_b64}
+    return {
+        "do": "compare",
+        **sent,
+        "created_at": created_at,
+        **_staging(stage),
+        **_fallback(fallback),
+    }
+
+
+def apply_cr_step(
+    crs: Any,
+    created_at: str,
+    stage: list[dict[str, Any]] | None = None,
+    *,
+    fallback: bool = False,
+) -> dict[str, Any]:
+    """An ``apply_cr`` step: ``POST /model/apply-cr`` with ``{"crs": crs}``,
+    answered at ``created_at``. With ``stage``, over the model with those raw
+    ops applied. ``fallback`` marks change requests the engine hands to the
+    server unread."""
+    return {
+        "do": "apply_cr",
+        "crs": crs,
+        "created_at": created_at,
+        **_staging(stage),
+        **_fallback(fallback),
+    }
+
+
+def _compare(session: Session, body: bytes) -> Any:
+    """The compare route over ``body``, sent as the one chunk of a request
+    that carries nothing else."""
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request({"type": "http", "method": "POST", "headers": []}, receive)
+    answer = asyncio.run(cr_routes.compare_model(request, session=session))
+    return answer.model_dump(mode="json")
+
+
+def _propose(session: Session, payload: ProposeCrRequest) -> Any:
+    """The apply-CR route's answer; its 409 is a response it returns."""
+    answer = cr_routes.propose_cr(payload, session=session)
+    if isinstance(answer, JSONResponse):
+        assert answer.status_code == 409, answer.status_code
+        return {"status": 409, "body": json.loads(bytes(answer.body))}
+    return answer.model_dump(mode="json")
 
 
 #: an artifact as the recorder keeps it: its kind and its payload
@@ -980,6 +1060,17 @@ class Recorder:
 
         return self._dry(step, call)
 
+    def _change_request(
+        self, step: dict[str, Any], call: Callable[[Session], Any]
+    ) -> Any:
+        """``call`` over the seeded session, staged as ``_over_stage`` stages,
+        with the routes' clock reading the step's ``created_at``."""
+        session = self._session
+        assert session is not None, f"{step['do']} needs a seeded recorder"
+        created_at = step["created_at"]
+        with mock.patch.object(cr_routes, "_now_iso", lambda: created_at):
+            return self._over_stage(step, lambda _staged: call(session))
+
     def _candidate(self, step: dict[str, Any]) -> Any:
         """``POST /metamodel/diff``'s model half: the store the route reads,
         against the model validated under the step's metamodel document with
@@ -1128,6 +1219,17 @@ class Recorder:
                         for i in validate_view(view, staged, known_artifact_ids=known)
                     ],
                 )
+            case "compare":
+                body = (
+                    step["file"].encode("utf-8")
+                    if "file" in step
+                    else base64.b64decode(step["file_b64"], validate=True)
+                )
+                return self._change_request(step, lambda s: _compare(s, body))
+            case "apply_cr":
+                # the body is read before the route runs, as FastAPI reads it
+                payload = _payload(ProposeCrRequest, {"crs": step["crs"]})
+                return self._change_request(step, lambda s: _propose(s, payload))
             case "create_element":
                 return model.create_element(step["type"]).id
             case "restore_element":

@@ -149,7 +149,14 @@ frozen for behaviour from C's plan 7 on; `diff_metamodels` is not.
 `api/serialize.py::iter_model_json` and the download route (`GET /model/download`), and
 `core/view/validation.py` and the `GET /views/{id}` route that serves its warnings, are frozen for
 behaviour from C's plan 6a on; the engine replays them from the `model_download` and
-`view_warnings` fixtures. Areas not yet being ported carry on as normal.
+`view_warnings` fixtures. `core/model/change_request.py`, `api/change_request_ops.py`,
+`api/routes/change_request.py` (`POST /model/compare`, `POST /model/apply-cr`),
+`api/routes/_snapshot.py::build_model_from_dicts` and `api/serialize.py::parse_model_json` are
+frozen for behaviour from C's plan 6b on; the engine replays them from the `py_eq` and
+`change_request` fixtures. One bug landed on both sides under this rule during plan 6b: a CR
+that listed an id twice in `deleted` raised `KeyError` on the second delete, which the server
+answered 404; the ids are now one delete, and a `change_request` fixture step holds it. Areas
+not yet being ported carry on as normal.
 
 **MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
 engine on a small fixture model. The route-level mock tests of its server path stay while
