@@ -112,7 +112,7 @@ Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -742,6 +742,32 @@ probes and rethrows.
 of 4 full e2e runs (the first one of C's plan 7, task 9) and passed alone and in the other three.
 Nothing in that run had touched drag and drop. Fix direction: find what the spec waits on that a
 loaded host stretches, and wait on that signal instead of the clock.
+
+### K-88 · The two sides can name different winners for an element placed in two folders · `open` · *2026-09-29*
+The frontend's `elementHomeFolderId` (`lib/state/view-ops.ts`, which the view
+store's placement ops use) checks a folder's own elements before its descendants, while
+`validate_view` and its engine port check descendants first. For an element listed in a folder
+and in one of that folder's descendants, the two name different folders as the one that "wins",
+so a move op and the warning's "first placement wins" can disagree about where the element is.
+Fix direction: pick one order, in the oracle first, with a fixture, and follow it in the
+frontend's helper.
+
+### K-89 · The model download's longest step and slice are over the 16 ms bound · `open` · perf · *2026-09-29*
+`modelFileSteps` at M (118,076,420 bytes), medians of 3 on DESKTOP-5QK3FA5 (Ryzen 9 3900X),
+2026-09-29: 2,493 ms in Node with a 27 ms longest step, 1,944 ms in Chromium 148 with a 20 ms
+longest slice; the export, table, rescan and candidate slices are over the bound too. Node's
+peak heap, 21.6 MB above baseline, leaves out the roughly 118 MB of `ArrayBuffer` parts, which
+sit off the heap until the transfer. Fix direction: find what the longest step holds (the
+`Meter`'s 1,024-entity step over large entities, or the part writer's encode and copy at a part
+boundary) and make it end sooner; the heap row wants an `arrayBuffers` figure beside it.
+
+### K-90 · The server's download is buffered into a Blob before the save starts · `open` · *2026-09-29*
+`downloadModel()` answers a `Blob` on both sides so the `always` digest shadow can read one
+value; on the server side that buffers `GET /model/download`'s whole body (about 120 MB at M)
+in the browser before the save picker's writable receives any of it, where the raw `Response`
+used to stream into it. The engine side builds its Blob from the 4 MiB parts the same way.
+Fix direction: on the server side, tee the body into the save while the digest reads the other
+branch, or drop the server side when the engine's is the only one left (F).
 
 ### Considered by the exports plan and deferred
 

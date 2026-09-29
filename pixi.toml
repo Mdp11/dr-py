@@ -322,7 +322,7 @@ cmd = "npm run xlsx-sample"
 cwd = "engine"
 
 [feature.frontend.tasks.engine-parity-large]
-description = "Compare the engine's table, export and sweep at model M with the Python oracle's (run engine-bench-data once before)"
+description = "Compare the engine's table, export, download and sweep at model M with the Python oracle's (run engine-bench-data once before)"
 cmd = "node --disable-warning=ExperimentalWarning bench/parity-large.ts"
 cwd = "engine"
 depends-on = [

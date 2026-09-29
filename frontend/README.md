@@ -1774,7 +1774,8 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   forgets the old view's; a view that 404s, no active view or a failed load
   forgets the one registered; `clearViewState()` (the project switch)
   forgets them all. The view store also registers a quiet probe that is
-  pending while any `refreshView()` is in flight.
+  pending while any `refreshView()` or view-event reconciliation
+  (`reconcileAfterViewEvent`) is in flight.
 - **Searches abort.** The three debounced searches —
   `Sidebar/Search.svelte`, `Navigation/ElementStartPicker.svelte` and
   `Snippet/ElementContextRow.svelte` — pass `listElementsPage` a `signal`
@@ -1959,9 +1960,9 @@ a project's view through `POST /views` after deleting whatever views exist.)
   deleted or renamed folder's prior name is unrecoverable from the blob
   itself, so the label is the only record of what the user actually did, for
   both undo-history display and the DiffDrawer's View tab.
-- **The warnings.** With the `views` surface on the server (the default)
+- **The warnings.** With the `views` surface on the server
   `_warnings` are `GET /views/{id}`'s, over the committed view, set by
-  every `refreshView()`. With it on the engine (and its gate, the `issues`
+  every `refreshView()`. With it on the engine (the default, and its gate, the `issues`
   one, open) they are recomputed from `_view` AS STAGED, over the working
   model and the working artifacts (`viewWarnings`, `validateView` in the
   engine): at the end of every `refreshView()` (whose `warnings` are then

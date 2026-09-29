@@ -212,7 +212,8 @@ function refreshEnded(): void {
 }
 
 // After a commit of view ops the server's excluded pool is ahead of the
-// registered placements until the refetch lands: a shadow re-test waits.
+// registered placements until the refetch lands, and a view event's
+// reconciliation lags the same way: a shadow re-test waits for both.
 addQuietProbe(() =>
 	_refreshing === 0
 		? Promise.resolve()

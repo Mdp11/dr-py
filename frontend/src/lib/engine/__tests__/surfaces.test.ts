@@ -16,7 +16,7 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports, the metamodel, the download and the views; every one but the download and the views on the engine by default', () => {
+	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports, the metamodel, the download and the views; every one on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
 		expect(SURFACES).toEqual([
 			...READ_SURFACES,
@@ -41,8 +41,8 @@ describe('the surface switches', () => {
 			tables: 'engine',
 			exports: 'engine',
 			metamodel: 'engine',
-			download: 'server',
-			views: 'server'
+			download: 'engine',
+			views: 'engine'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
@@ -73,20 +73,20 @@ describe('the surface switches', () => {
 
 	it('staging on the engine does not force the download, and dr.surfaces moves it', () => {
 		for (const staging of ['engine', 'legacy']) {
-			expect(readSurfaces(storing(`{"staging": "${staging}"}`)).download).toBe('server');
-			expect(readSurfaces(storing(`{"staging": "${staging}", "download": "engine"}`))).toEqual({
+			expect(readSurfaces(storing(`{"staging": "${staging}"}`)).download).toBe('engine');
+			expect(readSurfaces(storing(`{"staging": "${staging}", "download": "server"}`))).toEqual({
 				...SURFACE_DEFAULTS,
-				download: 'engine'
+				download: 'server'
 			});
 		}
 	});
 
 	it('staging on the engine does not force the views, and dr.surfaces moves them', () => {
 		for (const staging of ['engine', 'legacy']) {
-			expect(readSurfaces(storing(`{"staging": "${staging}"}`)).views).toBe('server');
-			expect(readSurfaces(storing(`{"staging": "${staging}", "views": "engine"}`))).toEqual({
+			expect(readSurfaces(storing(`{"staging": "${staging}"}`)).views).toBe('engine');
+			expect(readSurfaces(storing(`{"staging": "${staging}", "views": "server"}`))).toEqual({
 				...SURFACE_DEFAULTS,
-				views: 'engine'
+				views: 'server'
 			});
 		}
 	});
