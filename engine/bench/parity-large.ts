@@ -1,7 +1,8 @@
 /**
  * The engine against the Python oracle at model M, over the same
  * (pre-violation) replica: the gate's table, row for row; the gate's export,
- * byte for byte, in csv and in json; then, with the same violations and the
+ * byte for byte, in csv and in json; the model download, byte for byte, with
+ * and without a staged edit (`scripts/download_large.py`); then, with the same violations and the
  * same custom rules applied, the sweep. `scripts/table_large.py` writes the
  * table oracle's side (`tableSteps`'s counterpart) over
  * `engine/bench/big-table.json`, before any op lands: its rows, and beside
@@ -41,6 +42,7 @@ import {
 	issueKey,
 	LiveIssues,
 	Metamodel,
+	modelFileSteps,
 	navigationFetch,
 	openSnapshot,
 	parseJson,
@@ -60,6 +62,7 @@ import {
 	type EvalContext,
 	type ExportFileResult,
 	type ExportFormat,
+	type ModelFile,
 	type Issue,
 	type IssueOut,
 	type MetamodelDoc
@@ -83,6 +86,7 @@ const BIG_TABLE = new URL('big-table.json', import.meta.url);
 const TABLE_ORACLE = new URL('large.table.json', DIR);
 const TABLE_ORACLE_META = new URL('large.table.meta.json', DIR);
 const EXPORT_ORACLE_META = new URL('large.export.meta.json', DIR);
+const DOWNLOAD_ORACLE = new URL('large.download.json', DIR);
 const EXPORT_ORACLE = (format: ExportFormat) => new URL(`large.export.${format}`, DIR);
 
 for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES, CANDIDATE, CANDIDATE_ORACLE]) {
@@ -91,7 +95,7 @@ for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES, CANDIDATE, C
 		process.exit(1);
 	}
 }
-for (const file of [TABLE_ORACLE, TABLE_ORACLE_META, EXPORT_ORACLE_META]) {
+for (const file of [TABLE_ORACLE, TABLE_ORACLE_META, EXPORT_ORACLE_META, DOWNLOAD_ORACLE]) {
 	if (!existsSync(file)) {
 		console.error(
 			`Missing ${file.pathname}: run \`pixi run engine-table-oracle\` and \`engine-export-oracle\` first.`
@@ -264,6 +268,58 @@ for (const format of ['csv', 'json'] as const) {
 	}
 }
 
+// The model download over the same replica, as the oracle wrote it, then again with
+// one edit staged: the file is the committed model, so a staged edit changes nothing.
+function joined(file: ModelFile): Uint8Array {
+	const out = new Uint8Array(file.parts.reduce((n, part) => n + part.byteLength, 0));
+	let at = 0;
+	for (const part of file.parts) {
+		out.set(new Uint8Array(part), at);
+		at += part.byteLength;
+	}
+	return out;
+}
+const downloadOracle = new Uint8Array(readFileSync(DOWNLOAD_ORACLE));
+let downloadOk = true;
+/** Compares one download with the oracle's bytes and prints the verdict under `label`. */
+function checkDownload(label: string, file: ModelFile, ms: number): void {
+	const engineBytes = joined(file);
+	const diffAt = firstDiff(downloadOracle, engineBytes);
+	const ok =
+		diffAt === -1 && file.filename === 'model.json' && file.content_type === 'application/json';
+	downloadOk = downloadOk && ok;
+	console.log(
+		ok
+			? `${label} equal (${engineBytes.length.toLocaleString('en-US')} bytes), written in ${ms.toFixed(0)} ms.`
+			: `${label} FAILS: ${engineBytes.length.toLocaleString('en-US')} bytes ` +
+					`(oracle ${downloadOracle.length.toLocaleString('en-US')}), ${file.filename} ${file.content_type}`
+	);
+	if (diffAt !== -1) {
+		console.log(
+			`  first differing offset ${diffAt.toLocaleString('en-US')}\n` +
+				`    oracle  ...${JSON.stringify(around(downloadOracle, diffAt))}...\n` +
+				`    engine  ...${JSON.stringify(around(engineBytes, diffAt))}...`
+		);
+	}
+}
+const downloadStart = performance.now();
+checkDownload('download', drain(modelFileSteps(workingCopy)), performance.now() - downloadStart);
+const [firstElement] = workingCopy.committedElementsInOrder();
+workingCopy.stage([
+	{
+		kind: 'update_element',
+		id: firstElement!.id,
+		properties_patch: { name: 'staged in the download parity' }
+	}
+]);
+const stagedStart = performance.now();
+checkDownload(
+	'download with one update_element staged:',
+	drain(modelFileSteps(workingCopy)),
+	performance.now() - stagedStart
+);
+workingCopy.unstage('all');
+
 // Committed state, as the oracle holds it: the store wraps the working copy after.
 const ops = readOps(parseJson(readFileSync(VIOLATIONS, 'utf-8')));
 applyBatch(workingCopy.model, ops);
@@ -402,4 +458,4 @@ console.log(
 			: `Parity FAILS: ${candidateDiffs.length} difference(s) (${failing} now_failing, ${passing} now_passing). The first ${SHOWN}:`)
 );
 for (const line of candidateDiffs.slice(0, SHOWN)) console.log(line);
-if (!tableOk || !exportOk || !issuesOk || !candidateOk) process.exit(1);
+if (!tableOk || !exportOk || !downloadOk || !issuesOk || !candidateOk) process.exit(1);

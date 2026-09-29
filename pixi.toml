@@ -139,6 +139,11 @@ description = "Write benchmarks/large.export.{csv,json}: the Python export route
 cmd = "python scripts/export_large.py"
 default-environment = "core-dev"
 
+[feature.core-dev.tasks.engine-download-oracle]
+description = "Write benchmarks/large.download.json: the Python model download's bytes over model M, which engine-parity-large and engine-bench-browser compare"
+cmd = "python scripts/download_large.py"
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.engine-candidate-oracle]
 description = "Write benchmarks/large.candidate{,.metamodel}.json: the Python candidate diff over model M, which engine-parity-large and engine-bench-browser use"
 cmd = "python scripts/candidate_large.py"
@@ -324,6 +329,7 @@ depends-on = [
     { task = "engine-parity-oracle", environment = "core-dev" },
     { task = "engine-table-oracle", environment = "core-dev" },
     { task = "engine-export-oracle", environment = "core-dev" },
+    { task = "engine-download-oracle", environment = "core-dev" },
     { task = "engine-candidate-oracle", environment = "core-dev" }
 ]
 
@@ -334,6 +340,7 @@ cwd = "frontend"
 depends-on = [
     "sandbox-build",
     { task = "engine-parity-oracle", environment = "core-dev" },
+    { task = "engine-download-oracle", environment = "core-dev" },
     { task = "engine-candidate-oracle", environment = "core-dev" }
 ]
 

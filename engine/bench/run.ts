@@ -30,6 +30,7 @@ import {
 	issueListBody,
 	LiveIssues,
 	Metamodel,
+	modelFileSteps,
 	Model,
 	navigationFetch,
 	openSnapshot,
@@ -46,7 +47,6 @@ import {
 	type Delta,
 	type ElementRec,
 	type EvalContext,
-	type ExportFileResult,
 	type MetamodelDoc,
 	type ModelOp,
 	type RelRec,
@@ -120,6 +120,8 @@ const ROWS = {
 	exportCsvWarmLongest: '  its longest step',
 	exportSplitZip: 'exportTable: json split a row, one zip, a fresh order cache',
 	exportSplitZipLongest: '  its longest step',
+	download: 'download: the committed model file, written in steps',
+	downloadLongest: '  its longest step',
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -192,13 +194,15 @@ function stepped<T>(total: Row, longest: Row | null, steps: Steps<T>, first?: Ro
 	}
 }
 
-type ExportRow = 'exportCsv' | 'exportJson' | 'exportXlsx' | 'exportCsvWarm' | 'exportSplitZip';
+type ExportRow =
+	'exportCsv' | 'exportJson' | 'exportXlsx' | 'exportCsvWarm' | 'exportSplitZip' | 'download';
 const EXPORT_ROWS: readonly ExportRow[] = [
 	'exportCsv',
 	'exportJson',
 	'exportXlsx',
 	'exportCsvWarm',
-	'exportSplitZip'
+	'exportSplitZip',
+	'download'
 ];
 const exportBytes = new Map<ExportRow, number[]>();
 const exportPeakHeapMb = new Map<ExportRow, number[]>();
@@ -209,12 +213,12 @@ const exportPeakHeapMb = new Map<ExportRow, number[]>();
  * just before the call — sampled after every step, since nothing else
  * marks where inside the render the peak falls.
  */
-function steppedExport(
+function steppedExport<T extends { parts: ArrayBuffer[] }>(
 	total: Row,
 	longest: Row,
 	row: ExportRow,
-	steps: Steps<ExportFileResult>
-): ExportFileResult {
+	steps: Steps<T>
+): T {
 	globalThis.gc?.();
 	globalThis.gc?.();
 	const baseline = process.memoryUsage().heapUsed;
@@ -781,6 +785,17 @@ function measureExport(workingCopy: WorkingCopy): void {
 	}
 }
 
+/** The committed model file, written over the just-opened replica: what a download streams. */
+function measureDownload(workingCopy: WorkingCopy): void {
+	const file = steppedExport(
+		'download',
+		'downloadLongest',
+		'download',
+		modelFileSteps(workingCopy)
+	);
+	if (file.parts.length === 0) throw new Error('the download holds no bytes');
+}
+
 async function pass(): Promise<void> {
 	const start = performance.now();
 	let loaded = start;
@@ -807,6 +822,7 @@ async function pass(): Promise<void> {
 	stepped('navigation', 'navigationLongest', navigation(workingCopy.model));
 	measureTable(workingCopy);
 	measureExport(workingCopy);
+	measureDownload(workingCopy);
 	counts = `${count(header.elements)} elements, ${count(header.relationships)} relationships`;
 	// Weighed before the document is read: the last text a regular expression
 	// ran over stays reachable, and further down that is the whole document.

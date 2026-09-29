@@ -8,6 +8,7 @@ import type {
 	ElementPage,
 	EndResult,
 	ExportFileResult,
+	ModelFile,
 	TablePageBody,
 	TailResult,
 	WireElement
@@ -311,6 +312,16 @@ async function transitions(): Promise<Measures> {
 		exportSlice = Math.max(exportSlice, slice);
 	}
 	measures['longest staged round trip during the exports (slice bound)'] = exportSlice;
+
+	// The committed model file, written in the worker and its parts transferred.
+	const stopDownloadPings = ping(client);
+	const download = await timed('downloadModel', () => client.call<ModelFile>('downloadModel', {}));
+	const downloadBytes = download.parts.reduce((n, part) => n + part.byteLength, 0);
+	if (downloadBytes === 0) throw new Error('the model download holds no bytes');
+	measures['  its bytes (downloadModel)'] = downloadBytes;
+	measures['  longest staged round trip during it (downloadModel)'] = longest(
+		await stopDownloadPings()
+	).ms;
 
 	// Custom rules installed: `setArtifacts` queues a rescan the store runs
 	// before answering the next `getModelIssues`, so the pair is timed as ONE
