@@ -1,10 +1,12 @@
-"""Read-only metamodel sandbox: diff + lint.
+"""Read-only metamodel sandbox: diff, structural diff + lint.
 
 ``/metamodel/diff`` validates the live model against a CANDIDATE metamodel via
 a no-copy ``build_rebind_view`` (shares the instance payload, rebuilds indexes)
 and returns a conformance diff, running under the per-project ``write_mutex``
-so the validation sweep can't race a concurrent commit. ``/metamodel/lint``
-is a cheap parse + schema check with no session/model/mutex at all.
+so the validation sweep can't race a concurrent commit; its model half lives in
+``metamodel_candidate.py``. ``/metamodel/structural-diff`` is the document half
+alone, with no model and no mutex. ``/metamodel/lint`` is a cheap parse +
+schema check with no session/model/mutex at all.
 
 The non-destructive rebind itself lands through the ``metamodel.rebind`` op
 family under ``POST /commits`` (``routes/commits.py`` + ``metamodel_ops.py``).
@@ -15,17 +17,14 @@ from __future__ import annotations
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from data_rover.core.metamodel.diff import diff_metamodels
+from data_rover.core.metamodel.diff import MetamodelStructuralDiff, diff_metamodels
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
-from data_rover.core.model.model import build_rebind_view
-from data_rover.core.validation.issue import Issue
 
 from ..authz import require_membership
 from ..db_models import Membership
-from ..deps import Session, get_request_session, require_model
-from ..rules import candidate_pipeline
+from ..deps import Session, get_request_session, require_metamodel, require_model
+from ..metamodel_candidate import candidate_issues, model_half
 from ..schemas import (
-    IssueOut,
     LintErrorOut,
     MetamodelDiffResponse,
     MetamodelLintResponse,
@@ -43,23 +42,6 @@ async def _read_metamodel_blob(request: Request) -> str:
         data = await request.json() if body else {}
         return yaml.safe_dump(data)
     return body
-
-
-def _issue_key(issue: Issue) -> tuple[str, str, str, str, tuple[str, ...]]:
-    """Stable identity for diffing two validation runs (Issue has no code).
-
-    ``check`` is part of the key: two user rules can produce the same custom
-    message on the same element, and without it one of them vanishes from the
-    diff. Both sides are stamped by the same pipeline, so including it only
-    ever splits keys, never merges distinct issues.
-    """
-    return (
-        issue.category.value,
-        issue.severity.value,
-        issue.check,
-        issue.message,
-        tuple(sorted(issue.target_ids)),
-    )
 
 
 def _load_candidate(blob: str):  # type: ignore[return]
@@ -85,24 +67,33 @@ async def diff_metamodel(
         current = _ensure_validation_seeded(session, model).all_issues()
         # The candidate side runs the session's rule SOURCES recompiled against
         # the CANDIDATE schema, so the diff reports rule flips the swap would
-        # cause. A drifted rule reports nothing here and its current issues
-        # land in ``now_passing``.
-        candidate_issues = candidate_pipeline(session, candidate).validate(
-            build_rebind_view(model, candidate)
+        # cause.
+        candidate_list = candidate_issues(
+            model, candidate, session.compiled_rules.sources
         )
-    cur_by_key = {_issue_key(i): i for i in current}
-    cand_by_key = {_issue_key(i): i for i in candidate_issues}
-    now_failing = [v for k, v in cand_by_key.items() if k not in cur_by_key]
-    now_passing = [v for k, v in cur_by_key.items() if k not in cand_by_key]
-    unchanged = len(cur_by_key.keys() & cand_by_key.keys())
     return MetamodelDiffResponse(
-        now_failing=[IssueOut.from_core(i) for i in now_failing],
-        now_passing=[IssueOut.from_core(i) for i in now_passing],
-        unchanged_count=unchanged,
-        current_error_count=len(current),
-        candidate_error_count=len(candidate_issues),
-        structural=structural,
+        **model_half(current, candidate_list), structural=structural
     )
+
+
+@router.post("/metamodel/structural-diff", response_model=None)
+async def structural_diff_metamodel(
+    request: Request,
+    session: Session = Depends(get_request_session),
+    membership: Membership = Depends(require_membership),
+) -> MetamodelStructuralDiff:
+    """The document half of ``/metamodel/diff`` alone: no model, no mutex,
+    so a client that computes the model half itself costs the server no
+    sweep. NOT in the read-only-POST allowlist, like lint: only the
+    owner-gated editing flow previews a candidate this way. An undecodable
+    body or an unconstructible YAML scalar is a bad candidate, 422 like any
+    other."""
+    current_mm = require_metamodel(session)
+    try:
+        candidate = _load_candidate(await _read_metamodel_blob(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return diff_metamodels(current_mm, candidate)
 
 
 @router.post("/metamodel/lint")
@@ -117,8 +108,9 @@ async def lint_metamodel(
     owner-gated editing flow calls it, and viewers have nothing to lint.
 
     ``_read_metamodel_blob`` itself is called INSIDE this try block, not
-    before it: the helper is shared with ``diff_metamodel`` (whose contract
-    is 422-on-bad-input, not always-200), so it must not be changed to
+    before it: the helper is shared with ``diff_metamodel`` and
+    ``structural_diff_metamodel`` (whose contract is 422-on-bad-input, not
+    always-200), so it must not be changed to
     swallow its own decode errors. An undecodable body
     (bad UTF-8, or malformed JSON under a JSON content-type) is exactly as
     much "the candidate text is bad" as a YAML/schema error, so it must land
@@ -126,7 +118,7 @@ async def lint_metamodel(
     """
     try:
         blob = await _read_metamodel_blob(request)
-        load_metamodel_str(blob)
+        document = load_metamodel_str(blob)
     except ValueError as exc:
         # Covers UnicodeDecodeError (bytes.decode("utf-8")) and
         # json.JSONDecodeError (request.json()) raised by
@@ -147,4 +139,4 @@ async def lint_metamodel(
         )
     except MetamodelError as exc:
         return MetamodelLintResponse(ok=False, errors=[LintErrorOut(message=str(exc))])
-    return MetamodelLintResponse(ok=True)
+    return MetamodelLintResponse(ok=True, document=document)

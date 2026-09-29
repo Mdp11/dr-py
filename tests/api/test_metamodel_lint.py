@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from data_rover.api import db
@@ -7,6 +10,7 @@ from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .test_commits_metamodel_ops import _acquire_mm
 
 _YAML = {"content-type": "application/x-yaml"}
 
@@ -39,10 +43,49 @@ def _client() -> TestClient:
     return c
 
 
+def _exact(value: object) -> str:
+    """JSON text that tells ``1`` from ``1.0`` and keeps key order."""
+    return json.dumps(value)
+
+
 def test_lint_valid_ok() -> None:
-    r = _client().post(papi("/metamodel/lint"), content=_VALID, headers=_YAML)
+    c = _client()
+    assert c.post(papi("/metamodel"), content=_VALID, headers=_YAML).status_code == 200
+    stored = c.get(papi("/metamodel"))
+    assert stored.status_code == 200, stored.text
+    r = c.post(papi("/metamodel/lint"), content=_VALID, headers=_YAML)
     assert r.status_code == 200, r.text
-    assert r.json() == {"ok": True, "errors": []}
+    assert r.json() == {"ok": True, "errors": [], "document": stored.json()}
+
+
+def test_lint_document_is_what_a_rebind_to_the_same_blob_serves() -> None:
+    """The document the engine opens for a candidate is the one the server
+    would answer after committing that candidate."""
+    candidate = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
+    c = _client()
+    assert c.post(papi("/metamodel"), content=_VALID, headers=_YAML).status_code == 200
+    assert (
+        c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code
+        == 200
+    )
+    rev = c.get(papi("/model/summary")).json()["model_rev"]
+    r = c.post(
+        papi("/commits"),
+        json={
+            "base_rev": rev,
+            "ops": [{"kind": "metamodel.rebind", "blob": candidate}],
+            "message": "rebind",
+            "lock_tokens": [_acquire_mm(c)],
+        },
+    )
+    assert r.status_code == 200, r.text
+    served = c.get(papi("/metamodel"))
+    assert served.status_code == 200, served.text
+    r = c.post(papi("/metamodel/lint"), content=candidate, headers=_YAML)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert _exact(body["document"]) == _exact(served.json())
 
 
 def test_lint_syntax_error_carries_position() -> None:
@@ -54,6 +97,7 @@ def test_lint_syntax_error_carries_position() -> None:
     assert err["message"]
     assert isinstance(err["line"], int) and err["line"] >= 1
     assert isinstance(err["column"], int) and err["column"] >= 1
+    assert body["document"] is None
 
 
 def test_lint_schema_error_message_only() -> None:
@@ -64,6 +108,7 @@ def test_lint_schema_error_message_only() -> None:
     (err,) = body["errors"]
     assert err["message"]
     assert err["line"] is None and err["column"] is None
+    assert body["document"] is None
 
 
 def test_lint_works_without_a_bound_metamodel() -> None:
@@ -83,6 +128,7 @@ def test_lint_undecodable_utf8_body_is_ok_false_not_500() -> None:
     assert body["ok"] is False
     (err,) = body["errors"]
     assert err["message"]
+    assert body["document"] is None
 
 
 def test_lint_malformed_json_body_is_ok_false_not_500() -> None:

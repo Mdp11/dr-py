@@ -7,6 +7,9 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 from data_rover.api.db_models import Role
+from data_rover.api.metamodel_candidate import issue_key, model_half
+from data_rover.api.schemas import IssueOut
+from data_rover.core.validation.issue import Issue, Severity
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 _MM = """
@@ -37,12 +40,28 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert c.post(papi("/metamodel"), content=_MM,
-                  headers={"content-type": "application/x-yaml"}).status_code == 200
-    assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    assert (
+        c.post(
+            papi("/metamodel"),
+            content=_MM,
+            headers={"content-type": "application/x-yaml"},
+        ).status_code
+        == 200
+    )
+    assert (
+        c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code
+        == 200
+    )
     # one Node with no label
-    ops_r = c.post(papi("/model/ops"), json={"base_rev": _rev(c), "ops": [
-        {"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}]})
+    ops_r = c.post(
+        papi("/model/ops"),
+        json={
+            "base_rev": _rev(c),
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}
+            ],
+        },
+    )
     assert ops_r.status_code == 200, ops_r.text
     return c
 
@@ -53,8 +72,11 @@ def _rev(c: TestClient) -> int:
 
 def test_diff_identical_metamodel_is_empty(client: TestClient) -> None:
     before = _rev(client)
-    r = client.post(papi("/metamodel/diff"), content=_MM,
-                    headers={"content-type": "application/x-yaml"})
+    r = client.post(
+        papi("/metamodel/diff"),
+        content=_MM,
+        headers={"content-type": "application/x-yaml"},
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["now_failing"] == []
@@ -63,8 +85,11 @@ def test_diff_identical_metamodel_is_empty(client: TestClient) -> None:
 
 
 def test_diff_new_required_property_now_failing(client: TestClient) -> None:
-    r = client.post(papi("/metamodel/diff"), content=_MM_REQUIRED,
-                    headers={"content-type": "application/x-yaml"})
+    r = client.post(
+        papi("/metamodel/diff"),
+        content=_MM_REQUIRED,
+        headers={"content-type": "application/x-yaml"},
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["candidate_error_count"] >= 1
@@ -72,8 +97,11 @@ def test_diff_new_required_property_now_failing(client: TestClient) -> None:
 
 
 def test_diff_invalid_candidate_422(client: TestClient) -> None:
-    r = client.post(papi("/metamodel/diff"), content="elements: [ {",
-                    headers={"content-type": "application/x-yaml"})
+    r = client.post(
+        papi("/metamodel/diff"),
+        content="elements: [ {",
+        headers={"content-type": "application/x-yaml"},
+    )
     assert r.status_code == 422
 
 
@@ -122,8 +150,11 @@ relationships:
 
 
 def test_diff_returns_structural_section(client: TestClient) -> None:
-    r = client.post(papi("/metamodel/diff"), content=_MM_STRUCT_RENAMED,
-                    headers={"content-type": "application/x-yaml"})
+    r = client.post(
+        papi("/metamodel/diff"),
+        content=_MM_STRUCT_RENAMED,
+        headers={"content-type": "application/x-yaml"},
+    )
     assert r.status_code == 200, r.text
     structural = r.json()["structural"]
     assert [t["name"] for t in structural["element_types"]["added"]] == ["Widget"]
@@ -140,9 +171,46 @@ def test_diff_returns_structural_section(client: TestClient) -> None:
 
 
 def test_diff_structural_field_change_uses_from_alias(client: TestClient) -> None:
-    r = client.post(papi("/metamodel/diff"), content=_MM_STRUCT_MULT,
-                    headers={"content-type": "application/x-yaml"})
+    r = client.post(
+        papi("/metamodel/diff"),
+        content=_MM_STRUCT_MULT,
+        headers={"content-type": "application/x-yaml"},
+    )
     assert r.status_code == 200, r.text
     (chg,) = r.json()["structural"]["relationship_types"]["changed"]
     (fc,) = chg["attributes"]
     assert fc == {"field": "source_multiplicity", "from": "0..*", "to": "1..1"}
+
+
+def _issue(
+    message: str, targets: list[str], severity: Severity = Severity.ERROR
+) -> Issue:
+    return Issue(severity=severity, message=message, target_ids=targets, check="facets")
+
+
+def _out(issue: Issue) -> dict:
+    return IssueOut.from_core(issue).model_dump(mode="json")
+
+
+def test_model_half_keys_as_dicts_do() -> None:
+    """A key keeps its first position and its last value (target ids are
+    keyed sorted, so ``[b, a]`` and ``[a, b]`` are one key rendered two ways);
+    ``unchanged_count`` counts distinct shared keys; both error counts are the
+    raw lengths, duplicates and warnings included."""
+    p_first, p_last = _issue("p", ["b", "a"]), _issue("p", ["a", "b"])
+    q = _issue("q", ["q"])
+    s_cur, s_cand = _issue("s", ["s2", "s1"]), _issue("s", ["s1", "s2"])
+    w = _issue("w", ["w"], Severity.WARNING)
+    f_first, f_last = _issue("f", ["d", "c"]), _issue("f", ["c", "d"])
+    n = _issue("n", ["n"])
+    current = [p_first, s_cur, q, p_last, w, w]
+    candidate = [f_first, s_cand, n, f_last, w]
+    assert issue_key(p_first) == issue_key(p_last)
+    half = model_half(current, candidate)
+    assert half == {
+        "now_failing": [_out(f_last), _out(n)],
+        "now_passing": [_out(p_last), _out(q)],
+        "unchanged_count": 2,
+        "current_error_count": 6,
+        "candidate_error_count": 5,
+    }

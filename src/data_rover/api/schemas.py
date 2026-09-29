@@ -14,6 +14,7 @@ from pydantic import (
 )
 
 from data_rover.core.metamodel.diff import MetamodelStructuralDiff
+from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.change_request import (
     ChangeRequest as CoreChangeRequest,
     ModifiedElement as CoreModifiedElement,
@@ -218,10 +219,13 @@ class LintErrorOut(BaseModel):
 
 class MetamodelLintResponse(BaseModel):
     """Cheap parse/schema check for the live editor. Always 200 —
-    a failed parse is the RESULT, not an error."""
+    a failed parse is the RESULT, not an error. ``document`` is the parsed
+    candidate, serialized as ``GET /metamodel`` serializes the bound one;
+    ``null`` when ``ok`` is false."""
 
     ok: bool
     errors: list[LintErrorOut] = Field(default_factory=list)
+    document: Metamodel | None = None
 
 
 class RulesLintRequest(BaseModel):

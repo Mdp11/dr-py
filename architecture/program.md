@@ -144,7 +144,9 @@ connecting, disconnecting or cascading away a relationship named in a key now ma
 ends' old and new group members attributable, so a strict commit that used to land can get a
 422, as a key-property edit already could. `core/validation/rules` and `api/rules.py` are frozen
 from C's plan 3 on, which ports them: a bug or a feature there lands on both sides with a fixture
-until F. Areas not yet being ported carry on as normal.
+until F. The diff route's model half (`api/metamodel_candidate.py`) and `build_rebind_view` are
+frozen for behaviour from C's plan 7 on; `diff_metamodels` is not. Areas not yet being ported carry
+on as normal.
 
 **MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
 engine on a small fixture model. The route-level mock tests of its server path stay while
