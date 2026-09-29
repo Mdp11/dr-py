@@ -123,7 +123,7 @@ export { elementLine, modelLines, relationshipLine } from './model/lines.ts';
 export { Model, type ModelOptions } from './model/model.ts';
 export { displayName, nameOf } from './model/naming.ts';
 export { ElementRec, RelRec, type Props } from './model/records.ts';
-export { liveStructure, type Structure } from './model/structure.ts';
+export { candidateStructureSteps, liveStructure, type Structure } from './model/structure.ts';
 export { keyEndpoints, uniqKeyText } from './model/uniq-key.ts';
 export {
 	DEFAULT_LIMITS,
