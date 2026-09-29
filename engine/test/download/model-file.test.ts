@@ -116,10 +116,14 @@ describe('the model file', () => {
 
 	it('refuses a lone surrogate at its place in the file, in code points', () => {
 		const model = pair();
-		model.setProperty(model.getElement('b'), 'name', '𝄞Ā');
-		const text = fileText(drain(modelFileSteps(workingCopy(model))));
-		const at = Array.from(text.slice(0, text.indexOf('Ā'))).length;
 		model.setProperty(model.getElement('b'), 'name', '𝄞\ud800');
+		// Where the surrogate stands in the file as written by hand, `𝄞` one code point.
+		const bare = '    {\n      "id": "b",\n      "type_name": "Node",\n      "properties": {}';
+		const head = PAIR_FILE.slice(0, PAIR_FILE.indexOf(bare));
+		const lead =
+			'    {\n      "id": "b",\n      "type_name": "Node",\n      "properties": {\n        "name": "𝄞';
+		const at = Array.from(head + lead).length;
+		expect(at).toBe(231);
 		expect(thrown(() => drain(modelFileSteps(workingCopy(model), 7)))).toMatchObject({
 			status: 422,
 			detail: `'utf-8' codec can't encode character '\\ud800' in position ${at}: surrogates not allowed`

@@ -34,8 +34,9 @@ const answerPost = (posts: readonly Post[], id: string) =>
 async function idle(client: Client): Promise<void> {
 	const ended = (task: string) => (event: Event) =>
 		event.event === 'progress' && event.task === task && event.done === event.total;
-	for (;;) {
+	for (let turns = 0; ; turns++) {
 		if (client.events.some(ended('verify')) && client.events.some(ended('sweep'))) break;
+		if (turns === 10_000) throw new Error('the replica never went idle');
 		await settle();
 	}
 	await client.call('staged');
@@ -54,6 +55,9 @@ function ring(): Model {
 }
 
 const rename: ModelOp = { kind: 'update_element', id: 'n1500', properties_patch: { name: 'aaa' } };
+
+// The file's last entity: no slice before the last has written it.
+const dropLast: ModelOp = { kind: 'delete_relationship', id: `r${COUNT - 1}` };
 
 /** A ready replica of the ring on a host whose turns the test ends. */
 async function paused() {
@@ -104,7 +108,7 @@ describe('a download over the scheduler', () => {
 	it('answers once, from the state it began on, when a delta lands between its slices', async () => {
 		const server = new Server(clone(ring()));
 		const before = direct(ring());
-		const { delta } = server.commit([rename]);
+		const { delta } = server.commit([dropLast]);
 		const after = direct(server.model);
 		expect(after).not.toBe(before);
 		const { host, client } = await paused();
