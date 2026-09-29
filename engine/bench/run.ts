@@ -19,6 +19,7 @@ import {
 	candidateDiff,
 	candidateScan,
 	candidateStructureSteps,
+	compareSteps,
 	compileRuleSets,
 	DEFAULT_TABLE_LIMITS,
 	drain,
@@ -36,7 +37,9 @@ import {
 	openSnapshot,
 	parseExact,
 	prepareCandidate,
+	proposeSteps,
 	READS,
+	readCrs,
 	readTableDefinition,
 	rebindPreviewBody,
 	resolveTableRefs,
@@ -70,12 +73,18 @@ const METAMODEL = new URL('large.snapshot.v2.metamodel.json', DIR);
 const DOCUMENT = new URL('large.model.json', DIR);
 const CANDIDATE = new URL('large.candidate.metamodel.json', DIR);
 const BIG_TABLE = new URL('big-table.json', import.meta.url);
+const COMPARE_FILE = new URL('large.compare.model.json', DIR);
+const CR_CREATED_AT = '2026-01-01T00:00:00.000Z';
 
 for (const file of [SNAPSHOT, METAMODEL, DOCUMENT]) {
 	if (!existsSync(file)) {
 		console.error(`Missing ${file.pathname}: run \`pixi run engine-bench-data\` first.`);
 		process.exit(1);
 	}
+}
+if (!existsSync(COMPARE_FILE)) {
+	console.error(`Missing ${COMPARE_FILE.pathname}: run \`pixi run engine-compare-oracle\` first.`);
+	process.exit(1);
 }
 if (!existsSync(CANDIDATE)) {
 	console.error(`Missing ${CANDIDATE.pathname}: run \`pixi run engine-candidate-oracle\` first.`);
@@ -122,6 +131,12 @@ const ROWS = {
 	exportSplitZipLongest: '  its longest step',
 	download: 'download: the committed model file, written in steps',
 	downloadLongest: '  its longest step',
+	compareParse: 'compare: the uploaded file decoded, parsed and shaped (its first step)',
+	compare: 'compare: the working copy against the uploaded file, in steps',
+	compareLongest: '  its longest step after the parse',
+	comparePeakHeapMb: '  peak heap above baseline, the parsed file beside the replica, MB',
+	applyCr: 'apply-CR: the compare’s change request proposed over the working copy, in steps',
+	applyCrLongest: '  its longest step',
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -655,6 +670,11 @@ function measureCandidate(model: Model, live: LiveIssues, rules: string): void {
 }
 
 const bytes = readFileSync(SNAPSHOT);
+const compareBytes = readFileSync(COMPARE_FILE);
+const compareFile = compareBytes.buffer.slice(
+	compareBytes.byteOffset,
+	compareBytes.byteOffset + compareBytes.byteLength
+) as ArrayBuffer;
 const candidateDoc: unknown = JSON.parse(readFileSync(CANDIDATE, 'utf-8'));
 const metamodelDoc = JSON.parse(readFileSync(METAMODEL, 'utf-8')) as MetamodelDoc;
 const rawBigTable = JSON.parse(readFileSync(BIG_TABLE, 'utf-8')) as Record<string, unknown>;
@@ -796,6 +816,48 @@ function measureDownload(workingCopy: WorkingCopy): void {
 	if (file.parts.length === 0) throw new Error('the download holds no bytes');
 }
 
+/**
+ * The compare of the derived file, driven by hand: the first step reads the
+ * file (decode, parse, shape), the peak heap is sampled after every step, and
+ * the change request it answers is proposed back.
+ */
+function measureCompare(workingCopy: WorkingCopy): void {
+	globalThis.gc?.();
+	globalThis.gc?.();
+	const baseline = process.memoryUsage().heapUsed;
+	const steps = compareSteps(workingCopy, { file: compareFile, created_at: CR_CREATED_AT });
+	let peak = 0;
+	let worst = 0;
+	let taken = 0;
+	const start = performance.now();
+	let answer;
+	for (;;) {
+		const before = performance.now();
+		const next = steps.next();
+		const ms = performance.now() - before;
+		if (taken++ === 0) record('compareParse', ms);
+		else worst = Math.max(worst, ms);
+		peak = Math.max(peak, process.memoryUsage().heapUsed - baseline);
+		if (next.done === true) {
+			answer = next.value;
+			break;
+		}
+	}
+	record('compare', performance.now() - start);
+	record('compareLongest', worst);
+	record('comparePeakHeapMb', peak / 2 ** 20);
+	if (answer.other_element_count === 0) throw new Error('the compare read no elements');
+	const crs = readCrs(JSON.parse(JSON.stringify([answer.cr])));
+	const proposed = stepped(
+		'applyCr',
+		'applyCrLongest',
+		proposeSteps(workingCopy, { crs, created_at: CR_CREATED_AT })
+	);
+	if (!('ops' in proposed) || proposed.ops.length === 0) {
+		throw new Error('the compare’s change request proposes nothing');
+	}
+}
+
 async function pass(): Promise<void> {
 	const start = performance.now();
 	let loaded = start;
@@ -823,6 +885,7 @@ async function pass(): Promise<void> {
 	measureTable(workingCopy);
 	measureExport(workingCopy);
 	measureDownload(workingCopy);
+	measureCompare(workingCopy);
 	counts = `${count(header.elements)} elements, ${count(header.relationships)} relationships`;
 	// Weighed before the document is read: the last text a regular expression
 	// ran over stays reachable, and further down that is the whole document.

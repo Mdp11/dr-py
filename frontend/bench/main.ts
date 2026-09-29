@@ -90,6 +90,8 @@ function deferred(): { promise: Promise<number>; resolve(at: number): void } {
 	return { promise, resolve };
 }
 
+const CR_CREATED_AT = '2026-01-01T00:00:00.000Z';
+
 let link: EngineLink | null = null;
 let rev = 0;
 
@@ -357,6 +359,35 @@ async function transitions(): Promise<Measures> {
 	// M holds no issue, so only what the edit adds is expected.
 	if (diff.now_failing.length === 0) {
 		throw new Error('the candidate edit changes nothing');
+	}
+
+	// Compare and apply-CR: the derived file goes to the worker transferred,
+	// the change request it answers is proposed back, a ping loop alongside each.
+	const compareFile = await (await fetch('/data/compare.json')).arrayBuffer();
+	const stopComparePings = ping(client);
+	const compared = await timed('compareModel: the working copy against an uploaded file', () =>
+		client.call<{ cr: unknown; other_element_count: number }>(
+			'compareModel',
+			{ file: compareFile, created_at: CR_CREATED_AT },
+			{ transfer: [compareFile] }
+		)
+	);
+	measures['  longest staged round trip during it (compareModel)'] = longest(
+		await stopComparePings()
+	).ms;
+	if (compared.other_element_count === 0) throw new Error('the compare read no elements');
+	const stopProposePings = ping(client);
+	const proposed = await timed('proposeCr: the compare’s change request', () =>
+		client.call<{ ops?: unknown[] }>('proposeCr', {
+			crs: [compared.cr],
+			created_at: CR_CREATED_AT
+		})
+	);
+	measures['  longest staged round trip during it (proposeCr)'] = longest(
+		await stopProposePings()
+	).ms;
+	if (proposed.ops === undefined || proposed.ops.length === 0) {
+		throw new Error('the compare’s change request proposes nothing');
 	}
 
 	// Last: the delta's digest is wrong on purpose (the page cannot compute

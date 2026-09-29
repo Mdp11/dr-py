@@ -64,6 +64,13 @@ if (!existsSync(new URL('large.candidate.metamodel.json', BENCHMARKS))) {
 	process.exit(1);
 }
 
+if (!existsSync(new URL('large.compare.model.json', BENCHMARKS))) {
+	console.error(
+		'Missing benchmarks/large.compare.model.json: run `pixi run engine-compare-oracle` first.'
+	);
+	process.exit(1);
+}
+
 if (!existsSync(new URL('large.download.json', BENCHMARKS))) {
 	console.error(
 		'Missing benchmarks/large.download.json: run `pixi run engine-download-oracle` first.'

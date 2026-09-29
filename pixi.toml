@@ -150,6 +150,11 @@ cmd = "python scripts/candidate_large.py"
 default-environment = "core-dev"
 depends-on = ["engine-parity-oracle"]
 
+[feature.core-dev.tasks.engine-compare-oracle]
+description = "Write benchmarks/large.compare{.model,}.json and large.apply-cr.json: a derived other model file and the Python compare and apply-CR answers over model M, which engine-parity-large and engine-bench use"
+cmd = "python scripts/compare_large.py"
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.core-lint]
 description = "Lint + typecheck the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
@@ -314,7 +319,10 @@ cwd = "engine"
 description = "Benchmark the engine at model M (run engine-bench-data once before)"
 cmd = "npm run bench"
 cwd = "engine"
-depends-on = [{ task = "engine-candidate-oracle", environment = "core-dev" }]
+depends-on = [
+    { task = "engine-candidate-oracle", environment = "core-dev" },
+    { task = "engine-compare-oracle", environment = "core-dev" }
+]
 
 [feature.frontend.tasks.engine-xlsx-sample]
 description = "Rewrite engine/fixtures/xlsx/sample.xlsx, the engine's workbook that tests/golden/test_engine_xlsx.py opens with openpyxl"
@@ -330,7 +338,8 @@ depends-on = [
     { task = "engine-table-oracle", environment = "core-dev" },
     { task = "engine-export-oracle", environment = "core-dev" },
     { task = "engine-download-oracle", environment = "core-dev" },
-    { task = "engine-candidate-oracle", environment = "core-dev" }
+    { task = "engine-candidate-oracle", environment = "core-dev" },
+    { task = "engine-compare-oracle", environment = "core-dev" }
 ]
 
 [feature.frontend.tasks.engine-bench-browser]
@@ -341,7 +350,8 @@ depends-on = [
     "sandbox-build",
     { task = "engine-parity-oracle", environment = "core-dev" },
     { task = "engine-download-oracle", environment = "core-dev" },
-    { task = "engine-candidate-oracle", environment = "core-dev" }
+    { task = "engine-candidate-oracle", environment = "core-dev" },
+    { task = "engine-compare-oracle", environment = "core-dev" }
 ]
 
 [feature.frontend.tasks.engine-tidy]

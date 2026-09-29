@@ -2,7 +2,9 @@
  * The engine against the Python oracle at model M, over the same
  * (pre-violation) replica: the gate's table, row for row; the gate's export,
  * byte for byte, in csv and in json; the model download, byte for byte, with
- * and without a staged edit (`scripts/download_large.py`); then, with the same violations and the
+ * and without a staged edit (`scripts/download_large.py`); the compare of a
+ * derived file and the apply-CR of the change request it answers
+ * (`scripts/compare_large.py`), as JSON text; then, with the same violations and the
  * same custom rules applied, the sweep. `scripts/table_large.py` writes the
  * table oracle's side (`tableSteps`'s counterpart) over
  * `engine/bench/big-table.json`, before any op lands: its rows, and beside
@@ -35,6 +37,7 @@ import {
 	candidateKey,
 	candidateScan,
 	cmpCodePoint,
+	compareSteps,
 	compileRuleSets,
 	DEFAULT_TABLE_LIMITS,
 	drain,
@@ -47,8 +50,10 @@ import {
 	openSnapshot,
 	parseJson,
 	prepareCandidate,
+	proposeSteps,
 	pyDumps,
 	readArtifacts,
+	readCrs,
 	readOps,
 	readTableDefinition,
 	rebindPreviewBody,
@@ -87,6 +92,10 @@ const TABLE_ORACLE = new URL('large.table.json', DIR);
 const TABLE_ORACLE_META = new URL('large.table.meta.json', DIR);
 const EXPORT_ORACLE_META = new URL('large.export.meta.json', DIR);
 const DOWNLOAD_ORACLE = new URL('large.download.json', DIR);
+const COMPARE_FILE = new URL('large.compare.model.json', DIR);
+const COMPARE_ORACLE = new URL('large.compare.json', DIR);
+const APPLY_CR_ORACLE = new URL('large.apply-cr.json', DIR);
+const CR_CREATED_AT = '2026-01-01T00:00:00.000Z';
 const EXPORT_ORACLE = (format: ExportFormat) => new URL(`large.export.${format}`, DIR);
 
 for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES, CANDIDATE, CANDIDATE_ORACLE]) {
@@ -95,7 +104,15 @@ for (const file of [SNAPSHOT, METAMODEL, ORACLE, VIOLATIONS, RULES, CANDIDATE, C
 		process.exit(1);
 	}
 }
-for (const file of [TABLE_ORACLE, TABLE_ORACLE_META, EXPORT_ORACLE_META, DOWNLOAD_ORACLE]) {
+for (const file of [
+	TABLE_ORACLE,
+	TABLE_ORACLE_META,
+	EXPORT_ORACLE_META,
+	DOWNLOAD_ORACLE,
+	COMPARE_FILE,
+	COMPARE_ORACLE,
+	APPLY_CR_ORACLE
+]) {
 	if (!existsSync(file)) {
 		console.error(
 			`Missing ${file.pathname}: run \`pixi run engine-table-oracle\` and \`engine-export-oracle\` first.`
@@ -320,6 +337,79 @@ checkDownload(
 );
 workingCopy.unstage('all');
 
+// Compare and apply-CR over the same replica, before the violations land: the
+// derived file and the change request the oracle answered for it.
+/** The path of the first difference between two parsed JSON values, or null when they are equal. */
+function firstDiffPath(a: unknown, b: unknown, path = '$'): string | null {
+	if (a === b) return null;
+	if (Array.isArray(a) && Array.isArray(b)) {
+		for (let i = 0; i < Math.max(a.length, b.length); i++) {
+			const at = firstDiffPath(a[i], b[i], `${path}[${i}]`);
+			if (at !== null) return at;
+		}
+		return a.length === b.length ? null : path;
+	}
+	if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
+		const x = a as Record<string, unknown>;
+		const y = b as Record<string, unknown>;
+		for (const key of new Set([...Object.keys(x), ...Object.keys(y)])) {
+			const at = firstDiffPath(x[key], y[key], `${path}.${key}`);
+			if (at !== null) return at;
+		}
+		return null;
+	}
+	return path;
+}
+
+/** Prints the verdict of one answer against the oracle's text and returns whether they are equal. */
+function checkAnswer(label: string, answer: unknown, oracleText: string, detail: string): boolean {
+	const engineText = JSON.stringify(answer);
+	const oracleJson = JSON.stringify(JSON.parse(oracleText));
+	const ok = engineText === oracleJson;
+	console.log(ok ? `${label} equal (${detail})` : `${label} FAILS (${detail})`);
+	if (!ok) {
+		console.log(
+			`  first differing path ${firstDiffPath(JSON.parse(engineText), JSON.parse(oracleJson))}`
+		);
+	}
+	return ok;
+}
+
+const compareBytes = readFileSync(COMPARE_FILE);
+const compareStart = performance.now();
+const compared = drain(
+	compareSteps(workingCopy, {
+		file: compareBytes.buffer.slice(
+			compareBytes.byteOffset,
+			compareBytes.byteOffset + compareBytes.byteLength
+		) as ArrayBuffer,
+		created_at: CR_CREATED_AT
+	})
+);
+const compareMs = performance.now() - compareStart;
+const compareOk = checkAnswer(
+	'compare',
+	compared,
+	readFileSync(COMPARE_ORACLE, 'utf-8'),
+	`${compared.other_element_count.toLocaleString('en-US')} elements, ` +
+		`${compared.other_relationship_count.toLocaleString('en-US')} relationships in the file, ` +
+		`${compareMs.toFixed(0)} ms`
+);
+const proposeStart = performance.now();
+const proposed = drain(
+	proposeSteps(workingCopy, {
+		crs: readCrs(JSON.parse(JSON.stringify([compared.cr]))),
+		created_at: CR_CREATED_AT
+	})
+);
+const proposeMs = performance.now() - proposeStart;
+const applyCrOk = checkAnswer(
+	'apply-cr',
+	proposed,
+	readFileSync(APPLY_CR_ORACLE, 'utf-8'),
+	`${'ops' in proposed ? proposed.ops.length.toLocaleString('en-US') : 0} ops, ${proposeMs.toFixed(0)} ms`
+);
+
 // Committed state, as the oracle holds it: the store wraps the working copy after.
 const ops = readOps(parseJson(readFileSync(VIOLATIONS, 'utf-8')));
 applyBatch(workingCopy.model, ops);
@@ -458,4 +548,6 @@ console.log(
 			: `Parity FAILS: ${candidateDiffs.length} difference(s) (${failing} now_failing, ${passing} now_passing). The first ${SHOWN}:`)
 );
 for (const line of candidateDiffs.slice(0, SHOWN)) console.log(line);
-if (!tableOk || !exportOk || !downloadOk || !issuesOk || !candidateOk) process.exit(1);
+if (!tableOk || !exportOk || !downloadOk || !compareOk || !applyCrOk || !issuesOk || !candidateOk) {
+	process.exit(1);
+}

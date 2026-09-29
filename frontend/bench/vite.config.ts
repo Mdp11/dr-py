@@ -6,7 +6,7 @@ import { crossOriginIsolation } from '../vite.config.ts';
 const BENCHMARKS = new URL('../../benchmarks/', import.meta.url);
 const ENGINE_BENCH = new URL('../../engine/bench/', import.meta.url);
 
-/** What the bench page reads: model M's data, and the gate's table, rules and candidate metamodel. */
+/** What the bench page reads: model M's data, and the gate's table, rules, candidate metamodel and compare file. */
 const DATA: Record<string, { file: URL; type: string }> = {
 	'/data/snapshot.gz': {
 		file: new URL('large.snapshot.v2.gz', BENCHMARKS),
@@ -26,6 +26,10 @@ const DATA: Record<string, { file: URL; type: string }> = {
 	},
 	'/data/candidate.json': {
 		file: new URL('large.candidate.metamodel.json', BENCHMARKS),
+		type: 'application/json'
+	},
+	'/data/compare.json': {
+		file: new URL('large.compare.model.json', BENCHMARKS),
 		type: 'application/json'
 	}
 };
