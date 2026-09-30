@@ -28,7 +28,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, assert_never, get_args
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
@@ -50,6 +50,7 @@ from ..artifact_ops import (
 from ..authz import require_membership
 from ..commit_diff import diff_commit
 from ..commit_states import capture_entity_states
+from ..range_diff import diff_range
 from ..feed import commit_event, lock_event, rebind_event
 from .. import content
 from ..db import get_db
@@ -120,6 +121,7 @@ from ..schemas import (
     PlaceElementOp,
     PreviewRequest,
     PreviewResponse,
+    RangeDiffOut,
     RebindMetamodelOp,
     RelationshipOut,
     RemoveArtifactOp,
@@ -690,6 +692,31 @@ def list_commits(
         ],
         has_more=has_more,
     )
+
+
+@router.get("/commits/diff", response_model=None)
+def commits_range_diff(
+    project_id: str,
+    from_rev: int = Query(alias="from"),
+    to_rev: int = Query(alias="to"),
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> RangeDiffOut | JSONResponse:
+    """The diff between revisions ``from`` and ``to``.
+
+    Read endpoint, any member. O(entities touched) when the journal answers,
+    two reconstructions otherwise (``source`` says which). Takes no lock and
+    leaves the live model alone. Declared before the ``/commits/{rev}/…``
+    routes.
+    """
+    model_row = content.get_model_row(db, project_id)
+    head = model_row.model_rev if model_row is not None else 0
+    if not 0 <= from_rev <= to_rev <= head:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "rev out of range", "model_rev": head},
+        )
+    return diff_range(db, project_id, from_rev, to_rev)
 
 
 @router.get("/commits/{rev}/model", response_model=None)

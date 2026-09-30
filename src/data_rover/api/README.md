@@ -101,8 +101,12 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   `GET /commits/{rev}/diff` renders the model half from it and reconstructs the model at
   rev-1/rev **only** when it is `NULL` (rows older than the column, or a batch over
   `ENTITY_STATES_MAX` = 5000 touched entities). Baseline rows (`persist_baseline`, the importer)
-  store `NULL` on purpose. The frontend's per-commit Diff calls this route; its two-revision
-  Compare still uses `GET /commits/{rev}/model`, which stays O(model) by design.
+  store `NULL` on purpose. The per-commit Diff calls `GET /commits/{rev}/diff`; the
+  two-revision Compare calls `GET /commits/diff?from=&to=`, which folds the states of the rows
+  in `(from, to]` (`api/range_diff.py`: first `before`, last `after`, equality ignoring `rev`, id
+  order) and reconstructs both revisions on the server when a row in range has no states, is a
+  rebind, is missing, or the range exceeds `RANGE_DIFF_MAX_REVS` = 1,000; `source` says which.
+  `GET /commits/{rev}/model` remains, with no frontend caller.
 - **`importer.py`** (`python -m data_rover.api.importer`) turns
   `(metamodel.yaml + model.json + view.json)` into a project's rev-0 baseline;
   the importer CLI / New Project wizard load `examples/smart-city.*` on demand (no autoload).
