@@ -6,11 +6,15 @@ import { INDEX_URL } from './pyodide.ts';
 
 if (parentPort === null) throw new Error('script-worker runs as a worker thread');
 const port = parentPort;
+// Bound before any script runs: a script can reach `parentPort` through Pyodide's `js` module and
+// rebind its methods, which must not change how this worker talks.
+const postMessage = port.postMessage.bind(port);
+const on = port.on.bind(port);
 
 runWorker(
 	{
-		post: (message) => port.postMessage(message),
-		onMessage: (handler) => port.on('message', handler),
+		post: (message) => postMessage(message),
+		onMessage: (handler) => on('message', handler),
 		globals: globalThis
 	},
 	(options) => loadPyodide({ indexURL: INDEX_URL, ...options })

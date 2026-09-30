@@ -621,23 +621,54 @@ describe('spares', () => {
 		expect(run.results).toEqual([{ text: 'r0' }]);
 	});
 
-	it('spawns toward the cap while runs wait, and drops the spares beyond one after spareIdleMs', async () => {
-		const { pool, fakes, alive } = poolOf([honest], { cap: 3, spareIdleMs: 50 });
+	it('boots one worker for a lone run and one spare, and no more', async () => {
+		const { pool, fakes, alive } = poolOf([honest], { cap: 4 });
 		await pool.run(batchOf(), bridge);
+		await settle(40);
+		expect(fakes).toHaveLength(2);
+		expect(alive()).toBe(1);
+	});
+
+	it('keeps min(cap, running + waiting + 1) workers alive', async () => {
+		const slow: Behaviour = answers((fake) =>
+			setTimeout(() => fake.say({ type: 'done', results: [{ text: 'x' }], trips: 0, ms: 1 }), 40)
+		);
+		const { pool, fakes, peak } = poolOf([slow], { cap: 4 });
+		await Promise.all([pool.run(batchOf(), bridge), pool.run(batchOf(), bridge)]);
+		expect(peak()).toBe(3);
+		expect(fakes.length).toBe(3);
+		const { pool: small, peak: smallPeak } = poolOf([slow], { cap: 2 });
+		await Promise.all([1, 2, 3].map(() => small.run(batchOf(), bridge)));
+		expect(smallPeak()).toBe(2);
+	});
+
+	it('serves a run from a spare that is already up, and replaces it', async () => {
+		const { pool, fakes } = poolOf([honest], { cap: 3, spareIdleMs: 10_000 });
+		await pool.run(batchOf(), bridge);
+		await settle(30);
+		expect(fakes).toHaveLength(2);
+		const spare = fakes.find((f) => !f.terminated)!;
+		await pool.run(batchOf(), bridge);
+		expect(spare.posted.some((m) => m.type === 'run')).toBe(true);
+		await settle(30);
 		expect(fakes).toHaveLength(3);
-		expect(alive()).toBe(2);
+	});
+
+	it('drops the spares beyond one after spareIdleMs, once no run waits', async () => {
+		// A run whose roots fail never starts, so both workers booted for it stay spares.
+		const { pool, fakes, alive } = poolOf([honest], { cap: 2, spareIdleMs: 50 });
+		await expect(
+			pool.run(batchOf(), {
+				dispatch: bridge.dispatch,
+				roots: () => {
+					throw new Error('no roots');
+				}
+			})
+		).rejects.toThrow('no roots');
+		await until(() => fakes.length === 2 && alive() === 2);
 		await until(() => alive() === 1, 2000);
 		await settle(120);
 		expect(alive()).toBe(1);
-		expect(fakes).toHaveLength(3);
-		expect(fakes.filter((f) => f.terminated)).toHaveLength(2);
-	});
-
-	it('serves a run from a spare that is already up, without spawning', async () => {
-		const { pool, fakes } = poolOf([honest], { cap: 3, spareIdleMs: 10_000 });
-		await pool.run(batchOf(), bridge);
-		expect(fakes).toHaveLength(3);
-		await pool.run(batchOf(), bridge);
-		expect(fakes).toHaveLength(3);
+		expect(fakes).toHaveLength(2);
 	});
 });

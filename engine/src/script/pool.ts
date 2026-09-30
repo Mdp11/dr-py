@@ -110,8 +110,9 @@ function rootsOf(batch: ScriptBatch, bridge: Bridge, readMemoMax: number): strin
 }
 
 /**
- * The pool over `spawn`. It spawns up to `cap` workers for the runs that wait (FIFO) and keeps one
- * spare when idle; spares beyond one end after `spareIdleMs` without a waiting run. A boot that
+ * The pool over `spawn`. It keeps `min(cap, running + waiting + 1)` workers alive: one for each
+ * run that waits (FIFO) and one spare ahead, which is also the one spare it keeps when idle; spares
+ * beyond one (a run that never started leaves one) end after `spareIdleMs` without a waiting run. A boot that
  * fails fails one waiting run, or the pending `boot()`s if none waits, and stops every spawn that
  * no run or `boot()` asked for, until a worker boots.
  */
@@ -240,11 +241,10 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			if (waiting !== undefined) start(slot, waiting);
 		}
 		while (queue.length > count('booting') && slots.size < cap) spawnOne();
-		if (queue.length === 0) {
-			if (bootWaiters.length > 0 || (warm && !held)) ensureOne();
-		} else {
-			while (!held && !disposed && slots.size < cap) spawnOne();
-		}
+		if (warm && !held) {
+			// A run waiting is served by its own worker, and one more is kept ahead.
+			while (!held && !disposed && unassigned() <= queue.length && slots.size < cap) spawnOne();
+		} else if (queue.length === 0 && bootWaiters.length > 0) ensureOne();
 		scheduleTrim();
 	}
 

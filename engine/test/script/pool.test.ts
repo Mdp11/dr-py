@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { BridgeDispatcher, dumpDefault, projectRoots } from '../../src/script/bridge.ts';
 import type { Bridge, ScriptBatch, ScriptHost } from '../../src/script/host.ts';
+import { hostErrorText } from '../../src/script/host-error.ts';
 import { createPool, type WorkerPort, type WorkerSpawner } from '../../src/script/pool.ts';
 import { nodeScriptHost, poolCap, spawnNodeWorker } from '../../node/script-host.ts';
 import { expectParity, loadParity, parityBatch, parityModel } from './parity.ts';
@@ -71,41 +72,73 @@ describe('the pool size of the Node host', () => {
 });
 
 describe('a script cannot reach another batch (K-105)', () => {
-	// The reproduction: rebind the harness's entry points, `json` and the scope's `postMessage`.
-	const hijack = `
+	// What a script on the Node port reaches: Pyodide's `js` module gives it the worker's `process`,
+	// and through it the real `parentPort`, the harness's entry points in `__main__` and `json`.
+	const prelude = `
 import __main__, json, js
+from pyodide.ffi import create_proxy, to_js
+pp = js.process.getBuiltinModule('node:worker_threads').parentPort
+real = pp.postMessage.bind(pp)
+def say(**message):
+    real(to_js(message, dict_converter=js.Object.fromEntries))
+`;
+	const answer42 = 'def transform(doc):\n    return 42\n';
+	const rebind = `${prelude}
+pp.postMessage = create_proxy(lambda *a: None)
 __main__._dr_batch = None
 __main__._dr_call = lambda *a, **k: {"payload": "FORGED"}
 json.loads = lambda s: {"payload": "FORGED"}
-js.postMessage = lambda *a: None
-def transform(doc):
-    return 42
-`;
-	// And one that breaks the worker's own reply.
+${answer42}`;
 	const breakReply = `
 import json
 json.dumps = lambda *a, **k: '"FORGED"'
-def transform(doc):
-    return 42
-`;
-	const honest = 'def transform(doc):\n    return 42\n';
-	const ported = instrumented();
-	const host = pool(createPool(ported.spawn, { cap: 2, now: () => performance.now() }));
+${answer42}`;
+	const forge = (line: string) => `${prelude}\n${line}\n${answer42}`;
+	const forgeReady = forge("say(type='ready', ms=1, boot='cold')");
+	const forgeDone = forge("say(type='done', results=[{'text': 'FORGED'}], trips=0, ms=1)");
+	const forgeFailed = forge("say(type='failed', message='FORGED')");
+	const slowHonest = `import time\ntime.sleep(2)\n${answer42}`;
 
-	it('answers the next batches honestly after ones that rebind the harness, json and the scope', async () => {
-		const first = await host.run(transform(hijack), recording(true).bridge);
-		// The hijack took hold inside its own worker, and only its own batch is affected.
+	it('answers later batches honestly after ones that rebind the harness, json and the port', async () => {
+		const ported = instrumented();
+		const host = pool(createPool(ported.spawn, { cap: 2, now: () => performance.now() }));
+		const first = await host.run(transform(rebind), recording(true).bridge);
+		// The hijack took hold inside its own worker; rebinding the port's method did not silence it.
 		expect(first.results.map((r) => r.text)).toEqual(['{"payload": "FORGED"}']);
-		const second = await host.run(transform(honest), recording(true).bridge);
+		const second = await host.run(transform(answer42), recording(true).bridge);
 		expect(second.results.map((r) => r.text)).toEqual([HONEST_42]);
 		const broken = await host.run(transform(breakReply), recording(true).bridge);
 		expect(JSON.parse(broken.results[0]!.text).error.kind).toBe('runtime');
-		const third = await host.run(transform(honest), recording(true).bridge);
+		const third = await host.run(transform(answer42), recording(true).bridge);
 		expect(third.results.map((r) => r.text)).toEqual([HONEST_42]);
 		const used = ported.seen.filter((one) => one.runs > 0);
 		expect(used).toHaveLength(4);
 		expect(ported.seen.every((one) => one.runs <= 1)).toBe(true);
 		expect(used.every((one) => one.terminated)).toBe(true);
+	}, 60_000);
+
+	it('keeps a batch honest while others post forged ready, done and failed through the real port', async () => {
+		const ported = instrumented();
+		const host = pool(createPool(ported.spawn, { cap: 5, now: () => performance.now() }));
+		const go = (code: string) => host.run(transform(code), recording(true).bridge);
+		// The honest batch sleeps, so the forgers run on other workers while it is in flight.
+		const honest = go(slowHonest);
+		const [ready, done, failed] = await Promise.all([
+			go(forgeReady),
+			go(forgeDone),
+			go(forgeFailed)
+		]);
+		const text = (run: { results: readonly { text: string }[] }) => run.results[0]!.text;
+		const batch = transform('');
+		// Each forger changed only its own batch's answer.
+		expect(text(ready)).toBe(
+			hostErrorText(batch, 'runtime', 'the script worker sent a bad "ready"')
+		);
+		expect(text(done)).toBe('FORGED');
+		expect(text(failed)).toBe(hostErrorText(batch, 'runtime', 'FORGED'));
+		expect(text(await honest)).toBe(HONEST_42);
+		expect(ported.seen.filter((one) => one.runs > 0)).toHaveLength(4);
+		expect(ported.seen.every((one) => one.runs <= 1)).toBe(true);
 	}, 60_000);
 
 	it('reports each call of a batch as it starts and ends, before its done', async () => {

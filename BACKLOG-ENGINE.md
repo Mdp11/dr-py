@@ -115,12 +115,12 @@ behaviour from C's plan 6a on; the engine replays them from the `model_download`
 D (scripts in the browser) is in progress, its first plan built: `scriptCalls` runs user Python
 in Pyodide in a script worker nested in the engine worker over a shared-memory bridge; at M, in
 Chromium, 10,000 script cells take 3,276 ms against the 2 s budget, over it (`K-100`)
-*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-09-30)*. Findings of that plan still open: `K-101` to `K-105`, `T-12` to `T-14`.
+*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-09-30)*. Findings of that plan still open: `K-101` to `K-106`, `T-12` to `T-14`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-101`, `K-102`, `K-103`, `K-104`, `K-105`, `T-12`, `T-13`, `T-14`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-101`, `K-102`, `K-103`, `K-104`, `K-105`, `K-106`, `T-12`, `T-13`, `T-14`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -905,6 +905,21 @@ capture `postMessage` and the message listener when the worker starts (closes re
 messages is not settled); snapshot and restore `sys.modules`, `__main__` and `builtins`
 around each batch; or accept the risk explicitly in CT-6. K-100's 3,276 ms assumes warm reuse of one interpreter, so the chosen isolation may
 change that cost.
+
+### K-106 · A script on the Node host reaches the host process · `open` · security · *2026-10-01*
+The pool's one-batch-per-worker isolation closes K-105 where the worker is a browser Web Worker
+in a cross-origin sandbox: a script there reaches only its own worker's scope. On the Node
+port (`engine/node/`, `worker_threads`) a worker shares the host's process, and Pyodide's `js`
+module hands a script the worker's `process`. Reproduction: `import js;
+js.process.getBuiltinModule('node:fs')` inside a script works, so batch 1 can rewrite files
+later workers load (`engine/src/script/harness.generated.ts` through the facade and harness
+text, Pyodide's `python_stdlib.zip`), read the host's environment or call `js.process.kill`
+on the host. `test/script/pool.test.ts` forges through the real `parentPort` the same way,
+and shows the pool keeps that to the batch's own answer, but nothing stops file or process
+access. Until sub-project E gives the headless service a process boundary the Node host runs
+trusted code only (tests, benches). Fix direction: run the Node host's workers in a child
+process under Node's `--permission` model (no file writes, no child processes, no network),
+which is also what CT-6 and CN-20 already say the headless transport ends with.
 
 ### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
 Failed 1 run in 3 of the full e2e run during the scripts plan (engine rev 5 against server
