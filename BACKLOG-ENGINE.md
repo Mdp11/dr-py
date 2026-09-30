@@ -773,11 +773,12 @@ used to stream into it. The engine side builds its Blob from the 4 MiB parts the
 Fix direction: on the server side, tee the body into the save while the digest reads the other
 branch, or drop the server side when the engine's is the only one left (F).
 
-### K-91 · One frontend test, the download route's engine case, timed out once under a full run · `open` · *2026-09-29*
+### K-91 · The download route's tests time out under a loaded full run · `open` · *2026-09-29*
 `frontend/src/lib/api/__tests__/download-route.test.ts` "answers the engine's committed bytes as
 an application/json Blob and asks the server nothing", the first test of its file, hit its 5 s
-limit in 1 of 2 full `dr-test` runs and passed in the rerun (two of its tests timed out in a later full run, 2026-09-30, and pass alone, 7 of 7), on a loaded host (its cold worker
-start and a 4 MiB-part file share the clock). Fix direction: find what the test waits on that a
+limit in 1 of 2 full `dr-test` runs and passed in the rerun. On 2026-09-30 two of its tests
+timed out in one full run and one test in another; the file passes alone, 7 of 7. The cause is a
+loaded host (its cold worker start and a 4 MiB-part file share the clock). Fix direction: find what the test waits on that a
 loaded host stretches, and wait on that signal instead of the clock.
 
 ### K-92 · Compare's parse block, apply-CR's last step and the parsed file's heap miss the bounds · `open` · perf · *2026-09-30*

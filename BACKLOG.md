@@ -1087,7 +1087,7 @@ land on the parser or on the parts, not on a byte stream the route reads). Same 
 it lands, so a client can keep telling "too large" from "malformed".
 
 ### K-94 · The range diff's equality ignores `1` against `1.0`, and its randomized test skips nested values · `open` · *2026-09-30*
-The range diff compares `type_name` and `properties` with Python `==`, so a change from `1` to
+The range diff compares `type_name` and `properties` (plus `source_id` and `target_id` for a relationship) with Python `==`, never `id` or `rev`, so a change from `1` to
 `1.0` (or `True` to `1`) renders as no change, on the journal path and on reconstruction alike.
 The randomized fold-versus-reconstruction test (`tests/api/test_range_diff.py`) draws string,
 integer and float properties only: nested list and dict values, and `1` against `1.0` on one
@@ -1096,17 +1096,14 @@ in `entity_states` is not exercised. Fix direction: add a list-, a dict- and a m
 property to the test metamodel; decide whether the diff should tell `1` from `1.0`; run the
 randomized test once against Postgres.
 
-### K-95 · A range across a `touch_model` hole reconstructs from the journal only · `open` · *2026-09-30*
+### K-95 · A range across a `touch_model` hole reconstructs from the journal · `open` · *2026-09-30*
 The legacy `POST /model/elements` bumps `model_rev` without a journal row. A range spanning that
-rev is not contiguous, so it reconstructs, and reconstruction replays the journal, so the element
-the legacy route created is absent from both sides of the diff (probed 2026-09-30: the range's
-`added` lists the journaled elements only). Left as is: the route is legacy and the journal is
-the history. Fix direction: retire the legacy write route, or journal it.
-
-### K-96 · Test hygiene in the range diff's tests · `open` · *2026-09-30*
-`from_gt_head` in `test_route_refuses_a_range_outside_the_history` (`(head+1, head+2)`) cannot
-be told from `to_gt_head`: any `from` above head with `from <= to` also has `to` above head, so
-the case is a duplicate to drop or fold into `to_gt_head`.
+rev is not contiguous, so it reconstructs from the latest snapshot at or below the rev plus the
+journal tail. Where the base snapshot predates the hole, the element the legacy route created is
+absent from both sides of the diff (probed 2026-09-30: the range's `added` lists the journaled
+elements only); a snapshot taken after the hole (the snapshot job records the live model) holds
+it, so the answer depends on when snapshots were taken. Left as is: the route is legacy and the
+journal is the history. Fix direction: retire the legacy write route, or journal it.
 
 ### K-20 · The trigram search index was built inline by `IndexSet.rebuild()` · `done` (2026-08-26, perf/deferred-search-index) · perf · *2026-08-26*
 Measured on a 320k-element / 239k-relationship fixture (212 MiB snapshot — production
@@ -1385,6 +1382,16 @@ reviews:
 ---
 
 ## 9. Operational / infrastructure
+
+### T-11 · `view.spec.ts:326` intermittently fails with the change badge at "0 changes" · `open` · *2026-09-30*
+"view curation: search result dragged into a folder is placed there" fails at
+`view.spec.ts:343` (`expect(badge).toContainText('1 change')`; the badge reads `● 0 changes`
+after `dragRowOnto`). It passes alone and failed once in a full e2e run. Measured 2026-09-30:
+on the range-diff branch it failed in 2 of 2 full runs and in 5 of 14 runs of
+`history.spec.ts` + `view.spec.ts`; on its base commit `4408e0c6` (a separate worktree) it passed
+the one full run and failed in 2 of 11 such pairs, so the flake predates the branch. Not
+analysed further. Fix direction: wait on the drop's staged op instead of the badge's clock, or
+find why the drag sometimes lands without staging.
 
 ### O-1 · `.env.example` ships the lease mirror commented out · `open` · by design
 `docker-compose` starts a `redis` service unconditionally, but `DATA_ROVER_REDIS_URL` is

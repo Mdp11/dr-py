@@ -774,9 +774,7 @@ def test_route_from_equal_to_is_an_empty_journal_answer(
         assert out.source == "journal" and _empty(out)
 
 
-@pytest.mark.parametrize(
-    "shape", ["from_gt_to", "from_negative", "to_gt_head", "from_gt_head"]
-)
+@pytest.mark.parametrize("shape", ["from_gt_to", "from_negative", "to_gt_head"])
 def test_route_refuses_a_range_outside_the_history(
     client: TestClient, shape: str
 ) -> None:
@@ -785,7 +783,6 @@ def test_route_refuses_a_range_outside_the_history(
         "from_gt_to": (head, head - 1),
         "from_negative": (-1, head),
         "to_gt_head": (0, head + 1),
-        "from_gt_head": (head + 1, head + 2),
     }[shape]
     r = _get(client, lo, hi)
     assert r.status_code == 422

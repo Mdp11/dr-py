@@ -103,8 +103,10 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   `ENTITY_STATES_MAX` = 5000 touched entities). Baseline rows (`persist_baseline`, the importer)
   store `NULL` on purpose. The per-commit Diff calls `GET /commits/{rev}/diff`; the
   two-revision Compare calls `GET /commits/diff?from=&to=`, which folds the states of the rows
-  in `(from, to]` (`api/range_diff.py`: first `before`, last `after`, id order; equality is Python `==` on `type_name` and
-  `properties`, never `rev`, so `1` against `1.0` is no change) and reconstructs both revisions on the server when a row in range has no states, is a
+  in `(from, to]` (`api/range_diff.py`: first `before`, last `after`, id order; equality is
+  Python `==` on `type_name` and `properties`, plus `source_id` and `target_id` for a
+  relationship, never `id` or `rev`, so `1` against `1.0` is no change) and reconstructs both
+  revisions on the server when a row in range has no states, is a
   rebind, is missing, or the range exceeds `RANGE_DIFF_MAX_REVS` = 1,000; `source` says which.
   `GET /commits/{rev}/model` remains, with no frontend caller.
 - **`importer.py`** (`python -m data_rover.api.importer`) turns
