@@ -319,6 +319,13 @@ export {
 	type RelationCountCriterion
 } from './search/criteria.ts';
 export { searchModel, type SearchResultPage } from './search/search-model.ts';
+export {
+	BRIDGE_LIMITS,
+	BridgeDispatcher,
+	dumpDefault,
+	projectRoots,
+	type BridgeLimits
+} from './script/bridge.ts';
 export { ByteQueue } from './service/byte-queue.ts';
 export {
 	Scheduler,

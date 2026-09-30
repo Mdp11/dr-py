@@ -87,6 +87,33 @@ export function pyFloatOf(text: string): number | null {
 	return Number(trimmed.replace(/_/g, ''));
 }
 
+const INT_DIGITS = /^[+-]?[0-9](?:_?[0-9])*$/;
+const INT_MAX_STR_DIGITS = 4300;
+
+/** A digit run past the interpreter's `int(str)` limit: Python's `ValueError`. */
+export class PyIntLimitError extends Error {
+	constructor(digits: number) {
+		super(
+			`Exceeds the limit (${INT_MAX_STR_DIGITS} digits) for integer string conversion: ` +
+				`value has ${digits} digits; use sys.set_int_max_str_digits() to increase the limit`
+		);
+		this.name = 'PyIntLimitError';
+	}
+}
+
+/**
+ * `int(text)`, or `null` where Python raises `ValueError`: the same digit and
+ * space transform as `float(text)`, one optional sign, digits with single
+ * underscores between them. A run of more than 4300 digits throws `PyIntLimitError`.
+ */
+export function pyIntOf(text: string): bigint | null {
+	const trimmed = stripAsciiSpace(normalizeDigits(text));
+	if (!INT_DIGITS.test(trimmed)) return null;
+	const digits = trimmed.replace(/[+\-_]/g, '');
+	if (digits.length > INT_MAX_STR_DIGITS) throw new PyIntLimitError(digits.length);
+	return BigInt(trimmed.replace(/_/g, ''));
+}
+
 /** `String(value)` for the JSON scalar types model properties hold — the
  * criteria's own name for `str()`, integral floats without a trailing `.0`. */
 export function jsStr(value: Value): string {
