@@ -5,10 +5,10 @@
 import type { loadPyodide as LoadPyodide } from 'pyodide';
 import type { PyDict } from 'pyodide/ffi';
 import { createGuest, type Guest, type Interpreter } from '../../engine/src/script/guest.ts';
-import { armReply, readReply } from './bridge-buffer.ts';
+import { armReply, readReply } from '../../engine/src/script/bridge-buffer.ts';
 import type { CspViolation } from './handshake.ts';
 import type { FromScriptWorker, ToScriptWorker } from './script-host.ts';
-import { batchFromWire } from './script-wire.ts';
+import { batchFromWire } from '../../engine/src/script/wire.ts';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 

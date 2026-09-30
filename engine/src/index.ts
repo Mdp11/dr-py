@@ -336,6 +336,7 @@ export {
 	type Interpreter
 } from './script/guest.ts';
 export type {
+	AbortSignalLike,
 	Bridge,
 	RawScriptResult,
 	ScriptBatch,
@@ -345,6 +346,16 @@ export type {
 	ScriptHostFactory,
 	ScriptRun
 } from './script/host.ts';
+export { hostErrorResults, hostErrorText, type HostErrorKind } from './script/host-error.ts';
+export {
+	createPool,
+	DEFAULT_RUN_LIMITS,
+	type PoolOptions,
+	type RunLimits,
+	type WorkerPort,
+	type WorkerSpawner
+} from './script/pool.ts';
+export { runWorker, type WorkerScope } from './script/worker-main.ts';
 export { ByteQueue } from './service/byte-queue.ts';
 export {
 	Scheduler,

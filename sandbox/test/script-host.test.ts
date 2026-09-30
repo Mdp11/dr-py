@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { once } from 'node:events';
 import { Worker } from 'node:worker_threads';
-import type { Bridge, ScriptBatch } from '../../engine/src/script/host.ts';
+import type { Bridge, ScriptBatch, ScriptHost, ScriptRun } from '../../engine/src/script/host.ts';
 import { PyFloat } from '../../engine/src/value/types.ts';
 import type { CspViolation } from '../src/handshake.ts';
 import { createScriptHost, type Spawn } from '../src/script-host.ts';
@@ -39,7 +39,12 @@ function setup(modes: string[] = ['ok'], reply: (text: string) => string = (text
 			terminate: () => void worker.terminate()
 		};
 	};
-	const host = createScriptHost(bridge, spawn, (violation) => violations.push(violation));
+	const real = createScriptHost(spawn, (violation) => violations.push(violation));
+	// The host takes the bridge per run; these tests use the one.
+	const host: Omit<ScriptHost, 'run'> & { run(batch: ScriptBatch): Promise<ScriptRun> } = {
+		...real,
+		run: (batch) => real.run(batch, bridge)
+	};
 	hosts.push(host);
 	return { host, violations, dispatched, spawnCount: () => n };
 }

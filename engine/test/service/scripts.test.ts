@@ -42,11 +42,18 @@ const NAME = 'def value(els): return els[0].name';
 function tracked() {
 	const hosts: ScriptHost[] = [];
 	const bridges: Bridge[] = [];
-	const factory: ScriptHostFactory = (bridge) => {
-		const host = nodeScriptHost(bridge);
+	const factory: ScriptHostFactory = () => {
+		const host = nodeScriptHost();
 		hosts.push(host);
-		bridges.push(bridge);
-		return host;
+		return {
+			boot: () => host.boot(),
+			prewarm: () => host.prewarm(),
+			run(batch, bridge, signal) {
+				if (!bridges.includes(bridge)) bridges.push(bridge);
+				return host.run(batch, bridge, signal);
+			},
+			dispose: () => host.dispose()
+		};
 	};
 	return { hosts, bridges, factory, dispose: () => hosts.forEach((host) => host.dispose()) };
 }
@@ -94,7 +101,7 @@ describe('scriptCalls on a ready replica', () => {
 		expect(result.results[0]!.text).toBe(
 			'{"payload": {"kind": "scalar", "value": "two"}, "error": null, "reads": [["el", "n2"]], "stdout": ""}'
 		);
-	});
+	}, 60_000);
 
 	it('reads what a script needs from the working copy through the bridge', async () => {
 		const result = await client.call<CallsResult>(
@@ -103,7 +110,7 @@ describe('scriptCalls on a ready replica', () => {
 		);
 		expect(payloadOf(result.results[0]!)).toBe(5);
 		expect(result.trips).toBeGreaterThanOrEqual(1);
-	});
+	}, 60_000);
 
 	it('reads the staged name after stage, and the committed one after unstage', async () => {
 		await client.call('stage', { ops: [rename('n1', 'uno')] });
@@ -117,7 +124,7 @@ describe('scriptCalls on a ready replica', () => {
 		await client.call('unstage', { what: 'all' });
 		const committed = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]));
 		expect(payloadOf(committed.results[0]!)).toBe('one');
-	});
+	}, 60_000);
 
 	it('sends inputs and a document as their text says', async () => {
 		const result = await client.call<CallsResult>('scriptCalls', {
@@ -140,7 +147,7 @@ describe('scriptCalls on a ready replica', () => {
 		expect(transform.results[0]!.text).toBe(
 			'{"payload": {"kind": "json", "value": {"f": 1.0, "i": 1, "big": 1152921504606846976}}, "error": null, "reads": [], "stdout": ""}'
 		);
-	});
+	}, 60_000);
 
 	it('reports a raising call beside one that returned', async () => {
 		const result = await client.call<CallsResult>(
@@ -152,7 +159,7 @@ describe('scriptCalls on a ready replica', () => {
 		);
 		expect(answer(result.results[0]!).error?.message).toBe('ValueError: x');
 		expect(answer(result.results[1]!).error).toBeNull();
-	});
+	}, 60_000);
 
 	it('answers a bridge request inside the message handler, with no scheduler job', async () => {
 		const host = fakeHost({ tick: 1 });
@@ -373,16 +380,17 @@ describe('a replica that goes while a script call is in flight', () => {
 		let gate: Promise<void> = Promise.resolve();
 		const real = tracked();
 		all.push(real);
-		const factory: ScriptHostFactory = (bridge) => {
-			const host = real.factory(bridge);
+		const factory: ScriptHostFactory = () => {
+			const host = real.factory();
 			return {
 				boot: () => host.boot(),
+				prewarm: () => host.prewarm(),
 				dispose: () => host.dispose(),
-				async run(batch) {
+				async run(batch, bridge, signal) {
 					entered();
 					await gate;
 					seen.push({ reply: bridge.dispatch(ELEMENT_REQUEST), roots: bridge.roots(['n1']) });
-					return host.run(batch);
+					return host.run(batch, bridge, signal);
 				}
 			};
 		};
@@ -450,9 +458,10 @@ describe('the host boots again where it can', () => {
 		all.push(real);
 		let attempts = 0;
 		let failing: Promise<never> | null = null;
-		const factory: ScriptHostFactory = (bridge) => {
-			const host = real.factory(bridge);
+		const factory: ScriptHostFactory = () => {
+			const host = real.factory();
 			return {
+				prewarm: () => host.prewarm(),
 				boot() {
 					if (failing !== null) return failing;
 					if (attempts++ > 0) return host.boot();
@@ -464,7 +473,7 @@ describe('the host boots again where it can', () => {
 					);
 					return failing;
 				},
-				run: (batch) => host.run(batch),
+				run: (batch, bridge) => host.run(batch, bridge),
 				dispose: () => host.dispose()
 			};
 		};
@@ -505,17 +514,18 @@ describe('the host boots again where it can', () => {
 		all.push(real);
 		let generation = 1;
 		let crashNext = false;
-		const factory: ScriptHostFactory = (bridge) => {
-			const host = real.factory(bridge);
+		const factory: ScriptHostFactory = () => {
+			const host = real.factory();
 			return {
 				boot: () => host.boot().then(() => ({ ms: generation })),
-				async run(batch) {
+				prewarm: () => host.prewarm(),
+				async run(batch, bridge) {
 					if (crashNext) {
 						crashNext = false;
 						generation++;
 						throw new Error('the script worker stopped');
 					}
-					return host.run(batch);
+					return { ...(await host.run(batch, bridge)), bootMs: generation };
 				},
 				dispose: () => host.dispose()
 			};
@@ -540,12 +550,13 @@ describe('a host answer the service cannot trust', () => {
 	function shaped(shape: (results: ScriptRun['results']) => unknown) {
 		const real = tracked();
 		all.push(real);
-		const factory: ScriptHostFactory = (bridge) => {
-			const host = real.factory(bridge);
+		const factory: ScriptHostFactory = () => {
+			const host = real.factory();
 			return {
 				boot: () => host.boot(),
-				run: async (call) => {
-					const run = await host.run(call);
+				prewarm: () => host.prewarm(),
+				run: async (call, bridge) => {
+					const run = await host.run(call, bridge);
 					return { ...run, results: shape(run.results) } as ScriptRun;
 				},
 				dispose: () => host.dispose()

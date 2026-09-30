@@ -2,8 +2,8 @@
 // class instance's fields and drops its class, which would turn a `PyFloat`
 // into a dict; a float therefore travels as a one-element `Float64Array` (a
 // type no `Value` holds, so nothing is ambiguous) and is rebuilt on arrival.
-import type { ScriptBatch } from '../../engine/src/script/host.ts';
-import { PyFloat, type Value } from '../../engine/src/value/types.ts';
+import type { ScriptBatch } from './host.ts';
+import { PyFloat, type Value } from '../value/types.ts';
 
 export type WireValue =
 	| null

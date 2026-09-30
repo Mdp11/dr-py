@@ -4,8 +4,8 @@
 // browser, so the host's side of the protocol can be driven without a browser.
 import { parentPort, workerData } from 'node:worker_threads';
 import { dumpDefault } from '../../../engine/src/script/bridge.ts';
-import { armReply, readReply } from '../../src/bridge-buffer.ts';
-import { batchFromWire, type WireBatch } from '../../src/script-wire.ts';
+import { armReply, readReply } from '../../../engine/src/script/bridge-buffer.ts';
+import { batchFromWire, type WireBatch } from '../../../engine/src/script/wire.ts';
 
 const port = parentPort;
 if (port === null) throw new Error('script-stub runs as a worker');

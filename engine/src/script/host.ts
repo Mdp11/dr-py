@@ -26,8 +26,12 @@ export type RawScriptResult = { readonly text: string };
 
 export type ScriptRun = {
 	readonly results: readonly RawScriptResult[];
+	/** Bridge requests the run made, counted by the host. */
 	readonly trips: number;
 	readonly ms: number;
+	/** How long the worker that ran it took to boot, and how it booted. */
+	readonly bootMs: number;
+	readonly boot: 'snapshot' | 'cold';
 };
 
 /** What a host reaches the model through: `dispatch` answers one bridge request, `roots` the projections of elements. Both carry text. */
@@ -36,10 +40,24 @@ export type Bridge = {
 	roots(ids: readonly string[]): string;
 };
 
+/** What a run watches to be cancelled: an `AbortSignal` is one, and the engine's sources have no DOM to name it. */
+export type AbortSignalLike = {
+	readonly aborted: boolean;
+	addEventListener(type: 'abort', listener: () => void, options?: { once?: boolean }): void;
+	removeEventListener(type: 'abort', listener: () => void): void;
+};
+
+/**
+ * `boot()` is idempotent on a live host and retried after a rejection, never memoized;
+ * `dispose()` ends every worker and rejects every pending boot and run. A run takes the
+ * `bridge` it is given for its own requests and nothing else.
+ */
 export type ScriptHost = {
 	boot(): Promise<{ ms: number }>;
-	run(batch: ScriptBatch): Promise<ScriptRun>;
+	/** Starts a worker ahead of the first run; a host that cannot does nothing. */
+	prewarm(): void;
+	run(batch: ScriptBatch, bridge: Bridge, signal?: AbortSignalLike): Promise<ScriptRun>;
 	dispose(): void;
 };
 
-export type ScriptHostFactory = (bridge: Bridge) => ScriptHost;
+export type ScriptHostFactory = () => ScriptHost;

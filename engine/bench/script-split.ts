@@ -99,19 +99,25 @@ async function main(): Promise<void> {
 			return text;
 		}
 	};
-	const host = nodeScriptHost(bridge);
+	const host = nodeScriptHost();
 	await host.boot();
-	await host.run({
-		code: 'def value(els):\n    return els[0].name\n',
-		entry: 'value',
-		calls: [calls[0]!]
-	});
+	await host.run(
+		{
+			code: 'def value(els):\n    return els[0].name\n',
+			entry: 'value',
+			calls: [calls[0]!]
+		},
+		bridge
+	);
 
 	async function pass(): Promise<{ trips: number; ms: number }> {
 		let trips = 0;
 		let ms = 0;
 		for (const body of BODIES) {
-			const run = await host.run({ code: `def value(els):\n    ${body}\n`, entry: 'value', calls });
+			const run = await host.run(
+				{ code: `def value(els):\n    ${body}\n`, entry: 'value', calls },
+				bridge
+			);
 			for (const r of run.results) {
 				const { error } = JSON.parse(r.text) as { error: { message: string } | null };
 				if (error !== null) throw new Error(error.message);

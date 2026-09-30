@@ -2,7 +2,7 @@
 // on each `read` it arms, posts `bridge`, optionally stays busy so the reply
 // lands before it waits, then blocks in `readReply` and posts the bytes back.
 import { parentPort, workerData } from 'node:worker_threads';
-import { armReply, readReply } from '../../src/bridge-buffer.ts';
+import { armReply, readReply } from '../../../src/script/bridge-buffer.ts';
 
 const buffer = (workerData as { buffer: SharedArrayBuffer }).buffer;
 const port = parentPort;

@@ -829,12 +829,9 @@ class Service {
 			await host.boot();
 			await before;
 			this.stillReady(epoch);
-			// Again: a run before this one may have stopped the host, which boots anew.
-			const { ms: boot_ms } = await host.boot();
-			this.stillReady(epoch);
 			this.runEpoch = epoch;
 			pinned = true;
-			const { results, trips, ms } = await host.run(batch);
+			const { results, trips, ms, bootMs: boot_ms } = await host.run(batch, this.bridge);
 			this.stillReady(epoch);
 			if (results.length !== batch.calls.length) {
 				throw new Refused(
@@ -866,7 +863,7 @@ class Service {
 		if (this.scripting === null) {
 			const factory = this.deps.scripts;
 			if (factory === undefined) throw new Refused(501, 'scripts are not available');
-			this.scripting = factory(this.bridge);
+			this.scripting = factory();
 		}
 		return this.scripting;
 	}

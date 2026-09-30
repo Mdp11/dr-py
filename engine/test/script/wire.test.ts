@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { dumpDefault } from '../../engine/src/script/bridge.ts';
-import type { ScriptBatch } from '../../engine/src/script/host.ts';
-import { PyFloat, type Value } from '../../engine/src/value/types.ts';
-import { batchFromWire, batchToWire } from '../src/script-wire.ts';
+import { dumpDefault } from '../../src/script/bridge.ts';
+import type { ScriptBatch } from '../../src/script/host.ts';
+import { PyFloat, type Value } from '../../src/value/types.ts';
+import { batchFromWire, batchToWire } from '../../src/script/wire.ts';
 
 function crossed(batch: ScriptBatch): ScriptBatch {
 	return batchFromWire(structuredClone(batchToWire(batch)));

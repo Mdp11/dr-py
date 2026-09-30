@@ -9,11 +9,11 @@ import type {
 	ScriptHostFactory,
 	ScriptRun
 } from '../../engine/src/script/host.ts';
-import { createReplyBuffer, ReplyWriter } from './bridge-buffer.ts';
+import { createReplyBuffer, ReplyWriter } from '../../engine/src/script/bridge-buffer.ts';
 import type { CspViolation } from './handshake.ts';
-import { batchToWire, type WireBatch } from './script-wire.ts';
+import { batchToWire, type WireBatch } from '../../engine/src/script/wire.ts';
 
-/** Engine worker → script worker. `batch` is a `ScriptBatch` as `script-wire.ts` sends it. */
+/** Engine worker → script worker. `batch` is a `ScriptBatch` as `engine/src/script/wire.ts` sends it. */
 export type ToScriptWorker =
 	| { type: 'init'; reply: SharedArrayBuffer }
 	| { type: 'run'; run: number; batch: WireBatch; roots: string[] };
@@ -47,7 +47,8 @@ type Live = {
 	port: WorkerPort;
 	writer: ReplyWriter;
 	booting: Settle<{ ms: number }> | null;
-	running: ({ id: number } & Settle<ScriptRun>) | null;
+	running: ({ id: number; bridge: Bridge } & Settle<ScriptRun>) | null;
+	bootMs: number;
 };
 
 const encoder = new TextEncoder();
@@ -58,10 +59,9 @@ const noop = () => {};
  * A script host over `spawn`. One worker at a time, made by `boot()`; it ends
  * on `dispose()`, a `failed` message or an `error` event, and every promise
  * waiting on it then rejects, so nothing outlives it. The next `boot()` or
- * `run()` starts a new worker. Runs go one at a time.
+ * `run()` starts a new worker. Runs go one at a time, each over the bridge it is given.
  */
 export function createScriptHost(
-	bridge: Bridge,
 	spawn: Spawn,
 	onViolation: (violation: CspViolation) => void
 ): ScriptHost {
@@ -88,7 +88,8 @@ export function createScriptHost(
 	function answer(worker: Live, text: string): void {
 		let bytes: Uint8Array;
 		try {
-			bytes = encoder.encode(bridge.dispatch(text));
+			if (worker.running === null) throw new Error('the script worker asked outside a run');
+			bytes = encoder.encode(worker.running.bridge.dispatch(text));
 		} catch (error) {
 			end(worker, error instanceof Error ? error : new Error(String(error)));
 			return;
@@ -103,8 +104,10 @@ export function createScriptHost(
 			case 'ready': {
 				const settle = worker.booting;
 				worker.booting = null;
-				if (settle !== null && typeof message.ms === 'number') settle.resolve({ ms: message.ms });
-				else if (settle !== null) end(worker, new Error('the script worker sent a bad ready'));
+				if (settle !== null && typeof message.ms === 'number') {
+					worker.bootMs = message.ms;
+					settle.resolve({ ms: message.ms });
+				} else if (settle !== null) end(worker, new Error('the script worker sent a bad ready'));
 				return;
 			}
 			case 'failed':
@@ -137,7 +140,9 @@ export function createScriptHost(
 				running.resolve({
 					results: message.results as RawScriptResult[],
 					trips: message.trips,
-					ms: message.ms
+					ms: message.ms,
+					bootMs: worker.bootMs,
+					boot: 'cold'
 				});
 				return;
 			}
@@ -170,7 +175,8 @@ export function createScriptHost(
 					port,
 					writer: new ReplyWriter(reply),
 					booting: { resolve, reject },
-					running: null
+					running: null,
+					bootMs: 0
 				};
 				live = worker;
 				port.postMessage({ type: 'init', reply });
@@ -195,7 +201,7 @@ export function createScriptHost(
 		return booting;
 	}
 
-	async function execute(batch: ScriptBatch): Promise<ScriptRun> {
+	async function execute(batch: ScriptBatch, bridge: Bridge): Promise<ScriptRun> {
 		await boot();
 		const worker = live;
 		if (disposed || worker === null || worker.booting !== null) {
@@ -212,14 +218,17 @@ export function createScriptHost(
 				reject(error instanceof Error ? error : new Error(String(error)));
 				return;
 			}
-			worker.running = { id, resolve, reject };
+			worker.running = { id, bridge, resolve, reject };
 		});
 	}
 
 	return {
 		boot,
-		run(batch) {
-			const result = queue.then(() => execute(batch));
+		prewarm() {
+			void boot().catch(noop);
+		},
+		run(batch, bridge) {
+			const result = queue.then(() => execute(batch, bridge));
 			queue = result.then(noop, noop);
 			return result;
 		},
@@ -242,7 +251,7 @@ function spawnWorker(on: Parameters<Spawn>[0]): WorkerPort {
 }
 
 /** The script host the engine worker runs, relaying the script worker's CSP violations to the page. */
-export const browserScriptHost: ScriptHostFactory = (bridge) =>
-	createScriptHost(bridge, spawnWorker, (violation) =>
+export const browserScriptHost: ScriptHostFactory = () =>
+	createScriptHost(spawnWorker, (violation) =>
 		(self as unknown as { postMessage(message: unknown): void }).postMessage(violation)
 	);

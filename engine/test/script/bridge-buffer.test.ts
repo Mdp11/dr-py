@@ -7,7 +7,7 @@ import {
 	readReply,
 	REPLY_BUFFER_BYTES,
 	ReplyWriter
-} from '../src/bridge-buffer.ts';
+} from '../../src/script/bridge-buffer.ts';
 
 const CAPACITY = REPLY_BUFFER_BYTES - HEADER_BYTES;
 
