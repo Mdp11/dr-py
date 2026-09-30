@@ -2,6 +2,7 @@
 import { createService } from '../../engine/src/index.ts';
 import type { CspViolation } from './handshake.ts';
 import { createHost, portOf } from './host.ts';
+import { browserScriptHost } from './script-host.ts';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -24,5 +25,5 @@ scope.addEventListener('message', (event) => {
 	if (typeof data !== 'object' || data === null || port === undefined) return;
 	if ((data as { type?: unknown }).type !== 'port') return;
 	served = true;
-	createService(portOf(port), createHost().deps);
+	createService(portOf(port), { ...createHost().deps, scripts: browserScriptHost });
 });

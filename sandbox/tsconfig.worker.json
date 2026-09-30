@@ -3,5 +3,12 @@
 	"compilerOptions": {
 		"lib": ["ES2023", "WebWorker"]
 	},
-	"include": ["src/engine-worker.ts", "src/host.ts"]
+	"include": [
+		"src/engine-worker.ts",
+		"src/host.ts",
+		"src/bridge-buffer.ts",
+		"src/script-worker.ts",
+		"src/script-host.ts",
+		"src/script-wire.ts"
+	]
 }
