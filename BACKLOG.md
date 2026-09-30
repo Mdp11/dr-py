@@ -1094,7 +1094,9 @@ integer and float properties only: nested list and dict values, and `1` against 
 property, are unpinned. It runs on SQLite, so Postgres's JSON round trip of `2**53+1` and `1.0`
 in `entity_states` is not exercised. Fix direction: add a list-, a dict- and a mixed int/float
 property to the test metamodel; decide whether the diff should tell `1` from `1.0`; run the
-randomized test once against Postgres.
+randomized test once against Postgres. The test's per-seed tally asserts deletes, undos and
+removals but not recreates (`tests/api/test_range_diff.py:953`), so a generator change could
+drop the randomized delete-then-recreate coverage unnoticed.
 
 ### K-95 · A range across a `touch_model` hole reconstructs from the journal · `open` · *2026-09-30*
 The legacy `POST /model/elements` bumps `model_rev` without a journal row. A range spanning that
@@ -1104,6 +1106,36 @@ absent from both sides of the diff (probed 2026-09-30: the range's `added` lists
 elements only); a snapshot taken after the hole (the snapshot job records the live model) holds
 it, so the answer depends on when snapshots were taken. Left as is: the route is legacy and the
 journal is the history. Fix direction: retire the legacy write route, or journal it.
+
+### K-96 · The range diff's fold holds heap in proportion to the range's revs, not its touched entities · `open` · perf · *2026-09-30*
+`fold_range` (`api/range_diff.py:87-107`) keeps a raw `before` and `after` per distinct id, then
+validates a pydantic pair per surviving id, including pairs the renderer drops as equal. A
+foldable range can be 1,000 rows of up to 5,000 entities each. `commit_states_between`
+(`api/content.py:241`, `yield_per=100`) materialises 100 decoded rows where the fold needs one.
+Fix directions: a smaller `yield_per`; release raw entries as pairs are built; compare the raw
+dicts before validating; a touched-entity cap that falls back to reconstruction.
+
+### K-97 · The range diff's equality and the drawer's field lines disagree · `open` · *2026-09-30*
+The server reports `modified` for a `type_name`-only change (an id recreated under another type)
+and for integers that differ past 2^53 (`range_diff.py:110-122`). `crToDiff` derives
+`modifiedFields` from properties and endpoints after `JSON.parse`
+(`frontend/src/lib/state/cr.ts:265-271`, `elementModifiedFields` in `state/diff.ts`), so both
+cases render a modified row with no field lines (`DiffRow.svelte:98`). Fix direction: add
+`type_name` to the derived fields.
+
+### K-98 · A repeated Compare over a range the journal cannot answer reconstructs twice each time · `open` · perf · *2026-09-30*
+A range with a hole, a rebind or over 1,000 revs reconstructs two models on the server per
+request. The drawer keeps no per-rev cache (`HistoryDrawer.svelte:60` calls the route every
+time), and `commits_range_diff` is a synchronous route with no concurrency guard, so repeated
+Compares repeat the work and can run in parallel. Fix directions: cache the answer by
+`(from, to)` for a head that has not moved, or bound concurrent reconstructions.
+
+### K-99 · The range diff's marks and states queries share no snapshot · `open` · *2026-09-30*
+`diff_range` reads the marks (`commit_range_marks`) and then the states (`fold_range`) as two
+statements (`range_diff.py:215-223`). Under READ COMMITTED a history clear (a model upload)
+landing between them makes the fold read fewer rows than `can_fold` approved, and a partial
+diff is answered as `source: "journal"`. Fix directions: re-count the rows in the fold, or read
+both in one statement.
 
 ### K-20 · The trigram search index was built inline by `IndexSet.rebuild()` · `done` (2026-08-26, perf/deferred-search-index) · perf · *2026-08-26*
 Measured on a 320k-element / 239k-relationship fixture (212 MiB snapshot — production
@@ -1389,7 +1421,9 @@ reviews:
 after `dragRowOnto`). It passes alone and failed once in a full e2e run. Measured 2026-09-30:
 on the range-diff branch it failed in 2 of 2 full runs and in 5 of 14 runs of
 `history.spec.ts` + `view.spec.ts`; on its base commit `4408e0c6` (a separate worktree) it passed
-the one full run and failed in 2 of 11 such pairs, so the flake predates the branch. Not
+the one full run and failed in 2 of 11 such pairs, so the flake predates the branch. The branch's
+observed rate (5 of 14 paired, 2 of 2 full) is higher than the base's (2 of 11, 0 of 1), but the
+samples do not distinguish the two, so a higher rate on the branch is not ruled out. Not
 analysed further. Fix direction: wait on the drop's staged op instead of the badge's clock, or
 find why the drag sometimes lands without staging.
 
