@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyBatch, type MetamodelDoc, type ModelOp } from '../../src/index.ts';
-import type { Bridge, ScriptHost, ScriptHostFactory } from '../../src/script/host.ts';
+import type { Bridge, ScriptHost, ScriptHostFactory, ScriptRun } from '../../src/script/host.ts';
 import { nodeScriptHost } from '../../node/script-host.ts';
 import { loadFixture } from '../golden/load.ts';
 import { loadLines } from '../golden/model-load.ts';
@@ -531,5 +531,43 @@ describe('the host boots again where it can', () => {
 		expect(after.boot_ms).toBe(2);
 		expect(payloadOf(after.results[0]!)).toBe('two');
 		expect(real.hosts).toHaveLength(1);
+	}, 60_000);
+});
+
+describe('a host answer the service cannot trust', () => {
+	/** The real Node host, whose run answers through `shape`. */
+	function shaped(shape: (results: ScriptRun['results']) => unknown) {
+		const real = tracked();
+		all.push(real);
+		const factory: ScriptHostFactory = (bridge) => {
+			const host = real.factory(bridge);
+			return {
+				boot: () => host.boot(),
+				run: async (call) => {
+					const run = await host.run(call);
+					return { ...run, results: shape(run.results) } as ScriptRun;
+				},
+				dispose: () => host.dispose()
+			};
+		};
+		return factory;
+	}
+
+	const refused = async (factory: ScriptHostFactory) => {
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await openReplica(client, bridgeModel(), doc);
+		return refusal(client.call('scriptCalls', batch(NAME, [['n1'], ['n2']])));
+	};
+
+	it('refuses 500 a host that answers fewer results than calls', async () => {
+		const answer = await refused(shaped((results) => results.slice(1)));
+		expect(answer.status).toBe(500);
+		expect(answer.detail).toMatch(/1 result.*2 calls/);
+	}, 60_000);
+
+	it('refuses 500 a host whose result is not an object', async () => {
+		const answer = await refused(shaped((results) => [results[0], null]));
+		expect(answer.status).toBe(500);
+		expect(answer.detail).toMatch(/not an object/);
 	}, 60_000);
 });

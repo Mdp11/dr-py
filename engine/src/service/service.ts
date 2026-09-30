@@ -836,6 +836,15 @@ class Service {
 			pinned = true;
 			const { results, trips, ms } = await host.run(batch);
 			this.stillReady(epoch);
+			if (results.length !== batch.calls.length) {
+				throw new Refused(
+					500,
+					`the script host answered ${results.length} results for ${batch.calls.length} calls`
+				);
+			}
+			if (results.some((one) => typeof one !== 'object' || one === null)) {
+				throw new Refused(500, 'the script host answered a result that is not an object');
+			}
 			return {
 				results: results.map(({ text, error }) => ({ text, error })),
 				trips,

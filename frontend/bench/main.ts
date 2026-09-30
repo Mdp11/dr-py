@@ -33,6 +33,8 @@ export type Bench = {
 	open(): Promise<OpenReport>;
 	/** Ten scripts over 1,000 `Microservice` ids each, on one warm script worker. */
 	scripts(): Promise<Measures>;
+	/** CSP violations the frame has reported since the open, the script worker's included. */
+	violations(): number;
 	/** Edits and reads; the last of them diverges the replica. */
 	transitions(): Promise<Measures>;
 	close(): void;
@@ -97,11 +99,12 @@ const CR_CREATED_AT = '2026-01-01T00:00:00.000Z';
 
 let link: EngineLink | null = null;
 let rev = 0;
+let violations = 0;
 
 async function open(): Promise<OpenReport> {
 	link = await connectFrame();
 	const client = link.client;
-	let violations = 0;
+	violations = 0;
 	link.onViolation(() => violations++);
 	const metamodel: unknown = await (await fetch('/data/metamodel.json')).json();
 
@@ -488,6 +491,7 @@ async function scripts(): Promise<Measures> {
 window.bench = {
 	open,
 	scripts,
+	violations: () => violations,
 	transitions,
 	close() {
 		link?.dispose();

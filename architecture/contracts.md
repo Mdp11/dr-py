@@ -271,7 +271,8 @@ event     {event, …}                     engine → client, unsolicited
   call and disposed by `close`; a replica opened again boots another. `boot_ms` is the boot
   that serves the call: every call goes through the host's `boot()`, so a host that failed to
   boot or stopped mid-run starts over on the next call, and a failed boot (a 500 for every
-  call waiting on it) is not remembered by the engine.
+  call waiting on it) is not remembered by the engine. A host answer that is not one result
+  object per call is a 500.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed

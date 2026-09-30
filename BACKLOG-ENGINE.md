@@ -115,12 +115,12 @@ behaviour from C's plan 6a on; the engine replays them from the `model_download`
 D (scripts in the browser) is in progress, its first plan built: `scriptCalls` runs user Python
 in Pyodide in a script worker nested in the engine worker over a shared-memory bridge; at M, in
 Chromium, 10,000 script cells take 3,276 ms against the 2 s budget, over it (`K-100`)
-*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-09-30)*. Findings of that plan still open: `K-101` to `K-104`, `T-12` to `T-14`.
+*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-09-30)*. Findings of that plan still open: `K-101` to `K-105`, `T-12` to `T-14`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-101`, `K-102`, `K-103`, `K-104`, `T-12`, `T-13`, `T-14`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-101`, `K-102`, `K-103`, `K-104`, `K-105`, `T-12`, `T-13`, `T-14`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -836,13 +836,15 @@ and the 790 ms. Node's parts are from separate runs and leave 123 ms of its 1,64
 Chromium's per-trip time is thus about the dispatcher, the JSON and the transport; nothing in
 the data points to chunked replies (no reply nears 1 MiB) or to the structured clone.
 
+The measurement assumes warm reuse of one interpreter across batches, which `K-105` may change.
+
 Fix directions: fewer trips (project more with the roots, batch reads in the facade), a cheaper
 codec for the reply (the largest JSON part) and a leaner post path, a binary layout behind
 `_transport` (CT-6 allows it). The bench prints the verdict and never fails.
 
 ### K-101 · A failed script-host boot is memoized, and a stuck run holds the queue · `open` · *2026-09-30*
 The Node host keeps a rejected boot (`booting ??= start()`), so a host whose boot failed
-cannot be retried, and the service keeps a rejected boot until `close`; `ScriptHost` does not
+cannot be retried (the service keeps no boot of its own); `ScriptHost` does not
 document the `boot()` contract the service relies on (idempotent on a live host, a restart
 after failure). Runs are serialized, so a run that never settles blocks every later call: a
 host's `dispose()` must reject its run in flight. A `close()` during a Node host boot holds
@@ -858,7 +860,7 @@ oracle's insertion order. Fix: a
 ### K-103 · Script worker and bridge hardening and small divergences · `open` · *2026-09-30*
 (1) A user script can post `done`, `failed` or `csp-violation` as the worker through
 Pyodide's `js` module; the script worker is not a trust boundary for those messages, which
-the README should say. (2) Neither side listens for `messageerror`, so a failed deserialize
+the README should say (`sandbox/README.md` now does). (2) Neither side listens for `messageerror`, so a failed deserialize
 leaves a boot or run pending until close. (3) A reply of 2 GiB or more wraps the Int32
 header's `[2]`; `ReplyWriter.begin` could refuse it. (4) `wire`/`unwire` recurse without a
 depth bound; a `worker.booting !== null` branch is unreachable. (5) A violation during the
@@ -869,11 +871,33 @@ relayed. (6) The Node host does not project input elements (`inputs.e.ids`) with
 host duplicates that wrapper; `'[]'` for `transform` is written in host and guest. (7)
 `opOutgoing` and `opIncoming` are near-duplicates with their helpers defined below the class, `bridgeWorkingCopy`'s getter mutates
 `bridged`, `close()` disposes the host last (a throwing `dispose` leaves `close` failed after
-the reset), `ScriptCallsParams` is exported and unused.
+the reset), `ScriptCallsParams` is exported and unused. (8) A `BaseException` subclass
+raised in one call fails the whole batch: the per-call handler in `guest.ts` catches
+`(Exception, SystemExit)`, the setup path `BaseException`; in the browser the worker then
+posts `failed` and the next call pays a new boot (about 2.1 s). The server guest also catches
+only `Exception` (parity). The interrupt design decides how `KeyboardInterrupt` interacts.
 
 ### K-104 · The sandbox's `/pyodide/` dev middleware has no error handling · `open` · *2026-09-30*
 A `statSync` throw answers 500 and a stream error is unhandled, which could end the dev
 server; nothing tests a non-GET/HEAD request or a HEAD on `/pyodide/<file>`.
+
+### K-105 · Interpreter state is shared across script batches · `open` · security · *2026-09-30*
+`guest.ts`: `GUEST_BOOTSTRAP` puts `_dr_run` in `__main__` and `run` looks it up again from
+`py.globals` on every batch. Each batch gets a fresh `ns` dict, but the interpreter is shared:
+`__main__`, `sys.modules` (`json`, which `_transport` uses) and `builtins` persist. The
+browser script worker keeps one Pyodide warm across batches of different scripts and across
+replica replacement. Reproduced: batch 1 runs `import __main__; __main__._dr_run = _hijack`;
+batch 2, an honest `def transform(doc): return 42`, returned `{"payload": "FORGED", "reads":
+[]}`. Monkeypatching `json.loads`/`json.dumps` or `builtins` persists the same way. Scripts
+are project artifacts, so one member's script runs in other members' browsers; there is no
+exfiltration path (`connect-src 'self'`), but results can be silently falsified. The server
+guarantees a fresh interpreter per snippet (`script_runner.py`). Not yet reachable: nothing
+user-facing calls `scriptCalls`.
+Options: keep the `_dr_run` proxy from boot rather than re-reading `py.globals` (closes the
+hijack, not `json` or `builtins`); a fresh interpreter per script; snapshot and restore
+`sys.modules`, `__main__` and `builtins` around each batch; or accept the risk explicitly in
+CT-6. K-100's 3,276 ms assumes warm reuse of one interpreter, so the chosen isolation may
+change that cost.
 
 ### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
 Failed 1 run in 3 of the full e2e run during the scripts plan (engine rev 5 against server

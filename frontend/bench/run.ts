@@ -214,6 +214,8 @@ try {
 		const heap = await workerHeap(debugPort);
 		record({ [HEAP]: mb(heap.usedSize), [BACKING]: mb(heap.backingStorageSize ?? NaN) });
 		record(await page.evaluate(() => window.bench.scripts()));
+		const total = await page.evaluate(() => window.bench.violations());
+		hosts[hosts.length - 1] += `, ${total} after the scripts`;
 		record(await page.evaluate(() => window.bench.transitions()));
 		await page.evaluate(() => window.bench.close());
 		await context.close();
