@@ -22,22 +22,29 @@ export function poolCap(parallelism: number): number {
 	return Math.max(1, Math.min(4, parallelism - 2));
 }
 
-/** A `worker_threads` worker running `script-worker.ts`. */
-export const spawnNodeWorker: WorkerSpawner = (): WorkerPort => {
-	const worker = new Worker(new URL('./script-worker.ts', import.meta.url));
-	return {
-		post: (message) => worker.postMessage(message),
-		onMessage: (handler) => worker.on('message', handler),
-		onError(handler) {
-			worker.on('error', (error) => handler(error.message));
-			// A message that would not deserialize: the batch would wait for ever.
-			worker.on('messageerror', (error) => handler(error.message));
-			// Ending the worker ourselves reaches here too, and the pool ignores it.
-			worker.on('exit', (code) => handler(`the script worker exited with code ${code}`));
-		},
-		terminate: () => void worker.terminate()
+/** A spawner of `worker_threads` workers running `entry`, which is a `script-worker.ts` or serves as one. */
+export const nodeWorkerSpawner =
+	(entry: URL, workerData?: unknown): WorkerSpawner =>
+	(): WorkerPort => {
+		const worker = new Worker(entry, { workerData });
+		return {
+			post: (message, transfer) => worker.postMessage(message, transfer ?? []),
+			onMessage: (handler) => worker.on('message', handler),
+			onError(handler) {
+				worker.on('error', (error) => handler(error.message));
+				// A message that would not deserialize: the batch would wait for ever.
+				worker.on('messageerror', (error) => handler(error.message));
+				// Ending the worker ourselves reaches here too, and the pool ignores it.
+				worker.on('exit', (code) => handler(`the script worker exited with code ${code}`));
+			},
+			terminate: () => void worker.terminate()
+		};
 	};
-};
+
+/** A `worker_threads` worker running `script-worker.ts`. */
+export const spawnNodeWorker: WorkerSpawner = nodeWorkerSpawner(
+	new URL('./script-worker.ts', import.meta.url)
+);
 
 /** The pool over `worker_threads`: one fresh thread, and so one fresh Pyodide, per batch. */
 export const nodeScriptHost: ScriptHostFactory = () =>

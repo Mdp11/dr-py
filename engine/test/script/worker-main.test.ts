@@ -11,19 +11,44 @@ import { settle, until } from './fixtures/fake-workers.ts';
 
 type Posted = { type: string; [key: string]: unknown };
 
-function worker() {
+/**
+ * A scope of its own for the worker to pin: a worker pins the `Date` and `crypto` it is given, which
+ * in a real worker are the thread's and here must not be this test process's.
+ */
+function scopeGlobals() {
+	class ScopeDate extends Date {}
+	const crypto = { getRandomValues: <T>(array: T) => array };
+	return { Date: ScopeDate, crypto, performance } as unknown as typeof globalThis & {
+		Date: typeof ScopeDate;
+		crypto: typeof crypto;
+	};
+}
+
+const coldPyodide = (options: object) => loadPyodide({ indexURL: INDEX_URL, ...options });
+
+function worker(load: (options: object) => Promise<unknown> = coldPyodide) {
 	const posted: Posted[] = [];
+	const transfers: (ArrayBuffer[] | undefined)[] = [];
 	let handler: (message: unknown) => void = () => {};
+	const globals = scopeGlobals();
 	runWorker(
 		{
-			post: (message) => void posted.push(message as Posted),
+			post: (message, transfer) => {
+				posted.push(message as Posted);
+				transfers.push(transfer);
+			},
 			onMessage: (h) => void (handler = h),
-			globals: globalThis
+			globals
 		},
-		(options) => loadPyodide({ indexURL: INDEX_URL, ...options })
+		load
 	);
-	const init = () =>
-		handler({ type: 'init', reply: createReplyBuffer(), interrupt: new SharedArrayBuffer(4) });
+	const init = (extra: object = {}) =>
+		handler({
+			type: 'init',
+			reply: createReplyBuffer(),
+			interrupt: new SharedArrayBuffer(4),
+			...extra
+		});
 	const run = (n = 2) =>
 		handler({
 			type: 'run',
@@ -34,7 +59,7 @@ function worker() {
 			}),
 			roots: Array.from({ length: n }, () => '[]')
 		});
-	return { posted, init, run, types: () => posted.map((m) => m.type) };
+	return { posted, transfers, globals, init, run, types: () => posted.map((m) => m.type) };
 }
 
 describe('the worker body', () => {
@@ -98,12 +123,113 @@ describe('a worker that is not booted', () => {
 			{
 				post: (message) => void posted.push(message as Posted),
 				onMessage: (h) => void (handler = h),
-				globals: globalThis
+				globals: scopeGlobals()
 			},
 			() => Promise.reject(new Error('no pyodide here'))
 		);
 		handler({ type: 'init', reply: createReplyBuffer(), interrupt: new SharedArrayBuffer(4) });
 		await until(() => posted.length > 0);
 		expect(posted).toEqual([{ type: 'failed', message: 'no pyodide here' }]);
+	});
+});
+
+describe('the pins', () => {
+	it('fix the clock, the zone and the entropy of the scope the worker is given, and of no other', async () => {
+		const realNow = Date.now;
+		const realOffset = new Date(1750000000000).getTimezoneOffset();
+		const pinned = worker();
+		pinned.init();
+		await until(() => pinned.types().includes('ready'), 60_000);
+		const { Date: ScopeDate, crypto } = pinned.globals;
+		expect(ScopeDate.now()).toBe(1750000000000);
+		const at = new ScopeDate(1750000000000);
+		expect([at.getHours(), at.getMinutes(), at.getSeconds(), at.getDate(), at.getMonth()]).toEqual([
+			15, 6, 40, 15, 5
+		]);
+		expect([at.getFullYear(), at.getDay(), at.getTimezoneOffset()]).toEqual([2025, 0, 0]);
+		const buffer = new ArrayBuffer(12);
+		const view = new Uint32Array(buffer, 4, 2);
+		expect(crypto.getRandomValues(view)).toBe(view);
+		expect(Array.from(new Uint8Array(buffer))).toEqual([0, 0, 0, 0, ...Array(8).fill(0x42)]);
+		// This process's own clock and zone are untouched.
+		expect(Date.now).toBe(realNow);
+		expect(Date.now()).not.toBe(1750000000000);
+		expect(new Date(1750000000000).getTimezoneOffset()).toBe(realOffset);
+	}, 60_000);
+
+	it('are in place before Pyodide loads', async () => {
+		let seen: number | undefined;
+		const w = worker((options) => {
+			seen = w.globals.Date.now();
+			return coldPyodide(options);
+		});
+		w.init();
+		await until(() => w.types().includes('ready'), 60_000);
+		expect(seen).toBe(1750000000000);
+	}, 60_000);
+});
+
+describe('the snapshot', () => {
+	let image: ArrayBuffer;
+
+	it('is made by an init with make: a posted, transferred image, and no batch ever', async () => {
+		const maker = worker();
+		maker.init({ make: true });
+		await until(() => maker.types().includes('snapshot'), 60_000);
+		expect(maker.types()).toEqual(['snapshot']);
+		image = maker.posted[0]!.bytes as ArrayBuffer;
+		expect(image).toBeInstanceOf(ArrayBuffer);
+		expect(image.byteLength).toBeGreaterThan(1_000_000);
+		expect(maker.transfers[0]).toEqual([image]);
+		maker.run(1);
+		expect(maker.posted.at(-1)).toEqual({
+			type: 'failed',
+			message: 'the script worker is not booted'
+		});
+	}, 60_000);
+
+	it('boots a worker that binds its transport after the restore and runs a batch', async () => {
+		const options: object[] = [];
+		const w = worker((o) => (options.push(o), coldPyodide(o)));
+		w.init({ snapshot: image.slice(0) });
+		await until(() => w.types().includes('ready'), 60_000);
+		expect(w.posted).toEqual([{ type: 'ready', ms: expect.any(Number), boot: 'snapshot' }]);
+		expect(options).toHaveLength(1);
+		expect(options[0]).toMatchObject({ env: { PYTHONHASHSEED: '0' } });
+		expect(options[0]).toHaveProperty('_loadSnapshot');
+		w.posted.length = 0;
+		w.run(2);
+		expect(w.types()).toEqual(['call-start', 'call-end', 'call-start', 'call-end', 'done']);
+	}, 60_000);
+
+	it('falls back to a cold boot, and says so, when the image cannot be loaded', async () => {
+		const options: object[] = [];
+		const w = worker((o) => {
+			options.push(o);
+			return '_loadSnapshot' in o ? Promise.reject(new Error('no snapshots')) : coldPyodide(o);
+		});
+		w.init({ snapshot: image.slice(0) });
+		await until(() => w.types().length > 0, 60_000);
+		expect(w.posted).toEqual([{ type: 'ready', ms: expect.any(Number), boot: 'cold' }]);
+		expect(options.map((o) => '_loadSnapshot' in o)).toEqual([true, false]);
+		w.posted.length = 0;
+		w.run(1);
+		expect(w.types()).toEqual(['call-start', 'call-end', 'done']);
+	}, 60_000);
+
+	it('falls back to a cold boot when the image is not one', async () => {
+		const w = worker();
+		w.init({ snapshot: new ArrayBuffer(64) });
+		await until(() => w.types().length > 0, 60_000);
+		expect(w.posted).toEqual([{ type: 'ready', ms: expect.any(Number), boot: 'cold' }]);
+	}, 60_000);
+
+	it('does not hold a worker that could not make one: a make that fails says failed', async () => {
+		const w = worker((o) =>
+			'_makeSnapshot' in o ? Promise.reject(new Error('no make')) : coldPyodide(o)
+		);
+		w.init({ make: true });
+		await until(() => w.types().length > 0);
+		expect(w.posted).toEqual([{ type: 'failed', message: 'no make' }]);
 	});
 });

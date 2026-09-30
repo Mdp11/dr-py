@@ -40,7 +40,7 @@ type Answer = { payload: unknown; error: { kind: string; message: string } | nul
 const answers = (batch: ScriptBatch) => runOn(batch).map((r) => JSON.parse(r.text) as Answer);
 
 describe('the guest answers the parity corpus, text for text', () => {
-	// Hash-dependent answers are pinned on the pool's workers, which set the hash seed.
+	// The determinism group is held on the pool's workers, which pin the clock, the entropy and the hash seed.
 	const cases = loadParity().filter((c) => c.group !== 'determinism');
 
 	it('has cases to run', () => {

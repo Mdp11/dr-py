@@ -9,6 +9,8 @@ export type Fake = {
 	readonly buffers: { reply: SharedArrayBuffer; interrupt: SharedArrayBuffer };
 	/** Everything the pool posted to it. */
 	readonly posted: Message[];
+	/** The transfer list of each post, in order. */
+	readonly transfers: (ArrayBuffer[] | undefined)[];
 	terminated: boolean;
 	/** Delivers `message` to the pool, on a later turn, terminated or not: a dead worker's queue can still drain. */
 	say(message: unknown): void;
@@ -40,6 +42,7 @@ export function fakeWorkers(...behaviours: Behaviour[]) {
 			index,
 			buffers,
 			posted: [],
+			transfers: [],
 			terminated: false,
 			say: (message) => void setTimeout(() => onMessage(message), 0),
 			crash: (text) => void setTimeout(() => onError(text), 0)
@@ -47,9 +50,10 @@ export function fakeWorkers(...behaviours: Behaviour[]) {
 		fakes.push(fake);
 		peak = Math.max(peak, alive());
 		const port: WorkerPort = {
-			post(message) {
+			post(message, transfer) {
 				const m = message as Message;
 				fake.posted.push(m);
+				fake.transfers.push(transfer);
 				(behaviours[Math.min(index, behaviours.length - 1)] ?? honest)(fake, m);
 			},
 			onMessage: (handler) => void (onMessage = handler),

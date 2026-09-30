@@ -35,17 +35,15 @@ export type Guest = {
 };
 
 /**
- * Run once per interpreter, after the globals `_dr_transport_text`, `_dr_facade`,
- * `_dr_harness`, `_dr_stdout_chars`, `_dr_repr_chars`, `_read_memo_max`, `_dr_call_start` and
- * `_dr_call_end` are set. The harness runs in this module's namespace; `_dr_batch` drives it and
- * answers one JSON array of the harness's own result texts, so what crosses back is a str and no
- * proxy exists to leak. There is no `except` here: the harness catches what a call raises, and a
- * `MemoryError` leaves for the host.
+ * Run once per interpreter, after `_dr_facade` and `_dr_harness` are set. The harness runs in this
+ * module's namespace; `_dr_batch` drives it and answers one JSON array of the harness's own result
+ * texts, so what crosses back is a str and no proxy exists to leak. Nothing here names a JS value:
+ * the transport, the hooks and the caps are globals that `GUEST_BIND` sets, and are read when a batch
+ * runs, so an interpreter image taken after this script holds no JS reference. There is no `except`
+ * here: the harness catches what a call raises, and a `MemoryError` leaves for the host.
  */
 export const GUEST_BOOTSTRAP = `
 import json
-
-_dr_limits = {"stdout_bytes": _dr_stdout_chars, "result_repr_bytes": _dr_repr_chars}
 
 def _transport(req):
     return json.loads(_dr_transport_text(json.dumps(req)))
@@ -89,6 +87,20 @@ def _dr_batch(code, entry, calls_text, roots_texts, console):
     return json.dumps(out)
 `;
 
+/**
+ * Run after the globals `_dr_transport_text`, `_dr_stdout_chars`, `_dr_repr_chars`, `_read_memo_max`,
+ * `_dr_call_start` and `_dr_call_end` are set.
+ */
+const GUEST_BIND = `
+_dr_limits = {"stdout_bytes": _dr_stdout_chars, "result_repr_bytes": _dr_repr_chars}
+`;
+
+/** Run on an interpreter restored from an image: the image froze `random`'s state, so it is drawn again. */
+const GUEST_RESEED = `
+import random
+random.seed()
+`;
+
 type Callable = ((...args: unknown[]) => unknown) & { destroy?: () => void };
 
 function callSpec(call: ScriptBatch['calls'][number]): Value {
@@ -99,25 +111,37 @@ function callSpec(call: ScriptBatch['calls'][number]): Value {
 }
 
 /**
+ * The part of the guest that needs no JS value: the facade and harness sources, as text, and
+ * `GUEST_BOOTSTRAP`. What this leaves in `py` can be imaged and restored; `createGuest` with
+ * `restored: true` then binds the rest.
+ */
+export function prepareGuest(py: Interpreter): void {
+	py.globals.set('_dr_facade', FACADE_SOURCE);
+	py.globals.set('_dr_harness', HARNESS_SOURCE);
+	py.runPython(GUEST_BOOTSTRAP);
+}
+
+/**
  * Boots the harness and the facade's host side in `py` and returns the batch runner.
  * `transport` answers one bridge request text with its reply text; it is called synchronously
- * from Python.
+ * from Python. `restored` says `py` was restored from an image that `prepareGuest` had run on.
  */
 export function createGuest(
 	py: Interpreter,
 	transport: (requestText: string) => string,
-	limits: HarnessLimits = DEFAULT_HARNESS_LIMITS
+	limits: HarnessLimits = DEFAULT_HARNESS_LIMITS,
+	restored = false
 ): Guest {
 	let hooks: GuestHooks | undefined;
+	if (!restored) prepareGuest(py);
 	py.globals.set('_dr_transport_text', transport);
-	py.globals.set('_dr_facade', FACADE_SOURCE);
-	py.globals.set('_dr_harness', HARNESS_SOURCE);
 	py.globals.set('_dr_stdout_chars', limits.stdoutChars);
 	py.globals.set('_dr_repr_chars', limits.reprChars);
 	py.globals.set('_read_memo_max', limits.readMemoMax);
 	py.globals.set('_dr_call_start', (i: number) => hooks?.callStart?.(i));
 	py.globals.set('_dr_call_end', (i: number) => hooks?.callEnd?.(i));
-	py.runPython(GUEST_BOOTSTRAP);
+	py.runPython(GUEST_BIND);
+	if (restored) py.runPython(GUEST_RESEED);
 
 	return {
 		run(batch, roots, callHooks) {

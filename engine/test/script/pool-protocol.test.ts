@@ -21,7 +21,12 @@ afterEach(() => pools.splice(0).forEach((pool) => pool.dispose()));
 
 function poolOf(behaviours: Behaviour[] = [honest], options: Partial<PoolOptions> = {}) {
 	const workers = fakeWorkers(...behaviours);
-	const pool = createPool(workers.spawn, { cap: 1, now: () => performance.now(), ...options });
+	const pool = createPool(workers.spawn, {
+		cap: 1,
+		now: () => performance.now(),
+		snapshots: false,
+		...options
+	});
 	pools.push(pool);
 	return { pool, ...workers };
 }
@@ -445,7 +450,7 @@ describe('a worker that fails to boot', () => {
 				spawned++;
 				throw new Error('no threads');
 			},
-			{ cap: 2, now: () => performance.now() }
+			{ cap: 2, now: () => performance.now(), snapshots: false }
 		);
 		pools.push(pool);
 		await expect(pool.run(batchOf(), bridge)).rejects.toThrow('no threads');
@@ -670,5 +675,297 @@ describe('spares', () => {
 		await settle(120);
 		expect(alive()).toBe(1);
 		expect(fakes).toHaveLength(2);
+	});
+});
+
+describe('the snapshot maker and the image', () => {
+	const image = () => new Uint8Array([1, 2, 3, 4]).buffer;
+	const imageOf = (message: Message) => message.snapshot as ArrayBuffer | undefined;
+
+	/** `make` posts an image, an `init` with one reports `snapshot`, one without reports `cold`. */
+	const imager: Behaviour = (fake, message) => {
+		if (message.type === 'init' && message.make === true)
+			fake.say({ type: 'snapshot', bytes: image() });
+		else if (message.type === 'init') {
+			fake.say({
+				type: 'ready',
+				ms: 5,
+				boot: message.snapshot === undefined ? 'cold' : 'snapshot'
+			});
+		} else honest(fake, message);
+	};
+	/** A maker that never answers. */
+	const silentMaker: Behaviour = (fake, message) => {
+		if (message.type === 'init' && message.make === true) return;
+		honest(fake, message);
+	};
+	const inits = (fakes: { posted: Message[] }[]) =>
+		fakes.flatMap((fake) => fake.posted.filter((m) => m.type === 'init'));
+	const warnings = () => {
+		const seen: string[] = [];
+		return { seen, onWarning: (message: string) => void seen.push(message) };
+	};
+	const withImages = (extra: Partial<PoolOptions> = {}) => ({ snapshots: true, cap: 2, ...extra });
+
+	it('spawns a maker with the first worker, sends it no batch and ends it once it has the image', async () => {
+		const { pool, fakes } = poolOf([imager], withImages());
+		await pool.run(batchOf(), bridge);
+		await until(() => fakes.some((fake) => fake.posted[0]?.make === true && fake.terminated));
+		const makers = fakes.filter((fake) => fake.posted.some((m) => m.make === true));
+		expect(makers).toHaveLength(1);
+		expect(makers[0]!.posted.map((m) => m.type)).toEqual(['init']);
+		expect(
+			makers.length + fakes.filter((fake) => fake.posted.some((m) => m.type === 'run')).length
+		).toBe(2);
+		// The first worker was not held up for it: it booted cold.
+		expect(imageOf(fakes[0]!.posted[0]!)).toBeUndefined();
+	});
+
+	it('does not count the maker against the cap', async () => {
+		const { pool, fakes, alive } = poolOf([silentMaker], withImages({ cap: 1 }));
+		const run = pool.run(batchOf(), bridge);
+		await until(() => fakes.length === 2);
+		expect(alive()).toBe(2);
+		expect((await run).results).toEqual([{ text: 'r0' }]);
+	});
+
+	it('keeps no spare ahead while the maker works, and one from the image once it has it', async () => {
+		const { pool, fakes } = poolOf([silentMaker], withImages({ cap: 3 }));
+		await pool.run(batchOf(), bridge);
+		await settle(60);
+		expect(fakes).toHaveLength(2);
+		const maker = fakes.find((fake) => fake.posted[0]?.make === true)!;
+		maker.say({ type: 'snapshot', bytes: image() });
+		await until(() => fakes.length === 3);
+		expect(Array.from(new Uint8Array(imageOf(fakes[2]!.posted[0]!)!))).toEqual([1, 2, 3, 4]);
+		expect(maker.terminated).toBe(true);
+	});
+
+	it('does not start a spare for boot() ahead of the image while a worker is alive', async () => {
+		// The first worker holds its run, so a spare would be a second cold boot.
+		const held: Behaviour = (fake, message) => {
+			if (message.type === 'run') return;
+			silentMaker(fake, message);
+		};
+		const { pool, fakes } = poolOf([held], withImages({ cap: 3 }));
+		await pool.boot();
+		void pool.run(batchOf(), bridge).catch(() => {});
+		await settle(30);
+		expect(fakes).toHaveLength(2);
+		let resolved = false;
+		const second = pool.boot().then(() => (resolved = true));
+		await settle(60);
+		expect(resolved).toBe(false);
+		expect(fakes).toHaveLength(2);
+		fakes.find((fake) => fake.posted[0]?.make === true)!.say({ type: 'snapshot', bytes: image() });
+		await second;
+		expect(imageOf(fakes.at(-1)!.posted[0]!)).toBeDefined();
+	});
+
+	it('gives each worker a copy of its own, transferred, and keeps its own bytes whole', async () => {
+		const { pool, fakes } = poolOf([imager], withImages({ cap: 3 }));
+		await pool.run(batchOf(), bridge);
+		await until(() => inits(fakes).some((m) => imageOf(m) !== undefined));
+		const [first] = inits(fakes).filter((m) => imageOf(m) !== undefined);
+		const holder = fakes.find((fake) => fake.posted[0] === first)!;
+		expect(holder.transfers[0]).toEqual([imageOf(first!)]);
+		// A worker that scribbles over the bytes it was booted from...
+		new Uint8Array(imageOf(first!)!).fill(9);
+		// ...changes nothing for the workers after it.
+		await pool.run(batchOf(), bridge);
+		await pool.run(batchOf(), bridge);
+		await settle(40);
+		const later = inits(fakes)
+			.filter((m) => imageOf(m) !== undefined)
+			.slice(1);
+		expect(later.length).toBeGreaterThanOrEqual(2);
+		for (const m of later) {
+			expect(imageOf(m)).not.toBe(imageOf(first!));
+			expect(Array.from(new Uint8Array(imageOf(m)!))).toEqual([1, 2, 3, 4]);
+		}
+		expect(new Set(later.map(imageOf)).size).toBe(later.length);
+	});
+
+	it('reports boot as the worker says, and never sends a run to the maker', async () => {
+		const { pool, fakes } = poolOf([imager], withImages({ cap: 3 }));
+		const first = await pool.run(batchOf(), bridge);
+		await until(() => inits(fakes).some((m) => imageOf(m) !== undefined));
+		await settle(30);
+		const second = await pool.run(batchOf(), bridge);
+		expect([first.boot, second.boot]).toEqual(['cold', 'snapshot']);
+		for (const fake of fakes.filter((one) => one.posted[0]?.make === true)) {
+			expect(fake.posted.some((m) => m.type === 'run')).toBe(false);
+		}
+	});
+
+	describe('gives up on images, warns once, and boots cold', () => {
+		const coldAfter = async (
+			pool: ReturnType<typeof poolOf>['pool'],
+			fakes: ReturnType<typeof poolOf>['fakes']
+		) => {
+			await settle(40);
+			const before = fakes.length;
+			const run = await pool.run(batchOf(), bridge);
+			await pool.run(batchOf(), bridge);
+			await settle(40);
+			expect(run.results).toEqual([{ text: 'r0' }]);
+			expect(fakes.length).toBeGreaterThan(before);
+			for (const m of inits(fakes.slice(before))) expect(imageOf(m)).toBeUndefined();
+		};
+
+		it('when the maker says failed', async () => {
+			const w = warnings();
+			const maker: Behaviour = (fake, message) => {
+				if (message.type === 'init' && message.make === true)
+					fake.say({ type: 'failed', message: 'no makeMemorySnapshot' });
+				else honest(fake, message);
+			};
+			const { pool, fakes } = poolOf([maker], withImages({ onWarning: w.onWarning }));
+			await coldAfter(pool, fakes);
+			expect(w.seen).toEqual([
+				'script workers boot cold: the snapshot could not be made: no makeMemorySnapshot'
+			]);
+			expect(fakes.filter((fake) => fake.posted[0]?.make === true).every((f) => f.terminated)).toBe(
+				true
+			);
+		});
+
+		it('when the maker crashes', async () => {
+			const w = warnings();
+			const maker: Behaviour = (fake, message) => {
+				if (message.type === 'init' && message.make === true) fake.crash('out of memory');
+				else honest(fake, message);
+			};
+			const { pool, fakes } = poolOf([maker], withImages({ onWarning: w.onWarning }));
+			await coldAfter(pool, fakes);
+			expect(w.seen).toEqual([
+				'script workers boot cold: the snapshot could not be made: out of memory'
+			]);
+		});
+
+		it('when the maker cannot be spawned', async () => {
+			const w = warnings();
+			const workers = fakeWorkers(honest);
+			let spawns = 0;
+			const pool = createPool(
+				(buffers) => {
+					if (++spawns === 2) throw new Error('no more threads');
+					return workers.spawn(buffers);
+				},
+				{ cap: 2, now: () => performance.now(), onWarning: w.onWarning }
+			);
+			pools.push(pool);
+			await coldAfter(pool, workers.fakes);
+			expect(w.seen).toEqual([
+				'script workers boot cold: the snapshot could not be made: no more threads'
+			]);
+		});
+
+		it.each([
+			['a ready', { type: 'ready', ms: 1, boot: 'cold' }],
+			['an empty image', { type: 'snapshot', bytes: new ArrayBuffer(0) }],
+			['an image that is not an ArrayBuffer', { type: 'snapshot', bytes: new Uint8Array(4) }],
+			['an image that is text', { type: 'snapshot', bytes: 'abcd' }],
+			['a message that is not an object', 'snapshot']
+		])('when the maker sends %s', async (_name, bad) => {
+			const w = warnings();
+			const maker: Behaviour = (fake, message) => {
+				if (message.type === 'init' && message.make === true) fake.say(bad);
+				else honest(fake, message);
+			};
+			const { pool, fakes } = poolOf([maker], withImages({ onWarning: w.onWarning }));
+			await coldAfter(pool, fakes);
+			expect(w.seen).toHaveLength(1);
+			expect(w.seen[0]).toMatch(/^script workers boot cold: the snapshot maker sent /);
+			expect(fakes.filter((fake) => fake.posted[0]?.make === true).every((f) => f.terminated)).toBe(
+				true
+			);
+		});
+
+		it('when a worker given the image boots cold instead', async () => {
+			const w = warnings();
+			const refuser: Behaviour = (fake, message) => {
+				if (message.type === 'init' && message.make === true)
+					fake.say({ type: 'snapshot', bytes: image() });
+				else if (message.type === 'init') fake.say({ type: 'ready', ms: 5, boot: 'cold' });
+				else honest(fake, message);
+			};
+			const { pool, fakes } = poolOf([refuser], withImages({ onWarning: w.onWarning }));
+			await pool.run(batchOf(), bridge);
+			await until(() => inits(fakes).some((m) => imageOf(m) !== undefined));
+			await settle(40);
+			const given = inits(fakes).filter((m) => imageOf(m) !== undefined).length;
+			await pool.run(batchOf(), bridge);
+			await pool.run(batchOf(), bridge);
+			await settle(40);
+			expect(w.seen).toEqual([
+				'script workers boot cold: a worker could not boot from the snapshot'
+			]);
+			expect(inits(fakes).filter((m) => imageOf(m) !== undefined)).toHaveLength(given);
+		});
+
+		it.each([
+			['crashes', (fake: Parameters<Behaviour>[0]) => fake.crash('wasm abort')],
+			[
+				'says failed',
+				(fake: Parameters<Behaviour>[0]) => fake.say({ type: 'failed', message: 'wasm abort' })
+			]
+		])(
+			'when a worker given the image %s, and the run that waited is still answered',
+			async (_name, die) => {
+				const w = warnings();
+				const dying: Behaviour = (fake, message) => {
+					if (message.type === 'init' && message.make === true)
+						fake.say({ type: 'snapshot', bytes: image() });
+					else if (message.type === 'init' && message.snapshot !== undefined) die(fake);
+					else imager(fake, message);
+				};
+				const { pool, fakes } = poolOf([dying], withImages({ onWarning: w.onWarning }));
+				await pool.run(batchOf(), bridge);
+				await until(() => inits(fakes).some((m) => imageOf(m) !== undefined));
+				await settle(40);
+				const run = await pool.run(batchOf(), bridge);
+				expect(run.results).toEqual([{ text: 'r0' }]);
+				expect(w.seen).toEqual([
+					'script workers boot cold: a worker could not boot from the snapshot: wasm abort'
+				]);
+				expect(run.boot).toBe('cold');
+			}
+		);
+
+		it('and goes on when the warning handler throws', async () => {
+			const maker: Behaviour = (fake, message) => {
+				if (message.type === 'init' && message.make === true)
+					fake.say({ type: 'failed', message: 'x' });
+				else honest(fake, message);
+			};
+			const { pool, fakes } = poolOf(
+				[maker],
+				withImages({
+					onWarning: () => {
+						throw new Error('handler');
+					}
+				})
+			);
+			await coldAfter(pool, fakes);
+		});
+	});
+
+	it('ends the maker on dispose, with the rest', async () => {
+		const { pool, fakes, alive } = poolOf([silentMaker], withImages());
+		const run = pool.run(batchOf(), bridge).catch((error: Error) => error.message);
+		await until(() => fakes.length === 2);
+		pool.dispose();
+		expect(await run).toBe('script host is disposed');
+		expect(alive()).toBe(0);
+	});
+
+	it('takes a snapshot message from a worker that is not the maker as a failed boot', async () => {
+		const forger: Behaviour = (fake, message) => {
+			if (message.type === 'init') fake.say({ type: 'snapshot', bytes: image() });
+		};
+		const { pool } = poolOf([forger], withImages({ cap: 1 }));
+		const run = await pool.run(batchOf(), bridge).catch((error: Error) => error.message);
+		expect(run).toBe('the script worker sent "snapshot" while booting');
 	});
 });

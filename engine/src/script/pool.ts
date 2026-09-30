@@ -1,7 +1,9 @@
 // The pool of script workers, for any host that can spawn one: it is written against `WorkerPort`,
 // never a Worker. A worker boots, waits as a spare, runs exactly ONE batch and is terminated, so no
 // interpreter or JS state of one script reaches another. What a worker posts is untrusted beyond its
-// own batch: a forged message can change only the answer of the batch that worker holds.
+// own batch: a forged message can change only the answer of the batch that worker holds. Workers boot
+// from a memory image of Pyodide with the guest loaded, which one more worker, the maker, takes once
+// per pool and which runs no batch; each worker gets a copy of the image of its own.
 import { utf8Encoder } from '../export/utf8.ts';
 import type { Value } from '../value/types.ts';
 import { createReplyBuffer, ReplyWriter } from './bridge-buffer.ts';
@@ -12,7 +14,8 @@ import { batchToWire } from './wire.ts';
 
 /** What the pool holds of a worker. The handlers are set once, straight after the spawn. */
 export type WorkerPort = {
-	post(message: unknown): void;
+	/** `transfer` lists the buffers the message moves to the worker instead of copying. */
+	post(message: unknown, transfer?: ArrayBuffer[]): void;
 	onMessage(handler: (message: unknown) => void): void;
 	onError(handler: (message: string) => void): void;
 	terminate(): void;
@@ -42,6 +45,10 @@ export type PoolOptions = {
 	now(): number;
 	/** Called with each CSP violation a worker reports. */
 	onViolation?(violation: { directive: string; blocked: string }): void;
+	/** Called once, when the pool gives up on booting workers from an image and boots them cold. */
+	onWarning?(message: string): void;
+	/** `false` boots every worker cold, without a maker. Default `true`. */
+	snapshots?: boolean;
 };
 
 const DEFAULT_SPARE_IDLE_MS = 30_000;
@@ -58,7 +65,9 @@ type Slot = {
 	readonly port: WorkerPort;
 	readonly writer: ReplyWriter;
 	/** `ended` is final: nothing the worker says after it is read. */
-	phase: 'booting' | 'ready' | 'running' | 'ended';
+	phase: 'booting' | 'ready' | 'running' | 'ended' | 'making';
+	/** It was given the image to boot from. */
+	imaged: boolean;
 	bootMs: number;
 	boot: 'snapshot' | 'cold';
 	readyAt: number;
@@ -69,6 +78,10 @@ type Timers = {
 	setTimeout(handler: () => void, ms: number): unknown;
 	clearTimeout(handle: unknown): void;
 };
+
+/** `ArrayBuffer` across realms: a worker's message is rebuilt in the receiver's. */
+const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
+	Object.prototype.toString.call(value) === '[object ArrayBuffer]';
 
 const timers = () => globalThis as unknown as Timers;
 
@@ -110,7 +123,13 @@ function rootsOf(batch: ScriptBatch, bridge: Bridge, readMemoMax: number): strin
 }
 
 /**
- * The pool over `spawn`. It keeps `min(cap, running + waiting + 1)` workers alive: one for each
+ * The pool over `spawn`. The first worker it spawns comes with a maker: a worker that boots cold,
+ * loads the guest without binding anything of the host, posts the image of its memory and is ended,
+ * and every worker spawned after the image arrives boots from a copy of it (`boot: 'snapshot'`).
+ * The maker holds no slot of the cap and is sent no batch. While it works no spare is kept ahead,
+ * so the first spare is the first from an image. A maker or an image that fails, here or in a
+ * worker, ends images for the pool's life: every worker boots cold and `onWarning` is told once.
+ * It keeps `min(cap, running + waiting + 1)` workers alive: one for each
  * run that waits (FIFO) and one spare ahead, which is also the one spare it keeps when idle; spares
  * beyond one (a run that never started leaves one) end after `spareIdleMs` without a waiting run. A boot that
  * fails fails one waiting run, or the pending `boot()`s if none waits, and stops every spawn that
@@ -137,6 +156,10 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 	// A boot failed and none has succeeded since: nothing is spawned unasked.
 	let held = false;
 	let trimTimer: unknown = null;
+	// 'idle': no maker yet; 'making': the maker works; 'ready': `image` is kept; 'off': cold boots.
+	let imaging: 'idle' | 'making' | 'ready' | 'off' = options.snapshots === false ? 'off' : 'idle';
+	let image: ArrayBuffer | null = null;
+	let maker: Slot | null = null;
 
 	const count = (phase: Slot['phase']) => [...slots].filter((slot) => slot.phase === phase).length;
 	const unassigned = () => count('booting') + count('ready');
@@ -155,6 +178,21 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		}
 	}
 
+	/** Boots cold from now on, and says so once. */
+	function giveUp(reason: string): void {
+		if (imaging === 'off') return;
+		imaging = 'off';
+		image = null;
+		if (maker !== null) end(maker);
+		maker = null;
+		try {
+			options.onWarning?.(`script workers boot cold: ${reason}`);
+		} catch {
+			// A warning that throws changes nothing.
+		}
+		fill();
+	}
+
 	/** A worker that failed to boot, or was never made. */
 	function bootFailed(error: Error): void {
 		held = true;
@@ -171,7 +209,16 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 	function lose(slot: Slot, error: Error): void {
 		const { phase, active } = slot;
 		if (phase === 'ended') return;
+		if (phase === 'making') {
+			giveUp(`the snapshot could not be made: ${error.message}`);
+			return;
+		}
 		end(slot);
+		if (phase === 'booting' && slot.imaged && imaging === 'ready') {
+			// Not yet a boot that cannot work: the image may be what it could not use.
+			giveUp(`a worker could not boot from the snapshot: ${error.message}`);
+			return;
+		}
 		if (phase === 'booting') bootFailed(error);
 		else if (phase === 'ready') held = true;
 		else if (active !== null) {
@@ -186,15 +233,42 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		fill();
 	}
 
+	function startMaker(): void {
+		imaging = 'making';
+		const buffers = { reply: createReplyBuffer(), interrupt: new SharedArrayBuffer(4) };
+		try {
+			const port = spawn(buffers);
+			const mine: Slot = {
+				port,
+				writer: new ReplyWriter(buffers.reply),
+				phase: 'making',
+				imaged: false,
+				bootMs: 0,
+				boot: 'cold',
+				readyAt: 0,
+				active: null
+			};
+			maker = mine;
+			port.onMessage((data) => onMessage(mine, data));
+			port.onError((text) => lose(mine, new Error(text)));
+			port.post({ type: 'init', ...buffers, limits: harness, make: true });
+		} catch (error) {
+			giveUp(`the snapshot could not be made: ${toError(error).message}`);
+		}
+	}
+
 	function spawnOne(): void {
 		const buffers = { reply: createReplyBuffer(), interrupt: new SharedArrayBuffer(4) };
 		let slot: Slot | undefined;
 		try {
 			const port = spawn(buffers);
+			// Its own copy, moved: no worker shares bytes with the pool or with another worker.
+			const copy = image?.slice(0);
 			slot = {
 				port,
 				writer: new ReplyWriter(buffers.reply),
 				phase: 'booting',
+				imaged: copy !== undefined,
 				bootMs: 0,
 				boot: 'cold',
 				readyAt: 0,
@@ -204,7 +278,16 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			const mine = slot;
 			port.onMessage((data) => onMessage(mine, data));
 			port.onError((text) => lose(mine, new Error(text)));
-			port.post({ type: 'init', ...buffers, limits: harness });
+			port.post(
+				{
+					type: 'init',
+					...buffers,
+					limits: harness,
+					...(copy !== undefined && { snapshot: copy })
+				},
+				copy === undefined ? [] : [copy]
+			);
+			if (imaging === 'idle') startMaker();
 		} catch (error) {
 			if (slot !== undefined) end(slot);
 			bootFailed(toError(error));
@@ -213,6 +296,8 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 
 	/** One worker on its way, for a `boot()` or `prewarm()`. */
 	function ensureOne(): void {
+		// While the maker works, a spare waits for its image unless nothing is alive.
+		if (imaging === 'making' && slots.size > 0) return;
 		if (unassigned() === 0 && slots.size < cap) spawnOne();
 	}
 
@@ -241,7 +326,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			if (waiting !== undefined) start(slot, waiting);
 		}
 		while (queue.length > count('booting') && slots.size < cap) spawnOne();
-		if (warm && !held) {
+		if (warm && !held && imaging !== 'making') {
 			// A run waiting is served by its own worker, and one more is kept ahead.
 			while (!held && !disposed && unassigned() <= queue.length && slots.size < cap) spawnOne();
 		} else if (queue.length === 0 && bootWaiters.length > 0) ensureOne();
@@ -277,6 +362,10 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			}
 			return;
 		}
+		if (slot.phase === 'making') {
+			onMaker(message);
+			return;
+		}
 		if (type === 'failed') {
 			lose(
 				slot,
@@ -290,6 +379,23 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		else if (slot.phase === 'running' && slot.active !== null)
 			onRunning(slot, slot.active, message);
 		else lose(slot, new Error(`the script worker sent ${describeType(type)} while ${slot.phase}`));
+	}
+
+	function onMaker(message: Message): void {
+		const { type, bytes } = message;
+		if (type === 'failed') {
+			giveUp(
+				`the snapshot could not be made: ${typeof message.message === 'string' ? message.message : 'the maker failed'}`
+			);
+		} else if (type === 'snapshot' && isArrayBuffer(bytes) && bytes.byteLength > 0) {
+			if (maker !== null) end(maker);
+			maker = null;
+			image = bytes;
+			imaging = 'ready';
+			fill();
+		} else {
+			giveUp(`the snapshot maker sent ${describeType(type)}`);
+		}
 	}
 
 	function onReady(slot: Slot, message: Message): void {
@@ -312,6 +418,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		bootWaiters = [];
 		for (const waiter of waiters) waiter.resolve({ ms });
 		fill();
+		if (slot.imaged && boot === 'cold') giveUp('a worker could not boot from the snapshot');
 	}
 
 	function onRunning(slot: Slot, active: Active, message: Message): void {
@@ -414,6 +521,9 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			if (trimTimer !== null) timers().clearTimeout(trimTimer);
 			trimTimer = null;
 			const error = new Error('script host is disposed');
+			if (maker !== null) end(maker);
+			maker = null;
+			image = null;
 			for (const slot of [...slots]) {
 				const { active } = slot;
 				end(slot);

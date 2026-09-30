@@ -9,22 +9,32 @@ import { expectParity, loadParity, parityBatch, parityModel } from './parity.ts'
 // The pool over real Pyodide in real worker threads: what it runs, and that no batch ever shares a
 // worker with another. The protocol handling over scripted workers is in `pool-protocol.test.ts`.
 
-type Seen = { runs: number; terminated: boolean; messages: { type?: unknown; i?: unknown }[] };
+type Seen = {
+	runs: number;
+	terminated: boolean;
+	/** It was told to make the snapshot: it serves no batch and holds no slot of the cap. */
+	maker: boolean;
+	messages: { type?: unknown; i?: unknown }[];
+};
 
 /** `spawnNodeWorker`, counting what each worker is asked and says, and when it is ended. */
 function instrumented(inner: WorkerSpawner = spawnNodeWorker) {
 	const seen: Seen[] = [];
 	let peak = 0;
-	const alive = () => seen.filter((one) => !one.terminated).length;
+	const alive = () => seen.filter((one) => !one.terminated && !one.maker).length;
 	const spawn: WorkerSpawner = (buffers) => {
 		const port = inner(buffers);
-		const here: Seen = { runs: 0, terminated: false, messages: [] };
+		const here: Seen = { runs: 0, terminated: false, maker: false, messages: [] };
 		seen.push(here);
-		peak = Math.max(peak, alive());
 		const wrapped: WorkerPort = {
-			post(message) {
-				if ((message as { type?: unknown }).type === 'run') here.runs++;
-				port.post(message);
+			post(message, transfer) {
+				const { type, make } = message as { type?: unknown; make?: unknown };
+				if (type === 'run') here.runs++;
+				if (type === 'init') {
+					here.maker = make === true;
+					peak = Math.max(peak, alive());
+				}
+				port.post(message, transfer);
 			},
 			onMessage: (handler) =>
 				port.onMessage((message) => {
@@ -270,8 +280,8 @@ describe('dispose() over real workers', () => {
 });
 
 describe('the parity corpus through the Node host', () => {
-	// The determinism cases need the pins of a later step: they are held there.
-	const cases = loadParity().filter((c) => c.group !== 'determinism');
+	// The determinism group too: the pool's workers pin the clock, the entropy and the hash seed.
+	const cases = loadParity();
 	const host = pool(nodeScriptHost());
 	const answers = new Map<string, Promise<void>>();
 

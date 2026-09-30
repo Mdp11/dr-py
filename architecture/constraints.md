@@ -64,6 +64,13 @@ row above, so its parts do not add to 3,276) gave, over the 10,850 trips: dispat
 Python `json` 849 ms, post to the engine's handler 885 ms, the rest of the transport 222 ms;
 K-100 has the split, what stays unattributed and the Node proxies.
 
+Script workers boot from a memory image of Pyodide with the guest loaded, through Pyodide's
+private snapshot API (`_makeSnapshot`, `makeMemorySnapshot`, `_loadSnapshot`), which is pinned with
+the Pyodide version: moving the pin needs `engine/test/script/snapshot.test.ts` green. Measured in
+Node 22 on this machine, 2026-10-01: a cold worker boots in ≈ 1.9 s, one from the image in
+≈ 0.15-0.26 s; the image is 30 MB and is made once per pool in ≈ 2.5 s by a worker that runs no
+script.
+
 The script-cell cost is Python-side JSON plus FFI (≈ 270 µs per bridge call vs ≈ 165 µs
 in-process); the store's language is irrelevant. Pyodide for user scripts adds ≈ 5.4 s boot
 and ≈ 90 MB whichever engine is used.

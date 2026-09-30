@@ -7,6 +7,7 @@ import { armReply, readReply } from './bridge-buffer.ts';
 import {
 	createGuest,
 	DEFAULT_HARNESS_LIMITS,
+	prepareGuest,
 	type Guest,
 	type HarnessLimits,
 	type Interpreter
@@ -15,7 +16,7 @@ import { batchFromWire, type WireBatch } from './wire.ts';
 
 /** What a worker has of its host. */
 export type WorkerScope = {
-	post(message: unknown): void;
+	post(message: unknown, transfer?: ArrayBuffer[]): void;
 	onMessage(handler: (message: unknown) => void): void;
 	globals: typeof globalThis;
 };
@@ -25,22 +26,66 @@ type Pyodide = {
 	runPython(code: string): unknown;
 	globals: { get(name: string): unknown; set(name: string, value: unknown): void };
 	setInterruptBuffer(buffer: Int32Array): void;
+	/** Pyodide's private image of its whole memory; it needs the `_makeSnapshot` boot option. */
+	makeMemorySnapshot(): Uint8Array;
 };
 
 type Init = {
 	reply: SharedArrayBuffer;
 	interrupt: SharedArrayBuffer;
 	limits?: HarnessLimits;
+	/** An image to boot from; a boot that cannot use it is a cold one. */
+	snapshot?: ArrayBuffer;
+	/** Make an image and post it, and serve no batch. */
+	make?: true;
 };
 
 type Run = { batch: WireBatch; roots: string[] };
+
+const PINNED_NOW_MS = 1750000000000;
+const PINNED_BYTE = 0x42;
+
+/**
+ * Makes the scope deterministic before any script can run: `Date.now`, `Date`'s local time (UTC, as
+ * on the server) and `crypto.getRandomValues`. Pyodide reads all three, so `time`, `datetime`,
+ * `os.urandom` and the first seed of `random` follow. Only the scope it is given changes.
+ */
+function pinScope(globals: typeof globalThis): void {
+	// `crypto` is a DOM type the engine's sources do not see; every worker scope has it.
+	const { Date: DateClass, crypto } = globals as unknown as {
+		Date: DateConstructor;
+		crypto: { getRandomValues<T>(array: T): T };
+	};
+	DateClass.now = () => PINNED_NOW_MS;
+	// Emscripten's `localtime` reads these; the environment's `TZ` does not reach it.
+	const date = DateClass.prototype;
+	date.getSeconds = date.getUTCSeconds;
+	date.getMinutes = date.getUTCMinutes;
+	date.getHours = date.getUTCHours;
+	date.getDate = date.getUTCDate;
+	date.getMonth = date.getUTCMonth;
+	date.getFullYear = date.getUTCFullYear;
+	date.getDay = date.getUTCDay;
+	date.getTimezoneOffset = () => 0;
+	crypto.getRandomValues = (array) => {
+		const view = array as unknown as ArrayBufferView;
+		new Uint8Array(view.buffer, view.byteOffset, view.byteLength).fill(PINNED_BYTE);
+		return array;
+	};
+}
+
+/** Every boot's options: a fixed hash seed, so `hash` and the order of a set are the same everywhere. */
+const BOOT_OPTIONS = { env: { PYTHONHASHSEED: '0' } };
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
  * Serves one pool: `init` boots Pyodide and answers `ready`, `run` runs the one batch this worker
  * will ever hold and answers `done`. A second `run`, or one before `ready`, is refused with `failed`,
- * and the pool ends the worker on either.
+ * and the pool ends the worker on either. An `init` with `make` boots cold, runs the guest's
+ * bootstrap, posts Pyodide's image of that state as `snapshot` and serves nothing: it never binds a
+ * transport, so no script runs in it. An `init` with `snapshot` boots from the image and binds the
+ * transport after the restore, and falls back to a cold boot when any part of that fails.
  */
 export function runWorker(
 	scope: WorkerScope,
@@ -58,30 +103,63 @@ export function runWorker(
 	let ran = false;
 	let trips = 0;
 
-	async function init({ reply, interrupt, limits }: Init): Promise<void> {
-		const t0 = now();
-		const py = (await loadPyodide({})) as Pyodide;
-		py.setInterruptBuffer(new Int32Array(interrupt));
-		const interpreter: Interpreter = {
-			runPython: (code) => py.runPython(code),
-			globals: {
-				get: (name) => py.globals.get(name),
-				set: (name, value) => py.globals.set(name, value)
-			}
+	const interpreterOf = (py: Pyodide): Interpreter => ({
+		runPython: (code) => py.runPython(code),
+		globals: {
+			get: (name) => py.globals.get(name),
+			set: (name, value) => py.globals.set(name, value)
+		}
+	});
+
+	async function makeSnapshot(): Promise<void> {
+		const py = (await loadPyodide({ ...BOOT_OPTIONS, _makeSnapshot: true })) as Pyodide;
+		prepareGuest(interpreterOf(py));
+		// A copy: the image is a view the interpreter may own, and what is posted is transferred.
+		const bytes = py.makeMemorySnapshot().slice().buffer;
+		post({ type: 'snapshot', bytes }, [bytes]);
+	}
+
+	async function boot({ reply, interrupt, limits, snapshot }: Init): Promise<'snapshot' | 'cold'> {
+		const start = async (image: ArrayBuffer | undefined): Promise<Guest> => {
+			const py = (await loadPyodide(
+				image === undefined ? BOOT_OPTIONS : { ...BOOT_OPTIONS, _loadSnapshot: image }
+			)) as Pyodide;
+			py.setInterruptBuffer(new Int32Array(interrupt));
+			// Armed before the post: a reply can land the instant the request is out, and arming
+			// after would erase it and block for good.
+			return createGuest(
+				interpreterOf(py),
+				(requestText) => {
+					trips++;
+					armReply(reply);
+					post({ type: 'bridge', text: requestText });
+					return decoder.decode(readReply(reply, () => post({ type: 'more' })));
+				},
+				limits ?? DEFAULT_HARNESS_LIMITS,
+				image !== undefined
+			);
 		};
-		// Armed before the post: a reply can land the instant the request is out, and arming
-		// after would erase it and block for good.
-		guest = createGuest(
-			interpreter,
-			(requestText) => {
-				trips++;
-				armReply(reply);
-				post({ type: 'bridge', text: requestText });
-				return decoder.decode(readReply(reply, () => post({ type: 'more' })));
-			},
-			limits ?? DEFAULT_HARNESS_LIMITS
-		);
-		post({ type: 'ready', ms: now() - t0, boot: 'cold' });
+		if (snapshot !== undefined) {
+			try {
+				guest = await start(snapshot);
+				return 'snapshot';
+			} catch {
+				// The image cannot be used here; what the pool is told is that this boot was cold.
+			}
+		}
+		guest = await start(undefined);
+		return 'cold';
+	}
+
+	async function init(data: Init): Promise<void> {
+		const t0 = now();
+		pinScope(scope.globals);
+		if (data.make === true) {
+			await makeSnapshot();
+			return;
+		}
+		const how = await boot(data);
+		post({ type: 'ready', ms: now() - t0, boot: how });
 	}
 
 	function run({ batch, roots }: Run): void {
