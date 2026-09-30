@@ -76,10 +76,28 @@ test('the replica opens in the real sandbox', async ({ page }) => {
 	await expectReplicaReady(page);
 	const indicator = replica(page);
 	await expect(indicator).toHaveAttribute('data-isolated', 'true');
-	// Counts the sandbox PAGE's violations; the worker's are not reported.
+	// Counts the sandbox page's violations and the engine worker's, which the page relays.
 	await expect(indicator).toHaveAttribute('data-csp-violations', '0');
 	expect(await replicaRev(page)).toBe(await headRev(api, projectId));
 	expect(errors).toEqual([]);
+});
+
+test('a violation in the engine worker is counted', async ({ page }) => {
+	test.setTimeout(120_000);
+	await openReady(page);
+	const indicator = replica(page);
+	await expect(indicator).toHaveAttribute('data-csp-violations', '0');
+	const worker = page.workers().find((w) => w.url().startsWith('http://localhost:5174/'));
+	expect(worker, 'the engine worker is listed').toBeDefined();
+	// `connect-src 'self'` blocks this before any request leaves the worker.
+	const blocked = await worker!.evaluate(() =>
+		fetch('https://example.invalid/').then(
+			() => false,
+			() => true
+		)
+	);
+	expect(blocked).toBe(true);
+	await expect(indicator).toHaveAttribute('data-csp-violations', '1');
 });
 
 test('an own commit reaches it', async ({ page }) => {

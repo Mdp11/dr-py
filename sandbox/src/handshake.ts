@@ -2,12 +2,24 @@
 export type SandboxReady = { type: 'sandbox-ready'; crossOriginIsolated: boolean };
 /** App → frame, carrying the one port the engine is served on. */
 export type Connect = { type: 'connect' };
-/** Frame → app, for every `securitypolicyviolation`. */
+/** Frame → app, for every `securitypolicyviolation`, the page's own or a worker's. */
 export type CspViolation = { type: 'csp-violation'; directive: string; blocked: string };
 /** Frame → app, when the worker's `error` event fires. */
 export type WorkerFailed = { type: 'worker-error'; message: string };
 
 export type FrameMessage = SandboxReady | CspViolation | WorkerFailed;
+
+/**
+ * The violation a worker reported, rebuilt from its two strings, or `null` for
+ * any other message: the page forwards only what it has checked.
+ */
+export function relayedViolation(data: unknown): CspViolation | null {
+	if (typeof data !== 'object' || data === null) return null;
+	const { type, directive, blocked } = data as Record<string, unknown>;
+	if (type !== 'csp-violation') return null;
+	if (typeof directive !== 'string' || typeof blocked !== 'string') return null;
+	return { type, directive, blocked };
+}
 
 /**
  * The port of a `connect` from the app, or `null` for anything else: another

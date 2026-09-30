@@ -1,6 +1,6 @@
 // Starts the engine worker, tells the app about it, and hands the app's port
 // to it; from then on the page is outside the data path.
-import { connectPort, type FrameMessage } from './handshake.ts';
+import { connectPort, relayedViolation, type FrameMessage } from './handshake.ts';
 import { APP_ORIGIN } from './origins.ts';
 
 const worker = new Worker(new URL('./engine-worker.ts', import.meta.url), { type: 'module' });
@@ -15,6 +15,12 @@ worker.addEventListener('error', (event) => {
 
 window.addEventListener('securitypolicyviolation', (event) => {
 	report({ type: 'csp-violation', directive: event.effectiveDirective, blocked: event.blockedURI });
+});
+
+// A worker's violations fire in its own scope, never on the page; it relays them.
+worker.addEventListener('message', (event) => {
+	const violation = relayedViolation(event.data);
+	if (violation !== null) report(violation);
 });
 
 let connected = false;

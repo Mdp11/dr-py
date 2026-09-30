@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { connectPort } from '../src/handshake.ts';
+import { connectPort, relayedViolation } from '../src/handshake.ts';
 
 const APP = 'http://127.0.0.1:5173';
 const parent = {};
@@ -62,5 +62,33 @@ describe('connectPort', () => {
 		for (const data of [null, undefined, 'connect', 1, true]) {
 			expect(connectPort(event({ data }), expected)).toBeNull();
 		}
+	});
+});
+
+describe('relayedViolation', () => {
+	it('rebuilds a worker violation from its two strings', () => {
+		const data = {
+			type: 'csp-violation',
+			directive: 'connect-src',
+			blocked: 'https://x.test/',
+			extra: 1
+		};
+		expect(relayedViolation(data)).toEqual({
+			type: 'csp-violation',
+			directive: 'connect-src',
+			blocked: 'https://x.test/'
+		});
+	});
+
+	it.each([
+		null,
+		'csp-violation',
+		{},
+		{ type: 'sandbox-ready' },
+		{ type: 'csp-violation', directive: 'connect-src' },
+		{ type: 'csp-violation', directive: 1, blocked: 'x' },
+		{ type: 'csp-violation', directive: 'connect-src', blocked: null }
+	])('drops anything else: %j', (data) => {
+		expect(relayedViolation(data)).toBeNull();
 	});
 });

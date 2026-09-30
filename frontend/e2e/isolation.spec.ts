@@ -33,6 +33,24 @@ test('a missing path on the sandbox site 404s', async ({ request }) => {
 	expect(res.status()).toBe(404);
 });
 
+test.describe('the sandbox serves Pyodide from its own origin', () => {
+	for (const name of ['pyodide.asm.wasm', 'pyodide.mjs']) {
+		test(`/pyodide/${name} carries the isolation headers`, async ({ request }) => {
+			const res = await request.get(`http://localhost:5174/pyodide/${name}`);
+			expect(res.status()).toBe(200);
+			const headers = res.headers();
+			expect(headers['content-security-policy']).toBe(SANDBOX_CSP);
+			expect(headers['cross-origin-embedder-policy']).toBe('require-corp');
+			expect(headers['cross-origin-resource-policy']).toBe('cross-origin');
+		});
+	}
+
+	test('nothing else of the package is served', async ({ request }) => {
+		const res = await request.get('http://localhost:5174/pyodide/package.json');
+		expect(res.status()).toBe(404);
+	});
+});
+
 test('the workspace embeds the sandbox once, and only the workspace', async ({ page }) => {
 	await openDefaultProject(page);
 	const frame = page.locator('iframe[title="Data Rover engine"]');
