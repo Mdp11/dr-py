@@ -326,6 +326,17 @@ export {
 	projectRoots,
 	type BridgeLimits
 } from './script/bridge.ts';
+export { createGuest, GUEST_BOOTSTRAP, type Guest, type Interpreter } from './script/guest.ts';
+export type {
+	Bridge,
+	RawScriptResult,
+	ScriptBatch,
+	ScriptCall,
+	ScriptEntry,
+	ScriptHost,
+	ScriptHostFactory,
+	ScriptRun
+} from './script/host.ts';
 export { ByteQueue } from './service/byte-queue.ts';
 export {
 	Scheduler,

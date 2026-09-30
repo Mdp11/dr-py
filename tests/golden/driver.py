@@ -18,6 +18,7 @@ from . import (
     coerce_tables,
     lower_tables,
     regex_tables,
+    script_facade,
     xlsx_tables,
     xlsx_widths,
 )
@@ -30,6 +31,7 @@ GENERATED: dict[Path, Callable[[], str]] = {
     Path("engine/src/value/lower-tables.ts"): lower_tables.render,
     Path("engine/src/value/digit-tables.ts"): coerce_tables.render,
     Path("engine/src/value/regex-tables.ts"): regex_tables.render,
+    Path("engine/src/script/facade.generated.ts"): script_facade.render,
     Path("engine/src/export/xlsx-widths.ts"): xlsx_widths.render,
     Path("engine/src/export/xlsx-tables.ts"): xlsx_tables.render,
 }

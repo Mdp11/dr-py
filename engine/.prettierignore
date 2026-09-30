@@ -6,3 +6,4 @@ package-lock.json
 /src/value/casefold-tables.ts
 /src/export/xlsx-widths.ts
 /src/export/xlsx-tables.ts
+/src/script/facade.generated.ts

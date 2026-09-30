@@ -10,7 +10,7 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
-		"check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+		"check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.node.json",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"test": "vitest run",
@@ -26,6 +26,7 @@
 		"eslint-config-prettier": "^10.1.8",
 		"globals": "^17.4.0",
 		"prettier": "^3.8.1",
+		"pyodide": "314.0.7",
 		"typescript": "^6.0.2",
 		"typescript-eslint": "^8.58.1",
 		"vitest": "^3.2.4"
