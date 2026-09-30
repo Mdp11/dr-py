@@ -782,7 +782,7 @@ loaded host stretches, and wait on that signal instead of the clock.
 
 ### K-92 · Compare's parse block, apply-CR's last step and the parsed file's heap miss the bounds · `open` · perf · *2026-09-30*
 At M, medians of 3 on DESKTOP-5QK3FA5 (Ryzen 9 3900X, near-idle host), 2026-09-30. Three misses:
-(1) compare's first step decodes, parses and shapes the 76,772,875-byte file in one block: 2,746 ms in Node, and in Chromium 148 the longest staged round trip during `compareModel` is 2,086 ms (the whole call 2,371 ms), far past the 16 ms slice bound; the diff after it is sliced, its longest step 44 ms (Node, whole compare 3,142 ms).
+(1) compare's first step decodes, parses and shapes the 76,772,875-byte file in one block: 2,746 ms in Node, and in Chromium 148 the longest staged round trip during `compareModel` is 2,086 ms (the whole call 2,371 ms), far past the 16 ms slice bound; the diff after it is sliced, but its longest step, 44 ms in Node (whole compare 3,142 ms), misses the bound too.
 (2) The parsed file's peak heap above baseline is 285 MB beside the replica's 240 MB, about 525 MB against CN-3's 400 MB.
 (3) `proposeCr` reads the change requests synchronously at arrival, and its last step runs the gate, `opsForChange` and the change-request document unmetered: at M with a whole-model CR (6,974 ops) the longest step is 62 ms in Node (whole call 104 ms) and 138 ms as the longest staged round trip in Chromium (277 ms).
 Fix direction: parse the file incrementally (a streaming or chunked reader that yields between entities) and shape it as it goes, or diff it entity by entity without holding the whole parse; meter the gate and the ops in `proposeCr`'s last step.

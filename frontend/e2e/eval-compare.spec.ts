@@ -206,9 +206,16 @@ for (const side of ['engine', 'server'] as const) {
 					await expect(dialog.getByTestId('mcd-replace')).toBeEnabled();
 					await dialog.getByTestId('mcd-replace').click();
 					await expect(dialog).toBeHidden({ timeout: 30_000 });
-					await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBeGreaterThan(1);
-					// The staged state has the file's names.
+					// Alpha's staged name goes back to the committed one the file has, so it
+					// nets out; Beta renamed, Gamma deleted and Delta added remain.
+					await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(FILE_OPS);
+					// The staged state is the file: its names, its Delta, no Gamma, and Alpha's
+					// staged name replaced by the file's.
 					await expect(row(page, RENAMED)).toBeVisible({ timeout: 10_000 });
+					await expect(row(page, 'Delta')).toBeVisible();
+					await expect(row(page, 'Alpha')).toBeVisible();
+					await expect(tree(page).getByText(/Staged-/)).toHaveCount(0);
+					await expect(tree(page).getByText('Gamma')).toHaveCount(0);
 				} else {
 					await expect(dialog.getByTestId('mcd-replace')).toBeDisabled();
 					await expect(dialog.getByTestId('mcd-gate-hint')).toHaveText(

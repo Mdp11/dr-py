@@ -1292,7 +1292,9 @@ component is now an option (it wasn't when the finding was raised).
 - `tests/api/test_exports_route.py::test_two_runs_at_one_rev_are_byte_identical` —
   a zip/xlsx determinism test, unrelated to validation rules. Flaked once on a
   full-suite run during the custom-validation-rules branch's work (2026-08-24),
-  reran clean twice; not yet diagnosed.
+  reran clean twice; not yet diagnosed. Seen again 2026-09-30 in a full `dr-test` (byte
+  mismatch at index 292 between the two zips), clean on rerun and alone; the likely cause
+  is a zip entry timestamp that crosses a DOS-time 2 s boundary between the two runs.
 
 ### T-5 · a11y: HistoryNav announces a popup that can't be opened · `open`
 The trigger keeps `aria-haspopup`/`aria-expanded` from bits-ui's `{...props}` spread while
