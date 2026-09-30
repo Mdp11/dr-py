@@ -798,7 +798,7 @@
         }
       ],
       "results": [
-        "{\"stdout\": \"-4594863902769663758\\n\", \"result_repr\": \"-4594863902769663758\", \"truncated\": false}"
+        "{\"stdout\": \"-1600925533\\n\", \"result_repr\": \"-1600925533\", \"truncated\": false}"
       ],
       "ops": "[]"
     },
@@ -814,7 +814,7 @@
         }
       ],
       "results": [
-        "{\"stdout\": \"{'c', 'a', 'b'}\\n\", \"result_repr\": \"\\\"{'c', 'a', 'b'}\\\"\", \"truncated\": false}"
+        "{\"stdout\": \"{'a', 'c', 'b'}\\n\", \"result_repr\": \"\\\"{'a', 'c', 'b'}\\\"\", \"truncated\": false}"
       ],
       "ops": "[]"
     },

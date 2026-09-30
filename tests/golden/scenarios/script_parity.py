@@ -22,10 +22,10 @@ import sys
 from typing import Any
 
 from data_rover.api.serialize import iter_entity_lines
-from data_rover.core.script.runner import RunLimits, RunRequest
+from data_rover.core.script.runner import RunLimits, RunRequest, ScriptBudget
 
 from ..driver import ROOT, scenario
-from .script_bridge import _ASTRAL, _ELEMENTS, _model
+from .script_bridge import ASTRAL, ELEMENTS, build_model
 
 Case = dict[str, Any]
 
@@ -322,7 +322,7 @@ def _cases() -> list[Case]:
             "fidelity_transform",
             "transform",
             'def transform(doc):\n    return [doc, doc["big"] + 1]\n',
-            _call(doc={"f": 1.0, "i": 1, "big": 2**60, "s": _ASTRAL}),
+            _call(doc={"f": 1.0, "i": 1, "big": 2**60, "s": ASTRAL}),
         ),
         _console(
             "fidelity",
@@ -377,14 +377,16 @@ def _run_cases(cases: list[Case]) -> list[dict[str, Any]]:
                     else None,
                 )
                 res, dispatcher = runner.run_harness(
-                    _model(), req, limits, record_ops=True
+                    build_model(), req, limits, record_ops=True
                 )
                 results.append(_dump(res))
                 if case["entry"] == "script":
                     assert len(calls) == 1
                     ops = _dump(dispatcher.ops)
         else:
-            session = runner.open_session(_model(), case["code"], limits, budget=None)  # type: ignore[arg-type]
+            session = runner.open_session(
+                build_model(), case["code"], limits, budget=ScriptBudget.start(30)
+            )
             for call in calls:
                 if session.boot_error is not None:
                     err = session.boot_error
@@ -423,6 +425,23 @@ def child_main() -> None:
     sys.stdout.write(json.dumps(_run_cases(cases)))
 
 
+#: Expected answers of the two hash-dependent cases. `Py_hash_t` is 32 bits on
+#: wasm32, so the server's guest and Pyodide agree with each other, not with
+#: a 64-bit oracle; `test_wasm_script_parity_hash_constants` pins them.
+WASM32_RESULTS: dict[str, str] = {
+    "determinism_hash": json.dumps(
+        {"stdout": "-1600925533\n", "result_repr": "-1600925533", "truncated": False}
+    ),
+    "determinism_set_repr": json.dumps(
+        {
+            "stdout": "{'a', 'c', 'b'}\n",
+            "result_repr": "\"{'a', 'c', 'b'}\"",
+            "truncated": False,
+        }
+    ),
+}
+
+
 def _outcomes(cases: list[Case]) -> list[dict[str, Any]]:
     env = {
         **os.environ,
@@ -451,15 +470,18 @@ def _outcomes(cases: list[Case]) -> list[dict[str, Any]]:
 
 @scenario("script_parity")
 def script_parity() -> Any:
-    model = _model()
+    model = build_model()
     lines = list(iter_entity_lines(model))
     cases = _cases()
     outcomes = _outcomes(cases)
+    for case, outcome in zip(cases, outcomes, strict=True):
+        if case["name"] in WASM32_RESULTS:
+            outcome["results"] = [WASM32_RESULTS[case["name"]]]
     return {
         "model": {
             "metamodel": model.metamodel.model_dump(mode="json"),
-            "elements": lines[: len(_ELEMENTS)],
-            "relationships": lines[len(_ELEMENTS) :],
+            "elements": lines[: len(ELEMENTS)],
+            "relationships": lines[len(ELEMENTS) :],
         },
         "cases": [
             {

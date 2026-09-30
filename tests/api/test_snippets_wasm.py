@@ -663,3 +663,32 @@ def test_wasm_session_value_receives_inputs(wasm_runner: WasmScriptRunner, small
         assert r.value == {"kind": "scalars", "values": [7, ids[1]]}
     finally:
         sess.close()
+
+
+def test_wasm_script_parity_hash_constants(wasm_runner: WasmScriptRunner) -> None:
+    """The committed `script_parity` answers for the hash-dependent cases are
+    what the real (wasm32) guest says."""
+    import json
+
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.golden.scenarios.script_bridge import build_model
+    from tests.golden.scenarios.script_parity import WASM32_RESULTS, script_parity
+
+    cases = {c["name"]: c for c in script_parity()["cases"]}
+    for name, expected in WASM32_RESULTS.items():
+        res = wasm_runner.run(
+            build_model(),
+            RunRequest(code=cases[name]["code"], entry="script"),
+            RunLimits(),
+            record_ops=True,
+            rev=0,
+        )
+        assert res.error is None, res.error
+        got = {
+            "stdout": res.stdout,
+            "result_repr": res.result_repr,
+            "truncated": res.truncated,
+        }
+        assert got == json.loads(expected)
+        assert cases[name]["results"] == [expected]
