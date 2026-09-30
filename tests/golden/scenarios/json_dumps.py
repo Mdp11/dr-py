@@ -17,6 +17,15 @@ _DUMP_VALUES: list[Any] = [
     {"id": "e1", "properties": {"name": "N", "list": [1, [2, {"z": 1.5}]], "empty": {}}, "rev": 0},
 ]  # fmt: skip
 
+# Written with bare ``json.dumps(value)``: ascii escapes, spaced separators, NaN allowed.
+_DEFAULT_VALUES: list[Any] = [
+    {"a": [1, {"b": None}], "c": {"d": [True, "x"]}},
+    [], {}, 1, 1.0, 1e22, 2**60, True, None,
+    "\u00e9", " ", "\U0001f600", "\x00\x1f\x7f", '"', "\\",
+    float("nan"), float("inf"), float("-inf"),
+    [float("nan"), {"k": float("inf")}],
+]  # fmt: skip
+
 
 @scenario("json_dumps")
 def json_dumps() -> Any:
@@ -31,4 +40,4 @@ def json_dumps() -> Any:
             ),
         }
         for value in _DUMP_VALUES
-    ]
+    ] + [{"value": tag(value), "default": json.dumps(value)} for value in _DEFAULT_VALUES]

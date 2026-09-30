@@ -313,5 +313,202 @@
     },
     "compact": "{\"id\":\"e1\",\"properties\":{\"name\":\"N\",\"list\":[1,[2,{\"z\":1.5}]],\"empty\":{}},\"rev\":0}",
     "indented": "{\n  \"id\": \"e1\",\n  \"properties\": {\n    \"name\": \"N\",\n    \"list\": [\n      1,\n      [\n        2,\n        {\n          \"z\": 1.5\n        }\n      ]\n    ],\n    \"empty\": {}\n  },\n  \"rev\": 0\n}"
+  },
+  {
+    "value": {
+      "t": "dict",
+      "v": [
+        [
+          "a",
+          {
+            "t": "list",
+            "v": [
+              {
+                "t": "int",
+                "v": "1"
+              },
+              {
+                "t": "dict",
+                "v": [
+                  [
+                    "b",
+                    {
+                      "t": "null"
+                    }
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        [
+          "c",
+          {
+            "t": "dict",
+            "v": [
+              [
+                "d",
+                {
+                  "t": "list",
+                  "v": [
+                    {
+                      "t": "bool",
+                      "v": true
+                    },
+                    {
+                      "t": "str",
+                      "v": "x"
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        ]
+      ]
+    },
+    "default": "{\"a\": [1, {\"b\": null}], \"c\": {\"d\": [true, \"x\"]}}"
+  },
+  {
+    "value": {
+      "t": "list",
+      "v": []
+    },
+    "default": "[]"
+  },
+  {
+    "value": {
+      "t": "dict",
+      "v": []
+    },
+    "default": "{}"
+  },
+  {
+    "value": {
+      "t": "int",
+      "v": "1"
+    },
+    "default": "1"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "3ff0000000000000"
+    },
+    "default": "1.0"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "4480f0cf064dd592"
+    },
+    "default": "1e+22"
+  },
+  {
+    "value": {
+      "t": "int",
+      "v": "1152921504606846976"
+    },
+    "default": "1152921504606846976"
+  },
+  {
+    "value": {
+      "t": "bool",
+      "v": true
+    },
+    "default": "true"
+  },
+  {
+    "value": {
+      "t": "null"
+    },
+    "default": "null"
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "é"
+    },
+    "default": "\"\\u00e9\""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": " "
+    },
+    "default": "\" \""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "😀"
+    },
+    "default": "\"\\ud83d\\ude00\""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "\u0000\u001f"
+    },
+    "default": "\"\\u0000\\u001f\\u007f\""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "\""
+    },
+    "default": "\"\\\"\""
+  },
+  {
+    "value": {
+      "t": "str",
+      "v": "\\"
+    },
+    "default": "\"\\\\\""
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "7ff8000000000000"
+    },
+    "default": "NaN"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "7ff0000000000000"
+    },
+    "default": "Infinity"
+  },
+  {
+    "value": {
+      "t": "float",
+      "hex": "fff0000000000000"
+    },
+    "default": "-Infinity"
+  },
+  {
+    "value": {
+      "t": "list",
+      "v": [
+        {
+          "t": "float",
+          "hex": "7ff8000000000000"
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "k",
+              {
+                "t": "float",
+                "hex": "7ff0000000000000"
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    "default": "[NaN, {\"k\": Infinity}]"
   }
 ]
