@@ -117,10 +117,11 @@ queued evaluation slices, so a blocked worker waits at most one slice.
 
 ### Dispatcher — port of `bridge.py`
 
-Same ops, same sorted orders, same caps, same trip-collapse. Writes are recorded as proposed
-ops with `tmp_N` ids and never applied. Embedded entries (`value`, `step`, `transform`) are
-read-only by construction, as on the server. The dispatcher records each run's read-set as it
-grows.
+Same ops, same sorted orders, same caps, same trip-collapse: one `_transport` call carries one
+op, and a reply piggybacks the projections the facade's memo will need (far endpoints, children,
+the call's roots). Writes are recorded as proposed ops and never applied; temp ids (`tmp_N`)
+and read-sets are the facade's, and a read-set reaches the engine with its call's result.
+Embedded entries (`value`, `step`, `transform`) are read-only by construction, as on the server.
 
 ### Pool and prewarm
 
@@ -151,7 +152,9 @@ parity.
 - In engine memory, keyed `(code, entry, element ids, inputs digest)`; each entry holds the
   result and its read-set.
 - A delta or a staged or unstaged op that touches a read-set evicts the entry. A run in flight
-  whose read-set is touched is discarded on return; reads it has not made yet see the new state.
+  when any transition lands is discarded on return and run again: its read-set is not known
+  until it returns, and its session's memo may hold projections the transition made stale, so
+  the session is dropped with it.
 - Bounded by entry count and bytes inside the CN-3 heap budget, least recently used first.
   A result above a per-entry size cap is not stored.
 - Errors are cached like values; `timeout` results are not.
