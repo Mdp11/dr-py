@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getCommitDiff, getCommitHistory, getModelAtRev, revertToCommit } from '../history';
+import { getCommitDiff, getCommitHistory, getCommitsDiff, revertToCommit } from '../history';
 
 function jsonFetch(captured: { path?: string; body?: unknown }, payload: unknown) {
 	return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -25,13 +25,28 @@ describe('history api', () => {
 		expect(res.has_more).toBe(false);
 	});
 
-	it('getModelAtRev hits /commits/{rev}/model', async () => {
+	it('getCommitsDiff hits /commits/diff with from and to', async () => {
 		const cap: { path?: string; body?: unknown } = {};
-		const res = await getModelAtRev(3, {
-			fetch: jsonFetch(cap, { elements: [], relationships: [] })
-		});
-		expect(cap.path).toContain('/commits/3/model');
-		expect(res.elements).toEqual([]);
+		const payload = {
+			from_rev: 1,
+			to_rev: 4,
+			source: 'journal',
+			elements: {
+				added: [{ id: 'e1', type_name: 'Node', properties: { label: 'A' }, rev: 4 }],
+				modified: [],
+				deleted: []
+			},
+			relationships: { added: [], modified: [], deleted: [] }
+		};
+		const res = await getCommitsDiff(1, 4, { fetch: jsonFetch(cap, payload) });
+		expect(cap.path).toContain('/commits/diff');
+		expect(cap.path).toContain('from=1');
+		expect(cap.path).toContain('to=4');
+		expect(res.elements.added.map((e) => e.id)).toEqual(['e1']);
+		expect(res.source).toBe('journal');
+		await expect(
+			getCommitsDiff(1, 4, { fetch: jsonFetch({}, { ...payload, source: 'other' }) })
+		).rejects.toThrow();
 	});
 
 	it('revertToCommit maps camelCase to snake_case body', async () => {

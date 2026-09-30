@@ -2678,9 +2678,11 @@ browses the project's durable commit journal:
   side — and converts it with `crToDiff` for `CompareDiff`, so the click costs
   O(commit) regardless of model size.
 - **Two-commit compare** — the "Compare" toggle lets the user select any two
-  revisions A and B; the same `computeDiff` path reconstructs both models and
-  renders the range diff. A warning banner is shown when the range spans a
-  rebind-carrying commit. This path is O(model) by design; only the per-commit Diff is journal-backed.
+  revisions A and B; one `GET /commits/diff` (`getCommitsDiff`) answers the net
+  change, which `crToDiff` converts for `CompareDiff`. The server folds the
+  journal over the range and reconstructs both sides itself only when the
+  journal cannot answer, so the drawer has one path. A warning banner is shown
+  when the range spans a rebind-carrying commit.
 - **Revert-to-commit** (`POST /commits/revert`) — gated on a quiet project:
   `state/quiet.ts`'s `isProjectQuiet()`, a five-term predicate (no staged
   MODEL ops, no staged ARTIFACT ops, no staged VIEW ops, no staged METAMODEL
@@ -3162,8 +3164,9 @@ src/
                         exponential backoff, TERMINAL on close 4401/4403/4404,
                         injectable socketFactory for tests; pure transport)
     api/history.ts      REST client for the commit-history endpoints:
-                        getCommitHistory (GET /commits, paged) and
-                        getModelAtRev (GET /commits/{rev}/model);
+                        getCommitHistory (GET /commits, paged),
+                        getCommitDiff (GET /commits/{rev}/diff),
+                        getCommitsDiff (GET /commits/diff) and
                         revertToCommit (POST /commits/revert)
     api/changeRequest.ts    compareModel + proposeCr (the dry-run
                         compare / apply-cr proposals)
@@ -3228,8 +3231,7 @@ src/
                         successful lease acquisition, unlike lock-notice.svelte.ts);
                         api/checkout.ts — the locks + commits REST client;
                         history.svelte.ts — commit-list store (paged
-                        GET /commits), rev→ModelOut reconstruction cache (Compare only; the per-commit Diff bypasses it),
-                        resetHistory/loadFirstPage/loadMore/modelAt;
+                        GET /commits), resetHistory/loadFirstPage/loadMore;
                         inspection-history.svelte.ts — the Inspector's
                         back/forward visit trail: in-memory stack + cursor (cap
                         50), pushed from select(), replayed with a re-entrancy

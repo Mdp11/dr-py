@@ -8,14 +8,13 @@
 		getHasMore,
 		getLoading,
 		resetHistory,
-		modelAt,
 		getCommits as _allCommits
 	} from '$lib/state/history.svelte';
 	import { onCommitEvent } from '$lib/state/realtime.svelte';
 	import { GitCommitVertical, RefreshCw, AlertTriangle, ArrowLeft } from '@lucide/svelte';
 	import CompareDiff from './CompareDiff.svelte';
-	import { computeDiff, type Diff } from '$lib/state/diff';
-	import { getCommitDiff, revertToCommit } from '$lib/api/history';
+	import type { Diff } from '$lib/state/diff';
+	import { getCommitDiff, getCommitsDiff, revertToCommit } from '$lib/api/history';
 	import { getRole, getModelRev, isProjectQuiet, applyDelta, beginReplicaCommit } from '$lib/state';
 	import { ConflictError, ValidationError } from '$lib/api';
 	import { crToDiff } from '$lib/state/cr';
@@ -56,13 +55,13 @@
 		}
 	}
 
-	// Two arbitrary revisions: both sides are reconstructed on the server and
-	// diffed here — inherently O(model).
+	// Two revisions: the server folds the journal over the range, or
+	// reconstructs both sides itself when the journal cannot answer.
 	async function showRangeDiff(fromRev: number, toRev: number): Promise<void> {
 		beginDiff(`r${fromRev} → r${toRev}`, spanCrossesRebind(fromRev, toRev));
 		try {
-			const [from, to] = await Promise.all([modelAt(fromRev), modelAt(toRev)]);
-			diff = computeDiff(from, to);
+			const d = await getCommitsDiff(fromRev, toRev);
+			diff = crToDiff({ ops: { elements: d.elements, relationships: d.relationships } });
 		} catch (e) {
 			diffError = e instanceof Error ? e.message : 'Failed to load diff';
 		}

@@ -29,7 +29,6 @@ vi.mock('$lib/state/history.svelte', () => ({
 	]),
 	getHasMore: vi.fn(() => false),
 	getLoading: vi.fn(() => false),
-	modelAt: vi.fn(),
 	resetHistory: vi.fn()
 }));
 // Only `onCommitEvent` is stubbed: the revert gate reads `isProjectQuiet()`,
@@ -51,11 +50,11 @@ vi.mock('$lib/state', async (orig) => {
 });
 vi.mock('$lib/api/history', async (orig) => {
 	const actual = await orig<typeof import('$lib/api/history')>();
-	return { ...actual, revertToCommit: vi.fn(), getCommitDiff: vi.fn() };
+	return { ...actual, revertToCommit: vi.fn(), getCommitDiff: vi.fn(), getCommitsDiff: vi.fn() };
 });
 
-import { loadFirstPage, modelAt } from '$lib/state/history.svelte';
-import { getCommitDiff, revertToCommit } from '$lib/api/history';
+import { loadFirstPage } from '$lib/state/history.svelte';
+import { getCommitDiff, getCommitsDiff, revertToCommit } from '$lib/api/history';
 import { applyDelta, beginReplicaCommit } from '$lib/state';
 // Left real by the `...actual` spread above so the revert gate is exercised
 // against the actual stores it reads in production.
@@ -126,20 +125,11 @@ describe('HistoryDrawer diff', () => {
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
 		expect(getCommitDiff).toHaveBeenCalledWith(2);
-		expect(modelAt).not.toHaveBeenCalled();
 		expect(document.body.textContent).toContain('+1 added');
 		unmount(c);
 	});
 
-	it('the two-revision Compare still reconstructs both sides', async () => {
-		vi.mocked(modelAt).mockImplementation(async (rev: number) =>
-			rev <= 1
-				? { elements: [], relationships: [] }
-				: {
-						elements: [{ id: 'e1', type_name: 'Node', properties: { label: 'A' }, rev: 2 }],
-						relationships: []
-					}
-		);
+	async function compareRange(): Promise<ReturnType<typeof mount>> {
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
 		flushSync();
 		await Promise.resolve();
@@ -154,10 +144,39 @@ describe('HistoryDrawer diff', () => {
 			.click();
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
-		expect(modelAt).toHaveBeenCalledWith(1);
-		expect(modelAt).toHaveBeenCalledWith(2);
+		return c;
+	}
+
+	it('the two-revision Compare asks the server for the range', async () => {
+		vi.mocked(getCommitsDiff).mockResolvedValue({
+			from_rev: 1,
+			to_rev: 2,
+			source: 'journal',
+			elements: {
+				added: [{ id: 'e1', type_name: 'Node', properties: { label: 'A' }, rev: 2 }],
+				modified: [],
+				deleted: []
+			},
+			relationships: { added: [], modified: [], deleted: [] }
+		});
+		const c = await compareRange();
+		expect(getCommitsDiff).toHaveBeenCalledOnce();
+		expect(getCommitsDiff).toHaveBeenCalledWith(1, 2);
 		expect(getCommitDiff).not.toHaveBeenCalled();
 		expect(document.body.textContent).toContain('+1 added');
+		unmount(c);
+	});
+
+	it('a failed range diff shows its error', async () => {
+		vi.mocked(getCommitsDiff).mockRejectedValue(new Error('boom'));
+		const c = await compareRange();
+		expect(document.body.textContent).toContain('boom');
+		Array.from(document.querySelectorAll('button'))
+			.find((b) => b.textContent?.includes('Back'))!
+			.click();
+		flushSync();
+		expect(document.body.textContent).toContain('second');
+		expect(document.body.textContent).not.toContain('boom');
 		unmount(c);
 	});
 });

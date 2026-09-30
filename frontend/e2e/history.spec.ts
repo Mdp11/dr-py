@@ -140,6 +140,24 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 	// Confirm we're back in list mode.
 	await expect(commitRows.first()).toBeVisible({ timeout: 10_000 });
 
+	// Two-revision Compare: one range-diff request, no per-revision model fetch.
+	const modelRequests: string[] = [];
+	page.on('request', (req) => {
+		if (/\/commits\/\d+\/model(\?|$)/.test(req.url())) modelRequests.push(req.url());
+	});
+	const rangeResponse = page.waitForResponse(
+		(r) => r.request().method() === 'GET' && /\/commits\/diff\?/.test(r.url())
+	);
+	await commitRows.first().getByRole('button', { name: 'Compare', exact: true }).click();
+	await commitRows.nth(1).getByRole('button', { name: 'Select B', exact: true }).click();
+	expect((await rangeResponse).status()).toBe(200);
+	await expect(historyDrawer.getByText(/added|modified|deleted/i).first()).toBeVisible({
+		timeout: 20_000
+	});
+	expect(modelRequests).toEqual([]);
+	await historyDrawer.getByRole('button', { name: 'Back' }).click();
+	await expect(commitRows.first()).toBeVisible({ timeout: 10_000 });
+
 	// 7. Revert to the SECOND (older) commit row — this is the commit BEFORE the
 	//    most recent one, so revert will undo the last edit (B → A).
 	//    The history is newest-first, so nth(1) is the second-oldest visible commit.

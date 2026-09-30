@@ -3,11 +3,11 @@ import {
 	CommitDiffSchema,
 	CommitHistoryResponseSchema,
 	CommitResponseSchema,
-	ModelOutSchema,
+	RangeDiffSchema,
 	type CommitDiff,
 	type CommitHistoryResponse,
 	type CommitResponse,
-	type ModelOut
+	type RangeDiff
 } from './types';
 
 /** GET /commits — durable commit history, newest-first, paged. */
@@ -26,15 +26,24 @@ export function getCommitHistory(
 	);
 }
 
-/** GET /commits/{rev}/model — full model as it existed at `rev`. */
-export function getModelAtRev(rev: number, cfg?: ClientConfig): Promise<ModelOut> {
-	return apiFetch(`/commits/${rev}/model`, { method: 'GET', schema: ModelOutSchema }, cfg);
-}
-
 /** GET /commits/{rev}/diff — one commit's changes, rendered by the server
  * from the journal row (no model reconstruction on either side). */
 export function getCommitDiff(rev: number, cfg?: ClientConfig): Promise<CommitDiff> {
 	return apiFetch(`/commits/${rev}/diff`, { method: 'GET', schema: CommitDiffSchema }, cfg);
+}
+
+/** GET /commits/diff — the net change between two revisions; the server
+ * folds the journal over the range or reconstructs both sides itself. */
+export function getCommitsDiff(
+	fromRev: number,
+	toRev: number,
+	cfg?: ClientConfig
+): Promise<RangeDiff> {
+	return apiFetch(
+		'/commits/diff',
+		{ method: 'GET', query: { from: fromRev, to: toRev }, schema: RangeDiffSchema },
+		cfg
+	);
 }
 
 /** POST /commits/revert — revert-to-commit. Throws ConflictError (409:

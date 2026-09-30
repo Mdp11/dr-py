@@ -901,6 +901,16 @@ export const CommitDiffSchema = z.object({
 });
 export type CommitDiff = z.infer<typeof CommitDiffSchema>;
 
+/** GET /commits/diff — the net change between two revisions. */
+export const RangeDiffSchema = z.object({
+	from_rev: z.number().int(),
+	to_rev: z.number().int(),
+	source: z.enum(['journal', 'reconstruction']),
+	elements: CrOpsSchema.shape.elements,
+	relationships: CrOpsSchema.shape.relationships
+});
+export type RangeDiff = z.infer<typeof RangeDiffSchema>;
+
 export const ProjectSettingsSchema = z.object({
 	strict_mode: z.boolean()
 });

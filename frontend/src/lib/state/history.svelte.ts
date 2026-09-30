@@ -1,18 +1,15 @@
 /**
  * History store for the commit-history browser. Holds the loaded
- * commit page(s), the paging cursor, and a rev->ModelOut reconstruction cache
- * so flipping between diffs does not refetch a rev already materialized.
+ * commit page(s) and the paging cursor.
  */
-import { SvelteMap } from 'svelte/reactivity';
-import { getCommitHistory, getModelAtRev } from '$lib/api/history';
-import type { CommitSummary, ModelOut } from '$lib/api/types';
+import { getCommitHistory } from '$lib/api/history';
+import type { CommitSummary } from '$lib/api/types';
 
 const PAGE = 50;
 
 let _commits: CommitSummary[] = $state([]);
 let _hasMore = $state(false);
 let _loading = $state(false);
-const _modelCache = new SvelteMap<number, ModelOut>();
 
 export function getCommits(): CommitSummary[] {
 	return _commits;
@@ -48,20 +45,8 @@ export async function loadMore(): Promise<void> {
 	}
 }
 
-/** Model at `rev`, cached. rev < 0 resolves to the empty model (for rev-1 of
- * the baseline commit). */
-export async function modelAt(rev: number): Promise<ModelOut> {
-	if (rev < 0) return { elements: [], relationships: [] };
-	const hit = _modelCache.get(rev);
-	if (hit) return hit;
-	const m = await getModelAtRev(rev);
-	_modelCache.set(rev, m);
-	return m;
-}
-
 export function resetHistory(): void {
 	_commits = [];
 	_hasMore = false;
 	_loading = false;
-	_modelCache.clear();
 }
