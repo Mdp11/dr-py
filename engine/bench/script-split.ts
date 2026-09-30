@@ -112,9 +112,11 @@ async function main(): Promise<void> {
 		let ms = 0;
 		for (const body of BODIES) {
 			const run = await host.run({ code: `def value(els):\n    ${body}\n`, entry: 'value', calls });
-			const failed = run.results.find((r) => r.error !== null);
-			if (failed) throw new Error(String(failed.error));
-			if (mode === 'record') for (const r of run.results) resultTexts.push(r.text!);
+			for (const r of run.results) {
+				const { error } = JSON.parse(r.text) as { error: { message: string } | null };
+				if (error !== null) throw new Error(error.message);
+			}
+			if (mode === 'record') for (const r of run.results) resultTexts.push(r.text);
 			trips += run.trips;
 			ms += run.ms;
 		}

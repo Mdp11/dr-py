@@ -119,7 +119,7 @@ export type ScriptCallsParams = {
 	calls: { element_ids: string[]; inputs_text?: string; doc_text?: string }[];
 };
 export type ScriptCallsResult = {
-	results: { text: string | null; error: string | null }[];
+	results: { text: string }[];
 	trips: number;
 	ms: number;
 	boot_ms: number;

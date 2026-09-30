@@ -251,9 +251,9 @@ event     {event, …}                     engine → client, unsolicited
   navigation's page marked with the reason (AD-31), an `issues` call's or a rebind preview's
   answer unmarked, exactly as the server always gave it; any other 501 is an error.
 - Scripts: `scriptCalls {code, entry, calls: [{element_ids, inputs_text?, doc_text?}]}` →
-  `{results: [{text, error}], trips, ms, boot_ms}`, one result per call in call order, each
-  the script's `{payload, reads}` as the JSON text the script side wrote (handed on unparsed)
-  or its `ExcName: message`, exactly one of the two. `entry` is `value`, `step` or `transform`
+  `{results: [{text}], trips, ms, boot_ms}`, one result per call in call order, each the
+  harness's answer as the JSON text the script side wrote (handed on unparsed):
+  `{payload, error, reads, stdout}`, where `error` is null or `{kind, message, traceback}`. `entry` is `value`, `step` or `transform`
   (`script` is a 422); `inputs_text` and `doc_text` are JSON text, read by the exact parser
   (AD-26). Params are read at arrival, else a 422; then a 409 `replica is not ready` unless
   `ready`, and a 501 `scripts are not available` where the host gave the engine no script

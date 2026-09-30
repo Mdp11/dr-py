@@ -18,7 +18,7 @@ import {
 
 type Fixture = { metamodel: MetamodelDoc; elements: string[]; relationships: string[] };
 type CallsResult = {
-	results: { text: string | null; error: string | null }[];
+	results: { text: string }[];
 	trips: number;
 	ms: number;
 	boot_ms: number;
@@ -62,8 +62,9 @@ const batch = (code: string, ids: string[][], entry = 'value') => ({
 	calls: ids.map((element_ids) => ({ element_ids }))
 });
 
-const payloadOf = (result: { text: string | null }) =>
-	(JSON.parse(result.text ?? 'null') as { payload: { value: unknown } }).payload.value;
+const answer = (result: { text: string }) =>
+	JSON.parse(result.text) as { payload: { value: unknown }; error: { message: string } | null };
+const payloadOf = (result: { text: string }) => answer(result).payload.value;
 
 const all: { dispose(): void }[] = [];
 afterAll(() => all.forEach((each) => each.dispose()));
@@ -85,13 +86,13 @@ describe('scriptCalls on a ready replica', () => {
 			'scriptCalls',
 			batch(NAME, [['n2'], ['n1'], ['n3'], ['n1']])
 		);
-		expect(result.results.map((r) => r.error)).toEqual([null, null, null, null]);
+		expect(result.results.map((r) => answer(r).error)).toEqual([null, null, null, null]);
 		expect(result.results.map(payloadOf)).toEqual(['two', 'one', 'three', 'one']);
 		expect(result.trips).toBe(0);
 		expect(result.ms).toBeGreaterThanOrEqual(0);
 		expect(result.boot_ms).toBeGreaterThan(0);
 		expect(result.results[0]!.text).toBe(
-			'{"payload": {"kind": "scalar", "value": "two"}, "reads": [["el", "n2"]]}'
+			'{"payload": {"kind": "scalar", "value": "two"}, "error": null, "reads": [["el", "n2"]], "stdout": ""}'
 		);
 	});
 
@@ -112,7 +113,7 @@ describe('scriptCalls on a ready replica', () => {
 			'scriptCalls',
 			batch('def value(els): return [r.destination().name for r in els[0].outgoing()][0]', [['n2']])
 		);
-		expect(through.results[0]!.error).toBeNull();
+		expect(answer(through.results[0]!).error).toBeNull();
 		await client.call('unstage', { what: 'all' });
 		const committed = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]));
 		expect(payloadOf(committed.results[0]!)).toBe('one');
@@ -129,7 +130,7 @@ describe('scriptCalls on a ready replica', () => {
 				}
 			]
 		});
-		expect(result.results[0]!.error).toBeNull();
+		expect(answer(result.results[0]!).error).toBeNull();
 		expect(result.results[0]!.text).toContain('2.5');
 		const transform = await client.call<CallsResult>('scriptCalls', {
 			code: 'def transform(doc): return doc',
@@ -137,7 +138,7 @@ describe('scriptCalls on a ready replica', () => {
 			calls: [{ element_ids: [], doc_text: '{"f": 1.0, "i": 1, "big": 1152921504606846976}' }]
 		});
 		expect(transform.results[0]!.text).toBe(
-			'{"payload": {"kind": "json", "value": {"f": 1.0, "i": 1, "big": 1152921504606846976}}, "reads": []}'
+			'{"payload": {"kind": "json", "value": {"f": 1.0, "i": 1, "big": 1152921504606846976}}, "error": null, "reads": [], "stdout": ""}'
 		);
 	});
 
@@ -149,8 +150,8 @@ describe('scriptCalls on a ready replica', () => {
 				['n2']
 			])
 		);
-		expect(result.results[0]).toEqual({ text: null, error: 'ValueError: x' });
-		expect(result.results[1]!.error).toBeNull();
+		expect(answer(result.results[0]!).error?.message).toBe('ValueError: x');
+		expect(answer(result.results[1]!).error).toBeNull();
 	});
 
 	it('answers a bridge request inside the message handler, with no scheduler job', async () => {
@@ -314,7 +315,7 @@ describe('a replica that goes while a script call is in flight', () => {
 		all.push(tracker);
 		await openReplica(client, bridgeModel(), doc);
 		const first = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]));
-		expect(first.results[0]!.error).toBeNull();
+		expect(answer(first.results[0]!).error).toBeNull();
 		await client.call('close');
 		expect(await refusal(client.call('scriptCalls', batch(NAME, [['n1']])))).toEqual({
 			status: 409,
@@ -565,9 +566,11 @@ describe('a host answer the service cannot trust', () => {
 		expect(answer.detail).toMatch(/1 result.*2 calls/);
 	}, 60_000);
 
-	it('refuses 500 a host whose result is not an object', async () => {
-		const answer = await refused(shaped((results) => [results[0], null]));
-		expect(answer.status).toBe(500);
-		expect(answer.detail).toMatch(/not an object/);
+	it('refuses 500 a host whose result has no text', async () => {
+		for (const bad of [null, {}, { text: null }, { text: 3 }]) {
+			const answer = await refused(shaped((results) => [results[0], bad]));
+			expect(answer.status).toBe(500);
+			expect(answer.detail).toMatch(/without text/);
+		}
 	}, 60_000);
 });

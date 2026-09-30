@@ -1,6 +1,7 @@
 import type { Value } from '../value/types.ts';
 
-export type ScriptEntry = 'value' | 'step' | 'transform';
+/** `script` is a console run: one call, answered as a run (`stdout`, `result_repr`, `truncated`, `error`?). */
+export type ScriptEntry = 'value' | 'step' | 'transform' | 'script';
 
 export type ScriptCall = {
 	readonly elementIds: readonly string[];
@@ -11,11 +12,17 @@ export type ScriptCall = {
 export type ScriptBatch = {
 	readonly code: string;
 	readonly entry: ScriptEntry;
+	/** Runs each call on a namespace of its own, answered as a console run; the `script` entry always does. */
+	readonly console?: boolean;
 	readonly calls: readonly ScriptCall[];
 };
 
-/** One per call: `_dr_call_entry`'s `{payload, reads}` as JSON text, or the error. Exactly one is non-null. */
-export type RawScriptResult = { readonly text: string | null; readonly error: string | null };
+/**
+ * One per call: the harness's result dict as the JSON text Python's default `json.dumps` wrote,
+ * `{payload, error, reads, stdout}` for an embedded call and `{stdout, result_repr, truncated,
+ * error?}` for a console run. A host that fails a call writes the same shape.
+ */
+export type RawScriptResult = { readonly text: string };
 
 export type ScriptRun = {
 	readonly results: readonly RawScriptResult[];

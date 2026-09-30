@@ -269,6 +269,29 @@
       ]
     },
     {
+      "name": "boot_stdout_carry",
+      "group": "value",
+      "mode": "embedded",
+      "entry": "value",
+      "code": "print(\"booting\")\n\n\ndef value(els):\n    print(\"call\", els[0].id)\n    return els[0].id\n",
+      "calls": [
+        {
+          "element_ids": [
+            "n1"
+          ]
+        },
+        {
+          "element_ids": [
+            "n2"
+          ]
+        }
+      ],
+      "results": [
+        "{\"payload\": {\"kind\": \"scalar\", \"value\": \"n1\"}, \"error\": null, \"reads\": [[\"el\", \"n1\"]], \"stdout\": \"booting\\ncall n1\\n\"}",
+        "{\"payload\": {\"kind\": \"scalar\", \"value\": \"n2\"}, \"error\": null, \"reads\": [[\"el\", \"n2\"]], \"stdout\": \"call n2\\n\"}"
+      ]
+    },
+    {
       "name": "script_print_result",
       "group": "script",
       "mode": "console",

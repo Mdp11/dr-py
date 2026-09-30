@@ -326,7 +326,15 @@ export {
 	projectRoots,
 	type BridgeLimits
 } from './script/bridge.ts';
-export { createGuest, GUEST_BOOTSTRAP, type Guest, type Interpreter } from './script/guest.ts';
+export {
+	createGuest,
+	DEFAULT_HARNESS_LIMITS,
+	GUEST_BOOTSTRAP,
+	type Guest,
+	type GuestHooks,
+	type HarnessLimits,
+	type Interpreter
+} from './script/guest.ts';
 export type {
 	Bridge,
 	RawScriptResult,

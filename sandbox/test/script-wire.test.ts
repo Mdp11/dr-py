@@ -31,6 +31,12 @@ describe('a script batch crossing postMessage', () => {
 		expect(back.entry).toBe('value');
 	});
 
+	it('keeps a console batch a console batch, and leaves the flag absent otherwise', () => {
+		const calls = [{ elementIds: [] }];
+		expect(crossed({ code: '', entry: 'value', console: true, calls }).console).toBe(true);
+		expect('console' in crossed({ code: '', entry: 'value', calls })).toBe(false);
+	});
+
 	it('keeps an absent input absent and an explicit null null', () => {
 		const back = crossed({
 			code: '',

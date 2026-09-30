@@ -842,11 +842,11 @@ class Service {
 					`the script host answered ${results.length} results for ${batch.calls.length} calls`
 				);
 			}
-			if (results.some((one) => typeof one !== 'object' || one === null)) {
-				throw new Refused(500, 'the script host answered a result that is not an object');
+			if (results.some((one) => typeof one?.text !== 'string')) {
+				throw new Refused(500, 'the script host answered a result without text');
 			}
 			return {
-				results: results.map(({ text, error }) => ({ text, error })),
+				results: results.map(({ text }) => ({ text })),
 				trips,
 				ms,
 				boot_ms

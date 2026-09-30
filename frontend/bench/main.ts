@@ -464,8 +464,10 @@ async function scripts(): Promise<Measures> {
 			entry: 'value',
 			calls
 		});
-		const failed = result.results.find((one) => one.error !== null);
-		if (failed !== undefined) throw new Error(`a script cell failed: ${failed.error}`);
+		for (const one of result.results) {
+			const { error } = JSON.parse(one.text) as { error: { message: string } | null };
+			if (error !== null) throw new Error(`a script cell failed: ${error.message}`);
+		}
 		return result;
 	};
 	const warm = await run('def value(els):\n    return els[0].name\n', [{ element_ids: [ids[0]!] }]);

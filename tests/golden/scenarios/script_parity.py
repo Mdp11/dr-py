@@ -172,6 +172,14 @@ def _cases() -> list[Case]:
             'def transform(doc):\n    return {"n": len(doc["rows"]), "rows": doc["rows"], "done": True}\n',
             _call(doc={"rows": [1, 2.5, "x"]}),
         ),
+        _embedded(
+            "value",
+            "boot_stdout_carry",
+            "value",
+            'print("booting")\n\n\ndef value(els):\n    print("call", els[0].id)\n    return els[0].id\n',
+            _call(n1),
+            _call(n2),
+        ),
         # console runs
         _console(
             "script",

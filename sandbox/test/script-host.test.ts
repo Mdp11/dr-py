@@ -93,10 +93,7 @@ describe('run', () => {
 	it('answers each bridge request and hands back results, trips and time', async () => {
 		const { host, dispatched } = setup();
 		const run = await host.run(batch('echo', [{ elementIds: ['a', 'b'] }, { elementIds: ['c'] }]));
-		expect(run.results).toEqual([
-			{ text: '<req:a,b>|["a","b"]', error: null },
-			{ text: '<req:c>|["c"]', error: null }
-		]);
+		expect(run.results).toEqual([{ text: '<req:a,b>|["a","b"]' }, { text: '<req:c>|["c"]' }]);
 		expect(run.trips).toBe(2);
 		expect(run.ms).toBe(3);
 		expect(dispatched).toEqual(['req:a,b', 'req:c']);

@@ -28,29 +28,24 @@ function blockForever(): never {
 	for (;;) Atomics.wait(cell, 0, 0);
 }
 
-function results(
-	batch: WireBatch,
-	roots: string[]
-): { text: string | null; error: string | null }[] {
+function results(batch: WireBatch, roots: string[]): { text: string }[] {
 	const calls = batchFromWire(batch).calls;
 	switch (batch.code) {
 		case 'echo':
 			return calls.map((call, i) => ({
-				text: `${transport(`req:${call.elementIds.join(',')}`)}|${roots[i]}`,
-				error: null
+				text: `${transport(`req:${call.elementIds.join(',')}`)}|${roots[i]}`
 			}));
 		case 'big':
-			return [{ text: transport('big'), error: null }];
+			return [{ text: transport('big') }];
 		case 'slow': {
 			const start = Date.now();
 			while (Date.now() < start + 150);
-			return [{ text: `${start},${Date.now()}`, error: null }];
+			return [{ text: `${start},${Date.now()}` }];
 		}
 		case 'floats':
 			return [
 				{
-					text: dumpDefault(calls.map((call) => [call.inputs ?? null, call.doc ?? null])),
-					error: null
+					text: dumpDefault(calls.map((call) => [call.inputs ?? null, call.doc ?? null]))
 				}
 			];
 		case 'violation':
