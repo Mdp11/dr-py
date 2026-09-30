@@ -127,8 +127,8 @@ supported) — see that spec's "Amendments" section for the rationale: restore-m
 inverses are schema-checked at the core mutation boundary, so no single replay order is
 valid on both sides of a schema swap without teaching the core a schema-independent restore
 mode (deferred, not designed away — the journal already carries the full-state rebind-back
-inverse a future phase would need to lift the 409). Also folds in F-9 (HistoryDrawer
-consuming `GET /commits/{rev}/diff`), which has been parked three times.
+inverse a future phase would need to lift the 409). F-9 (HistoryDrawer
+consuming the diff routes) is done.
 Source: master spec §12; handoffs 2026-08-09 → 2026-08-11; 2026-08-16 metamodel commit-flow
 design. Size: large.
 
@@ -705,10 +705,10 @@ load-bearing timing hack.
 - `retryMetamodelLease` clears `_lockedBy` before the retry resolves, so the editor is
   briefly writable mid-round-trip; typed characters are kept, nothing is lost.
 
-### F-9 · HistoryDrawer doesn't consume `GET /commits/{rev}/diff` · `open` · *parked 3×*
-The backend endpoint exists and renders full before/after reconstruction; the drawer
-doesn't use it. No client-side commit-diff schema exists yet. Parked repeatedly in favour
-of other work — folds naturally into R-2.
+### F-9 · HistoryDrawer doesn't consume `GET /commits/{rev}/diff` · `done` (2026-09-30, feat/eval-history-range-diff) · *parked 3×*
+Closed in two steps: the per-commit Diff calls `GET /commits/{rev}/diff` (`K-6`), and the
+two-revision Compare calls `GET /commits/diff?from=&to=`, a fold of the journal's entity
+states over the range (this plan).
 
 ### F-10 · Invalid `${name}` template blocks Export, not Save · `done` (2026-08-19, feat/exporter-v2-phase1) · spec divergence · *2026-08-14*
 Resolved by amending the spec rather than changing behaviour: the shipped stance (block
@@ -888,7 +888,8 @@ inverse patch only carries touched keys. `GET /commits/{rev}/diff` is now O(comm
 frontend's per-commit Diff was switched to it (it previously fetched `GET /commits/{rev}/model`
 twice and diffed client-side, so the backend route had no app caller). Measured at 320k:
 11 ms on the journal path vs. 42.7 s reconstructing (+1.6 GB transient RSS). The two-revision
-Compare still reconstructs (O(model), deferred by design). Baseline rows keep NULL. Also folds
+Compare first reconstructed (O(model)); it now folds the journal too (`GET /commits/diff`,
+2026-09-30). Baseline rows keep NULL. Also folds
 the "backfill or tolerate NULL" question: NULL is tolerated, never backfilled.
 
 Measured 2026-08-26 on a 320k-element fixture (212 MiB snapshot): each `reconstruct_model_at`
@@ -1084,6 +1085,28 @@ metamodel + model + view + artifact bundle in one request, so it is not the smal
 different mechanism than `read_capped_body` (Starlette parses multipart itself; the cap has to
 land on the parser or on the parts, not on a byte stream the route reads). Same 413 contract when
 it lands, so a client can keep telling "too large" from "malformed".
+
+### K-94 · The range diff's equality ignores `1` against `1.0`, and its randomized test skips nested values · `open` · *2026-09-30*
+The range diff compares `type_name` and `properties` with Python `==`, so a change from `1` to
+`1.0` (or `True` to `1`) renders as no change, on the journal path and on reconstruction alike.
+The randomized fold-versus-reconstruction test (`tests/api/test_range_diff.py`) draws string,
+integer and float properties only: nested list and dict values, and `1` against `1.0` on one
+property, are unpinned. It runs on SQLite, so Postgres's JSON round trip of `2**53+1` and `1.0`
+in `entity_states` is not exercised. Fix direction: add a list-, a dict- and a mixed int/float
+property to the test metamodel; decide whether the diff should tell `1` from `1.0`; run the
+randomized test once against Postgres.
+
+### K-95 · A range across a `touch_model` hole reconstructs from the journal only · `open` · *2026-09-30*
+The legacy `POST /model/elements` bumps `model_rev` without a journal row. A range spanning that
+rev is not contiguous, so it reconstructs, and reconstruction replays the journal, so the element
+the legacy route created is absent from both sides of the diff (probed 2026-09-30: the range's
+`added` lists the journaled elements only). Left as is: the route is legacy and the journal is
+the history. Fix direction: retire the legacy write route, or journal it.
+
+### K-96 · Test hygiene in the range diff's tests · `open` · *2026-09-30*
+`from_gt_head` in `test_route_refuses_a_range_outside_the_history` (`(head+1, head+2)`) cannot
+be told from `to_gt_head`: any `from` above head with `from <= to` also has `to` above head, so
+the case is a duplicate to drop or fold into `to_gt_head`.
 
 ### K-20 · The trigram search index was built inline by `IndexSet.rebuild()` · `done` (2026-08-26, perf/deferred-search-index) · perf · *2026-08-26*
 Measured on a 320k-element / 239k-relationship fixture (212 MiB snapshot — production

@@ -168,7 +168,7 @@ describe('HistoryDrawer diff', () => {
 	});
 
 	it('a failed range diff shows its error', async () => {
-		vi.mocked(getCommitsDiff).mockRejectedValue(new Error('boom'));
+		vi.mocked(getCommitsDiff).mockRejectedValueOnce(new Error('boom'));
 		const c = await compareRange();
 		expect(document.body.textContent).toContain('boom');
 		Array.from(document.querySelectorAll('button'))

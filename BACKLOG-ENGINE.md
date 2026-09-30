@@ -59,7 +59,7 @@ read surfaces default to the engine behind per-surface switches, the wait for `r
 fallback notice and the retry overlay, shadow comparison in dev and e2e, and the browser
 benchmark; the forked store — `staging` defaults to `engine`, the user's edits stage in the
 replica's working copy, the legacy store lives behind `staging: legacy`) — and watches `K-32`.
-C (evaluation) is in progress, C's plans 1–5, 6a and 7 of 8 built (this paragraph tells plans 1–3): the engine holds the project's artifacts —
+C (evaluation) is done, its eight plans built (this paragraph tells plans 1–3): the engine holds the project's artifacts —
 the committed payloads the shell fetches and follows, the staged entries mirrored from the
 frontend's buffer (AD-30) — and serves navigation and criteria search over the working copy,
 by default (`navigation` and `criteria` surfaces, held to the routes by fixture and by shadow
@@ -776,7 +776,7 @@ branch, or drop the server side when the engine's is the only one left (F).
 ### K-91 · One frontend test, the download route's engine case, timed out once under a full run · `open` · *2026-09-29*
 `frontend/src/lib/api/__tests__/download-route.test.ts` "answers the engine's committed bytes as
 an application/json Blob and asks the server nothing", the first test of its file, hit its 5 s
-limit in 1 of 2 full `dr-test` runs and passed in the rerun, on a loaded host (its cold worker
+limit in 1 of 2 full `dr-test` runs and passed in the rerun (two of its tests timed out in a later full run, 2026-09-30, and pass alone, 7 of 7), on a loaded host (its cold worker
 start and a 4 MiB-part file share the clock). Fix direction: find what the test waits on that a
 loaded host stretches, and wait on that signal instead of the clock.
 
