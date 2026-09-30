@@ -441,3 +441,95 @@ describe('the host across close and open', () => {
 		expect(tracker.hosts[1]).not.toBe(tracker.hosts[0]);
 	}, 60_000);
 });
+
+describe('the host boots again where it can', () => {
+	/** The real Node host, whose first boot attempt fails after `delay` ms, as a fetch of the interpreter's files may. */
+	function failingFirstBoot(delay: number) {
+		const real = tracked();
+		all.push(real);
+		let attempts = 0;
+		let failing: Promise<never> | null = null;
+		const factory: ScriptHostFactory = (bridge) => {
+			const host = real.factory(bridge);
+			return {
+				boot() {
+					if (failing !== null) return failing;
+					if (attempts++ > 0) return host.boot();
+					failing = new Promise<never>((_, reject) =>
+						setTimeout(() => {
+							failing = null;
+							reject(new Error('pyodide fetch failed'));
+						}, delay)
+					);
+					return failing;
+				},
+				run: (batch) => host.run(batch),
+				dispose: () => host.dispose()
+			};
+		};
+		return { real, factory };
+	}
+
+	it('does not keep a failed boot: the next call boots again on the same host', async () => {
+		const { real, factory } = failingFirstBoot(10);
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await openReplica(client, bridgeModel(), doc);
+		expect(await refusal(client.call('scriptCalls', batch(NAME, [['n1']])))).toEqual({
+			status: 500,
+			detail: 'pyodide fetch failed'
+		});
+		const next = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n2']]));
+		expect(payloadOf(next.results[0]!)).toBe('two');
+		expect(next.boot_ms).toBeGreaterThan(0);
+		expect(real.hosts).toHaveLength(1);
+	}, 60_000);
+
+	it('answers every call waiting on the same failed boot 500, none as a closed replica', async () => {
+		const { factory } = failingFirstBoot(50);
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await openReplica(client, bridgeModel(), doc);
+		const refused = await Promise.all(
+			[['n1'], ['n2'], ['n3']].map((ids) => refusal(client.call('scriptCalls', batch(NAME, [ids]))))
+		);
+		for (const each of refused) {
+			expect(each).toEqual({ status: 500, detail: 'pyodide fetch failed' });
+		}
+		const next = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n3']]));
+		expect(payloadOf(next.results[0]!)).toBe('three');
+	}, 60_000);
+
+	it('goes through boot() for every call and reports the boot that serves it', async () => {
+		// A host that reboots after a crash, as the browser host does: `boot()` is idempotent while it lives.
+		const real = tracked();
+		all.push(real);
+		let generation = 1;
+		let crashNext = false;
+		const factory: ScriptHostFactory = (bridge) => {
+			const host = real.factory(bridge);
+			return {
+				boot: () => host.boot().then(() => ({ ms: generation })),
+				async run(batch) {
+					if (crashNext) {
+						crashNext = false;
+						generation++;
+						throw new Error('the script worker stopped');
+					}
+					return host.run(batch);
+				},
+				dispose: () => host.dispose()
+			};
+		};
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await openReplica(client, bridgeModel(), doc);
+		expect((await client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]))).boot_ms).toBe(1);
+		crashNext = true;
+		expect(await refusal(client.call('scriptCalls', batch(NAME, [['n1']])))).toEqual({
+			status: 500,
+			detail: 'the script worker stopped'
+		});
+		const after = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n2']]));
+		expect(after.boot_ms).toBe(2);
+		expect(payloadOf(after.results[0]!)).toBe('two');
+		expect(real.hosts).toHaveLength(1);
+	}, 60_000);
+});

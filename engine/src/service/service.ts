@@ -589,11 +589,8 @@ class Service {
 	private issuesPosted = 0;
 	// The calls waiting for the store: for a sweep `validateModel` restarted, or for a rescan.
 	private readonly waiting = new Set<Call>();
-	// The script host, made by the first `scriptCalls` and disposed by `close`, with its one boot.
-	private scripting: {
-		readonly host: ScriptHost;
-		readonly booted: Promise<{ ms: number }>;
-	} | null = null;
+	// The script host, made by the first `scriptCalls` and disposed by `close`; the host owns its boots.
+	private scripting: ScriptHost | null = null;
 	// The bridge's dispatcher over the working copy it was built for, and only that one.
 	private bridged: { readonly wc: WorkingCopy; readonly dispatcher: BridgeDispatcher } | null =
 		null;
@@ -815,19 +812,25 @@ class Service {
 	/**
 	 * The call belongs to the replica it arrived on: it is refused, `replica
 	 * closed`, if that replica was dropped before the run began or by the time
-	 * it ended, and the bridge answers a run nothing but that replica.
+	 * it ended, and the bridge answers a run nothing but that replica. Every
+	 * call goes through `boot()`, which a live host answers at once and a host
+	 * that failed or stopped starts over; a failed boot is refused, not kept.
 	 */
 	private async runScripts(batch: ScriptBatch): Promise<ScriptCallsResult> {
 		this.ready();
 		const epoch = this.epoch;
-		const { host, booted } = this.scriptHost();
+		const host = this.scriptHost();
 		const before = this.runs;
 		let pinned = false;
 		let next!: () => void;
 		this.runs = new Promise<void>((resolve) => (next = resolve));
 		try {
-			const { ms: boot_ms } = await booted;
+			// Calls waiting on one boot share it, and share its failure.
+			await host.boot();
 			await before;
+			this.stillReady(epoch);
+			// Again: a run before this one may have stopped the host, which boots anew.
+			const { ms: boot_ms } = await host.boot();
 			this.stillReady(epoch);
 			this.runEpoch = epoch;
 			pinned = true;
@@ -841,7 +844,7 @@ class Service {
 			};
 		} catch (error) {
 			// `close` disposed the host under the run.
-			if (this.scripting?.host !== host) throw new Refused(409, 'replica closed');
+			if (this.scripting !== host) throw new Refused(409, 'replica closed');
 			throw error;
 		} finally {
 			if (pinned) this.runEpoch = null;
@@ -849,18 +852,12 @@ class Service {
 		}
 	}
 
-	/** The script host, made and booted on first use. */
-	private scriptHost(): NonNullable<typeof this.scripting> {
+	/** The script host, made on first use. */
+	private scriptHost(): ScriptHost {
 		if (this.scripting === null) {
 			const factory = this.deps.scripts;
 			if (factory === undefined) throw new Refused(501, 'scripts are not available');
-			const host = factory(this.bridge);
-			try {
-				this.scripting = { host, booted: host.boot() };
-			} catch (error) {
-				host.dispose();
-				throw error;
-			}
+			this.scripting = factory(this.bridge);
 		}
 		return this.scripting;
 	}
@@ -1363,7 +1360,7 @@ class Service {
 		this.enter('opening');
 		const scripting = this.scripting;
 		this.scripting = null;
-		scripting?.host.dispose();
+		scripting?.dispose();
 		return null;
 	}
 

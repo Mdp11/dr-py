@@ -268,7 +268,10 @@ event     {event, …}                     engine → client, unsolicited
   replica went before its run began or by the time it ended is answered 409 `replica
   closed` (`replica is not ready` after a divergence), never with results. A `stage`,
   `unstage` or delta on the same replica does not end a run. The host is made at the first
-  call and disposed by `close`; a replica opened again boots another.
+  call and disposed by `close`; a replica opened again boots another. `boot_ms` is the boot
+  that serves the call: every call goes through the host's `boot()`, so a host that failed to
+  boot or stopped mid-run starts over on the next call, and a failed boot (a 500 for every
+  call waiting on it) is not remembered by the engine.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed
