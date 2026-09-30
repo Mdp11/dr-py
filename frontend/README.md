@@ -1918,6 +1918,9 @@ a button. Both requests go through the `compare` surface (`engine` by default;
   Preview and Create CR are viewer-allowed (`POST /model/compare` is a read-only
   POST); in apply-cr mode Preview is gated on `canEdit()` too, since it goes
   through `POST /model/apply-cr`, which is deliberately treated as a write.
+  Create CR refuses a change request that names a temporary id
+  (`crHasTempIds`): an engine diff over a staged create would save an id no
+  committed model will hold.
 
 ### Named views and the active view
 

@@ -207,6 +207,25 @@ describe('ModelChangeDialog — compare mode', () => {
 		expect((inv.ops as typeof CR_DOC.ops).elements.deleted.map((e) => e.id)).toEqual(['n1']);
 	});
 
+	it('Create CR refuses a change request naming a staged create’s temporary id', async () => {
+		const staged = {
+			...CR_DOC,
+			ops: { ...CR_DOC.ops, elements: { ...CR_DOC.ops.elements, deleted: [EL('tmp_ab12', 'T')] } }
+		};
+		vi.spyOn(crApi, 'compareModel').mockResolvedValue({
+			...COMPARE_OUT,
+			cr: staged,
+			workingCopy: true
+		});
+		const save = vi.spyOn(fileSave, 'saveJsonToFile');
+		open('compare');
+		pickFiles([modelFile()]);
+		byTestId('mcd-create-cr').click();
+		await settle();
+		expect(save).not.toHaveBeenCalled();
+		expect(byTestId('proposal-error').textContent).toContain('Commit your staged creates first');
+	});
+
 	it('Replace proposes the compare CR and stages the ops with prestate', async () => {
 		vi.spyOn(crApi, 'compareModel').mockResolvedValue(COMPARE_OUT);
 		const propose = vi.spyOn(crApi, 'proposeCr').mockResolvedValue({

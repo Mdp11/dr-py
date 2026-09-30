@@ -17,6 +17,7 @@
 	import { stageProposedOps } from '$lib/state/stage-proposed';
 	import {
 		composeCrFilename,
+		crHasTempIds,
 		crPrestate,
 		crToDiff,
 		invertChangeRequest,
@@ -231,6 +232,11 @@
 		return run(async () => {
 			const out = await ensureCompared();
 			const cr = directedCr(out);
+			if (crHasTempIds(cr)) {
+				error =
+					'Commit your staged creates first — the change request would name their temporary ids.';
+				return;
+			}
 			// strip the transport-only `complete` flag so the file is exactly the
 			// datarover.cr/v1 shape Apply CR expects (same as saveWithOptionalCr),
 			// and relabel the baseline: inverting a CR keeps the envelope as-is,

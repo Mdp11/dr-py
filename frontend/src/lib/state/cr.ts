@@ -1,4 +1,5 @@
 import type { ChangesDoc, Conflict, Element, Relationship } from '$lib/api/types';
+import { isTempId } from './ops';
 import {
 	elementModifiedFields,
 	relationshipModifiedFields,
@@ -236,6 +237,23 @@ export function invertChangeRequest<T extends ChangeRequest>(cr: T): T {
 			}
 		}
 	};
+}
+
+/** Whether `cr` names a staged create's temporary id, which no committed
+ * model will ever hold. */
+export function crHasTempIds(cr: Pick<ChangeRequest, 'ops'>): boolean {
+	const { elements, relationships } = cr.ops;
+	const rels = [
+		...relationships.added,
+		...relationships.deleted,
+		...relationships.modified.flatMap((m) => [m.before, m.after])
+	];
+	return [
+		...elements.added.map((e) => e.id),
+		...elements.deleted.map((e) => e.id),
+		...elements.modified.map((m) => m.id),
+		...rels.flatMap((r) => [r.id, r.source_id, r.target_id])
+	].some(isTempId);
 }
 
 /** A CR as a renderable Diff: its six op buckets flattened back into
