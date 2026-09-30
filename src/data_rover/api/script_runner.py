@@ -39,13 +39,13 @@ numbers this design leans on):
    safe cross-thread because the guest is parked in a WASI read, not executing
    wasm back-edges -- then sends ONE start message carrying `{code, entry,
    element_ids, facade_source, stdout_bytes, result_repr_bytes}`.
-2. The guest bootstrap (`_GUEST_BOOTSTRAP_SOURCE`) reads that message, `exec`s
-   `FACADE_SOURCE` under the filename `<facade>` and then the user's `code`
-   SEPARATELY under `<snippet>` -- two compilation units so a snippet's line
-   numbers are its OWN (concatenating them offset every traceback and
+2. The guest bootstrap (`_GUEST_BOOTSTRAP_SOURCE`) reads that message and hands
+   it to the harness (`HARNESS_SOURCE`, preopened beside the bootstrap), which
+   `exec`s `FACADE_SOURCE` under the filename `<facade>` and then the user's
+   `code` SEPARATELY under `<snippet>` -- two compilation units so a snippet's
+   line numbers are its OWN (concatenating them offset every traceback and
    `SyntaxError` by the facade's ~300 lines), and so guest tracebacks strip to
-   user frames only (mirroring `tests/script/trusted_runner.py`). It captures
-   stdout in a size-capped buffer,
+   user frames only. The harness captures stdout in a size-capped buffer,
    resolves the entry function for `entry != "script"`, computes `result_repr`,
    and streams bridge requests to the host mid-execution whenever the facade's
    `_transport` is called.
@@ -128,6 +128,7 @@ from wasmtime import (
 from data_rover.core.model.model import Model
 from data_rover.core.script.bridge import project_roots
 from data_rover.core.script.facade_src import FACADE_SOURCE
+from data_rover.core.script.harness_src import HARNESS_SOURCE
 from data_rover.core.script.runner import (
     CallResult,
     RunLimits,
@@ -160,23 +161,10 @@ _GUEST_LIB_GUEST = "/lib"
 
 #: Guest-visible mount point for the (host-written-once) bootstrap script
 #: directory, matching `spikes/code_exec/s02_bridge.py`/`s07_pool.py`'s
-#: `/spike` preopen convention.
+#: `/spike` preopen convention. The bootstrap and the harness both live there.
 _GUEST_SCRIPTS_GUEST = "/spike"
 _BOOTSTRAP_FILENAME = "bootstrap.py"
-
-#: The filename the guest compiles the USER's snippet under -- its own
-#: compilation unit, so `line N` in a traceback or `SyntaxError` is the line
-#: the author sees in the editor. Guest tracebacks are stripped to frames from
-#: this file (never a bootstrap or facade frame), matching
-#: `tests/script/trusted_runner.py`'s `_SNIPPET_FILENAME`.
-_SNIPPET_FILENAME = "<snippet>"
-
-#: The filename the guest compiles `FACADE_SOURCE` under. Distinct from
-#: `_SNIPPET_FILENAME` for two reasons: it keeps the snippet's line numbering
-#: independent of the facade's length, and it makes facade frames invisible to
-#: `_format_guest_traceback` (an error raised inside `dr.…` should point at the
-#: caller's line, not at facade internals the author cannot see).
-_FACADE_FILENAME = "<facade>"
+_HARNESS_FILENAME = "harness.py"
 
 #: Fixed wall-clock epoch in nanoseconds injected by the determinism shim
 #: (`1_750_000_000` seconds), matching `spikes/code_exec/host.py`'s
@@ -235,29 +223,24 @@ _BOOT_HANDSHAKE_TIMEOUT_S = 30.0
 _BOOT_POLL_INTERVAL_S = 0.05
 
 
-# Guest bootstrap: runs INSIDE CPython-WASI. It sends a ready handshake, reads
-# ONE start message describing the run, execs FACADE_SOURCE then user code (as
-# two separate compilation units, so snippet line numbers are the author's) with
-# `_transport` bound so the facade's bridge calls stream to the host over the
-# real stdout (while user `print`s go to a size-capped buffer), then emits a
-# distinct FINAL message. Modeled on `tests/script/trusted_runner.py`'s run
-# semantics (entry handling, stdout cap, traceback stripping, result_repr
-# truncation) so the WASM path produces RunResults equivalent to the in-process
-# reference for equivalent inputs. Embedded as a string (not a shipped .py)
-# because it never runs host-side -- the guest interpreter compiles it itself,
-# the same reasoning `facade_src.FACADE_SOURCE`'s docstring gives.
+# Guest bootstrap: runs INSIDE CPython-WASI. It owns only the stdin/stdout
+# framing: a ready handshake, ONE start message describing the run, then the
+# messages that carry the harness's answers back. What a run or a call does --
+# the two compilation units, capped stdout, entry handling, traceback
+# stripping, `repr` truncation, the per-call `BaseException` rule -- is
+# `HARNESS_SOURCE` (`core/script/harness_src.py`), read from the preopened
+# scripts directory next to this file and exec'd with `_transport` and
+# `_read_memo_max` bound. Embedded as a string (not a shipped .py) because it
+# never runs host-side -- the guest interpreter compiles it itself, the same
+# reasoning `facade_src.FACADE_SOURCE`'s docstring gives.
 _GUEST_BOOTSTRAP_SOURCE = r"""
 import json
+import os
 import sys
-import traceback
 
-# The real, FIFO-backed stdout. Captured before any redirect so bridge
-# requests + the final message always reach the host even while user code has
-# sys.stdout swapped out for the capture buffer.
+# The real, FIFO-backed stdout. The harness swaps sys.stdout for its capture
+# buffer while user code runs; bridge requests and answers always go out here.
 _real_stdout = sys.stdout
-
-_SNIPPET_FILENAME = "<snippet>"
-_FACADE_FILENAME = "<facade>"
 
 
 def _emit(obj):
@@ -272,178 +255,37 @@ def _transport(req):
     return json.loads(sys.stdin.readline())
 
 
-class _CappedStdout:
-    # Mirrors tests/script/trusted_runner.py::_CappedStdout: stops accumulating
-    # past `cap` chars, appending an ellipsis on the truncating write and
-    # flagging `.truncated`.
-    def __init__(self, cap):
-        self._cap = cap if cap > 0 else 0
-        self._parts = []
-        self._size = 0
-        self.truncated = False
-
-    def write(self, s):
-        if self._size >= self._cap:
-            if s:
-                self.truncated = True
-            return len(s)
-        remaining = self._cap - self._size
-        if len(s) > remaining:
-            self._parts.append(s[:remaining] + "...")
-            self._size = self._cap
-            self.truncated = True
-        else:
-            self._parts.append(s)
-            self._size += len(s)
-        return len(s)
-
-    def flush(self):
-        pass
-
-    def getvalue(self):
-        return "".join(self._parts)
+def _load_harness(start):
+    path = os.path.join(os.path.dirname(sys.argv[0]), "harness.py")
+    with open(path) as f:
+        source = f.read()
+    harness = {
+        "_transport": _transport,
+        "_read_memo_max": start.get("read_memo_max", 4096),
+    }
+    exec(compile(source, "<harness>", "exec"), harness)
+    return harness
 
 
-def _format_guest_traceback():
-    # Keep only frames from the exec'd snippet source -- never a bootstrap or
-    # <facade> frame -- mirrors trusted_runner.py::_format_guest_traceback.
-    exc_type, exc, tb = sys.exc_info()
-    frames = [f for f in traceback.extract_tb(tb) if f.filename == _SNIPPET_FILENAME]
-    lines = ["Traceback (most recent call last):\n"]
-    lines.extend(traceback.format_list(frames))
-    lines.extend(traceback.format_exception_only(exc_type, exc))
-    return "".join(lines)
-
-
-def _wants_inputs(fn):
-    # A console run has no table row, so binding is decided by the entry
-    # function's OWN arity rather than by whether the caller sent inputs: a
-    # two-argument value() always gets a dict (empty when nothing was bound)
-    # instead of a missing-argument TypeError. The embedded path decides the
-    # other way round (facade_src._dr_call_entry branches on `inputs`), and
-    # must: there the column's declared inputs are the contract, and an
-    # arity mismatch is a real definition error the cell reports.
-    code = getattr(fn, "__code__", None)
-    return code is not None and code.co_argcount >= 2
-
-
-def _bind_inputs(namespace, inputs):
-    # Same shape as facade_src._dr_call_entry's bind: element inputs become
-    # handles, scalar inputs stay values.
-    bound = {}
-    for name, spec in (inputs or {}).items():
-        if spec.get("kind") == "elements":
-            bound[name] = [namespace["dr"].element(i) for i in spec["ids"]]
-        else:
-            bound[name] = list(spec["values"])
-    return bound
-
-
-def _run_once(start):
-    code = start["code"]
-    entry = start["entry"]
-    element_ids = start["element_ids"]
-    inputs = start.get("inputs")
-    facade_source = start["facade_source"]
-    stdout_cap = start["stdout_bytes"]
-    result_repr_cap = start["result_repr_bytes"]
-
-    stdout = _CappedStdout(stdout_cap)
-    namespace = {"_transport": _transport, "_read_memo_max": start.get("read_memo_max", 4096)}
-    error = None
-    value = None
-    have_value = False
-
-    # Two compilation units, NOT `facade + "\n" + code`: the snippet must own
-    # its line numbers (see _SNIPPET_FILENAME / _FACADE_FILENAME on the host).
-    try:
-        compiled = compile(code, _SNIPPET_FILENAME, "exec")
-    except SyntaxError as exc:
-        error = {"kind": "syntax", "message": str(exc), "traceback": None}
-        compiled = None
-
-    if compiled is not None:
-        sys.stdout = stdout
-        try:
-            exec(compile(facade_source, _FACADE_FILENAME, "exec"), namespace)
-            exec(compiled, namespace)
-            if entry == "script":
-                if "result" in namespace:
-                    value = namespace["result"]
-                    have_value = True
-            else:
-                fn = namespace.get(entry)
-                if fn is None or not callable(fn):
-                    raise NameError("entry function " + repr(entry) + " is not defined")
-                els = [namespace["dr"].element(i) for i in element_ids]
-                if entry == "value" and _wants_inputs(fn):
-                    value = fn(els, _bind_inputs(namespace, inputs))
-                else:
-                    value = fn(els if entry == "value" else (els[0] if els else None))
-                have_value = True
-        except MemoryError:
-            # Propagate to the CPython top level: a store memory-limiter breach
-            # surfaces as a nonzero WASI exit + a MemoryError traceback on
-            # stderr, which the host maps to ScriptError(kind="memory").
-            # Catching it as an ordinary Exception would mislabel a resource
-            # breach as a runtime error (see FINDINGS.md row 5).
-            sys.stdout = _real_stdout
-            raise
-        except Exception:
-            error = {
-                "kind": "runtime",
-                "message": type(sys.exc_info()[1]).__name__ + ": " + str(sys.exc_info()[1]),
-                "traceback": _format_guest_traceback(),
-            }
-        finally:
-            sys.stdout = _real_stdout
-
-    result_repr = None
-    truncated = stdout.truncated
-    if error is None and have_value:
-        result_repr = repr(value)
-        if len(result_repr) > result_repr_cap:
-            result_repr = result_repr[:result_repr_cap] + "..."
-            truncated = True
-
-    fin = {"fin": True, "stdout": stdout.getvalue(), "result_repr": result_repr, "truncated": truncated}
-    if error is not None:
-        fin["error"] = error
+def _run_once(harness, start, limits):
+    spec = {
+        "code": start["code"],
+        "facade": start["facade_source"],
+        "entry": start["entry"],
+        "element_ids": start["element_ids"],
+        "inputs": start.get("inputs"),
+        "limits": limits,
+    }
+    fin = {"fin": True}
+    fin.update(harness["_dr_run"](spec))
     _emit(fin)
 
 
-def _run_embedded(start):
-    code = start["code"]
-    facade_source = start["facade_source"]
-    stdout = _CappedStdout(start["stdout_bytes"])
-    namespace = {"_transport": _transport, "_read_memo_max": start.get("read_memo_max", 4096)}
-    err = None
-    try:
-        compiled = compile(code, _SNIPPET_FILENAME, "exec")
-    except SyntaxError as exc:
-        err = {"kind": "syntax", "message": str(exc), "traceback": None}
-        compiled = None
-    if compiled is not None:
-        sys.stdout = stdout
-        try:
-            exec(compile(facade_source, _FACADE_FILENAME, "exec"), namespace)
-            exec(compiled, namespace)
-        except MemoryError:
-            sys.stdout = _real_stdout
-            raise
-        except Exception:
-            err = {
-                "kind": "runtime",
-                "message": type(sys.exc_info()[1]).__name__ + ": " + str(sys.exc_info()[1]),
-                "traceback": _format_guest_traceback(),
-            }
-        finally:
-            sys.stdout = _real_stdout
-    _emit({"boot": True, "error": err})
-    if err is not None:
+def _run_embedded(harness, start, limits):
+    session = harness["_dr_open"](start["facade_source"], start["code"], limits)
+    _emit({"boot": True, "error": session["error"]})
+    if session["error"] is not None:
         return
-    # Module-level prints belong to no call; hand them to the first one.
-    carry = stdout.getvalue()
     while True:
         line = sys.stdin.readline()
         if not line:
@@ -454,44 +296,21 @@ def _run_embedded(start):
         call = msg.get("call")
         if call is None:
             continue
-        entry = call["entry"]
-        element_ids = call["element_ids"]
-        elements = call.get("elements")
-        doc = call.get("doc")
-        inputs = call.get("inputs")
-        cerr = None
-        payload = None
-        reads = None
-        stdout = _CappedStdout(start["stdout_bytes"])
-        sys.stdout = stdout
-        try:
-            res = namespace["_dr_call_entry"](entry, element_ids, elements, doc, inputs)
-            payload = res["payload"]
-            reads = res["reads"]
-        except MemoryError:
-            sys.stdout = _real_stdout
-            raise
-        except Exception:
-            cerr = {
-                "kind": "runtime",
-                "message": type(sys.exc_info()[1]).__name__ + ": " + str(sys.exc_info()[1]),
-                "traceback": _format_guest_traceback(),
-            }
-        finally:
-            sys.stdout = _real_stdout
-        out = carry + stdout.getvalue()
-        carry = ""
-        _emit({"call_result": {"payload": payload, "error": cerr, "reads": reads, "stdout": out}})
+        _emit({"call_result": harness["_dr_call"](session, call, limits)})
 
 
 def _main():
     _emit({"ready": True})
     start = json.loads(sys.stdin.readline())
-    mode = start.get("mode", "run")
-    if mode == "embedded":
-        _run_embedded(start)
+    harness = _load_harness(start)
+    limits = {
+        "stdout_bytes": start["stdout_bytes"],
+        "result_repr_bytes": start["result_repr_bytes"],
+    }
+    if start.get("mode", "run") == "embedded":
+        _run_embedded(harness, start, limits)
     else:
-        _run_once(start)
+        _run_once(harness, start, limits)
 
 
 _main()
@@ -686,6 +505,7 @@ class WasmScriptRunner:
         # every pool instance at `_GUEST_SCRIPTS_GUEST`.
         self._scripts_dir = Path(tempfile.mkdtemp(prefix="dr_wasm_scripts_"))
         (self._scripts_dir / _BOOTSTRAP_FILENAME).write_text(_GUEST_BOOTSTRAP_SOURCE)
+        (self._scripts_dir / _HARNESS_FILENAME).write_text(HARNESS_SOURCE)
 
         self._pool: queue.Queue[_PooledInstance] = queue.Queue()
         self._shutdown = threading.Event()

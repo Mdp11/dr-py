@@ -491,6 +491,36 @@ def test_wasm_session_boot_error(wasm_runner: WasmScriptRunner, small_model) -> 
     sess.close()
 
 
+def test_wasm_session_call_keyboard_interrupt_is_that_calls_error(
+    wasm_runner: WasmScriptRunner, small_model
+) -> None:
+    """A `BaseException` that is not an `Exception` ends only the call that
+    raised it: it answers a runtime error and the session serves the next
+    call."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    ids = sorted(small_model.elements)
+    sess = wasm_runner.open_session(
+        small_model,
+        "def value(els):\n"
+        "    if els[0].id == %r:\n"
+        "        raise KeyboardInterrupt\n"
+        "    return 7" % ids[0],
+        RunLimits(),
+        budget=ScriptBudget.start(60),
+    )
+    assert sess.boot_error is None
+    bad = sess.call("value", [ids[0]])
+    assert bad.value is None
+    assert bad.error is not None and bad.error.kind == "runtime"
+    assert bad.error.message == "KeyboardInterrupt: "
+    assert bad.error.traceback is not None and "<snippet>" in bad.error.traceback
+    good = sess.call("value", [ids[1]])
+    assert good.error is None
+    assert good.value == {"kind": "scalar", "value": 7}
+    sess.close()
+
+
 def test_wasm_session_call_timeout_kills_session(wasm_runner: WasmScriptRunner, small_model) -> None:
     """A per-call epoch timeout kills the guest; the session is promoted to a
     terminal `boot_error` so a subsequent call also fails fast."""

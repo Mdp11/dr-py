@@ -1,11 +1,12 @@
 """In-process `ScriptRunner` used only by the test suite.
 
 **RCE tripwire — this must never move to `src/`.** `TrustedRunner` `exec`s
-`FACADE_SOURCE` followed directly by arbitrary snippet code in the *current*
+`HARNESS_SOURCE`, which in turn `exec`s `FACADE_SOURCE` and then arbitrary
+snippet code, in the *current*
 Python process, with a live `BridgeDispatcher` wired straight into the
 guest's `_transport` global. There is no sandbox here: no wasmtime, no
-subprocess, no seccomp, no resource ceiling beyond the soft stdout cap this
-module implements itself. That is fine for a test harness exercising
+subprocess, no seccomp, no resource ceiling beyond the soft stdout cap the harness
+implements itself. That is fine for a test harness exercising
 `facade_src.FACADE_SOURCE` against a `Model` built in the same test process,
 but it is exactly the shape of bug this project designs against: production
 execution must call across a WASM guest boundary rather than a bare Python
@@ -18,14 +19,12 @@ make that boundary visible.
 
 from __future__ import annotations
 
-import contextlib
-import sys
 import time
-import traceback
 
 from data_rover.core.model.model import Model
 from data_rover.core.script.bridge import BridgeDispatcher, project_roots
 from data_rover.core.script.facade_src import FACADE_SOURCE
+from data_rover.core.script.harness_src import HARNESS_SOURCE
 from data_rover.core.script.runner import (
     CallResult,
     RunLimits,
@@ -40,84 +39,32 @@ from data_rover.core.script.runner import (
     input_element_ids,
 )
 
-#: The filename `compile()`/`exec()` see for the USER's snippet source. The
-#: facade is a SEPARATE compilation unit (`_FACADE_FILENAME`) so a snippet's
-#: line numbers are its own rather than offset by the facade's length. Used
-#: both as the `exec` "file" and as the marker that lets
-#: `_format_guest_traceback` keep only guest frames (never a
-#: `trusted_runner.py` or facade frame) when rendering a
-#: `ScriptError.traceback`. Mirrors `api/script_runner.py`.
-_SNIPPET_FILENAME = "<snippet>"
-_FACADE_FILENAME = "<facade>"
 
 
-class _CappedStdout:
-    """A `sys.stdout` replacement that stops accumulating past `cap` chars.
-
-    A plain `io.StringIO` would happily buffer an unbounded `print` loop
-    from untrusted code; this caps the buffer at construction time and just
-    drops (rather than raises on) writes past the cap, flagging
-    `.truncated` so the caller can surface that to the snippet author.
-    """
-
-    def __init__(self, cap: int) -> None:
-        self._cap = max(0, cap)
-        self._parts: list[str] = []
-        self._size = 0
-        self.truncated = False
-
-    def write(self, s: str) -> int:
-        if self._size >= self._cap:
-            if s:
-                self.truncated = True
-            return len(s)
-        remaining = self._cap - self._size
-        if len(s) > remaining:
-            self._parts.append(s[:remaining] + "...")
-            self._size = self._cap
-            self.truncated = True
-        else:
-            self._parts.append(s)
-            self._size += len(s)
-        return len(s)
-
-    def flush(self) -> None:  # pragma: no cover - no-op, kept for file-like duck typing
-        pass
-
-    def getvalue(self) -> str:
-        return "".join(self._parts)
+def _load_harness(dispatcher: BridgeDispatcher, limits: RunLimits) -> dict:
+    """`HARNESS_SOURCE` exec'd in a namespace bound to this dispatcher: the
+    same harness text the server's WASM guest runs."""
+    harness: dict = {
+        "_transport": dispatcher.dispatch,
+        "_read_memo_max": limits.read_memo_max,
+    }
+    exec(compile(HARNESS_SOURCE, "<harness>", "exec"), harness)
+    return harness
 
 
-def _format_guest_traceback() -> str:
-    """Render `sys.exc_info()` keeping only frames from the exec'd snippet
-    source (`_SNIPPET_FILENAME`) — never a `trusted_runner.py` frame and never
-    a `<facade>` frame, so the traceback a snippet author sees points at their
-    own code, at their own line numbers, not at internals they cannot see."""
-    exc_type, exc, tb = sys.exc_info()
-    assert exc_type is not None and exc is not None
-    frames = [f for f in traceback.extract_tb(tb) if f.filename == _SNIPPET_FILENAME]
-    lines = ["Traceback (most recent call last):\n"]
-    lines.extend(traceback.format_list(frames))
-    lines.extend(traceback.format_exception_only(exc_type, exc))
-    return "".join(lines)
+def _script_error(err: dict | None) -> ScriptError | None:
+    if err is None:
+        return None
+    return ScriptError(
+        kind=err["kind"], message=err["message"], traceback=err["traceback"]
+    )
 
 
-def _wants_inputs(fn: object) -> bool:
-    """Mirrors the WASM guest's `_wants_inputs`: a console run binds by the
-    entry function's own arity, never by whether inputs were sent."""
-    code = getattr(fn, "__code__", None)
-    return code is not None and code.co_argcount >= 2
-
-
-def _bind_inputs(namespace: dict, inputs: WireInputs | None) -> dict[str, object]:
-    """Mirrors the WASM guest's `_bind_inputs`."""
-    bound: dict[str, object] = {}
-    for name, spec in (inputs or {}).items():
-        if spec["kind"] == "elements":
-            bound[name] = [namespace["dr"].element(i) for i in spec["ids"]]
-        else:
-            bound[name] = list(spec["values"])
-    return bound
+def _limits_dict(limits: RunLimits) -> dict[str, int]:
+    return {
+        "stdout_bytes": limits.stdout_bytes,
+        "result_repr_bytes": limits.result_repr_bytes,
+    }
 
 
 class TrustedRunner:
@@ -141,66 +88,24 @@ class TrustedRunner:
             max_op_bytes=limits.max_op_bytes,
             page_limit=limits.page_limit,
         )
-        namespace: dict = {
-            "_transport": dispatcher.dispatch,
-            "_read_memo_max": limits.read_memo_max,
-        }
-        stdout = _CappedStdout(limits.stdout_bytes)
-        error: ScriptError | None = None
-        value = None
-        have_value = False
-
-        try:
-            compiled = compile(req.code, _SNIPPET_FILENAME, "exec")
-        except SyntaxError as exc:
-            error = ScriptError(kind="syntax", message=str(exc), traceback=None)
-            compiled = None
-
-        if compiled is not None:
-            with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
-                try:
-                    exec(compile(FACADE_SOURCE, _FACADE_FILENAME, "exec"), namespace)
-                    exec(compiled, namespace)
-                    if req.entry == "script":
-                        if "result" in namespace:
-                            value = namespace["result"]
-                            have_value = True
-                    else:
-                        fn = namespace.get(req.entry)
-                        if fn is None or not callable(fn):
-                            raise NameError(f"entry function {req.entry!r} is not defined")
-                        els = [namespace["dr"].element(i) for i in req.element_ids]
-                        if req.entry == "value" and _wants_inputs(fn):
-                            value = fn(els, _bind_inputs(namespace, req.inputs))
-                        else:
-                            value = fn(
-                                els if req.entry == "value" else (els[0] if els else None)
-                            )
-                        have_value = True
-                except Exception:
-                    error = ScriptError(
-                        kind="runtime",
-                        message=f"{sys.exc_info()[0].__name__}: {sys.exc_info()[1]}",  # type: ignore[union-attr]
-                        traceback=_format_guest_traceback(),
-                    )
-
+        out = _load_harness(dispatcher, limits)["_dr_run"](
+            {
+                "code": req.code,
+                "facade": FACADE_SOURCE,
+                "entry": req.entry,
+                "element_ids": req.element_ids,
+                "inputs": req.inputs,
+                "limits": _limits_dict(limits),
+            }
+        )
         duration_ms = int((time.monotonic() - start) * 1000)
-
-        result_repr = None
-        truncated = stdout.truncated
-        if error is None and have_value:
-            result_repr = repr(value)
-            if len(result_repr) > limits.result_repr_bytes:
-                result_repr = result_repr[: limits.result_repr_bytes] + "..."
-                truncated = True
-
         return RunResult(
-            stdout=stdout.getvalue(),
-            result_repr=result_repr,
+            stdout=out["stdout"],
+            result_repr=out["result_repr"],
             ops=list(dispatcher.ops),
-            error=error,
+            error=_script_error(out.get("error")),
             duration_ms=duration_ms,
-            truncated=truncated,
+            truncated=out["truncated"],
         )
 
     def open_session(
@@ -233,29 +138,12 @@ class _TrustedSession:
         )
         self._dispatcher = dispatcher
         self._limits = limits
-        self._namespace: dict = {
-            "_transport": dispatcher.dispatch,
-            "_read_memo_max": limits.read_memo_max,
-        }
-        self.boot_error: ScriptError | None = None
-        try:
-            compiled = compile(code, _SNIPPET_FILENAME, "exec")
-        except SyntaxError as exc:
-            self.boot_error = ScriptError(kind="syntax", message=str(exc), traceback=None)
-            return
-        stdout = _CappedStdout(limits.stdout_bytes)
-        with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
-            try:
-                exec(compile(FACADE_SOURCE, _FACADE_FILENAME, "exec"), self._namespace)
-                exec(compiled, self._namespace)
-            except Exception:
-                self.boot_error = ScriptError(
-                    kind="runtime",
-                    message=f"{sys.exc_info()[0].__name__}: {sys.exc_info()[1]}",  # type: ignore[union-attr]
-                    traceback=_format_guest_traceback(),
-                )
-        # Module-level prints ride on the first call's stdout (guest parity).
-        self._carry = stdout.getvalue()
+        self._harness = _load_harness(dispatcher, limits)
+        self._session = self._harness["_dr_open"](
+            FACADE_SOURCE, code, _limits_dict(limits)
+        )
+        self._namespace: dict = self._session["namespace"]
+        self.boot_error: ScriptError | None = _script_error(self._session["error"])
 
     def call(
         self,
@@ -284,24 +172,24 @@ class _TrustedSession:
             if project_ids and self._limits.read_memo_max > 0
             else []
         )
-        stdout = _CappedStdout(self._limits.stdout_bytes)
-        carry, self._carry = self._carry, ""
-        with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
-            try:
-                res = self._namespace["_dr_call_entry"](
-                    entry, element_ids, elements, doc, inputs
-                )
-            except Exception:
-                return CallResult(
-                    value=None,
-                    error=ScriptError(
-                        kind="runtime",
-                        message=f"{sys.exc_info()[0].__name__}: {sys.exc_info()[1]}",  # type: ignore[union-attr]
-                        traceback=_format_guest_traceback(),
-                    ),
-                    duration_ms=int((time.monotonic() - start) * 1000),
-                    stdout=carry + stdout.getvalue(),
-                )
+        res = self._harness["_dr_call"](
+            self._session,
+            {
+                "entry": entry,
+                "element_ids": element_ids,
+                "elements": elements,
+                "doc": doc,
+                "inputs": inputs,
+            },
+            _limits_dict(self._limits),
+        )
+        if res["error"] is not None:
+            return CallResult(
+                value=None,
+                error=_script_error(res["error"]),
+                duration_ms=int((time.monotonic() - start) * 1000),
+                stdout=res["stdout"],
+            )
         decoded, msg = decode_call_payload(entry, res["payload"])
         duration_ms = int((time.monotonic() - start) * 1000)
         if decoded is None:
@@ -309,14 +197,14 @@ class _TrustedSession:
                 value=None,
                 error=ScriptError(kind="runtime", message=msg or "malformed payload"),
                 duration_ms=duration_ms,
-                stdout=carry + stdout.getvalue(),
+                stdout=res["stdout"],
             )
         return CallResult(
             value=decoded,
             error=None,
             duration_ms=duration_ms,
             reads=decode_reads(res["reads"]),
-            stdout=carry + stdout.getvalue(),
+            stdout=res["stdout"],
         )
 
     def close(self) -> None:
