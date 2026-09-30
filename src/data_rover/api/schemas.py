@@ -1219,6 +1219,21 @@ class CommitDiffOut(BaseModel):
     layout_moves: list[LayoutMoveOut] = Field(default_factory=list)
 
 
+class RangeDiffOut(BaseModel):
+    """The model-entity changes between two revisions of the history.
+
+    ``source`` says how it was produced: ``"journal"`` folded the commits'
+    captured entity states, ``"reconstruction"`` compared two rebuilt models.
+    The two halves reuse the change-request shapes, like ``CommitDiffOut``.
+    """
+
+    from_rev: int
+    to_rev: int
+    source: Literal["journal", "reconstruction"]
+    elements: CrElementOps = Field(default_factory=CrElementOps)
+    relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
+
+
 class RevertRequest(BaseModel):
     """Revert the model to the state at ``target_rev``.
 

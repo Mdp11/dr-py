@@ -7,10 +7,10 @@ takes a live ``Session`` and does NOT commit — callers own the unit of work
 from __future__ import annotations
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
 from typing import Any
 
-from sqlalchemy import String, and_, cast, delete, select
+from sqlalchemy import String, and_, cast, delete, or_, select
 from sqlalchemy.orm import Session
 
 from .db_models import (
@@ -172,20 +172,25 @@ def commits_between(
     )
 
 
+#: a row holds entity states: a Python ``None`` in the JSON column is stored as
+#: JSON ``null``, not SQL NULL, so both count as absent
+_HAS_STATES = and_(
+    Commit.entity_states.is_not(None),
+    cast(Commit.entity_states, String) != "null",
+)
+
+
 def commit_tail_marks(
     db: Session, project_id: str, *, after_rev: int, max_rev: int
 ) -> list[tuple[int, bool]]:
     """``(rev, expressible)`` for ``after_rev < rev <= max_rev``, ascending,
     without loading a row's JSON bodies. A row is expressible as a delta when
-    it carries a state digest and entity states and is no rebind; a Python
-    ``None`` in the JSON column is stored as JSON ``null``, not SQL NULL, so
-    both count as absent."""
+    it carries a state digest and entity states and is no rebind."""
     expressible = and_(
         Commit.state_digest.is_not(None),
         Commit.from_metamodel_id.is_(None),
         Commit.to_metamodel_id.is_(None),
-        Commit.entity_states.is_not(None),
-        cast(Commit.entity_states, String) != "null",
+        _HAS_STATES,
     )
     rows = db.execute(
         select(Commit.rev, expressible)
@@ -197,6 +202,46 @@ def commit_tail_marks(
         .order_by(Commit.rev)
     )
     return [(rev, bool(ok)) for rev, ok in rows]
+
+
+def commit_range_marks(
+    db: Session, project_id: str, *, after_rev: int, max_rev: int
+) -> list[tuple[int, bool, bool]]:
+    """``(rev, has_states, is_rebind)`` for ``after_rev < rev <= max_rev``,
+    ascending, as scalars: no row's JSON body is loaded."""
+    is_rebind = or_(
+        Commit.from_metamodel_id.is_not(None), Commit.to_metamodel_id.is_not(None)
+    )
+    rows = db.execute(
+        select(Commit.rev, _HAS_STATES, is_rebind)
+        .where(
+            Commit.project_id == project_id,
+            Commit.rev > after_rev,
+            Commit.rev <= max_rev,
+        )
+        .order_by(Commit.rev)
+    )
+    return [(rev, bool(has), bool(rebind)) for rev, has, rebind in rows]
+
+
+def commit_states_between(
+    db: Session, project_id: str, *, after_rev: int, max_rev: int
+) -> Iterator[dict[str, Any]]:
+    """Each ``after_rev < rev <= max_rev`` row's raw ``entity_states``,
+    ascending by rev, streamed. Selects that column only; call it over rows
+    ``commit_range_marks`` reported as carrying states."""
+    rows = db.execute(
+        select(Commit.entity_states)
+        .where(
+            Commit.project_id == project_id,
+            Commit.rev > after_rev,
+            Commit.rev <= max_rev,
+        )
+        .order_by(Commit.rev)
+        .execution_options(yield_per=100)
+    )
+    for (states,) in rows:
+        yield states
 
 
 def first_rebind_after(db: Session, project_id: str, rev: int) -> Commit | None:
