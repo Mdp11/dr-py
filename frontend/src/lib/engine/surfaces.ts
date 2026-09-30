@@ -37,7 +37,7 @@ export const SURFACE_DEFAULTS: Readonly<Record<Surface, Side>> = Object.freeze({
 	metamodel: 'engine',
 	download: 'engine',
 	views: 'engine',
-	compare: 'server'
+	compare: 'engine'
 });
 
 /** Where the user's model edits are staged: the replica's working copy, or the store's own buffer. */

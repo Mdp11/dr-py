@@ -116,7 +116,7 @@ Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -779,6 +779,16 @@ an application/json Blob and asks the server nothing", the first test of its fil
 limit in 1 of 2 full `dr-test` runs and passed in the rerun, on a loaded host (its cold worker
 start and a 4 MiB-part file share the clock). Fix direction: find what the test waits on that a
 loaded host stretches, and wait on that signal instead of the clock.
+
+### K-92 · Compare's parse block, apply-CR's last step and the parsed file's heap miss the bounds · `open` · perf · *2026-09-30*
+At M, medians of 3 on DESKTOP-5QK3FA5 (Ryzen 9 3900X, near-idle host), 2026-09-30. Three misses:
+(1) compare's first step decodes, parses and shapes the 76,772,875-byte file in one block: 2,746 ms in Node, and in Chromium 148 the longest staged round trip during `compareModel` is 2,086 ms (the whole call 2,371 ms), far past the 16 ms slice bound; the diff after it is sliced, its longest step 44 ms (Node, whole compare 3,142 ms).
+(2) The parsed file's peak heap above baseline is 285 MB beside the replica's 240 MB, about 525 MB against CN-3's 400 MB.
+(3) `proposeCr` reads the change requests synchronously at arrival, and its last step runs the gate, `opsForChange` and the change-request document unmetered: at M with a whole-model CR (6,974 ops) the longest step is 62 ms in Node (whole call 104 ms) and 138 ms as the longest staged round trip in Chromium (277 ms).
+Fix direction: parse the file incrementally (a streaming or chunked reader that yields between entities) and shape it as it goes, or diff it entity by entity without holding the whole parse; meter the gate and the ops in `proposeCr`'s last step.
+
+### K-93 · An integral float in a change request stages as an int · `open` · *2026-09-30*
+A CR crosses the frontend as parsed JSON (the dialog reads the file with `JSON.parse`, and a compare's answer is parsed as it arrives), so a float such as `1.0` in an added or modified entity becomes `1` before it is sent back or staged, on the engine path and the server path alike. Wire text reaches the engine untouched elsewhere (AD-26); a CR does not. Fix direction: read and keep a CR as text with `parseExact`'s float-preserving values on both sides, or send the file's bytes to the engine and let it read them.
 
 ### Considered by the exports plan and deferred
 

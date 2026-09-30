@@ -1472,7 +1472,7 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   read once more) and `server()` (the same read from the server). It is not
   awaited, and nothing it throws or rejects reaches the caller.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS` — `engine` for every surface but `compare` — and
+  `SURFACE_DEFAULTS` — `engine` for every surface — and
   `STAGING_DEFAULT`, `engine`,
   overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
   surface set to `engine` or `server` is taken, `staging` set to `engine` or
@@ -1881,7 +1881,7 @@ Both Model-menu items open `components/ModelChangeDialog.svelte`
 (`mode: 'compare' | 'apply-cr'`), whose lower half is the shared
 `ProposalPreview.svelte` (a `CompareDiff` over the proposal, a conflicts block,
 an error line). **Nothing runs on file selection** — every request sits behind
-a button. Both requests go through the `compare` surface (`server` by default;
+a button. Both requests go through the `compare` surface (`engine` by default;
 `lib/engine/README.md` has the engine side), and a conflict is the same
 `{ok: false, …}` result whichever side answered:
 

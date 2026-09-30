@@ -16,7 +16,7 @@ const storing = (value: string | null) => ({
 });
 
 describe('the surface switches', () => {
-	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports, the metamodel, the download, the views and the compare; every one on the engine by default but the compare', () => {
+	it('names the five read surfaces, the two evaluations, the issues, the tables, the exports, the metamodel, the download, the views and the compare; every one on the engine by default', () => {
 		expect(READ_SURFACES).toEqual(['elements', 'search', 'relationships', 'tree', 'summary']);
 		expect(SURFACES).toEqual([
 			...READ_SURFACES,
@@ -44,7 +44,7 @@ describe('the surface switches', () => {
 			metamodel: 'engine',
 			download: 'engine',
 			views: 'engine',
-			compare: 'server'
+			compare: 'engine'
 		});
 		expect(readSurfaces(storing(null))).toEqual(SURFACE_DEFAULTS);
 	});
@@ -95,10 +95,10 @@ describe('the surface switches', () => {
 
 	it('staging on the engine does not force the compare, and dr.surfaces moves it', () => {
 		for (const staging of ['engine', 'legacy']) {
-			expect(readSurfaces(storing(`{"staging": "${staging}"}`)).compare).toBe('server');
-			expect(readSurfaces(storing(`{"staging": "${staging}", "compare": "engine"}`))).toEqual({
+			expect(readSurfaces(storing(`{"staging": "${staging}"}`)).compare).toBe('engine');
+			expect(readSurfaces(storing(`{"staging": "${staging}", "compare": "server"}`))).toEqual({
 				...SURFACE_DEFAULTS,
-				compare: 'engine'
+				compare: 'server'
 			});
 		}
 	});
