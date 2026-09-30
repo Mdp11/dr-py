@@ -799,14 +799,45 @@ A CR crosses the frontend as parsed JSON (the dialog reads the file with `JSON.p
 `pixi run engine-bench-browser` (Chromium 148, Ryzen 9 3900X under WSL2, load 1.4, median of 3)
 runs ten scripts over 1,000 `Microservice` ids each through `scriptCalls` on one warm script
 worker: 3,276 ms [4,481 3,276 3,139] against CN-3's 2,000, in 10,850 trips at 289 µs
-[397 289 277]; the boot the warm-up call pays is 2,110 ms. Nothing was tuned. Split, from a
-throwaway Node run over the same model and scripts (medians of 3): Node's in-process host
-1,678 ms (155 µs per trip), of which the dispatcher 390 ms and the Python side replaying
-canned replies 1,147 ms (facade, `json`, FFI; not split further); a no-op post-and-wake
-between two Node `worker_threads` is 78 µs per trip, 844 ms over the trips. The browser's 3.3 s
-is about 0.8 s more than Node's host plus that wake, which is unaccounted for (Pyodide in
-Chromium, chunked replies, structured clone). Fix directions: fewer trips (project more with
-the roots, batch reads in the facade), a cheaper Python-side codec, a binary layout behind
+[397 289 277]. The boot (2,110 ms) is paid by the warm-up call before the timer; `script µs
+per trip` is `guest.run`'s time, so about 3.1 s of the 3.3 s lies inside the script worker's
+run and the host's own post and clone of batch and results is about 0.14 s. Nothing was tuned.
+
+The four components the spec names, each with where it was measured:
+- **Dispatch**, Node (`engine/bench/script-split.ts`, medians of 3): the dispatcher 375 ms
+  (35 µs per trip) of a real in-process run of 1,648 ms. In Chromium, timed around
+  `bridge.dispatch` in the engine worker: 402 ms (37 µs), 402 ms and 342 ms in the three
+  passes, so dispatch is the same in both and is not where the browser is slower.
+- **Python-side JSON**, Node: `json` over the texts of one pass, timed inside Pyodide (request
+  dumped from its dict, reply, roots and result texts loaded or dumped): 404 ms (reply loads
+  185, roots loads 107, result dumps 64, request dumps 46); a Python timer pair costs about
+  0.9 µs. Chromium, timed around each `json` call in the guest: 849 ms (reply loads 354,
+  request dumps 165, roots loads 142, result dumps 149, calls loads 26, result list dumps 13),
+  761 and 938 ms in the other passes: about twice Node's.
+- **Post**, Chromium: the script worker's `postMessage` call 412 ms (38 µs per trip), and the
+  time from that post to the engine worker's handler starting 885 ms (82 µs), the call
+  included.
+- **Wake**, Chromium: what remains of the script worker's transport (arm, post, block, read,
+  decode: 1,983 ms) after the post-to-handler time, the engine's dispatch, encode and reply
+  write (402 + 124 + 293 ms) and the decode (57 ms) is 222 ms (20 µs), 288 and 181 ms in the
+  other passes. Node's proxy, a no-op round trip between two `worker_threads` over a shared
+  flag, is 754 ms (70 µs), medians of 3.
+
+The Chromium figures come from a scratch build (not committed) that timed those calls with
+`performance.now` and Python's `perf_counter`; that run's wall was 4,080 ms [4,080 4,277 3,568]
+at 362 µs per trip and its boot 2,563 ms, slower than the 3,276 ms run above, so the parts are
+of the 4,080 ms run and do not add up to 3,276. Inside its median pass's 3,930 ms of run:
+Python's side of the transport calls 2,291 ms (of which the JS transport 1,983 ms, the other
+308 ms the call and string conversion across the FFI), JSON 849 ms, and 790 ms that is neither
+(the facade's own code and Pyodide). Unattributed: why that run was 25% slower than the
+uninstrumented one (instrumentation or the session's drift, CN-5), the 308 ms FFI crossing,
+and the 790 ms. Node's parts are from separate runs and leave 123 ms of its 1,648 ms
+(1,648 − 375 − 1,150 canned Python side; the canned side holds the 404 ms of JSON).
+Chromium's per-trip time is thus about the dispatcher, the JSON and the transport; nothing in
+the data points to chunked replies (no reply nears 1 MiB) or to the structured clone.
+
+Fix directions: fewer trips (project more with the roots, batch reads in the facade), a cheaper
+codec for the reply (the largest JSON part) and a leaner post path, a binary layout behind
 `_transport` (CT-6 allows it). The bench prints the verdict and never fails.
 
 ### K-101 · A failed script-host boot is memoized, and a stuck run holds the queue · `open` · *2026-09-30*
@@ -836,7 +867,7 @@ script worker's own load is never relayed, which `sandbox/README.md` does not sa
 relayed. (6) The Node host does not project input elements (`inputs.e.ids`) with the roots as
 `trusted_runner.py` does: trips differ, results do not; the host counts trips and the browser
 host duplicates that wrapper; `'[]'` for `transform` is written in host and guest. (7)
-`opOutgoing` and `opIncoming` are near-duplicates, `bridgeWorkingCopy`'s getter mutates
+`opOutgoing` and `opIncoming` are near-duplicates with their helpers defined below the class, `bridgeWorkingCopy`'s getter mutates
 `bridged`, `close()` disposes the host last (a throwing `dispose` leaves `close` failed after
 the reset), `ScriptCallsParams` is exported and unused.
 

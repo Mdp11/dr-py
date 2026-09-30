@@ -54,12 +54,15 @@ Script cells across workers, measured 2026-09-30 (`pixi run engine-bench-browser
 148.0.7778.96 headless shell, Ryzen 9 3900X under WSL2, load 1.4, model M, median of 3 passes):
 10,000 cells (ten scripts over 1,000 `Microservice` ids each, `entry: 'value'`, one warm script
 worker, through the real frame and client) take **3,276 ms** [4,481 3,276 3,139], over CN-3's
-2 s, in 10,850 bridge trips at 289 µs per trip [397 289 277]; the warm-up call's boot is
-2,110 ms. The same ten scripts in Node's in-process host (`nodeScriptHost` over the same
-model, median of 3): 1,678 ms, 155 µs per trip, of which the dispatcher is 390 ms and the
-Python side with a canned reply 1,147 ms; a no-op round trip between two Node
-`worker_threads` over a shared flag costs 78 µs, 844 ms over 10,850 trips. Chromium's
-remainder is not split further: the 3.3 s is neither boot nor the dispatcher alone.
+2 s, in 10,850 bridge trips at 289 µs per trip [397 289 277]. The 2,110 ms boot is paid by the
+warm-up call before the timer; the time per trip is `guest.run`'s, so the remainder lies inside
+the script worker's run. The same ten scripts in Node's in-process host (`engine/bench/
+script-split.ts`, medians of 3): 1,648 ms, of which the dispatcher 375 ms and the Python side
+with canned replies 1,150 ms (Python's `json` alone 404 ms); the parts come from separate runs
+and leave 123 ms. A timed scratch build in Chromium (one run, 4,080 ms wall, slower than the
+row above, so its parts do not add to 3,276) gave, over the 10,850 trips: dispatch 402 ms,
+Python `json` 849 ms, post to the engine's handler 885 ms, the rest of the transport 222 ms;
+K-100 has the split, what stays unattributed and the Node proxies.
 
 The script-cell cost is Python-side JSON plus FFI (≈ 270 µs per bridge call vs ≈ 165 µs
 in-process); the store's language is irrelevant. Pyodide for user scripts adds ≈ 5.4 s boot
