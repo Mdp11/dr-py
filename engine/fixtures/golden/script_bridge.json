@@ -1,0 +1,828 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Node",
+        "abstract": false,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Leaf",
+        "abstract": false,
+        "extends": "Node",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "Other",
+        "abstract": false,
+        "extends": null,
+        "properties": [],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Links",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Node",
+        "target": "Node",
+        "mappings": [
+          {
+            "source": "Node",
+            "target": "Node"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      }
+    ]
+  },
+  "elements": [
+    "{\"id\":\"n1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"one\"},\"rev\":0}",
+    "{\"id\":\"n2\",\"type_name\":\"Node\",\"properties\":{\"name\":\"two\"},\"rev\":0}",
+    "{\"id\":\"l1\",\"type_name\":\"Leaf\",\"properties\":{\"name\":[\"\",\"listed\",\"second\"]},\"rev\":0}",
+    "{\"id\":\"o1\",\"type_name\":\"Other\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"z😀\",\"type_name\":\"Node\",\"properties\":{\"Name\":\"Upper\"},\"rev\":0}",
+    "{\"id\":\"é1\",\"type_name\":\"Node\",\"properties\":{\"name\":\"é\",\"note\":{\"z\":1,\"a\":{\"y\":2,\"b\":[3,1.5]}},\"list\":[1,\"x\"]},\"rev\":0}",
+    "{\"id\":\"n3\",\"type_name\":\"Node\",\"properties\":{\"name\":\"three\",\"f\":1.0,\"i\":1,\"big\":1152921504606846976,\"s\":\"😀\"},\"rev\":0}"
+  ],
+  "relationships": [
+    "{\"id\":\"r1\",\"type_name\":\"Owns\",\"source_id\":\"n1\",\"target_id\":\"n2\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"r2\",\"type_name\":\"Owns\",\"source_id\":\"n1\",\"target_id\":\"l1\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"r3\",\"type_name\":\"Owns\",\"source_id\":\"n1\",\"target_id\":\"n2\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"r4\",\"type_name\":\"Links\",\"source_id\":\"n2\",\"target_id\":\"n1\",\"properties\":{\"name\":\"back\"},\"rev\":0}",
+    "{\"id\":\"￿r5\",\"type_name\":\"Links\",\"source_id\":\"n1\",\"target_id\":\"o1\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"😀r6\",\"type_name\":\"Links\",\"source_id\":\"n1\",\"target_id\":\"z😀\",\"properties\":{},\"rev\":0}"
+  ],
+  "groups": [
+    {
+      "name": "reads",
+      "record_ops": false,
+      "limits": {},
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": \"element\", \"element_id\": \"n1\"}",
+          "reply": "{\"element\": {\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": \"element\", \"element_id\": \"l1\"}",
+          "reply": "{\"element\": {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": \"element\", \"element_id\": \"z\\ud83d\\ude00\"}",
+          "reply": "{\"element\": {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, \"id\": 3}"
+        },
+        {
+          "request": "{\"id\": 4, \"op\": \"element\", \"element_id\": \"\\u00e91\"}",
+          "reply": "{\"element\": {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, \"id\": 4}"
+        },
+        {
+          "request": "{\"id\": 5, \"op\": \"element\", \"element_id\": \"n3\"}",
+          "reply": "{\"element\": {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}, \"id\": 5}"
+        },
+        {
+          "request": "{\"id\": 6, \"op\": \"element\", \"element_id\": \"o1\"}",
+          "reply": "{\"element\": {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, \"id\": 6}"
+        },
+        {
+          "request": "{\"id\": 7, \"op\": \"element\", \"element_id\": \"nope\"}",
+          "reply": "{\"id\": 7, \"error\": \"KeyError: \\\"No element with id 'nope'\\\"\"}"
+        },
+        {
+          "request": "{\"id\": 8, \"op\": \"element\", \"element_id\": \"it's\"}",
+          "reply": "{\"id\": 8, \"error\": \"KeyError: 'No element with id \\\"it\\\\'s\\\"'\"}"
+        },
+        {
+          "request": "{\"id\": 9, \"op\": \"element\", \"element_id\": \"\"}",
+          "reply": "{\"id\": 9, \"error\": \"KeyError: \\\"No element with id ''\\\"\"}"
+        },
+        {
+          "request": "{\"id\": 10, \"op\": \"outgoing\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r2\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"l1\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"\\uffffr5\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"o1\"}, {\"id\": \"\\ud83d\\ude00r6\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"z\\ud83d\\ude00\"}], \"elements\": [{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}], \"id\": 10}"
+        },
+        {
+          "request": "{\"id\": 11, \"op\": \"outgoing\", \"element_id\": \"n2\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r4\", \"type\": \"Links\", \"name\": \"back\", \"properties\": {\"name\": \"back\"}, \"source_id\": \"n2\", \"target_id\": \"n1\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 11}"
+        },
+        {
+          "request": "{\"id\": 12, \"op\": \"outgoing\", \"element_id\": \"l1\"}",
+          "reply": "{\"relationships\": [], \"elements\": [], \"id\": 12}"
+        },
+        {
+          "request": "{\"id\": 13, \"op\": \"outgoing\", \"element_id\": \"o1\"}",
+          "reply": "{\"relationships\": [], \"elements\": [], \"id\": 13}"
+        },
+        {
+          "request": "{\"id\": 14, \"op\": \"outgoing\", \"element_id\": \"nope\"}",
+          "reply": "{\"id\": 14, \"error\": \"KeyError: \\\"No element with id 'nope'\\\"\"}"
+        },
+        {
+          "request": "{\"id\": 15, \"op\": \"incoming\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r4\", \"type\": \"Links\", \"name\": \"back\", \"properties\": {\"name\": \"back\"}, \"source_id\": \"n2\", \"target_id\": \"n1\"}], \"elements\": [{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"id\": 15}"
+        },
+        {
+          "request": "{\"id\": 16, \"op\": \"incoming\", \"element_id\": \"n2\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 16}"
+        },
+        {
+          "request": "{\"id\": 17, \"op\": \"incoming\", \"element_id\": \"l1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r2\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"l1\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 17}"
+        },
+        {
+          "request": "{\"id\": 18, \"op\": \"incoming\", \"element_id\": \"o1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"\\uffffr5\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"o1\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 18}"
+        },
+        {
+          "request": "{\"id\": 19, \"op\": \"incoming\", \"element_id\": \"nope\"}",
+          "reply": "{\"id\": 19, \"error\": \"KeyError: \\\"No element with id 'nope'\\\"\"}"
+        },
+        {
+          "request": "{\"id\": 20, \"op\": \"parent\", \"element_id\": \"n1\"}",
+          "reply": "{\"parent_id\": null, \"id\": 20}"
+        },
+        {
+          "request": "{\"id\": 21, \"op\": \"parent\", \"element_id\": \"n2\"}",
+          "reply": "{\"parent_id\": \"n1\", \"id\": 21}"
+        },
+        {
+          "request": "{\"id\": 22, \"op\": \"parent\", \"element_id\": \"l1\"}",
+          "reply": "{\"parent_id\": \"n1\", \"id\": 22}"
+        },
+        {
+          "request": "{\"id\": 23, \"op\": \"parent\", \"element_id\": \"nope\"}",
+          "reply": "{\"id\": 23, \"error\": \"KeyError: \\\"No element with id 'nope'\\\"\"}"
+        },
+        {
+          "request": "{\"id\": 24, \"op\": \"children\", \"element_id\": \"n1\"}",
+          "reply": "{\"children\": [{\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"id\": 24}"
+        },
+        {
+          "request": "{\"id\": 25, \"op\": \"children\", \"element_id\": \"l1\"}",
+          "reply": "{\"children\": [], \"id\": 25}"
+        },
+        {
+          "request": "{\"id\": 26, \"op\": \"children\", \"element_id\": \"o1\"}",
+          "reply": "{\"children\": [], \"id\": 26}"
+        },
+        {
+          "request": "{\"id\": 27, \"op\": \"children\", \"element_id\": \"nope\"}",
+          "reply": "{\"id\": 27, \"error\": \"KeyError: \\\"No element with id 'nope'\\\"\"}"
+        },
+        {
+          "request": "{\"id\": 28, \"op\": \"descendants\", \"kind\": \"element\", \"name\": \"Node\"}",
+          "reply": "{\"descendants\": [\"Leaf\", \"Node\"], \"id\": 28}"
+        },
+        {
+          "request": "{\"id\": 29, \"op\": \"descendants\", \"kind\": \"element\", \"name\": \"Leaf\"}",
+          "reply": "{\"descendants\": [\"Leaf\"], \"id\": 29}"
+        },
+        {
+          "request": "{\"id\": 30, \"op\": \"descendants\", \"kind\": \"element\", \"name\": \"Other\"}",
+          "reply": "{\"descendants\": [\"Other\"], \"id\": 30}"
+        },
+        {
+          "request": "{\"id\": 31, \"op\": \"descendants\", \"kind\": \"element\", \"name\": \"Nope\"}",
+          "reply": "{\"id\": 31, \"error\": \"KeyError: \\\"Unknown element stereotype 'Nope'\\\"\"}"
+        },
+        {
+          "request": "{\"id\": 32, \"op\": \"descendants\", \"kind\": \"relationship\", \"name\": \"Owns\"}",
+          "reply": "{\"descendants\": [\"Owns\"], \"id\": 32}"
+        },
+        {
+          "request": "{\"id\": 33, \"op\": \"descendants\", \"kind\": \"relationship\", \"name\": \"Links\"}",
+          "reply": "{\"descendants\": [\"Links\"], \"id\": 33}"
+        },
+        {
+          "request": "{\"id\": 34, \"op\": \"descendants\", \"kind\": \"relationship\", \"name\": \"Nope\"}",
+          "reply": "{\"id\": 34, \"error\": \"KeyError: \\\"Unknown relationship stereotype 'Nope'\\\"\"}"
+        },
+        {
+          "request": "{\"id\": 35, \"op\": \"descendants\", \"kind\": \"bogus\", \"name\": \"Node\"}",
+          "reply": "{\"id\": 35, \"error\": \"ValueError: descendants: unknown kind 'bogus'\"}"
+        },
+        {
+          "request": "{\"id\": 36, \"op\": \"descendants\", \"kind\": null, \"name\": \"Node\"}",
+          "reply": "{\"id\": 36, \"error\": \"ValueError: descendants: unknown kind None\"}"
+        },
+        {
+          "request": "{\"id\": 37, \"op\": \"descendants\", \"kind\": \"element\"}",
+          "reply": "{\"id\": 37, \"error\": \"KeyError: 'name'\"}"
+        },
+        {
+          "request": "{\"id\": 38, \"op\": \"descendants\", \"name\": \"Node\"}",
+          "reply": "{\"id\": 38, \"error\": \"ValueError: descendants: unknown kind None\"}"
+        },
+        {
+          "request": "{\"id\": 39, \"op\": \"elements_page\", \"type\": null}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 39}"
+        },
+        {
+          "request": "{\"id\": 40, \"op\": \"elements_page\", \"type\": [\"Node\"]}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 40}"
+        },
+        {
+          "request": "{\"id\": 41, \"op\": \"elements_page\", \"type\": []}",
+          "reply": "{\"elements\": [], \"next_offset\": null, \"id\": 41}"
+        },
+        {
+          "request": "{\"id\": 42, \"op\": \"elements_page\", \"type\": \"Leaf\"}",
+          "reply": "{\"elements\": [{\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}], \"next_offset\": null, \"id\": 42}"
+        },
+        {
+          "request": "{\"id\": 43, \"op\": \"elements_page\", \"type\": [\"Nope\"]}",
+          "reply": "{\"elements\": [], \"next_offset\": null, \"id\": 43}"
+        },
+        {
+          "request": "{\"id\": 44, \"op\": \"elements_page\", \"type\": [\"Leaf\", \"Other\"]}",
+          "reply": "{\"elements\": [{\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}], \"next_offset\": null, \"id\": 44}"
+        },
+        {
+          "request": "{\"id\": 45, \"op\": \"elements_page\", \"type\": \"Other\"}",
+          "reply": "{\"elements\": [{\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}], \"next_offset\": null, \"id\": 45}"
+        },
+        {
+          "request": "{\"id\": 46, \"op\": \"elements_page\"}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 46}"
+        },
+        {
+          "request": "{\"id\": 47, \"op\": \"elements_page\", \"limit\": 2}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"next_offset\": 2, \"id\": 47}"
+        },
+        {
+          "request": "{\"id\": 48, \"op\": \"elements_page\", \"limit\": 0}",
+          "reply": "{\"elements\": [], \"next_offset\": 0, \"id\": 48}"
+        },
+        {
+          "request": "{\"id\": 49, \"op\": \"elements_page\", \"limit\": -1}",
+          "reply": "{\"elements\": [], \"next_offset\": 0, \"id\": 49}"
+        },
+        {
+          "request": "{\"id\": 50, \"op\": \"elements_page\", \"limit\": 9999}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 50}"
+        },
+        {
+          "request": "{\"id\": 51, \"op\": \"elements_page\", \"limit\": null}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 51}"
+        },
+        {
+          "request": "{\"id\": 52, \"op\": \"elements_page\", \"limit\": \"3\"}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}], \"next_offset\": 3, \"id\": 52}"
+        },
+        {
+          "request": "{\"id\": 53, \"op\": \"elements_page\", \"limit\": 2.9}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"next_offset\": 2, \"id\": 53}"
+        },
+        {
+          "request": "{\"id\": 54, \"op\": \"elements_page\", \"limit\": true}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"next_offset\": 1, \"id\": 54}"
+        },
+        {
+          "request": "{\"id\": 55, \"op\": \"elements_page\", \"offset\": 0}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 55}"
+        },
+        {
+          "request": "{\"id\": 56, \"op\": \"elements_page\", \"offset\": 2}",
+          "reply": "{\"elements\": [{\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 56}"
+        },
+        {
+          "request": "{\"id\": 57, \"op\": \"elements_page\", \"offset\": 6}",
+          "reply": "{\"elements\": [{\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 57}"
+        },
+        {
+          "request": "{\"id\": 58, \"op\": \"elements_page\", \"offset\": 7}",
+          "reply": "{\"elements\": [], \"next_offset\": null, \"id\": 58}"
+        },
+        {
+          "request": "{\"id\": 59, \"op\": \"elements_page\", \"offset\": 99}",
+          "reply": "{\"elements\": [], \"next_offset\": null, \"id\": 59}"
+        },
+        {
+          "request": "{\"id\": 60, \"op\": \"elements_page\", \"offset\": -3}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 60}"
+        },
+        {
+          "request": "{\"id\": 61, \"op\": \"elements_page\", \"offset\": \"2\"}",
+          "reply": "{\"elements\": [{\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 61}"
+        },
+        {
+          "request": "{\"id\": 62, \"op\": \"elements_page\", \"offset\": 2.9}",
+          "reply": "{\"elements\": [{\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 62}"
+        },
+        {
+          "request": "{\"id\": 63, \"op\": \"elements_page\", \"offset\": null}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 63}"
+        },
+        {
+          "request": "{\"id\": 64, \"op\": \"elements_page\", \"offset\": []}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 64}"
+        },
+        {
+          "request": "{\"id\": 65, \"op\": \"elements_page\", \"type\": [\"Node\"], \"offset\": 1, \"limit\": 2}",
+          "reply": "{\"elements\": [{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}], \"next_offset\": 3, \"id\": 65}"
+        },
+        {
+          "request": "{\"id\": 66, \"op\": \"elements_page\", \"limit\": []}",
+          "reply": "{\"id\": 66, \"error\": \"TypeError: int() argument must be a string, a bytes-like object or a real number, not 'list'\"}"
+        },
+        {
+          "request": "{\"id\": 67, \"op\": \"elements_page\", \"type\": [[]]}",
+          "reply": "{\"id\": 67, \"error\": \"TypeError: cannot use 'list' as a dict key (unhashable type: 'list')\"}"
+        },
+        {
+          "request": "{\"id\": 68, \"op\": \"elements_page\", \"type\": [1]}",
+          "reply": "{\"elements\": [], \"next_offset\": null, \"id\": 68}"
+        },
+        {
+          "request": "{\"id\": 69, \"op\": \"elements_page\", \"type\": 5}",
+          "reply": "{\"id\": 69, \"error\": \"TypeError: 'int' object is not iterable\"}"
+        },
+        {
+          "request": "{\"id\": 70, \"op\": \"elements_page\", \"type\": {\"a\": 1}}",
+          "reply": "{\"elements\": [], \"next_offset\": null, \"id\": 70}"
+        },
+        {
+          "request": "{\"op\": \"element\", \"element_id\": \"n1\"}",
+          "reply": "{\"element\": {\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, \"id\": null}"
+        },
+        {
+          "request": "{\"id\": \"s\", \"op\": \"element\", \"element_id\": \"n2\"}",
+          "reply": "{\"element\": {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, \"id\": \"s\"}"
+        },
+        {
+          "request": "{\"id\": null, \"op\": \"parent\", \"element_id\": \"n2\"}",
+          "reply": "{\"parent_id\": \"n1\", \"id\": null}"
+        },
+        {
+          "request": "{\"id\": 1.5, \"op\": \"children\", \"element_id\": \"n1\"}",
+          "reply": "{\"children\": [{\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"id\": 1.5}"
+        },
+        {
+          "request": "{\"id\": {\"k\": [1]}, \"op\": \"element\", \"element_id\": \"n1\"}",
+          "reply": "{\"element\": {\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, \"id\": {\"k\": [1]}}"
+        },
+        {
+          "request": "{\"id\": 90, \"op\": \"element\", \"element_id\": \"é1\"}",
+          "reply": "{\"element\": {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, \"id\": 90}"
+        },
+        {
+          "request": "{\"id\": 77, \"op\": \"element\"}",
+          "reply": "{\"id\": 77, \"error\": \"KeyError: 'element_id'\"}"
+        },
+        {
+          "request": "{\"id\": 78, \"op\": \"outgoing\"}",
+          "reply": "{\"id\": 78, \"error\": \"KeyError: 'element_id'\"}"
+        },
+        {
+          "request": "{\"id\": 79, \"op\": \"incoming\"}",
+          "reply": "{\"id\": 79, \"error\": \"KeyError: 'element_id'\"}"
+        },
+        {
+          "request": "{\"id\": 80, \"op\": \"parent\"}",
+          "reply": "{\"id\": 80, \"error\": \"KeyError: 'element_id'\"}"
+        },
+        {
+          "request": "{\"id\": 81, \"op\": \"children\"}",
+          "reply": "{\"id\": 81, \"error\": \"KeyError: 'element_id'\"}"
+        },
+        {
+          "request": "{\"id\": 82, \"op\": \"descendants\"}",
+          "reply": "{\"id\": 82, \"error\": \"KeyError: 'name'\"}"
+        },
+        {
+          "request": "{\"id\": 83, \"op\": \"element\", \"element_id\": [\"x\"]}",
+          "reply": "{\"id\": 83, \"error\": \"TypeError: cannot use 'list' as a dict key (unhashable type: 'list')\"}"
+        },
+        {
+          "request": "{\"id\": 84, \"op\": \"element\", \"element_id\": {\"a\": 1}}",
+          "reply": "{\"id\": 84, \"error\": \"TypeError: cannot use 'dict' as a dict key (unhashable type: 'dict')\"}"
+        },
+        {
+          "request": "{\"id\": 85, \"op\": \"element\", \"element_id\": null}",
+          "reply": "{\"id\": 85, \"error\": \"KeyError: 'No element with id None'\"}"
+        },
+        {
+          "request": "{\"id\": 86, \"op\": \"element\", \"element_id\": 7}",
+          "reply": "{\"id\": 86, \"error\": \"KeyError: 'No element with id 7'\"}"
+        },
+        {
+          "request": "{\"id\": 87, \"op\": \"outgoing\", \"element_id\": [\"x\"]}",
+          "reply": "{\"id\": 87, \"error\": \"TypeError: cannot use 'list' as a dict key (unhashable type: 'list')\"}"
+        },
+        {
+          "request": "{\"id\": 88, \"op\": \"children\", \"element_id\": [\"x\"]}",
+          "reply": "{\"id\": 88, \"error\": \"TypeError: cannot use 'list' as a dict key (unhashable type: 'list')\"}"
+        },
+        {
+          "request": "{\"id\": 89, \"op\": \"bogus\"}",
+          "reply": "{\"id\": 89, \"error\": \"ValueError: unknown op 'bogus'\"}"
+        },
+        {
+          "request": "{\"id\": 90, \"op\": \"\"}",
+          "reply": "{\"id\": 90, \"error\": \"ValueError: unknown op ''\"}"
+        },
+        {
+          "request": "{\"id\": 91, \"op\": null}",
+          "reply": "{\"id\": 91, \"error\": \"ValueError: 'op' must be a str or dict, got None\"}"
+        },
+        {
+          "request": "{\"id\": 92, \"op\": 5}",
+          "reply": "{\"id\": 92, \"error\": \"ValueError: 'op' must be a str or dict, got 5\"}"
+        },
+        {
+          "request": "{\"id\": 93, \"op\": [\"element\"]}",
+          "reply": "{\"id\": 93, \"error\": \"ValueError: 'op' must be a str or dict, got ['element']\"}"
+        },
+        {
+          "request": "{\"id\": 94, \"op\": true}",
+          "reply": "{\"id\": 94, \"error\": \"ValueError: 'op' must be a str or dict, got True\"}"
+        },
+        {
+          "request": "{\"id\": 1}",
+          "reply": "{\"id\": 1, \"error\": \"ValueError: 'op' must be a str or dict, got None\"}"
+        },
+        {
+          "request": "{\"id\": 96, \"op\": {\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}}",
+          "reply": "{\"id\": 96, \"error\": \"ReadOnlyError: record_op is disabled on a read-only dispatcher\"}"
+        },
+        {
+          "request": "{\"id\": 97, \"op\": {\"kind\": \"delete_element\", \"id\": \"n2\"}}",
+          "reply": "{\"id\": 97, \"error\": \"ReadOnlyError: record_op is disabled on a read-only dispatcher\"}"
+        },
+        {
+          "request": "{\"id\": 98, \"op\": {}}",
+          "reply": "{\"id\": 98, \"error\": \"ReadOnlyError: record_op is disabled on a read-only dispatcher\"}"
+        }
+      ],
+      "ops": []
+    },
+    {
+      "name": "page_walk",
+      "record_ops": false,
+      "limits": {},
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": \"elements_page\", \"offset\": 0, \"limit\": 2}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"next_offset\": 2, \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": \"elements_page\", \"offset\": 2, \"limit\": 2}",
+          "reply": "{\"elements\": [{\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}], \"next_offset\": 4, \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": \"elements_page\", \"offset\": 4, \"limit\": 2}",
+          "reply": "{\"elements\": [{\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}], \"next_offset\": 6, \"id\": 3}"
+        },
+        {
+          "request": "{\"id\": 4, \"op\": \"elements_page\", \"offset\": 6, \"limit\": 2}",
+          "reply": "{\"elements\": [{\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 4}"
+        }
+      ],
+      "ops": []
+    },
+    {
+      "name": "page_limit",
+      "record_ops": false,
+      "limits": {
+        "page_limit": 3
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": \"elements_page\", \"offset\": 0}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}], \"next_offset\": 3, \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": \"elements_page\", \"offset\": 3}",
+          "reply": "{\"elements\": [{\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}], \"next_offset\": 6, \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": \"elements_page\", \"offset\": 6}",
+          "reply": "{\"elements\": [{\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}], \"next_offset\": null, \"id\": 3}"
+        }
+      ],
+      "ops": []
+    },
+    {
+      "name": "page_limit_clamp",
+      "record_ops": false,
+      "limits": {
+        "page_limit": 3
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": \"elements_page\", \"limit\": 9999}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}], \"next_offset\": 3, \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": \"elements_page\", \"limit\": 2}",
+          "reply": "{\"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"next_offset\": 2, \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": \"elements_page\", \"type\": [\"Node\"], \"limit\": 0}",
+          "reply": "{\"elements\": [], \"next_offset\": 0, \"id\": 3}"
+        }
+      ],
+      "ops": []
+    },
+    {
+      "name": "far_cap",
+      "record_ops": false,
+      "limits": {
+        "max_inline_far_endpoints": 2
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": \"outgoing\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r2\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"l1\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"\\uffffr5\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"o1\"}, {\"id\": \"\\ud83d\\ude00r6\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"z\\ud83d\\ude00\"}], \"elements\": [], \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": \"outgoing\", \"element_id\": \"n2\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r4\", \"type\": \"Links\", \"name\": \"back\", \"properties\": {\"name\": \"back\"}, \"source_id\": \"n2\", \"target_id\": \"n1\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": \"incoming\", \"element_id\": \"n2\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 3}"
+        },
+        {
+          "request": "{\"id\": 4, \"op\": \"incoming\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r4\", \"type\": \"Links\", \"name\": \"back\", \"properties\": {\"name\": \"back\"}, \"source_id\": \"n2\", \"target_id\": \"n1\"}], \"elements\": [{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"id\": 4}"
+        }
+      ],
+      "ops": []
+    },
+    {
+      "name": "far_cap_dedup",
+      "record_ops": false,
+      "limits": {
+        "max_inline_far_endpoints": 1
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": \"outgoing\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r2\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"l1\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"\\uffffr5\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"o1\"}, {\"id\": \"\\ud83d\\ude00r6\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"z\\ud83d\\ude00\"}], \"elements\": [], \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": \"outgoing\", \"element_id\": \"n2\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r4\", \"type\": \"Links\", \"name\": \"back\", \"properties\": {\"name\": \"back\"}, \"source_id\": \"n2\", \"target_id\": \"n1\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": \"incoming\", \"element_id\": \"n2\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 3}"
+        },
+        {
+          "request": "{\"id\": 4, \"op\": \"incoming\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r4\", \"type\": \"Links\", \"name\": \"back\", \"properties\": {\"name\": \"back\"}, \"source_id\": \"n2\", \"target_id\": \"n1\"}], \"elements\": [{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"id\": 4}"
+        }
+      ],
+      "ops": []
+    },
+    {
+      "name": "far_cap_edge",
+      "record_ops": false,
+      "limits": {
+        "max_inline_far_endpoints": 4
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": \"outgoing\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r2\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"l1\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"\\uffffr5\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"o1\"}, {\"id\": \"\\ud83d\\ude00r6\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"z\\ud83d\\ude00\"}], \"elements\": [{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}], \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": \"outgoing\", \"element_id\": \"n2\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r4\", \"type\": \"Links\", \"name\": \"back\", \"properties\": {\"name\": \"back\"}, \"source_id\": \"n2\", \"target_id\": \"n1\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": \"incoming\", \"element_id\": \"n2\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}], \"elements\": [{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}], \"id\": 3}"
+        },
+        {
+          "request": "{\"id\": 4, \"op\": \"incoming\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r4\", \"type\": \"Links\", \"name\": \"back\", \"properties\": {\"name\": \"back\"}, \"source_id\": \"n2\", \"target_id\": \"n1\"}], \"elements\": [{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}], \"id\": 4}"
+        }
+      ],
+      "ops": []
+    },
+    {
+      "name": "writes",
+      "record_ops": true,
+      "limits": {},
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": {\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}}",
+          "reply": "{\"temp_id\": \"tmp_1\", \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": {\"kind\": \"create_relationship\", \"temp_id\": \"tmp_2\", \"type_name\": \"Links\", \"source_id\": \"n1\", \"target_id\": \"tmp_1\", \"properties\": {}}}",
+          "reply": "{\"temp_id\": \"tmp_2\", \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": {\"kind\": \"update_element\", \"id\": \"n1\", \"properties_patch\": {\"name\": \"Renamed\"}}}",
+          "reply": "{\"id\": 3}"
+        },
+        {
+          "request": "{\"id\": 4, \"op\": {\"kind\": \"delete_element\", \"id\": \"n2\"}}",
+          "reply": "{\"id\": 4}"
+        },
+        {
+          "request": "{\"id\": 5, \"op\": {\"kind\": \"delete_relationship\", \"id\": \"r4\"}}",
+          "reply": "{\"id\": 5}"
+        },
+        {
+          "request": "{\"id\": 6, \"op\": \"element\", \"element_id\": \"n1\"}",
+          "reply": "{\"element\": {\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, \"id\": 6}"
+        },
+        {
+          "request": "{\"id\": 7, \"op\": \"outgoing\", \"element_id\": \"n1\"}",
+          "reply": "{\"relationships\": [{\"id\": \"r1\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"r2\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"l1\"}, {\"id\": \"r3\", \"type\": \"Owns\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"n2\"}, {\"id\": \"\\uffffr5\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"o1\"}, {\"id\": \"\\ud83d\\ude00r6\", \"type\": \"Links\", \"name\": null, \"properties\": {}, \"source_id\": \"n1\", \"target_id\": \"z\\ud83d\\ude00\"}], \"elements\": [{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}], \"id\": 7}"
+        },
+        {
+          "request": "{\"id\": 8, \"op\": {\"kind\": \"anything\", \"temp_id\": null, \"note\": 1.0}}",
+          "reply": "{\"id\": 8}"
+        },
+        {
+          "request": "{\"id\": 9, \"op\": {\"kind\": \"delete_element\", \"id\": \"\\u00e91\", \"temp_id\": 0}}",
+          "reply": "{\"temp_id\": 0, \"id\": 9}"
+        },
+        {
+          "request": "{\"id\": 10, \"op\": {}}",
+          "reply": "{\"id\": 10}"
+        }
+      ],
+      "ops": [
+        "{\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}",
+        "{\"kind\": \"create_relationship\", \"temp_id\": \"tmp_2\", \"type_name\": \"Links\", \"source_id\": \"n1\", \"target_id\": \"tmp_1\", \"properties\": {}}",
+        "{\"kind\": \"update_element\", \"id\": \"n1\", \"properties_patch\": {\"name\": \"Renamed\"}}",
+        "{\"kind\": \"delete_element\", \"id\": \"n2\"}",
+        "{\"kind\": \"delete_relationship\", \"id\": \"r4\"}",
+        "{\"kind\": \"anything\", \"temp_id\": null, \"note\": 1.0}",
+        "{\"kind\": \"delete_element\", \"id\": \"\\u00e91\", \"temp_id\": 0}",
+        "{}"
+      ]
+    },
+    {
+      "name": "op_cap",
+      "record_ops": true,
+      "limits": {
+        "max_ops": 2
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": {\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}}",
+          "reply": "{\"temp_id\": \"tmp_1\", \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": {\"kind\": \"create_relationship\", \"temp_id\": \"tmp_2\", \"type_name\": \"Links\", \"source_id\": \"n1\", \"target_id\": \"tmp_1\", \"properties\": {}}}",
+          "reply": "{\"temp_id\": \"tmp_2\", \"id\": 2}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": {\"kind\": \"update_element\", \"id\": \"n1\", \"properties_patch\": {\"name\": \"Renamed\"}}}",
+          "reply": "{\"id\": 3, \"error\": \"BridgeLimitError: record_op: op cap exceeded (max_ops=2)\"}"
+        }
+      ],
+      "ops": [
+        "{\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}",
+        "{\"kind\": \"create_relationship\", \"temp_id\": \"tmp_2\", \"type_name\": \"Links\", \"source_id\": \"n1\", \"target_id\": \"tmp_1\", \"properties\": {}}"
+      ]
+    },
+    {
+      "name": "byte_cap",
+      "record_ops": true,
+      "limits": {
+        "max_op_bytes": 145
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": {\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}}",
+          "reply": "{\"temp_id\": \"tmp_1\", \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": {\"kind\": \"update_element\", \"id\": \"\\u00e91\", \"properties_patch\": {\"name\": \"\\u00e9\"}}}",
+          "reply": "{\"id\": 2, \"error\": \"BridgeLimitError: record_op: op byte cap exceeded (max_op_bytes=145)\"}"
+        }
+      ],
+      "ops": [
+        "{\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}"
+      ]
+    },
+    {
+      "name": "byte_cap_fit",
+      "record_ops": true,
+      "limits": {
+        "max_op_bytes": 227
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": {\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}}",
+          "reply": "{\"temp_id\": \"tmp_1\", \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": {\"kind\": \"update_element\", \"id\": \"\\u00e91\", \"properties_patch\": {\"name\": \"\\u00e9\"}}}",
+          "reply": "{\"id\": 2}"
+        }
+      ],
+      "ops": [
+        "{\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}",
+        "{\"kind\": \"update_element\", \"id\": \"\\u00e91\", \"properties_patch\": {\"name\": \"\\u00e9\"}}"
+      ]
+    },
+    {
+      "name": "byte_cap_over",
+      "record_ops": true,
+      "limits": {
+        "max_op_bytes": 226
+      },
+      "exchanges": [
+        {
+          "request": "{\"id\": 1, \"op\": {\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}}",
+          "reply": "{\"temp_id\": \"tmp_1\", \"id\": 1}"
+        },
+        {
+          "request": "{\"id\": 2, \"op\": {\"kind\": \"update_element\", \"id\": \"\\u00e91\", \"properties_patch\": {\"name\": \"\\u00e9\"}}}",
+          "reply": "{\"id\": 2, \"error\": \"BridgeLimitError: record_op: op byte cap exceeded (max_op_bytes=226)\"}"
+        },
+        {
+          "request": "{\"id\": 3, \"op\": {\"kind\": \"delete_relationship\", \"id\": \"r4\"}}",
+          "reply": "{\"id\": 3}"
+        }
+      ],
+      "ops": [
+        "{\"kind\": \"create_element\", \"temp_id\": \"tmp_1\", \"type_name\": \"Node\", \"properties\": {\"name\": \"caf\\u00e9\", \"weight\": 1.0, \"tags\": [\"a\", \"\\u00e9\"]}}",
+        "{\"kind\": \"delete_relationship\", \"id\": \"r4\"}"
+      ]
+    }
+  ],
+  "roots": [
+    {
+      "ids": [],
+      "projection": "[]"
+    },
+    {
+      "ids": [
+        "n1"
+      ],
+      "projection": "[{\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}]"
+    },
+    {
+      "ids": [
+        "n2",
+        "missing",
+        "n1",
+        "n2"
+      ],
+      "projection": "[{\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}, {\"id\": \"n1\", \"type\": \"Node\", \"name\": \"one\", \"properties\": {\"name\": \"one\"}}, {\"id\": \"n2\", \"type\": \"Node\", \"name\": \"two\", \"properties\": {\"name\": \"two\"}}]"
+    },
+    {
+      "ids": [
+        "z😀",
+        "é1",
+        "n3",
+        "o1",
+        "l1"
+      ],
+      "projection": "[{\"id\": \"z\\ud83d\\ude00\", \"type\": \"Node\", \"name\": \"Upper\", \"properties\": {\"Name\": \"Upper\"}}, {\"id\": \"\\u00e91\", \"type\": \"Node\", \"name\": \"\\u00e9\", \"properties\": {\"name\": \"\\u00e9\", \"note\": {\"z\": 1, \"a\": {\"y\": 2, \"b\": [3, 1.5]}}, \"list\": [1, \"x\"]}}, {\"id\": \"n3\", \"type\": \"Node\", \"name\": \"three\", \"properties\": {\"name\": \"three\", \"f\": 1.0, \"i\": 1, \"big\": 1152921504606846976, \"s\": \"\\ud83d\\ude00\"}}, {\"id\": \"o1\", \"type\": \"Other\", \"name\": null, \"properties\": {}}, {\"id\": \"l1\", \"type\": \"Leaf\", \"name\": \"listed\", \"properties\": {\"name\": [\"\", \"listed\", \"second\"]}}]"
+    }
+  ]
+}

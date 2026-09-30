@@ -31,6 +31,7 @@ from . import (  # noqa: F401
     rules_compile,
     rules_eval,
     rules_reach,
+    script_bridge,
     search_criteria,
     smart_city,
     snapshot_v2,
