@@ -19,6 +19,9 @@ make that boundary visible.
 
 from __future__ import annotations
 
+import datetime
+import os
+import random
 import time
 
 from data_rover.core.model.model import Model
@@ -32,13 +35,36 @@ from data_rover.core.script.runner import (
     RunResult,
     ScriptBudget,
     ScriptError,
-    SnippetSession,
     WireInputs,
     decode_call_payload,
     decode_reads,
     input_element_ids,
 )
 
+
+_PINNED_S = 1750000000.0
+_PINNED_NS = 1_750_000_000_000_000_000
+
+
+class _PinnedDateTime(datetime.datetime):
+    @classmethod
+    def now(cls, tz: datetime.tzinfo | None = None) -> _PinnedDateTime:
+        return cls.fromtimestamp(_PINNED_S, tz)
+
+
+def pin_determinism() -> None:
+    """Pin the clock and the entropy sources the way the server's guest does.
+
+    Irreversible for the process: only a child that exists to record output
+    asks for it. `datetime.datetime.now` is pinned too, since CPython reads
+    the system clock for it without going through `time.time`.
+    """
+    time.time = lambda: _PINNED_S
+    time.time_ns = lambda: _PINNED_NS
+    os.urandom = lambda n: b"\x42" * n
+    # The key CPython's urandom path builds from 624 words of 0x42424242.
+    random.seed(int.from_bytes(b"\x42" * 2496, "little"))
+    datetime.datetime = _PinnedDateTime  # type: ignore[misc]
 
 
 def _load_harness(dispatcher: BridgeDispatcher, limits: RunLimits) -> dict:
@@ -71,16 +97,21 @@ class TrustedRunner:
     """In-process `ScriptRunner`. See the module docstring: test-only, no
     sandboxing. Implements the `ScriptRunner` protocol from `runner.py`."""
 
-    def run(
+    def __init__(self, *, deterministic: bool = False) -> None:
+        self._deterministic = deterministic
+
+    def run_harness(
         self,
         model: Model,
         req: RunRequest,
         limits: RunLimits,
         *,
         record_ops: bool,
-        rev: int,
-    ) -> RunResult:
-        start = time.monotonic()
+    ) -> tuple[dict, BridgeDispatcher]:
+        """One console run: the harness's own answer and the dispatcher that
+        served it."""
+        if self._deterministic:
+            pin_determinism()
         dispatcher = BridgeDispatcher(
             model,
             record_ops=record_ops,
@@ -98,6 +129,19 @@ class TrustedRunner:
                 "limits": _limits_dict(limits),
             }
         )
+        return out, dispatcher
+
+    def run(
+        self,
+        model: Model,
+        req: RunRequest,
+        limits: RunLimits,
+        *,
+        record_ops: bool,
+        rev: int,
+    ) -> RunResult:
+        start = time.monotonic()
+        out, dispatcher = self.run_harness(model, req, limits, record_ops=record_ops)
         duration_ms = int((time.monotonic() - start) * 1000)
         return RunResult(
             stdout=out["stdout"],
@@ -115,10 +159,12 @@ class TrustedRunner:
         limits: RunLimits,
         *,
         budget: ScriptBudget,
-    ) -> SnippetSession:
+    ) -> _TrustedSession:
         """Open an embedded-evaluation session: exec the facade + module once,
         then serve repeated entry-point calls."""
         del budget  # protocol parity only — see _TrustedSession docstring
+        if self._deterministic:
+            pin_determinism()
         return _TrustedSession(model, code, limits)
 
 
@@ -145,17 +191,15 @@ class _TrustedSession:
         self._namespace: dict = self._session["namespace"]
         self.boot_error: ScriptError | None = _script_error(self._session["error"])
 
-    def call(
+    def call_harness(
         self,
         entry: str,
         element_ids: list[str],
         *,
         doc: object | None = None,
         inputs: WireInputs | None = None,
-    ) -> CallResult:
-        start = time.monotonic()
-        if self.boot_error is not None:
-            return CallResult(value=None, error=self.boot_error, duration_ms=0)
+    ) -> dict:
+        """One call's `_dr_call` answer, undecoded."""
         # Skip the projection entirely when the guest can't memoize anyway
         # (read_memo_max <= 0): `_memo_put` no-ops on a non-positive cap, so
         # projecting every root would be pure wasted work for zero payoff.
@@ -172,7 +216,7 @@ class _TrustedSession:
             if project_ids and self._limits.read_memo_max > 0
             else []
         )
-        res = self._harness["_dr_call"](
+        return self._harness["_dr_call"](
             self._session,
             {
                 "entry": entry,
@@ -183,6 +227,19 @@ class _TrustedSession:
             },
             _limits_dict(self._limits),
         )
+
+    def call(
+        self,
+        entry: str,
+        element_ids: list[str],
+        *,
+        doc: object | None = None,
+        inputs: WireInputs | None = None,
+    ) -> CallResult:
+        start = time.monotonic()
+        if self.boot_error is not None:
+            return CallResult(value=None, error=self.boot_error, duration_ms=0)
+        res = self.call_harness(entry, element_ids, doc=doc, inputs=inputs)
         if res["error"] is not None:
             return CallResult(
                 value=None,
