@@ -881,7 +881,7 @@ only `Exception` (parity). The interrupt design decides how `KeyboardInterrupt` 
 A `statSync` throw answers 500 and a stream error is unhandled, which could end the dev
 server; nothing tests a non-GET/HEAD request or a HEAD on `/pyodide/<file>`.
 
-### K-105 · Interpreter state is shared across script batches · `open` · security · *2026-09-30*
+### K-105 · Interpreter and worker state are shared across script batches · `open` · security · *2026-09-30*
 `guest.ts`: `GUEST_BOOTSTRAP` puts `_dr_run` in `__main__` and `run` looks it up again from
 `py.globals` on every batch. Each batch gets a fresh `ns` dict, but the interpreter is shared:
 `__main__`, `sys.modules` (`json`, which `_transport` uses) and `builtins` persist. The
@@ -893,10 +893,17 @@ are project artifacts, so one member's script runs in other members' browsers; t
 exfiltration path (`connect-src 'self'`), but results can be silently falsified. The server
 guarantees a fresh interpreter per snippet (`script_runner.py`). Not yet reachable: nothing
 user-facing calls `scriptCalls`.
+The worker's JS global scope is shared the same way: a script can reach it through Pyodide's
+`js` module, replace `self.postMessage` (`post()` in `script-worker.ts` calls
+`scope.postMessage` at call time) or add a capture-phase `message` listener. Both persist
+across batches like the Python state, so a script can forge the `done` of every later batch
+and see or alter later `run` messages.
 Options: keep the `_dr_run` proxy from boot rather than re-reading `py.globals` (closes the
-hijack, not `json` or `builtins`); a fresh interpreter per script; snapshot and restore
-`sys.modules`, `__main__` and `builtins` around each batch; or accept the risk explicitly in
-CT-6. K-100's 3,276 ms assumes warm reuse of one interpreter, so the chosen isolation may
+hijack, not `json` or `builtins`); a fresh interpreter per script; a fresh worker per script;
+capture `postMessage` and the message listener when the worker starts (closes replacing
+`self.postMessage`; whether a script can still reach the original or read later `run`
+messages is not settled); snapshot and restore `sys.modules`, `__main__` and `builtins`
+around each batch; or accept the risk explicitly in CT-6. K-100's 3,276 ms assumes warm reuse of one interpreter, so the chosen isolation may
 change that cost.
 
 ### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
