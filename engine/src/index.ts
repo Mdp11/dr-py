@@ -365,6 +365,8 @@ export type {
 	ReplicaState,
 	RequestMessage,
 	ResponseMessage,
+	ScriptCallsParams,
+	ScriptCallsResult,
 	ServiceDeps,
 	ServiceEvent,
 	SetArtifactsParams,

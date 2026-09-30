@@ -1,4 +1,5 @@
 import type { WireArtifact, WireStagedArtifact } from '../artifacts/artifact-set.ts';
+import type { ScriptEntry, ScriptHostFactory } from '../script/host.ts';
 import type { SnapshotHeader } from '../snapshot/open.ts';
 import type { Wire, WireElement, WireRelationship } from '../read/wire.ts';
 import type { HostDeps } from './scheduler.ts';
@@ -9,9 +10,14 @@ export type Port = {
 	onMessage(handler: (message: unknown) => void): void;
 };
 
-/** What the host supplies: the shared thread, and gzip, which the engine does not hold. */
+/**
+ * What the host supplies: the shared thread, gzip, which the engine does not
+ * hold, and, where it has one, the factory of the script host `scriptCalls`
+ * runs on.
+ */
 export type ServiceDeps = HostDeps & {
 	inflate(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>;
+	scripts?: ScriptHostFactory;
 };
 
 export type ReplicaState = 'opening' | 'ready' | 'diverged';
@@ -106,3 +112,15 @@ export type PutArtifactsParams = {
 	staged?: WireStagedArtifact[];
 };
 export type SetStagedArtifactsParams = { entries: WireStagedArtifact[] };
+/** `inputs_text` and `doc_text` are JSON text, read exactly. */
+export type ScriptCallsParams = {
+	code: string;
+	entry: ScriptEntry;
+	calls: { element_ids: string[]; inputs_text?: string; doc_text?: string }[];
+};
+export type ScriptCallsResult = {
+	results: { text: string | null; error: string | null }[];
+	trips: number;
+	ms: number;
+	boot_ms: number;
+};

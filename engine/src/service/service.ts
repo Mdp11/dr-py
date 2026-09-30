@@ -28,6 +28,8 @@ import {
 } from '../rules/compile.ts';
 import { RulesUnreadable } from '../rules/document.ts';
 import { ruleSources } from '../rules/sources.ts';
+import { BridgeDispatcher, dumpDefault, projectRoots } from '../script/bridge.ts';
+import type { Bridge, ScriptBatch, ScriptCall, ScriptHost } from '../script/host.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
 import { TableOrderCache } from '../table/order-cache.ts';
@@ -43,7 +45,9 @@ import {
 import type { Issue } from '../validation/issue.ts';
 import { LiveIssues, type SweepStep } from '../validation/live.ts';
 import { PatternUnusable } from '../validation/pipeline.ts';
+import { parseExact } from '../value/parse.ts';
 import { pyRepr } from '../value/repr.ts';
+import type { Value } from '../value/types.ts';
 import { readDeltaText, readTailText } from '../working/delta.ts';
 import type {
 	ChangeSet,
@@ -62,6 +66,7 @@ import type {
 	Port,
 	ProgressTask,
 	ReplicaState,
+	ScriptCallsResult,
 	ServiceDeps,
 	ServiceEvent,
 	StagedDiffResult,
@@ -96,6 +101,18 @@ function errorBody(error: unknown): ErrorBody {
 	}
 	if (error instanceof SnapshotError) return { status: 422, detail: error.message };
 	return { status: 500, detail: error instanceof Error ? error.message : String(error) };
+}
+
+/** A bridge reply that carries only a failure, echoing the request's `id` when the text has one. */
+function bridgeFailure(requestText: string, error: string): string {
+	let id: Value = null;
+	try {
+		const request = parseExact(requestText, { floatConstants: true, controlCharacters: false });
+		if (isObject(request) && Object.hasOwn(request, 'id')) id = (request as { id: Value }).id;
+	} catch {
+		// Not JSON: the reply carries no id.
+	}
+	return dumpDefault({ id, error });
 }
 
 // -- the boundary out ----------------------------------------------------------
@@ -266,6 +283,48 @@ function readUnstage(raw: unknown): Unstage {
 	throw new Refused(422, "what must be 'all', {batch} or {entity, incident?}");
 }
 
+const SCRIPT_ENTRIES: readonly string[] = ['value', 'step', 'transform'];
+
+/** A call's `inputs_text` or `doc_text`, read exactly as the script is to see it; `undefined` when absent. */
+function jsonText(call: ReadParams, key: string, where: string): Value | undefined {
+	const raw = call[key];
+	if (raw === undefined || raw === null) return undefined;
+	if (typeof raw !== 'string') throw new Refused(422, `${where}.${key} must be a string`);
+	try {
+		return parseExact(raw, { floatConstants: true, controlCharacters: false });
+	} catch (error) {
+		const why = error instanceof Error ? error.message : String(error);
+		throw new Refused(422, `${where}.${key} is not valid JSON: ${why}`);
+	}
+}
+
+/** `scriptCalls`' params, read whole before anything runs. */
+function readScriptBatch(params: ReadParams): ScriptBatch {
+	const code = text(params, 'code');
+	const entry = params['entry'];
+	if (typeof entry !== 'string' || !SCRIPT_ENTRIES.includes(entry)) {
+		throw new Refused(422, "entry must be 'value', 'step' or 'transform'");
+	}
+	const raw = params['calls'];
+	if (!Array.isArray(raw)) throw new Refused(422, 'calls must be a list');
+	const calls = raw.map((item: unknown, i): ScriptCall => {
+		const where = `calls[${i}]`;
+		if (!isObject(item)) throw new Refused(422, `${where} must be an object`);
+		const ids = item['element_ids'];
+		if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
+			throw new Refused(422, `${where}.element_ids must be a list of strings`);
+		}
+		const inputs = jsonText(item, 'inputs_text', where);
+		const doc = jsonText(item, 'doc_text', where);
+		return {
+			elementIds: ids as string[],
+			...(inputs === undefined ? {} : { inputs }),
+			...(doc === undefined ? {} : { doc })
+		};
+	});
+	return { code, entry: entry as ScriptBatch['entry'], calls };
+}
+
 // -- calls and methods ---------------------------------------------------------
 
 /** A request being served: answered once, or not at all once cancelled. */
@@ -334,6 +393,7 @@ const METHODS: { readonly [method: string]: Method } = {
 	chunk: now((service, params) => service.chunk(params)),
 	end: later((service) => service.end()),
 	close: now((service) => service.close()),
+	scriptCalls: later((service, params) => service.scriptCalls(params)),
 	adoptStaged: (service, call) => service.adoptStaged(call),
 	applyTail: (service, call) => service.applyTail(call),
 	applyDelta: (service, call) => service.applyDelta(call),
@@ -529,6 +589,21 @@ class Service {
 	private issuesPosted = 0;
 	// The calls waiting for the store: for a sweep `validateModel` restarted, or for a rescan.
 	private readonly waiting = new Set<Call>();
+	// The script host, made by the first `scriptCalls` and disposed by `close`, with its one boot.
+	private scripting: {
+		readonly host: ScriptHost;
+		readonly booted: Promise<{ ms: number }>;
+	} | null = null;
+	// The bridge's dispatcher over the working copy it was built for, and only that one.
+	private bridged: { readonly wc: WorkingCopy; readonly dispatcher: BridgeDispatcher } | null =
+		null;
+	private readonly bridge: Bridge = {
+		dispatch: (requestText) => this.bridgeReply(requestText),
+		roots: (ids) => {
+			const wc = this.bridgeWorkingCopy();
+			return wc === null ? '[]' : dumpDefault(projectRoots(wc.model, ids));
+		}
+	};
 
 	constructor(port: Port, deps: ServiceDeps) {
 		this.port = port;
@@ -684,6 +759,74 @@ class Service {
 	private ready(): WorkingCopy {
 		if (this.state !== 'ready' || this.wc === null) throw new Refused(409, NOT_READY);
 		return this.wc;
+	}
+
+	// -- scripts -------------------------------------------------------------
+
+	/** The working copy the bridge reads: the ready replica's, else none. */
+	private bridgeWorkingCopy(): WorkingCopy | null {
+		if (this.state === 'ready' && this.wc !== null) return this.wc;
+		this.bridged = null;
+		return null;
+	}
+
+	/**
+	 * One bridge request, answered in the message handler: a read of the ready
+	 * replica's working copy, through a dispatcher built for that object alone.
+	 * It always answers, and never throws: a host may be blocked on the reply.
+	 */
+	private bridgeReply(requestText: string): string {
+		try {
+			const wc = this.bridgeWorkingCopy();
+			if (wc === null) return bridgeFailure(requestText, `BridgeError: ${NOT_READY}`);
+			if (this.bridged?.wc !== wc) {
+				this.bridged = { wc, dispatcher: new BridgeDispatcher(wc.model, false) };
+			}
+			return this.bridged.dispatcher.dispatch(requestText);
+		} catch (error) {
+			const why = error instanceof Error ? error.message : String(error);
+			return bridgeFailure(requestText, `RuntimeError: ${why}`);
+		}
+	}
+
+	/** `scriptCalls`: its params are read at arrival, so a malformed call is refused before it runs. */
+	scriptCalls(params: ReadParams): Promise<ScriptCallsResult> {
+		return this.runScripts(readScriptBatch(params));
+	}
+
+	private async runScripts(batch: ScriptBatch): Promise<ScriptCallsResult> {
+		this.ready();
+		const { host, booted } = this.scriptHost();
+		try {
+			const { ms: boot_ms } = await booted;
+			const { results, trips, ms } = await host.run(batch);
+			return {
+				results: results.map(({ text, error }) => ({ text, error })),
+				trips,
+				ms,
+				boot_ms
+			};
+		} catch (error) {
+			// `close` disposed the host under the run.
+			if (this.scripting?.host !== host) throw new Refused(409, 'replica closed');
+			throw error;
+		}
+	}
+
+	/** The script host, made and booted on first use. */
+	private scriptHost(): NonNullable<typeof this.scripting> {
+		if (this.scripting === null) {
+			const factory = this.deps.scripts;
+			if (factory === undefined) throw new Refused(501, 'scripts are not available');
+			const host = factory(this.bridge);
+			try {
+				this.scripting = { host, booted: host.boot() };
+			} catch (error) {
+				host.dispose();
+				throw error;
+			}
+		}
+		return this.scripting;
 	}
 
 	/** Where a transition of `wc` goes: through the issue store once the replica is ready. */
@@ -1084,6 +1227,7 @@ class Service {
 			this.opening = null;
 		}
 		this.wc = null;
+		this.bridged = null;
 		this.progressHeld.clear();
 		this.tableOrders.clear();
 		this.scheduler.setOpen(false);
@@ -1172,6 +1316,7 @@ class Service {
 			throw this.failed;
 		}
 		this.wc = workingCopy;
+		this.bridged = null;
 		return { ...header };
 	}
 
@@ -1179,6 +1324,9 @@ class Service {
 		this.discard();
 		this.failed = null;
 		this.enter('opening');
+		const scripting = this.scripting;
+		this.scripting = null;
+		scripting?.host.dispose();
 		return null;
 	}
 
@@ -1295,6 +1443,7 @@ class Service {
 
 	private diverge(wc: WorkingCopy): void {
 		if (this.wc !== wc || this.state === 'diverged') return;
+		this.bridged = null;
 		this.progressHeld.clear();
 		this.tableOrders.clear();
 		this.scheduler.setOpen(false);

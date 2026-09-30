@@ -12,6 +12,7 @@ import {
 	type HostDeps,
 	type MetamodelDoc,
 	type Port,
+	type ServiceDeps,
 	type Value
 } from '../../src/index.ts';
 import { stateDigest } from '../golden/digest.ts';
@@ -119,10 +120,15 @@ type Event = { event: string; [key: string]: unknown };
 
 /**
  * A client of a service on a fake host: calls, raw posts, cancels and the
- * events it sent. The service is created on the second port of the pair.
+ * events it sent. The service is created on the second port of the pair, with
+ * `extra` beside the host's deps.
  */
-export function connect(host = autoHost(), [mine, theirs]: [Port, Port] = portPair()) {
-	createService(theirs, { ...host.deps, inflate });
+export function connect(
+	host = autoHost(),
+	[mine, theirs]: [Port, Port] = portPair(),
+	extra: Partial<ServiceDeps> = {}
+) {
+	createService(theirs, { ...host.deps, inflate, ...extra });
 	let nextId = 0;
 	const pending = new Map<
 		string | number,

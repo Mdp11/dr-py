@@ -250,6 +250,21 @@ event     {event, …}                     engine → client, unsolicited
   having answered nothing. The client answers exactly those four from the server — a
   navigation's page marked with the reason (AD-31), an `issues` call's or a rebind preview's
   answer unmarked, exactly as the server always gave it; any other 501 is an error.
+- Scripts: `scriptCalls {code, entry, calls: [{element_ids, inputs_text?, doc_text?}]}` →
+  `{results: [{text, error}], trips, ms, boot_ms}`, one result per call in call order, each
+  the script's `{payload, reads}` as the JSON text the script side wrote (handed on unparsed)
+  or its `ExcName: message`, exactly one of the two. `entry` is `value`, `step` or `transform`
+  (`script` is a 422); `inputs_text` and `doc_text` are JSON text, read by the exact parser
+  (AD-26). Params are read at arrival, else a 422; then a 409 `replica is not ready` unless
+  `ready`, and a 501 `scripts are not available` where the host gave the engine no script
+  host. The call is not a scheduler job and is not queued behind the model lane: it runs on
+  the state as it stands, staged edits included. The script reaches the model only through
+  the bridge, which reads the ready replica's working copy and is answered where the request
+  arrives, synchronously, outside the scheduler; with no ready replica — never opened, opening,
+  diverged, closed — its reply is `{"id": …, "error": "BridgeError: replica is not ready"}`,
+  so a script a replica leaves mid-run ends with errors, and never waits. A `close` under a
+  call is answered 409 `replica closed`. The host is made at the first call and disposed by
+  `close`; a replica opened again boots another.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed
