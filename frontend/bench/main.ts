@@ -9,6 +9,7 @@ import type {
 	EndResult,
 	ExportFileResult,
 	ModelFile,
+	ScriptCallsResult,
 	TablePageBody,
 	TailResult,
 	WireElement
@@ -30,6 +31,8 @@ export type OpenReport = {
 export type Bench = {
 	/** Opens M cold and returns once the digest check is done. */
 	open(): Promise<OpenReport>;
+	/** Ten scripts over 1,000 `Microservice` ids each, on one warm script worker. */
+	scripts(): Promise<Measures>;
 	/** Edits and reads; the last of them diverges the replica. */
 	transitions(): Promise<Measures>;
 	close(): void;
@@ -418,8 +421,73 @@ async function transitions(): Promise<Measures> {
 	return measures;
 }
 
+const SCRIPT_TYPE = 'Microservice';
+const SCRIPT_IDS = 1000;
+/** Each a `value(els)` body; `els[0]` is the call's one element. */
+const SCRIPT_BODIES = [
+	'return els[0].name.upper()',
+	'return len(els[0].outgoing())',
+	'return len(els[0].incoming())',
+	'p = els[0].parent(); return p.name if p else None',
+	'return [r.destination().name for r in els[0].outgoing()][:5]',
+	'return sum(len(r.destination().outgoing()) for r in els[0].outgoing())',
+	"return els[0].get('status')",
+	"return ', '.join(sorted(els[0].get('tags') or []))",
+	"e = els[0]; return f'{e.stereotype}:{e.id}'",
+	'return len(els[0].children())'
+];
+
+async function scripts(): Promise<Measures> {
+	if (link === null) throw new Error('open first');
+	const client = link.client;
+	const ids: string[] = [];
+	for (let offset = 0; ids.length < SCRIPT_IDS; offset += 500) {
+		const page = await client.call<ElementPage>('listElementsPage', {
+			type: SCRIPT_TYPE,
+			limit: 500,
+			offset
+		});
+		ids.push(...page.items.map((element) => element.id));
+		if (offset + 500 >= page.total) break;
+	}
+	if (ids.length < SCRIPT_IDS) {
+		throw new Error(`model M holds ${ids.length} ${SCRIPT_TYPE} elements, ${SCRIPT_IDS} needed`);
+	}
+	ids.length = SCRIPT_IDS;
+
+	const run = async (code: string, calls: { element_ids: string[] }[]) => {
+		const result = await client.call<ScriptCallsResult>('scriptCalls', {
+			code,
+			entry: 'value',
+			calls
+		});
+		const failed = result.results.find((one) => one.error !== null);
+		if (failed !== undefined) throw new Error(`a script cell failed: ${failed.error}`);
+		return result;
+	};
+	const warm = await run('def value(els):\n    return els[0].name\n', [{ element_ids: [ids[0]!] }]);
+
+	const calls = ids.map((id) => ({ element_ids: [id] }));
+	let trips = 0;
+	let ms = 0;
+	const start = now();
+	for (const body of SCRIPT_BODIES) {
+		const result = await run(`def value(els):\n    ${body}\n`, calls);
+		trips += result.trips;
+		ms += result.ms;
+	}
+	const wall = now() - start;
+	return {
+		'script boot': warm.boot_ms,
+		'10,000 script cells': wall,
+		'script bridge trips': trips,
+		'script µs per trip': (ms * 1000) / trips
+	};
+}
+
 window.bench = {
 	open,
+	scripts,
 	transitions,
 	close() {
 		link?.dispose();

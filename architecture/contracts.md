@@ -336,9 +336,15 @@ event     {event, …}                     engine → client, unsolicited
 - The Python facade and its single synchronous `_transport(req) -> dict` are unchanged.
 - Browser transport: the script worker posts the request and blocks on shared memory; the
   engine answers asynchronously and wakes it. Headless transport: a direct call.
-- The dispatcher is a port of `src/data_rover/core/script/bridge.py` and keeps trip-collapse;
-  one trip carries one batched payload. Sub-project D MAY replace JSON with a binary layout
-  behind the same `_transport`.
+- The script worker is a worker nested in the engine worker, which spawns it, boots it and
+  ends it (on `dispose`, a failure or an `error` event; the next run boots a new one), so its
+  channel is private to that pair. It alone blocks, on its own reply buffer: one
+  `SharedArrayBuffer` of 1 MiB per worker, an Int32 header and the reply's UTF-8 bytes,
+  chunked when a reply is larger. The engine worker never blocks.
+- The dispatcher is a port of `src/data_rover/core/script/bridge.py` and keeps trip-collapse.
+  One trip carries one op and one reply; a reply piggybacks the projections the collapse
+  lets it (far endpoints, hop relationships), and a call's roots travel with the call. Sub-project D MAY
+  replace JSON with a binary layout behind the same `_transport`.
 - Scripts only propose ops; the engine never applies a script's op without the user staging it.
 - Runs are deterministic on both hosts: pinned clock, pinned randomness, `PYTHONHASHSEED=0`.
 - Wall timeout via the interrupt buffer; terminating the worker (browser) or the child process

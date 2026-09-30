@@ -112,11 +112,15 @@ feature there lands on both sides with a fixture until F. The diff route's model
 `core/view/validation.py` and the `GET /views/{id}` route that serves its warnings, are frozen for
 behaviour from C's plan 6a on; the engine replays them from the `model_download` and
 `view_warnings` fixtures.
+D (scripts in the browser) is in progress, its first plan built: `scriptCalls` runs user Python
+in Pyodide in a script worker nested in the engine worker over a shared-memory bridge; at M, in
+Chromium, 10,000 script cells take 3,276 ms against the 2 s budget, over it (`K-100`)
+*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-09-30)*. Findings of that plan still open: `K-101` to `K-104`, `T-12` to `T-14`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-101`, `K-102`, `K-103`, `K-104`, `T-12`, `T-13`, `T-14`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -790,6 +794,80 @@ Fix direction: parse the file incrementally (a streaming or chunked reader that 
 
 ### K-93 · An integral float in a change request stages as an int · `open` · *2026-09-30*
 A CR crosses the frontend as parsed JSON (the dialog reads the file with `JSON.parse`, and a compare's answer is parsed as it arrives), so a float such as `1.0` in an added or modified entity becomes `1` before it is sent back or staged, on the engine path and the server path alike. Wire text reaches the engine untouched elsewhere (AD-26); a CR does not. Fix direction: read and keep a CR as text with `parseExact`'s float-preserving values on both sides, or send the file's bytes to the engine and let it read them.
+
+### K-100 · 10,000 script cells take 3.3 s in the browser against a 2 s budget · `open` · perf · *2026-09-30*
+`pixi run engine-bench-browser` (Chromium 148, Ryzen 9 3900X under WSL2, load 1.4, median of 3)
+runs ten scripts over 1,000 `Microservice` ids each through `scriptCalls` on one warm script
+worker: 3,276 ms [4,481 3,276 3,139] against CN-3's 2,000, in 10,850 trips at 289 µs
+[397 289 277]; the boot the warm-up call pays is 2,110 ms. Nothing was tuned. Split, from a
+throwaway Node run over the same model and scripts (medians of 3): Node's in-process host
+1,678 ms (155 µs per trip), of which the dispatcher 390 ms and the Python side replaying
+canned replies 1,147 ms (facade, `json`, FFI; not split further); a no-op post-and-wake
+between two Node `worker_threads` is 78 µs per trip, 844 ms over the trips. The browser's 3.3 s
+is about 0.8 s more than Node's host plus that wake, which is unaccounted for (Pyodide in
+Chromium, chunked replies, structured clone). Fix directions: fewer trips (project more with
+the roots, batch reads in the facade), a cheaper Python-side codec, a binary layout behind
+`_transport` (CT-6 allows it). The bench prints the verdict and never fails.
+
+### K-101 · A failed script-host boot is memoized, and a stuck run holds the queue · `open` · *2026-09-30*
+The Node host keeps a rejected boot (`booting ??= start()`), so a host whose boot failed
+cannot be retried, and the service keeps a rejected boot until `close`; `ScriptHost` does not
+document the `boot()` contract the service relies on (idempotent on a live host, a restart
+after failure). Runs are serialized, so a run that never settles blocks every later call: a
+host's `dispose()` must reject its run in flight. A `close()` during a Node host boot holds
+the run queue until the boot ends (a delay, not a stall). Fix: drop a rejected boot from the
+memo, state the contract on the type, and hold each host to it in a test.
+
+### K-102 · Integer-like object keys are reordered by the value layer · `open` · *2026-09-30*
+A request or a nested property value with a key such as `"10"` is held as a plain object,
+which JS orders integer-like keys first, so a bridge reply or an op text can differ from the
+oracle's insertion order. Fix: a
+`Map`-backed object in the value layer, or ordered key lists beside the object.
+
+### K-103 · Script worker and bridge hardening and small divergences · `open` · *2026-09-30*
+(1) A user script can post `done`, `failed` or `csp-violation` as the worker through
+Pyodide's `js` module; the script worker is not a trust boundary for those messages, which
+the README should say. (2) Neither side listens for `messageerror`, so a failed deserialize
+leaves a boot or run pending until close. (3) A reply of 2 GiB or more wraps the Int32
+header's `[2]`; `ReplyWriter.begin` could refuse it. (4) `wire`/`unwire` recurse without a
+depth bound; a `worker.booting !== null` branch is unreachable. (5) A violation during the
+script worker's own load is never relayed, which `sandbox/README.md` does not say, and
+`architecture/contracts.md` (CT-4's port hand-over) does not name that worker violations are
+relayed. (6) The Node host does not project input elements (`inputs.e.ids`) with the roots as
+`trusted_runner.py` does: trips differ, results do not; the host counts trips and the browser
+host duplicates that wrapper; `'[]'` for `transform` is written in host and guest. (7)
+`opOutgoing` and `opIncoming` are near-duplicates, `bridgeWorkingCopy`'s getter mutates
+`bridged`, `close()` disposes the host last (a throwing `dispose` leaves `close` failed after
+the reset), `ScriptCallsParams` is exported and unused.
+
+### K-104 · The sandbox's `/pyodide/` dev middleware has no error handling · `open` · *2026-09-30*
+A `statSync` throw answers 500 and a stream error is unhandled, which could end the dev
+server; nothing tests a non-GET/HEAD request or a HEAD on `/pyodide/<file>`.
+
+### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
+Failed 1 run in 3 of the full e2e run during the scripts plan (engine rev 5 against server
+rev 6 on a background `getModelIssues`); not proven to predate the branch, and not the same
+as `T-11` (`view.spec.ts`). Not analysed.
+
+### T-13 · The script host and service have thin tests · `open` · *2026-09-30*
+`script-worker.ts` has no automated test (proof was by hand in Chromium; a >1 MiB reply and a
+replace mid-run belong in the bench or an e2e spec). No test runs the service over the real
+browser host's reboot; the boot-retry tests wrap the Node host with fault injection, and the
+concurrent-failure test assumes three calls arrive within a 50 ms delay. The divergence path
+of `stillReady` (409 `replica is not ready`) is untested, and the "no scheduler job" test
+calls `bridge.dispatch` from the test, not from inside a handler. Nothing tests non-ASCII or
+astral characters in the code string; the `transform` "no roots sent" check holds via
+`trips === 0` either way.
+
+### T-14 · The bridge's oracle tests are partial · `open` · *2026-09-30*
+The golden test runs only the `{ascii, spaced, allowNan}` combination of `pyDumps`' options;
+`serialize.golden.test.ts` mixes two fixture shapes in one `it` with `continue`;
+`bridge.test.ts` (53 cases) pins oracle quirks with hand-carried texts, not regenerated from
+the oracle, so they are not staleness-checked; `pyIntOf` and `PyIntLimitError` have no direct
+test; the 1e300 offset/limit cases show "does not throw", not "clamped". In the script-bridge
+fixture generator, the request id 90 collides with an auto-numbered 90 in group reads,
+`_model()` aliases module-level property dicts into each group's model (deepcopy would isolate
+them), and there is no dangling-far-endpoint case nor a write dict missing `type_name`/`id`.
 
 ### Considered by the exports plan and deferred
 
