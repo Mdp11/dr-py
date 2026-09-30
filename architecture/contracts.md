@@ -262,9 +262,13 @@ event     {event, …}                     engine → client, unsolicited
   the bridge, which reads the ready replica's working copy and is answered where the request
   arrives, synchronously, outside the scheduler; with no ready replica — never opened, opening,
   diverged, closed — its reply is `{"id": …, "error": "BridgeError: replica is not ready"}`,
-  so a script a replica leaves mid-run ends with errors, and never waits. A `close` under a
-  call is answered 409 `replica closed`. The host is made at the first call and disposed by
-  `close`; a replica opened again boots another.
+  and it never waits. A call belongs to the replica it arrived on: calls run one at a time,
+  a run in flight reads that replica alone — once it is closed, replaced (by a replica
+  already `ready` included) or diverged the bridge answers not-ready — and a call whose
+  replica went before its run began or by the time it ended is answered 409 `replica
+  closed` (`replica is not ready` after a divergence), never with results. A `stage`,
+  `unstage` or delta on the same replica does not end a run. The host is made at the first
+  call and disposed by `close`; a replica opened again boots another.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed

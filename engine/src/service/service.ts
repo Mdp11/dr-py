@@ -597,6 +597,12 @@ class Service {
 	// The bridge's dispatcher over the working copy it was built for, and only that one.
 	private bridged: { readonly wc: WorkingCopy; readonly dispatcher: BridgeDispatcher } | null =
 		null;
+	// Moves whenever a replica is dropped: a run is pinned to the epoch it began in.
+	private epoch = 0;
+	// The epoch of the run in flight, which the bridge serves alone; null between runs.
+	private runEpoch: number | null = null;
+	// The end of the last run queued: calls run one at a time, as the host's one worker does.
+	private runs: Promise<void> = Promise.resolve();
 	private readonly bridge: Bridge = {
 		dispatch: (requestText) => this.bridgeReply(requestText),
 		roots: (ids) => {
@@ -763,11 +769,23 @@ class Service {
 
 	// -- scripts -------------------------------------------------------------
 
-	/** The working copy the bridge reads: the ready replica's, else none. */
+	/**
+	 * The working copy the bridge reads: the ready replica's, else none. A run
+	 * in flight reads the replica it began on, not one opened since.
+	 */
 	private bridgeWorkingCopy(): WorkingCopy | null {
-		if (this.state === 'ready' && this.wc !== null) return this.wc;
+		const stale = this.runEpoch !== null && this.runEpoch !== this.epoch;
+		if (this.state === 'ready' && this.wc !== null && !stale) return this.wc;
 		this.bridged = null;
 		return null;
+	}
+
+	/** Refuses a call whose replica is gone or no longer ready since it arrived in `epoch`. */
+	private stillReady(epoch: number): void {
+		if (this.epoch !== epoch) {
+			throw new Refused(409, this.state === 'diverged' ? NOT_READY : 'replica closed');
+		}
+		this.ready();
 	}
 
 	/**
@@ -794,12 +812,27 @@ class Service {
 		return this.runScripts(readScriptBatch(params));
 	}
 
+	/**
+	 * The call belongs to the replica it arrived on: it is refused, `replica
+	 * closed`, if that replica was dropped before the run began or by the time
+	 * it ended, and the bridge answers a run nothing but that replica.
+	 */
 	private async runScripts(batch: ScriptBatch): Promise<ScriptCallsResult> {
 		this.ready();
+		const epoch = this.epoch;
 		const { host, booted } = this.scriptHost();
+		const before = this.runs;
+		let pinned = false;
+		let next!: () => void;
+		this.runs = new Promise<void>((resolve) => (next = resolve));
 		try {
 			const { ms: boot_ms } = await booted;
+			await before;
+			this.stillReady(epoch);
+			this.runEpoch = epoch;
+			pinned = true;
 			const { results, trips, ms } = await host.run(batch);
+			this.stillReady(epoch);
 			return {
 				results: results.map(({ text, error }) => ({ text, error })),
 				trips,
@@ -810,6 +843,9 @@ class Service {
 			// `close` disposed the host under the run.
 			if (this.scripting?.host !== host) throw new Refused(409, 'replica closed');
 			throw error;
+		} finally {
+			if (pinned) this.runEpoch = null;
+			next();
 		}
 	}
 
@@ -1228,6 +1264,7 @@ class Service {
 		}
 		this.wc = null;
 		this.bridged = null;
+		this.epoch++;
 		this.progressHeld.clear();
 		this.tableOrders.clear();
 		this.scheduler.setOpen(false);
@@ -1444,6 +1481,7 @@ class Service {
 	private diverge(wc: WorkingCopy): void {
 		if (this.wc !== wc || this.state === 'diverged') return;
 		this.bridged = null;
+		this.epoch++;
 		this.progressHeld.clear();
 		this.tableOrders.clear();
 		this.scheduler.setOpen(false);

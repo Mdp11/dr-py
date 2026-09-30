@@ -337,23 +337,87 @@ describe('a replica that goes while a script call is in flight', () => {
 		expect(tracker.hosts).toHaveLength(2);
 	}, 60_000);
 
-	it('ends the run with errors when the replica was replaced while the host booted', async () => {
+	it('refuses a call whose replica was replaced while the host booted', async () => {
 		const { client, tracker } = scripted();
 		all.push(tracker);
 		await openReplica(client, bridgeModel(), doc);
 		const calling = client.call<CallsResult>('scriptCalls', batch(NAME, [['n1'], ['n2']]));
 		await client.call('open', { project_id: 'demo', metamodel: doc });
-		const result = await calling;
-		expect(result.results).toHaveLength(2);
-		for (const each of result.results) {
-			expect(each.text).toBeNull();
-			expect(each.error).toMatch(/replica is not ready/);
-		}
+		expect(await refusal(calling)).toEqual({ status: 409, detail: 'replica closed' });
 		// Nothing is stuck: the new replica opens and is read.
 		await openReplica(client, bridgeModel(), doc);
 		const next = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n2']]));
 		expect(payloadOf(next.results[0]!)).toBe('two');
 		expect(tracker.hosts).toHaveLength(1);
+	}, 60_000);
+
+	it('refuses a call whose replica was replaced and became ready while the host booted', async () => {
+		const { client, tracker } = scripted();
+		all.push(tracker);
+		await openReplica(client, bridgeModel(), doc);
+		// The element ids belong to the replica the call arrived on; the new one holds another n1.
+		const calling = client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]));
+		const other = bridgeModel();
+		applyBatch(other, [rename('n1', 'replaced')]);
+		await openReplica(client, other, doc);
+		expect(await refusal(calling)).toEqual({ status: 409, detail: 'replica closed' });
+		const next = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]));
+		expect(payloadOf(next.results[0]!)).toBe('replaced');
+	}, 60_000);
+
+	it('pins a run to its replica: the bridge answers not-ready once it was replaced', async () => {
+		// The real Node host runs to its end in one turn, so a gate holds its `run` while the replica changes.
+		const seen: { reply: string; roots: string }[] = [];
+		let entered = () => {};
+		let gate: Promise<void> = Promise.resolve();
+		const real = tracked();
+		all.push(real);
+		const factory: ScriptHostFactory = (bridge) => {
+			const host = real.factory(bridge);
+			return {
+				boot: () => host.boot(),
+				dispose: () => host.dispose(),
+				async run(batch) {
+					entered();
+					await gate;
+					seen.push({ reply: bridge.dispatch(ELEMENT_REQUEST), roots: bridge.roots(['n1']) });
+					return host.run(batch);
+				}
+			};
+		};
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await openReplica(client, bridgeModel(), doc);
+		await client.call('scriptCalls', batch(NAME, [['n1']]));
+		seen.length = 0;
+		const inside = new Promise<void>((resolve) => (entered = resolve));
+
+		let release!: () => void;
+		gate = new Promise<void>((resolve) => (release = resolve));
+		const calling = client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]));
+		await inside;
+		const other = bridgeModel();
+		applyBatch(other, [rename('n1', 'replaced')]);
+		await openReplica(client, other, doc);
+		release();
+		expect(await refusal(calling)).toEqual({ status: 409, detail: 'replica closed' });
+		expect(seen).toEqual([{ reply: NOT_READY, roots: '[]' }]);
+
+		// With no run in flight the bridge reads the current replica again.
+		const reply = JSON.parse(real.bridges[0]!.dispatch(ELEMENT_REQUEST)) as {
+			element: { properties: { name: string } };
+		};
+		expect(reply.element.properties.name).toBe('replaced');
+	}, 60_000);
+
+	it('runs calls one at a time, each on the replica it arrived on', async () => {
+		const { client, tracker } = scripted();
+		all.push(tracker);
+		await openReplica(client, bridgeModel(), doc);
+		const [a, b] = await Promise.all([
+			client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']])),
+			client.call<CallsResult>('scriptCalls', batch(NAME, [['n2']]))
+		]);
+		expect([payloadOf(a.results[0]!), payloadOf(b.results[0]!)]).toEqual(['one', 'two']);
 	}, 60_000);
 });
 
