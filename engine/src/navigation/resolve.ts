@@ -1,11 +1,18 @@
 /**
- * Saved navigations inlined into a definition, as `core/navigation/resolve.py`
- * does it, and whether a definition reaches a script. A snippet ref needs no
- * resolving here: resolved or dangling, a script step with one reaches a
- * script all the same.
+ * Saved navigations and snippets inlined into a definition, as
+ * `core/navigation/resolve.py` does it, and whether a definition reaches a
+ * script. A script step's snippet ref is replaced by the snippet's code when a
+ * snippet fetch is given and finds it; a dangling ref stays, and evaluates to
+ * the step's error. Resolved or dangling, a script step reaches a script.
  */
 import { pyRepr } from '../value/repr.ts';
-import type { NavigationDefinition, Operand, SetExpression } from './schema.ts';
+import type {
+	NavigationDefinition,
+	NavigationStep,
+	Operand,
+	SetExpression,
+	SnippetSource
+} from './schema.ts';
 
 /** A ref that makes a definition unevaluable; `message` is the core's text. */
 export class NavigationResolveError extends Error {
@@ -37,31 +44,67 @@ export class RefCycleError extends NavigationResolveError {
 /** A saved navigation's definition; throws `RefNotFoundError` when there is none. */
 export type Fetch = (id: string) => NavigationDefinition;
 
-function resolveExpr(expr: SetExpression, fetch: Fetch, seen: ReadonlySet<string>): SetExpression {
+/** A saved snippet's code, or `null` for a ref that names none. */
+export type SnippetFetch = (ref: string) => { code: string } | null;
+
+/** `source` with its ref replaced by the snippet it names; a dangling ref, or no fetch, leaves it. */
+export function resolveSnippet(source: SnippetSource, snippets?: SnippetFetch): SnippetSource {
+	if (source.ref === null || snippets === undefined) return source;
+	const snippet = snippets(source.ref);
+	return snippet === null ? source : { ref: null, definition: { code: snippet.code } };
+}
+
+function resolveSteps(steps: NavigationStep[], snippets?: SnippetFetch): NavigationStep[] {
+	if (snippets === undefined) return steps;
+	let changed = false;
+	const resolved = steps.map((step) => {
+		if (step.kind !== 'script') return step;
+		const snippet = resolveSnippet(step.snippet, snippets);
+		if (snippet === step.snippet) return step;
+		changed = true;
+		return { ...step, snippet };
+	});
+	return changed ? resolved : steps;
+}
+
+function resolveExpr(
+	expr: SetExpression,
+	fetch: Fetch,
+	seen: ReadonlySet<string>,
+	snippets?: SnippetFetch
+): SetExpression {
 	const operands = expr.operands.map((operand): Operand => {
 		if (operand.ref !== null) {
 			if (seen.has(operand.ref)) throw new RefCycleError(operand.ref);
-			const inner = resolveRefs(fetch(operand.ref), fetch, new Set([...seen, operand.ref]));
+			const inner = resolveRefs(
+				fetch(operand.ref),
+				fetch,
+				new Set([...seen, operand.ref]),
+				snippets
+			);
 			return { ref: null, definition: inner, step_index: operand.step_index };
 		}
-		return { ...operand, definition: resolveRefs(operand.definition!, fetch, seen) };
+		return { ...operand, definition: resolveRefs(operand.definition!, fetch, seen, snippets) };
 	});
 	return { ...expr, operands };
 }
 
 /**
  * A copy of `defn` with every operand's ref replaced by the navigation it
- * names, resolved in turn. `seen` holds the ids being expanded on the path to
- * here: a navigation may appear twice side by side, never inside itself.
+ * names, resolved in turn, and every script step's snippet ref by the snippet
+ * it names. `seen` holds the ids being expanded on the path to here: a
+ * navigation may appear twice side by side, never inside itself.
  */
 export function resolveRefs(
 	defn: NavigationDefinition,
 	fetch: Fetch,
-	seen: ReadonlySet<string> = new Set()
+	seen: ReadonlySet<string> = new Set(),
+	snippets?: SnippetFetch
 ): NavigationDefinition {
-	if (defn.kind === 'set_op') return resolveExpr(defn, fetch, seen);
-	if (defn.start.kind !== 'set_op') return defn;
-	return { ...defn, start: resolveExpr(defn.start, fetch, seen) };
+	if (defn.kind === 'set_op') return resolveExpr(defn, fetch, seen, snippets);
+	const steps = resolveSteps(defn.steps, snippets);
+	if (defn.start.kind !== 'set_op') return steps === defn.steps ? defn : { ...defn, steps };
+	return { ...defn, start: resolveExpr(defn.start, fetch, seen, snippets), steps };
 }
 
 function setHasScript(expr: SetExpression): boolean {

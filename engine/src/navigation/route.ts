@@ -6,6 +6,7 @@ import { ReadError } from '../read/errors.ts';
 import { optionalString, pageOf, type ReadParams } from '../read/params.ts';
 import { treeItem, type TreeItem } from '../read/tree.ts';
 import { toWire, type Wire } from '../read/wire.ts';
+import { snippetFetch } from '../script/snippets.ts';
 import type { Steps } from '../steps/steps.ts';
 import { pyRepr } from '../value/repr.ts';
 import {
@@ -63,8 +64,9 @@ function resolved(
 	source: NavigationDefinition | string
 ): NavigationDefinition {
 	const fetch = navigationFetch(artifacts);
+	const snippets = snippetFetch(artifacts);
 	try {
-		if (typeof source !== 'string') return resolveRefs(source, fetch);
+		if (typeof source !== 'string') return resolveRefs(source, fetch, new Set(), snippets);
 		const id = source;
 		let saved: NavigationDefinition;
 		try {
@@ -76,7 +78,7 @@ function resolved(
 			}
 			throw error;
 		}
-		return resolveRefs(saved, fetch, new Set([id]));
+		return resolveRefs(saved, fetch, new Set([id]), snippets);
 	} catch (error) {
 		if (error instanceof NavigationResolveError) throw new ReadError(422, error.message);
 		throw error;

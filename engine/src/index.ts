@@ -186,7 +186,9 @@ export {
 	RefCycleError,
 	RefNotFoundError,
 	resolveRefs,
-	type Fetch
+	resolveSnippet,
+	type Fetch,
+	type SnippetFetch
 } from './navigation/resolve.ts';
 export {
 	evaluateNavigation,
@@ -355,6 +357,20 @@ export {
 	type WorkerPort,
 	type WorkerSpawner
 } from './script/pool.ts';
+export {
+	PENDING,
+	parseScriptResult,
+	type EmbeddedEntry,
+	type ReadKey,
+	type ReadTag,
+	type ScriptError,
+	type ScriptErrorKind,
+	type ScriptResult,
+	type StepPayload,
+	type TransformPayload,
+	type ValuePayload
+} from './script/result.ts';
+export { resolveTransformSource, SNIPPET_KIND, snippetFetch } from './script/snippets.ts';
 export { runWorker, type WorkerScope } from './script/worker-main.ts';
 export { ByteQueue } from './service/byte-queue.ts';
 export {

@@ -1,8 +1,10 @@
 /**
- * Saved navigations inlined into a table, as `core/table/resolve.py` does it,
- * and whether the table reaches a script. Snippet refs are left in place: a
- * table with a configured snippet reaches a script whether its ref resolves
- * or not.
+ * Saved navigations and snippets inlined into a table, as `core/table/resolve.py`
+ * does it, and whether the table reaches a script. A script column's snippet
+ * ref, and those of the script steps of every navigation it holds, are
+ * replaced by the snippet's code when a snippet fetch finds it; a dangling ref
+ * stays and evaluates to the column's error. A table with a configured snippet
+ * reaches a script whether its ref resolves or not.
  */
 import type { ArtifactSet } from '../artifacts/artifact-set.ts';
 import {
@@ -10,7 +12,9 @@ import {
 	NavigationResolveError,
 	RefNotFoundError,
 	resolveRefs,
-	type Fetch
+	resolveSnippet,
+	type Fetch,
+	type SnippetFetch
 } from '../navigation/resolve.ts';
 import { ReadError } from '../read/errors.ts';
 import { pyRepr } from '../value/repr.ts';
@@ -32,7 +36,11 @@ export function tableFetch(artifacts: ArtifactSet): (id: string) => TableDefinit
 
 // A source's own ref missing is the route's `unknown artifact <id>`; one
 // nested in its operands is the navigation resolver's error.
-function resolveSource(source: NavigationSource, fetch: Fetch): NavigationSource {
+function resolveSource(
+	source: NavigationSource,
+	fetch: Fetch,
+	snippets?: SnippetFetch
+): NavigationSource {
 	if (source.ref === null && source.definition === null) return source;
 	let base = source.definition;
 	if (source.ref !== null) {
@@ -46,7 +54,7 @@ function resolveSource(source: NavigationSource, fetch: Fetch): NavigationSource
 		}
 	}
 	try {
-		return { ref: null, definition: resolveRefs(base!, fetch) };
+		return { ref: null, definition: resolveRefs(base!, fetch, new Set(), snippets) };
 	} catch (error) {
 		if (error instanceof NavigationResolveError) throw new ReadError(422, error.message);
 		throw error;
@@ -56,15 +64,25 @@ function resolveSource(source: NavigationSource, fetch: Fetch): NavigationSource
 /**
  * A copy of `defn` with the row source's navigation and every navigation
  * column's inlined, refs nested in them included; an unconfigured one stays.
- * A ref that names no navigation refuses with 422.
+ * A ref that names no navigation refuses with 422. With `snippets`, every
+ * script column's snippet ref, and every script step's in those navigations,
+ * is inlined as well.
  */
-export function resolveTableRefs(defn: TableDefinition, fetch: Fetch): TableDefinition {
+export function resolveTableRefs(
+	defn: TableDefinition,
+	fetch: Fetch,
+	snippets?: SnippetFetch
+): TableDefinition {
 	const rs = defn.row_source;
 	const rowSource =
-		rs.kind === 'scope' ? rs : { ...rs, navigation: resolveSource(rs.navigation, fetch) };
-	const columns = defn.columns.map((col): Column =>
-		col.kind === 'navigation' ? { ...col, navigation: resolveSource(col.navigation, fetch) } : col
-	);
+		rs.kind === 'scope' ? rs : { ...rs, navigation: resolveSource(rs.navigation, fetch, snippets) };
+	const columns = defn.columns.map((col): Column => {
+		if (col.kind === 'navigation') {
+			return { ...col, navigation: resolveSource(col.navigation, fetch, snippets) };
+		}
+		if (col.kind === 'script') return { ...col, snippet: resolveSnippet(col.snippet, snippets) };
+		return col;
+	});
 	return { ...defn, row_source: rowSource, columns };
 }
 

@@ -10,6 +10,7 @@ import { navigationFetch } from '../navigation/route.ts';
 import { RefNotFoundError } from '../navigation/resolve.ts';
 import { ReadError } from '../read/errors.ts';
 import { pageOf, type ReadParams } from '../read/params.ts';
+import { snippetFetch } from '../script/snippets.ts';
 import type { Steps } from '../steps/steps.ts';
 import { pyRepr } from '../value/repr.ts';
 import { evaluateCellsSteps, type TableCell } from './cells.ts';
@@ -38,7 +39,7 @@ export function sourceOf(params: ReadParams): TableDefinition | string {
 	return artifactId;
 }
 
-/** The table with every navigation it names inlined, through the working copy's artifacts. */
+/** The table with every navigation and snippet it names inlined, through the working copy's artifacts. */
 export function resolved(
 	artifacts: ArtifactSet,
 	source: TableDefinition | string
@@ -53,7 +54,7 @@ export function resolved(
 			throw error;
 		}
 	} else defn = source;
-	return resolveTableRefs(defn, navigationFetch(artifacts));
+	return resolveTableRefs(defn, navigationFetch(artifacts), snippetFetch(artifacts));
 }
 
 /** The core's `ValueError` and `KeyError`, as the routes answer them. */

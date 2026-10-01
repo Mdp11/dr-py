@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+from functools import cache
 from typing import Any
 
 from data_rover.api.serialize import iter_entity_lines
@@ -476,8 +477,8 @@ def _outcomes(cases: list[Case]) -> list[dict[str, Any]]:
     return json.loads(proc.stdout)
 
 
-@scenario("script_parity")
-def script_parity() -> Any:
+@cache
+def _document() -> dict[str, Any]:
     model = build_model()
     lines = list(iter_entity_lines(model))
     cases = _cases()
@@ -504,3 +505,18 @@ def script_parity() -> Any:
             for case, outcome in zip(cases, outcomes, strict=True)
         ],
     }
+
+
+@scenario("script_parity")
+def script_parity() -> Any:
+    return _document()
+
+
+def embedded_results() -> list[tuple[str, str]]:
+    """Every embedded call's result text with its entry, as the corpus recorded it."""
+    return [
+        (case["entry"], text)
+        for case in _document()["cases"]
+        if case["mode"] == "embedded"
+        for text in case["results"]
+    ]
