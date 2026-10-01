@@ -196,6 +196,8 @@ export type Step = Partial<Observed> & {
 	/** `apply_cr`: the request body's change requests, as JSON, and as text parsed exactly from the fixture (`withExactCrs`). */
 	crs?: unknown;
 	crs_text?: string;
+	/** `read` / `export`: the step ran its snippets, on the oracle's runner. */
+	scripted?: true;
 	/** The engine leaves the step to the server with its `FALLBACKS` refusal, whatever Python answered. */
 	fallback?: true;
 	result: string | string[] | BatchOutcome | object | boolean | null;
@@ -326,7 +328,7 @@ export function outcome(model: Model, res: BatchResult): BatchOutcome {
  */
 type Landed = Map<number, BatchResult>;
 type Validation = { validators: Validators; patterns: FacetPatterns };
-type Carried = {
+export type Carried = {
 	landed: Landed;
 	placements: ViewPlacements;
 	artifacts: ArtifactSet;
@@ -915,17 +917,27 @@ const READ_LIKE = new Set([
 ]);
 
 /**
- * Replays a recorded scenario through the engine, comparing every outcome and
- * the whole observable state after every step. Adjacency is shuffled before
- * each step and the indexes are checked against a rebuild after it. The
- * artifacts of an `artifacts` step go into `layer`: committed, or staged as
- * creates under their own ids over an empty committed layer.
+ * A replay in pieces: `begin` a step, `apply` it, and `end` it with what it
+ * answered or `fail`ed with, comparing every outcome and the whole observable
+ * state after it. A step answered by awaiting something is applied by the
+ * caller in place of `apply`; `replaySteps` is the loop over the pieces.
  */
-export function replaySteps(
+export type Replay = {
+	readonly model: Model;
+	readonly carried: Carried;
+	/** Shuffles adjacency before the step; answers its label. */
+	begin(step: Step, index: number): string;
+	apply(step: Step, index: number): unknown;
+	/** The error a step ended with, as the oracle records one; anything else is rethrown. */
+	fail(caught: unknown): Step['error'];
+	end(step: Step, label: string, result: unknown, error: Step['error']): void;
+};
+
+export function startReplay(
 	fixture: StepsFixture,
 	options: ModelOptions = {},
 	layer: ArtifactLayer = 'committed'
-): void {
+): Replay {
 	const model = loadModelFile(fixture, options);
 	const random = seededRandom(20260918);
 	const carried: Carried = {
@@ -940,59 +952,88 @@ export function replaySteps(
 		options
 	};
 	let minted = 0;
+	let mintedBefore = 0;
 	let last = observe(model);
+	return {
+		model,
+		carried,
+		begin(step, index) {
+			shuffleAdjacency(model, random);
+			mintedBefore = minted;
+			return `step ${index}: ${step.do}`;
+		},
+		apply: (step, index) => apply(model, step, index, () => `id-${++minted}`, carried),
+		fail(caught) {
+			minted = mintedBefore;
+			if (caught instanceof ModelError) return { kind: caught.kind, message: caught.message };
+			if (caught instanceof OpError) return { status: caught.status, detail: caught.detail };
+			if (caught instanceof ReadError) return { status: caught.status, detail: caught.detail };
+			if (caught instanceof NavKeyError) return { kind: 'key', message: caught.id };
+			if (caught instanceof NavValueError) return { kind: 'value', message: caught.message };
+			if (caught instanceof RefusedOps) return { ...REFUSED_OPS };
+			throw caught;
+		},
+		end(step, label, result, error) {
+			const recorded = step.error;
+			if (step.fallback === true) {
+				expect(error, label).toEqual(FALLBACKS[step.do]);
+			} else if (step.do === 'preview_rebind' && recorded !== null) {
+				// The oracle refuses the ops in its own words; the engine leaves them to it.
+				expect(error, label).toEqual(REFUSED_OPS);
+			} else if (recorded !== null && 'status' in recorded && typeof recorded.detail !== 'string') {
+				// FastAPI's refusal of a body: the engine refuses it in its own words.
+				expect(error !== null && 'status' in error ? error.status : error, label).toBe(
+					recorded.status
+				);
+			} else expect(error, label).toEqual(recorded);
+			// A body is compared as text: values and key order at once.
+			if (step.fallback === true) expect(result, label).toBeNull();
+			else if (READ_LIKE.has(step.do)) {
+				const recordedResult =
+					step.do === 'candidate' ? comparableDiff(step.result as CandidateDiff) : step.result;
+				expect(JSON.stringify(result), label).toBe(JSON.stringify(recordedResult));
+			} else expect(result, label).toEqual(step.result);
+			const seen = observe(model);
+			if (step.unchanged) {
+				expect(seen, label).toEqual(last);
+			} else {
+				if (step.state !== undefined) {
+					// A checkpoint: compare what can be read before what can only be seen.
+					expect(seen.state, label).toEqual(step.state);
+					expect(JSON.parse(seen.indexes), label).toEqual(JSON.parse(step.indexes!));
+				}
+				expect(seen.digest, label).toBe(step.digest);
+				expect(seen.fingerprint, label).toBe(step.fingerprint);
+			}
+			verifyConsistent(model);
+			expect(observe(model), `${label}, after a rebuild`).toEqual(seen);
+			last = seen;
+		}
+	};
+}
+
+/**
+ * Replays a recorded scenario through the engine, comparing every outcome and
+ * the whole observable state after every step. Adjacency is shuffled before
+ * each step and the indexes are checked against a rebuild after it. The
+ * artifacts of an `artifacts` step go into `layer`: committed, or staged as
+ * creates under their own ids over an empty committed layer.
+ */
+export function replaySteps(
+	fixture: StepsFixture,
+	options: ModelOptions = {},
+	layer: ArtifactLayer = 'committed'
+): void {
+	const replay = startReplay(fixture, options, layer);
 	fixture.steps.forEach((step, index) => {
-		const label = `step ${index}: ${step.do}`;
-		shuffleAdjacency(model, random);
+		const label = replay.begin(step, index);
 		let result: unknown = null;
 		let error: Step['error'] = null;
-		const mintedBefore = minted;
 		try {
-			result = apply(model, step, index, () => `id-${++minted}`, carried);
+			result = replay.apply(step, index);
 		} catch (caught) {
-			minted = mintedBefore;
-			if (caught instanceof ModelError) error = { kind: caught.kind, message: caught.message };
-			else if (caught instanceof OpError) error = { status: caught.status, detail: caught.detail };
-			else if (caught instanceof ReadError) {
-				error = { status: caught.status, detail: caught.detail };
-			} else if (caught instanceof NavKeyError) error = { kind: 'key', message: caught.id };
-			else if (caught instanceof NavValueError) error = { kind: 'value', message: caught.message };
-			else if (caught instanceof RefusedOps) error = { ...REFUSED_OPS };
-			else throw caught;
+			error = replay.fail(caught);
 		}
-		const recorded = step.error;
-		if (step.fallback === true) {
-			expect(error, label).toEqual(FALLBACKS[step.do]);
-		} else if (step.do === 'preview_rebind' && recorded !== null) {
-			// The oracle refuses the ops in its own words; the engine leaves them to it.
-			expect(error, label).toEqual(REFUSED_OPS);
-		} else if (recorded !== null && 'status' in recorded && typeof recorded.detail !== 'string') {
-			// FastAPI's refusal of a body: the engine refuses it in its own words.
-			expect(error !== null && 'status' in error ? error.status : error, label).toBe(
-				recorded.status
-			);
-		} else expect(error, label).toEqual(recorded);
-		// A body is compared as text: values and key order at once.
-		if (step.fallback === true) expect(result, label).toBeNull();
-		else if (READ_LIKE.has(step.do)) {
-			const recordedResult =
-				step.do === 'candidate' ? comparableDiff(step.result as CandidateDiff) : step.result;
-			expect(JSON.stringify(result), label).toBe(JSON.stringify(recordedResult));
-		} else expect(result, label).toEqual(step.result);
-		const seen = observe(model);
-		if (step.unchanged) {
-			expect(seen, label).toEqual(last);
-		} else {
-			if (step.state !== undefined) {
-				// A checkpoint: compare what can be read before what can only be seen.
-				expect(seen.state, label).toEqual(step.state);
-				expect(JSON.parse(seen.indexes), label).toEqual(JSON.parse(step.indexes!));
-			}
-			expect(seen.digest, label).toBe(step.digest);
-			expect(seen.fingerprint, label).toBe(step.fingerprint);
-		}
-		verifyConsistent(model);
-		expect(observe(model), `${label}, after a rebuild`).toEqual(seen);
-		last = seen;
+		replay.end(step, label, result, error);
 	});
 }

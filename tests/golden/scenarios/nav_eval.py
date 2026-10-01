@@ -3,7 +3,8 @@ navigation core underneath: every step kind over subtypes, parallel edges, a
 self-loop and a cycle; scopes with and without types and criteria; every set
 operation, nested, by ref and inline; row starts; refs missing, of another
 kind, in a cycle and in a diamond; saved navigations; paging; the evaluator's
-caps; and which definitions reach a script."""
+caps; and which definitions reach a script. ``nav_eval_scripted`` runs the
+script steps those definitions reach, on the oracle's trusted runner."""
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from data_rover.core.metamodel.schema import Metamodel
 
 from ..driver import scenario
 from ..model_steps import batch, read_step, run_steps
+from ..scripted import run_scripted
 
 _METAMODEL = {
     "elements": [
@@ -604,3 +606,217 @@ _STEPS: list[dict[str, Any]] = [
 @scenario("nav_eval")
 def nav_eval() -> Any:
     return run_steps(Metamodel.model_validate(_METAMODEL), _STEPS)
+
+
+# -- script steps -----------------------------------------------------------------
+
+
+def _step_code(body: str) -> dict[str, Any]:
+    return {"definition": {"code": f"def step(el):\n{body}\n"}}
+
+
+_DEST = 'r.destination().id for r in el.outgoing(stereotype="Links")'
+_HOP_SCRIPT = _step_code(f"    return [{_DEST}]")
+_HOP_EITHER = _step_code(
+    f"    return [{_DEST}] + "
+    '[r.source().id for r in el.incoming(stereotype="Links")]'
+)
+#: ids and a value together: a chain ends at the value, the rest hop on
+_HOP_AND_NAME = _step_code(f'    return [{_DEST}] + [el["name"]]')
+#: duplicates across (type, value), a wide int, a signed zero, a name no element has
+_TERMINALS = _step_code(
+    '    return [el["name"], "alpha", 1, True, 1.0, "1", 1, 1.0, "alpha", 2**70, 2**70, 0.0, -0.0, None]'
+)
+_NON_FINITE = _step_code(
+    '    return [float("nan"), float("inf"), "inf", float("-inf"), float("inf"), "nan"]'
+)
+_ONE_VALUE = _step_code('    return el["name"]')
+_NOTHING = _step_code("    return None")
+_CHILDREN = _step_code("    return el.children()")
+_SELF = _step_code("    return el.id")
+_BOOM = _step_code('    raise ValueError("boom")')
+#: one failure kind per element: more kinds than the channel holds
+_BOOM_EACH = _step_code('    raise ValueError("boom " + el.id)')
+_BOOM_THIRDS = _step_code(
+    '    if int(el.id.split("-")[1]) % 3 == 0:\n'
+    "        raise KeyError(el.id)\n"
+    f"    return [{_DEST}]"
+)
+_BAD_RETURN = _step_code('    return {"a": 1}')
+_SYNTAX = {"definition": {"code": "def step(el:\n    return 1\n"}}
+_NO_STEP = {"definition": {"code": "x = 1\n"}}
+_BOOT_RAISE = {"definition": {"code": 'raise RuntimeError("boot failed")\n'}}
+
+_SCRIPT_ARTIFACTS = {
+    **_ARTIFACTS,
+    "hop": {"kind": "code_snippet", "payload": _HOP_SCRIPT["definition"]},
+    "nav_hop": {
+        "kind": "navigation",
+        "payload": _path(_scope(["Part"]), _script({"ref": "hop"}), _hop("Links")),
+    },
+}
+
+
+def _run(definition: dict[str, Any], **params: Any) -> dict[str, Any]:
+    return read_step("evaluateNavigation", scripted=True, definition=definition, **params)
+
+
+def _run_saved(artifact_id: str, **params: Any) -> dict[str, Any]:
+    return read_step("evaluateNavigation", scripted=True, artifact_id=artifact_id, **params)
+
+
+def _hops() -> list[dict[str, Any]]:
+    part = _scope(["Part"], _prop("s", "exists"))
+    return [
+        _run(_path(_NODES, _script(_HOP_SCRIPT))),
+        _run(_path(_NODES, _script(_HOP_SCRIPT, "next"))),
+        _run(_path(_NODES, _script(_HOP_EITHER))),
+        _run(_path(_NODES, _script(_CHILDREN))),
+        _run(_path(_NODES, _script(_SELF))),
+        _run(_path(_NODES, _script(_SELF)), limit=3, offset=2),
+        _run(_path(_NODES, _script(_SELF), exclude_visited=False)),
+        _run(_path(_NODES, _script(_NOTHING))),
+        # two script steps, and a script step among the others
+        _run(_path(_NODES, _script(_HOP_SCRIPT), _script(_HOP_SCRIPT))),
+        _run(_path(_NODES, _script(_HOP_SCRIPT), _script(_CHILDREN), _script(_HOP_SCRIPT))),
+        _run(_path(_NODES, _hop("Links"), _script(_HOP_SCRIPT))),
+        _run(_path(_NODES, _script(_HOP_SCRIPT), _hop("Links"))),
+        _run(_path(_NODES, _script(_HOP_SCRIPT), _filter(_prop("s", "exists")))),
+        _run(_path(_NODES, _script(_HOP_SCRIPT), _filter(_prop("s", "exists")), _hop("Links"))),
+        _run(_path(_NODES, _script(_HOP_SCRIPT), _prop_step("refs"))),
+        _run(_path(_NODES, _prop_step("refs"), _script(_HOP_SCRIPT))),
+        _run(_path(_NODES, _script(_HOP_SCRIPT, "a"), _script(_HOP_SCRIPT, "b")), limit=2),
+        # a cycle walked with and without the guard
+        _run(_path(part, _script(_HOP_SCRIPT), _script(_HOP_SCRIPT), _script(_HOP_SCRIPT))),
+        _run(
+            _path(
+                part,
+                _script(_HOP_SCRIPT),
+                _script(_HOP_SCRIPT),
+                _script(_HOP_SCRIPT),
+                exclude_visited=False,
+            )
+        ),
+    ]
+
+
+def _terminals() -> list[dict[str, Any]]:
+    return [
+        _run(_path(_scope(["Leaf"]), _script(_TERMINALS))),
+        _run(_path(_scope(["Leaf"]), _script(_NON_FINITE))),
+        _run(_path(_scope(["Leaf"]), _script(_ONE_VALUE))),
+        _run(_path(_scope(["Part"]), _script(_HOP_AND_NAME))),
+        # a value ends its chain: whatever follows prunes
+        _run(_path(_scope(["Leaf"]), _script(_TERMINALS), _hop("Links"))),
+        _run(_path(_scope(["Part"]), _script(_HOP_AND_NAME), _script(_HOP_SCRIPT))),
+        _run(_path(_scope(["Leaf"]), _script(_ONE_VALUE), _filter())),
+    ]
+
+
+def _failures() -> list[dict[str, Any]]:
+    return [
+        _run(_path(_NODES, _script(_BOOM))),
+        _run(_path(_NODES, _script(_BOOM_EACH))),
+        _run(_path(_scope(["Leaf"]), _script(_BOOM_EACH))),
+        _run(_path(_NODES, _script(_BOOM_THIRDS))),
+        _run(_path(_NODES, _script(_BOOM_THIRDS), _script(_BOOM))),
+        _run(_path(_NODES, _script(_BAD_RETURN))),
+        _run(_path(_scope(["Leaf"]), _script(_SYNTAX))),
+        _run(_path(_scope(["Leaf"]), _script(_NO_STEP))),
+        _run(_path(_scope(["Leaf"]), _script(_BOOT_RAISE))),
+        # the failing step prunes; another still runs
+        _run(_path(_scope(["Leaf"]), _script(_BOOM), _script(_HOP_SCRIPT))),
+    ]
+
+
+def _snippet_refs() -> list[dict[str, Any]]:
+    return [
+        _run(_path(_NODES, _script({"ref": "hop"}))),
+        _run(_path(_NODES, _script({"ref": "s1"}))),
+        _run(_path(_NODES, _script({"ref": "s1"}), exclude_visited=False)),
+        _run(_path(_NODES, _script({"ref": "hop"}), _script({"definition": _HOP_SCRIPT["definition"]}))),
+        # a ref that names nothing, or no snippet
+        _run(_path(_NODES, _script({"ref": "gone"}))),
+        _run(_path(_NODES, _script({"ref": "n1"}))),
+        _run(_path(_NODES, _script({"ref": "t1"}))),
+        _run(_path(_scope(["Leaf"]), _script({"ref": "gone"}), _script({"ref": "hop"}))),
+        _run(_path(_scope(["Leaf"]), _script({"ref": "gone"}, "missing"))),
+        # unconfigured: nothing runs, nothing is said
+        _run(_path(_NODES, _script({}))),
+        _run(_path(_NODES, _script({}), _script({"ref": "hop"}))),
+    ]
+
+
+def _script_sets() -> list[dict[str, Any]]:
+    scripted = _path(_NODES, _script(_HOP_SCRIPT))
+    plain = _path(_NODES, _hop("Links"))
+    return [
+        _run(_set("union", _inline(scripted), _inline(_path(_scope(["Leaf"]))))),
+        _run(_set("union", _inline(scripted, 0), _inline(scripted, 1))),
+        _run(_set("difference", _inline(plain, 1), _inline(scripted, 1))),
+        _run(_set("intersection", _inline(plain, 1), _inline(scripted, 1))),
+        _run(_set("symmetric_difference", _inline(plain, 1), _inline(scripted))),
+        # a value at the projected step contributes nothing
+        _run(_set("union", _inline(_path(_NODES, _script(_TERMINALS)), 1))),
+        _run(_set("union", _inline(_path(_NODES, _script(_HOP_AND_NAME)), 1))),
+        _run(_set("union", _inline(_path(_NODES, _script(_BOOM)), 1))),
+        _run(_set("union", _inline(_set("union", _inline(scripted, 1)), 0), _inline(plain))),
+        # a set that starts a path with a script step in it
+        _run(_path(_set("union", _inline(scripted, 1)), _script(_HOP_SCRIPT))),
+        _run(_path(_set("union", _inline(scripted, 1), _inline(plain, 1)), _hop("Links"))),
+        _run(_path(_set("union", _inline(_path(_NODES, _script({"ref": "gone"})))), _hop("Links"))),
+        # by ref
+        _run(_set("union", _ref("n3"), _inline(scripted))),
+        _run(_set("union", _ref("nav_hop", 1))),
+        _run_saved("n3"),
+        _run_saved("nav_hop"),
+        _run_saved("nav_hop", limit=2, offset=1),
+    ]
+
+
+def _script_rows() -> list[dict[str, Any]]:
+    return [
+        _run(_path(_ROW, _script(_HOP_SCRIPT)), row_element_id="id-1"),
+        _run(_path(_ROW, _script(_HOP_SCRIPT), _script(_HOP_SCRIPT)), row_element_id="id-1"),
+        _run(_path(_ROW, _script(_TERMINALS)), row_element_id="id-2"),
+        _run(_path(_ROW, _hop("Links"), _script(_HOP_SCRIPT)), row_element_id="id-1"),
+        _run(_path(_ROW, _script(_HOP_SCRIPT)), row_element_id="id-30"),
+        _run(_path(_ROW, _script(_HOP_SCRIPT)), row_element_id="ghost"),
+        _run(_path(_ROW, _script(_HOP_SCRIPT))),
+        _run(
+            _set(
+                "union",
+                _inline(_path(_ROW, _script(_HOP_SCRIPT))),
+                _inline(_path(_scope(["Leaf"]))),
+            ),
+            row_element_id="id-2",
+        ),
+    ]
+
+
+_SCRIPTED_STEPS: list[dict[str, Any]] = [
+    batch([_element(i) for i in range(1, _ELEMENT_COUNT + 1)]),
+    batch(_RELATIONSHIPS),
+    _artifacts(_SCRIPT_ARTIFACTS),
+    *_hops(),
+    *_terminals(),
+    *_failures(),
+    *_snippet_refs(),
+    *_script_sets(),
+    *_script_rows(),
+    # the elements move under a script step's feet
+    {"do": "connect", "type": "Links", "source": "id-24", "target": "id-1"},
+    _run(_path(_scope(["Leaf"]), _script(_HOP_SCRIPT), _script(_HOP_SCRIPT))),
+    {"do": "delete_element", "id": "id-2"},
+    _run(_path(_scope(["Node"]), _script(_HOP_SCRIPT))),
+    _run(_path(_NODES, _hop("Links"))),
+]
+
+
+@scenario("nav_eval_scripted")
+def nav_eval_scripted() -> Any:
+    metamodel = Metamodel.model_validate(_METAMODEL)
+    return {
+        "metamodel": metamodel.model_dump(mode="json"),
+        "steps": run_scripted(metamodel, _SCRIPTED_STEPS),
+    }

@@ -7,6 +7,7 @@ import { optionalString, pageOf, type ReadParams } from '../read/params.ts';
 import { treeItem, type TreeItem } from '../read/tree.ts';
 import { toWire, type Wire } from '../read/wire.ts';
 import { snippetFetch } from '../script/snippets.ts';
+import { ScriptWarningLog, type ScriptWarning } from '../script/warnings.ts';
 import type { Steps } from '../steps/steps.ts';
 import { pyRepr } from '../value/repr.ts';
 import {
@@ -36,7 +37,7 @@ export type ChainPageOut = {
 	chains: (TreeItem | ChainValueOut)[][];
 	total: number;
 	truncated: boolean;
-	warnings: [];
+	warnings: ScriptWarning[];
 };
 
 /** A saved navigation in the working copy: a staged one first, then the committed one. */
@@ -97,7 +98,8 @@ function chainItem(model: Model, node: ChainNode): TreeItem | ChainValueOut {
  * `POST .../artifacts/navigation/evaluate` in steps. Before the first step it
  * reads its params and resolves every ref through the working copy's
  * artifacts; a definition that reaches a script refuses with 501, for the
- * server to run, before any pattern is translated. An id no element has,
+ * server to run, before any pattern is translated, unless the context reads
+ * scripts, which a script step then runs through. An id no element has,
  * read where the core indexes the model raw, is answered as the route's
  * `LookupError` handler answers it: `unknown navigation artifact 'x'`.
  */
@@ -112,13 +114,16 @@ export function evaluateNavigation(ctx: EvalContext, params: ReadParams): Steps<
 	const { model } = ctx;
 	const meter = new Meter(DEFAULT_LIMITS.maxVisited);
 	const rowElements = rowElementId === null ? null : [rowElementId];
+	const scripts =
+		ctx.scripts === undefined ? null : { reader: ctx.scripts, warnings: new ScriptWarningLog() };
 	const evaluation = evaluateSteps(
 		model.metamodel,
 		model,
 		defn,
 		DEFAULT_LIMITS,
 		rowElements,
-		meter
+		meter,
+		scripts
 	);
 
 	return (function* (): Steps<ChainPageOut> {
@@ -146,7 +151,7 @@ export function evaluateNavigation(ctx: EvalContext, params: ReadParams): Steps<
 			chains,
 			total: result.chains.length,
 			truncated: result.truncated,
-			warnings: []
+			warnings: result.warnings
 		};
 	})();
 }

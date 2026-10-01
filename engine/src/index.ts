@@ -187,6 +187,7 @@ export {
 	type ChainNode,
 	type ChainResult,
 	type EvalLimits,
+	type NavScripts,
 	type ScalarValue
 } from './navigation/evaluate.ts';
 export {
@@ -387,6 +388,13 @@ export {
 	type ValuePayload
 } from './script/result.ts';
 export { resolveTransformSource, SNIPPET_KIND, snippetFetch } from './script/snippets.ts';
+export {
+	MAX_SCRIPT_WARNINGS,
+	ScriptWarningLog,
+	type ScriptWarning,
+	type ScriptWarningCode,
+	type WarningSnapshot
+} from './script/warnings.ts';
 export { runWorker, type WorkerScope } from './script/worker-main.ts';
 export { ByteQueue } from './service/byte-queue.ts';
 export {

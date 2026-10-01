@@ -5,7 +5,14 @@
  * page can be cut by re-evaluating. Two caps bound the work: `maxVisited`
  * counts every edge and property value examined, `maxChains` the chains
  * collected; either stops the walk and marks the result truncated.
+ *
+ * A script step asks a snippet for each element it expands, through the
+ * `ScriptReader` of the pass: an answer it does not hold yet comes back
+ * pending, and the pass is discarded for a fill to run it again. A failure
+ * prunes the chain with a warning, and a returned value that names no element
+ * ends the chain at it.
  */
+import type { ScriptReader } from '../evaluate/fill.ts';
 import type { Metamodel } from '../metamodel/metamodel.ts';
 import type { Model } from '../model/model.ts';
 import { getProp, type ElementRec, type RelRec } from '../model/records.ts';
@@ -15,8 +22,12 @@ import {
 	type CompiledCriteria,
 	type Criterion
 } from '../search/criteria.ts';
+import { ReadError } from '../read/errors.ts';
+import type { ScriptResult, StepPayload } from '../script/result.ts';
+import type { ScriptWarning, ScriptWarningLog } from '../script/warnings.ts';
 import { drain, sortedInSlices, type Progress, type Steps } from '../steps/steps.ts';
 import { cmpCodePoint } from '../value/compare.ts';
+import { pyReprValue } from '../value/repr.ts';
 import { PyFloat, type Value } from '../value/types.ts';
 import type {
 	FilterStep,
@@ -26,6 +37,7 @@ import type {
 	PropertyStep,
 	RelationshipStep,
 	Scope,
+	ScriptStep,
 	SetExpression
 } from './schema.ts';
 
@@ -60,8 +72,23 @@ export class PropertyValue {
 /** One position of a chain: an element id, or a terminal value. */
 export type ChainNode = string | PropertyValue;
 
-/** Every chain holds its start at index 0; only the last node may be a value. */
-export type ChainResult = { stepTypes: string[]; chains: ChainNode[][]; truncated: boolean };
+/**
+ * What a script step runs through: the reader of the pass, and the channel its
+ * failures are reported to, which a caller shares across the evaluations of one
+ * pass.
+ */
+export type NavScripts = { reader: ScriptReader; warnings: ScriptWarningLog };
+
+/**
+ * Every chain holds its start at index 0; only the last node may be a value.
+ * `warnings` are what this evaluation added to its channel, not its total.
+ */
+export type ChainResult = {
+	stepTypes: string[];
+	chains: ChainNode[][];
+	truncated: boolean;
+	warnings: ScriptWarning[];
+};
 
 /** The core's `KeyError`: `model.elements[id]` of an id no element has. */
 export class NavKeyError extends Error {
@@ -156,6 +183,7 @@ type Context = {
 	rowElements: readonly string[] | null;
 	meter: Meter;
 	compiled: CompiledCriteria;
+	scripts: NavScripts | null;
 };
 
 type Walk = Generator<Progress, boolean, void>;
@@ -197,6 +225,23 @@ function criteriaOf(defn: NavigationDefinition, into: Criterion[]): Criterion[] 
 	else if (defn.start.kind === 'set_op') ofSet(defn.start);
 	for (const step of defn.steps) if (step.kind === 'filter') into.push(...step.criteria);
 	return into;
+}
+
+/** Refuses an inline snippet that holds no code, as the core's schema does. */
+function checkSnippets(defn: NavigationDefinition): void {
+	const ofSet = (expr: SetExpression) => {
+		for (const operand of expr.operands) {
+			if (operand.definition !== null) checkSnippets(operand.definition);
+		}
+	};
+	if (defn.kind === 'set_op') return ofSet(defn);
+	if (defn.start.kind === 'set_op') ofSet(defn.start);
+	for (const step of defn.steps) {
+		if (step.kind !== 'script' || step.snippet.definition === null) continue;
+		if (typeof (step.snippet.definition as { code?: unknown }).code !== 'string') {
+			throw new ReadError(422, 'a script step snippet definition needs a string `code`');
+		}
+	}
 }
 
 // -- starts --------------------------------------------------------------------
@@ -335,6 +380,54 @@ function* hopProperty(
 	return yield* sortIds(ctx, [...ids]);
 }
 
+const isStepPayload = (payload: ScriptResult['payload']): payload is StepPayload =>
+	payload !== null && Object.hasOwn(payload, 'nodes');
+
+/**
+ * What a script step's snippet returns for `elementId`: a string that names an
+ * element hops, any other value ends the chain at itself, in the snippet's
+ * order. Values are told apart by type and value, `true`, `1` and `1.0` being
+ * three; of equal ones the first position holds the last value, as a dict
+ * does. A non-finite float is its repr, a string. A snippet that fails, or a
+ * ref that names none, prunes with a warning; an unconfigured step, or none
+ * to read scripts through, prunes silently.
+ */
+function hopScript(ctx: Context, elementId: string, step: ScriptStep, budget: Budget): ChainNode[] {
+	const { scripts } = ctx;
+	const { ref, definition } = step.snippet;
+	if (ref !== null) {
+		scripts?.warnings.add('nav_snippet_not_found', ref);
+		return [];
+	}
+	if (definition === null || scripts === null) return [];
+	const result = scripts.reader.read({
+		code: (definition as { code: string }).code,
+		entry: 'step',
+		elementIds: [elementId],
+		inputsText: null,
+		docText: null
+	});
+	if (result.error !== null) {
+		scripts.warnings.add('nav_step_failed', result.error.message);
+		return [];
+	}
+	if (!isStepPayload(result.payload)) return [];
+	const distinct = new Map<string, Value>();
+	for (const node of result.payload.nodes)
+		distinct.set(new PropertyValue(node as ScalarValue).key, node);
+	const nodes = [...distinct.values()];
+	if (!budget.spend(nodes.length)) return [];
+	return nodes.map((node) =>
+		typeof node === 'string' && ctx.model.findElement(node) !== undefined
+			? node
+			: new PropertyValue(
+					node instanceof PyFloat && !Number.isFinite(node.value)
+						? pyReprValue(node)
+						: (node as ScalarValue)
+				)
+	);
+}
+
 // -- paths ---------------------------------------------------------------------
 
 function stepType(step: Exclude<NavigationStep, FilterStep>): string {
@@ -345,9 +438,8 @@ function stepType(step: Exclude<NavigationStep, FilterStep>): string {
 
 /**
  * Depth first over the steps from `itemIdx`: true when the walk stopped
- * early, at the chain cap or the budget. A value is terminal, and a script
- * step never runs here — one that reaches a snippet was refused before —
- * so it prunes.
+ * early, at the chain cap or the budget. A value is terminal, so whatever
+ * follows one prunes.
  */
 function* walk(
 	ctx: Context,
@@ -378,9 +470,10 @@ function* walk(
 	}
 	// The element expanded is a unit too: one with no edges costs a visit.
 	if (meter.tick()) yield meter.end();
-	let next: readonly ChainNode[] = [];
+	let next: readonly ChainNode[];
 	if (step.kind === 'relationship') next = yield* hop(ctx, current, step, budget);
 	else if (step.kind === 'property') next = yield* hopProperty(ctx, current, step, budget);
+	else next = hopScript(ctx, current, step, budget);
 	if (budget.exhausted) return true;
 	for (const other of next) {
 		// A value is never in a chain's prefix: only an id can repeat.
@@ -464,13 +557,16 @@ function* evaluateSet(
 
 function* evaluate(ctx: Context, defn: NavigationDefinition): Steps<ChainResult> {
 	const budget = new Budget(ctx.limits.maxVisited);
+	const before = ctx.scripts?.warnings.snapshot();
+	const warned = () => (before === undefined ? [] : ctx.scripts!.warnings.since(before));
 	if (defn.kind === 'set_op') {
 		const [members, truncated] = yield* evaluateSet(ctx, defn, budget);
 		const ids = yield* sortIds(ctx, [...members]);
 		return {
 			stepTypes: [],
 			chains: ids.map((id) => [id]),
-			truncated: truncated || budget.exhausted
+			truncated: truncated || budget.exhausted,
+			warnings: warned()
 		};
 	}
 	const starts = yield* startIds(ctx, defn, budget);
@@ -485,7 +581,8 @@ function* evaluate(ctx: Context, defn: NavigationDefinition): Steps<ChainResult>
 	return {
 		stepTypes: defn.steps.filter((step) => step.kind !== 'filter').map(stepType),
 		chains,
-		truncated: truncated || budget.exhausted
+		truncated: truncated || budget.exhausted,
+		warnings: warned()
 	};
 }
 
@@ -494,7 +591,9 @@ function* evaluate(ctx: Context, defn: NavigationDefinition): Steps<ChainResult>
  * binds every row start, nested ones included; a row start with none throws
  * `NavValueError`. Every pattern of the definition is translated before the
  * generator exists, so an unsupported one refuses (501) before any step.
- * `meter` counts the units of the whole call when the caller shares it.
+ * `meter` counts the units of the whole call when the caller shares it. With
+ * `scripts`, a script step runs its snippet through it, and one whose inline
+ * snippet holds no code refuses with 422; without, it prunes.
  */
 export function evaluateSteps(
 	mm: Metamodel,
@@ -502,10 +601,12 @@ export function evaluateSteps(
 	defn: NavigationDefinition,
 	limits: EvalLimits = DEFAULT_LIMITS,
 	rowElements: readonly string[] | null = null,
-	meter: Meter = new Meter(limits.maxVisited)
+	meter: Meter = new Meter(limits.maxVisited),
+	scripts: NavScripts | null = null
 ): Steps<ChainResult> {
 	const compiled = compileCriteria(criteriaOf(defn, []));
-	return evaluate({ mm, model, limits, rowElements, meter, compiled }, defn);
+	if (scripts !== null) checkSnippets(defn);
+	return evaluate({ mm, model, limits, rowElements, meter, compiled, scripts }, defn);
 }
 
 /**
@@ -521,7 +622,7 @@ export function* scopeSteps(
 ): Steps<string[]> {
 	const compiled = compileCriteria(scope.criteria);
 	return yield* scopeIds(
-		{ mm, model, limits: DEFAULT_LIMITS, rowElements: null, meter, compiled },
+		{ mm, model, limits: DEFAULT_LIMITS, rowElements: null, meter, compiled, scripts: null },
 		scope
 	);
 }

@@ -54,6 +54,10 @@ loaded as committed state arrives; its steps then compare with the loaded
 model. Such a run can carry no checkpoints (``full_every=None``): the file is
 the state, and its lines would dwarf the fixture.
 
+A ``read`` or ``export`` step with ``"scripted": true`` runs the snippets it
+reaches, on the recorder's ``runner``, and is called again until its answer
+holds no pending cell (see ``scripted.py``, which supplies the runner).
+
 A batch runs on the recorder's own model, as it does on a session's. A refused
 batch leaves no trace — the applier puts every touched entity back, ``rev``
 and place in insertion order included — and the recorder holds the oracle to
@@ -145,6 +149,7 @@ from data_rover.core.navigation.resolve import (
     resolve_refs,
 )
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
+from data_rover.core.script.runner import ScriptRunner
 from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
 from data_rover.core.table.cell_text import cell_text
 from data_rover.core.table.cells import evaluate_cells
@@ -227,10 +232,14 @@ def batch(ops: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
     return {"do": "batch", "_ops": ops, **extra}
 
 
-def read_step(method: str, **params: Any) -> dict[str, Any]:
+def read_step(method: str, *, scripted: bool = False, **params: Any) -> dict[str, Any]:
     """A ``read`` step: a method of the engine's read or evaluation table, with
-    its params."""
-    return {"do": "read", "method": method, "params": params}
+    its params. A ``scripted`` step runs its snippets, which only a recorder
+    given a runner can do (see ``scripted.py``)."""
+    step: dict[str, Any] = {"do": "read", "method": method, "params": params}
+    if scripted:
+        step["scripted"] = True
+    return step
 
 
 def validate_step(scope: list[str] | str) -> dict[str, Any]:
@@ -580,10 +589,17 @@ def _payload[M: BaseModel](cls: type[M], params: dict[str, Any]) -> M:
 
 
 def _read(
-    session: Session, artifacts: Artifacts, method: str, params: dict[str, Any]
+    session: Session,
+    artifacts: Artifacts,
+    method: str,
+    params: dict[str, Any],
+    runner: ScriptRunner | None = None,
+    settings: Settings | None = None,
 ) -> BaseModel:
     """Calls the route function behind ``method`` with every argument passed:
-    called directly, a route keeps ``Query(...)`` objects as its defaults."""
+    called directly, a route keeps ``Query(...)`` objects as its defaults.
+    ``runner`` and ``settings`` are what the route's snippet work runs with."""
+    settings = settings or Settings()
     limit = params.get("limit", 100)
     offset = params.get("offset", 0)
     match method:
@@ -640,8 +656,8 @@ def _read(
                 project_id="p",
                 session=session,
                 db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
-                runner=None,
-                settings=Settings(),
+                runner=runner,
+                settings=settings,
             )
         case "evaluateTable":
             return table_routes.evaluate_table(
@@ -649,8 +665,8 @@ def _read(
                 project_id="p",
                 session=session,
                 db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
-                runner=None,
-                settings=Settings(),
+                runner=runner,
+                settings=settings,
             )
         case "previewTableJson":
             return table_routes.json_preview(
@@ -658,17 +674,28 @@ def _read(
                 project_id="p",
                 session=session,
                 db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
-                runner=None,
-                settings=Settings(),
+                runner=runner,
+                settings=settings,
             )
     raise AssertionError(f"unknown read {method!r}")
 
 
-def export_step(case: str, method: str, date: str, **body: Any) -> dict[str, Any]:
+def export_step(
+    case: str, method: str, date: str, *, scripted: bool = False, **body: Any
+) -> dict[str, Any]:
     """An ``export`` step named ``case``: ``exportTable``, ``runExporter`` or
     ``runExporterDraft`` with its body, on the UTC day ``date``
-    (``YYYYMMDD``)."""
-    return {"do": "export", "case": case, "method": method, "body": body, "date": date}
+    (``YYYYMMDD``). ``scripted`` as for ``read_step``."""
+    step: dict[str, Any] = {
+        "do": "export",
+        "case": case,
+        "method": method,
+        "body": body,
+        "date": date,
+    }
+    if scripted:
+        step["scripted"] = True
+    return step
 
 
 def _clock(date: str) -> type[datetime]:
@@ -750,9 +777,16 @@ _EXPORT_BODY = {
 }
 
 
-def _export(session: Session, artifacts: Artifacts, step: dict[str, Any]) -> Any:
+def _export(
+    session: Session,
+    artifacts: Artifacts,
+    step: dict[str, Any],
+    runner: ScriptRunner | None = None,
+    settings: Settings | None = None,
+) -> Any:
     """The export route behind the step's method, called with every argument,
     while ``table_export_engine`` reads the step's date off its clock."""
+    settings = settings or Settings()
     method, body = step["method"], step["body"]
     assert set(body) <= _EXPORT_BODY[method], (method, sorted(body))
     db: Any = _ArtifactDb(artifacts)
@@ -763,8 +797,8 @@ def _export(session: Session, artifacts: Artifacts, step: dict[str, Any]) -> Any
                 project_id="p",
                 session=session,
                 db=db,
-                runner=None,
-                settings=Settings(),
+                runner=runner,
+                settings=settings,
             )
         else:
             response = export_routes.run_export(
@@ -772,8 +806,8 @@ def _export(session: Session, artifacts: Artifacts, step: dict[str, Any]) -> Any
                 project_id="p",
                 session=session,
                 db=db,
-                runner=None,
-                settings=Settings(),
+                runner=runner,
+                settings=settings,
             )
     return _shipped(response)
 
@@ -819,8 +853,42 @@ class _Ids:
         return f"id-{self.drawn}"
 
 
+#: How many times a ``scripted`` step's route is called for an answer with no
+#: pending cell before the recorder gives up.
+_SCRIPTED_ATTEMPTS = 3
+
+
+def _pending(node: Any) -> bool:
+    """Whether an answer holds a cell the sweep has not filled yet."""
+    if isinstance(node, dict):
+        status = node.get("script_status")
+        if node.get("kind") == "pending" or (
+            isinstance(status, dict) and status.get("state") == "computing"
+        ):
+            return True
+        return any(_pending(item) for item in node.values())
+    if isinstance(node, list):
+        return any(_pending(item) for item in node)
+    return False
+
+
+def _without_volatile(node: Any) -> Any:
+    """``node`` without ``script_status`` and ``duration_ms``, at any depth."""
+    if isinstance(node, dict):
+        return {
+            key: _without_volatile(item)
+            for key, item in node.items()
+            if key not in ("script_status", "duration_ms")
+        }
+    if isinstance(node, list):
+        return [_without_volatile(item) for item in node]
+    return node
+
+
 class Recorder:
-    """One scenario in the making: a model with sequential ids, and its log."""
+    """One scenario in the making: a model with sequential ids, and its log.
+    ``runner`` and ``settings`` are what a ``scripted`` step runs its snippets
+    with; a step without the flag runs as the server does with no runner."""
 
     def __init__(
         self,
@@ -828,11 +896,15 @@ class Recorder:
         *,
         full_every: int | None = 5,
         model_file: str | None = None,
+        runner: ScriptRunner | None = None,
+        settings: Settings | None = None,
     ) -> None:
         assert model_file is None or full_every is None, (
             "a run from a model file carries no checkpoints"
         )
         self.metamodel = metamodel
+        self._runner = runner
+        self._settings = settings
         self._ids = _Ids()
         self.model = Model(metamodel, self._ids)
         self._full_every = full_every
@@ -873,6 +945,27 @@ class Recorder:
         )
         if observe(self.model) != observe(bulk):
             raise AssertionError(f"{model_file} loads unlike the bulk loader")
+
+    def _answer(
+        self,
+        step: dict[str, Any],
+        call: Callable[[ScriptRunner | None, Settings | None], Any],
+    ) -> Any:
+        """``call``'s body. A ``scripted`` step runs with the recorder's runner
+        and settings and is called again until its answer holds no pending
+        cell, as a client polls; what the answer says about the polling
+        (``script_status``) and how long a call took (``duration_ms``) are not
+        recorded."""
+        if not step.get("scripted"):
+            return call(None, None)
+        assert self._runner is not None, "a scripted step needs a recorder with a runner"
+        for _ in range(_SCRIPTED_ATTEMPTS):
+            body = call(self._runner, self._settings)
+            if not _pending(body):
+                return _without_volatile(body)
+        raise RuntimeError(
+            f"step {len(self._steps)}: still pending after {_SCRIPTED_ATTEMPTS} calls"
+        )
 
     def _entity(self, step: dict[str, Any]) -> Element | Relationship:
         detached = step.get("detached")
@@ -1129,16 +1222,32 @@ class Recorder:
             case "candidate":
                 return self._candidate(step)
             case "read":
+                # One session per step: its cell cache and sweeps live as long
+                # as the calls of the step, and no longer than the model it read.
                 session = Session(
                     metamodel=self.metamodel, model=model, views=self._views
                 )
-                body = _read(session, self._artifacts, step["method"], step["params"])
-                return body.model_dump(mode="json")
+                return self._answer(
+                    step,
+                    lambda runner, settings: _read(
+                        session,
+                        self._artifacts,
+                        step["method"],
+                        step["params"],
+                        runner,
+                        settings,
+                    ).model_dump(mode="json"),
+                )
             case "export":
                 session = Session(
                     metamodel=self.metamodel, model=model, views=self._views
                 )
-                return _export(session, self._artifacts, step)
+                return self._answer(
+                    step,
+                    lambda runner, settings: _export(
+                        session, self._artifacts, step, runner, settings
+                    ),
+                )
             case "validate":
                 scope = step["scope"]
                 ids = (
@@ -1346,8 +1455,16 @@ def run_steps(
     *,
     full_every: int | None = 5,
     model_file: str | None = None,
+    runner: ScriptRunner | None = None,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
-    recorder = Recorder(metamodel, full_every=full_every, model_file=model_file)
+    recorder = Recorder(
+        metamodel,
+        full_every=full_every,
+        model_file=model_file,
+        runner=runner,
+        settings=settings,
+    )
     for step in steps:
         recorder.run(step)
     return recorder.document()
