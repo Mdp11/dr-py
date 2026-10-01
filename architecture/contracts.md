@@ -355,21 +355,27 @@ event     {event, …}                     engine → client, unsolicited
   buffer: one `SharedArrayBuffer` of 1 MiB per worker, an Int32 header and the reply's UTF-8
   bytes, chunked when a reply is larger. The engine worker never blocks.
 - The message set is the pool's: pool to worker `init` and `run`; worker to pool `ready`,
-  `failed`, `call-start`, `call-end`, `bridge`, `more`, `done` and `csp-violation`. A worker's
-  message is never trusted beyond its own batch; the pool validates shape and place and ends a
-  worker that breaks the protocol.
-- Limits: 10 s per call, 30 s per batch (a call's deadline is the lesser of 10 s and what remains
-  of the batch). At the deadline the pool raises Pyodide's interrupt (the soft stop, which the
-  pool repeats until the call ends because the flag can be lost); 1.5 s later it ends the worker
-  (the hard stop). A stopped call and the rest of its batch answer `timeout`; the replica
-  survives either. On the Node host a worker shares the process, so that host runs trusted
-  code only until E gives the headless service a process boundary (`K-106`).
+  `failed`, `snapshot {bytes}` (the image maker only), `call-start`, `call-end`, `bridge`, `more`,
+  `done` and `csp-violation`. A worker's message is never trusted beyond its own batch: the pool
+  validates shape and place, the first valid `done` wins and later messages are dropped, and a
+  worker that breaks the protocol is ended.
+- Limits: 10 s per call, 30 s per batch (a call's deadline is the lesser of 10 s and what
+  remains of the batch). At the deadline the pool raises Pyodide's interrupt (the soft stop,
+  repeated until the call ends because the flag can be lost): that call answers `timeout` and the
+  batch continues. 1.5 s later, if the call has not ended, the pool ends the worker (the hard
+  stop). The rest of the batch answers `timeout` only after a hard stop, a spent batch budget or
+  a stopped module-level window. The replica survives either stop. On the Node host a worker
+  shares the process, so that host runs trusted code only until E gives the headless service a
+  process boundary (`K-106`).
 - The dispatcher is a port of `src/data_rover/core/script/bridge.py` and keeps trip-collapse.
   One trip carries one op and one reply; a reply piggybacks the projections the collapse
   lets it (far endpoints, hop relationships), and a call's roots travel with the call. Sub-project D MAY
   replace JSON with a binary layout behind the same `_transport`.
 - Scripts only propose ops; the engine never applies a script's op without the user staging it.
-- Runs are deterministic on both hosts: `Date.now` pinned to `1750000000000`, `crypto.getRandomValues` filled with `0x42`, `PYTHONHASHSEED=0`, and `random.seed()` after every image restore.
+- Runs are deterministic on both hosts: `Date.now` pinned
+  to `1750000000000` and `Date`'s local getters and `getTimezoneOffset` to UTC,
+  `crypto.getRandomValues` filled with `0x42` (and `node:crypto`'s on the Node host),
+  `PYTHONHASHSEED=0`, and `random.seed()` after every image restore.
 - Results are cached in the engine, keyed `(code, entry, element ids, inputs digest)`, with
   read-sets; deltas and staged ops evict by read-set.
 

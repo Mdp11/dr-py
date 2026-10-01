@@ -114,13 +114,13 @@ behaviour from C's plan 6a on; the engine replays them from the `model_download`
 `view_warnings` fixtures.
 D (scripts in the browser) is in progress, its second plan built: `scriptCalls` runs user Python
 in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; at M, in
-Chromium, 10,000 script cells take 4,654 ms against the 2 s budget, over it (`K-100`)
-*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-01)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `T-12` to `T-14`.
+Chromium, 10,000 script cells take 4,888 ms against the 2 s budget, over it (`K-100`)
+*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-01)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-109`, `K-110`, `T-12` to `T-15`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `T-12`, `T-13`, `T-14`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-109`, `K-110`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -795,7 +795,7 @@ Fix direction: parse the file incrementally (a streaming or chunked reader that 
 ### K-93 · An integral float in a change request stages as an int · `open` · *2026-09-30*
 A CR crosses the frontend as parsed JSON (the dialog reads the file with `JSON.parse`, and a compare's answer is parsed as it arrives), so a float such as `1.0` in an added or modified entity becomes `1` before it is sent back or staged, on the engine path and the server path alike. Wire text reaches the engine untouched elsewhere (AD-26); a CR does not. Fix direction: read and keep a CR as text with `parseExact`'s float-preserving values on both sides, or send the file's bytes to the engine and let it read them.
 
-### K-100 · 10,000 script cells take 4.7 s in the browser against a 2 s budget · `open` · perf · *2026-09-30*
+### K-100 · 10,000 script cells take 4.9 s in the browser against a 2 s budget · `open` · perf · *2026-09-30*
 The first measurement, on one warm script worker (Chromium 148, Ryzen 9 3900X under WSL2, load 1.4,
 median of 3): ten scripts over 1,000 `Microservice` ids each through `scriptCalls` on one warm script
 worker: 3,276 ms [4,481 3,276 3,139] against CN-3's 2,000, in 10,850 trips at 289 µs
@@ -836,16 +836,24 @@ and the 790 ms. Node's parts are from separate runs and leave 123 ms of its 1,64
 Chromium's per-trip time is thus about the dispatcher, the JSON and the transport; nothing in
 the data points to chunked replies (no reply nears 1 MiB) or to the structured clone.
 
-**Measured again on the pool (2026-10-01, same machine and model, load 0.8, median of 3).** Each
-batch now has a fresh worker and the ten scripts run concurrently on up to four
-(`hardwareConcurrency` less 2, at most 4): 10,000 cells take **4,654 ms** [4,786 4,654 4,597]
-against 2,000, in 10,850 trips at 447 µs [459 446 447]. Verdict: over budget, a miss by 2.3x and
-slower than the single warm worker's 3,276 ms. Boot: the first worker cold 2,083 ms [2,058 2,083
-2,137], those that follow from the image 309 ms [352 303 309], the figures that Chromium gives for
-the snapshot path. The per-trip cost rose about 55% with four interpreters and the engine worker
-sharing the machine, and the run pays nine boots from the image (about 0.3 s each, in parallel)
-inside the timer. Nothing was tuned; `script dispatch busy` is not reported (the service exposes no
-summed dispatch time). Fewer trips or a binary layout gets its own design with the owner.
+**Measured again on the pool (2026-10-01, same machine and model, load 1.1, median of 3).** Each
+batch has a fresh worker and the ten scripts run concurrently on up to four (`hardwareConcurrency`
+less 2, at most 4). Measured: 10,000 cells take **4,888 ms** wall [4,710 4,888 5,016] against 2,000
+(an earlier run of the same build: 4,654 ms); verdict over budget, 2.4x, and slower than the
+single warm worker's 3,276 ms. The ten batches' own times (boot excluded) sum to 5,341 ms
+[4,759 5,341 5,386], min 116, median 571, max 1,450 ms each; the pool's bridge handling (dispatch,
+encode, reply write) was busy 750 ms [700 771 750]; 10,850 trips at 492 µs [439 492 496] of batch
+time; boots: first cold 2,065 ms, later ones from the image 318 ms [299 332 318]. Nothing was
+tuned. The run sum is close to the wall, so the four workers bought little overlap.
+
+Hypotheses, not measured: the four interpreters and the engine worker compete for cores (WSL2);
+the engine worker's thread serializes message handling beyond what the 750 ms shows; nine image
+boots (three waves) add about 1 s. **Open, unaccounted:** what bounds the wall, why a trip costs
+more (289 to 492 µs) with four workers, the queue and post time between a worker's request and the
+pool's handler, and the time between the pool's reply and the worker waking. Next step: time
+those in a scratch build, and run the batches with the cap at 1, 2 and 4 to see whether wall
+falls with workers at all. `script dispatch busy` is `dispatch_ms`, the pool's own timing.
+Fewer trips or a binary layout gets its own design with the owner.
 
 Fix directions: fewer trips (project more with the roots, batch reads in the facade), a cheaper
 codec for the reply (the largest JSON part) and a leaner post path, a binary layout behind
@@ -859,7 +867,7 @@ after failure). Runs are serialized, so a run that never settles blocks every la
 host's `dispose()` must reject its run in flight. A `close()` during a Node host boot holds
 the run queue until the boot ends (a delay, not a stall). Fix: drop a rejected boot from the
 memo, state the contract on the type, and hold each host to it in a test.
-Closed by the pool: a failed boot rejects the run that waited on it, nothing respawns on its own and the next run boots once more.
+Closed by the pool: a failed boot rejects the run that waited on it, nothing respawns on its own and the next run boots once more; the `boot()` contract is stated on `ScriptHost` (`host.ts:50-54`).
 
 ### K-102 · Integer-like object keys are reordered by the value layer · `open` · *2026-09-30*
 A request or a nested property value with a key such as `"10"` is held as a plain object,
@@ -914,7 +922,7 @@ capture `postMessage` and the message listener when the worker starts (closes re
 `self.postMessage`; whether a script can still reach the original or read later `run`
 messages is not settled); snapshot and restore `sys.modules`, `__main__` and `builtins`
 around each batch; or accept the risk explicitly in CT-6. Closed in the browser by the pool: one batch per worker, so no interpreter or worker scope outlives a
-batch (K-100's 4,654 ms is measured on it). The Node host shares the process: `K-106`.
+batch (K-100's 4,888 ms is measured on it). The Node host shares the process: `K-106`.
 
 ### K-106 · A script on the Node host reaches the host process · `open` · security · *2026-10-01*
 The pool's one-batch-per-worker isolation closes K-105 where the worker is a browser Web Worker
@@ -947,20 +955,42 @@ its fixture-vs-constant assertion is tautological. (6) `harness_src.py`'s docstr
 `trusted_runner.py` and `core/script/README.md`.
 
 ### K-108 · The script pool and its hosts carry small gaps · `open` · *2026-10-01*
-(1) A worker flooding `bridge` while a reply is in flight or `more` with nothing pending is not refused
-and ended. (2) A forged `csp-violation` flood is relayed without limit to the app's main thread, one store
-update each (`sync.ts:576`): a per-worker cap in `script-host.ts:44-56` and `pool.ts:548-558`. (3) The
+(1) A forged `csp-violation` flood is relayed without limit to the app's main thread, one store
+update each (`sync.ts:576`): a per-worker cap in `script-host.ts:44-56` and `pool.ts:548-558`. (2) The
 batch-budget checks at call-start receipt and the watchdog ignore a pool-thread stall of at least
-`graceMs` near the budget edge. (4) `prewarmScripts` is O(artifacts) on every move: cache by
-`artifacts.version`; the "< 8 s" timing bounds in tests could flake on slow CI. (5) The maker allocates an
+`graceMs` near the budget edge. (3) `prewarmScripts` is O(artifacts) on every move: cache by
+`artifacts.version`; the "< 8 s" timing bounds in tests could flake on slow CI. (4) The maker allocates an
 unused `ReplyWriter`; `serve-worker`'s `randomFillSync` ignores offset and size; `nodeScriptHost` passes no
-`onWarning`; `batchToWire` throwing wastes a spare. (6) The isolation probe's comment
+`onWarning`; `batchToWire` throwing wastes a spare. (5) The isolation probe's comment
 (`frontend/bench/scripts.ts:353`) says "after its batch", but the error now fires during it, so the
 ended-slot error case is no longer exercised; the concurrent K-105 test does not assert overlap; a
-describe title overclaims on Node (`K-106`). (7) `service.ts:454`'s `one?.text` runtime guard wants a
+describe title overclaims on Node (`K-106`). (6) `service.ts:454`'s `one?.text` runtime guard wants a
 comment; `DEFAULT_HARNESS_LIMITS` and `Interpreter` are exported without a user; `engines` allows Node
-20.19 where native type stripping needs 22.18. (8) The soft stop can re-interrupt a script's own
-`KeyboardInterrupt` cleanup (documented in `engine/README.md`).
+20.19 where native type stripping needs 22.18. (7) The soft stop can re-interrupt a script's own
+`KeyboardInterrupt` cleanup (documented in `engine/README.md`). (8) A throw from `onViolation` becomes an uncaught error, and a running worker's violations are forgeable.
+
+### K-109 · The runaway "soft stop on a snapshot worker" test sometimes boots cold · `open` · *2026-10-01*
+`engine/test/script/runaway.test.ts` "ends a runaway loop at the call's deadline on a snapshot worker"
+failed in two full `dr-test` runs of this plan (Task 8's and Task 9's) with `expected 'cold' to be
+'snapshot'` (`runaway.test.ts:112`), and passed alone. Under load the maker may not have the image ready,
+or a restore failed and the pool gave up on the image (`giveUp`); which it is has not been looked into,
+so it is not known whether this is only load or a pool/snapshot timing gap. Fix: wait for the maker in
+the test, or record why a worker booted cold, and decide from that.
+
+### K-110 · Small code-comment and test gaps from the scripts plan · `open` · *2026-10-01*
+(1) A worker `error` event whose message is not an `Error` is not turned into one in
+`engine/node/script-host.ts`. (2) The service's `boot_ms` test cannot tell which source its figure comes
+from. (3) Forward-looking comments, which RC-6 forbids, at `engine/test/script/pool.test.ts:240` and in
+`engine/README.md`. (4) A comment over 100 columns at `engine/src/script/pool.ts:115`. (5) The Scripts
+bullet in `architecture/contracts.md` is over-long. Not logged, judged not worth an item: the
+`harness_src.py` docstring path and cosmetic re-wraps (in K-107), which cost nothing to leave.
+
+### T-15 · Full-run flakes in e2e and the frontend's download-route test · `open` · *2026-10-01*
+In the full `pixi run frontend-test-e2e` run of the scripts plan's last task, `e2e/eval-exports.spec.ts:176`
+("an exporter with two entries and a manifest downloads a zip") and `e2e/table.spec.ts:290` ("inline
+navigation column and inline row source") failed beside `T-9` and `T-11`, and both passed when run
+alone (8 of 8). `src/lib/api/__tests__/download-route.test.ts` flaked in Task 8's full run and passed in
+Task 9's (`K-91` is the same test's timeouts). Load-sensitive, not looked into.
 
 ### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
 Failed 1 run in 3 of the full e2e run during the scripts plan (engine rev 5 against server

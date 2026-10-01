@@ -93,7 +93,14 @@ describe('what the pool sends a worker', () => {
 			})
 		]);
 		const run = await pool.run(batchOf(), bridge);
-		expect(run).toEqual({ results: [{ text: 'x' }], trips: 1, ms: 4, bootMs: 5, boot: 'cold' });
+		expect(run).toEqual({
+			results: [{ text: 'x' }],
+			trips: 1,
+			ms: 4,
+			dispatchMs: expect.any(Number),
+			bootMs: 5,
+			boot: 'cold'
+		});
 	});
 });
 

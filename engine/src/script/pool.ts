@@ -87,6 +87,8 @@ type Timer = unknown;
 type Active = {
 	waiting: Waiting;
 	trips: number;
+	/** Time the pool spent answering the run's bridge requests and chunk asks. */
+	dispatchMs: number;
 	startedAt: number;
 	/** What each ended call answered, for a run that ends without a `done`. */
 	texts: (string | undefined)[];
@@ -165,6 +167,7 @@ function cancelledRun(batch: ScriptBatch): ScriptRun {
 		results: hostErrorResults(batch, 'cancelled', CANCELLED_MESSAGE),
 		trips: 0,
 		ms: 0,
+		dispatchMs: 0,
 		bootMs: 0,
 		boot: 'cold'
 	};
@@ -326,6 +329,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		active.waiting.resolve({
 			results,
 			trips: active.trips,
+			dispatchMs: active.dispatchMs,
 			ms: ms ?? now() - active.startedAt,
 			bootMs: slot.bootMs,
 			boot: slot.boot
@@ -484,6 +488,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		const active: Active = {
 			waiting,
 			trips: 0,
+			dispatchMs: 0,
 			startedAt: now(),
 			texts: waiting.batch.calls.map(() => undefined),
 			window: null,
@@ -634,6 +639,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 				// The worker is blocked until a reply is written, so a bridge that throws ends it.
 				let reply: Uint8Array;
 				active.trips++;
+				const began = now();
 				try {
 					reply = encoder.encode(bridge.dispatch(message.text));
 				} catch (error) {
@@ -641,6 +647,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 					return;
 				}
 				slot.writer.begin(reply);
+				active.dispatchMs += now() - began;
 				return;
 			}
 			case 'more':
@@ -649,7 +656,11 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 					lose(slot, new Error('the script worker asked for a chunk that is not pending'));
 					return;
 				}
-				slot.writer.more();
+				{
+					const began = now();
+					slot.writer.more();
+					active.dispatchMs += now() - began;
+				}
 				return;
 			case 'call-start': {
 				const { i } = message;

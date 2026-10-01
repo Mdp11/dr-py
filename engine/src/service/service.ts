@@ -883,6 +883,7 @@ class Service {
 				results,
 				trips,
 				ms,
+				dispatchMs: dispatch_ms,
 				bootMs: boot_ms,
 				boot
 			} = await host.run(batch, bridge, cancel.signal);
@@ -900,6 +901,7 @@ class Service {
 				results: results.map(({ text }) => ({ text })),
 				trips,
 				ms,
+				dispatch_ms,
 				boot_ms,
 				boot,
 				...(recording === null ? {} : { ops: dumpDefault(recording.ops) })

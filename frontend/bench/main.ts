@@ -33,7 +33,7 @@ export type OpenReport = {
 export type Bench = {
 	/** Opens M cold and returns once the digest check is done. */
 	open(): Promise<OpenReport>;
-	/** Ten scripts over 1,000 `Microservice` ids each,. */
+	/** Ten scripts over 1,000 `Microservice` ids each, concurrently on the pool. */
 	scripts(): Promise<Measures>;
 	/** The script parity corpus through the pool in the built sandbox, on a replica of the corpus model. */
 	parity(): Promise<ParityReport>;
@@ -490,18 +490,29 @@ async function scripts(): Promise<Measures> {
 	const wall = now() - start;
 	let trips = 0;
 	let ms = 0;
+	let dispatch = 0;
 	for (const result of results) {
 		trips += result.trips;
 		ms += result.ms;
+		dispatch += result.dispatch_ms;
 	}
-	const snapshotBoots = results.filter((r) => r.boot === 'snapshot').map((r) => r.boot_ms);
-	snapshotBoots.sort((x, y) => x - y);
+	const batchMs = results.map((r) => r.ms).sort((x, y) => x - y);
+	const snapshotBoots = [warm, ...results]
+		.filter((r) => r.boot === 'snapshot')
+		.map((r) => r.boot_ms)
+		.sort((x, y) => x - y);
 	const parallelism =
 		typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : 1;
 	return {
-		'script boot (cold)': warm.boot_ms,
+		// The warm-up's boot is cold only when the image was not ready yet; otherwise it is a snapshot boot.
+		...(warm.boot === 'cold' && { 'script boot (cold)': warm.boot_ms }),
 		'script boot (snapshot)': snapshotBoots[Math.floor(snapshotBoots.length / 2)] ?? NaN,
 		'10,000 script cells': wall,
+		'script run sum': ms,
+		'script batch ms (min)': batchMs[0]!,
+		'script batch ms (median)': batchMs[Math.floor(batchMs.length / 2)]!,
+		'script batch ms (max)': batchMs[batchMs.length - 1]!,
+		'script dispatch busy': dispatch,
 		'script bridge trips': trips,
 		'script µs per trip': (ms * 1000) / trips,
 		'script workers': Math.max(1, Math.min(4, parallelism - 2))

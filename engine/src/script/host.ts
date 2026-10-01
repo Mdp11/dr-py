@@ -29,6 +29,8 @@ export type ScriptRun = {
 	/** Bridge requests the run made, counted by the host. */
 	readonly trips: number;
 	readonly ms: number;
+	/** Time the pool spent answering the run's bridge requests: dispatch, encode and reply write. */
+	readonly dispatchMs: number;
 	/** How long the worker that ran it took to boot, and how it booted. */
 	readonly bootMs: number;
 	readonly boot: 'snapshot' | 'cold';

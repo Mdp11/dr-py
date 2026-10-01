@@ -127,6 +127,8 @@ export type ScriptCallsResult = {
 	results: { text: string }[];
 	trips: number;
 	ms: number;
+	/** Time the pool spent answering the run's bridge requests. */
+	dispatch_ms: number;
 	boot_ms: number;
 	/** How the worker that ran it booted. */
 	boot: 'snapshot' | 'cold';

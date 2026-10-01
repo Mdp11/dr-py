@@ -24,6 +24,7 @@ type CallsResult = {
 	trips: number;
 	ms: number;
 	boot_ms: number;
+	dispatch_ms: number;
 	boot: 'snapshot' | 'cold';
 	ops?: string;
 };
@@ -150,6 +151,7 @@ describe('scriptCalls on a ready replica', () => {
 		expect(result.results.map(payloadOf)).toEqual(['two', 'one', 'three', 'one']);
 		expect(result.trips).toBe(0);
 		expect(result.ms).toBeGreaterThanOrEqual(0);
+		expect(result.dispatch_ms).toBe(0);
 		expect(result.boot_ms).toBeGreaterThan(0);
 		expect(['snapshot', 'cold']).toContain(result.boot);
 		expect(result).not.toHaveProperty('ops');
@@ -165,6 +167,7 @@ describe('scriptCalls on a ready replica', () => {
 		);
 		expect(payloadOf(result.results[0]!)).toBe(5);
 		expect(result.trips).toBeGreaterThanOrEqual(1);
+		expect(result.dispatch_ms).toBeGreaterThan(0);
 	}, 60_000);
 
 	it('reads the staged name after stage, and the committed one after unstage', async () => {
