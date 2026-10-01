@@ -1007,7 +1007,9 @@ In the full `pixi run frontend-test-e2e` run of the scripts plan's last task, `e
 ("an exporter with two entries and a manifest downloads a zip") and `e2e/table.spec.ts:290` ("inline
 navigation column and inline row source") failed beside `T-9` and `T-11`, and both passed when run
 alone (8 of 8). `src/lib/api/__tests__/download-route.test.ts` flaked in Task 8's full run and passed in
-Task 9's (`K-91` is the same test's timeouts). Load-sensitive, not looked into.
+Task 9's (`K-91` is the same test's timeouts). In the full run after the final fixes,
+`e2e/smoke.spec.ts:28` and `e2e/snippet-flow.spec.ts:57` failed instead, and both passed when run alone.
+Load-sensitive, not looked into.
 
 ### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
 Failed 1 run in 3 of the full e2e run during the scripts plan (engine rev 5 against server
