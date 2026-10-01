@@ -115,12 +115,12 @@ behaviour from C's plan 6a on; the engine replays them from the `model_download`
 D (scripts in the browser) is in progress, its second plan built: `scriptCalls` runs user Python
 in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; at M, in
 Chromium, 10,000 script cells take 4,888 ms against the 2 s budget, over it (`K-100`)
-*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-01)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-109`, `K-110`, `T-12` to `T-15`.
+*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-01)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `T-12` to `T-15`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-109`, `K-110`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -983,13 +983,16 @@ comment; `DEFAULT_HARNESS_LIMITS` and `Interpreter` are exported without a user;
 20.19 where native type stripping needs 22.18. (7) The soft stop can re-interrupt a script's own
 `KeyboardInterrupt` cleanup (documented in `engine/README.md`). (8) A throw from `onViolation` becomes an uncaught error, and a running worker's violations are forgeable.
 
-### K-109 · The runaway "soft stop on a snapshot worker" test sometimes boots cold · `open` · *2026-10-01*
+### K-109 · The runaway "soft stop on a snapshot worker" test sometimes booted cold · `done` · *2026-10-01*
 `engine/test/script/runaway.test.ts` "ends a runaway loop at the call's deadline on a snapshot worker"
-failed in two full `dr-test` runs of this plan (Task 8's and Task 9's) with `expected 'cold' to be
-'snapshot'` (`runaway.test.ts:112`), and passed alone. Under load the maker may not have the image ready,
-or a restore failed and the pool gave up on the image (`giveUp`); which it is has not been looked into,
-so it is not known whether this is only load or a pool/snapshot timing gap. Fix: wait for the maker in
-the test, or record why a worker booted cold, and decide from that.
+failed in two full `dr-test` runs of this plan with `expected 'cold' to be 'snapshot'`, and passed alone.
+The test's `warmed()` stopped at the first run that reported `'snapshot'`, while a spare spawned before
+the image was ready (cold boots take about 2 s, image boots about 0.2 s) could still be booting and become
+the next run's worker. Closed in the test: `warmed()` now runs passes until every live worker was handed the
+image (`Seen.snapshot` in `test/script/fixtures/instrumented.ts`) and then waits on `boot()`. The cause is
+read from the code, not reproduced: the file passed five of five runs alone before and after, and the failure
+only showed under a full run's load. If it appears again with every live worker handed the image, the pool
+gave up on the image (`giveUp`), and that is a new item.
 
 ### K-110 · Small code-comment and test gaps from the scripts plan · `open` · *2026-10-01*
 (1) A worker `error` event whose message is not an `Error` is not turned into one in

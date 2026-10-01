@@ -921,7 +921,12 @@ class Service {
 	 * where the deps opt in with `prewarmScripts`.
 	 */
 	private prewarmScripts(): void {
-		if (this.deps.prewarmScripts !== true || this.deps.scripts === undefined || this.prewarmed === this.epoch) return;
+		if (
+			this.deps.prewarmScripts !== true ||
+			this.deps.scripts === undefined ||
+			this.prewarmed === this.epoch
+		)
+			return;
 		if (this.state !== 'ready' || this.wc === null) return;
 		const holdsSnippet = this.artifacts
 			.ids()

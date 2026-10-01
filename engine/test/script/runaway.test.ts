@@ -74,12 +74,18 @@ async function ready(host: ScriptHost): Promise<void> {
 	await host.boot();
 }
 
-/** A pool whose next worker boots from the snapshot, which is what `boot` of a later run says. */
+/**
+ * A pool whose next worker boots from the snapshot, which is what `boot` of a later run says. A run
+ * that reported `'snapshot'` is not enough: a spare spawned before the image was ready may still be
+ * booting cold and become the next run's worker, so passes go on until every live worker was handed
+ * the image, and `boot()` then waits for one of them.
+ */
 async function warmed(options: Partial<PoolOptions> = {}) {
 	const pooled = poolOf(options);
 	for (let tries = 0; tries < 40; tries++) {
-		const run = await pooled.host.run(batchOf('pass', [null]), bridge);
-		if (run.boot === 'snapshot') break;
+		await pooled.host.run(batchOf('pass', [null]), bridge);
+		const live = pooled.seen.filter((one) => !one.terminated && !one.maker);
+		if (live.length > 0 && live.every((one) => one.snapshot)) break;
 		await sleep(250);
 	}
 	await ready(pooled.host);

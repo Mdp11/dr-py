@@ -631,7 +631,10 @@ class WasmScriptRunner:
         # Read-only: the preopens are shared by every run in the pool, so a
         # writable one would let a snippet falsify all later runs.
         wasi.preopen_dir(
-            self._guest_lib_path, _GUEST_LIB_GUEST, DirPerms.READ_ONLY, FilePerms.READ_ONLY
+            self._guest_lib_path,
+            _GUEST_LIB_GUEST,
+            DirPerms.READ_ONLY,
+            FilePerms.READ_ONLY,
         )
         wasi.preopen_dir(
             str(self._scripts_dir),
