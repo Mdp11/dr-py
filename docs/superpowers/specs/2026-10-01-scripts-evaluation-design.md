@@ -31,8 +31,13 @@ they only matter once the app runs scripts.
    pinned to an epoch, with `call.onCancel` aborting. Evaluations emit no progress; `ProgressTask`
    is `parse|index|tail|verify|sweep` (`service/types.ts:36`).
 4. Every model transition — stage, unstage, delta, each tail delta — passes `Service.changed(wc,
-   ChangeSet, …)` (`service.ts:1352-1374`). `ChangeSet` carries ids only. `BatchResult` keeps
-   `beforeElements` and `beforeRelationships` images (`ops/result.ts:60-61`).
+   ChangeSet, …)` (`service.ts:1352-1374`). `ChangeSet` carries ids only, and no `BatchResult`
+   reaches the service: a delta's committed part is written without one
+   (`working/working-copy.ts:688-759`), and unstage rewinds and replays (`:815-848`). `LiveIssues`
+   already reads each transition's neighbourhood on the pre-state (`beforeRebase`) and the
+   post-state (`validation/live.ts:127-159,347-430`). A metamodel change reopens the replica;
+   there is no in-replica metamodel transition. After ready, transitions are model-lane jobs that
+   queue behind a running scan: they land between passes, during a fill, not inside one.
 5. The server derives touched read keys per applied batch in `api/invalidation.py`
    (`touched_keys`): a changed element touches `el`, its parents' `children`, and `scan` for its
    type, its ancestors and `None`; a relationship touches `out` source and `in` target, plus
@@ -55,7 +60,20 @@ they only matter once the app runs scripts.
 9. Golden families `table_rows`, `table_eval`, `nav_eval` and `export_bytes` cover only
    unconfigured scripts, refs and the `reach_*` refusals; no family has an evaluated script
    value, error or transform output.
-10. Nothing in the app calls `scriptCalls` or sets `prewarmScripts`
+10. Snippet `ref`s are never resolved in the engine (`table/resolve.ts:1-5`,
+    `navigation/resolve.ts:57-65`); the `code_snippet` family is read only by prewarm
+    (`service.ts:296`). The oracle inlines a ref as its definition and keeps a dangling one
+    (`core/table/resolve.py:67-79`); a transform source resolves strictly, every failure a 422
+    (`api/routes/tables.py:140+`).
+11. The arity check is AST-based (`core/script/lint.py:79-88`, `entry_arity`), applied at
+    evaluation (`core/table/script_inputs.py:356-363`).
+12. Exports carry no script-error count: the server sets a boolean header,
+    `X-Table-Script-Errors: true`, on any error or miss (`api/table_export_engine.py:855-862`).
+13. The pinned oracle runner (`tests/script/trusted_runner.py`, `pin_determinism`) patches
+    `datetime` process-wide, so scripted oracle runs live in a child process, as
+    `script_parity`'s do. The server's routes answer a scripted table complete only after their
+    sweep; the engine's answer matches that complete answer.
+14. Nothing in the app calls `scriptCalls` or sets `prewarmScripts`
     (`sandbox/src/engine-worker.ts:28`).
 
 ## Decisions
@@ -66,12 +84,14 @@ send it; the engine's Node tests, the Chromium script specs and the bench do, th
 client and frame. Plan 4 removes the option together with the refusals.
 
 **E2 · Collect.** `EvalContext` gains a `scripts` reader. A lookup checks the evaluation's memo
-(E4), then the cell cache (E6). A miss records `(code, entry, element ids, inputs)` and returns a
-placeholder that never leaves the engine. A pass that ended with misses returns a `{needs}`
-marker in place of its result, so nothing is published; a pass with none publishes as today.
+(E4), then the cell cache (E6). A miss records `(code, entry, element ids, inputs)` and reads as
+the oracle's cache-only miss, a `pending` result (`embed.py`, `cache_only`), so the ported sites
+take the oracle's own pending paths. A pass that recorded a miss is discarded, never published;
+a pass with none publishes as today. No evaluator's signature changes.
 
-**E3 · Fill and re-run.** The service runs an evaluation that may reach a script as a loop:
-submit the pass; on `{needs}`, group the misses into one batch per `(code, entry)`, run the
+**E3 · Fill and re-run.** The loop lives in `engine/src/evaluate/`, behind a runner that runs a
+batch, so the golden replays drive it without a service. The service runs an evaluation that may reach a script as a loop:
+submit the pass; when it recorded misses, group the misses into one batch per `(code, entry)`, run the
 batches concurrently on the pool outside the scheduler (as `runScripts`), record every result in
 the memo and, where E7 allows, in the cache; submit the pass again. A chain takes one round per
 level. Every call a round runs is answered in the memo, so a round never misses the same call
@@ -83,9 +103,10 @@ cell publish without being cached. It dies with the evaluation, and with the pas
 transition restarts it (E7).
 
 **E5 · Cancel and progress.** `{cancel: id}` during a fill aborts its batches through their
-signal (soft then hard stop, S13) and the evaluation is never answered. A fill emits
-`progress {task: 'scripts', done, total}` in calls, at most once per batch result plus first and
-last; `ProgressTask` gains `'scripts'`.
+signal (soft then hard stop, S13) and the evaluation is never answered. Fills emit
+`progress {task: 'scripts', done, total}` in calls, summed over every fill in flight, emitted
+directly at each batch result (a fill runs outside the scheduler's slice-end flush);
+`ProgressTask` gains `'scripts'`.
 
 **E6 · The cell cache.** One per replica, in the service, made at open and cleared by `discard`,
 `diverge` and close. Keyed `(code, entry, element ids, inputs digest)`, the digest being the
@@ -95,17 +116,20 @@ least recently used first; a result above 64 KiB is not stored; a read-set over 
 stored as `null`. Cached: values and `runtime` and `syntax` errors; not cached: `timeout` and
 every other kind. A snippet edit needs no eviction: the code is in the key.
 
-**E7 · Eviction and the in-flight discard.** In `Service.changed`, each applied batch's touched
-keys come from a port of `touched_keys`, reading deleted entities' type and endpoints from the
-batch's before-images; entries whose read-set intersects them, or is `null`, are evicted. A
-transition with no batch result to read (`discard`, `diverge`, a metamodel move, and unstage
-where it rebuilds rather than rewinds — the plan confirms which) clears the cache. The service
+**E7 · Eviction and the in-flight discard.** Each transition's touched keys are `touched_keys`'s
+rules applied twice, as `LiveIssues` reads its neighbourhood: over the pre-state for the ids the
+transition will touch (`wc.touchedIds()` and the delta's ids, read before it runs), and over the
+post-state for its `ChangeSet`. The union is a superset of the oracle's keys for the same batch.
+Entries whose read-set intersects it, or is `null`, are evicted. `discard`, `diverge` and close
+clear the cache; a metamodel change reopens and so clears it. The service
 counts transitions; a batch notes the count when it starts and its results enter the cache only
 if the count has not moved when it returns. The memo of a pass a transition restarted is
 dropped with it, since its results may have read the state before the transition.
 
-**E8 · The order cache.** `orderKey` inlines the resolved code of every snippet `ref`, so an
-edited snippet's table gets a new order. Nothing else changes: an eviction by a transition
+**E8 · Snippet refs and the order cache.** Table, navigation and export resolution inline a
+snippet `ref` as its definition from the `code_snippet` family, staged first, as the oracle
+does; a dangling ref stays and evaluates to the oracle's error. `orderKey` then holds the code,
+so an edited snippet's table gets a new order. Nothing else changes: an eviction by a transition
 already moves `(rev, stagedVersion)`, and an LRU drop does not make a stored order wrong for its
 state. This narrows the program spec's "`TableOrderCache` depends on the cell cache".
 
@@ -119,20 +143,24 @@ script sort, row source or script-fed navigation in the row source fills the who
 - `_script_cell`, expand columns included, and the row-build and sort sites;
 - `_hop_script` in `walk()` (a failure prunes with a warning; a non-id string is a terminal
   value; non-finite floats as their repr; dedup on `(type name, value)`);
-- the export transform (a failure is the export's error; jsonl requires a list) and
-  `script_errors` counted in `ExportFileResult`;
+- the export transform (a failure is the export's error; jsonl requires a list), and
+  `ExportFileResult.script_errors` a boolean, the server's header;
+- `entry_arity` as a scanner of the top-level `def value(...)` signature, held to the oracle by a
+  `script_arity` golden family;
 - the harness result text parsed once into a result type the four sites share.
 
 **E11 · Two engine methods** (CT-4), not yet called by the app: `tableScriptErrors` answers
-`/tables/script-errors`'s body (the whole-table recap, `row_index` in the page's order, never a
+`/tables/script-errors`'s body (the whole-table recap, capped at 200 items, `row_index` in the page's order, never a
 202 since the fill precedes the answer) and `previewTransform` answers
 `/exports/preview-transform`'s body, its 422s and file caps included.
 
 **E12 · Oracle.** `table_eval`, `nav_eval` and `export_bytes` gain configured-script scenarios —
 values, errors, a chain, expand columns, inputs, transforms, `script_errors` — whose Python side
-runs the trusted runner in a child process with `PYTHONHASHSEED=0` and `TZ=UTC`, as
-`script_parity`. The engine replays them on the Node host with real Pyodide. A `script_touched`
-family pins the port of `touched_keys` over element, relationship, containment and delete cases.
+runs the Recorder with the pinned trusted runner in a child process with `PYTHONHASHSEED=0` and
+`TZ=UTC`, as `script_parity`, and records the complete answer. The engine replays them on the
+Node host with real Pyodide. A `script_touched` family records `touched_keys` over element,
+relationship, containment and delete batches; the engine's keys for each are a superset of the
+oracle's.
 
 **E13 · Tests.** Eviction: a delta, a stage and an unstage each evict exactly the entries whose
 read-set they touch; a `null` read-set is evicted by any transition; a batch that spans a
@@ -141,11 +169,14 @@ never answered and stops its workers; a transition mid-fill restarts the evaluat
 result reflects the new state; a `timeout` publishes and is not cached; a gated replica (no
 `scripts: 'evaluate'`) still answers 501.
 
-**E14 · The budget gate.** An `engine-bench-browser` row: `evaluateTable` over a table of ten
-script columns × 1,000 rows, prewarmed (`scriptWarm` before the timer), through the real frame
-with `scripts: 'evaluate'`, gated at ≤ 3 s (CN-3). Reported beside it: the cold first use, a
-cached re-page, the rounds and the pass time outside the fill. Expected, reasoned not measured:
-the `scriptCalls` row's 2,234 ms plus two passes over 1,000 rows, tens of milliseconds.
+**E14 · The budget gate.** An `engine-bench-browser` row: a CSV `exportTable` of a table of ten
+script columns over the 1,000 `Microservice` rows the `scriptCalls` row uses, so one call fills
+all 10,000 cells, prewarmed (`scriptWarm` before the timer), through the real frame with
+`scripts: 'evaluate'`, gated at ≤ 3 s (CN-3). An export, not a page, because a page holds at most
+500 rows. Reported beside it, not gated: `evaluateTable`'s first page of the same table, the
+cached re-export, and the rounds. Expected, reasoned not measured: the `scriptCalls` row's
+2,234 ms, the same ten batches of 1,000, plus two export passes over 1,000 rows, tens of
+milliseconds.
 
 ## Documents
 
