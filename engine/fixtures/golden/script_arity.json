@@ -1,0 +1,341 @@
+{
+  "cases": [
+    {
+      "code": "def value(): pass",
+      "name": "value",
+      "arity": 0
+    },
+    {
+      "code": "def value(a): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "def value(a, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(a, b, c): return 1",
+      "name": "value",
+      "arity": 3
+    },
+    {
+      "code": "def value(a, b=(1, 2), c=[3, 4]): pass",
+      "name": "value",
+      "arity": 3
+    },
+    {
+      "code": "def value(a, b={'k': 1, 'j': 2}, c=f(1, 2)): pass",
+      "name": "value",
+      "arity": 3
+    },
+    {
+      "code": "def value(a, b=')', c='#', d=\"(\"): pass",
+      "name": "value",
+      "arity": 4
+    },
+    {
+      "code": "def value(a, b=''')\n,''', c=1): pass",
+      "name": "value",
+      "arity": 3
+    },
+    {
+      "code": "def value(a=lambda x, y: x, b=2): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(a: int, b: dict[str, int] = {}) -> list[int, str]: pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(a, /, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(a, b, /): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(a, *, b): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "def value(a, *args): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "def value(a, **kw): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "def value(a, b=1, *args, c, **kw): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(*args): pass",
+      "name": "value",
+      "arity": 0
+    },
+    {
+      "code": "def value(**kw): pass",
+      "name": "value",
+      "arity": 0
+    },
+    {
+      "code": "def value(a, b=2*3, c=2**3): pass",
+      "name": "value",
+      "arity": 3
+    },
+    {
+      "code": "def value(\n    a,  # first, with a comma\n    b,\n    c,\n): pass",
+      "name": "value",
+      "arity": 3
+    },
+    {
+      "code": "def value (a, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value[T](a: T, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(a, \\\n  b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "@decorator\ndef value(a, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "@d(1, 2)\n@e\ndef value(a): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "class C:\n    def value(self, a, b): pass\n",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def other():\n    def value(a, b, c): pass\n",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "if True:\n    def value(a): pass\n",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value(a): pass\ndef value(a, b): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "async def value(a): pass\ndef value(a, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "async def value(a): pass",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "x = \"\"\"\ndef value(a, b)\n\"\"\"\ndef value(a): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "x = \"\"\"\ndef value(a, b)\n\"\"\"",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "x = '''def value(a)\n'''",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "# def value(a, b)\ndef value(a): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "# def value(a, b)\n",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "x = (1,\ndef value(a))",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "x = [\n1,\n]\ndef value(a, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "x = 1 \\\ndef value(a): pass",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "s = rb'\\'' \ndef value(a, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "s = f\"{d['k']}\" + F'{{'\ndef value(a): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "s = f\"{d[\"k\"]}\"\ndef value(a): pass",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "if 1:\n\tx = 1\ndef value(a,\tb):\n\treturn 1",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(a, b):\r\n    return 1\r\n",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "x = 1\r\ndef value(a):\r\n    pass\r\n",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "def valué(a, b): pass",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def valué(a, b): pass",
+      "name": "valué",
+      "arity": 2
+    },
+    {
+      "code": "def ｖalue(a, b): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def значение(a): pass\ndef value(a, b, c): pass",
+      "name": "value",
+      "arity": 3
+    },
+    {
+      "code": "def step(a): pass",
+      "name": "step",
+      "arity": 1
+    },
+    {
+      "code": "def transform(a): pass\ndef value(a, b): pass",
+      "name": "transform",
+      "arity": 1
+    },
+    {
+      "code": "def value(a): pass",
+      "name": "step",
+      "arity": null
+    },
+    {
+      "code": "",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "value = 1",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def values(a): pass",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value(a): pass; x = 1",
+      "name": "value",
+      "arity": 1
+    },
+    {
+      "code": "def value(a, a): pass",
+      "name": "value",
+      "arity": 2
+    },
+    {
+      "code": "def value(a): pass\nx = (1,",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value(a): pass\nx = 1)",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value(a): pass\nx = (1]",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value(a): pass\nx = 'abc",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value(a): pass\nx = '''abc",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value(a, b",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value:",
+      "name": "value",
+      "arity": null
+    }
+  ],
+  "unparsed": [
+    {
+      "code": "def value(a, b): pass\nx = = 1",
+      "name": "value",
+      "arity": null
+    },
+    {
+      "code": "def value(a, b):\nreturn 1",
+      "name": "value",
+      "arity": null
+    }
+  ]
+}

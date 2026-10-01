@@ -31,6 +31,7 @@ from . import (  # noqa: F401
     rules_compile,
     rules_eval,
     rules_reach,
+    script_arity,
     script_bridge,
     script_decode,
     script_parity,
