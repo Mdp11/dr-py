@@ -700,12 +700,63 @@ describe('prewarming the script host', () => {
 			deleted_ids: []
 		});
 		expect(counts.prewarm).toBe(1);
-		await client.call('open', { project_id: 'demo', metamodel: doc });
+		await openReplica(client, bridgeModel(), doc);
+		expect(counts.prewarm).toBe(2);
 		await client.call('putArtifacts', {
 			changed: [artifact('s3', 'code_snippet')],
 			deleted_ids: []
 		});
 		expect(counts.prewarm).toBe(2);
+	}, 60_000);
+
+	it('prewarms when a replica becomes ready over artifacts that were already there', async () => {
+		const { counts, factory } = counting();
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await client.call('setArtifacts', { artifacts: [artifact('s1', 'code_snippet')] });
+		expect(counts).toEqual({ prewarm: 0, made: 0 });
+		await openReplica(client, bridgeModel(), doc);
+		expect(counts).toEqual({ prewarm: 1, made: 1 });
+
+		// `close` disposes the host but the artifacts stay: the next replica prewarms a new one.
+		await client.call('close');
+		await openReplica(client, bridgeModel(), doc);
+		expect(counts).toEqual({ prewarm: 2, made: 2 });
+	}, 60_000);
+
+	it('creates no host for a snippet move with no ready replica', async () => {
+		const { counts, factory } = counting();
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await client.call('setArtifacts', { artifacts: [artifact('s1', 'code_snippet')] });
+		await openReplica(client, bridgeModel(), doc);
+		await client.call('close');
+		expect(counts).toEqual({ prewarm: 1, made: 1 });
+		await client.call('putArtifacts', {
+			changed: [artifact('s2', 'code_snippet')],
+			deleted_ids: []
+		});
+		expect(counts).toEqual({ prewarm: 1, made: 1 });
+
+		// An open that is not ready yet does not prewarm either.
+		await client.call('open', { project_id: 'demo', metamodel: doc });
+		await client.call('putArtifacts', {
+			changed: [artifact('s3', 'code_snippet')],
+			deleted_ids: []
+		});
+		expect(counts).toEqual({ prewarm: 1, made: 1 });
+	}, 60_000);
+
+	it('does not prewarm for a replica that has diverged', async () => {
+		const { counts, factory } = counting();
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		const committed = bridgeModel();
+		const server = new Server(clone(committed));
+		await openReplica(client, committed, doc);
+		const { delta } = server.commit([rename('n1', 'x')]);
+		await client.call('applyDelta', {
+			text: deltaText({ ...delta, state_digest: '0'.repeat(16) })
+		});
+		await client.call('setArtifacts', { artifacts: [artifact('s1', 'code_snippet')] });
+		expect(counts).toEqual({ prewarm: 0, made: 0 });
 	}, 60_000);
 
 	it('prewarms for a staged snippet, and not for a snippet whose delete is staged', async () => {

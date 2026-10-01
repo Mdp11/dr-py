@@ -271,8 +271,8 @@ event     {event, …}                     engine → client, unsolicited
   replica went before its run began or by the time it ended is answered 409 `replica
   closed` (`replica is not ready` after a divergence), never with results, and a replica
   dropped under a run stops it. `{cancel: id}` on a call stops its run and the call is never
-  answered. When the artifacts hold a snippet the engine starts the host's first worker
-  ahead of the first call. A `stage`,
+  answered. When the artifacts hold a snippet and a replica is ready the engine starts the host's
+  first worker ahead of the first call. A `stage`,
   `unstage` or delta on the same replica does not end a run. The host is made at the first
   call and disposed by `close`; a replica opened again boots another. `boot_ms` is the boot
   that serves the call: every call goes through the host's `boot()`, so a host that failed to

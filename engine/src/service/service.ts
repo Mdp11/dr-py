@@ -913,9 +913,13 @@ class Service {
 		}
 	}
 
-	/** Starts the host's first worker when the artifacts hold a snippet, once for each replica. */
+	/**
+	 * Starts the host's first worker when the artifacts hold a snippet, once for each replica that
+	 * is ready: from an artifact move on one, and from the moment a replica becomes ready.
+	 */
 	private prewarmScripts(): void {
 		if (this.deps.scripts === undefined || this.prewarmed === this.epoch) return;
+		if (this.state !== 'ready' || this.wc === null) return;
 		const holdsSnippet = this.artifacts
 			.ids()
 			.some((id) => this.artifacts.resolve(id)?.kind === SNIPPET_KIND);
@@ -1529,6 +1533,7 @@ class Service {
 	 */
 	private becomeReady(wc: WorkingCopy): void {
 		this.enter('ready');
+		this.prewarmScripts();
 		this.scheduler.setOpen(true);
 		this.scheduler.setBackground({
 			start: () => wc.verifyDigestSteps(),
