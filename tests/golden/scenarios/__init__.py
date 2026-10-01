@@ -34,6 +34,7 @@ from . import (  # noqa: F401
     script_bridge,
     script_decode,
     script_parity,
+    script_touched,
     search_criteria,
     smart_city,
     snapshot_v2,

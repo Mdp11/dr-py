@@ -1,0 +1,1185 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Thing",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Building",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "House",
+        "abstract": false,
+        "extends": "Building",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "Person",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Contains",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Thing",
+        "target": "Thing",
+        "mappings": [
+          {
+            "source": "Thing",
+            "target": "Thing"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "note",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      },
+      {
+        "name": "Holds",
+        "abstract": false,
+        "extends": "Contains",
+        "containment": false,
+        "source": "Thing",
+        "target": "Thing",
+        "mappings": [
+          {
+            "source": "Thing",
+            "target": "Thing"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Knows",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Thing",
+        "target": "Thing",
+        "mappings": [
+          {
+            "source": "Thing",
+            "target": "Thing"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": [
+          {
+            "name": "since",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ]
+      }
+    ]
+  },
+  "elements": [
+    "{\"id\":\"b1\",\"type_name\":\"Building\",\"properties\":{\"name\":\"Hall\"},\"rev\":0}",
+    "{\"id\":\"h1\",\"type_name\":\"House\",\"properties\":{\"name\":\"One\"},\"rev\":0}",
+    "{\"id\":\"h2\",\"type_name\":\"House\",\"properties\":{\"name\":\"Two\"},\"rev\":0}",
+    "{\"id\":\"p1\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ann\"},\"rev\":0}",
+    "{\"id\":\"p2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Bob\"},\"rev\":0}",
+    "{\"id\":\"o1\",\"type_name\":\"Building\",\"properties\":{\"name\":\"Annex\"},\"rev\":0}"
+  ],
+  "relationships": [
+    "{\"id\":\"r1\",\"type_name\":\"Contains\",\"source_id\":\"b1\",\"target_id\":\"h1\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"r2\",\"type_name\":\"Contains\",\"source_id\":\"b1\",\"target_id\":\"h2\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"r3\",\"type_name\":\"Knows\",\"source_id\":\"p1\",\"target_id\":\"p2\",\"properties\":{\"since\":2020},\"rev\":0}",
+    "{\"id\":\"r4\",\"type_name\":\"Holds\",\"source_id\":\"b1\",\"target_id\":\"p1\",\"properties\":{},\"rev\":0}",
+    "{\"id\":\"r5\",\"type_name\":\"Contains\",\"source_id\":\"o1\",\"target_id\":\"h2\",\"properties\":{},\"rev\":0}"
+  ],
+  "cases": [
+    {
+      "name": "update a property of a leaf element",
+      "ops": [
+        {
+          "kind": "update_element",
+          "id": "p1",
+          "properties_patch": {
+            "name": "Anna"
+          }
+        }
+      ],
+      "element_ids": [
+        "p1"
+      ],
+      "relationship_ids": [],
+      "moves_containment": false,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "el",
+          "p1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Person"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "update an element with one containment parent",
+      "ops": [
+        {
+          "kind": "update_element",
+          "id": "h1",
+          "properties_patch": {
+            "name": "Uno"
+          }
+        }
+      ],
+      "element_ids": [
+        "h1"
+      ],
+      "relationship_ids": [],
+      "moves_containment": false,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "el",
+          "h1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "House"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "update an element with two containment parents",
+      "ops": [
+        {
+          "kind": "update_element",
+          "id": "h2",
+          "properties_patch": {
+            "name": "Due"
+          }
+        }
+      ],
+      "element_ids": [
+        "h2"
+      ],
+      "relationship_ids": [],
+      "moves_containment": false,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "children",
+          "o1"
+        ],
+        [
+          "el",
+          "h2"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "House"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "update an element with no parent",
+      "ops": [
+        {
+          "kind": "update_element",
+          "id": "o1",
+          "properties_patch": {
+            "name": "Wing"
+          }
+        }
+      ],
+      "element_ids": [
+        "o1"
+      ],
+      "relationship_ids": [],
+      "moves_containment": false,
+      "keys": [
+        [
+          "el",
+          "o1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "create a concrete subtype",
+      "ops": [
+        {
+          "kind": "create_element",
+          "temp_id": "tmp_n1",
+          "id": "n1",
+          "type_name": "House",
+          "properties": {
+            "name": "New"
+          }
+        }
+      ],
+      "element_ids": [
+        "n1"
+      ],
+      "relationship_ids": [],
+      "moves_containment": false,
+      "keys": [
+        [
+          "el",
+          "n1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "House"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "create a root of the chain's middle",
+      "ops": [
+        {
+          "kind": "create_element",
+          "temp_id": "tmp_n1",
+          "id": "n1",
+          "type_name": "Building",
+          "properties": {
+            "name": "Mid"
+          }
+        }
+      ],
+      "element_ids": [
+        "n1"
+      ],
+      "relationship_ids": [],
+      "moves_containment": false,
+      "keys": [
+        [
+          "el",
+          "n1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "delete a leaf with a plain relationship",
+      "ops": [
+        {
+          "kind": "delete_element",
+          "id": "p2"
+        }
+      ],
+      "element_ids": [
+        "p2"
+      ],
+      "relationship_ids": [
+        "r3"
+      ],
+      "moves_containment": false,
+      "keys": [
+        [
+          "el",
+          "p2"
+        ],
+        [
+          "in",
+          "p2"
+        ],
+        [
+          "out",
+          "p1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Person"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "delete an element with containment edges",
+      "ops": [
+        {
+          "kind": "delete_element",
+          "id": "h1"
+        }
+      ],
+      "element_ids": [
+        "h1"
+      ],
+      "relationship_ids": [
+        "r1"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "el",
+          "h1"
+        ],
+        [
+          "in",
+          "h1"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "parent",
+          "h1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "House"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "delete a container",
+      "ops": [
+        {
+          "kind": "delete_element",
+          "id": "b1"
+        }
+      ],
+      "element_ids": [
+        "b1",
+        "h1",
+        "h2",
+        "p1"
+      ],
+      "relationship_ids": [
+        "r1",
+        "r2",
+        "r4",
+        "r5",
+        "r3"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "children",
+          "o1"
+        ],
+        [
+          "el",
+          "b1"
+        ],
+        [
+          "el",
+          "h1"
+        ],
+        [
+          "el",
+          "h2"
+        ],
+        [
+          "el",
+          "p1"
+        ],
+        [
+          "in",
+          "h1"
+        ],
+        [
+          "in",
+          "h2"
+        ],
+        [
+          "in",
+          "p1"
+        ],
+        [
+          "in",
+          "p2"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "out",
+          "o1"
+        ],
+        [
+          "out",
+          "p1"
+        ],
+        [
+          "parent",
+          "h1"
+        ],
+        [
+          "parent",
+          "h2"
+        ],
+        [
+          "parent",
+          "p1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "House"
+        ],
+        [
+          "scan",
+          "Person"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "delete an element with two parents",
+      "ops": [
+        {
+          "kind": "delete_element",
+          "id": "h2"
+        }
+      ],
+      "element_ids": [
+        "h2"
+      ],
+      "relationship_ids": [
+        "r2",
+        "r5"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "children",
+          "o1"
+        ],
+        [
+          "el",
+          "h2"
+        ],
+        [
+          "in",
+          "h2"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "out",
+          "o1"
+        ],
+        [
+          "parent",
+          "h2"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "House"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "create a plain relationship",
+      "ops": [
+        {
+          "kind": "create_relationship",
+          "temp_id": "tmp_r9",
+          "id": "r9",
+          "type_name": "Knows",
+          "source_id": "p2",
+          "target_id": "p1",
+          "properties": {
+            "since": 1
+          }
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r9"
+      ],
+      "moves_containment": false,
+      "keys": [
+        [
+          "in",
+          "p1"
+        ],
+        [
+          "out",
+          "p2"
+        ]
+      ]
+    },
+    {
+      "name": "create a containment relationship",
+      "ops": [
+        {
+          "kind": "create_relationship",
+          "temp_id": "tmp_r9",
+          "id": "r9",
+          "type_name": "Contains",
+          "source_id": "o1",
+          "target_id": "p2",
+          "properties": {}
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r9"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "o1"
+        ],
+        [
+          "in",
+          "p2"
+        ],
+        [
+          "out",
+          "o1"
+        ],
+        [
+          "parent",
+          "p2"
+        ]
+      ]
+    },
+    {
+      "name": "create a containment subtype",
+      "ops": [
+        {
+          "kind": "create_relationship",
+          "temp_id": "tmp_r9",
+          "id": "r9",
+          "type_name": "Holds",
+          "source_id": "o1",
+          "target_id": "h1",
+          "properties": {}
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r9"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "o1"
+        ],
+        [
+          "in",
+          "h1"
+        ],
+        [
+          "out",
+          "o1"
+        ],
+        [
+          "parent",
+          "h1"
+        ]
+      ]
+    },
+    {
+      "name": "update a plain relationship",
+      "ops": [
+        {
+          "kind": "update_relationship",
+          "id": "r3",
+          "properties_patch": {
+            "since": 2021
+          }
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r3"
+      ],
+      "moves_containment": false,
+      "keys": [
+        [
+          "in",
+          "p2"
+        ],
+        [
+          "out",
+          "p1"
+        ]
+      ]
+    },
+    {
+      "name": "update a containment relationship",
+      "ops": [
+        {
+          "kind": "update_relationship",
+          "id": "r1",
+          "properties_patch": {
+            "note": "x"
+          }
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r1"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "in",
+          "h1"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "parent",
+          "h1"
+        ]
+      ]
+    },
+    {
+      "name": "update a containment subtype",
+      "ops": [
+        {
+          "kind": "update_relationship",
+          "id": "r4",
+          "properties_patch": {
+            "note": "y"
+          }
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r4"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "in",
+          "p1"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "parent",
+          "p1"
+        ]
+      ]
+    },
+    {
+      "name": "delete a plain relationship",
+      "ops": [
+        {
+          "kind": "delete_relationship",
+          "id": "r3"
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r3"
+      ],
+      "moves_containment": false,
+      "keys": [
+        [
+          "in",
+          "p2"
+        ],
+        [
+          "out",
+          "p1"
+        ]
+      ]
+    },
+    {
+      "name": "delete a containment relationship",
+      "ops": [
+        {
+          "kind": "delete_relationship",
+          "id": "r1"
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r1"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "in",
+          "h1"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "parent",
+          "h1"
+        ]
+      ]
+    },
+    {
+      "name": "delete a containment subtype",
+      "ops": [
+        {
+          "kind": "delete_relationship",
+          "id": "r4"
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r4"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "in",
+          "p1"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "parent",
+          "p1"
+        ]
+      ]
+    },
+    {
+      "name": "re-parent by deleting and creating containment",
+      "ops": [
+        {
+          "kind": "delete_relationship",
+          "id": "r1"
+        },
+        {
+          "kind": "create_relationship",
+          "temp_id": "tmp_r9",
+          "id": "r9",
+          "type_name": "Contains",
+          "source_id": "o1",
+          "target_id": "h1",
+          "properties": {}
+        }
+      ],
+      "element_ids": [],
+      "relationship_ids": [
+        "r9",
+        "r1"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "children",
+          "o1"
+        ],
+        [
+          "in",
+          "h1"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "out",
+          "o1"
+        ],
+        [
+          "parent",
+          "h1"
+        ]
+      ]
+    },
+    {
+      "name": "create an element and attach it",
+      "ops": [
+        {
+          "kind": "create_element",
+          "temp_id": "tmp_n1",
+          "id": "n1",
+          "type_name": "House",
+          "properties": {
+            "name": "New"
+          }
+        },
+        {
+          "kind": "create_relationship",
+          "temp_id": "tmp_r9",
+          "id": "r9",
+          "type_name": "Contains",
+          "source_id": "o1",
+          "target_id": "n1",
+          "properties": {}
+        },
+        {
+          "kind": "create_relationship",
+          "temp_id": "tmp_r10",
+          "id": "r10",
+          "type_name": "Knows",
+          "source_id": "n1",
+          "target_id": "p1",
+          "properties": {}
+        }
+      ],
+      "element_ids": [
+        "n1"
+      ],
+      "relationship_ids": [
+        "r9",
+        "r10"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "o1"
+        ],
+        [
+          "el",
+          "n1"
+        ],
+        [
+          "in",
+          "n1"
+        ],
+        [
+          "in",
+          "p1"
+        ],
+        [
+          "out",
+          "n1"
+        ],
+        [
+          "out",
+          "o1"
+        ],
+        [
+          "parent",
+          "n1"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Building"
+        ],
+        [
+          "scan",
+          "House"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    },
+    {
+      "name": "mix every kind",
+      "ops": [
+        {
+          "kind": "update_element",
+          "id": "p1",
+          "properties_patch": {
+            "name": "Anna"
+          }
+        },
+        {
+          "kind": "create_element",
+          "temp_id": "tmp_n1",
+          "id": "n1",
+          "type_name": "Person",
+          "properties": {
+            "name": "Cy"
+          }
+        },
+        {
+          "kind": "create_relationship",
+          "temp_id": "tmp_r9",
+          "id": "r9",
+          "type_name": "Knows",
+          "source_id": "n1",
+          "target_id": "p1",
+          "properties": {}
+        },
+        {
+          "kind": "update_relationship",
+          "id": "r3",
+          "properties_patch": {
+            "since": 1
+          }
+        },
+        {
+          "kind": "delete_relationship",
+          "id": "r2"
+        },
+        {
+          "kind": "delete_element",
+          "id": "p2"
+        }
+      ],
+      "element_ids": [
+        "p1",
+        "n1",
+        "p2"
+      ],
+      "relationship_ids": [
+        "r9",
+        "r2",
+        "r3"
+      ],
+      "moves_containment": true,
+      "keys": [
+        [
+          "children",
+          "b1"
+        ],
+        [
+          "el",
+          "n1"
+        ],
+        [
+          "el",
+          "p1"
+        ],
+        [
+          "el",
+          "p2"
+        ],
+        [
+          "in",
+          "h2"
+        ],
+        [
+          "in",
+          "p1"
+        ],
+        [
+          "in",
+          "p2"
+        ],
+        [
+          "out",
+          "b1"
+        ],
+        [
+          "out",
+          "n1"
+        ],
+        [
+          "out",
+          "p1"
+        ],
+        [
+          "parent",
+          "h2"
+        ],
+        [
+          "scan",
+          null
+        ],
+        [
+          "scan",
+          "Person"
+        ],
+        [
+          "scan",
+          "Thing"
+        ]
+      ]
+    }
+  ]
+}
