@@ -33,7 +33,7 @@ export type OpenReport = {
 export type Bench = {
 	/** Opens M cold and returns once the digest check is done. */
 	open(): Promise<OpenReport>;
-	/** Ten scripts over 1,000 `Microservice` ids each, on one warm script worker. */
+	/** Ten scripts over 1,000 `Microservice` ids each,. */
 	scripts(): Promise<Measures>;
 	/** The script parity corpus through the pool in the built sandbox, on a replica of the corpus model. */
 	parity(): Promise<ParityReport>;
@@ -483,20 +483,28 @@ async function scripts(): Promise<Measures> {
 	const warm = await run('def value(els):\n    return els[0].name\n', [{ element_ids: [ids[0]!] }]);
 
 	const calls = ids.map((id) => ({ element_ids: [id] }));
+	const start = now();
+	const results = await Promise.all(
+		SCRIPT_BODIES.map((body) => run(`def value(els):\n    ${body}\n`, calls))
+	);
+	const wall = now() - start;
 	let trips = 0;
 	let ms = 0;
-	const start = now();
-	for (const body of SCRIPT_BODIES) {
-		const result = await run(`def value(els):\n    ${body}\n`, calls);
+	for (const result of results) {
 		trips += result.trips;
 		ms += result.ms;
 	}
-	const wall = now() - start;
+	const snapshotBoots = results.filter((r) => r.boot === 'snapshot').map((r) => r.boot_ms);
+	snapshotBoots.sort((x, y) => x - y);
+	const parallelism =
+		typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : 1;
 	return {
-		'script boot': warm.boot_ms,
+		'script boot (cold)': warm.boot_ms,
+		'script boot (snapshot)': snapshotBoots[Math.floor(snapshotBoots.length / 2)] ?? NaN,
 		'10,000 script cells': wall,
 		'script bridge trips': trips,
-		'script µs per trip': (ms * 1000) / trips
+		'script µs per trip': (ms * 1000) / trips,
+		'script workers': Math.max(1, Math.min(4, parallelism - 2))
 	};
 }
 

@@ -731,9 +731,10 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 	}
 
 	/**
-	 * An interrupt raised once can go unseen: Python reads the flag and no `KeyboardInterrupt` comes
-	 * of it, now and then, when other workers boot beside it. So it is raised again, over the grace,
-	 * until the call ends.
+	 * An interrupt raised once can be lost: Pyodide's `_Py_CheckEmscriptenSignals_Helper`
+	 * (`pyodide.asm.mjs`) reads the flag and then clears it, not atomically, so a store between the
+	 * two never reaches Python. So it is raised again, over the grace, until the call ends. The
+	 * retry can also re-interrupt a script's own `KeyboardInterrupt` cleanup that outlasts it.
 	 */
 	function armRetry(slot: Slot, active: Active, n: number): void {
 		active.retry = timers().setTimeout(() => {

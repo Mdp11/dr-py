@@ -64,6 +64,18 @@ row above, so its parts do not add to 3,276) gave, over the 10,850 trips: dispat
 Python `json` 849 ms, post to the engine's handler 885 ms, the rest of the transport 222 ms;
 K-100 has the split, what stays unattributed and the Node proxies.
 
+On the pool (one batch per worker, ten batches concurrent, `pixi run engine-bench-browser`, same
+machine and model, load 0.8, 2026-10-01, median of 3 passes): the same 10,000 cells take **4,654 ms**
+[4,786 4,654 4,597], over CN-3's 2 s and slower than the single warm worker's 3,276 ms above, in
+10,850 trips at 447 µs per trip [459 446 447], on 4 workers (`hardwareConcurrency` less 2, at most
+4). The first worker boots cold in 2,083 ms [2,058 2,083 2,137], the ones that follow from the image
+in 309 ms [352 303 309]. Nothing was tuned: the cost per trip rose about 55% when four interpreters
+run beside the engine worker, and the miss is owned by `K-100`. The `script dispatch busy` label is
+not reported, since the service does not expose a summed dispatch time. The pool's interrupt retry
+exists because Pyodide's `_Py_CheckEmscriptenSignals_Helper` (`pyodide.asm.mjs`) reads then clears
+the interrupt flag non-atomically, so a store between the two is lost: re-check it whenever the
+Pyodide pin moves.
+
 Script workers boot from a memory image of Pyodide with the guest loaded, through Pyodide's
 private snapshot API (`_makeSnapshot`, `makeMemorySnapshot`, `_loadSnapshot`), which is pinned with
 the Pyodide version: moving the pin needs `engine/test/script/snapshot.test.ts` green. Measured in

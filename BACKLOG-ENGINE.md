@@ -112,15 +112,15 @@ feature there lands on both sides with a fixture until F. The diff route's model
 `core/view/validation.py` and the `GET /views/{id}` route that serves its warnings, are frozen for
 behaviour from C's plan 6a on; the engine replays them from the `model_download` and
 `view_warnings` fixtures.
-D (scripts in the browser) is in progress, its first plan built: `scriptCalls` runs user Python
-in Pyodide in a script worker nested in the engine worker over a shared-memory bridge; at M, in
-Chromium, 10,000 script cells take 3,276 ms against the 2 s budget, over it (`K-100`)
-*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-09-30)*. Findings of that plan still open: `K-101` to `K-106`, `T-12` to `T-14`.
+D (scripts in the browser) is in progress, its second plan built: `scriptCalls` runs user Python
+in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; at M, in
+Chromium, 10,000 script cells take 4,654 ms against the 2 s budget, over it (`K-100`)
+*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-01)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `T-12` to `T-14`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-101`, `K-102`, `K-103`, `K-104`, `K-105`, `K-106`, `T-12`, `T-13`, `T-14`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `T-12`, `T-13`, `T-14`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -795,9 +795,9 @@ Fix direction: parse the file incrementally (a streaming or chunked reader that 
 ### K-93 · An integral float in a change request stages as an int · `open` · *2026-09-30*
 A CR crosses the frontend as parsed JSON (the dialog reads the file with `JSON.parse`, and a compare's answer is parsed as it arrives), so a float such as `1.0` in an added or modified entity becomes `1` before it is sent back or staged, on the engine path and the server path alike. Wire text reaches the engine untouched elsewhere (AD-26); a CR does not. Fix direction: read and keep a CR as text with `parseExact`'s float-preserving values on both sides, or send the file's bytes to the engine and let it read them.
 
-### K-100 · 10,000 script cells take 3.3 s in the browser against a 2 s budget · `open` · perf · *2026-09-30*
-`pixi run engine-bench-browser` (Chromium 148, Ryzen 9 3900X under WSL2, load 1.4, median of 3)
-runs ten scripts over 1,000 `Microservice` ids each through `scriptCalls` on one warm script
+### K-100 · 10,000 script cells take 4.7 s in the browser against a 2 s budget · `open` · perf · *2026-09-30*
+The first measurement, on one warm script worker (Chromium 148, Ryzen 9 3900X under WSL2, load 1.4,
+median of 3): ten scripts over 1,000 `Microservice` ids each through `scriptCalls` on one warm script
 worker: 3,276 ms [4,481 3,276 3,139] against CN-3's 2,000, in 10,850 trips at 289 µs
 [397 289 277]. The boot (2,110 ms) is paid by the warm-up call before the timer; `script µs
 per trip` is `guest.run`'s time, so about 3.1 s of the 3.3 s lies inside the script worker's
@@ -836,13 +836,22 @@ and the 790 ms. Node's parts are from separate runs and leave 123 ms of its 1,64
 Chromium's per-trip time is thus about the dispatcher, the JSON and the transport; nothing in
 the data points to chunked replies (no reply nears 1 MiB) or to the structured clone.
 
-The measurement assumes warm reuse of one interpreter across batches, which `K-105` may change.
+**Measured again on the pool (2026-10-01, same machine and model, load 0.8, median of 3).** Each
+batch now has a fresh worker and the ten scripts run concurrently on up to four
+(`hardwareConcurrency` less 2, at most 4): 10,000 cells take **4,654 ms** [4,786 4,654 4,597]
+against 2,000, in 10,850 trips at 447 µs [459 446 447]. Verdict: over budget, a miss by 2.3x and
+slower than the single warm worker's 3,276 ms. Boot: the first worker cold 2,083 ms [2,058 2,083
+2,137], those that follow from the image 309 ms [352 303 309], the figures that Chromium gives for
+the snapshot path. The per-trip cost rose about 55% with four interpreters and the engine worker
+sharing the machine, and the run pays nine boots from the image (about 0.3 s each, in parallel)
+inside the timer. Nothing was tuned; `script dispatch busy` is not reported (the service exposes no
+summed dispatch time). Fewer trips or a binary layout gets its own design with the owner.
 
 Fix directions: fewer trips (project more with the roots, batch reads in the facade), a cheaper
 codec for the reply (the largest JSON part) and a leaner post path, a binary layout behind
 `_transport` (CT-6 allows it). The bench prints the verdict and never fails.
 
-### K-101 · A failed script-host boot is memoized, and a stuck run holds the queue · `open` · *2026-09-30*
+### K-101 · A failed script-host boot is memoized, and a stuck run holds the queue · `done` · *2026-09-30*
 The Node host keeps a rejected boot (`booting ??= start()`), so a host whose boot failed
 cannot be retried (the service keeps no boot of its own); `ScriptHost` does not
 document the `boot()` contract the service relies on (idempotent on a live host, a restart
@@ -850,6 +859,7 @@ after failure). Runs are serialized, so a run that never settles blocks every la
 host's `dispose()` must reject its run in flight. A `close()` during a Node host boot holds
 the run queue until the boot ends (a delay, not a stall). Fix: drop a rejected boot from the
 memo, state the contract on the type, and hold each host to it in a test.
+Closed by the pool: a failed boot rejects the run that waited on it, nothing respawns on its own and the next run boots once more.
 
 ### K-102 · Integer-like object keys are reordered by the value layer · `open` · *2026-09-30*
 A request or a nested property value with a key such as `"10"` is held as a plain object,
@@ -857,7 +867,7 @@ which JS orders integer-like keys first, so a bridge reply or an op text can dif
 oracle's insertion order. Fix: a
 `Map`-backed object in the value layer, or ordered key lists beside the object.
 
-### K-103 · Script worker and bridge hardening and small divergences · `open` · *2026-09-30*
+### K-103 · Script worker and bridge hardening and small divergences · `open` (items 6 and 8 done) · *2026-09-30*
 (1) A user script can post `done`, `failed` or `csp-violation` as the worker through
 Pyodide's `js` module; the script worker is not a trust boundary for those messages, which
 the README should say (`sandbox/README.md` now does). (2) Neither side listens for `messageerror`, so a failed deserialize
@@ -866,12 +876,12 @@ header's `[2]`; `ReplyWriter.begin` could refuse it. (4) `wire`/`unwire` recurse
 depth bound; a `worker.booting !== null` branch is unreachable. (5) A violation during the
 script worker's own load is never relayed, which `sandbox/README.md` does not say, and
 `architecture/contracts.md` (CT-4's port hand-over) does not name that worker violations are
-relayed. (6) The Node host does not project input elements (`inputs.e.ids`) with the roots as
+relayed. (6) *(done)* The Node host does not project input elements (`inputs.e.ids`) with the roots as
 `trusted_runner.py` does: trips differ, results do not; the host counts trips and the browser
 host duplicates that wrapper; `'[]'` for `transform` is written in host and guest. (7)
 `opOutgoing` and `opIncoming` are near-duplicates with their helpers defined below the class, `bridgeWorkingCopy`'s getter mutates
 `bridged`, `close()` disposes the host last (a throwing `dispose` leaves `close` failed after
-the reset), `ScriptCallsParams` is exported and unused. (8) A `BaseException` subclass
+the reset), `ScriptCallsParams` is exported and unused. (8) *(done: per-call `BaseException` answers as that call's `runtime` error)* A `BaseException` subclass
 raised in one call fails the whole batch: the per-call handler in `guest.ts` catches
 `(Exception, SystemExit)`, the setup path `BaseException`; in the browser the worker then
 posts `failed` and the next call pays a new boot (about 2.1 s). The server guest also catches
@@ -881,7 +891,7 @@ only `Exception` (parity). The interrupt design decides how `KeyboardInterrupt` 
 A `statSync` throw answers 500 and a stream error is unhandled, which could end the dev
 server; nothing tests a non-GET/HEAD request or a HEAD on `/pyodide/<file>`.
 
-### K-105 · Interpreter and worker state are shared across script batches · `open` · security · *2026-09-30*
+### K-105 · Interpreter and worker state are shared across script batches · `done` · security · *2026-09-30*
 `guest.ts`: `GUEST_BOOTSTRAP` puts `_dr_run` in `__main__` and `run` looks it up again from
 `py.globals` on every batch. Each batch gets a fresh `ns` dict, but the interpreter is shared:
 `__main__`, `sys.modules` (`json`, which `_transport` uses) and `builtins` persist. The
@@ -903,8 +913,8 @@ hijack, not `json` or `builtins`); a fresh interpreter per script; a fresh worke
 capture `postMessage` and the message listener when the worker starts (closes replacing
 `self.postMessage`; whether a script can still reach the original or read later `run`
 messages is not settled); snapshot and restore `sys.modules`, `__main__` and `builtins`
-around each batch; or accept the risk explicitly in CT-6. K-100's 3,276 ms assumes warm reuse of one interpreter, so the chosen isolation may
-change that cost.
+around each batch; or accept the risk explicitly in CT-6. Closed in the browser by the pool: one batch per worker, so no interpreter or worker scope outlives a
+batch (K-100's 4,654 ms is measured on it). The Node host shares the process: `K-106`.
 
 ### K-106 · A script on the Node host reaches the host process · `open` · security · *2026-10-01*
 The pool's one-batch-per-worker isolation closes K-105 where the worker is a browser Web Worker
@@ -920,6 +930,37 @@ access. Until sub-project E gives the headless service a process boundary the No
 trusted code only (tests, benches). Fix direction: run the Node host's workers in a child
 process under Node's `--permission` model (no file writes, no child processes, no network),
 which is also what CT-6 and CN-20 already say the headless transport ends with.
+
+### K-107 · The script harness and its trusted copy carry small gaps · `open` · *2026-10-01*
+(1) The console branch drops `call["doc"]`, and a console run with entry `transform` is accepted and
+runs the generic path: document console as `value`/`step` only, or refuse `transform`. (2) A stop that
+lands between the harness's `finally` and `session["carry"] = ""` (`harness_src.py:253-254`) leaks
+module-level stdout into the next call: clear `carry` inside the `try`/`finally` (a core harness change, so
+golden fixtures regenerate). (3) The bootstrap's `except KeyboardInterrupt` body (`guest.ts:90-91,116-117`)
+has a check point, so a second interrupt there fails the batch as `runtime`: build the killed texts before
+the loop. (4) `trusted_runner.pin_determinism` leaves `gmtime`, `localtime`, `strftime`, `ctime` and
+`utcnow` unpinned and shows a private subclass in `datetime.now`'s repr, and mutates modules
+irreversibly; `js.Date` shows UTC in user scripts. (5) No WASM-guest test of a console run or boot that
+raises `SystemExit`; `test_wasm_script_parity_hash_constants` spawns the whole scenario to read code and
+its fixture-vs-constant assertion is tautological. (6) `harness_src.py`'s docstring cites
+`tests/golden/scenarios/script_harness.py`, which is `tests/golden/script_harness.py`; cosmetic re-wraps in
+`trusted_runner.py` and `core/script/README.md`.
+
+### K-108 · The script pool and its hosts carry small gaps · `open` · *2026-10-01*
+(1) A worker flooding `bridge` while a reply is in flight or `more` with nothing pending is not refused
+and ended. (2) A forged `csp-violation` flood is relayed without limit to the app's main thread, one store
+update each (`sync.ts:576`): a per-worker cap in `script-host.ts:44-56` and `pool.ts:548-558`. (3) The
+batch-budget checks at call-start receipt and the watchdog ignore a pool-thread stall of at least
+`graceMs` near the budget edge. (4) `prewarmScripts` is O(artifacts) on every move: cache by
+`artifacts.version`; the "< 8 s" timing bounds in tests could flake on slow CI. (5) The maker allocates an
+unused `ReplyWriter`; `serve-worker`'s `randomFillSync` ignores offset and size; `nodeScriptHost` passes no
+`onWarning`; `batchToWire` throwing wastes a spare. (6) The isolation probe's comment
+(`frontend/bench/scripts.ts:353`) says "after its batch", but the error now fires during it, so the
+ended-slot error case is no longer exercised; the concurrent K-105 test does not assert overlap; a
+describe title overclaims on Node (`K-106`). (7) `service.ts:454`'s `one?.text` runtime guard wants a
+comment; `DEFAULT_HARNESS_LIMITS` and `Interpreter` are exported without a user; `engines` allows Node
+20.19 where native type stripping needs 22.18. (8) The soft stop can re-interrupt a script's own
+`KeyboardInterrupt` cleanup (documented in `engine/README.md`).
 
 ### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
 Failed 1 run in 3 of the full e2e run during the scripts plan (engine rev 5 against server

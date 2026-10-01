@@ -343,19 +343,33 @@ event     {event, …}                     engine → client, unsolicited
 - The Python facade and its single synchronous `_transport(req) -> dict` are unchanged.
 - Browser transport: the script worker posts the request and blocks on shared memory; the
   engine answers asynchronously and wakes it. Headless transport: a direct call.
-- The script worker is a worker nested in the engine worker, which spawns it, boots it and
-  ends it (on `dispose`, a failure or an `error` event; the next run boots a new one), so its
-  channel is private to that pair. It alone blocks, on its own reply buffer: one
-  `SharedArrayBuffer` of 1 MiB per worker, an Int32 header and the reply's UTF-8 bytes,
-  chunked when a reply is larger. The engine worker never blocks.
+- Script workers belong to a pool (`engine/src/script/pool.ts`, the same code on both hosts; the
+  host supplies spawning, `loadPyodide` and the global scope to pin). One worker runs one batch,
+  then is ended; the next batch gets a fresh worker, so no interpreter or worker state outlives
+  a batch. Workers boot from a memory image of Pyodide with the guest loaded (each its own copy),
+  or cold when the image cannot be made or restored; a result reports which (`boot`). The cap is
+  `max(1, min(4, hardwareConcurrency - 2))`, one spare idles, and further spares end after 30 s
+  without a queue. Runs of different batches proceed concurrently, each on its own worker and
+  channel. The engine worker spawns, boots and ends workers (on `dispose`, a failure or an
+  `error` event); a worker's channel is private to that pair. It alone blocks, on its own reply
+  buffer: one `SharedArrayBuffer` of 1 MiB per worker, an Int32 header and the reply's UTF-8
+  bytes, chunked when a reply is larger. The engine worker never blocks.
+- The message set is the pool's: pool to worker `init` and `run`; worker to pool `ready`,
+  `failed`, `call-start`, `call-end`, `bridge`, `more`, `done` and `csp-violation`. A worker's
+  message is never trusted beyond its own batch; the pool validates shape and place and ends a
+  worker that breaks the protocol.
+- Limits: 10 s per call, 30 s per batch (a call's deadline is the lesser of 10 s and what remains
+  of the batch). At the deadline the pool raises Pyodide's interrupt (the soft stop, which the
+  pool repeats until the call ends because the flag can be lost); 1.5 s later it ends the worker
+  (the hard stop). A stopped call and the rest of its batch answer `timeout`; the replica
+  survives either. On the Node host a worker shares the process, so that host runs trusted
+  code only until E gives the headless service a process boundary (`K-106`).
 - The dispatcher is a port of `src/data_rover/core/script/bridge.py` and keeps trip-collapse.
   One trip carries one op and one reply; a reply piggybacks the projections the collapse
   lets it (far endpoints, hop relationships), and a call's roots travel with the call. Sub-project D MAY
   replace JSON with a binary layout behind the same `_transport`.
 - Scripts only propose ops; the engine never applies a script's op without the user staging it.
-- Runs are deterministic on both hosts: pinned clock, pinned randomness, `PYTHONHASHSEED=0`.
-- Wall timeout via the interrupt buffer; terminating the worker (browser) or the child process
-  (headless) is the hard stop. The replica survives either.
+- Runs are deterministic on both hosts: `Date.now` pinned to `1750000000000`, `crypto.getRandomValues` filled with `0x42`, `PYTHONHASHSEED=0`, and `random.seed()` after every image restore.
 - Results are cached in the engine, keyed `(code, entry, element ids, inputs digest)`, with
   read-sets; deltas and staged ops evict by read-set.
 
