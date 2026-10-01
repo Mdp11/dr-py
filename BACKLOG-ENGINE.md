@@ -855,6 +855,20 @@ those in a scratch build, and run the batches with the cap at 1, 2 and 4 to see 
 falls with workers at all. `script dispatch busy` is `dispatch_ms`, the pool's own timing.
 Fewer trips or a binary layout gets its own design with the owner.
 
+**What the pool's per-call bookkeeping adds (code, counts only; not measured).** `worker-main.ts`
+posts `call-start {i}` and `call-end {i, text}` around every call (and the module-level window),
+and the pool handles each on the engine thread, arming a timer at `call-start` and clearing three
+at `call-end` (`pool.ts`, `case 'call-start'` / `'call-end'`). For the bench's 10,000 cells in ten
+batches that is 10,010 windows, about 20,000 extra messages beside the 10,850 bridge trips, and
+each result's text is cloned twice, in its `call-end` and again in `done`. The 492 µs per trip
+above divides batch time by trips, so it includes this work and plan 1's 289 µs does not (that
+run predates the pool and its windows). Unmeasured candidate: these messages are part of what the engine thread
+serializes and of the per-trip rise, next to the 750 ms the busy figure shows. Direction, if
+a measurement puts weight on it: the worker already writes the window word into the shared
+buffer (`beginWindow` / `endWindow`), so the pool could read that word at the trips and at its
+deadline timer instead of receiving `call-start` / `call-end`, and send each text once, in
+`done`.
+
 Fix directions: fewer trips (project more with the roots, batch reads in the facade), a cheaper
 codec for the reply (the largest JSON part) and a leaner post path, a binary layout behind
 `_transport` (CT-6 allows it). The bench prints the verdict and never fails.

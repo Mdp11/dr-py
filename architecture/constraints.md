@@ -79,7 +79,10 @@ interpreters and the engine worker compete for the machine's cores (WSL2), and t
 single thread serializes the bridge handling and message delivery in a way the busy figure does
 not show. Unaccounted: what bounds the wall (the three boot waves, 4 + 4 + 2 batches, account for
 roughly 1 s at 0.3 s each), why a trip costs more with four workers, and the queue and post time
-between a worker's request and the pool's handler. The pool's interrupt retry
+between a worker's request and the pool's handler. The per-trip figure also includes the pool's per-call
+messages (`call-start` and `call-end`, about 20,000 for these 10,000 cells besides the 10,850 trips,
+each result's text cloned in `call-end` and again in `done`), which plan 1's 289 µs did not; their
+cost is not measured (K-100). The pool's interrupt retry
 exists because Pyodide's `_Py_CheckEmscriptenSignals_Helper` (`pyodide.asm.mjs`) reads then clears
 the interrupt flag non-atomically, so a store between the two is lost: re-check it whenever the
 Pyodide pin moves.
