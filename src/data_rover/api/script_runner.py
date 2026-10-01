@@ -112,8 +112,10 @@ from typing import TYPE_CHECKING, Any, Literal, TextIO
 
 from wasmtime import (
     Config,
+    DirPerms,
     Engine,
     ExitTrap,
+    FilePerms,
     FuncType,
     Instance,
     Linker,
@@ -626,8 +628,17 @@ class WasmScriptRunner:
             ("PYTHONPATH", _GUEST_LIB_GUEST),
             ("PYTHONHASHSEED", "0"),  # determinism (string hashing)
         ]
-        wasi.preopen_dir(self._guest_lib_path, _GUEST_LIB_GUEST)
-        wasi.preopen_dir(str(self._scripts_dir), _GUEST_SCRIPTS_GUEST)
+        # Read-only: the preopens are shared by every run in the pool, so a
+        # writable one would let a snippet falsify all later runs.
+        wasi.preopen_dir(
+            self._guest_lib_path, _GUEST_LIB_GUEST, DirPerms.READ_ONLY, FilePerms.READ_ONLY
+        )
+        wasi.preopen_dir(
+            str(self._scripts_dir),
+            _GUEST_SCRIPTS_GUEST,
+            DirPerms.READ_ONLY,
+            FilePerms.READ_ONLY,
+        )
         wasi.stdin_file = stdin_fifo
         wasi.stdout_file = stdout_fifo
         # Per-instance stderr (in the instance's own scratch dir, not the

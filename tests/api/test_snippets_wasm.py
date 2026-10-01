@@ -692,3 +692,34 @@ def test_wasm_script_parity_hash_constants(wasm_runner: WasmScriptRunner) -> Non
         }
         assert got == json.loads(expected)
         assert cases[name]["results"] == [expected]
+
+
+def test_wasm_guest_cannot_write_preopened_dirs(wasm_runner: WasmScriptRunner) -> None:
+    """The `/spike` and `/lib` preopens are read-only: a snippet cannot rewrite
+    the harness or drop a module the next run in the shared pool would import."""
+    import pathlib
+
+    from data_rover.api.script_runner import _HARNESS_FILENAME
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    harness = pathlib.Path(wasm_runner._scripts_dir) / _HARNESS_FILENAME
+    before = harness.read_bytes()
+    planted = pathlib.Path(LIB) / "dr_planted_by_snippet.py"
+    planted.unlink(missing_ok=True)
+    try:
+        for target in (f"/spike/{_HARNESS_FILENAME}", "/lib/dr_planted_by_snippet.py"):
+            res = wasm_runner.run(
+                tiny_model(),
+                RunRequest(code=f"open({target!r}, 'a').write('# tampered\\n')"),
+                RunLimits(),
+                record_ops=False,
+                rev=0,
+            )
+            assert res.error is not None, target
+            assert res.error.kind == "runtime", (target, res.error)
+        assert harness.read_bytes() == before
+        assert not planted.exists()
+    finally:
+        planted.unlink(missing_ok=True)
