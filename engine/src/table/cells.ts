@@ -8,6 +8,7 @@
 import type { Model } from '../model/model.ts';
 import { displayName } from '../model/naming.ts';
 import { PropertyValue, type Meter } from '../navigation/evaluate.ts';
+import { ReadError } from '../read/errors.ts';
 import { treeItem, type TreeItem } from '../read/tree.ts';
 import type { Steps } from '../steps/steps.ts';
 import type { Value } from '../value/types.ts';
@@ -255,10 +256,10 @@ function* navigationCell(
 	return elementsCell(model, ids.slice(0, cap), ids.length, ids.length > cap);
 }
 
-/** A script column here runs no snippet: a configured one reaches a script and is refused before any cell. */
+/** A script column here runs no snippet: a configured one reaches a script and answers 501. */
 function scriptCell(pass: Pass, key: RowKey, col: ScriptColumn, index: number): TableCell {
 	if (col.snippet.ref !== null || col.snippet.definition !== null) {
-		throw new Error('a script column with a snippet is evaluated on the server');
+		throw new ReadError(501, 'reaches a script');
 	}
 	if (col.mode === 'expand') {
 		const b = key[expandSlotOf(pass.defn, pass.baseSlots, index)];

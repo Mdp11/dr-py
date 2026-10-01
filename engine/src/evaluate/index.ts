@@ -1,4 +1,5 @@
 import type { ArtifactSet } from '../artifacts/artifact-set.ts';
+import type { ScriptReader } from './fill.ts';
 import { exportTable, previewTableJson } from '../export/route.ts';
 import { runExporter, runExporterDraft } from '../export/run.ts';
 import type { Model } from '../model/model.ts';
@@ -21,13 +22,16 @@ export type WorkingStamp = { rev: number; stagedVersion: number; tableOrders: Ta
 /**
  * What an evaluation reads: the working model, the project's artifacts and
  * the view placements; `working` absent, the committed state is at rev 0, as
- * a session that has seen no commit, and no table order is kept.
+ * a session that has seen no commit, and no table order is kept. `scripts`
+ * present, a definition that reaches a script is evaluated, reading its scripts
+ * through it; absent, it refuses with 501.
  */
 export type EvalContext = {
 	model: Model;
 	artifacts: ArtifactSet;
 	placements: ViewPlacements;
 	working?: WorkingStamp;
+	scripts?: ScriptReader;
 };
 
 /**

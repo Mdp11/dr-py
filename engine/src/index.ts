@@ -53,6 +53,15 @@ export { verifyConsistent } from './debug/verify-consistent.ts';
 export { modelFileSteps, type ModelFile } from './download/model-file.ts';
 export { PartWriter } from './download/parts.ts';
 export {
+	evaluateFilled,
+	type BatchRunner,
+	type FillOptions,
+	type FillSignal,
+	type FillStats,
+	type ScriptCall as ReaderCall,
+	type ScriptReader
+} from './evaluate/fill.ts';
+export {
 	EVALUATIONS,
 	type EvalContext,
 	type Evaluation,
@@ -328,6 +337,13 @@ export {
 	projectRoots,
 	type BridgeLimits
 } from './script/bridge.ts';
+export {
+	CELL_CACHE_LIMITS,
+	CellCache,
+	cellKey,
+	type CellCacheLimits,
+	type CellKey
+} from './script/cell-cache.ts';
 export {
 	createGuest,
 	DEFAULT_HARNESS_LIMITS,

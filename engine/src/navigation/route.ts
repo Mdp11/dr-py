@@ -106,7 +106,9 @@ export function evaluateNavigation(ctx: EvalContext, params: ReadParams): Steps<
 	const rowElementId = optionalString(params, 'row_element_id');
 	const { limit, offset } = pageOf(params);
 	const defn = resolved(ctx.artifacts, source);
-	if (navigationHasScript(defn)) throw new ReadError(501, 'reaches a script');
+	if (ctx.scripts === undefined && navigationHasScript(defn)) {
+		throw new ReadError(501, 'reaches a script');
+	}
 	const { model } = ctx;
 	const meter = new Meter(DEFAULT_LIMITS.maxVisited);
 	const rowElements = rowElementId === null ? null : [rowElementId];

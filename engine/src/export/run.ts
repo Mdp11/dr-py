@@ -127,7 +127,10 @@ export function runExportSteps(
 	def: ExporterDefinition,
 	run: RunIdentity
 ): Steps<ExportFileResult> {
-	if (exportReachesScript(def.entries, [])) throw new ReadError(501, 'reaches a script');
+	const scripted = ctx.scripts !== undefined;
+	if (!scripted && exportReachesScript(def.entries, [])) {
+		throw new ReadError(501, 'reaches a script');
+	}
 	if (def.entries.length === 0) throw new ReadError(422, 'exporter has no entries');
 	const vars = templateVars(ctx, run);
 	const badFilename = validateTokens(def.output.filename, NAME_TOKENS);
@@ -161,7 +164,9 @@ export function runExportSteps(
 		}
 	});
 	const reached = tables.map((defn) => (defn instanceof ReadError ? null : defn));
-	if (exportReachesScript(def.entries, reached)) throw new ReadError(501, 'reaches a script');
+	if (!scripted && exportReachesScript(def.entries, reached)) {
+		throw new ReadError(501, 'reaches a script');
+	}
 
 	const modelRev = ctx.working?.rev ?? 0;
 	const meter = new Meter(0);

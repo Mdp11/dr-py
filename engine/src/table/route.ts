@@ -125,7 +125,9 @@ export function evaluateTable(ctx: EvalContext, params: ReadParams): Steps<Table
 	const source = sourceOf(params);
 	const { limit, offset } = pageOf(params);
 	const defn = resolved(ctx.artifacts, source);
-	if (tableHasScript(defn)) throw new ReadError(501, 'reaches a script');
+	if (ctx.scripts === undefined && tableHasScript(defn)) {
+		throw new ReadError(501, 'reaches a script');
+	}
 	const { model } = ctx;
 	const rev = ctx.working?.rev ?? 0;
 	const meter = new Meter(0);

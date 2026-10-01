@@ -331,7 +331,9 @@ export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportF
 	const format = formatOf(params);
 	const context = exportContext(params);
 	const defn = resolved(ctx.artifacts, source);
-	if (tableHasScript(defn) || hasTransform(defn)) throw new ReadError(501, 'reaches a script');
+	if (ctx.scripts === undefined && (tableHasScript(defn) || hasTransform(defn))) {
+		throw new ReadError(501, 'reaches a script');
+	}
 	const badSplit = splitRefusal(format, defn.json_split);
 	if (badSplit !== null) throw new ReadError(422, badSplit);
 	const name = typeof source === 'string' ? ctx.artifacts.resolve(source)!.name : 'table';
@@ -371,7 +373,9 @@ export function previewTableJson(ctx: EvalContext, params: ReadParams): Steps<Js
 	const source = sourceOf(params);
 	pageOf(params);
 	const defn = resolved(ctx.artifacts, source);
-	if (tableHasScript(defn)) throw new ReadError(501, 'reaches a script');
+	if (ctx.scripts === undefined && tableHasScript(defn)) {
+		throw new ReadError(501, 'reaches a script');
+	}
 	const { model } = ctx;
 	const meter = new Meter(0);
 	const rows = orderedRows(ctx, defn, meter);
