@@ -1,5 +1,6 @@
 import { dumpDefault } from './bridge.ts';
 import { FACADE_SOURCE } from './facade.generated.ts';
+import { HARNESS_SOURCE } from './harness.generated.ts';
 import type { RawScriptResult, ScriptBatch } from './host.ts';
 import type { Value } from '../value/types.ts';
 
@@ -9,53 +10,128 @@ export type Interpreter = {
 	globals: { set(name: string, value: unknown): void; get(name: string): unknown };
 };
 
+/** What the harness caps, in characters, and how many element reads the facade memoizes. */
+export type HarnessLimits = {
+	readonly stdoutChars: number;
+	readonly reprChars: number;
+	readonly readMemoMax: number;
+};
+
+export const DEFAULT_HARNESS_LIMITS: HarnessLimits = Object.freeze({
+	stdoutChars: 262144,
+	reprChars: 65536,
+	readMemoMax: 4096
+});
+
+/**
+ * Called around each stretch in which a script's code runs, in order: every call of the batch,
+ * and before them, for an embedded run, the module-level code as `-1`. `callEnd` gets the text the
+ * call answers, which is the one in the batch's reply.
+ */
+export type GuestHooks = {
+	callStart?(i: number): void;
+	callEnd?(i: number, text: string): void;
+};
+
 export type Guest = {
 	/** `roots[i]` is the JSON text of call `i`'s projected elements. */
-	run(batch: ScriptBatch, roots: readonly string[]): RawScriptResult[];
+	run(batch: ScriptBatch, roots: readonly string[], hooks?: GuestHooks): RawScriptResult[];
 };
 
 /**
- * Run once per interpreter, after `_dr_transport_text`, `_dr_facade` and
- * `_dr_read_memo_max` are set. Each batch executes the facade and then the code in a fresh
- * namespace. `_dr_run` returns text, never a Python object: a str crosses as a JS string, so
- * no proxy exists to leak, and its one JSON layer holds only strings and null.
+ * Run once per interpreter, after `_dr_facade` and `_dr_harness` are set. The harness runs in this
+ * module's namespace; `_dr_batch` drives it and answers one JSON array of the harness's own result
+ * texts, so what crosses back is a str and no proxy exists to leak. Nothing here names a JS value:
+ * the transport, the hooks and the caps are globals that `GUEST_BIND` sets, and are read when a batch
+ * runs, so an interpreter image taken after this script holds no JS reference. There is no `except`
+ * here: the harness catches what a call raises, and a `MemoryError` leaves for the host.
  */
 export const GUEST_BOOTSTRAP = `
 import json
 
-_dr_facade_code = compile(_dr_facade, "<facade>", "exec")
-
 def _transport(req):
     return json.loads(_dr_transport_text(json.dumps(req)))
 
-def _dr_error(exc):
-    return {"error": type(exc).__name__ + ": " + str(exc)}
+exec(compile(_dr_harness, "<harness>", "exec"), globals())
 
-def _dr_run(code, entry, calls_text, roots_texts):
-    calls = json.loads(calls_text)
-    roots_texts = roots_texts.to_py()
-    try:
-        ns = {"_transport": _transport, "_read_memo_max": _dr_read_memo_max}
-        exec(_dr_facade_code, ns)
-        exec(compile(code, "<snippet>", "exec"), ns)
-        call_entry = ns["_dr_call_entry"]
-    except BaseException as exc:
-        failed = _dr_error(exc)
-        return json.dumps([failed for _ in calls])
-    out = []
-    for call, roots_text in zip(calls, roots_texts):
+def _dr_killed(console):
+    error = {"kind": "runtime", "message": "KeyboardInterrupt", "traceback": None}
+    if console:
+        return {"stdout": "", "result_repr": None, "truncated": False, "error": error}
+    return {"payload": None, "error": error, "reads": None, "stdout": ""}
+
+def _dr_end(i, text):
+    # An interrupt the host raised for this window can land anywhere up to the hook, which clears
+    # what is left of it; it is absorbed here and never reaches the next call.
+    while True:
         try:
-            result = call_entry(
-                entry,
-                call["element_ids"],
-                json.loads(roots_text),
-                call.get("doc"),
-                call.get("inputs"),
-            )
-            out.append({"text": json.dumps(result)})
-        except (Exception, SystemExit) as exc:
-            out.append(_dr_error(exc))
+            _dr_call_end(i, text)
+            return
+        except KeyboardInterrupt:
+            pass
+
+def _dr_batch(code, entry, calls_text, roots_texts, console):
+    calls = json.loads(calls_text)
+    roots = roots_texts.to_py()
+    out = []
+    if console:
+        for i, call in enumerate(calls):
+            try:
+                _dr_call_start(i)
+                res = _dr_run({
+                    "code": code,
+                    "facade": _dr_facade,
+                    "entry": entry,
+                    "element_ids": call["element_ids"],
+                    "inputs": call.get("inputs"),
+                    "limits": _dr_limits,
+                })
+                text = json.dumps(res)
+            except KeyboardInterrupt:
+                text = json.dumps(_dr_killed(True))
+            _dr_end(i, text)
+            out.append(text)
+        return json.dumps(out)
+    try:
+        _dr_call_start(-1)
+        session = _dr_open(_dr_facade, code, _dr_limits)
+    except KeyboardInterrupt:
+        session = {"namespace": {}, "carry": "", "error": _dr_killed(False)["error"]}
+    _dr_end(-1, "")
+    boot_error = session["error"]
+    for i, call in enumerate(calls):
+        try:
+            _dr_call_start(i)
+            if boot_error is not None:
+                res = {"payload": None, "error": boot_error, "reads": None, "stdout": ""}
+            else:
+                res = _dr_call(session, {
+                    "entry": entry,
+                    "element_ids": call["element_ids"],
+                    "elements": json.loads(roots[i]),
+                    "doc": call.get("doc"),
+                    "inputs": call.get("inputs"),
+                }, _dr_limits)
+            text = json.dumps(res)
+        except KeyboardInterrupt:
+            text = json.dumps(_dr_killed(False))
+        _dr_end(i, text)
+        out.append(text)
     return json.dumps(out)
+`;
+
+/**
+ * Run after the globals `_dr_transport_text`, `_dr_stdout_chars`, `_dr_repr_chars`, `_read_memo_max`,
+ * `_dr_call_start` and `_dr_call_end` are set.
+ */
+const GUEST_BIND = `
+_dr_limits = {"stdout_bytes": _dr_stdout_chars, "result_repr_bytes": _dr_repr_chars}
+`;
+
+/** Run on an interpreter restored from an image: the image froze `random`'s state, so it is drawn again. */
+const GUEST_RESEED = `
+import random
+random.seed()
 `;
 
 type Callable = ((...args: unknown[]) => unknown) & { destroy?: () => void };
@@ -68,40 +144,61 @@ function callSpec(call: ScriptBatch['calls'][number]): Value {
 }
 
 /**
- * Boots the facade's host side in `py` and returns the batch runner. `transport` answers one
- * bridge request text with its reply text; it is called synchronously from Python.
+ * The part of the guest that needs no JS value: the facade and harness sources, as text, and
+ * `GUEST_BOOTSTRAP`. What this leaves in `py` can be imaged and restored; `createGuest` with
+ * `restored: true` then binds the rest.
+ */
+export function prepareGuest(py: Interpreter): void {
+	py.globals.set('_dr_facade', FACADE_SOURCE);
+	py.globals.set('_dr_harness', HARNESS_SOURCE);
+	py.runPython(GUEST_BOOTSTRAP);
+}
+
+/**
+ * Boots the harness and the facade's host side in `py` and returns the batch runner.
+ * `transport` answers one bridge request text with its reply text; it is called synchronously
+ * from Python. `restored` says `py` was restored from an image that `prepareGuest` had run on.
  */
 export function createGuest(
 	py: Interpreter,
 	transport: (requestText: string) => string,
-	readMemoMax = 4096
+	limits: HarnessLimits = DEFAULT_HARNESS_LIMITS,
+	restored = false
 ): Guest {
+	let hooks: GuestHooks | undefined;
+	if (!restored) prepareGuest(py);
 	py.globals.set('_dr_transport_text', transport);
-	py.globals.set('_dr_facade', FACADE_SOURCE);
-	py.globals.set('_dr_read_memo_max', readMemoMax);
-	py.runPython(GUEST_BOOTSTRAP);
+	py.globals.set('_dr_stdout_chars', limits.stdoutChars);
+	py.globals.set('_dr_repr_chars', limits.reprChars);
+	py.globals.set('_read_memo_max', limits.readMemoMax);
+	py.globals.set('_dr_call_start', (i: number) => hooks?.callStart?.(i));
+	py.globals.set('_dr_call_end', (i: number, text: string) => hooks?.callEnd?.(i, text));
+	py.runPython(GUEST_BIND);
+	if (restored) py.runPython(GUEST_RESEED);
 
 	return {
-		run(batch, roots) {
+		run(batch, roots, callHooks) {
 			if (roots.length !== batch.calls.length) {
 				throw new Error(`${batch.calls.length} calls but ${roots.length} root texts`);
 			}
 			const rootTexts = batch.entry === 'transform' ? batch.calls.map(() => '[]') : [...roots];
 			const callsText = dumpDefault(batch.calls.map(callSpec));
-			const runner = py.globals.get('_dr_run') as Callable;
+			const consoleRun = batch.console === true || batch.entry === 'script';
+			const runner = py.globals.get('_dr_batch') as Callable;
 			let reply: unknown;
+			hooks = callHooks;
 			try {
-				reply = runner(batch.code, batch.entry, callsText, rootTexts);
+				reply = runner(batch.code, batch.entry, callsText, rootTexts, consoleRun);
 			} finally {
+				hooks = undefined;
 				runner.destroy?.();
 			}
 			if (typeof reply !== 'string') {
 				(reply as { destroy?: () => void } | null)?.destroy?.();
 				throw new Error('the guest returned a non-text reply');
 			}
-			// The reply's only strings are `text` and `error`: JSON.parse returns them as written.
-			const raw = JSON.parse(reply) as { text?: string; error?: string }[];
-			return raw.map((r) => ({ text: r.text ?? null, error: r.error ?? null }));
+			// The reply is an array of strings; JSON.parse returns each as written.
+			return (JSON.parse(reply) as string[]).map((text) => ({ text }));
 		}
 	};
 }

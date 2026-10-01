@@ -1,211 +1,123 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { once } from 'node:events';
-import { Worker } from 'node:worker_threads';
-import type { Bridge, ScriptBatch } from '../../engine/src/script/host.ts';
-import { PyFloat } from '../../engine/src/value/types.ts';
+import type { ScriptHost } from '../../engine/src/script/host.ts';
+import {
+	fakeWorkers,
+	honest,
+	settle,
+	type Fake
+} from '../../engine/test/script/fixtures/fake-workers.ts';
 import type { CspViolation } from '../src/handshake.ts';
-import { createScriptHost, type Spawn } from '../src/script-host.ts';
+import { createBrowserHost, violationRelay } from '../src/script-host.ts';
 
-// The real host over real worker threads running `fixtures/script-stub.ts`,
-// which speaks the script worker's protocol over the real reply buffer.
+// What the browser port adds to the engine's pool: how it is sized, and how a script worker's
+// violations reach the page. The pool itself, over real Pyodide, is proved in the engine's tests and
+// in Chromium by `pixi run engine-scripts-browser`; the spawner and `script-worker.ts` need a browser.
 
-const hosts: { dispose(): void }[] = [];
-const spawned: Worker[] = [];
-afterEach(async () => {
-	for (const host of hosts.splice(0)) host.dispose();
-	await Promise.all(spawned.splice(0).map((worker) => worker.terminate()));
-});
+const hosts: ScriptHost[] = [];
+afterEach(() => hosts.splice(0).forEach((host) => host.dispose()));
 
-function setup(modes: string[] = ['ok'], reply: (text: string) => string = (text) => `<${text}>`) {
-	const violations: CspViolation[] = [];
-	const dispatched: string[] = [];
-	const bridge: Bridge = {
-		dispatch: (text) => {
-			dispatched.push(text);
-			return reply(text);
-		},
-		roots: (ids) => JSON.stringify(ids)
-	};
-	let n = 0;
-	const spawn: Spawn = (on) => {
-		const worker = new Worker(new URL('./fixtures/script-stub.ts', import.meta.url), {
-			workerData: { mode: modes[Math.min(n++, modes.length - 1)] }
-		});
-		spawned.push(worker);
-		worker.on('message', (data) => on.message(data));
-		worker.on('error', (error) => on.error(error.message));
-		return {
-			postMessage: (message) => worker.postMessage(message),
-			terminate: () => void worker.terminate()
-		};
-	};
-	const host = createScriptHost(bridge, spawn, (violation) => violations.push(violation));
+function hostOf(parallelism: number | undefined, post: (violation: CspViolation) => void) {
+	const fakes = fakeWorkers(honest);
+	const warnings: string[] = [];
+	const host = createBrowserHost({
+		spawn: fakes.spawn,
+		post,
+		parallelism,
+		warn: (message) => warnings.push(message)
+	});
 	hosts.push(host);
-	return { host, violations, dispatched, spawnCount: () => n };
+	return { host, fakes, warnings };
 }
 
-const batch = (
-	code: string,
-	calls: ScriptBatch['calls'] = [{ elementIds: ['a'] }]
-): ScriptBatch => ({
-	code,
-	entry: 'value',
-	calls
+const batch = (n: number) => ({
+	code: 'def value(els):\n    return 1\n',
+	entry: 'value' as const,
+	calls: Array.from({ length: n }, () => ({ elementIds: [] }))
 });
 
-const settled = (promise: Promise<unknown>) =>
-	promise.then(
-		() => 'resolved',
-		(error: Error) => error.message
-	);
-
-describe('boot', () => {
-	it('resolves with the worker’s time, and boots one worker however often it is asked', async () => {
-		const { host, spawnCount } = setup();
-		const [a, b] = await Promise.all([host.boot(), host.boot()]);
-		expect(a).toEqual({ ms: 7 });
-		expect(b).toEqual({ ms: 7 });
-		expect(spawnCount()).toBe(1);
-	});
-
-	it('rejects with what a failed worker said, and the next boot starts a new worker', async () => {
-		const { host, spawnCount } = setup(['failed', 'ok']);
-		await expect(host.boot()).rejects.toThrow('pyodide did not boot');
-		expect(await host.boot()).toEqual({ ms: 7 });
-		expect(spawnCount()).toBe(2);
-	});
-
-	it('rejects when the worker dies while booting', async () => {
-		const { host } = setup(['crash']);
-		await expect(host.boot()).rejects.toThrow('crashed at boot');
-	});
-
-	it('rejects a boot still pending when the host is disposed', async () => {
-		const { host } = setup(['silent']);
-		const booting = settled(host.boot());
-		host.dispose();
-		expect(await booting).toBe('script host is disposed');
-		await expect(host.boot()).rejects.toThrow('script host is disposed');
-	});
-});
-
-describe('run', () => {
-	it('answers each bridge request and hands back results, trips and time', async () => {
-		const { host, dispatched } = setup();
-		const run = await host.run(batch('echo', [{ elementIds: ['a', 'b'] }, { elementIds: ['c'] }]));
-		expect(run.results).toEqual([
-			{ text: '<req:a,b>|["a","b"]', error: null },
-			{ text: '<req:c>|["c"]', error: null }
-		]);
-		expect(run.trips).toBe(2);
-		expect(run.ms).toBe(3);
-		expect(dispatched).toEqual(['req:a,b', 'req:c']);
-	});
-
-	it('sends no roots for a transform', async () => {
-		const { host } = setup();
-		const run = await host.run({
-			code: 'echo',
-			entry: 'transform',
-			calls: [{ elementIds: ['a'] }]
+describe('violationRelay', () => {
+	it('posts the violation as the page expects it', () => {
+		const posted: CspViolation[] = [];
+		violationRelay((violation) => posted.push(violation))({
+			directive: 'script-src',
+			blocked: 'eval'
 		});
-		expect(run.results[0]?.text).toBe('<req:a>|[]');
+		expect(posted).toEqual([{ type: 'csp-violation', directive: 'script-src', blocked: 'eval' }]);
 	});
 
-	it('crosses a reply of 3.5 MiB of multi-byte text exactly, decoded once', async () => {
-		const text = 'a' + '😀é'.repeat(Math.ceil((3.5 * (1 << 20)) / 6));
-		const { host } = setup(['ok'], () => text);
-		const run = await host.run(batch('big'));
-		expect(run.trips).toBe(1);
-		expect(run.results[0]?.text === text).toBe(true);
+	it('cuts what a forged report makes long', () => {
+		const posted: CspViolation[] = [];
+		violationRelay((violation) => posted.push(violation))({
+			directive: 'd'.repeat(10_000),
+			blocked: 'b'.repeat(10_000_000)
+		});
+		expect(posted[0]!.directive).toHaveLength(256);
+		expect(posted[0]!.blocked).toHaveLength(256);
 	});
 
-	it('keeps a float a float across the worker boundary', async () => {
-		const { host } = setup();
-		const run = await host.run(
-			batch('floats', [{ elementIds: [], inputs: { x: new PyFloat(1), n: 1, big: 2n ** 60n } }])
-		);
-		expect(run.results[0]?.text).toBe('[[{"x": 1.0, "n": 1, "big": 1152921504606846976}, null]]');
-	});
-
-	it('runs one batch at a time, in order', async () => {
-		const { host } = setup();
-		const runs = await Promise.all([
-			host.run(batch('slow')),
-			host.run(batch('slow')),
-			host.run(batch('echo'))
-		]);
-		const span = (i: number) => (runs[i]?.results[0]?.text ?? '').split(',').map(Number);
-		expect(span(1)[0]).toBeGreaterThanOrEqual(span(0)[1]!);
-		expect(runs[2]?.results[0]?.text).toBe('<req:a>|["a"]');
-	});
-
-	it('relays a worker’s CSP violation and drops a malformed one', async () => {
-		const { host, violations } = setup();
-		await host.run(batch('violation'));
-		// The worker posts violations before `done`, and messages keep their order.
-		expect(violations).toEqual([
-			{ type: 'csp-violation', directive: 'script-src', blocked: 'eval' }
-		]);
+	it('never throws into its caller when the post does', () => {
+		const relay = violationRelay(() => {
+			throw new Error('the port is closed');
+		});
+		expect(() => relay({ directive: 'script-src', blocked: 'eval' })).not.toThrow();
 	});
 });
 
-describe('a run that cannot finish', () => {
-	it('is rejected, not left waiting, when the host is disposed under a blocked worker', async () => {
-		const { host, spawnCount } = setup();
-		await host.boot();
-		const worker = spawned[0]!;
-		const running = settled(host.run(batch('hang')));
-		const queued = settled(host.run(batch('echo')));
-		await new Promise((done) => setTimeout(done, 100));
-		host.dispose();
-		expect(await running).toBe('script host is disposed');
-		expect(await queued).toBe('script host is disposed');
-		await once(worker, 'exit');
-		expect(spawnCount()).toBe(1);
-		await expect(host.run(batch('echo'))).rejects.toThrow('script host is disposed');
+describe('the browser host', () => {
+	it('relays a violation a worker reports, and survives a post that throws', async () => {
+		let posted = 0;
+		const { host, fakes } = hostOf(4, () => {
+			posted++;
+			throw new Error('the port is closed');
+		});
+		host.prewarm();
+		await settle(20);
+		const first = fakes.fakes[0]!;
+		first.say({ type: 'csp-violation', directive: 'script-src', blocked: 'eval' });
+		first.say({ type: 'csp-violation', directive: 'connect-src', blocked: 'https://x.test/' });
+		await settle(50);
+		expect(posted).toBe(2);
+		// The worker the violation came from is still the pool's: it boots and a run reaches it.
+		const run = await host.run(batch(2), { dispatch: () => '', roots: () => '[]' });
+		expect(run.results.map((one) => one.text)).toEqual(['r0', 'r1']);
 	});
 
-	it('is rejected when the worker crashes, and the next run starts a new worker', async () => {
-		const { host, spawnCount } = setup();
-		await host.boot();
-		await expect(host.run(batch('crash'))).rejects.toThrow('boom');
-		const run = await host.run(batch('echo'));
-		expect(run.results[0]?.text).toBe('<req:a>|["a"]');
-		expect(spawnCount()).toBe(2);
+	it('drops a violation whose fields are not strings', async () => {
+		const posted: CspViolation[] = [];
+		const { host, fakes } = hostOf(4, (violation) => posted.push(violation));
+		host.prewarm();
+		await settle(20);
+		fakes.fakes[0]!.say({ type: 'csp-violation', directive: 1, blocked: {} });
+		await settle(50);
+		expect(posted).toEqual([]);
 	});
 
-	it('is rejected when the worker reports it failed mid-run, and the worker is ended', async () => {
-		const { host } = setup();
-		await host.boot();
-		const worker = spawned[0]!;
-		await expect(host.run(batch('fail'))).rejects.toThrow('the guest broke');
-		await once(worker, 'exit');
-	});
-
-	it('does not answer a request from a worker it has ended', async () => {
-		const { host, dispatched } = setup();
-		await host.boot();
-		const worker = spawned[0]!;
-		const running = settled(host.run(batch('hang')));
-		await new Promise((done) => setTimeout(done, 50));
-		expect(dispatched).toEqual(['about to hang']);
-		host.dispose();
-		expect(await running).toBe('script host is disposed');
-		worker.emit('message', { type: 'bridge', text: 'late' });
-		expect(dispatched).toEqual(['about to hang']);
-	});
-
-	it('refuses a batch that cannot be posted, and stays usable', async () => {
-		const { host } = setup();
-		await host.boot();
-		const bad = {
-			code: 'echo',
-			entry: 'value',
-			calls: [{ elementIds: [() => 1] }]
-		} as unknown as ScriptBatch;
-		await expect(host.run(bad)).rejects.toThrow();
-		const run = await host.run(batch('echo'));
-		expect(run.trips).toBe(1);
+	it('is sized by the cores the browser reports, one when it reports none', async () => {
+		// Workers that boot and hold their batch: the runs started are the cap.
+		const holding = (fake: Fake, message: { type?: unknown }) => {
+			if (message.type === 'init') fake.say({ type: 'ready', ms: 5, boot: 'cold' });
+		};
+		for (const [parallelism, cap] of [
+			[8, 4],
+			[5, 3],
+			[3, 1],
+			[undefined, 1],
+			[0, 1]
+		] as const) {
+			const fakes = fakeWorkers(holding);
+			const host = createBrowserHost({
+				spawn: fakes.spawn,
+				post: () => {},
+				parallelism,
+				warn: () => {}
+			});
+			hosts.push(host);
+			const bridge = { dispatch: () => '', roots: () => '[]' };
+			for (let i = 0; i < 6; i++) void host.run(batch(1), bridge).catch(() => {});
+			await settle(150);
+			const started = fakes.fakes.filter((fake) => fake.posted.some((m) => m.type === 'run'));
+			expect(started, `parallelism ${parallelism}`).toHaveLength(cap);
+			host.dispose();
+		}
 	});
 });

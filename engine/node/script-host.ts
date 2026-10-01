@@ -1,20 +1,15 @@
-import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { availableParallelism } from 'node:os';
+import { Worker } from 'node:worker_threads';
 import { loadPyodide } from 'pyodide';
 import type { PyDict } from 'pyodide/ffi';
-import { createGuest, type Guest, type Interpreter } from '../src/script/guest.ts';
-import type {
-	Bridge,
-	ScriptBatch,
-	ScriptHost,
-	ScriptHostFactory,
-	ScriptRun
-} from '../src/script/host.ts';
+import type { Interpreter } from '../src/script/guest.ts';
+import type { ScriptHostFactory } from '../src/script/host.ts';
+import { createPool, poolCap, type WorkerPort, type WorkerSpawner } from '../src/script/pool.ts';
+import { INDEX_URL } from './pyodide.ts';
 
-// An explicit index keeps the assets found when a bundler or test runner inlines the package.
-const INDEX_URL = dirname(createRequire(import.meta.url).resolve('pyodide/package.json'));
+export { poolCap };
 
-/** A fresh Pyodide interpreter, booted in this process. */
+/** A fresh Pyodide interpreter, booted in this thread. */
 export async function loadInterpreter(): Promise<Interpreter> {
 	const py = await loadPyodide({ indexURL: INDEX_URL });
 	const globals = py.globals as unknown as PyDict;
@@ -24,47 +19,33 @@ export async function loadInterpreter(): Promise<Interpreter> {
 	};
 }
 
-/** Pyodide in this process, with the bridge called directly. */
-export const nodeScriptHost: ScriptHostFactory = (bridge: Bridge): ScriptHost => {
-	let booting: Promise<{ ms: number }> | null = null;
-	let guest: Guest | null = null;
-	let disposed = false;
-	let trips = 0;
-
-	const transport = (requestText: string): string => {
-		trips++;
-		return bridge.dispatch(requestText);
+/** A spawner of `worker_threads` workers running `entry`, which is a `script-worker.ts` or serves as one. */
+export const nodeWorkerSpawner =
+	(entry: URL, workerData?: unknown): WorkerSpawner =>
+	(): WorkerPort => {
+		const worker = new Worker(entry, { workerData });
+		return {
+			post: (message, transfer) => worker.postMessage(message, transfer ?? []),
+			onMessage: (handler) => worker.on('message', handler),
+			onError(handler) {
+				worker.on('error', (error) => handler(error.message));
+				// A message that would not deserialize: the batch would wait for ever.
+				worker.on('messageerror', (error) => handler(error.message));
+				// Ending the worker ourselves reaches here too, and the pool ignores it.
+				worker.on('exit', (code) => handler(`the script worker exited with code ${code}`));
+			},
+			terminate: () => void worker.terminate()
+		};
 	};
 
-	async function start(): Promise<{ ms: number }> {
-		const t0 = performance.now();
-		const py = await loadInterpreter();
-		if (!disposed) guest = createGuest(py, transport);
-		return { ms: performance.now() - t0 };
-	}
+/** A `worker_threads` worker running `script-worker.ts`. */
+export const spawnNodeWorker: WorkerSpawner = nodeWorkerSpawner(
+	new URL('./script-worker.ts', import.meta.url)
+);
 
-	function boot(): Promise<{ ms: number }> {
-		if (disposed) return Promise.reject(new Error('script host is disposed'));
-		booting ??= start();
-		return booting;
-	}
-
-	return {
-		boot,
-		async run(batch: ScriptBatch): Promise<ScriptRun> {
-			await boot();
-			if (guest === null) throw new Error('script host is disposed');
-			const roots = batch.calls.map((call) =>
-				batch.entry === 'transform' ? '[]' : bridge.roots(call.elementIds)
-			);
-			trips = 0;
-			const t0 = performance.now();
-			const results = guest.run(batch, roots);
-			return { results, trips, ms: performance.now() - t0 };
-		},
-		dispose() {
-			disposed = true;
-			guest = null;
-		}
-	};
-};
+/** The pool over `worker_threads`: one fresh thread, and so one fresh Pyodide, per batch. */
+export const nodeScriptHost: ScriptHostFactory = () =>
+	createPool(spawnNodeWorker, {
+		cap: poolCap(availableParallelism()),
+		now: () => performance.now()
+	});

@@ -491,6 +491,36 @@ def test_wasm_session_boot_error(wasm_runner: WasmScriptRunner, small_model) -> 
     sess.close()
 
 
+def test_wasm_session_call_keyboard_interrupt_is_that_calls_error(
+    wasm_runner: WasmScriptRunner, small_model
+) -> None:
+    """A `BaseException` that is not an `Exception` ends only the call that
+    raised it: it answers a runtime error and the session serves the next
+    call."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    ids = sorted(small_model.elements)
+    sess = wasm_runner.open_session(
+        small_model,
+        "def value(els):\n"
+        "    if els[0].id == %r:\n"
+        "        raise KeyboardInterrupt\n"
+        "    return 7" % ids[0],
+        RunLimits(),
+        budget=ScriptBudget.start(60),
+    )
+    assert sess.boot_error is None
+    bad = sess.call("value", [ids[0]])
+    assert bad.value is None
+    assert bad.error is not None and bad.error.kind == "runtime"
+    assert bad.error.message == "KeyboardInterrupt: "
+    assert bad.error.traceback is not None and "<snippet>" in bad.error.traceback
+    good = sess.call("value", [ids[1]])
+    assert good.error is None
+    assert good.value == {"kind": "scalar", "value": 7}
+    sess.close()
+
+
 def test_wasm_session_call_timeout_kills_session(wasm_runner: WasmScriptRunner, small_model) -> None:
     """A per-call epoch timeout kills the guest; the session is promoted to a
     terminal `boot_error` so a subsequent call also fails fast."""
@@ -633,3 +663,63 @@ def test_wasm_session_value_receives_inputs(wasm_runner: WasmScriptRunner, small
         assert r.value == {"kind": "scalars", "values": [7, ids[1]]}
     finally:
         sess.close()
+
+
+def test_wasm_script_parity_hash_constants(wasm_runner: WasmScriptRunner) -> None:
+    """The committed `script_parity` answers for the hash-dependent cases are
+    what the real (wasm32) guest says."""
+    import json
+
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.golden.scenarios.script_bridge import build_model
+    from tests.golden.scenarios.script_parity import WASM32_RESULTS, script_parity
+
+    cases = {c["name"]: c for c in script_parity()["cases"]}
+    for name, expected in WASM32_RESULTS.items():
+        res = wasm_runner.run(
+            build_model(),
+            RunRequest(code=cases[name]["code"], entry="script"),
+            RunLimits(),
+            record_ops=True,
+            rev=0,
+        )
+        assert res.error is None, res.error
+        got = {
+            "stdout": res.stdout,
+            "result_repr": res.result_repr,
+            "truncated": res.truncated,
+        }
+        assert got == json.loads(expected)
+        assert cases[name]["results"] == [expected]
+
+
+def test_wasm_guest_cannot_write_preopened_dirs(wasm_runner: WasmScriptRunner) -> None:
+    """The `/spike` and `/lib` preopens are read-only: a snippet cannot rewrite
+    the harness or drop a module the next run in the shared pool would import."""
+    import pathlib
+
+    from data_rover.api.script_runner import _HARNESS_FILENAME
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    harness = pathlib.Path(wasm_runner._scripts_dir) / _HARNESS_FILENAME
+    before = harness.read_bytes()
+    planted = pathlib.Path(LIB) / "dr_planted_by_snippet.py"
+    planted.unlink(missing_ok=True)
+    try:
+        for target in (f"/spike/{_HARNESS_FILENAME}", "/lib/dr_planted_by_snippet.py"):
+            res = wasm_runner.run(
+                tiny_model(),
+                RunRequest(code=f"open({target!r}, 'a').write('# tampered\\n')"),
+                RunLimits(),
+                record_ops=False,
+                rev=0,
+            )
+            assert res.error is not None, target
+            assert res.error.kind == "runtime", (target, res.error)
+        assert harness.read_bytes() == before
+        assert not planted.exists()
+    finally:
+        planted.unlink(missing_ok=True)

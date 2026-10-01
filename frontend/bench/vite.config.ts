@@ -5,8 +5,12 @@ import { crossOriginIsolation } from '../vite.config.ts';
 
 const BENCHMARKS = new URL('../../benchmarks/', import.meta.url);
 const ENGINE_BENCH = new URL('../../engine/bench/', import.meta.url);
+const GOLDEN = new URL('../../engine/fixtures/golden/', import.meta.url);
 
-/** What the bench page reads: model M's data, and the gate's table, rules, candidate metamodel and compare file. */
+/**
+ * What the bench page reads: model M's data, and the gate's table, rules, candidate metamodel and
+ * compare file; and the script corpus's model and cases.
+ */
 const DATA: Record<string, { file: URL; type: string }> = {
 	'/data/snapshot.gz': {
 		file: new URL('large.snapshot.v2.gz', BENCHMARKS),
@@ -26,6 +30,18 @@ const DATA: Record<string, { file: URL; type: string }> = {
 	},
 	'/data/candidate.json': {
 		file: new URL('large.candidate.metamodel.json', BENCHMARKS),
+		type: 'application/json'
+	},
+	'/data/script-snapshot.gz': {
+		file: new URL('script-corpus.snapshot.v2.gz', BENCHMARKS),
+		type: 'application/gzip'
+	},
+	'/data/script-metamodel.json': {
+		file: new URL('script-corpus.metamodel.json', BENCHMARKS),
+		type: 'application/json'
+	},
+	'/data/script-parity.json': {
+		file: new URL('script_parity.json', GOLDEN),
 		type: 'application/json'
 	},
 	'/data/compare.json': {

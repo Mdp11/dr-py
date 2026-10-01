@@ -7,3 +7,4 @@ package-lock.json
 /src/export/xlsx-widths.ts
 /src/export/xlsx-tables.ts
 /src/script/facade.generated.ts
+/src/script/harness.generated.ts

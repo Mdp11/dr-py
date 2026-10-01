@@ -29,7 +29,13 @@ import {
 import { RulesUnreadable } from '../rules/document.ts';
 import { ruleSources } from '../rules/sources.ts';
 import { BridgeDispatcher, dumpDefault, projectRoots } from '../script/bridge.ts';
-import type { Bridge, ScriptBatch, ScriptCall, ScriptHost } from '../script/host.ts';
+import type {
+	AbortSignalLike,
+	Bridge,
+	ScriptBatch,
+	ScriptCall,
+	ScriptHost
+} from '../script/host.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
 import { TableOrderCache } from '../table/order-cache.ts';
@@ -283,7 +289,10 @@ function readUnstage(raw: unknown): Unstage {
 	throw new Refused(422, "what must be 'all', {batch} or {entity, incident?}");
 }
 
-const SCRIPT_ENTRIES: readonly string[] = ['value', 'step', 'transform'];
+const SCRIPT_ENTRIES: readonly string[] = ['value', 'step', 'transform', 'script'];
+
+/** The kind of a snippet artifact, as the server stores it (`ArtifactKind.code_snippet`). */
+const SNIPPET_KIND = 'code_snippet';
 
 /** A call's `inputs_text` or `doc_text`, read exactly as the script is to see it; `undefined` when absent. */
 function jsonText(call: ReadParams, key: string, where: string): Value | undefined {
@@ -303,10 +312,17 @@ function readScriptBatch(params: ReadParams): ScriptBatch {
 	const code = text(params, 'code');
 	const entry = params['entry'];
 	if (typeof entry !== 'string' || !SCRIPT_ENTRIES.includes(entry)) {
-		throw new Refused(422, "entry must be 'value', 'step' or 'transform'");
+		throw new Refused(422, "entry must be 'value', 'step', 'transform' or 'script'");
+	}
+	const consoleRun = params['console'];
+	if (consoleRun !== undefined && typeof consoleRun !== 'boolean') {
+		throw new Refused(422, 'console must be a boolean');
 	}
 	const raw = params['calls'];
 	if (!Array.isArray(raw)) throw new Refused(422, 'calls must be a list');
+	if (entry === 'script' && raw.length !== 1) {
+		throw new Refused(422, "entry 'script' takes exactly one call");
+	}
 	const calls = raw.map((item: unknown, i): ScriptCall => {
 		const where = `calls[${i}]`;
 		if (!isObject(item)) throw new Refused(422, `${where} must be an object`);
@@ -322,7 +338,32 @@ function readScriptBatch(params: ReadParams): ScriptBatch {
 			...(doc === undefined ? {} : { doc })
 		};
 	});
-	return { code, entry: entry as ScriptBatch['entry'], calls };
+	return {
+		code,
+		entry: entry as ScriptBatch['entry'],
+		...(consoleRun === undefined ? {} : { console: consoleRun }),
+		calls
+	};
+}
+
+/** What a run watches to be cancelled: the engine's sources have no DOM to name an `AbortController`. */
+function abortable(): { readonly signal: AbortSignalLike; abort(): void } {
+	let aborted = false;
+	const listeners = new Set<() => void>();
+	return {
+		signal: {
+			get aborted() {
+				return aborted;
+			},
+			addEventListener: (_type, listener) => void listeners.add(listener),
+			removeEventListener: (_type, listener) => void listeners.delete(listener)
+		},
+		abort() {
+			if (aborted) return;
+			aborted = true;
+			for (const listener of [...listeners]) listener();
+		}
+	};
 }
 
 // -- calls and methods ---------------------------------------------------------
@@ -332,6 +373,8 @@ type Call = {
 	readonly id: string | number;
 	readonly params: ReadParams;
 	cancelled: boolean;
+	/** Set by a method that has work to stop when the call is cancelled. */
+	onCancel?: () => void;
 	/** Posts `result`, moving the buffers of `transfer` to the other side. */
 	answer(result: unknown, transfer?: readonly ArrayBuffer[]): void;
 	refuse(error: unknown): void;
@@ -393,7 +436,7 @@ const METHODS: { readonly [method: string]: Method } = {
 	chunk: now((service, params) => service.chunk(params)),
 	end: later((service) => service.end()),
 	close: now((service) => service.close()),
-	scriptCalls: later((service, params) => service.scriptCalls(params)),
+	scriptCalls: (service, call) => service.scriptCalls(call),
 	adoptStaged: (service, call) => service.adoptStaged(call),
 	applyTail: (service, call) => service.applyTail(call),
 	applyDelta: (service, call) => service.applyDelta(call),
@@ -589,24 +632,17 @@ class Service {
 	private issuesPosted = 0;
 	// The calls waiting for the store: for a sweep `validateModel` restarted, or for a rescan.
 	private readonly waiting = new Set<Call>();
-	// The script host, made by the first `scriptCalls` and disposed by `close`; the host owns its boots.
+	// The script host, made by the first `scriptCalls` or prewarm and disposed by `close`; the host owns its boots.
 	private scripting: ScriptHost | null = null;
-	// The bridge's dispatcher over the working copy it was built for, and only that one.
+	// The read-only dispatcher the embedded runs over one working copy share, and that working copy alone.
 	private bridged: { readonly wc: WorkingCopy; readonly dispatcher: BridgeDispatcher } | null =
 		null;
 	// Moves whenever a replica is dropped: a run is pinned to the epoch it began in.
 	private epoch = 0;
-	// The epoch of the run in flight, which the bridge serves alone; null between runs.
-	private runEpoch: number | null = null;
-	// The end of the last run queued: calls run one at a time, as the host's one worker does.
-	private runs: Promise<void> = Promise.resolve();
-	private readonly bridge: Bridge = {
-		dispatch: (requestText) => this.bridgeReply(requestText),
-		roots: (ids) => {
-			const wc = this.bridgeWorkingCopy();
-			return wc === null ? '[]' : dumpDefault(projectRoots(wc.model, ids));
-		}
-	};
+	// The runs in flight; a replica dropped under them stops them.
+	private readonly running = new Set<() => void>();
+	// The epoch the host was last told to prewarm for.
+	private prewarmed = -1;
 
 	constructor(port: Port, deps: ServiceDeps) {
 		this.port = port;
@@ -668,7 +704,9 @@ class Service {
 	private cancel(id: string | number): void {
 		this.scheduler.cancel(id);
 		const call = this.awaiting.get(id);
-		if (call !== undefined) call.cancelled = true;
+		if (call === undefined) return;
+		call.cancelled = true;
+		call.onCancel?.();
 	}
 
 	answerLater(call: Call, work: Promise<unknown>): void {
@@ -766,17 +804,6 @@ class Service {
 
 	// -- scripts -------------------------------------------------------------
 
-	/**
-	 * The working copy the bridge reads: the ready replica's, else none. A run
-	 * in flight reads the replica it began on, not one opened since.
-	 */
-	private bridgeWorkingCopy(): WorkingCopy | null {
-		const stale = this.runEpoch !== null && this.runEpoch !== this.epoch;
-		if (this.state === 'ready' && this.wc !== null && !stale) return this.wc;
-		this.bridged = null;
-		return null;
-	}
-
 	/** Refuses a call whose replica is gone or no longer ready since it arrived in `epoch`. */
 	private stillReady(epoch: number): void {
 		if (this.epoch !== epoch) {
@@ -785,56 +812,81 @@ class Service {
 		this.ready();
 	}
 
-	/**
-	 * One bridge request, answered in the message handler: a read of the ready
-	 * replica's working copy, through a dispatcher built for that object alone.
-	 * It always answers, and never throws: a host may be blocked on the reply.
-	 */
-	private bridgeReply(requestText: string): string {
-		try {
-			const wc = this.bridgeWorkingCopy();
-			if (wc === null) return bridgeFailure(requestText, `BridgeError: ${NOT_READY}`);
-			if (this.bridged?.wc !== wc) {
-				this.bridged = { wc, dispatcher: new BridgeDispatcher(wc.model, false) };
-			}
-			return this.bridged.dispatcher.dispatch(requestText);
-		} catch (error) {
-			const why = error instanceof Error ? error.message : String(error);
-			return bridgeFailure(requestText, `RuntimeError: ${why}`);
+	/** Moves the epoch: what ran on the replica that went stops. */
+	private nextEpoch(): void {
+		this.bridged = null;
+		this.epoch++;
+		for (const abort of this.running) abort();
+	}
+
+	/** The dispatcher the embedded runs on `wc` share: it reads and records nothing. */
+	private sharedDispatcher(wc: WorkingCopy): BridgeDispatcher {
+		if (this.bridged?.wc !== wc) {
+			this.bridged = { wc, dispatcher: new BridgeDispatcher(wc.model, false) };
 		}
+		return this.bridged.dispatcher;
+	}
+
+	/**
+	 * The bridge of one run: it answers from `wc` through `dispatcher` while the replica is the
+	 * ready one the run began on, and `BridgeError: replica is not ready` ever after, even once a
+	 * replica opened since is ready. `dispatch` runs in the message handler, so it always answers
+	 * and never throws: a host may be blocked on the reply.
+	 */
+	private bridgeOf(epoch: number, wc: WorkingCopy, dispatcher: BridgeDispatcher): Bridge {
+		const live = () => this.epoch === epoch && this.state === 'ready';
+		return {
+			dispatch: (requestText) => {
+				try {
+					if (!live()) return bridgeFailure(requestText, `BridgeError: ${NOT_READY}`);
+					return dispatcher.dispatch(requestText);
+				} catch (error) {
+					const why = error instanceof Error ? error.message : String(error);
+					return bridgeFailure(requestText, `RuntimeError: ${why}`);
+				}
+			},
+			roots: (ids) => (live() ? dumpDefault(projectRoots(wc.model, ids)) : '[]')
+		};
 	}
 
 	/** `scriptCalls`: its params are read at arrival, so a malformed call is refused before it runs. */
-	scriptCalls(params: ReadParams): Promise<ScriptCallsResult> {
-		return this.runScripts(readScriptBatch(params));
+	scriptCalls(call: Call): void {
+		const batch = readScriptBatch(call.params);
+		const run = abortable();
+		call.onCancel = run.abort;
+		this.answerLater(call, this.runScripts(batch, run));
 	}
 
 	/**
-	 * The call belongs to the replica it arrived on: it is refused, `replica
-	 * closed`, if that replica was dropped before the run began or by the time
-	 * it ended, and the bridge answers a run nothing but that replica. Every
-	 * call goes through `boot()`, which a live host answers at once and a host
-	 * that failed or stopped starts over; a failed boot is refused, not kept.
+	 * A run belongs to the replica it arrived on: it is refused, `replica closed`, if that replica
+	 * was dropped before the run began or by the time it ended, and its bridge answers nothing but
+	 * that replica; a replica dropped under it also stops it. Runs go in parallel, each in a worker
+	 * of the host's pool. Every run goes through `boot()`, which a live host answers at once and a
+	 * host that failed or stopped starts over; a failed boot is refused, not kept. A `script` run
+	 * gets a dispatcher of its own that records the ops its code proposes, answered as `ops`.
 	 */
-	private async runScripts(batch: ScriptBatch): Promise<ScriptCallsResult> {
-		this.ready();
+	private async runScripts(
+		batch: ScriptBatch,
+		cancel: { readonly signal: AbortSignalLike; abort(): void }
+	): Promise<ScriptCallsResult> {
+		const wc = this.ready();
 		const epoch = this.epoch;
 		const host = this.scriptHost();
-		const before = this.runs;
-		let pinned = false;
-		let next!: () => void;
-		this.runs = new Promise<void>((resolve) => (next = resolve));
+		const recording = batch.entry === 'script' ? new BridgeDispatcher(wc.model, true) : null;
+		const bridge = this.bridgeOf(epoch, wc, recording ?? this.sharedDispatcher(wc));
+		this.running.add(cancel.abort);
 		try {
 			// Calls waiting on one boot share it, and share its failure.
 			await host.boot();
-			await before;
 			this.stillReady(epoch);
-			// Again: a run before this one may have stopped the host, which boots anew.
-			const { ms: boot_ms } = await host.boot();
-			this.stillReady(epoch);
-			this.runEpoch = epoch;
-			pinned = true;
-			const { results, trips, ms } = await host.run(batch);
+			const {
+				results,
+				trips,
+				ms,
+				dispatchMs: dispatch_ms,
+				bootMs: boot_ms,
+				boot
+			} = await host.run(batch, bridge, cancel.signal);
 			this.stillReady(epoch);
 			if (results.length !== batch.calls.length) {
 				throw new Refused(
@@ -842,23 +894,46 @@ class Service {
 					`the script host answered ${results.length} results for ${batch.calls.length} calls`
 				);
 			}
-			if (results.some((one) => typeof one !== 'object' || one === null)) {
-				throw new Refused(500, 'the script host answered a result that is not an object');
+			if (results.some((one) => typeof one?.text !== 'string')) {
+				throw new Refused(500, 'the script host answered a result without text');
 			}
 			return {
-				results: results.map(({ text, error }) => ({ text, error })),
+				results: results.map(({ text }) => ({ text })),
 				trips,
 				ms,
-				boot_ms
+				dispatch_ms,
+				boot_ms,
+				boot,
+				...(recording === null ? {} : { ops: dumpDefault(recording.ops) })
 			};
 		} catch (error) {
 			// `close` disposed the host under the run.
 			if (this.scripting !== host) throw new Refused(409, 'replica closed');
 			throw error;
 		} finally {
-			if (pinned) this.runEpoch = null;
-			next();
+			this.running.delete(cancel.abort);
 		}
+	}
+
+	/**
+	 * Starts the host's first worker when the artifacts hold a snippet, once for each replica that
+	 * is ready: from an artifact move on one, and from the moment a replica becomes ready. Only
+	 * where the deps opt in with `prewarmScripts`.
+	 */
+	private prewarmScripts(): void {
+		if (
+			this.deps.prewarmScripts !== true ||
+			this.deps.scripts === undefined ||
+			this.prewarmed === this.epoch
+		)
+			return;
+		if (this.state !== 'ready' || this.wc === null) return;
+		const holdsSnippet = this.artifacts
+			.ids()
+			.some((id) => this.artifacts.resolve(id)?.kind === SNIPPET_KIND);
+		if (!holdsSnippet) return;
+		this.prewarmed = this.epoch;
+		this.scriptHost().prewarm();
 	}
 
 	/** The script host, made on first use. */
@@ -866,7 +941,7 @@ class Service {
 		if (this.scripting === null) {
 			const factory = this.deps.scripts;
 			if (factory === undefined) throw new Refused(501, 'scripts are not available');
-			this.scripting = factory(this.bridge);
+			this.scripting = factory();
 		}
 		return this.scripting;
 	}
@@ -1161,6 +1236,7 @@ class Service {
 				if (!live.settled) this.sweep(live);
 			}
 		}
+		this.prewarmScripts();
 		this.postBare(this.artifacts.version !== version);
 	}
 
@@ -1269,8 +1345,7 @@ class Service {
 			this.opening = null;
 		}
 		this.wc = null;
-		this.bridged = null;
-		this.epoch++;
+		this.nextEpoch();
 		this.progressHeld.clear();
 		this.tableOrders.clear();
 		this.scheduler.setOpen(false);
@@ -1466,6 +1541,7 @@ class Service {
 	 */
 	private becomeReady(wc: WorkingCopy): void {
 		this.enter('ready');
+		this.prewarmScripts();
 		this.scheduler.setOpen(true);
 		this.scheduler.setBackground({
 			start: () => wc.verifyDigestSteps(),
@@ -1486,8 +1562,7 @@ class Service {
 
 	private diverge(wc: WorkingCopy): void {
 		if (this.wc !== wc || this.state === 'diverged') return;
-		this.bridged = null;
-		this.epoch++;
+		this.nextEpoch();
 		this.progressHeld.clear();
 		this.tableOrders.clear();
 		this.scheduler.setOpen(false);

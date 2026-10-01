@@ -36,22 +36,22 @@ METAMODEL = {
     ],
 }
 
-_ASTRAL = "\U0001f600"
+ASTRAL = "\U0001f600"
 _BMP_MAX = "\uffff"
 
 #: (id, type, properties), in insertion order
-_ELEMENTS: list[tuple[str, str, dict[str, Any]]] = [
+ELEMENTS: list[tuple[str, str, dict[str, Any]]] = [
     ("n1", "Node", {"name": "one"}),
     ("n2", "Node", {"name": "two"}),
     ("l1", "Leaf", {"name": ["", "listed", "second"]}),
     ("o1", "Other", {}),
-    (f"z{_ASTRAL}", "Node", {"Name": "Upper"}),
+    (f"z{ASTRAL}", "Node", {"Name": "Upper"}),
     (
         "é1",
         "Node",
         {"name": "é", "note": {"z": 1, "a": {"y": 2, "b": [3, 1.5]}}, "list": [1, "x"]},
     ),
-    ("n3", "Node", {"name": "three", "f": 1.0, "i": 1, "big": 2**60, "s": _ASTRAL}),
+    ("n3", "Node", {"name": "three", "f": 1.0, "i": 1, "big": 2**60, "s": ASTRAL}),
 ]
 
 #: (id, type, source, target, properties)
@@ -61,7 +61,7 @@ _RELATIONSHIPS: list[tuple[str, str, str, str, dict[str, Any]]] = [
     ("r3", "Owns", "n1", "n2", {}),
     ("r4", "Links", "n2", "n1", {"name": "back"}),
     (f"{_BMP_MAX}r5", "Links", "n1", "o1", {}),
-    (f"{_ASTRAL}r6", "Links", "n1", f"z{_ASTRAL}", {}),
+    (f"{ASTRAL}r6", "Links", "n1", f"z{ASTRAL}", {}),
 ]
 
 #: the five write dicts the facade records
@@ -92,9 +92,9 @@ _ESCAPED_WRITE: dict[str, Any] = {
 }
 
 
-def _model() -> Model:
+def build_model() -> Model:
     model = Model(Metamodel.model_validate(METAMODEL))
-    for eid, type_name, properties in _ELEMENTS:
+    for eid, type_name, properties in ELEMENTS:
         model.insert_element(eid, type_name, properties, 0)
     for rid, type_name, source, target, properties in _RELATIONSHIPS:
         model.insert_relationship(rid, type_name, source, target, properties, 0)
@@ -115,7 +115,7 @@ def _reads() -> list[str]:
     def add(op: Any, **fields: Any) -> None:
         texts.append(_req(len(texts) + 1, op, **fields))
 
-    for eid in ("n1", "l1", f"z{_ASTRAL}", "é1", "n3", "o1", "nope", "it's", ""):
+    for eid in ("n1", "l1", f"z{ASTRAL}", "é1", "n3", "o1", "nope", "it's", ""):
         add("element", element_id=eid)
     for op in ("outgoing", "incoming"):
         for eid in ("n1", "n2", "l1", "o1", "nope"):
@@ -186,7 +186,9 @@ def _reads() -> list[str]:
 
 def _page_walk(page_limit: int = 500, **fields: Any) -> list[str]:
     """Requests that walk every page, following each reply's ``next_offset``."""
-    dispatcher = BridgeDispatcher(_model(), record_ops=False, page_limit=page_limit)
+    dispatcher = BridgeDispatcher(
+        build_model(), record_ops=False, page_limit=page_limit
+    )
     texts: list[str] = []
     offset: Any = 0
     while offset is not None:
@@ -202,7 +204,9 @@ def _group(
     dispatcher_limits = {
         k: v for k, v in limits.items() if k != "max_inline_far_endpoints"
     }
-    dispatcher = BridgeDispatcher(_model(), record_ops=record_ops, **dispatcher_limits)
+    dispatcher = BridgeDispatcher(
+        build_model(), record_ops=record_ops, **dispatcher_limits
+    )
     exchanges = [
         {"request": text, "reply": json.dumps(dispatcher.dispatch(json.loads(text)))}
         for text in requests
@@ -223,7 +227,7 @@ def _far_group(name: str, cap: int, requests: list[str]) -> dict[str, Any]:
 
 @scenario("script_bridge")
 def script_bridge() -> Any:
-    model = _model()
+    model = build_model()
     lines = list(iter_entity_lines(model))
     first = _WRITES[0]
     first_size = len(json.dumps(first))
@@ -288,13 +292,13 @@ def script_bridge() -> Any:
             [],
             ["n1"],
             ["n2", "missing", "n1", "n2"],
-            [f"z{_ASTRAL}", "é1", "n3", "o1", "l1"],
+            [f"z{ASTRAL}", "é1", "n3", "o1", "l1"],
         )
     ]
     return {
         "metamodel": model.metamodel.model_dump(mode="json"),
-        "elements": lines[: len(_ELEMENTS)],
-        "relationships": lines[len(_ELEMENTS) :],
+        "elements": lines[: len(ELEMENTS)],
+        "relationships": lines[len(ELEMENTS) :],
         "groups": groups,
         "roots": roots,
     }

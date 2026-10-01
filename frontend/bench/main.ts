@@ -16,6 +16,8 @@ import type {
 } from '$engine';
 import type { EngineClient, EngineLink } from '$lib/engine/client';
 import { connectFrame } from '$lib/engine/frame';
+import { isolation, parity, runaway, violationControl } from './scripts';
+import type { IsolationReport, ParityReport, RunawayReport } from './scripts';
 
 /** One pass's measurements by label, in insertion order; ms unless the label says otherwise. */
 export type Measures = Record<string, number>;
@@ -31,8 +33,16 @@ export type OpenReport = {
 export type Bench = {
 	/** Opens M cold and returns once the digest check is done. */
 	open(): Promise<OpenReport>;
-	/** Ten scripts over 1,000 `Microservice` ids each, on one warm script worker. */
+	/** Ten scripts over 1,000 `Microservice` ids each, concurrently on the pool. */
 	scripts(): Promise<Measures>;
+	/** The script parity corpus through the pool in the built sandbox, on a replica of the corpus model. */
+	parity(): Promise<ParityReport>;
+	/** The soft stop, the hard stops and a cancel, with the default limits. */
+	runaway(): Promise<RunawayReport>;
+	/** A script that rebinds its worker's scope, and the next batch on a worker of its own. */
+	isolation(): Promise<IsolationReport>;
+	/** A script that `eval`s, to show a worker's CSP violation reaches the page's count. */
+	violationControl(): Promise<{ violations: number; answer: string }>;
 	/** CSP violations the frame has reported since the open, the script worker's included. */
 	violations(): number;
 	/** Edits and reads; the last of them diverges the replica. */
@@ -464,33 +474,58 @@ async function scripts(): Promise<Measures> {
 			entry: 'value',
 			calls
 		});
-		const failed = result.results.find((one) => one.error !== null);
-		if (failed !== undefined) throw new Error(`a script cell failed: ${failed.error}`);
+		for (const one of result.results) {
+			const { error } = JSON.parse(one.text) as { error: { message: string } | null };
+			if (error !== null) throw new Error(`a script cell failed: ${error.message}`);
+		}
 		return result;
 	};
 	const warm = await run('def value(els):\n    return els[0].name\n', [{ element_ids: [ids[0]!] }]);
 
 	const calls = ids.map((id) => ({ element_ids: [id] }));
+	const start = now();
+	const results = await Promise.all(
+		SCRIPT_BODIES.map((body) => run(`def value(els):\n    ${body}\n`, calls))
+	);
+	const wall = now() - start;
 	let trips = 0;
 	let ms = 0;
-	const start = now();
-	for (const body of SCRIPT_BODIES) {
-		const result = await run(`def value(els):\n    ${body}\n`, calls);
+	let dispatch = 0;
+	for (const result of results) {
 		trips += result.trips;
 		ms += result.ms;
+		dispatch += result.dispatch_ms;
 	}
-	const wall = now() - start;
+	const batchMs = results.map((r) => r.ms).sort((x, y) => x - y);
+	const snapshotBoots = [warm, ...results]
+		.filter((r) => r.boot === 'snapshot')
+		.map((r) => r.boot_ms)
+		.sort((x, y) => x - y);
+	const parallelism =
+		typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : 1;
 	return {
-		'script boot': warm.boot_ms,
+		// The warm-up's boot is cold only when the image was not ready yet; otherwise it is a snapshot boot.
+		...(warm.boot === 'cold' && { 'script boot (cold)': warm.boot_ms }),
+		'script boot (snapshot)': snapshotBoots[Math.floor(snapshotBoots.length / 2)] ?? NaN,
 		'10,000 script cells': wall,
+		'script run sum': ms,
+		'script batch ms (min)': batchMs[0]!,
+		'script batch ms (median)': batchMs[Math.floor(batchMs.length / 2)]!,
+		'script batch ms (max)': batchMs[batchMs.length - 1]!,
+		'script dispatch busy': dispatch,
 		'script bridge trips': trips,
-		'script µs per trip': (ms * 1000) / trips
+		'script µs per trip': (ms * 1000) / trips,
+		'script workers': Math.max(1, Math.min(4, parallelism - 2))
 	};
 }
 
 window.bench = {
 	open,
 	scripts,
+	parity,
+	runaway,
+	isolation,
+	violationControl,
 	violations: () => violations,
 	transitions,
 	close() {

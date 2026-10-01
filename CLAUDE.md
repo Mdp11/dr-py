@@ -58,6 +58,7 @@ pixi run golden-fixtures                  # regenerate engine/fixtures/golden fr
 pixi run engine-xlsx-sample               # rewrite engine/fixtures/xlsx/sample.xlsx after an xlsx writer change
 pixi run engine-bench / engine-bench-browser   # after `pixi run engine-bench-data` once; they write the candidate oracle's files first
 pixi run engine-parity-large   # engine sweep vs the oracle at M (after engine-bench-data)
+pixi run engine-scripts-browser # script parity corpus + runaway cases in Chromium through the built sandbox (a test; stop any sandbox preview first)
 ```
 
 Gotchas:

@@ -283,6 +283,36 @@ this contract, including the exact read-op parameter/response shapes and the
 `BridgeDispatcher` construction knobs (`record_ops`, `max_ops`,
 `max_op_bytes`, `page_limit`).
 
+## The harness
+
+`harness_src.HARNESS_SOURCE` (like `FACADE_SOURCE`, a string nothing imports)
+is the one copy of what a console run or an embedded call does around the
+facade: the two compilation units, the capped stdout, the traceback filter,
+the `script` entry's `result` pickup, `repr` truncation, arity binding and the
+per-call dispatch through `_dr_call_entry`. It is exec'd in a namespace that
+already holds `_transport` and `_read_memo_max`, by the server guest's
+bootstrap (which reads `harness.py` from the preopened scripts directory next
+to `bootstrap.py` and keeps only the stdin/stdout framing) and by
+`tests/script/trusted_runner.py`. The engine carries it as
+`engine/src/script/harness.generated.ts`, which `pixi run golden-fixtures`
+rewrites. It defines three functions; the module docstring of
+`harness_src.py` holds their exact signatures and return shapes:
+
+- `_dr_run(spec)`: one console run, answering the fields of the `fin` message.
+- `_dr_open(facade, code, limits)`: boots a session, answering
+  `{namespace, carry, error}`.
+- `_dr_call(session, call, limits)`: one embedded call, answering
+  `{payload, error, reads, stdout}`.
+
+**The per-call rule.** A run, a boot and each call catch `BaseException`
+except `MemoryError`: a `KeyboardInterrupt`, a `SystemExit` or a custom
+`BaseException` subclass ends only that run or call and answers a `runtime`
+error in the usual `TypeName: message` form with a snippet-only traceback, and
+the session's next call runs. `MemoryError` propagates out of the harness so a
+memory-limiter breach still reaches the host as a nonzero exit it maps to a
+`memory` error. The harness never decides a call was stopped for time: a host
+that interrupts a call replaces that call's result with its own `timeout`.
+
 ## Evaluation sessions
 
 Table columns (`ScriptColumn`) and navigation steps (`ScriptStep`) call a
@@ -323,11 +353,11 @@ already-JSON-decoded value — and is ignored for `"value"`/`"step"` calls;
 (`api/script_runner.py`) pops a warm pool instance and sends ONE start
 message shaped like a normal run's (`code`, `facade_source`, `stdout_bytes`,
 `result_repr_bytes`) plus `"mode": "embedded"`. The guest bootstrap
-(`_GUEST_BOOTSTRAP_SOURCE`) branches on that field: `"embedded"` runs
-`_run_embedded` instead of the one-shot `_run_once` console runs use.
-`_run_embedded` execs `FACADE_SOURCE` then `code` once (separate units,
-see above), emits a boot ack
-(`{"boot": true, "error": ...}`), and — if the exec didn't raise — enters a
+(`_GUEST_BOOTSTRAP_SOURCE`) branches on that field: `"embedded"` calls the
+harness's `_dr_open` instead of the `_dr_run` a console run uses (see
+"The harness" above). `_dr_open` execs `FACADE_SOURCE` then `code` once
+(separate units, see above); the bootstrap emits a boot ack
+(`{"boot": true, "error": ...}`) and — if the exec didn't raise — enters a
 call loop reading newline-JSON frames from the host:
 
 - `{"call": {"entry": "value"|"step"|"transform", "element_ids": [...],
@@ -356,7 +386,7 @@ call loop reading newline-JSON frames from the host:
   `transform` invoking it with `doc` directly (no element fetch at all —
   `element_ids` is always empty), and serializing the result via
   `_dr_serialize_entry_result` — is driven by ONE guest-side function,
-  `facade_src.py`'s `_dr_call_entry`, called by BOTH hosts (the WASM
+  `facade_src.py`'s `_dr_call_entry`, called by the harness's `_dr_call`, which both hosts run (the WASM
   bootstrap loop above and `tests/script/trusted_runner.py`'s
   `_TrustedSession`) so per-call semantics live in exactly one place and the
   two hosts cannot drift. `_dr_call_entry` returns `{"payload", "reads"}` —
@@ -365,12 +395,11 @@ call loop reading newline-JSON frames from the host:
   the call's recorded read-set (see `runner.py`'s `ReadKey` and
   `CallResult.reads`), decoded host-side via `decode_reads`; `null` means
   "depends on everything" (recording overflowed, or the call errored).
-  `print()` output during the call is still captured
-  through the same size-capped `_CappedStdout` console runs use, but the
-  buffer is never included in `call_result` — **embedded calls' stdout is
-  captured and discarded**, by design; only the tagged wire payload, the
-  read-set, and, in a write-enabled mode, recorded ops (sessions are
-  read-only — see below) reach the caller.
+  `print()` output during a call is captured through the harness's
+  size-capped `_CappedStdout` and rides on `call_result.stdout`, which the
+  host re-caps and hands on as `CallResult.stdout`; what the module printed
+  at top level rides on the first call's. Sessions are read-only (see below),
+  so no ops are recorded.
 - `{"close": true}` — the loop returns, ending the guest's `_start`; the host
   then tears the instance down (never pooled again, same lifecycle as a
   console run's single-use instance).

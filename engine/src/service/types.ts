@@ -13,11 +13,13 @@ export type Port = {
 /**
  * What the host supplies: the shared thread, gzip, which the engine does not
  * hold, and, where it has one, the factory of the script host `scriptCalls`
- * runs on.
+ * runs on. `prewarmScripts` (default off) has the service start the script host's first
+ * worker when a replica holds a snippet, before any call.
  */
 export type ServiceDeps = HostDeps & {
 	inflate(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>;
 	scripts?: ScriptHostFactory;
+	prewarmScripts?: boolean;
 };
 
 export type ReplicaState = 'opening' | 'ready' | 'diverged';
@@ -112,15 +114,26 @@ export type PutArtifactsParams = {
 	staged?: WireStagedArtifact[];
 };
 export type SetStagedArtifactsParams = { entries: WireStagedArtifact[] };
-/** `inputs_text` and `doc_text` are JSON text, read exactly. */
+/**
+ * `inputs_text` and `doc_text` are JSON text, read exactly. `entry: 'script'` takes exactly one call
+ * and is a console run that records the ops its code proposes; `console` makes an embedded entry
+ * run each call on a namespace of its own, answered as a console run.
+ */
 export type ScriptCallsParams = {
 	code: string;
 	entry: ScriptEntry;
+	console?: boolean;
 	calls: { element_ids: string[]; inputs_text?: string; doc_text?: string }[];
 };
 export type ScriptCallsResult = {
-	results: { text: string | null; error: string | null }[];
+	results: { text: string }[];
 	trips: number;
 	ms: number;
+	/** Time the pool spent answering the run's bridge requests. */
+	dispatch_ms: number;
 	boot_ms: number;
+	/** How the worker that ran it booted. */
+	boot: 'snapshot' | 'cold';
+	/** The ops a `script` run proposed, as default-style JSON text. */
+	ops?: string;
 };

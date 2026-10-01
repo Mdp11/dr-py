@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { dumpDefault } from '../../engine/src/script/bridge.ts';
-import type { ScriptBatch } from '../../engine/src/script/host.ts';
-import { PyFloat, type Value } from '../../engine/src/value/types.ts';
-import { batchFromWire, batchToWire } from '../src/script-wire.ts';
+import { dumpDefault } from '../../src/script/bridge.ts';
+import type { ScriptBatch } from '../../src/script/host.ts';
+import { PyFloat, type Value } from '../../src/value/types.ts';
+import { batchFromWire, batchToWire } from '../../src/script/wire.ts';
 
 function crossed(batch: ScriptBatch): ScriptBatch {
 	return batchFromWire(structuredClone(batchToWire(batch)));
@@ -29,6 +29,12 @@ describe('a script batch crossing postMessage', () => {
 		expect(back.calls[0]!.doc).toBeInstanceOf(PyFloat);
 		expect(back.code).toBe(batch.code);
 		expect(back.entry).toBe('value');
+	});
+
+	it('keeps a console batch a console batch, and leaves the flag absent otherwise', () => {
+		const calls = [{ elementIds: [] }];
+		expect(crossed({ code: '', entry: 'value', console: true, calls }).console).toBe(true);
+		expect('console' in crossed({ code: '', entry: 'value', calls })).toBe(false);
 	});
 
 	it('keeps an absent input absent and an explicit null null', () => {

@@ -64,6 +64,36 @@ row above, so its parts do not add to 3,276) gave, over the 10,850 trips: dispat
 Python `json` 849 ms, post to the engine's handler 885 ms, the rest of the transport 222 ms;
 K-100 has the split, what stays unattributed and the Node proxies.
 
+On the pool (one batch per worker, the ten batches concurrent, `pixi run engine-bench-browser`,
+same machine and model, load 1.1, 2026-10-01, median of 3 passes): the same 10,000 cells take
+**4,888 ms** wall [4,710 4,888 5,016], over CN-3's 2 s (an earlier run of the same build: 4,654 ms
+[4,786 4,654 4,597]), against 3,276 ms on the single warm worker above. Measured in that run:
+the ten batches' own times (`ms`, from the start of a batch's run on its worker, boot excluded) sum to
+5,341 ms [4,759 5,341 5,386], each between 116 and 1,450 ms (median 571); the pool's bridge handling
+(dispatch, encode, reply write) was busy 750 ms [700 771 750] in total; 10,850 trips, 492 µs per trip
+[439 492 496] (batch time over trips); 4 workers (`hardwareConcurrency` less 2, at most 4); the
+first worker boots cold in 2,065 ms [2,008 2,107 2,065], the later ones from the image in 318 ms
+[299 332 318]. Nothing was tuned. The run sum is about the wall, so the four workers bought little
+overlap, and the per-trip time rose from 289 µs. Why is not measured. Hypotheses: the four
+interpreters and the engine worker compete for the machine's cores (WSL2), and the engine worker's
+single thread serializes the bridge handling and message delivery in a way the busy figure does
+not show. Unaccounted: what bounds the wall (the three boot waves, 4 + 4 + 2 batches, account for
+roughly 1 s at 0.3 s each), why a trip costs more with four workers, and the queue and post time
+between a worker's request and the pool's handler. The per-trip figure also includes the pool's per-call
+messages (`call-start` and `call-end`, about 20,000 for these 10,000 cells besides the 10,850 trips,
+each result's text cloned in `call-end` and again in `done`), which plan 1's 289 µs did not; their
+cost is not measured (K-100). The pool's interrupt retry
+exists because Pyodide's `_Py_CheckEmscriptenSignals_Helper` (`pyodide.asm.mjs`) reads then clears
+the interrupt flag non-atomically, so a store between the two is lost: re-check it whenever the
+Pyodide pin moves.
+
+Script workers boot from a memory image of Pyodide with the guest loaded, through Pyodide's
+private snapshot API (`_makeSnapshot`, `makeMemorySnapshot`, `_loadSnapshot`), which is pinned with
+the Pyodide version: moving the pin needs `engine/test/script/snapshot.test.ts` green. Measured in
+Node 22 on this machine, 2026-10-01: a cold worker boots in ≈ 1.9 s, one from the image in
+≈ 0.15-0.26 s; the image is 30 MB and is made once per pool in ≈ 2.5 s by a worker that runs no
+script.
+
 The script-cell cost is Python-side JSON plus FFI (≈ 270 µs per bridge call vs ≈ 165 µs
 in-process); the store's language is irrelevant. Pyodide for user scripts adds ≈ 5.4 s boot
 and ≈ 90 MB whichever engine is used.

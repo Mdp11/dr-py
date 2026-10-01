@@ -41,6 +41,11 @@ export class ReplyWriter {
 		this.#payload = new Uint8Array(buffer, HEADER_BYTES, CAPACITY);
 	}
 
+	/** Chunks of a reply remain to be written, each for a `more`. */
+	get pending(): boolean {
+		return this.#offset < this.#pending.length;
+	}
+
 	/** Starts a reply and writes its first chunk; the writer keeps `bytes`, which the caller must not change. */
 	begin(bytes: Uint8Array): void {
 		this.#pending = bytes;
