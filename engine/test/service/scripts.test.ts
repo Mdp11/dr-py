@@ -72,7 +72,7 @@ function tracked({ cap = poolCap(availableParallelism()) }: { cap?: number } = {
 		return {
 			boot: () => host.boot(),
 			prewarm: () => host.prewarm(),
-			warmed: () => host.warmed(),
+			warmed: (signal) => host.warmed(signal),
 			async run(batch, bridge, signal) {
 				if (!bridges.includes(bridge)) bridges.push(bridge);
 				const tag = batch.calls[0]?.elementIds[0] ?? batch.entry;
@@ -100,6 +100,8 @@ function tracked({ cap = poolCap(availableParallelism()) }: { cap?: number } = {
 		factory,
 		/** Workers spawned and not yet ended by the pool. */
 		alive: () => spawned.size - ended.size,
+		/** Workers the pool has ended so far. */
+		ended: () => ended.size,
 		dispose: () => hosts.forEach((host) => host.dispose())
 	};
 }
@@ -451,7 +453,7 @@ describe('a replica that goes while a script call is in flight', () => {
 			return {
 				boot: () => host.boot(),
 				prewarm: () => host.prewarm(),
-				warmed: () => host.warmed(),
+				warmed: (signal) => host.warmed(signal),
 				dispose: () => host.dispose(),
 				async run(batch, bridge, signal) {
 					entered();
@@ -572,6 +574,7 @@ describe('a replica replaced under runs in flight', () => {
 		await client.call('scriptCalls', batch(NAME, [['n1']]));
 		tracker.log.length = 0;
 
+		const endedBefore = tracker.ended();
 		const first = refusal(client.call('scriptCalls', batch(FOREVER, [['n1']])));
 		const second = refusal(client.call('scriptCalls', batch(FOREVER, [['n2']])));
 		await until(() => tracker.log.includes('n1:trip') && tracker.log.includes('n2:trip'));
@@ -586,8 +589,9 @@ describe('a replica replaced under runs in flight', () => {
 
 		const next = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]));
 		expect(payloadOf(next.results[0]!)).toBe('replaced');
-		// Every worker that ran a batch is gone; at most the cap's worth of spares lives.
-		await until(() => tracker.alive() <= 2);
+		// Every worker that ran a batch is gone: both runaways' workers were ended (counted below),
+		// and `next` answered at a cap of two, so neither still held a slot.
+		await until(() => tracker.ended() - endedBefore >= 2);
 		expect(tracker.hosts).toHaveLength(1);
 	}, 90_000);
 
@@ -672,7 +676,7 @@ describe('prewarming the script host', () => {
 					counts.prewarm++;
 					host.prewarm();
 				},
-				warmed: () => host.warmed(),
+				warmed: (signal) => host.warmed(signal),
 				run: (call, bridge, signal) => host.run(call, bridge, signal),
 				dispose: () => host.dispose()
 			};
@@ -818,15 +822,47 @@ describe('scriptWarm', () => {
 		expect(payloadOf(run.results[0]!)).toBe('one');
 	}, 120_000);
 
-	it('is refused 501 where no script host is supplied, and 409 when a close ends the host under it', async () => {
-		expect(await refusal(connect().call('scriptWarm'))).toMatchObject({ status: 501 });
+	it('is refused as scriptCalls is: 409 without a ready replica, before any host is made, and 501 without a script host', async () => {
+		const { client, tracker } = scripted(tracked({ cap: 1 }));
+		all.push(tracker);
+		const early = await refusal(client.call('scriptCalls', batch(NAME, [['n1']])));
+		expect(await refusal(client.call('scriptWarm'))).toEqual(early);
+		expect(tracker.hosts).toHaveLength(0);
+		const bare = connect();
+		await openReplica(bare, bridgeModel(), doc);
+		expect(await refusal(bare.call('scriptWarm'))).toMatchObject({ status: 501 });
+	}, 60_000);
+
+	it('is refused 409 when a close ends the host under it, and builds no host after the close', async () => {
 		const { client, tracker } = scripted(tracked({ cap: 1 }));
 		all.push(tracker);
 		await openReplica(client, bridgeModel(), doc);
 		const waiting = refusal(client.call('scriptWarm'));
 		await client.call('close');
 		expect(await waiting).toEqual({ status: 409, detail: 'replica closed' });
+		const made = tracker.hosts.length;
+		await refusal(client.call('scriptWarm'));
+		expect(tracker.hosts).toHaveLength(made);
 	}, 60_000);
+
+	it('hands the host a signal that a cancel aborts, so the wait is dropped', async () => {
+		let seen: { aborted: boolean } | undefined;
+		const never = new Promise<{ spares: number }>(() => {});
+		const factory: ScriptHostFactory = () => ({
+			boot: () => never as never,
+			prewarm: () => {},
+			warmed: (signal) => ((seen = signal), never),
+			run: () => never as never,
+			dispose: () => {}
+		});
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await openReplica(client, bridgeModel(), doc);
+		void client.callAs(77, 'scriptWarm');
+		await until(() => seen !== undefined);
+		expect(seen!.aborted).toBe(false);
+		client.cancel(77);
+		await until(() => seen!.aborted);
+	});
 });
 
 describe('the host across close and open', () => {
@@ -861,7 +897,7 @@ describe('the host boots again where it can', () => {
 			const host = real.factory();
 			return {
 				prewarm: () => host.prewarm(),
-				warmed: () => host.warmed(),
+				warmed: (signal) => host.warmed(signal),
 				boot() {
 					if (failing !== null) return failing;
 					if (attempts++ > 0) return host.boot();
@@ -919,7 +955,7 @@ describe('the host boots again where it can', () => {
 			return {
 				boot: () => host.boot().then(() => ({ ms: generation })),
 				prewarm: () => host.prewarm(),
-				warmed: () => host.warmed(),
+				warmed: (signal) => host.warmed(signal),
 				async run(batch, bridge) {
 					if (crashNext) {
 						crashNext = false;
@@ -956,7 +992,7 @@ describe('a host answer the service cannot trust', () => {
 			return {
 				boot: () => host.boot(),
 				prewarm: () => host.prewarm(),
-				warmed: () => host.warmed(),
+				warmed: (signal) => host.warmed(signal),
 				run: async (call, bridge) => {
 					const run = await host.run(call, bridge);
 					return { ...run, results: shape(run.results) } as ScriptRun;

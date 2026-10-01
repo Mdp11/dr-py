@@ -149,6 +149,7 @@ const OUT_OF_MEMORY =
 	/MemoryError|out of memory|memory limit|allocation failed|Cannot enlarge memory|could not allocate memory|\bOOM\b/i;
 
 const CANCELLED_MESSAGE = 'the run was cancelled';
+const WARM_CANCELLED = 'the warm-up was cancelled';
 const MEMORY_MESSAGE = 'guest exceeded its memory budget';
 
 /** A console run answers as one; an embedded run carries module-level code, timed as window 0. */
@@ -254,6 +255,8 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 	let hot = false;
 	// A boot failed and none has succeeded since: nothing is spawned unasked.
 	let held = false;
+	// What the last failed boot, or the last ready spare that died, said.
+	let bootError: Error | null = null;
 	let trimTimer: unknown = null;
 	// 'idle': no maker yet; 'making': the maker works; 'ready': `image` is kept; 'off': cold boots.
 	let imaging: 'idle' | 'making' | 'ready' | 'off' = options.snapshots === false ? 'off' : 'idle';
@@ -304,6 +307,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 	/** A worker that failed to boot, or was never made. */
 	function bootFailed(error: Error): void {
 		held = true;
+		bootError = error;
 		const coming = unassigned();
 		if (queue.length > coming) queue.shift()?.reject(error);
 		if (coming === 0) {
@@ -311,25 +315,25 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			bootWaiters = [];
 			for (const waiter of waiters) waiter.reject(error);
 		}
-		failWarm(error);
 	}
 
-	/** `warmed()` waits on the boots under way; with none left it has nothing to wait for. */
-	function failWarm(error: Error): void {
-		if (count('booting') > 0) return;
-		const waiters = warmWaiters;
-		warmWaiters = [];
-		for (const waiter of waiters) waiter.reject(error);
-	}
-
-	/** Answers `warmed()` once the image is settled and `cap` spares are ready. */
+	/**
+	 * Answers the `warmed()`s: with `cap` ready spares once the image is settled, or with the last
+	 * boot error once a boot has failed (or a ready spare died) and none is under way, since nothing
+	 * spawns until something asks and a waiter would never be answered.
+	 */
 	function settleWarm(): void {
-		if (warmWaiters.length === 0 || imaging === 'idle' || imaging === 'making') return;
+		if (warmWaiters.length === 0) return;
 		const ready = spares().length;
-		if (ready < cap) return;
 		const waiters = warmWaiters;
-		warmWaiters = [];
-		for (const waiter of waiters) waiter.resolve({ spares: ready });
+		if (imaging !== 'idle' && imaging !== 'making' && ready >= cap) {
+			warmWaiters = [];
+			for (const waiter of waiters) waiter.resolve({ spares: ready });
+		} else if (held && count('booting') === 0) {
+			warmWaiters = [];
+			const error = bootError ?? new Error('the script workers could not boot');
+			for (const waiter of waiters) waiter.reject(error);
+		}
 	}
 
 	/**
@@ -379,7 +383,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		if (phase === 'booting') bootFailed(error);
 		else if (phase === 'ready') {
 			held = true;
-			failWarm(error);
+			bootError = error;
 		} else if (active !== null) {
 			// `crashed`: the text is the worker's own, so it may say the worker ran out of memory.
 			const failure: { kind: HostErrorKind; message: string } = active.cancelled
@@ -578,13 +582,23 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 	function trim(): void {
 		trimTimer = null;
 		if (disposed) return;
-		if (queue.length === 0 && warmWaiters.length === 0) {
+		if (queue.length === 0) {
 			const at = now();
+			let ended = false;
 			for (const slot of spares().slice(1)) {
 				if (at - slot.readyAt < spareIdleMs) continue;
 				end(slot);
-				// What the shrink ended stays ended until something asks for a worker again.
+				ended = true;
+			}
+			if (ended) {
+				// What the shrink ended stays ended until something asks for a worker again, so a
+				// `warmed()` still waiting would wait for ever.
 				hot = false;
+				const waiters = warmWaiters;
+				warmWaiters = [];
+				for (const waiter of waiters) {
+					waiter.reject(new Error('the pool shrank before it was warm'));
+				}
 			}
 		}
 		scheduleTrim();
@@ -874,14 +888,26 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			ensureOne();
 			fill();
 		},
-		warmed() {
+		warmed(signal) {
 			if (disposed) return Promise.reject(new Error('script host is disposed'));
+			if (signal?.aborted === true) return Promise.reject(new Error(WARM_CANCELLED));
 			warm = true;
 			hot = true;
 			ensureOne();
 			fill();
 			return new Promise((resolve, reject) => {
-				warmWaiters.push({ resolve, reject });
+				const onAbort = () => {
+					const at = warmWaiters.indexOf(waiter);
+					if (at >= 0) warmWaiters.splice(at, 1);
+					reject(new Error(WARM_CANCELLED));
+				};
+				const detach = () => signal?.removeEventListener('abort', onAbort);
+				const waiter: Settle<{ spares: number }> = {
+					resolve: (value) => (detach(), resolve(value)),
+					reject: (error) => (detach(), reject(error))
+				};
+				signal?.addEventListener('abort', onAbort, { once: true });
+				warmWaiters.push(waiter);
 				settleWarm();
 			});
 		},

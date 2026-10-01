@@ -13,8 +13,8 @@ export type Port = {
 /**
  * What the host supplies: the shared thread, gzip, which the engine does not
  * hold, and, where it has one, the factory of the script host `scriptCalls`
- * runs on. `prewarmScripts` (default off) has the service start the script host's first
- * worker when a replica holds a snippet, before any call.
+ * runs on. `prewarmScripts` (default off) has the service prewarm the script host when a
+ * replica holds a snippet, before any call: the first worker, then spares up to the pool's cap.
  */
 export type ServiceDeps = HostDeps & {
 	inflate(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>;

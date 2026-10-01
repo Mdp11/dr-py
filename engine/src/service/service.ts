@@ -438,7 +438,7 @@ const METHODS: { readonly [method: string]: Method } = {
 	end: later((service) => service.end()),
 	close: now((service) => service.close()),
 	scriptCalls: (service, call) => service.scriptCalls(call),
-	scriptWarm: later((service) => service.warmScripts()),
+	scriptWarm: (service, call) => service.scriptWarm(call),
 	adoptStaged: (service, call) => service.adoptStaged(call),
 	applyTail: (service, call) => service.applyTail(call),
 	applyDelta: (service, call) => service.applyDelta(call),
@@ -917,22 +917,42 @@ class Service {
 		}
 	}
 
+	/** `scriptWarm`: refused as `scriptCalls` is without a ready replica; a cancel drops the wait. */
+	scriptWarm(call: Call): void {
+		const warm = abortable();
+		call.onCancel = warm.abort;
+		this.answerLater(call, this.warmScripts(warm));
+	}
+
 	/**
-	 * `scriptWarm`: prewarms the host and answers once its spares are ready, for a caller that
-	 * wants the first run to start at once. Needs no replica; a `close` under it refuses it.
+	 * Prewarms the host and answers once its pool holds its spares, for a caller that wants the first
+	 * run to start at once (the bench and the tests; the app does not ask). Like a run it belongs to
+	 * the replica it arrived on: a replica dropped under it ends the wait, `replica closed`.
 	 */
-	async warmScripts(): Promise<ScriptWarmResult> {
+	private async warmScripts(cancel: {
+		readonly signal: AbortSignalLike;
+		abort(): void;
+	}): Promise<ScriptWarmResult> {
+		this.ready();
+		const epoch = this.epoch;
 		const host = this.scriptHost();
+		this.running.add(cancel.abort);
 		try {
-			return await host.warmed();
+			const warm = await host.warmed(cancel.signal);
+			this.stillReady(epoch);
+			return warm;
 		} catch (error) {
 			if (this.scripting !== host) throw new Refused(409, 'replica closed');
+			if (this.epoch !== epoch) this.stillReady(epoch);
 			throw error;
+		} finally {
+			this.running.delete(cancel.abort);
 		}
 	}
 
 	/**
-	 * Starts the host's first worker when the artifacts hold a snippet, once for each replica that
+	 * Prewarms the host (its first worker, then the spares up to the pool's cap once the image is
+	 * ready) when the artifacts hold a snippet, once for each replica that
 	 * is ready: from an artifact move on one, and from the moment a replica becomes ready. Only
 	 * where the deps opt in with `prewarmScripts`.
 	 */

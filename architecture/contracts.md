@@ -258,7 +258,8 @@ event     {event, …}                     engine → client, unsolicited
   `transform` or `script`: `script` takes exactly one call (else a 422), is answered as a console
   run `{stdout, result_repr, truncated, error?}`, and adds `ops`, the ops its code proposed, as
   JSON text; `console: true` answers an embedded entry as a console run too; `boot` is
-  `snapshot` or `cold`. `inputs_text` and `doc_text` are JSON text, read by the exact parser
+  `snapshot` or `cold`. `scriptWarm`, a bench and test aid the app does not call, is in CT-6.
+  `inputs_text` and `doc_text` are JSON text, read by the exact parser
   (AD-26). Params are read at arrival, else a 422; then a 409 `replica is not ready` unless
   `ready`, and a 501 `scripts are not available` where the host gave the engine no script
   host. The call is not a scheduler job and is not queued behind the model lane: it runs on
@@ -370,11 +371,16 @@ event     {event, …}                     engine → client, unsolicited
   a stopped module-level window. The replica survives either stop. On the Node host a worker
   shares the process, so that host runs trusted code only until E gives the headless service a
   process boundary (`K-106`).
-- Warm: `scriptWarm` (no params) prewarms the host and answers `{spares}` once the pool holds `cap`
-  ready spares; the bench awaits it before timing script cells.
-- Prewarm: the service can start the pool's first worker when a replica holds a snippet, before
-  any call (`ServiceDeps.prewarmScripts`). It is available and off in the sandbox for now; the
-  first call boots the worker until a caller enables it.
+- Warm: `scriptWarm` (no params; a bench and test aid, which the app does not call) prewarms the
+  host and answers `{spares}` once the pool holds `cap` ready spares. It is refused as
+  `scriptCalls` is: 409 `replica is not ready` without a ready replica, 501 without a script
+  host, 409 `replica closed` when the replica is dropped under it. It rejects with the boot error
+  when a boot fails with none under way, and with a 500 when the idle shrink comes first; a
+  cancel (`{cancel: id}`) drops the wait.
+- Prewarm: the service can start the pool when a replica holds a snippet, before any call
+  (`ServiceDeps.prewarmScripts`): the first worker, then spares up to `cap` once the image is
+  ready. It is available and off in the sandbox for now; the first call boots the worker until a
+  caller enables it.
 - The dispatcher is a port of `src/data_rover/core/script/bridge.py` and keeps trip-collapse.
   One trip carries one op and one reply; a reply piggybacks the projections the collapse
   lets it (far endpoints, hop relationships), and a call's roots travel with the call. Sub-project D MAY

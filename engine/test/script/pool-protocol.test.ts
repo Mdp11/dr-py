@@ -861,13 +861,85 @@ describe('hot spares', () => {
 		const { pool, fakes } = poolOf([failBoot], { cap: 3 });
 		await expect(pool.boot()).rejects.toThrow('pyodide did not boot');
 		await settle(60);
-		const first = fakes.length;
-		expect(first).toBeLessThanOrEqual(3);
+		// The boot() asked for one worker, and nothing asked for more.
+		expect(fakes).toHaveLength(1);
 		await settle(80);
-		expect(fakes).toHaveLength(first);
+		expect(fakes).toHaveLength(1);
 	});
 
 	describe('warmed()', () => {
+		const neverReady: Behaviour = () => {};
+		const diesReady =
+			(afterMs: number): Behaviour =>
+			(fake, message) => {
+				if (message.type !== 'init') return;
+				fake.say({ type: 'ready', ms: 5, boot: 'cold' });
+				setTimeout(() => fake.crash('the spare died'), afterMs);
+			};
+
+		it('rejects, at the call and again at the next, while a boot failed with spares short of the cap', async () => {
+			const { pool, fakes } = poolOf([honest, honest, failBoot], { cap: 3 });
+			await expect(pool.warmed()).rejects.toThrow('pyodide did not boot');
+			// Two spares are ready and nothing boots: nothing can reach the cap, so it does not wait.
+			await expect(pool.warmed()).rejects.toThrow('pyodide did not boot');
+			await expect(pool.warmed()).rejects.toThrow('pyodide did not boot');
+			expect(fakes.filter((fake) => !fake.terminated)).toHaveLength(2);
+		});
+
+		it('rejects a wait that is open when a ready spare dies and nothing is booting', async () => {
+			const { pool, fakes } = poolOf([silentMaker], withImages({ cap: 2 }));
+			const waiting = pool.warmed();
+			await until(() => fakes.some((fake) => fake.posted.some((m) => m.type === 'init')));
+			await settle(20);
+			// The first worker is a ready spare and the maker has not answered: the pool is short of the cap.
+			fakes.find((fake) => fake.posted.every((m) => m.make !== true))!.crash('the spare died');
+			await expect(waiting).rejects.toThrow('the spare died');
+		});
+
+		it('settles when a ready spare dies before anything waits, and a boot is not under way', async () => {
+			const { pool } = poolOf([diesReady(20), honest], { cap: 1 });
+			await pool.warmed();
+			await settle(60);
+			// The spare died, so the next ask boots another and gets its answer.
+			expect(await pool.warmed()).toEqual({ spares: 1 });
+		});
+
+		it('drops its waiter when the signal aborts, and a later warmed() answers on its own', async () => {
+			const { pool, fakes } = poolOf([silentMaker], withImages({ cap: 2 }));
+			const controller = new AbortController();
+			const waiting = pool.warmed(controller.signal);
+			await settle(30);
+			controller.abort();
+			await expect(waiting).rejects.toThrow(/cancel/);
+			const next = pool.warmed();
+			makers(fakes)[0]!.say({ type: 'snapshot', bytes: image() });
+			expect(await next).toEqual({ spares: 2 });
+		});
+
+		it('rejects at once for a signal that is aborted already, and starts nothing', async () => {
+			const { pool, fakes } = poolOf([honest], { cap: 2 });
+			const controller = new AbortController();
+			controller.abort();
+			await expect(pool.warmed(controller.signal)).rejects.toThrow(/cancel/);
+			expect(fakes).toHaveLength(0);
+		});
+
+		it('does not hold the idle shrink, and the shrink ends a wait that can no longer finish, with no timer spinning', async () => {
+			let reads = 0;
+			// Two spares ready, the third never boots: the wait is open when the shrink is due.
+			const { pool, alive } = poolOf([honest, honest, neverReady], {
+				cap: 3,
+				spareIdleMs: 50,
+				now: () => (reads++, performance.now())
+			});
+			await expect(pool.warmed()).rejects.toThrow(/shrank/);
+			expect(alive()).toBe(2);
+			const before = reads;
+			await settle(300);
+			// A timer re-armed every millisecond would read the clock hundreds of times.
+			expect(reads - before).toBeLessThan(20);
+		});
+
 		it('answers once the image is ready and cap spares are, and counts them', async () => {
 			const { pool, fakes } = poolOf([silentMaker], withImages({ cap: 3 }));
 			let answer: { spares: number } | null = null;
