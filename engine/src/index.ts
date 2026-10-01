@@ -386,6 +386,7 @@ export type {
 	ResponseMessage,
 	ScriptCallsParams,
 	ScriptCallsResult,
+	ScriptWarmResult,
 	ServiceDeps,
 	ServiceEvent,
 	SetArtifactsParams,

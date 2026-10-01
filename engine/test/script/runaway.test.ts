@@ -114,6 +114,7 @@ describe('the soft stop', () => {
 				const batch = batchOf('while True:\n    pass', ['spin', null, null]);
 				const used = () => seen.filter((one) => one.runs > 0).length;
 				const before = used();
+				const ranBefore = new Set(seen.filter((one) => one.runs > 0));
 				const [run, ms] = await timed(host.run(batch, bridge));
 				expect(run.boot).toBe(boot);
 				expect(texts(run)).toEqual([timeoutText(batch), HONEST_42, HONEST_42]);
@@ -122,7 +123,8 @@ describe('the soft stop', () => {
 				expect(ms).toBeLessThan(CALL_MS + GRACE_MS);
 				// One worker ran the batch, and reached `done` itself: nothing ended it early.
 				expect(used()).toBe(before + 1);
-				const worker = seen.filter((one) => one.runs > 0).at(-1)!;
+				// The oldest ready spare takes a batch, which need not be the newest worker spawned.
+				const worker = seen.find((one) => one.runs > 0 && !ranBefore.has(one))!;
 				expect(worker.messages.filter((m) => m.type === 'call-end')).toHaveLength(4);
 				expect(worker.messages.at(-1)?.type).toBe('done');
 				await expectHealthy(host);

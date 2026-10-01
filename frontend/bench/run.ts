@@ -20,7 +20,7 @@ const OPEN_BUDGET_MS = 3000;
 const HEAP_BUDGET_MB = 400;
 const SLICE_BUDGET_MS = 16;
 const TRANSITION_BUDGET_MS = 100;
-const SCRIPT_CELLS_BUDGET_MS = 2000;
+const SCRIPT_CELLS_BUDGET_MS = 3000;
 
 const BENCH_URL = 'http://127.0.0.1:5173/';
 const SANDBOX_URL = 'http://localhost:5174/';

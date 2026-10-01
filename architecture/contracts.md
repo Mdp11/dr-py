@@ -258,7 +258,8 @@ event     {event, …}                     engine → client, unsolicited
   `transform` or `script`: `script` takes exactly one call (else a 422), is answered as a console
   run `{stdout, result_repr, truncated, error?}`, and adds `ops`, the ops its code proposed, as
   JSON text; `console: true` answers an embedded entry as a console run too; `boot` is
-  `snapshot` or `cold`. `inputs_text` and `doc_text` are JSON text, read by the exact parser
+  `snapshot` or `cold`. `scriptWarm`, a bench and test aid the app does not call, is in CT-6.
+  `inputs_text` and `doc_text` are JSON text, read by the exact parser
   (AD-26). Params are read at arrival, else a 422; then a 409 `replica is not ready` unless
   `ready`, and a 501 `scripts are not available` where the host gave the engine no script
   host. The call is not a scheduler job and is not queued behind the model lane: it runs on
@@ -349,8 +350,10 @@ event     {event, …}                     engine → client, unsolicited
   then is ended; the next batch gets a fresh worker, so no interpreter or worker state outlives
   a batch. Workers boot from a memory image of Pyodide with the guest loaded (each its own copy),
   or cold when the image cannot be made or restored; a result reports which (`boot`). The cap is
-  `max(1, min(4, hardwareConcurrency - 2))`, one spare idles, and further spares end after 30 s
-  without a queue. Runs of different batches proceed concurrently, each on its own worker and
+  `max(1, min(4, hardwareConcurrency - 2))`. Once asked, the pool fills every free slot with a
+  spare as soon as the image is ready, so `cap` workers are alive and the first runs of a burst
+  start at once; spares beyond one end after 30 s without a queue, and stay ended until the next
+  call asks. Runs of different batches proceed concurrently, each on its own worker and
   channel. The engine worker spawns, boots and ends workers (on `dispose`, a failure or an
   `error` event); a worker's channel is private to that pair. It alone blocks, on its own reply
   buffer: one `SharedArrayBuffer` of 1 MiB per worker, an Int32 header and the reply's UTF-8
@@ -368,9 +371,16 @@ event     {event, …}                     engine → client, unsolicited
   a stopped module-level window. The replica survives either stop. On the Node host a worker
   shares the process, so that host runs trusted code only until E gives the headless service a
   process boundary (`K-106`).
-- Prewarm: the service can start the pool's first worker when a replica holds a snippet, before
-  any call (`ServiceDeps.prewarmScripts`). It is available and off in the sandbox for now; the
-  first call boots the worker until a caller enables it.
+- Warm: `scriptWarm` (no params; a bench and test aid, which the app does not call) prewarms the
+  host and answers `{spares}` once the pool holds `cap` ready spares. It is refused as
+  `scriptCalls` is: 409 `replica is not ready` without a ready replica, 501 without a script
+  host, 409 `replica closed` when the replica is dropped under it. It rejects with the boot error
+  when a boot fails with none under way; a cancel (`{cancel: id}`) drops the wait. The idle
+  shrink is held while it waits.
+- Prewarm: the service can start the pool when a replica holds a snippet, before any call
+  (`ServiceDeps.prewarmScripts`): the first worker, then spares up to `cap` once the image is
+  ready. It is available and off in the sandbox for now; the first call boots the worker until a
+  caller enables it.
 - The dispatcher is a port of `src/data_rover/core/script/bridge.py` and keeps trip-collapse.
   One trip carries one op and one reply; a reply piggybacks the projections the collapse
   lets it (far endpoints, hop relationships), and a call's roots travel with the call. Sub-project D MAY

@@ -3,7 +3,7 @@
  * over a replica of the corpus model. `bench/scripts-run.ts` compares what these return with the
  * oracle's. Each function opens its own link and disposes it.
  */
-import type { EndResult, ScriptCallsResult, TailResult } from '$engine';
+import type { EndResult, ScriptCallsResult, ScriptWarmResult, TailResult } from '$engine';
 import type { EngineClient, EngineLink } from '$lib/engine/client';
 import { connectFrame } from '$lib/engine/frame';
 
@@ -174,14 +174,26 @@ export async function runaway(): Promise<RunawayReport> {
 	const run = (batch: ReturnType<typeof transform>, signal?: AbortSignal) =>
 		client.call<ScriptCallsResult>('scriptCalls', batch, signal === undefined ? {} : { signal });
 
-	/** The script workers alive once the pool holds at most its one spare, or as many as stay alive. */
-	async function settled(): Promise<number> {
-		let count = Infinity;
-		for (let tries = 0; tries < 50 && count > 1; tries++) {
-			count = await alive();
-			if (count > 1) await sleep(100);
+	const cap = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 1) - 2));
+
+	/**
+	 * What the pool holds once the run that just ended has left it: `null` unless every slot is a ready
+	 * spare again (`scriptWarm` answers `cap`), which a run's worker still alive would prevent; and the
+	 * script workers the browser lists, once they are at most `cap`.
+	 */
+	async function settled(): Promise<{ warm: ScriptWarmResult | null; listed: number }> {
+		const waiting = new AbortController();
+		const warm = await Promise.race([
+			client.call<ScriptWarmResult>('scriptWarm', undefined, { signal: waiting.signal }),
+			sleep(15_000).then(() => null)
+		]);
+		waiting.abort();
+		let listed = Infinity;
+		for (let tries = 0; tries < 50 && listed > cap; tries++) {
+			listed = await alive();
+			if (listed > cap) await sleep(100);
 		}
-		return count;
+		return { warm, listed };
 	}
 
 	async function check(
@@ -214,10 +226,14 @@ export async function runaway(): Promise<RunawayReport> {
 			ok = false;
 			details.push('the replica changed');
 		}
-		const workers = await settled();
-		if (workers > 1) {
+		const { warm, listed } = await settled();
+		if (warm === null || warm.spares !== cap) {
 			ok = false;
-			details.push(`${workers} script workers are alive`);
+			details.push(`the pool did not return to ${cap} ready spares: a worker still holds a slot`);
+		}
+		if (listed > cap) {
+			ok = false;
+			details.push(`${listed} script workers are alive, the pool's cap is ${cap}`);
 		}
 		report.push({ name, ok, detail: details.join('; '), ms });
 	}
@@ -229,7 +245,7 @@ export async function runaway(): Promise<RunawayReport> {
 	};
 
 	try {
-		// A first batch: a spare is up, so what is timed is the call and not a boot.
+		// A first batch, and the pool hot behind it: what is timed is the call and not a boot.
 		await run(transform('pass', [null]));
 		await settled();
 

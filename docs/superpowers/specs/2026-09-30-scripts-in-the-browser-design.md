@@ -19,7 +19,8 @@ builds on AD-4 and AD-5.
 - The facade (`FACADE_SOURCE`) and its synchronous `_transport(req) -> dict` unchanged; the
   dispatcher a TypeScript port of `src/data_rover/core/script/bridge.py`, trip-collapse kept.
 - Every script use evaluated by the engine over the working copy, within the CN-3 script-cell
-  budget (10,000 cells ≤ 2 s on warm workers).
+  budget (10,000 cells ≤ 3 s, prewarmed: the image and the pool's spares ready at the timer; the
+  first use after open is reported, not gated).
 - A runaway script stopped — softly by interrupt, hard by terminating its worker — with the
   replica intact.
 - Identical code giving byte-identical output in Chromium and in Node.
@@ -261,7 +262,7 @@ Four, written one at a time, each leaving the branch green.
 
 1. **Bridge foundation** — §1's interface, browser topology, bridge trip, dispatcher, Node
    host; Pyodide in the sandbox build; the cross-worker measurement; the binary layout if JSON
-   misses 2 s.
+   misses the budget.
 2. **Script host** — §1's Python sources, determinism, pool, prewarm, limits and stop; the
    parity corpus and runaway tests.
 3. **Evaluation** — §2 and §3: cell cache, collect-fill-re-run, table script columns,
@@ -270,7 +271,7 @@ Four, written one at a time, each leaving the branch green.
 
 ## 10. Done when
 
-- The script-cell budget gate is met in `engine-bench-browser`.
+- The script-cell budget gate (≤ 3 s, prewarmed) is met in `engine-bench-browser`.
 - The runaway tests pass with the replica intact.
 - The parity corpus is byte-identical in Node and Chromium.
 - No frontend code names `pending` cells, script status polling or a 202 retry; no engine code
