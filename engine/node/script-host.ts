@@ -4,8 +4,10 @@ import { loadPyodide } from 'pyodide';
 import type { PyDict } from 'pyodide/ffi';
 import type { Interpreter } from '../src/script/guest.ts';
 import type { ScriptHostFactory } from '../src/script/host.ts';
-import { createPool, type WorkerPort, type WorkerSpawner } from '../src/script/pool.ts';
+import { createPool, poolCap, type WorkerPort, type WorkerSpawner } from '../src/script/pool.ts';
 import { INDEX_URL } from './pyodide.ts';
+
+export { poolCap };
 
 /** A fresh Pyodide interpreter, booted in this thread. */
 export async function loadInterpreter(): Promise<Interpreter> {
@@ -15,11 +17,6 @@ export async function loadInterpreter(): Promise<Interpreter> {
 		runPython: (code) => py.runPython(code),
 		globals: { get: (name) => globals.get(name), set: (name, value) => globals.set(name, value) }
 	};
-}
-
-/** The pool's size for `parallelism` cores: two are left to the engine and the page, and it is between one and four. */
-export function poolCap(parallelism: number): number {
-	return Math.max(1, Math.min(4, parallelism - 2));
 }
 
 /** A spawner of `worker_threads` workers running `entry`, which is a `script-worker.ts` or serves as one. */

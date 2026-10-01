@@ -410,6 +410,30 @@ describe('a forged or broken message', () => {
 	});
 });
 
+describe('a CSP violation handler that throws', () => {
+	it('changes nothing: the batch answers, and every report was still delivered', async () => {
+		let calls = 0;
+		const { pool } = poolOf(
+			[
+				answers((fake) => {
+					fake.say({ type: 'csp-violation', directive: 'script-src', blocked: 'eval' });
+					fake.say({ type: 'csp-violation', directive: 'connect-src', blocked: 'x' });
+					fake.say({ type: 'done', results: [{ text: 'x' }], trips: 0, ms: 1 });
+				})
+			],
+			{
+				onViolation: () => {
+					calls++;
+					throw new Error('the port is closed');
+				}
+			}
+		);
+		const run = await pool.run(batchOf(), bridge);
+		expect(run.results).toEqual([{ text: 'x' }]);
+		expect(calls).toBe(2);
+	});
+});
+
 describe('a worker that fails to boot', () => {
 	it('fails the first run with the boot error, and the next run boots again and succeeds', async () => {
 		const { pool, fakes } = poolOf([failBoot, honest]);

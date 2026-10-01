@@ -55,7 +55,7 @@ export type PoolOptions = {
 	spareIdleMs?: number;
 	limits?: Partial<RunLimits>;
 	now(): number;
-	/** Called with each CSP violation a worker reports. */
+	/** Called with each CSP violation a worker reports; a throw is ignored. */
 	onViolation?(violation: { directive: string; blocked: string }): void;
 	/** Called once, when the pool gives up on booting workers from an image and boots them cold. */
 	onWarning?(message: string): void;
@@ -64,6 +64,11 @@ export type PoolOptions = {
 };
 
 const DEFAULT_SPARE_IDLE_MS = 30_000;
+
+/** The pool's size for `parallelism` cores: two are left to the engine and the page, and it is between one and four. */
+export function poolCap(parallelism: number): number {
+	return Math.max(1, Math.min(4, parallelism - 2));
+}
 
 type Settle<T> = { resolve(value: T): void; reject(error: Error): void };
 
@@ -544,7 +549,11 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		if (type === 'csp-violation') {
 			const { directive, blocked } = message;
 			if (typeof directive === 'string' && typeof blocked === 'string') {
-				options.onViolation?.({ directive, blocked });
+				try {
+					options.onViolation?.({ directive, blocked });
+				} catch {
+					// A report that cannot be made changes nothing, and must not throw into the host's message loop.
+				}
 			}
 			return;
 		}

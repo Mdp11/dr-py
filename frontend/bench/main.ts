@@ -16,6 +16,8 @@ import type {
 } from '$engine';
 import type { EngineClient, EngineLink } from '$lib/engine/client';
 import { connectFrame } from '$lib/engine/frame';
+import { isolation, parity, runaway, violationControl } from './scripts';
+import type { IsolationReport, ParityReport, RunawayReport } from './scripts';
 
 /** One pass's measurements by label, in insertion order; ms unless the label says otherwise. */
 export type Measures = Record<string, number>;
@@ -33,6 +35,14 @@ export type Bench = {
 	open(): Promise<OpenReport>;
 	/** Ten scripts over 1,000 `Microservice` ids each, on one warm script worker. */
 	scripts(): Promise<Measures>;
+	/** The script parity corpus through the pool in the built sandbox, on a replica of the corpus model. */
+	parity(): Promise<ParityReport>;
+	/** The soft stop, the hard stops and a cancel, with the default limits. */
+	runaway(): Promise<RunawayReport>;
+	/** A script that rebinds its worker's scope, and the next batch on a worker of its own. */
+	isolation(): Promise<IsolationReport>;
+	/** A script that `eval`s, to show a worker's CSP violation reaches the page's count. */
+	violationControl(): Promise<{ violations: number; answer: string }>;
 	/** CSP violations the frame has reported since the open, the script worker's included. */
 	violations(): number;
 	/** Edits and reads; the last of them diverges the replica. */
@@ -493,6 +503,10 @@ async function scripts(): Promise<Measures> {
 window.bench = {
 	open,
 	scripts,
+	parity,
+	runaway,
+	isolation,
+	violationControl,
 	violations: () => violations,
 	transitions,
 	close() {

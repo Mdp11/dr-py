@@ -124,6 +124,11 @@ description = "Write benchmarks/large.model.json as the v2 snapshot that engine-
 cmd = "python scripts/snapshot_v2.py --model benchmarks/large.model.json --metamodel examples/smart-city.metamodel.yaml --out benchmarks/large.snapshot.v2 --gzip"
 default-environment = "core-dev"
 
+[feature.core-dev.tasks.engine-scripts-snapshot]
+description = "Write benchmarks/script-corpus.*: the script parity corpus's model as the snapshot engine-scripts-browser opens"
+cmd = "python scripts/script_corpus_snapshot.py"
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.engine-parity-oracle]
 description = "Write benchmarks/large.issues.json: the Python sweep's issues over model M, which engine-parity-large compares"
 cmd = "python scripts/issues_large.py"
@@ -352,6 +357,15 @@ depends-on = [
     { task = "engine-download-oracle", environment = "core-dev" },
     { task = "engine-candidate-oracle", environment = "core-dev" },
     { task = "engine-compare-oracle", environment = "core-dev" }
+]
+
+[feature.frontend.tasks.engine-scripts-browser]
+description = "Run the script parity corpus and the runaway cases in Chromium through the built sandbox; exits non-zero on a mismatch or a failed case (stop any sandbox preview first)"
+cmd = "npm run scripts:browser"
+cwd = "frontend"
+depends-on = [
+    "sandbox-build",
+    { task = "engine-scripts-snapshot", environment = "core-dev" }
 ]
 
 [feature.frontend.tasks.engine-tidy]

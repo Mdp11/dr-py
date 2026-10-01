@@ -18,7 +18,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:e2e": "playwright test",
-		"bench:browser": "node --experimental-strip-types bench/run.ts"
+		"bench:browser": "node --experimental-strip-types bench/run.ts",
+		"scripts:browser": "node --experimental-strip-types bench/scripts-run.ts"
 	},
 	"devDependencies": {
 		"@codemirror/autocomplete": "^6.20.3",
