@@ -576,29 +576,24 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		const extra = spares().slice(1);
 		if (extra.length === 0) return;
 		const due = Math.min(...extra.map((slot) => slot.readyAt + spareIdleMs)) - now();
-		trimTimer = timers().setTimeout(trim, Math.max(1, due));
+		// While a `warmed()` waits the shrink is held, so the timer is not re-armed for spares already due.
+		trimTimer = timers().setTimeout(
+			trim,
+			warmWaiters.length > 0 ? Math.max(due, spareIdleMs) : Math.max(1, due)
+		);
 	}
 
 	function trim(): void {
 		trimTimer = null;
 		if (disposed) return;
-		if (queue.length === 0) {
+		// A `warmed()` that waits is for the full complement: no spare ends under it.
+		if (queue.length === 0 && warmWaiters.length === 0) {
 			const at = now();
-			let ended = false;
 			for (const slot of spares().slice(1)) {
 				if (at - slot.readyAt < spareIdleMs) continue;
 				end(slot);
-				ended = true;
-			}
-			if (ended) {
-				// What the shrink ended stays ended until something asks for a worker again, so a
-				// `warmed()` still waiting would wait for ever.
+				// What the shrink ended stays ended until something asks for a worker again.
 				hot = false;
-				const waiters = warmWaiters;
-				warmWaiters = [];
-				for (const waiter of waiters) {
-					waiter.reject(new Error('the pool shrank before it was warm'));
-				}
 			}
 		}
 		scheduleTrim();

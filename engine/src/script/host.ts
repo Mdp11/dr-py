@@ -60,8 +60,8 @@ export type ScriptHost = {
 	prewarm(): void;
 	/**
 	 * Prewarms, and answers once the host holds its full complement of ready spares: a run now
-	 * starts at once, on a spare. Rejects when a boot fails with none under way, when the pool shrinks
-	 * first, when `signal` aborts, or when the host is disposed.
+	 * starts at once, on a spare. Rejects when a boot fails with none under way, when `signal` aborts, or
+	 * when the host is disposed.
 	 */
 	warmed(signal?: AbortSignalLike): Promise<{ spares: number }>;
 	run(batch: ScriptBatch, bridge: Bridge, signal?: AbortSignalLike): Promise<ScriptRun>;

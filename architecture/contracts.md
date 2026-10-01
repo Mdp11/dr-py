@@ -375,8 +375,8 @@ event     {event, …}                     engine → client, unsolicited
   host and answers `{spares}` once the pool holds `cap` ready spares. It is refused as
   `scriptCalls` is: 409 `replica is not ready` without a ready replica, 501 without a script
   host, 409 `replica closed` when the replica is dropped under it. It rejects with the boot error
-  when a boot fails with none under way, and with a 500 when the idle shrink comes first; a
-  cancel (`{cancel: id}`) drops the wait.
+  when a boot fails with none under way; a cancel (`{cancel: id}`) drops the wait. The idle
+  shrink is held while it waits.
 - Prewarm: the service can start the pool when a replica holds a snippet, before any call
   (`ServiceDeps.prewarmScripts`): the first worker, then spares up to `cap` once the image is
   ready. It is available and off in the sandbox for now; the first call boots the worker until a

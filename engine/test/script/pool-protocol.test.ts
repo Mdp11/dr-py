@@ -924,20 +924,39 @@ describe('hot spares', () => {
 			expect(fakes).toHaveLength(0);
 		});
 
-		it('does not hold the idle shrink, and the shrink ends a wait that can no longer finish, with no timer spinning', async () => {
+		it('is not rejected by the idle shrink when an older spare passes the idle limit during its refill', async () => {
+			const slowBoot: Behaviour = (fake, message) => {
+				if (message.type === 'init')
+					setTimeout(() => fake.say({ type: 'ready', ms: 5, boot: 'cold' }), 100);
+				else honest(fake, message);
+			};
+			const { pool } = poolOf([slowBoot], { cap: 3, spareIdleMs: 200 });
+			await pool.warmed();
+			await settle(150);
+			// The run takes a spare and its slot refills over 100 ms; the other spares come due meanwhile.
+			void pool.run(batchOf(), bridge);
+			expect(await pool.warmed()).toEqual({ spares: 3 });
+		});
+
+		it('holds the idle shrink while a warmed() waits, with no timer spinning, and shrinks once it settles', async () => {
 			let reads = 0;
-			// Two spares ready, the third never boots: the wait is open when the shrink is due.
+			// Two spares ready, the third never boots: the wait stays open past the idle limit.
 			const { pool, alive } = poolOf([honest, honest, neverReady], {
 				cap: 3,
 				spareIdleMs: 50,
 				now: () => (reads++, performance.now())
 			});
-			await expect(pool.warmed()).rejects.toThrow(/shrank/);
-			expect(alive()).toBe(2);
+			const controller = new AbortController();
+			const waiting = pool.warmed(controller.signal);
+			await settle(30);
 			const before = reads;
 			await settle(300);
+			expect(alive()).toBe(3);
 			// A timer re-armed every millisecond would read the clock hundreds of times.
 			expect(reads - before).toBeLessThan(20);
+			controller.abort();
+			await expect(waiting).rejects.toThrow(/cancel/);
+			await until(() => alive() === 2, 2000);
 		});
 
 		it('answers once the image is ready and cap spares are, and counts them', async () => {
