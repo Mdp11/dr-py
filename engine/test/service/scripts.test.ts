@@ -676,7 +676,7 @@ describe('prewarming the script host', () => {
 
 	it('starts a boot when the artifacts hold a snippet, before any call', async () => {
 		const { counts, factory, real } = counting();
-		const client = connect(autoHost(), portPair(), { scripts: factory });
+		const client = connect(autoHost(), portPair(), { scripts: factory, prewarmScripts: true });
 		await openReplica(client, bridgeModel(), doc);
 		await client.call('setArtifacts', { artifacts: [artifact('t1', 'table')] });
 		expect(counts).toEqual({ prewarm: 0, made: 0 });
@@ -694,7 +694,7 @@ describe('prewarming the script host', () => {
 
 	it('prewarms once for a replica, and again for the next', async () => {
 		const { counts, factory } = counting();
-		const client = connect(autoHost(), portPair(), { scripts: factory });
+		const client = connect(autoHost(), portPair(), { scripts: factory, prewarmScripts: true });
 		const artifacts = [artifact('s1', 'code_snippet')];
 		await openReplica(client, bridgeModel(), doc);
 		await client.call('setArtifacts', { artifacts });
@@ -714,7 +714,7 @@ describe('prewarming the script host', () => {
 
 	it('prewarms when a replica becomes ready over artifacts that were already there', async () => {
 		const { counts, factory } = counting();
-		const client = connect(autoHost(), portPair(), { scripts: factory });
+		const client = connect(autoHost(), portPair(), { scripts: factory, prewarmScripts: true });
 		await client.call('setArtifacts', { artifacts: [artifact('s1', 'code_snippet')] });
 		expect(counts).toEqual({ prewarm: 0, made: 0 });
 		await openReplica(client, bridgeModel(), doc);
@@ -728,7 +728,7 @@ describe('prewarming the script host', () => {
 
 	it('creates no host for a snippet move with no ready replica', async () => {
 		const { counts, factory } = counting();
-		const client = connect(autoHost(), portPair(), { scripts: factory });
+		const client = connect(autoHost(), portPair(), { scripts: factory, prewarmScripts: true });
 		await client.call('setArtifacts', { artifacts: [artifact('s1', 'code_snippet')] });
 		await openReplica(client, bridgeModel(), doc);
 		await client.call('close');
@@ -750,7 +750,7 @@ describe('prewarming the script host', () => {
 
 	it('does not prewarm for a replica that has diverged', async () => {
 		const { counts, factory } = counting();
-		const client = connect(autoHost(), portPair(), { scripts: factory });
+		const client = connect(autoHost(), portPair(), { scripts: factory, prewarmScripts: true });
 		const committed = bridgeModel();
 		const server = new Server(clone(committed));
 		await openReplica(client, committed, doc);
@@ -764,7 +764,7 @@ describe('prewarming the script host', () => {
 
 	it('prewarms for a staged snippet, and not for a snippet whose delete is staged', async () => {
 		const { counts, factory } = counting();
-		const client = connect(autoHost(), portPair(), { scripts: factory });
+		const client = connect(autoHost(), portPair(), { scripts: factory, prewarmScripts: true });
 		await openReplica(client, bridgeModel(), doc);
 		await client.call('putArtifacts', {
 			changed: [artifact('s1', 'code_snippet')],
@@ -776,6 +776,21 @@ describe('prewarming the script host', () => {
 			entries: [{ op: 'create', id: 'tmp', kind: 'code_snippet', name: 'n', payload: {} }]
 		});
 		expect(counts.prewarm).toBe(1);
+	}, 60_000);
+
+	it('does not prewarm unless the deps opt in', async () => {
+		const { counts, factory } = counting();
+		const client = connect(autoHost(), portPair(), { scripts: factory });
+		await openReplica(client, bridgeModel(), doc);
+		await client.call('setArtifacts', { artifacts: [artifact('s1', 'code_snippet')] });
+		await client.call('setStagedArtifacts', {
+			entries: [{ op: 'create', id: 'tmp', kind: 'code_snippet', name: 'n', payload: {} }]
+		});
+		expect(counts).toEqual({ prewarm: 0, made: 0 });
+		// The host is still made on first use.
+		const run = await client.call<CallsResult>('scriptCalls', batch(NAME, [['n1']]));
+		expect(payloadOf(run.results[0]!)).toBe('one');
+		expect(counts).toEqual({ prewarm: 0, made: 1 });
 	}, 60_000);
 
 	it('does nothing without a script host in the deps', async () => {

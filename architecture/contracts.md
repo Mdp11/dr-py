@@ -251,7 +251,8 @@ event     {event, …}                     engine → client, unsolicited
   navigation's page marked with the reason (AD-31), an `issues` call's or a rebind preview's
   answer unmarked, exactly as the server always gave it; any other 501 is an error.
 - Scripts: `scriptCalls {code, entry, console?, calls: [{element_ids, inputs_text?, doc_text?}]}` →
-  `{results: [{text}], trips, ms, boot_ms, boot, ops?}`, one result per call in call order, each the
+  `{results: [{text}], trips, ms, dispatch_ms, boot_ms, boot, ops?}` (`dispatch_ms` is the time
+  the pool spent answering the run's bridge requests), one result per call in call order, each the
   harness's answer as the JSON text the script side wrote (handed on unparsed):
   `{payload, error, reads, stdout}`, where `error` is null or `{kind, message, traceback}`. `entry` is `value`, `step`,
   `transform` or `script`: `script` takes exactly one call (else a 422), is answered as a console
@@ -367,6 +368,9 @@ event     {event, …}                     engine → client, unsolicited
   a stopped module-level window. The replica survives either stop. On the Node host a worker
   shares the process, so that host runs trusted code only until E gives the headless service a
   process boundary (`K-106`).
+- Prewarm: the service can start the pool's first worker when a replica holds a snippet, before
+  any call (`ServiceDeps.prewarmScripts`). It is available and off in the sandbox for now; the
+  first call boots the worker until a caller enables it.
 - The dispatcher is a port of `src/data_rover/core/script/bridge.py` and keeps trip-collapse.
   One trip carries one op and one reply; a reply piggybacks the projections the collapse
   lets it (far endpoints, hop relationships), and a call's roots travel with the call. Sub-project D MAY

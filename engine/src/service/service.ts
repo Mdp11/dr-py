@@ -917,10 +917,11 @@ class Service {
 
 	/**
 	 * Starts the host's first worker when the artifacts hold a snippet, once for each replica that
-	 * is ready: from an artifact move on one, and from the moment a replica becomes ready.
+	 * is ready: from an artifact move on one, and from the moment a replica becomes ready. Only
+	 * where the deps opt in with `prewarmScripts`.
 	 */
 	private prewarmScripts(): void {
-		if (this.deps.scripts === undefined || this.prewarmed === this.epoch) return;
+		if (this.deps.prewarmScripts !== true || this.deps.scripts === undefined || this.prewarmed === this.epoch) return;
 		if (this.state !== 'ready' || this.wc === null) return;
 		const holdsSnippet = this.artifacts
 			.ids()
