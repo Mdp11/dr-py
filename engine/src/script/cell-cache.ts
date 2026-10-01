@@ -40,9 +40,9 @@ export function readKeyText(key: ReadKey): string {
 export type CellCacheLimits = {
 	/** Entries held. */
 	entries: number;
-	/** Result text held, counted as UTF-16 code units × 2. */
+	/** Keys and result texts held, counted as UTF-16 code units × 2. */
 	bytes: number;
-	/** A result above this is not stored. */
+	/** An entry, key and text, above this is not stored. */
 	entryBytes: number;
 	/** A read-set above this many keys is stored as "depends on everything". */
 	reads: number;
@@ -96,12 +96,13 @@ export class CellCache {
 
 	/**
 	 * Stores `result`, whose wire answer was `text`, unless it is not one that
-	 * reproduces or is too large. A read-set above the bound, or none, is stored
+	 * reproduces or is too large; a key carries the code and the inputs, so it
+	 * is counted with the text. A read-set above the bound, or none, is stored
 	 * as "depends on everything".
 	 */
 	put(key: CellKey, result: ScriptResult, text: string): void {
 		if (result.error !== null && !CACHEABLE_ERRORS.has(result.error.kind)) return;
-		const bytes = text.length * 2;
+		const bytes = (key.length + text.length) * 2;
 		if (bytes > this.limits.entryBytes) return;
 		this.remove(key);
 		const keys = result.reads === null ? null : [...new Set(result.reads.map(readKeyText))];

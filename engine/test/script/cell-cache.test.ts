@@ -27,7 +27,8 @@ const failed = (kind: string): ScriptResult => ({
 	stdout: ''
 });
 
-const text = (units: number) => 'x'.repeat(units);
+// A result text that makes the key and the text together `units` UTF-16 units.
+const sized = (key: string, units: number) => 'x'.repeat(units - key.length);
 
 const reading = (...keys: ReadKey[]) => value(keys);
 
@@ -88,12 +89,12 @@ describe('the recency order', () => {
 
 	it('puts a key stored again at the recent end, once, with its new size', () => {
 		const cache = new CellCache(limits({ entries: 2 }));
-		cache.put('a', value(), text(10));
-		cache.put('b', value(), text(10));
-		cache.put('a', value(), text(30));
+		cache.put('a', value(), sized('a', 10));
+		cache.put('b', value(), sized('b', 10));
+		cache.put('a', value(), sized('a', 30));
 		expect(cache.size).toBe(2);
 		expect(cache.bytes).toBe(80);
-		cache.put('c', value(), text(10));
+		cache.put('c', value(), sized('c', 10));
 		expect(cache.get('b')).toBeUndefined();
 		expect(cache.get('a')).toBeDefined();
 	});
@@ -111,15 +112,15 @@ describe('the bounds', () => {
 
 	it('counts two bytes per UTF-16 unit and drops least recent first at the byte cap', () => {
 		const cache = new CellCache(limits({ bytes: 200 }));
-		cache.put('a', value(), text(40));
-		cache.put('b', value(), text(40));
+		cache.put('a', value(), sized('a', 40));
+		cache.put('b', value(), sized('b', 40));
 		expect(cache.bytes).toBe(160);
 		cache.get('a');
-		cache.put('c', value(), text(40));
+		cache.put('c', value(), sized('c', 40));
 		expect(cache.get('b')).toBeUndefined();
 		expect(cache.bytes).toBe(160);
 		// 160 + 160 > 200: a goes as the older of a and c, and 240 is still over: c goes too
-		cache.put('d', value(), text(80));
+		cache.put('d', value(), sized('d', 80));
 		expect(cache.get('a')).toBeUndefined();
 		expect(cache.get('c')).toBeUndefined();
 		expect(cache.get('d')).toBeDefined();
@@ -128,8 +129,8 @@ describe('the bounds', () => {
 
 	it('stores a result of exactly the entry size and refuses one unit more', () => {
 		const cache = new CellCache(limits({ entryBytes: 100 }));
-		cache.put('fits', value(), text(50));
-		cache.put('over', value(), text(51));
+		cache.put('fits', value(), sized('fits', 50));
+		cache.put('over', value(), sized('over', 51));
 		expect(cache.get('fits')).toBeDefined();
 		expect(cache.get('over')).toBeUndefined();
 		expect(cache.size).toBe(1);
@@ -139,15 +140,39 @@ describe('the bounds', () => {
 	it('keeps the stored entry when a larger result for the same key is refused', () => {
 		const cache = new CellCache(limits({ entryBytes: 100 }));
 		const first = value();
-		cache.put('k', first, text(10));
-		cache.put('k', value(), text(51));
+		cache.put('k', first, sized('k', 10));
+		cache.put('k', value(), sized('k', 51));
 		expect(cache.get('k')).toBe(first);
+	});
+
+	it('counts the key against the entry size', () => {
+		const cache = new CellCache(limits({ entryBytes: 100 }));
+		const key = 'k'.repeat(40);
+		cache.put(key, value(), 'x'.repeat(10));
+		cache.put('j'.repeat(41), value(), 'x'.repeat(10));
+		expect(cache.get(key)).toBeDefined();
+		expect(cache.get('j'.repeat(41))).toBeUndefined();
+		expect(cache.bytes).toBe(100);
+	});
+
+	it('counts the key against the byte cap', () => {
+		const cache = new CellCache(limits({ bytes: 150 }));
+		const [a, b, c] = ['a'.repeat(30), 'b'.repeat(30), 'c'.repeat(30)] as const;
+		cache.put(a, value(), 'x');
+		cache.put(b, value(), 'x');
+		expect(cache.bytes).toBe(124);
+		// the texts alone are 6 bytes, the keys make the third overflow
+		cache.put(c, value(), 'x');
+		expect(cache.get(a)).toBeUndefined();
+		expect(cache.get(b)).toBeDefined();
+		expect(cache.get(c)).toBeDefined();
+		expect(cache.bytes).toBe(124);
 	});
 
 	it('refuses a 64 KiB result by default', () => {
 		const cache = new CellCache();
-		cache.put('fits', value(), text(32 * 1024));
-		cache.put('over', value(), text(32 * 1024 + 1));
+		cache.put('fits', value(), sized('fits', 32 * 1024));
+		cache.put('over', value(), sized('over', 32 * 1024 + 1));
 		expect(cache.size).toBe(1);
 	});
 });
@@ -208,7 +233,7 @@ describe('eviction by read-set', () => {
 
 	it('leaves an entry that reads a key no other transition touched', () => {
 		const cache = new CellCache();
-		cache.put('a', reading(['el', 'x']), text(10));
+		cache.put('a', reading(['el', 'x']), sized('a', 10));
 		expect(cache.evict(touching(['el', 'y']))).toBe(0);
 		expect(cache.size).toBe(1);
 		expect(cache.bytes).toBe(20);
@@ -223,8 +248,8 @@ describe('eviction by read-set', () => {
 
 	it('takes the entries it drops out of the byte count', () => {
 		const cache = new CellCache();
-		cache.put('a', reading(['el', 'x']), text(10));
-		cache.put('b', reading(['el', 'y']), text(30));
+		cache.put('a', reading(['el', 'x']), sized('a', 10));
+		cache.put('b', reading(['el', 'y']), sized('b', 30));
 		cache.evict(touching(['el', 'x']));
 		expect(cache.bytes).toBe(60);
 	});
@@ -292,8 +317,8 @@ describe('eviction by read-set', () => {
 describe('clearing', () => {
 	it('empties the cache and its byte count, and takes nothing after', () => {
 		const cache = new CellCache();
-		cache.put('a', reading(['el', 'x']), text(10));
-		cache.put('b', value(null), text(10));
+		cache.put('a', reading(['el', 'x']), sized('a', 10));
+		cache.put('b', value(null), sized('b', 10));
 		cache.clear();
 		expect(cache.size).toBe(0);
 		expect(cache.bytes).toBe(0);
