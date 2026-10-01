@@ -112,10 +112,15 @@ export type PutArtifactsParams = {
 	staged?: WireStagedArtifact[];
 };
 export type SetStagedArtifactsParams = { entries: WireStagedArtifact[] };
-/** `inputs_text` and `doc_text` are JSON text, read exactly. */
+/**
+ * `inputs_text` and `doc_text` are JSON text, read exactly. `entry: 'script'` takes exactly one call
+ * and is a console run that records the ops its code proposes; `console` makes an embedded entry
+ * run each call on a namespace of its own, answered as a console run.
+ */
 export type ScriptCallsParams = {
 	code: string;
 	entry: ScriptEntry;
+	console?: boolean;
 	calls: { element_ids: string[]; inputs_text?: string; doc_text?: string }[];
 };
 export type ScriptCallsResult = {
@@ -123,4 +128,8 @@ export type ScriptCallsResult = {
 	trips: number;
 	ms: number;
 	boot_ms: number;
+	/** How the worker that ran it booted. */
+	boot: 'snapshot' | 'cold';
+	/** The ops a `script` run proposed, as default-style JSON text. */
+	ops?: string;
 };

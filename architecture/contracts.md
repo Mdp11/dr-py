@@ -250,11 +250,14 @@ event     {event, …}                     engine → client, unsolicited
   having answered nothing. The client answers exactly those four from the server — a
   navigation's page marked with the reason (AD-31), an `issues` call's or a rebind preview's
   answer unmarked, exactly as the server always gave it; any other 501 is an error.
-- Scripts: `scriptCalls {code, entry, calls: [{element_ids, inputs_text?, doc_text?}]}` →
-  `{results: [{text}], trips, ms, boot_ms}`, one result per call in call order, each the
+- Scripts: `scriptCalls {code, entry, console?, calls: [{element_ids, inputs_text?, doc_text?}]}` →
+  `{results: [{text}], trips, ms, boot_ms, boot, ops?}`, one result per call in call order, each the
   harness's answer as the JSON text the script side wrote (handed on unparsed):
-  `{payload, error, reads, stdout}`, where `error` is null or `{kind, message, traceback}`. `entry` is `value`, `step` or `transform`
-  (`script` is a 422); `inputs_text` and `doc_text` are JSON text, read by the exact parser
+  `{payload, error, reads, stdout}`, where `error` is null or `{kind, message, traceback}`. `entry` is `value`, `step`,
+  `transform` or `script`: `script` takes exactly one call (else a 422), is answered as a console
+  run `{stdout, result_repr, truncated, error?}`, and adds `ops`, the ops its code proposed, as
+  JSON text; `console: true` answers an embedded entry as a console run too; `boot` is
+  `snapshot` or `cold`. `inputs_text` and `doc_text` are JSON text, read by the exact parser
   (AD-26). Params are read at arrival, else a 422; then a 409 `replica is not ready` unless
   `ready`, and a 501 `scripts are not available` where the host gave the engine no script
   host. The call is not a scheduler job and is not queued behind the model lane: it runs on
@@ -262,11 +265,14 @@ event     {event, …}                     engine → client, unsolicited
   the bridge, which reads the ready replica's working copy and is answered where the request
   arrives, synchronously, outside the scheduler; with no ready replica — never opened, opening,
   diverged, closed — its reply is `{"id": …, "error": "BridgeError: replica is not ready"}`,
-  and it never waits. A call belongs to the replica it arrived on: calls run one at a time,
-  a run in flight reads that replica alone — once it is closed, replaced (by a replica
+  and it never waits. A call belongs to the replica it arrived on: calls run at once, each
+  with a bridge of its own, and a run in flight reads that replica alone — once it is closed, replaced (by a replica
   already `ready` included) or diverged the bridge answers not-ready — and a call whose
   replica went before its run began or by the time it ended is answered 409 `replica
-  closed` (`replica is not ready` after a divergence), never with results. A `stage`,
+  closed` (`replica is not ready` after a divergence), never with results, and a replica
+  dropped under a run stops it. `{cancel: id}` on a call stops its run and the call is never
+  answered. When the artifacts hold a snippet the engine starts the host's first worker
+  ahead of the first call. A `stage`,
   `unstage` or delta on the same replica does not end a run. The host is made at the first
   call and disposed by `close`; a replica opened again boots another. `boot_ms` is the boot
   that serves the call: every call goes through the host's `boot()`, so a host that failed to
