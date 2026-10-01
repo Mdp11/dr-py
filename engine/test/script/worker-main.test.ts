@@ -46,7 +46,7 @@ function worker(load: (options: object) => Promise<unknown> = coldPyodide) {
 		handler({
 			type: 'init',
 			reply: createReplyBuffer(),
-			interrupt: new SharedArrayBuffer(4),
+			interrupt: new SharedArrayBuffer(8),
 			...extra
 		});
 	const run = (n = 2) =>
@@ -79,9 +79,19 @@ describe('the worker body', () => {
 	it('runs its one batch, reporting each call, then done with a text per call', () => {
 		booted.posted.length = 0;
 		booted.run(2);
-		expect(booted.types()).toEqual(['call-start', 'call-end', 'call-start', 'call-end', 'done']);
-		expect(booted.posted.filter((m) => m.type === 'call-start').map((m) => m.i)).toEqual([0, 1]);
+		// The module-level code is the window before the calls, as `-1`.
+		expect(booted.types()).toEqual([
+			...['call-start', 'call-end', 'call-start', 'call-end', 'call-start', 'call-end'],
+			'done'
+		]);
+		expect(booted.posted.filter((m) => m.type === 'call-start').map((m) => m.i)).toEqual([
+			-1, 0, 1
+		]);
 		const done = booted.posted.at(-1)!;
+		// Each call-end carries the text that `done` holds for it.
+		expect(
+			booted.posted.filter((m) => m.type === 'call-end' && (m.i as number) >= 0).map((m) => m.text)
+		).toEqual((done.results as { text: string }[]).map((r) => r.text));
 		expect((done.results as { text: string }[]).map((r) => r.text)).toEqual(
 			Array(2).fill(
 				'{"payload": {"kind": "json", "value": 42}, "error": null, "reads": [], "stdout": ""}'
@@ -127,7 +137,7 @@ describe('a worker that is not booted', () => {
 			},
 			() => Promise.reject(new Error('no pyodide here'))
 		);
-		handler({ type: 'init', reply: createReplyBuffer(), interrupt: new SharedArrayBuffer(4) });
+		handler({ type: 'init', reply: createReplyBuffer(), interrupt: new SharedArrayBuffer(8) });
 		await until(() => posted.length > 0);
 		expect(posted).toEqual([{ type: 'failed', message: 'no pyodide here' }]);
 	});
@@ -199,7 +209,10 @@ describe('the snapshot', () => {
 		expect(options[0]).toHaveProperty('_loadSnapshot');
 		w.posted.length = 0;
 		w.run(2);
-		expect(w.types()).toEqual(['call-start', 'call-end', 'call-start', 'call-end', 'done']);
+		expect(w.types()).toEqual([
+			...['call-start', 'call-end', 'call-start', 'call-end', 'call-start', 'call-end'],
+			'done'
+		]);
 	}, 60_000);
 
 	it('falls back to a cold boot, and says so, when the image cannot be loaded', async () => {
@@ -214,7 +227,7 @@ describe('the snapshot', () => {
 		expect(options.map((o) => '_loadSnapshot' in o)).toEqual([true, false]);
 		w.posted.length = 0;
 		w.run(1);
-		expect(w.types()).toEqual(['call-start', 'call-end', 'done']);
+		expect(w.types()).toEqual(['call-start', 'call-end', 'call-start', 'call-end', 'done']);
 	}, 60_000);
 
 	it('falls back to a cold boot when the image is not one', async () => {

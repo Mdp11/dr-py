@@ -67,7 +67,38 @@ describe('the guest over the harness', () => {
 			batch.calls.map((call) => rootsOf([...call.elementIds])),
 			{ callStart: (i) => events.push(`start ${i}`), callEnd: (i) => events.push(`end ${i}`) }
 		);
-		expect(events).toEqual(['start 0', 'end 0', 'start 1', 'end 1', 'start 2', 'end 2']);
+		// The module-level code of an embedded run is the window before the calls.
+		expect(events).toEqual([
+			'start -1',
+			'end -1',
+			'start 0',
+			'end 0',
+			'start 1',
+			'end 1',
+			'start 2',
+			'end 2'
+		]);
+	});
+
+	it('hands `callEnd` the text the call answers, and times a console run by its calls only', () => {
+		const ends: [number, string][] = [];
+		const starts: number[] = [];
+		const hooks = {
+			callStart: (i: number) => starts.push(i),
+			callEnd: (i: number, text: string) => ends.push([i, text])
+		};
+		const batch = batchOf('def value(els): return els[0].id', [['n1'], ['n2']]);
+		dispatcher = new BridgeDispatcher(parityModel(), false);
+		const results = guest.run(
+			batch,
+			batch.calls.map((c) => rootsOf([...c.elementIds])),
+			hooks
+		);
+		expect(ends.filter(([i]) => i >= 0)).toEqual(results.map(({ text }, i) => [i, text]));
+		starts.length = 0;
+		dispatcher = new BridgeDispatcher(parityModel(), true);
+		guest.run({ ...batch, console: true }, ['[]', '[]'], hooks);
+		expect(starts).toEqual([0, 1]);
 	});
 
 	it('reports the hooks of a call that raises, and of a failed boot', () => {
@@ -81,7 +112,10 @@ describe('the guest over the harness', () => {
 			dispatcher = new BridgeDispatcher(parityModel(), false);
 			guest.run(batch, ['[]', '[]'], hooks);
 		}
-		expect(events).toEqual(['s0', 'e0', 's1', 'e1', 's0', 'e0', 's1', 'e1']);
+		expect(events).toEqual([
+			...['s-1', 'e-1', 's0', 'e0', 's1', 'e1'],
+			...['s-1', 'e-1', 's0', 'e0', 's1', 'e1']
+		]);
 	});
 
 	it('takes no hooks and does not keep the last ones', () => {
@@ -90,7 +124,7 @@ describe('the guest over the harness', () => {
 		dispatcher = new BridgeDispatcher(parityModel(), false);
 		guest.run(batch, ['[]'], { callStart: (i) => events.push(i) });
 		guest.run(batch, ['[]']);
-		expect(events).toEqual([0]);
+		expect(events).toEqual([-1, 0]);
 	});
 
 	it('gives each batch its own globals', () => {

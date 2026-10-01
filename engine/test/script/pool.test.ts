@@ -2,55 +2,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { BridgeDispatcher, dumpDefault, projectRoots } from '../../src/script/bridge.ts';
 import type { Bridge, ScriptBatch, ScriptHost } from '../../src/script/host.ts';
 import { hostErrorText } from '../../src/script/host-error.ts';
-import { createPool, type WorkerPort, type WorkerSpawner } from '../../src/script/pool.ts';
+import { createPool } from '../../src/script/pool.ts';
 import { nodeScriptHost, poolCap, spawnNodeWorker } from '../../node/script-host.ts';
+import { instrumented } from './fixtures/instrumented.ts';
 import { expectParity, loadParity, parityBatch, parityModel } from './parity.ts';
 
 // The pool over real Pyodide in real worker threads: what it runs, and that no batch ever shares a
 // worker with another. The protocol handling over scripted workers is in `pool-protocol.test.ts`.
-
-type Seen = {
-	runs: number;
-	terminated: boolean;
-	/** It was told to make the snapshot: it serves no batch and holds no slot of the cap. */
-	maker: boolean;
-	messages: { type?: unknown; i?: unknown }[];
-};
-
-/** `spawnNodeWorker`, counting what each worker is asked and says, and when it is ended. */
-function instrumented(inner: WorkerSpawner = spawnNodeWorker) {
-	const seen: Seen[] = [];
-	let peak = 0;
-	const alive = () => seen.filter((one) => !one.terminated && !one.maker).length;
-	const spawn: WorkerSpawner = (buffers) => {
-		const port = inner(buffers);
-		const here: Seen = { runs: 0, terminated: false, maker: false, messages: [] };
-		seen.push(here);
-		const wrapped: WorkerPort = {
-			post(message, transfer) {
-				const { type, make } = message as { type?: unknown; make?: unknown };
-				if (type === 'run') here.runs++;
-				if (type === 'init') {
-					here.maker = make === true;
-					peak = Math.max(peak, alive());
-				}
-				port.post(message, transfer);
-			},
-			onMessage: (handler) =>
-				port.onMessage((message) => {
-					here.messages.push(message as Seen['messages'][number]);
-					handler(message);
-				}),
-			onError: (handler) => port.onError(handler),
-			terminate() {
-				here.terminated = true;
-				port.terminate();
-			}
-		};
-		return wrapped;
-	};
-	return { spawn, seen, alive, peak: () => peak };
-}
 
 function recording(readOnlyRun: boolean) {
 	const dispatcher = new BridgeDispatcher(parityModel(), !readOnlyRun);
@@ -118,7 +76,8 @@ ${answer42}`;
 		const second = await host.run(transform(answer42), recording(true).bridge);
 		expect(second.results.map((r) => r.text)).toEqual([HONEST_42]);
 		const broken = await host.run(transform(breakReply), recording(true).bridge);
-		expect(JSON.parse(broken.results[0]!.text).error.kind).toBe('runtime');
+		// The batch's own answer is whatever its script wrote for itself: the call-end text it made.
+		expect(broken.results).toEqual([{ text: '"FORGED"' }]);
 		const third = await host.run(transform(answer42), recording(true).bridge);
 		expect(third.results.map((r) => r.text)).toEqual([HONEST_42]);
 		const used = ported.seen.filter((one) => one.runs > 0);
@@ -144,7 +103,8 @@ ${answer42}`;
 		expect(text(ready)).toBe(
 			hostErrorText(batch, 'runtime', 'the script worker sent a bad "ready"')
 		);
-		expect(text(done)).toBe('FORGED');
+		// A `done` sent inside a call is refused: the call had not ended.
+		expect(text(done)).toBe(hostErrorText(batch, 'runtime', 'the script worker ended mid-call'));
 		expect(text(failed)).toBe(hostErrorText(batch, 'runtime', 'FORGED'));
 		expect(text(await honest)).toBe(HONEST_42);
 		expect(ported.seen.filter((one) => one.runs > 0)).toHaveLength(4);
@@ -166,7 +126,11 @@ ${answer42}`;
 			.find((one) => one.runs > 0)!
 			.messages.filter((m) => ['call-start', 'call-end', 'done'].includes(m.type as string))
 			.map((m) => (m.type === 'done' ? 'done' : `${m.type as string} ${m.i as number}`));
-		expect(events).toEqual(['call-start 0', 'call-end 0', 'call-start 1', 'call-end 1', 'done']);
+		// Window -1 is the module-level code, which runs before the calls.
+		expect(events).toEqual([
+			...['call-start -1', 'call-end -1', 'call-start 0', 'call-end 0'],
+			...['call-start 1', 'call-end 1', 'done']
+		]);
 	}, 60_000);
 });
 
@@ -191,7 +155,8 @@ describe('concurrent runs on a cap of two', () => {
 			expect(answer.payload.values).toEqual(ids.slice(0, k + 1));
 			expect(run.trips).toBe(mine.requests.length);
 			expect(run.trips).toBeGreaterThanOrEqual(k + 1);
-			expect(run.boot).toBe('cold');
+			// Whether a run's worker restored the image depends on when the maker finished.
+			expect(['cold', 'snapshot']).toContain(run.boot);
 			expect(run.bootMs).toBeGreaterThan(0);
 		}
 		expect(ported.peak()).toBeLessThanOrEqual(2);

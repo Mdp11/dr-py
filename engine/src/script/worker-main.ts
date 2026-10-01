@@ -12,6 +12,7 @@ import {
 	type HarnessLimits,
 	type Interpreter
 } from './guest.ts';
+import { beginWindow, channelView, endWindow, flagView } from './interrupt.ts';
 import { batchFromWire, type WireBatch } from './wire.ts';
 
 /** What a worker has of its host. */
@@ -99,6 +100,7 @@ export function runWorker(
 	const fail = (error: unknown) => post({ type: 'failed', message: message(error) });
 
 	let guest: Guest | null = null;
+	let channel: Int32Array | null = null;
 	let started = false;
 	let ran = false;
 	let trips = 0;
@@ -124,7 +126,9 @@ export function runWorker(
 			const py = (await loadPyodide(
 				image === undefined ? BOOT_OPTIONS : { ...BOOT_OPTIONS, _loadSnapshot: image }
 			)) as Pyodide;
-			py.setInterruptBuffer(new Int32Array(interrupt));
+			// Set on a restored interpreter too: the image holds no interrupt buffer.
+			py.setInterruptBuffer(flagView(interrupt));
+			channel = channelView(interrupt);
 			// Armed before the post: a reply can land the instant the request is out, and arming
 			// after would erase it and block for good.
 			return createGuest(
@@ -168,9 +172,18 @@ export function runWorker(
 		ran = true;
 		trips = 0;
 		const t0 = now();
+		const stops = channel;
+		if (stops === null) throw new Error('the script worker is not booted');
+		// Window `n` is the module-level code (`i` -1) or call `i`; the pool times each by these.
 		const results = guest.run(batchFromWire(batch), roots, {
-			callStart: (i) => post({ type: 'call-start', i }),
-			callEnd: (i) => post({ type: 'call-end', i })
+			callStart: (i) => {
+				beginWindow(stops, i + 1);
+				post({ type: 'call-start', i });
+			},
+			callEnd: (i, text) => {
+				endWindow(stops, i + 1);
+				post({ type: 'call-end', i, text });
+			}
 		});
 		post({ type: 'done', results, trips, ms: now() - t0 });
 	}

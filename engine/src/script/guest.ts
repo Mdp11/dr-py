@@ -23,10 +23,14 @@ export const DEFAULT_HARNESS_LIMITS: HarnessLimits = Object.freeze({
 	readMemoMax: 4096
 });
 
-/** Called around each call of a batch, in order, for every call the batch holds. */
+/**
+ * Called around each stretch in which a script's code runs, in order: every call of the batch,
+ * and before them, for an embedded run, the module-level code as `-1`. `callEnd` gets the text the
+ * call answers, which is the one in the batch's reply.
+ */
 export type GuestHooks = {
 	callStart?(i: number): void;
-	callEnd?(i: number): void;
+	callEnd?(i: number, text: string): void;
 };
 
 export type Guest = {
@@ -50,40 +54,69 @@ def _transport(req):
 
 exec(compile(_dr_harness, "<harness>", "exec"), globals())
 
+def _dr_killed(console):
+    error = {"kind": "runtime", "message": "KeyboardInterrupt", "traceback": None}
+    if console:
+        return {"stdout": "", "result_repr": None, "truncated": False, "error": error}
+    return {"payload": None, "error": error, "reads": None, "stdout": ""}
+
+def _dr_end(i, text):
+    # An interrupt the host raised for this window can land anywhere up to the hook, which clears
+    # what is left of it; it is absorbed here and never reaches the next call.
+    while True:
+        try:
+            _dr_call_end(i, text)
+            return
+        except KeyboardInterrupt:
+            pass
+
 def _dr_batch(code, entry, calls_text, roots_texts, console):
     calls = json.loads(calls_text)
     roots = roots_texts.to_py()
     out = []
     if console:
         for i, call in enumerate(calls):
-            _dr_call_start(i)
-            res = _dr_run({
-                "code": code,
-                "facade": _dr_facade,
-                "entry": entry,
-                "element_ids": call["element_ids"],
-                "inputs": call.get("inputs"),
-                "limits": _dr_limits,
-            })
-            _dr_call_end(i)
-            out.append(json.dumps(res))
+            try:
+                _dr_call_start(i)
+                res = _dr_run({
+                    "code": code,
+                    "facade": _dr_facade,
+                    "entry": entry,
+                    "element_ids": call["element_ids"],
+                    "inputs": call.get("inputs"),
+                    "limits": _dr_limits,
+                })
+                text = json.dumps(res)
+            except KeyboardInterrupt:
+                text = json.dumps(_dr_killed(True))
+            _dr_end(i, text)
+            out.append(text)
         return json.dumps(out)
-    session = _dr_open(_dr_facade, code, _dr_limits)
+    try:
+        _dr_call_start(-1)
+        session = _dr_open(_dr_facade, code, _dr_limits)
+    except KeyboardInterrupt:
+        session = {"namespace": {}, "carry": "", "error": _dr_killed(False)["error"]}
+    _dr_end(-1, "")
     boot_error = session["error"]
     for i, call in enumerate(calls):
-        _dr_call_start(i)
-        if boot_error is not None:
-            res = {"payload": None, "error": boot_error, "reads": None, "stdout": ""}
-        else:
-            res = _dr_call(session, {
-                "entry": entry,
-                "element_ids": call["element_ids"],
-                "elements": json.loads(roots[i]),
-                "doc": call.get("doc"),
-                "inputs": call.get("inputs"),
-            }, _dr_limits)
-        _dr_call_end(i)
-        out.append(json.dumps(res))
+        try:
+            _dr_call_start(i)
+            if boot_error is not None:
+                res = {"payload": None, "error": boot_error, "reads": None, "stdout": ""}
+            else:
+                res = _dr_call(session, {
+                    "entry": entry,
+                    "element_ids": call["element_ids"],
+                    "elements": json.loads(roots[i]),
+                    "doc": call.get("doc"),
+                    "inputs": call.get("inputs"),
+                }, _dr_limits)
+            text = json.dumps(res)
+        except KeyboardInterrupt:
+            text = json.dumps(_dr_killed(False))
+        _dr_end(i, text)
+        out.append(text)
     return json.dumps(out)
 `;
 
@@ -139,7 +172,7 @@ export function createGuest(
 	py.globals.set('_dr_repr_chars', limits.reprChars);
 	py.globals.set('_read_memo_max', limits.readMemoMax);
 	py.globals.set('_dr_call_start', (i: number) => hooks?.callStart?.(i));
-	py.globals.set('_dr_call_end', (i: number) => hooks?.callEnd?.(i));
+	py.globals.set('_dr_call_end', (i: number, text: string) => hooks?.callEnd?.(i, text));
 	py.runPython(GUEST_BIND);
 	if (restored) py.runPython(GUEST_RESEED);
 

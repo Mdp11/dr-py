@@ -181,13 +181,20 @@ describe('bridge requests', () => {
 			dispatch: (text) => (seen[name]!.push(text), `${name}:${text}`),
 			roots: () => '[]'
 		});
+		// An honest worker asks once its last reply is in and its reply state is armed again.
 		const talk = (name: string, n: number): Behaviour =>
 			answers((fake) => {
-				for (let i = 0; i < n; i++) fake.say({ type: 'bridge', text: `${name}${i}` });
-				setTimeout(
-					() => fake.say({ type: 'done', results: [{ text: name }], trips: 0, ms: 1 }),
-					10
-				);
+				const header = new Int32Array(fake.buffers.reply, 0, 4);
+				let asked = 0;
+				const ask = () => {
+					if (asked > 0 && Atomics.load(header, 0) !== 1) return void setTimeout(ask, 1);
+					if (asked === n)
+						return fake.say({ type: 'done', results: [{ text: name }], trips: 0, ms: 1 });
+					armReply(fake.buffers.reply);
+					fake.say({ type: 'bridge', text: `${name}${asked++}` });
+					setTimeout(ask, 1);
+				};
+				ask();
 			});
 		const { pool } = poolOf([talk('a', 3), talk('b', 1)], { cap: 2 });
 		const [a, b] = await Promise.all([
@@ -304,8 +311,8 @@ describe('a forged or broken message', () => {
 		],
 		[
 			'a failed',
-			answers((fake) => fake.say({ type: 'failed', message: 'MemoryError: out' })),
-			'MemoryError: out'
+			answers((fake) => fake.say({ type: 'failed', message: 'RuntimeError: unreachable' })),
+			'RuntimeError: unreachable'
 		],
 		[
 			'a failed with no message',
