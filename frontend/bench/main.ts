@@ -10,6 +10,7 @@ import type {
 	ExportFileResult,
 	ModelFile,
 	ScriptCallsResult,
+	ScriptWarmResult,
 	TablePageBody,
 	TailResult,
 	WireElement
@@ -480,7 +481,10 @@ async function scripts(): Promise<Measures> {
 		}
 		return result;
 	};
+	// The first use after the open: a cold boot, reported and not gated.
 	const warm = await run('def value(els):\n    return els[0].name\n', [{ element_ids: [ids[0]!] }]);
+	// The timer starts with the image made and every spare of the pool ready.
+	const warmed = await client.call<ScriptWarmResult>('scriptWarm');
 
 	const calls = ids.map((id) => ({ element_ids: [id] }));
 	const start = now();
@@ -504,8 +508,9 @@ async function scripts(): Promise<Measures> {
 	const parallelism =
 		typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : 1;
 	return {
-		// The warm-up's boot is cold only when the image was not ready yet; otherwise it is a snapshot boot.
+		// The first use boots cold unless the image was ready already.
 		...(warm.boot === 'cold' && { 'script boot (cold)': warm.boot_ms }),
+		'script spares ready at the timer': warmed.spares,
 		'script boot (snapshot)': snapshotBoots[Math.floor(snapshotBoots.length / 2)] ?? NaN,
 		'10,000 script cells': wall,
 		'script run sum': ms,

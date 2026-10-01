@@ -10,6 +10,7 @@ import {
 	settle,
 	until,
 	type Behaviour,
+	type Fake,
 	type Message
 } from './fixtures/fake-workers.ts';
 
@@ -652,49 +653,50 @@ describe('spares', () => {
 		await until(() => alive() === 1 && fakes.length === 3);
 	});
 
-	it('starts one boot for prewarm() on an empty pool, and no second', async () => {
+	it('starts a boot for each free slot on prewarm(), and none for a second prewarm()', async () => {
 		const { pool, fakes } = poolOf([honest], { cap: 3 });
 		pool.prewarm();
 		pool.prewarm();
-		expect(fakes).toHaveLength(1);
+		expect(fakes).toHaveLength(3);
 		await pool.boot();
 		pool.prewarm();
-		expect(fakes).toHaveLength(1);
+		await settle(20);
+		expect(fakes).toHaveLength(3);
 		const run = await pool.run(batchOf(), bridge);
 		expect(run.results).toEqual([{ text: 'r0' }]);
 	});
 
-	it('boots one worker for a lone run and one spare, and no more', async () => {
+	it('keeps cap workers alive once a run is done, a lone run included', async () => {
 		const { pool, fakes, alive } = poolOf([honest], { cap: 4 });
 		await pool.run(batchOf(), bridge);
+		await until(() => alive() === 4);
 		await settle(40);
-		expect(fakes).toHaveLength(2);
-		expect(alive()).toBe(1);
+		expect(alive()).toBe(4);
+		expect(fakes).toHaveLength(5);
 	});
 
-	it('keeps min(cap, running + waiting + 1) workers alive', async () => {
+	it('keeps cap workers alive however many runs there are, and no more', async () => {
 		const slow: Behaviour = answers((fake) =>
 			setTimeout(() => fake.say({ type: 'done', results: [{ text: 'x' }], trips: 0, ms: 1 }), 40)
 		);
-		const { pool, fakes, peak } = poolOf([slow], { cap: 4 });
+		const { pool, peak, alive } = poolOf([slow], { cap: 4 });
 		await Promise.all([pool.run(batchOf(), bridge), pool.run(batchOf(), bridge)]);
-		expect(peak()).toBe(3);
-		expect(fakes.length).toBe(3);
+		expect(peak()).toBe(4);
+		await until(() => alive() === 4);
 		const { pool: small, peak: smallPeak } = poolOf([slow], { cap: 2 });
 		await Promise.all([1, 2, 3].map(() => small.run(batchOf(), bridge)));
 		expect(smallPeak()).toBe(2);
 	});
 
 	it('serves a run from a spare that is already up, and replaces it', async () => {
-		const { pool, fakes } = poolOf([honest], { cap: 3, spareIdleMs: 10_000 });
+		const { pool, fakes, alive } = poolOf([honest], { cap: 3, spareIdleMs: 10_000 });
 		await pool.run(batchOf(), bridge);
-		await settle(30);
-		expect(fakes).toHaveLength(2);
+		await until(() => alive() === 3);
+		expect(fakes).toHaveLength(4);
 		const spare = fakes.find((f) => !f.terminated)!;
 		await pool.run(batchOf(), bridge);
 		expect(spare.posted.some((m) => m.type === 'run')).toBe(true);
-		await settle(30);
-		expect(fakes).toHaveLength(3);
+		await until(() => alive() === 3 && fakes.length === 5);
 	});
 
 	it('drops the spares beyond one after spareIdleMs, once no run waits', async () => {
@@ -713,6 +715,186 @@ describe('spares', () => {
 		await settle(120);
 		expect(alive()).toBe(1);
 		expect(fakes).toHaveLength(2);
+	});
+});
+
+describe('hot spares', () => {
+	const imaged = (fakes: Fake[]) =>
+		fakes.filter((fake) => fake.posted.some((m) => m.type === 'init' && m.snapshot !== undefined));
+	const makers = (fakes: Fake[]) =>
+		fakes.filter((fake) => fake.posted.some((m) => m.make === true));
+	const image = () => new Uint8Array([1, 2, 3, 4]).buffer;
+	const imager: Behaviour = (fake, message) => {
+		if (message.type === 'init' && message.make === true)
+			fake.say({ type: 'snapshot', bytes: image() });
+		else if (message.type === 'init') {
+			fake.say({
+				type: 'ready',
+				ms: 5,
+				boot: message.snapshot === undefined ? 'cold' : 'snapshot'
+			});
+		} else honest(fake, message);
+	};
+	const silentMaker: Behaviour = (fake, message) => {
+		if (message.type === 'init' && message.make === true) return;
+		imager(fake, message);
+	};
+	const withImages = (extra: Partial<PoolOptions> = {}) => ({ snapshots: true, cap: 3, ...extra });
+	const ready = (fakes: Fake[]) =>
+		fakes.filter((fake) => !fake.terminated && !fake.posted.some((m) => m.make === true));
+
+	it('fills every free slot with a spare once the image is ready', async () => {
+		const { pool, fakes, alive } = poolOf([imager], withImages({ cap: 4 }));
+		pool.prewarm();
+		await until(() => alive() === 4);
+		await settle(40);
+		// The first worker booted cold beside the maker; the rest booted from the image.
+		expect(alive()).toBe(4);
+		expect(fakes).toHaveLength(5);
+		expect(imaged(fakes)).toHaveLength(3);
+		expect(makers(fakes).every((fake) => fake.terminated)).toBe(true);
+	});
+
+	it('starts no spare cold while the maker works, and fills to the cap when the image arrives', async () => {
+		const { pool, fakes } = poolOf([silentMaker], withImages({ cap: 4 }));
+		pool.prewarm();
+		await settle(60);
+		expect(fakes).toHaveLength(2);
+		expect(imaged(fakes)).toHaveLength(0);
+		// A run that waits is served as ever, by the cold worker; no spare is started for it either.
+		const run = await pool.run(batchOf(), bridge);
+		expect(run.results).toEqual([{ text: 'r0' }]);
+		await settle(60);
+		expect(fakes).toHaveLength(2);
+		const maker = makers(fakes)[0]!;
+		maker.say({ type: 'snapshot', bytes: image() });
+		await until(() => ready(fakes).length === 4);
+		expect(imaged(fakes)).toHaveLength(4);
+		expect(maker.terminated).toBe(true);
+	});
+
+	it('serves a burst of cap runs right after warm-up, each on a spare that is already up', async () => {
+		const { pool, fakes } = poolOf([imager], withImages({ cap: 4, spareIdleMs: 60_000 }));
+		await pool.warmed();
+		const up = fakes.length;
+		const runs = Array.from({ length: 4 }, () => pool.run(batchOf(), bridge));
+		// Synchronously: every run is already on a worker, and nothing was spawned to serve it.
+		const holding = fakes.filter((fake) => fake.posted.some((m) => m.type === 'run'));
+		expect(holding).toHaveLength(4);
+		expect(fakes).toHaveLength(up);
+		expect(holding.every((fake) => fake.posted.length === 2)).toBe(true);
+		// The first worker booted cold beside the maker; the other three booted from the image.
+		const boots = (await Promise.all(runs)).map((run) => run.boot).sort();
+		expect(boots).toEqual(['cold', 'snapshot', 'snapshot', 'snapshot']);
+	});
+
+	it('does not refill what the idle shrink ended, until something asks', async () => {
+		const { pool, fakes, alive } = poolOf([honest], { cap: 3, spareIdleMs: 60 });
+		pool.prewarm();
+		await until(() => alive() === 3);
+		await until(() => alive() === 1, 2000);
+		await settle(200);
+		expect(alive()).toBe(1);
+		expect(fakes).toHaveLength(3);
+	});
+
+	it.each([
+		['prewarm()', (pool: ScriptHost) => pool.prewarm()],
+		['boot()', (pool: ScriptHost) => void pool.boot().catch(() => {})],
+		['run()', (pool: ScriptHost) => void pool.run(batchOf(), bridge).catch(() => {})]
+	])('refills to the cap on %s after the idle shrink', async (_name, ask) => {
+		const { pool, fakes, alive } = poolOf([honest], { cap: 3, spareIdleMs: 60 });
+		pool.prewarm();
+		await until(() => alive() === 3);
+		await until(() => alive() === 1, 2000);
+		ask(pool);
+		await until(() => alive() === 3);
+		expect(fakes.length).toBeGreaterThan(3);
+	});
+
+	it('shrinks again after a refill, and each shrink waits for the next ask', async () => {
+		const { pool, alive } = poolOf([honest], { cap: 3, spareIdleMs: 60 });
+		for (let round = 0; round < 2; round++) {
+			pool.prewarm();
+			await until(() => alive() === 3);
+			await until(() => alive() === 1, 2000);
+			await settle(150);
+			expect(alive()).toBe(1);
+		}
+	});
+
+	it('refills the slot of a finished batch and never holds more than cap', async () => {
+		const slow: Behaviour = answers((fake) =>
+			setTimeout(() => fake.say({ type: 'done', results: [{ text: 'x' }], trips: 0, ms: 1 }), 20)
+		);
+		const { pool, peak, alive } = poolOf([slow], { cap: 3, spareIdleMs: 150 });
+		const runs = Array.from({ length: 7 }, () => pool.run(batchOf(), bridge));
+		await Promise.all(runs);
+		expect(peak()).toBeLessThanOrEqual(3);
+		// The tail respawns spares ...
+		await until(() => alive() === 3);
+		expect(peak()).toBeLessThanOrEqual(3);
+		// ... and the idle shrink takes them back to one.
+		await until(() => alive() === 1, 2000);
+	});
+
+	it('keeps the maker out of the cap', async () => {
+		const { pool, fakes, alive } = poolOf([silentMaker], withImages({ cap: 2 }));
+		pool.prewarm();
+		await settle(40);
+		expect(alive()).toBe(2);
+		makers(fakes)[0]!.say({ type: 'snapshot', bytes: image() });
+		await until(() => ready(fakes).length === 2);
+		await settle(40);
+		expect(alive()).toBe(2);
+		expect(fakes).toHaveLength(3);
+	});
+
+	it('boots spares cold, to the cap, when images are off', async () => {
+		const { pool, fakes, alive } = poolOf([honest], { cap: 3 });
+		pool.prewarm();
+		await until(() => alive() === 3);
+		expect(imaged(fakes)).toHaveLength(0);
+	});
+
+	it('does not spawn spares behind a failed boot', async () => {
+		const { pool, fakes } = poolOf([failBoot], { cap: 3 });
+		await expect(pool.boot()).rejects.toThrow('pyodide did not boot');
+		await settle(60);
+		const first = fakes.length;
+		expect(first).toBeLessThanOrEqual(3);
+		await settle(80);
+		expect(fakes).toHaveLength(first);
+	});
+
+	describe('warmed()', () => {
+		it('answers once the image is ready and cap spares are, and counts them', async () => {
+			const { pool, fakes } = poolOf([silentMaker], withImages({ cap: 3 }));
+			let answer: { spares: number } | null = null;
+			const waiting = pool.warmed().then((one) => (answer = one));
+			await settle(60);
+			expect(answer).toBeNull();
+			makers(fakes)[0]!.say({ type: 'snapshot', bytes: image() });
+			await waiting;
+			expect(answer).toEqual({ spares: 3 });
+			expect(ready(fakes)).toHaveLength(3);
+		});
+
+		it('answers at once on a pool that is already hot', async () => {
+			const { pool } = poolOf([honest], { cap: 2 });
+			await pool.warmed();
+			expect(await pool.warmed()).toEqual({ spares: 2 });
+		});
+
+		it('rejects with the boot error when no worker boots, and when the pool is disposed', async () => {
+			const { pool } = poolOf([failBoot], { cap: 2 });
+			await expect(pool.warmed()).rejects.toThrow('pyodide did not boot');
+			const { pool: other } = poolOf([(fake, message) => void (message.type === 'init' && fake)]);
+			const waiting = other.warmed();
+			other.dispose();
+			await expect(waiting).rejects.toThrow('script host is disposed');
+			await expect(other.warmed()).rejects.toThrow('script host is disposed');
+		});
 	});
 });
 
@@ -767,15 +949,17 @@ describe('the snapshot maker and the image', () => {
 		expect((await run).results).toEqual([{ text: 'r0' }]);
 	});
 
-	it('keeps no spare ahead while the maker works, and one from the image once it has it', async () => {
+	it('keeps no spare while the maker works, and cap spares from the image once it has it', async () => {
 		const { pool, fakes } = poolOf([silentMaker], withImages({ cap: 3 }));
 		await pool.run(batchOf(), bridge);
 		await settle(60);
 		expect(fakes).toHaveLength(2);
 		const maker = fakes.find((fake) => fake.posted[0]?.make === true)!;
 		maker.say({ type: 'snapshot', bytes: image() });
-		await until(() => fakes.length === 3);
-		expect(Array.from(new Uint8Array(imageOf(fakes[2]!.posted[0]!)!))).toEqual([1, 2, 3, 4]);
+		await until(() => fakes.length === 5);
+		for (const fake of fakes.slice(2)) {
+			expect(Array.from(new Uint8Array(imageOf(fake.posted[0]!)!))).toEqual([1, 2, 3, 4]);
+		}
 		expect(maker.terminated).toBe(true);
 	});
 

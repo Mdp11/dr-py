@@ -73,6 +73,7 @@ import type {
 	ProgressTask,
 	ReplicaState,
 	ScriptCallsResult,
+	ScriptWarmResult,
 	ServiceDeps,
 	ServiceEvent,
 	StagedDiffResult,
@@ -437,6 +438,7 @@ const METHODS: { readonly [method: string]: Method } = {
 	end: later((service) => service.end()),
 	close: now((service) => service.close()),
 	scriptCalls: (service, call) => service.scriptCalls(call),
+	scriptWarm: later((service) => service.warmScripts()),
 	adoptStaged: (service, call) => service.adoptStaged(call),
 	applyTail: (service, call) => service.applyTail(call),
 	applyDelta: (service, call) => service.applyDelta(call),
@@ -912,6 +914,20 @@ class Service {
 			throw error;
 		} finally {
 			this.running.delete(cancel.abort);
+		}
+	}
+
+	/**
+	 * `scriptWarm`: prewarms the host and answers once its spares are ready, for a caller that
+	 * wants the first run to start at once. Needs no replica; a `close` under it refuses it.
+	 */
+	async warmScripts(): Promise<ScriptWarmResult> {
+		const host = this.scriptHost();
+		try {
+			return await host.warmed();
+		} catch (error) {
+			if (this.scripting !== host) throw new Refused(409, 'replica closed');
+			throw error;
 		}
 	}
 

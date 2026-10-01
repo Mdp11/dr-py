@@ -349,8 +349,10 @@ event     {event, …}                     engine → client, unsolicited
   then is ended; the next batch gets a fresh worker, so no interpreter or worker state outlives
   a batch. Workers boot from a memory image of Pyodide with the guest loaded (each its own copy),
   or cold when the image cannot be made or restored; a result reports which (`boot`). The cap is
-  `max(1, min(4, hardwareConcurrency - 2))`, one spare idles, and further spares end after 30 s
-  without a queue. Runs of different batches proceed concurrently, each on its own worker and
+  `max(1, min(4, hardwareConcurrency - 2))`. Once asked, the pool fills every free slot with a
+  spare as soon as the image is ready, so `cap` workers are alive and the first runs of a burst
+  start at once; spares beyond one end after 30 s without a queue, and stay ended until the next
+  call asks. Runs of different batches proceed concurrently, each on its own worker and
   channel. The engine worker spawns, boots and ends workers (on `dispose`, a failure or an
   `error` event); a worker's channel is private to that pair. It alone blocks, on its own reply
   buffer: one `SharedArrayBuffer` of 1 MiB per worker, an Int32 header and the reply's UTF-8
@@ -368,6 +370,8 @@ event     {event, …}                     engine → client, unsolicited
   a stopped module-level window. The replica survives either stop. On the Node host a worker
   shares the process, so that host runs trusted code only until E gives the headless service a
   process boundary (`K-106`).
+- Warm: `scriptWarm` (no params) prewarms the host and answers `{spares}` once the pool holds `cap`
+  ready spares; the bench awaits it before timing script cells.
 - Prewarm: the service can start the pool's first worker when a replica holds a snippet, before
   any call (`ServiceDeps.prewarmScripts`). It is available and off in the sandbox for now; the
   first call boots the worker until a caller enables it.

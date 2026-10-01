@@ -56,8 +56,13 @@ export type AbortSignalLike = {
  */
 export type ScriptHost = {
 	boot(): Promise<{ ms: number }>;
-	/** Starts a worker ahead of the first run; a host that cannot does nothing. */
+	/** Starts the workers ahead of the first run; a host that cannot does nothing. */
 	prewarm(): void;
+	/**
+	 * Prewarms, and answers once the host holds its full complement of ready spares: a run now
+	 * starts at once, on a spare. Rejects when no worker boots or the host is disposed.
+	 */
+	warmed(): Promise<{ spares: number }>;
 	run(batch: ScriptBatch, bridge: Bridge, signal?: AbortSignalLike): Promise<ScriptRun>;
 	dispose(): void;
 };

@@ -137,3 +137,6 @@ export type ScriptCallsResult = {
 	/** The ops a `script` run proposed, as default-style JSON text. */
 	ops?: string;
 };
+
+/** `scriptWarm`'s answer: how many spares the pool holds ready. */
+export type ScriptWarmResult = { spares: number };

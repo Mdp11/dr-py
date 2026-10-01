@@ -100,12 +100,15 @@ const sample = [
 
 describe('workers booted from the snapshot', () => {
 	it('report boot: snapshot from the second run on, and boot in well under a cold one', async () => {
-		const { host, warnings, first, seen } = await withSnapshot(spawnNodeWorker);
+		// One slot: a hot pool boots its spares together, and each boot would be timed against the others.
+		const { host, warnings, first, seen } = await withSnapshot(spawnNodeWorker, { cap: 1 });
 		const later: ScriptRun[] = [];
 		for (let i = 0; i < 3; i++) later.push(await host.run(trivial, trivialBridge));
 		expect(first.boot).toBe('cold');
 		expect(later.map((run) => run.boot)).toEqual(['snapshot', 'snapshot', 'snapshot']);
-		for (const run of later) expect(run.bootMs).toBeLessThan(1000);
+		// Against the cold boot of the same pool, which a loaded machine slows too: a fixed bound
+		// would measure the load the other suites' hot pools put on it.
+		for (const run of later) expect(run.bootMs).toBeLessThan(first.bootMs / 2);
 		expect(warnings).toEqual([]);
 		// The maker never ran a batch, and was ended once it had posted the image.
 		const makers = seen.workers.filter((one) => one.make);

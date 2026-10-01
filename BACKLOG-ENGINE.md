@@ -114,13 +114,13 @@ behaviour from C's plan 6a on; the engine replays them from the `model_download`
 `view_warnings` fixtures.
 D (scripts in the browser) is in progress, its second plan built: `scriptCalls` runs user Python
 in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; at M, in
-Chromium, 10,000 script cells take 4,888 ms against the 2 s budget, over it (`K-100`)
+Chromium, 10,000 script cells take 2,284 ms prewarmed against CN-3's 3 s, within it (`K-100`)
 *(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-01)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `T-12` to `T-15`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-100`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -795,7 +795,33 @@ Fix direction: parse the file incrementally (a streaming or chunked reader that 
 ### K-93 · An integral float in a change request stages as an int · `open` · *2026-09-30*
 A CR crosses the frontend as parsed JSON (the dialog reads the file with `JSON.parse`, and a compare's answer is parsed as it arrives), so a float such as `1.0` in an added or modified entity becomes `1` before it is sent back or staged, on the engine path and the server path alike. Wire text reaches the engine untouched elsewhere (AD-26); a CR does not. Fix direction: read and keep a CR as text with `parseExact`'s float-preserving values on both sides, or send the file's bytes to the engine and let it read them.
 
-### K-100 · 10,000 script cells take 4.9 s in the browser against a 2 s budget · `open` · perf · *2026-09-30*
+### K-100 · 10,000 script cells took 4.9 s in the browser against a 2 s budget · `done` · perf · *2026-09-30*
+**Closed 2026-10-01.** The owner decided: a fresh worker per batch stays (K-105's isolation),
+CN-3's script-cell budget is now **≤ 3 s, measured prewarmed** (image and spares ready at the
+timer), the cold first use after the open is reported, not gated, and the pool keeps hot spares.
+What bounded the run, Chromium, cap 4, medians of 3 on a throwaway probe: as benched it took
+4.8 to 4.9 s, about 2 s of it a cold boot inside the timer (the warm-up call ended before the
+maker's image existed, so the timed run found no spare). Prewarmed with the image and one spare
+ready it took 2,686 ms; with four hot spares 2,364 / 2,547 / 2,616 / 2,464 ms across sessions (two
+spares: 2,673). What did not help: dropping `call-start` / `call-end` (noise); booting ahead past
+the cap (+3%, eight interpreters contend); splitting batches across workers (chunks of 500: 3.1 s,
+250: 7.4 s, work-stealing about the control), the lost memo negligible. The split of one run
+(batch 5, cap 4): Python `json` 27%, FFI 7%, post, queue and wake 45%, the engine core 2%, the
+Python facade 20%; a zero-cost codec would project to 1.86 s at best. Reusing workers across
+batches measured 1.73 to 1.77 s (no boots, 374 against 450 µs per trip) but breaks K-105's
+fresh-worker-per-batch isolation, so it is not taken; an idea for later that keeps K-105's
+cross-member guarantee: reuse a worker only across batches of the same author (the last editor).
+The change: once asked (`run`, `boot`, `prewarm`, `warmed`) the pool fills every free slot with a
+spare as soon as the image is ready, starts none while the maker works, refills a finished
+batch's slot, and keeps the idle shrink (spares beyond one end after `spareIdleMs` and stay ended
+until the next ask); `scriptWarm` (a service route over `ScriptHost.warmed()`) lets the bench wait
+until `cap` spares are ready. Closing measurement (`engine-bench-browser`, 2026-10-01, median of 3):
+**2,284 ms** [2,284 2,283 2,360] against 3,000, within budget, with four spares ready at the timer;
+the first use's cold boot 2,102 ms [2,044 2,102 2,125] is its own row. Cost: `cap` interpreters
+stay resident (about 90 MB each) while the pool is hot.
+
+The record below is the earlier measurement and its split.
+
 The first measurement, on one warm script worker (Chromium 148, Ryzen 9 3900X under WSL2, load 1.4,
 median of 3): ten scripts over 1,000 `Microservice` ids each through `scriptCalls` on one warm script
 worker: 3,276 ms [4,481 3,276 3,139] against CN-3's 2,000, in 10,850 trips at 289 µs
