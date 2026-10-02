@@ -821,9 +821,18 @@ the first use's cold boot 2,102 ms [2,044 2,102 2,125] is its own row. Cost: `ca
 stay resident (about 90 MB each) while the pool is hot.
 
 The same ten scripts as table columns over those 1,000 rows, exported as csv through the engine
-(`engine-bench-browser`, 2026-10-02, median of 3, one fill): **2,765 ms** [2,735 2,775 2,765]
+(`engine-bench-browser`, 2026-10-02, median of 3, one round): **2,765 ms** [2,735 2,775 2,765]
 against 3,000, within budget (`script table export (10,000 cells)`, gated). Cached, not gated: the
 same export again 34 ms, the first page of 500 rows 28 ms.
+
+Attribution of the slice rows (2026-10-02, medians of 3, same HEAD): once as benched (`scripts:
+'evaluate'`, the table export before `transitions()`, ~10,000 cells in the cache) and once with the
+option off and the table export skipped. Open slice 55 / 49; digest check 11 / 11; sweep 12 / 10; table
+16 / 29; exports 32 / 23 (passes 32 23 36 / 23 22 24); download 19 / 21; rescan 38 / 39; candidateIssues
+29 / 28; stage 1,000 ops 69 / 66; unstage all 96 / 92; applyDelta 17 / 16; `exportTable: csv` 407 / 347 ms;
+`evaluateTable` first page 167 / 248 ms. Only the exports' slice and csv time moved the same way in two
+of three passes beyond the other rows' spread (about +9 ms and +60 ms); the table row moved the other way
+and the rest are within noise. The exports' slice is `K-113`.
 
 The record below is the earlier measurement and its split.
 
@@ -1053,6 +1062,13 @@ The harness swaps `sys.stdout` around each call without a lock, so the sweep thr
 can leave a `_CappedStdout` installed and the child answered nothing; `tests/golden/scripted.py` writes its
 answer through `sys.__stdout__` to get past it. A real fix is a lock or a per-thread stream in
 `core/script/harness_src.py` (frozen: lands on both sides with a fixture).
+
+### K-113 · The exports' longest slice is 32 ms with the option on, 23 ms with it off · `open` · perf · *2026-10-02*
+`engine-bench-browser` with `scripts: 'evaluate'` and ~10,000 cached script cells ahead of
+`transitions()` shows `longest staged round trip during the exports` at 32 ms [32 23 36], against 23 ms
+[23 22 24] without them (the README's 2026-09-28 figure is 23 ms), and `exportTable: csv` at 407 against
+347 ms. Both are over CN-3's 16 ms either way; the delta suggests the cache's bookkeeping or the filled
+path runs in a slice. Not analysed, nothing tuned.
 
 ### T-15 · Full-run flakes in e2e and the frontend's download-route test · `open` · *2026-10-01*
 In the full `pixi run frontend-test-e2e` run of the scripts plan's last task, `e2e/eval-exports.spec.ts:176`

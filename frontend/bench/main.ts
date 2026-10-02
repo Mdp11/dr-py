@@ -537,6 +537,21 @@ async function scripts(): Promise<Measures> {
 	};
 }
 
+/** The records of a csv text: a newline inside a quoted field does not end one. */
+function csvRows(csv: string): number {
+	let rows = 0;
+	let quoted = false;
+	let open = false;
+	for (const c of csv) {
+		if (c === '"') quoted = !quoted;
+		if (c === '\n' && !quoted) {
+			if (open) rows++;
+			open = false;
+		} else if (c !== '\r') open = true;
+	}
+	return open ? rows + 1 : rows;
+}
+
 async function scriptTable(): Promise<Measures> {
 	if (link === null) throw new Error('open first');
 	const client = link.client;
@@ -566,20 +581,24 @@ async function scriptTable(): Promise<Measures> {
 	const exported = async () => {
 		const file = await client.call<ExportFileResult>('exportTable', params);
 		const csv = file.parts.map((part) => new TextDecoder().decode(part)).join('');
+		// A script cell that failed or was not computed renders as `#ERROR: ...`, so the
+		// scan is complete; `script_errors` says the same of the file.
 		if (file.script_errors || csv.includes('#ERROR')) {
 			throw new Error('a script table cell holds an error');
 		}
-		return csv.split('\n').filter((line) => line !== '').length;
+		if (file.truncated) throw new Error('the script table export is truncated');
+		return csvRows(csv);
 	};
 
 	// The pool's spares are ready before the timer, as in `scripts()`.
 	await client.call('scriptWarm');
 	const roundsBefore = scriptRounds;
 	const start = now();
-	const lines = await exported();
+	const records = await exported();
 	const wall = now() - start;
 	const rounds = scriptRounds - roundsBefore;
-	if (lines < SCRIPT_IDS + 1) throw new Error(`the script table's csv holds ${lines} lines`);
+	if (records !== SCRIPT_IDS + 1)
+		throw new Error(`the script table's csv holds ${records} records`);
 	const again = now();
 	await exported();
 	const cached = now() - again;
@@ -594,7 +613,7 @@ async function scriptTable(): Promise<Measures> {
 		throw new Error(`the script table's page holds ${page.rows.length} rows`);
 	return {
 		'script table export (10,000 cells)': wall,
-		'  script fills in it (count)': rounds,
+		'  script rounds in it (count)': rounds,
 		'script table export (cached)': cached,
 		'script table first page (cached)': firstPage
 	};
