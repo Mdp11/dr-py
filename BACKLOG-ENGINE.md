@@ -120,9 +120,9 @@ evaluates navigation script steps, table script columns, export transforms and t
 recap through a cell cache evicted by read-set (AD-34), with no option, and runs the console's
 snippets (`runSnippet`, CT-4); a client with an engine sends `X-Data-Rover-Scripts: engine-only` and
 the server answers 409 `scripts need the engine` instead of running scripts.
-At M, in Chromium, 10,000 script cells take 2,284 ms prewarmed through `scriptCalls` and 2,765 ms as table
+At M, in Chromium, 10,000 script cells take 2,405 ms prewarmed through `scriptCalls` and 2,714 ms as table
 columns exported as csv, against CN-3's 3 s (`K-100`) *(measured, Chromium 148, Ryzen 9 3900X under WSL2,
-median of 3, 2026-10-01 and 2026-10-02)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`,
+median of 3, 2026-10-02)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`,
 `K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `K-115`, `T-12` to `T-15`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
@@ -834,6 +834,17 @@ The same ten scripts as table columns over those 1,000 rows, exported as csv thr
 against 3,000, within budget (`script table export (10,000 cells)`, gated). Cached, not gated: the
 same export again 34 ms, the first page of 500 rows 28 ms.
 
+Re-measured after plan 4 (`engine-bench-browser`, 2026-10-02, median of 3, the bench's whole run, machine
+quiet): **2,714 ms** [2,700 2,714 2,805] against 3,000, within budget. An earlier run of the same bench
+showed 3,233 ms [3,233 3,466 3,213], over budget, and was the bench's own doing: its ping loop (a `staged`
+round trip posted as each is answered, about 12,300 in an export) ran during the timed export and shared the
+worker's thread with the script bridge, which cost about 110 ms there and on the pre-plan-4 tree alike (paired
+passes, ping on and off, same session: 2,867 against 2,755 at HEAD, 2,883 against 2,767 before plan 4; with the
+ping off HEAD equals the older tree). The ping now runs on a separate, untimed export of the table under
+another code text (one full fill round, no cell cached), so the gated row is the export alone. The machine
+drifts about 5% between minutes (the same HEAD measured 3,233, about 3,180 and 2,925 ms with the ping in): read
+a gate figure against a baseline taken in the same session.
+
 Attribution of the slice rows (2026-10-02, medians of 3, same HEAD): once as benched (`scripts:
 'evaluate'`, the table export before `transitions()`, ~10,000 cells in the cache) and once with the
 option off and the table export skipped. Open slice 55 / 49; digest check 11 / 11; sweep 12 / 10; table
@@ -1081,8 +1092,14 @@ It does not block: a Pyodide worker is single-threaded, so the engine has no swe
 `transitions()` shows `longest staged round trip during the exports` at 32 ms [32 23 36], against 23 ms
 [23 22 24] without them (the README's 2026-09-28 figure is 23 ms), and `exportTable: csv` at 407 against
 347 ms. Both are over CN-3's 16 ms either way; the delta suggests the cache's bookkeeping or the filled
-path runs in a slice. Not analysed, nothing tuned. Plan 4 slices the settle and `put` (`K-114` (4)); the
-re-measure after it is recorded with the plan's bench run.
+path runs in a slice. Not analysed, nothing tuned. Plan 4 slices the settle and `put` (`K-114` (4)).
+
+Re-measure after plan 4 (`engine-bench-browser`, 2026-10-02, median of 3): `longest staged round trip during
+the exports (slice bound)` **22 ms** [22 22 35], still over 16 ms; the cache holds about 20,000 script cells
+ahead of it now (the timed table and the slice-bound export's). The script table's own row, `longest staged
+round trip during the script table (slice bound)`, measured on its separate full-round export with ~10,000
+cells already cached, is **58 ms** [58 72 46]: over 16 ms and above the 38 ms the ping showed beside the timed
+export, whose cache was empty. Why the same export's slice is longer with a warm cache is not analysed.
 
 ### K-114 · What the scripts evaluation leaves open · `open` · *2026-10-02*
 (1) The fill memo has no byte bound. It lives for one evaluation and is bounded by its scope; a bound that
@@ -1093,7 +1110,7 @@ unmetered and never yields (CN-3 risk). (4) Fixed for the settle and `CellCache.
 synchronous: a round's batching (`batchesOf`, one `parseExact` per call, outside the scheduler) and
 eviction's key computation (`touchedKeys`, `deletedKeys` in `transit`, inside the transition's slice, CN-3);
 nothing meters either.
-`window.bench.scriptTable()` is to ping during the export so that the bench sees a slice
+`window.bench.scriptTable()` pings during a separate, untimed export so that the bench sees a slice
 (`longest staged round trip during the script table (slice bound)`); it gated wall time only before that.
 (5) `entryArities` (`src/script/arity.ts`) refuses valid transforms the oracle accepts:
 `def transform(doc): return f"{doc:'>10}"` scans `null` and is a 422 `does not parse`; a form feed before

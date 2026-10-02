@@ -556,7 +556,8 @@ async function scriptTable(): Promise<Measures> {
 	if (link === null) throw new Error('open first');
 	const client = link.client;
 	const ids = await scriptIds(client);
-	const definition = {
+	// `tag` makes the code text, so every cell's cache key, differ from another table's.
+	const tableOf = (tag: string) => ({
 		row_source: {
 			kind: 'scope',
 			types: [SCRIPT_TYPE],
@@ -572,13 +573,14 @@ async function scriptTable(): Promise<Measures> {
 			{ kind: 'property', name: 'name' },
 			...SCRIPT_BODIES.map((body) => ({
 				kind: 'script',
-				snippet: { definition: { code: scriptCode(body) } }
+				snippet: { definition: { code: tag + scriptCode(body) } }
 			}))
 		],
 		sort: [{ column: 1 }]
-	};
-	const params = { definition, format: 'csv', date: '20240229', project: PROJECT_ID };
-	const exported = async () => {
+	});
+	const definition = tableOf('');
+	const exported = async (table: unknown) => {
+		const params = { definition: table, format: 'csv', date: '20240229', project: PROJECT_ID };
 		const file = await client.call<ExportFileResult>('exportTable', params);
 		const csv = file.parts.map((part) => new TextDecoder().decode(part)).join('');
 		// A script cell that failed or was not computed renders as `#ERROR: ...`, so the
@@ -587,22 +589,21 @@ async function scriptTable(): Promise<Measures> {
 			throw new Error('a script table cell holds an error');
 		}
 		if (file.truncated) throw new Error('the script table export is truncated');
-		return csvRows(csv);
+		const records = csvRows(csv);
+		if (records !== SCRIPT_IDS + 1)
+			throw new Error(`the script table's csv holds ${records} records`);
 	};
 
-	// The pool's spares are ready before the timer, as in `scripts()`.
+	// The pool's spares are ready before the timer, as in `scripts()`. No ping runs in the timed
+	// export: its trips share the worker's thread with the script bridge and cost about 4%.
 	await client.call('scriptWarm');
 	const roundsBefore = scriptRounds;
-	const stopPings = ping(client);
 	const start = now();
-	const records = await exported();
+	await exported(definition);
 	const wall = now() - start;
-	const slice = longest(await stopPings()).ms;
 	const rounds = scriptRounds - roundsBefore;
-	if (records !== SCRIPT_IDS + 1)
-		throw new Error(`the script table's csv holds ${records} records`);
 	const again = now();
-	await exported();
+	await exported(definition);
 	const cached = now() - again;
 	const pageStart = now();
 	const page = await client.call<TablePageBody>('evaluateTable', {
@@ -619,6 +620,16 @@ async function scriptTable(): Promise<Measures> {
 				throw new Error(`the script table's cached page holds a ${cell.kind} cell`);
 			}
 		}
+	}
+
+	// The slice bound has an export of its own, untimed: another code text, so no cell is cached
+	// and it runs a full round, with a ping loop beside it.
+	const sliceRoundsBefore = scriptRounds;
+	const stopPings = ping(client);
+	await exported(tableOf('# slice bound\n'));
+	const slice = longest(await stopPings()).ms;
+	if (scriptRounds - sliceRoundsBefore !== 1) {
+		throw new Error('the slice-bound export did not run one script round');
 	}
 	return {
 		'script table export (10,000 cells)': wall,
