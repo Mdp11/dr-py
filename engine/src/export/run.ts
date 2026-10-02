@@ -8,6 +8,7 @@ import { Meter } from '../navigation/evaluate.ts';
 import { ReadError } from '../read/errors.ts';
 import type { ReadParams } from '../read/params.ts';
 import type { Steps } from '../steps/steps.ts';
+import { resolveTransformSource } from '../script/snippets.ts';
 import { tableHasScript } from '../table/resolve.ts';
 import { answered, resolved } from '../table/route.ts';
 import type { TableDefinition } from '../table/schema.ts';
@@ -30,10 +31,12 @@ import {
 import {
 	exportContext,
 	exportFilesSteps,
+	isJsonFamily,
 	MEDIA_TYPES,
 	shipped,
 	splitRefusal,
 	templateVars,
+	transformFormatRefusal,
 	type ExportFileResult,
 	type ExportFiles
 } from './route.ts';
@@ -104,6 +107,32 @@ function entrySegments(
 	return splitRefusal(entry.format, entry.json_split) ?? segments;
 }
 
+/**
+ * The code of an entry's transform where the context reads scripts, else `null`: an entry whose
+ * transform is on a format that is not JSON-family, or does not resolve, is listed in `bad`.
+ */
+function entryTransform(
+	ctx: EvalContext,
+	entry: ExporterEntry,
+	label: string,
+	bad: string[]
+): string | null {
+	if (ctx.scripts === undefined || !hasEntryTransform(entry)) return null;
+	if (!isJsonFamily(entry.format)) {
+		bad.push(transformFormatRefusal(label, entry.format).detail);
+		return null;
+	}
+	try {
+		return resolveTransformSource(ctx.artifacts, entry.transform!, label);
+	} catch (error) {
+		if (error instanceof ReadError) {
+			bad.push(error.detail);
+			return null;
+		}
+		throw error;
+	}
+}
+
 /** An entry as the run renders it, or the refusal its table's resolution met. */
 type Planned = {
 	entry: ExporterEntry;
@@ -119,8 +148,10 @@ type Planned = {
  * table is looked up; then no entries, the output filename's tokens, and
  * the missing tables and bad templates, each list a 422 naming its entries.
  * A table's resolution that fails refuses when the run reaches its entry,
- * as the route's does. `${rev}` and the manifest's `model_rev` are the
- * committed rev.
+ * as the route's does. Where the context reads scripts an entry's transform
+ * runs, and the entries whose transform is on a format that is not JSON-family
+ * or does not resolve are one more list, a 422 after the others. `${rev}` and
+ * the manifest's `model_rev` are the committed rev.
  */
 export function runExportSteps(
 	ctx: EvalContext,
@@ -138,6 +169,7 @@ export function runExportSteps(
 
 	const missing: string[] = [];
 	const badTemplates: string[] = [];
+	const badTransforms: string[] = [];
 	const found = def.entries.map((entry) => {
 		const label = entry.name || entry.source.ref;
 		const table = ctx.artifacts.resolve(entry.source.ref);
@@ -146,13 +178,21 @@ export function runExportSteps(
 		const tableName = isTable ? table.name : entry.source.ref;
 		const segments = entrySegments(entry, tableName, vars);
 		if (typeof segments === 'string') badTemplates.push(`${label}: ${segments}`);
-		return { entry, tableName, segments: typeof segments === 'string' ? [] : segments };
+		return {
+			entry,
+			tableName,
+			segments: typeof segments === 'string' ? [] : segments,
+			transform: entryTransform(ctx, entry, label, badTransforms)
+		};
 	});
 	if (missing.length > 0) {
 		throw new ReadError(422, `missing table(s) for entries: ${missing.join(', ')}`);
 	}
 	if (badTemplates.length > 0) {
 		throw new ReadError(422, `invalid template for entries: ${badTemplates.join(', ')}`);
+	}
+	if (badTransforms.length > 0) {
+		throw new ReadError(422, `invalid transform for entries: ${badTransforms.join('; ')}`);
 	}
 
 	const tables = found.map(({ entry }): TableDefinition | ReadError => {
@@ -170,7 +210,7 @@ export function runExportSteps(
 
 	const modelRev = ctx.working?.rev ?? 0;
 	const meter = new Meter(0);
-	const planned = found.map(({ entry, tableName, segments }, i): Planned => {
+	const planned = found.map(({ entry, tableName, segments, transform }, i): Planned => {
 		const defn = tables[i]!;
 		const outName = entry.name ? substitute(entry.name, { name: tableName, ...vars }) : tableName;
 		const files =
@@ -184,7 +224,8 @@ export function runExportSteps(
 							name: outName,
 							format: entry.format,
 							vars,
-							jsonDoc: entry.json_doc
+							jsonDoc: entry.json_doc,
+							transform
 						},
 						meter
 					);
@@ -219,9 +260,11 @@ function* assembled(
 	if (wantManifest) taken.add(rpartition(MANIFEST_NAME, '.')[0]);
 	const manifestEntries: ManifestEntry[] = [];
 	let truncated = false;
+	let degraded = false;
 	for (const [i, { entry, tableName, segments, outName }] of planned.entries()) {
 		const res = results[i]!;
 		truncated ||= res.truncated;
+		degraded ||= res.degraded;
 		const prefix = segments.length > 0 ? segments.join('/') + '/' : '';
 		let paths: string[];
 		if (res.archive && !entry.split_folder) {
@@ -245,7 +288,7 @@ function* assembled(
 				table_name: tableName,
 				format: entry.format,
 				truncated: res.truncated,
-				degraded: false,
+				degraded: res.degraded,
 				files: paths,
 				transform: manifestTransform(entry.transform)
 			});
@@ -274,14 +317,14 @@ function* assembled(
 		const contentType = Object.hasOwn(MEDIA_TYPES, ext)
 			? MEDIA_TYPES[ext as keyof typeof MEDIA_TYPES]
 			: 'application/octet-stream';
-		return shipped(bytes, rpartition(path, '/')[2], contentType, truncated);
+		return shipped(bytes, rpartition(path, '/')[2], contentType, truncated, degraded);
 	}
 	const zipStem =
 		sanitizeStem(substitute(def.output.filename, { name: run.name, ...vars })) ||
 		sanitizeStem(run.name) ||
 		'export';
 	const zipped = yield* zipSteps(files, meter);
-	return shipped(zipped, `${zipStem}.zip`, 'application/zip', truncated);
+	return shipped(zipped, `${zipStem}.zip`, 'application/zip', truncated, degraded);
 }
 
 // -- the route -------------------------------------------------------------------

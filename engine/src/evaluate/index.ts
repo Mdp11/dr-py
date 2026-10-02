@@ -1,5 +1,6 @@
 import type { ArtifactSet } from '../artifacts/artifact-set.ts';
 import type { ScriptReader } from './fill.ts';
+import { previewTransform } from '../export/preview-transform.ts';
 import { exportTable, previewTableJson } from '../export/route.ts';
 import { runExporter, runExporterDraft } from '../export/run.ts';
 import type { Model } from '../model/model.ts';
@@ -48,6 +49,7 @@ export const EVALUATIONS: { readonly [method: string]: Evaluation } = {
 	evaluateTable,
 	exportTable,
 	previewTableJson,
+	previewTransform,
 	runExporter,
 	runExporterDraft,
 	validateView

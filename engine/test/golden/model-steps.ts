@@ -593,18 +593,19 @@ function exportBytes(result: ExportFileResult): Uint8Array {
  * a workbook's grid, or — for a zip — its members in order, each its path
  * plus its own text or grid.
  */
-function exported(result: ExportFileResult): unknown {
-	const { filename, content_type, truncated } = result;
+export function exported(result: ExportFileResult): unknown {
+	const { filename, content_type, truncated, script_errors } = result;
 	const bytes = exportBytes(result);
+	const shipped = { status: 200, filename, content_type, truncated, script_errors };
 	if (content_type === 'application/zip') {
 		const members = unzipSync(bytes);
 		const zip = Object.entries(members).map(([path, member]) => ({
 			path,
 			...recordedFile(path, member)
 		}));
-		return { status: 200, filename, content_type, truncated, file: { zip } };
+		return { ...shipped, file: { zip } };
 	}
-	return { status: 200, filename, content_type, truncated, file: recordedFile(filename, bytes) };
+	return { ...shipped, file: recordedFile(filename, bytes) };
 }
 
 /**

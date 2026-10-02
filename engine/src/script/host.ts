@@ -7,6 +7,8 @@ export type ScriptCall = {
 	readonly elementIds: readonly string[];
 	readonly inputs?: Value;
 	readonly doc?: Value;
+	/** The transform's document as JSON text, passed to the guest as written: its keys keep their order. Wins over `doc`. */
+	readonly docText?: string;
 };
 
 export type ScriptBatch = {

@@ -127,6 +127,7 @@ from data_rover.api.schemas import (
     RulesStatusOut,
     RunExportIn,
     TableRowOut,
+    TransformPreviewIn,
     ValidateRequest,
 )
 from data_rover.api.search import SearchQueryIn
@@ -668,6 +669,18 @@ def _read(
                 runner=runner,
                 settings=settings,
             )
+        case "previewTransform":
+            with mock.patch.object(
+                table_export_engine, "datetime", _clock(params["date"])
+            ):
+                return export_routes.preview_transform(
+                    _payload(TransformPreviewIn, {"entry": params["entry"]}),
+                    project_id="p",
+                    session=session,
+                    db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
+                    runner=runner,
+                    settings=settings,
+                )
         case "previewTableJson":
             return table_routes.json_preview(
                 _payload(EvaluateTableIn, params),
@@ -766,6 +779,7 @@ def _shipped(response: Response) -> dict[str, Any]:
         "filename": filename,
         "content_type": content_type,
         "truncated": response.headers.get("x-table-truncated") == "true",
+        "script_errors": response.headers.get("x-table-script-errors") == "true",
         "file": file,
     }
 
@@ -809,6 +823,12 @@ def _export(
                 runner=runner,
                 settings=settings,
             )
+    if response.status_code == 202:
+        # a sweep is filling the cache: the recorder asks again (see ``_answer``)
+        return {
+            "status": 202,
+            "script_status": json.loads(bytes(response.body)),
+        }
     return _shipped(response)
 
 

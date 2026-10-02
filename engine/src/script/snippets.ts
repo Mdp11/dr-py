@@ -9,6 +9,7 @@ import type { ArtifactSet } from '../artifacts/artifact-set.ts';
 import type { EntryTransform } from '../export/schema.ts';
 import type { SnippetFetch } from '../navigation/resolve.ts';
 import { ReadError } from '../read/errors.ts';
+import { entryArities } from './arity.ts';
 import { pyRepr } from '../value/repr.ts';
 import { PyFloat, type Value } from '../value/types.ts';
 
@@ -91,22 +92,45 @@ export function snippetFetch(artifacts: ArtifactSet): SnippetFetch {
 	};
 }
 
+/** Whether `code` defines a top-level `transform` taking one argument, which is what `derive_entry_points` accepts. */
+const definesTransform = (code: string): boolean =>
+	(entryArities(code, 'transform') ?? []).includes(1);
+
 /**
  * The code of an exporter entry's transform, `label` naming the entry in the
  * refusal. Every failure is a 422, none degrading to an untransformed export: a
- * ref that is no snippet, a source that is neither a ref nor inline code. The
- * code's own entry point, `transform(doc)`, is not checked here.
+ * ref that is no snippet, a source that is neither a ref nor inline code, code that
+ * does not parse (inline only: a saved snippet is not parsed first) or that defines no
+ * top-level `transform(doc)`. Unparseable is what `entryArities` can see of it.
  */
 export function resolveTransformSource(
 	artifacts: ArtifactSet,
 	transform: EntryTransform,
 	label: string
 ): string {
-	if (transform.definition !== null) return transform.definition.code;
+	if (transform.definition !== null) {
+		const { code } = transform.definition;
+		if (entryArities(code, 'transform') === null) {
+			throw new ReadError(422, `${label}: transform code does not parse`);
+		}
+		if (!definesTransform(code)) {
+			throw new ReadError(
+				422,
+				`${label}: transform code does not define a one-argument top-level transform(doc)`
+			);
+		}
+		return code;
+	}
 	if (transform.ref === null) throw new ReadError(422, `${label}: no transform configured`);
 	const snippet = snippetFetch(artifacts)(transform.ref);
 	if (snippet === null) {
 		throw new ReadError(422, `${label}: unknown transform snippet ${transform.ref}`);
+	}
+	if (!definesTransform(snippet.code)) {
+		throw new ReadError(
+			422,
+			`${label}: snippet ${transform.ref} does not define a one-argument top-level transform(doc)`
+		);
 	}
 	return snippet.code;
 }

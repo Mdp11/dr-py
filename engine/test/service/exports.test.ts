@@ -171,7 +171,7 @@ describe('export bytes over the port', () => {
 			filename: 'T.csv',
 			content_type: MEDIA_TYPES.csv,
 			truncated: false,
-			script_errors: 0
+			script_errors: false
 		});
 		expect(file.parts.length).toBeGreaterThan(0);
 		expect(file.parts.every((part) => part instanceof ArrayBuffer)).toBe(true);

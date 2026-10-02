@@ -149,11 +149,13 @@ function parseParams(code: string, open: number): [number, number] | null {
 	return null;
 }
 
-/** Parameter count of the first column-0 `def name(...)`; `null` when absent or unreadable. */
-export function entryArity(code: string, name = 'value'): number | null {
+/**
+ * The parameter counts of every column-0 `def name(...)`, in source order; `[]` when there is none
+ * and `null` when the code is unreadable.
+ */
+export function entryArities(code: string, name = 'value'): number[] | null {
 	const wanted = name.normalize('NFKC');
-	let found: number | null = null;
-	let seen = false;
+	const found: number[] = [];
 	const stack: string[] = [];
 	let lineStart = true;
 	let i = 0;
@@ -170,11 +172,10 @@ export function entryArity(code: string, name = 'value'): number | null {
 			lineStart = false;
 			continue;
 		}
-		if (lineStart && !seen) {
+		if (lineStart) {
 			DEF.lastIndex = i;
 			const m = DEF.exec(code);
 			if (m !== null && m[1]!.normalize('NFKC') === wanted) {
-				seen = true;
 				let at = i + m[0].length;
 				while (isBlank(code[at])) at++;
 				if (code[at] === '[') {
@@ -185,7 +186,7 @@ export function entryArity(code: string, name = 'value'): number | null {
 				if (code[at] !== '(') return null;
 				const params = parseParams(code, at);
 				if (params === null) return null;
-				found = params[0];
+				found.push(params[0]);
 				i = params[1];
 				lineStart = false;
 				continue;
@@ -206,4 +207,9 @@ export function entryArity(code: string, name = 'value'): number | null {
 		i++;
 	}
 	return stack.length === 0 ? found : null;
+}
+
+/** Parameter count of the first column-0 `def name(...)`; `null` when absent or unreadable. */
+export function entryArity(code: string, name = 'value'): number | null {
+	return entryArities(code, name)?.[0] ?? null;
 }

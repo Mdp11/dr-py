@@ -302,6 +302,17 @@ class SheetWriter {
 		this.spans = `1:${width}`;
 	}
 
+	/**
+	 * A row of one unformatted text in column A, below the rows written, outside every measure:
+	 * `ws.write(row, 0, text)` after `autofit`. A row that opens a block of 16 spans column A alone.
+	 */
+	notice(row: number, text: string): void {
+		const spans = row % 16 === 0 || this.pixels.length === 0 ? '1:1' : this.spans;
+		this.rows.push(
+			`<row r="${row + 1}" spans="${spans}"><c r="A${row + 1}" t="s"><v>${this.sst.add(text)}</v></c></row>`
+		);
+	}
+
 	private claim(col: number, pixels: number): void {
 		if (pixels > this.pixels[col]!) this.pixels[col] = pixels;
 	}
@@ -551,7 +562,9 @@ const CELL_STYLE = 2;
  * cell for every header but the row number's; then a tick a shared string;
  * then the parts zipped by `zipSteps`, the sheet's rows and the shared
  * strings passed as pieces, never joined. The sheet is named
- * `sheetTitle(sheetName)`. A lone surrogate refuses with Python's encoder
+ * `sheetTitle(sheetName)`. A `notice` is one more row, a text in column A, written
+ * after the autofit and the filter's range, as the server's notice for script cells
+ * that failed. A lone surrogate refuses with Python's encoder
  * error, positioned in the part it breaks first, before any part is zipped.
  */
 export function* buildWorkbookSteps(
@@ -560,7 +573,8 @@ export function* buildWorkbookSteps(
 	sheetName: string,
 	rows: readonly (readonly TableCell[])[],
 	rowNumberAt: number | null,
-	meter: Meter
+	meter: Meter,
+	notice: string | null = null
 ): Steps<Uint8Array> {
 	const ncols = headers.length;
 	const width = ncols - (rowNumberAt === null ? 0 : 1);
@@ -589,6 +603,13 @@ export function* buildWorkbookSteps(
 	const lastRow = rows.length;
 	const lastCell = ncols > 0 ? columnName(ncols - 1) + (lastRow + 1) : 'A1';
 	const range = lastCell === 'A1' ? 'A1' : `A1:${lastCell}`;
+	// The sheet's dimension holds the notice's cell.
+	let dimension = range;
+	if (notice !== null) {
+		sheet.notice(lastRow + 1, notice);
+		const noticeCell = `A${lastRow + 2}`;
+		dimension = ncols > 0 ? `A1:${columnName(ncols - 1)}${lastRow + 2}` : noticeCell;
+	}
 	const absolute = lastCell === 'A1' ? '$A$1' : `$A$1:$${columnName(ncols - 1)}$${lastRow + 1}`;
 	const filterArea = ncols > 0 ? `${quoteSheetName(title)}!${absolute}` : null;
 
@@ -609,7 +630,7 @@ export function* buildWorkbookSteps(
 		[
 			XML_DECLARATION +
 				`<worksheet xmlns="${MAIN_NS}" xmlns:r="${REL_NS}">` +
-				`<dimension ref="${range}"/>` +
+				`<dimension ref="${dimension}"/>` +
 				'<sheetViews><sheetView tabSelected="1" workbookViewId="0">' +
 				'<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
 				'<selection pane="bottomLeft"/></sheetView></sheetViews>' +

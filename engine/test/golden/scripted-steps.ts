@@ -3,6 +3,7 @@ import {
 	evaluateFilled,
 	EVALUATIONS,
 	type BatchRunner,
+	type ExportFileResult,
 	type Model,
 	type ReadParams,
 	type ScriptHost
@@ -10,6 +11,7 @@ import {
 import { BridgeDispatcher, dumpDefault, projectRoots } from '../../src/script/bridge.ts';
 import type { Bridge } from '../../src/script/host.ts';
 import {
+	exported,
 	startReplay,
 	type ArtifactLayer,
 	type Replay,
@@ -51,12 +53,15 @@ function withoutVolatile(node: unknown): unknown {
 	);
 }
 
-/** A scripted `read`: the evaluation run by fill until a pass holds no miss. */
+/** A scripted `read` or `export`: the evaluation run by fill until a pass holds no miss. */
 async function readScripted(replay: Replay, step: Step, host: ScriptHost): Promise<unknown> {
-	if (step.do !== 'read') throw new Error(`a scripted ${step.do} step is not replayed yet`);
+	if (step.do !== 'read' && step.do !== 'export') {
+		throw new Error(`a scripted ${step.do} step is not replayed`);
+	}
 	const method = step.method!;
 	if (!Object.hasOwn(EVALUATIONS, method)) throw new Error(`no evaluation ${method}`);
-	const params: ReadParams = step.params ?? {};
+	const params: ReadParams =
+		step.do === 'read' ? (step.params ?? {}) : { ...step.body!, date: step.date!, project: 'p' };
 	const { model, carried } = replay;
 	const base = { model, artifacts: carried.artifacts, placements: carried.placements };
 	const { value } = await evaluateFilled(
@@ -67,7 +72,7 @@ async function readScripted(replay: Replay, step: Step, host: ScriptHost): Promi
 			stdoutChars: STDOUT_CHARS
 		}
 	);
-	return withoutVolatile(value);
+	return step.do === 'export' ? exported(value as ExportFileResult) : withoutVolatile(value);
 }
 
 /**

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildWorkbook,
 	buildWorkbookSteps,
+	drain,
 	Meter,
 	PyFloat,
 	ReadError,
@@ -343,5 +344,58 @@ describe('buildWorkbookSteps', () => {
 		);
 		// Every cell and every shared string but the refused one, and not one push.
 		expect(yields).toBe(Math.floor((ROWS * 2 + ROWS + 1) / 1024));
+	});
+});
+
+describe('a notice row', () => {
+	const NOTICE = 'Some cells failed';
+	const grid = (rows: number, notice: string | null) =>
+		drain(
+			buildWorkbookSteps(
+				model,
+				['A', 'B'],
+				'S',
+				Array.from({ length: rows }, (_, i) => [value(`a${i}`), value(`b${i}`)]),
+				null,
+				new Meter(0),
+				notice
+			)
+		);
+	const sheetOf = (bytes: Uint8Array) => xlsxParts(bytes)['xl/worksheets/sheet1.xml']!;
+
+	// Each of these is what xlsxwriter writes for `build_workbook(..., notice_provider=...)`: a text
+	// in column A after the autofit, unformatted, below the filter's range.
+	it('is one more row of column A, unformatted, below the rows and outside the filter', () => {
+		const bytes = grid(2, NOTICE);
+		const sheet = sheetOf(bytes);
+		expect(sheet).toContain('<dimension ref="A1:B4"/>');
+		expect(sheet).toContain('<autoFilter ref="A1:B3"/>');
+		expect(sheet).toContain('<row r="4" spans="1:2"><c r="A4" t="s"><v>6</v></c></row>');
+		expect(xlsxParts(bytes)['xl/workbook.xml']).toContain('$A$1:$B$3');
+		const rows = readXlsx(bytes).rows;
+		expect(rows.at(-1)).toEqual([
+			{ v: NOTICE, t: 's' },
+			{ v: null, t: 'n' }
+		]);
+	});
+
+	it('does not move a column`s width', () => {
+		const plain = xlsxParts(grid(2, null))['xl/worksheets/sheet1.xml']!;
+		const noticed = sheetOf(grid(2, 'x'.repeat(400)));
+		const cols = (sheet: string) => /<cols>.*<\/cols>/.exec(sheet)![0];
+		expect(cols(noticed)).toBe(cols(plain));
+	});
+
+	it('spans column A alone where it opens a block of 16 rows', () => {
+		// The header and 15 rows fill the first block; the notice is the first row of the next.
+		expect(sheetOf(grid(15, NOTICE))).toContain('<row r="17" spans="1:1">');
+		expect(sheetOf(grid(14, NOTICE))).toContain('<row r="16" spans="1:2">');
+	});
+
+	it('leaves a workbook without one as it was', () => {
+		const plain = drain(
+			buildWorkbookSteps(model, ['A', 'B'], 'S', [[value('a0'), value('b0')]], null, new Meter(0))
+		);
+		expect(Buffer.compare(grid(1, null), plain)).toBe(0);
 	});
 });

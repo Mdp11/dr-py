@@ -6,8 +6,8 @@
  * of its entry is a `runtime` error, and a malformed read-set means "depends on
  * everything".
  */
-import { parseExact } from '../value/parse.ts';
-import { PyFloat, type Value } from '../value/types.ts';
+import { parseExact, parseOrdered } from '../value/parse.ts';
+import { PyFloat, type OrderedValue, type Value } from '../value/types.ts';
 
 export type EmbeddedEntry = 'value' | 'step' | 'transform';
 
@@ -39,7 +39,8 @@ export type ValuePayload =
 /** A step's nodes: element ids and terminal values alike; the navigation tells them apart. */
 export type StepPayload = { nodes: Value[] };
 
-export type TransformPayload = { kind: 'json'; value: Value };
+/** A transform's document, its objects with an array-index key `Map`s, so that their order is the transform's. */
+export type TransformPayload = { kind: 'json'; value: OrderedValue };
 
 /**
  * `payload` is set exactly when `error` is not. `reads` is `null` when the call
@@ -162,7 +163,8 @@ function decodeError(raw: Value): ScriptError | null {
 
 /**
  * The harness's `{payload, error, reads, stdout}` text for one call of `entry`,
- * parsed exactly (the guest's `json.dumps` writes `NaN` and `Infinity`). The
+ * parsed exactly (the guest's `json.dumps` writes `NaN` and `Infinity`; a
+ * transform's document is parsed by `parseOrdered`). The
  * envelope is the harness's, so a text that is not one throws; the payload and
  * the read-set are the guest's, so a malformed one is an answer: a `runtime`
  * error for the payload, `null` reads for the read-set. A call that errored or
@@ -170,7 +172,11 @@ function decodeError(raw: Value): ScriptError | null {
  * read-set.
  */
 export function parseScriptResult(text: string, entry: EmbeddedEntry): ScriptResult {
-	const answer = parseExact(text, { floatConstants: true });
+	const floats = { floatConstants: true };
+	// A transform returns a whole document, whose key order is part of it: the envelope is plain,
+	// its `value` may hold `Map`s.
+	const answer =
+		entry === 'transform' ? (parseOrdered(text, floats) as Value) : parseExact(text, floats);
 	if (!isDoc(answer)) return malformed('not an object');
 	for (const key of ['payload', 'error', 'reads', 'stdout']) {
 		if (!Object.hasOwn(answer, key)) return malformed(`no ${key}`);

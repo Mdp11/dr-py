@@ -28,6 +28,7 @@ import {
 	type RowNumberExportOptions,
 	type TableDefinition
 } from '../table/schema.ts';
+import { checkSnippetDefinition } from '../script/snippets.ts';
 import type { ExportFormat } from './route.ts';
 
 /** The most entries an exporter may hold. */
@@ -90,6 +91,7 @@ function readJsonDocument(d: Doc, where: string): JsonDocumentOptions {
 function readTransform(d: Doc, where: string): EntryTransform {
 	const { ref, definition } = readSnippetSource(d, where);
 	if (definition === null) return { ref, definition: null };
+	checkSnippetDefinition(definition, `${where}.definition`);
 	return { ref, definition: { code: str(definition as Doc, 'code', `${where}.definition`) } };
 }
 
@@ -102,7 +104,8 @@ function readColumnOverride(raw: unknown, where: string): ColumnOverride {
 	};
 }
 
-function readEntry(raw: unknown, where: string): ExporterEntry {
+/** One exporter entry as `readExporterDefinition` reads each of its entries. */
+export function readExporterEntry(raw: unknown, where: string): ExporterEntry {
 	const d = doc(raw, where);
 	const at = `${where}.source`;
 	return {
@@ -147,7 +150,7 @@ export function readExporterDefinition(raw: unknown, where: string): ExporterDef
 			filename: str(output, 'filename', at, ''),
 			manifest: bool(output, 'manifest', at, true)
 		},
-		entries: entries.map((entry, i) => readEntry(entry, `${where}.entries[${i}]`))
+		entries: entries.map((entry, i) => readExporterEntry(entry, `${where}.entries[${i}]`))
 	};
 }
 

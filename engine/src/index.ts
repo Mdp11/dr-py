@@ -111,6 +111,12 @@ export {
 	validateTokens
 } from './export/naming.ts';
 export {
+	PREVIEW_MAX_FILES,
+	previewTransform,
+	type TransformPreviewBody,
+	type TransformPreviewFile
+} from './export/preview-transform.ts';
+export {
 	exportContext,
 	exportFilesSteps,
 	exportRowsSteps,
@@ -390,6 +396,13 @@ export {
 } from './script/result.ts';
 export { resolveTransformSource, SNIPPET_KIND, snippetFetch } from './script/snippets.ts';
 export {
+	pyTypeName,
+	TRANSFORM_MAX_BYTES,
+	transformedSteps,
+	transformSteps,
+	type TransformOutcome
+} from './export/transform.ts';
+export {
 	MAX_SCRIPT_WARNINGS,
 	ScriptWarningLog,
 	type ScriptWarning,
@@ -598,12 +611,13 @@ export {
 	parseExact,
 	parseJson,
 	parseLines,
+	parseOrdered,
 	type ParseOptions
 } from './value/parse.ts';
 export { translatePyRegex, type PyRegex } from './value/regex.ts';
 export { pyRepr, pyReprValue, pyStr } from './value/repr.ts';
 export { pyDumps } from './value/serialize.ts';
-export { PyFloat, type Value } from './value/types.ts';
+export { PyFloat, type OrderedValue, type Value } from './value/types.ts';
 export { readDeltaText, readTailText, type Delta } from './working/delta.ts';
 export {
 	WorkingCopy,

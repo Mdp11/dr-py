@@ -342,14 +342,57 @@ describe('an export transform', () => {
 		expect(resolveTransformSource(set, { ref: 's1', definition: null }, label)).toBe(
 			'def transform(doc): return doc'
 		);
-		const staged = artifacts(artifact('s1', 'code_snippet', snippet('committed')));
-		stageUpdate(staged, 's1', snippet('staged'));
-		expect(resolveTransformSource(staged, { ref: 's1', definition: null }, label)).toBe('staged');
+		const staged = artifacts(
+			artifact('s1', 'code_snippet', snippet('def transform(doc):\n    return 0\n'))
+		);
+		const code = 'def transform(doc):\n    return 1\n';
+		stageUpdate(staged, 's1', snippet(code));
+		expect(resolveTransformSource(staged, { ref: 's1', definition: null }, label)).toBe(code);
 	});
 
 	it('answers its inline code', () => {
-		const transform = { ref: null, definition: { code: 'inline' } };
-		expect(resolveTransformSource(set, transform, label)).toBe('inline');
+		const code = 'def transform(doc):\n    return [doc]\n';
+		const transform = { ref: null, definition: { code } };
+		expect(resolveTransformSource(set, transform, label)).toBe(code);
+	});
+
+	const inline = (code: string) => refusal({ ref: null, definition: { code } });
+	const unparseable = 'entry 0: transform code does not parse';
+	const noEntry = 'entry 0: transform code does not define a one-argument top-level transform(doc)';
+
+	it('refuses inline code that does not parse, or that defines no transform of one argument', () => {
+		expect(inline('def transform(doc:\n    return doc\n').detail).toBe(unparseable);
+		expect(inline('x = (1,\n').detail).toBe(unparseable);
+		for (const code of [
+			'x = 1\n',
+			'def transform(a, b):\n    return a\n',
+			'def transform():\n    return 1\n',
+			'async def transform(doc):\n    return doc\n',
+			'if True:\n    def transform(doc):\n        return doc\n',
+			'def transformer(doc):\n    return doc\n'
+		]) {
+			expect([inline(code).status, inline(code).detail], code).toEqual([422, noEntry]);
+		}
+	});
+
+	it('takes a one-argument transform wherever it stands among the same name, as the oracle does', () => {
+		const code = 'def transform(a, b):\n    return a\n\ndef transform(doc):\n    return doc\n';
+		expect(resolveTransformSource(set, { ref: null, definition: { code } }, label)).toBe(code);
+	});
+
+	it('refuses a saved snippet that defines no transform of one argument, with its id', () => {
+		const saved = artifacts(
+			artifact('none', 'code_snippet', snippet('x = 1\n')),
+			artifact('two', 'code_snippet', snippet('def transform(a, b):\n    return a\n')),
+			artifact('broken', 'code_snippet', snippet('def transform(doc:\n'))
+		);
+		for (const ref of ['none', 'two', 'broken']) {
+			const error = refusal({ ref, definition: null }, saved);
+			expect([error.status, error.detail]).toEqual([
+				422,
+				`entry 0: snippet ${ref} does not define a one-argument top-level transform(doc)`
+			]);
+		}
 	});
 
 	it('refuses a ref that names no artifact with the oracle text', () => {

@@ -41,7 +41,9 @@ export class CodeIds {
  * The call's key: the id of its code, the entry, the ids it runs over, and the
  * texts of its resolved inputs and document (`null` for none). The code is
  * named by its id, so an edited snippet is a different key and a key does not
- * grow with the code.
+ * grow with the code. A document, which may be megabytes, follows the rest as
+ * it stands, after a NUL no dumped array ends in: a key is made by every read,
+ * and escaping the text would cost more than a slice may.
  */
 export function cellKey(
 	codeId: number,
@@ -50,7 +52,8 @@ export function cellKey(
 	inputsText: string | null,
 	docText: string | null
 ): CellKey {
-	return pyDumps([codeId, entry, [...elementIds], inputsText, docText]);
+	const key = pyDumps([codeId, entry, [...elementIds], inputsText]);
+	return docText === null ? key : `${key}\u0000${docText}`;
 }
 
 /**

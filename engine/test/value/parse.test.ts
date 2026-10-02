@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { needsExactParse, parseExact, parseLines, PyFloat } from '../../src/index.ts';
+import { needsExactParse, parseExact, parseLines, parseOrdered, PyFloat } from '../../src/index.ts';
 
 describe('needsExactParse', () => {
 	it('flags floats, big integers and bare constants in value position', () => {
@@ -60,5 +60,43 @@ describe('parseExact errors', () => {
 		for (const text of ['', '{', '[1,]', '{"a"}', '"open', '01', '1 2', '"bad \\x"', 'tru']) {
 			expect(() => parseExact(text), text).toThrow(SyntaxError);
 		}
+	});
+});
+
+describe('parseOrdered', () => {
+	it('keeps the order of an object that holds an array-index key, as a Map', () => {
+		const parsed = parseOrdered('{"b": 1, "10": {"2": 0, "1": [1.0]}, "2": 3, "a": {"x": 1}}');
+		expect(parsed).toBeInstanceOf(Map);
+		const map = parsed as Map<string, unknown>;
+		expect([...map.keys()]).toEqual(['b', '10', '2', 'a']);
+		const inner = map.get('10') as Map<string, unknown>;
+		expect([...inner.keys()]).toEqual(['2', '1']);
+		expect(inner.get('1')).toEqual([new PyFloat(1)]);
+		// An object without one is as `parseExact` makes it.
+		expect(map.get('a')).toEqual({ x: 1 });
+	});
+
+	it('takes only the keys a JS object sorts first for an index: canonical, below 2^32 - 1', () => {
+		for (const key of ['0', '7', '4294967294']) {
+			expect(parseOrdered(`{"z": 1, "${key}": 2}`), key).toBeInstanceOf(Map);
+		}
+		for (const key of ['-1', '01', '1.5', '4294967295', '1e3', ' 1', '']) {
+			expect(parseOrdered(`{"z": 1, "${key}": 2}`), key).not.toBeInstanceOf(Map);
+		}
+	});
+
+	it('keeps the position of a repeated key and the value of its last', () => {
+		const map = parseOrdered('{"3": 1, "a": 2, "3": 4}') as Map<string, unknown>;
+		expect([...map]).toEqual([
+			['3', 4],
+			['a', 2]
+		]);
+	});
+
+	it('reads everything else as parseExact does', () => {
+		const text = '[1, 1.0, 12345678901234567890, -0, NaN, "é\\u00e9", {"k": null}, {}]';
+		expect(parseOrdered(text, { floatConstants: true })).toEqual(
+			parseExact(text, { floatConstants: true })
+		);
 	});
 });

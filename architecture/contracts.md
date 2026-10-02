@@ -158,18 +158,26 @@ event     {event, …}                     engine → client, unsolicited
   `evaluateTable {definition | artifact_id, offset, limit}`, `previewTableJson {definition |
   artifact_id}` and the exports `exportTable {definition | artifact_id, format, date, project}`,
   `runExporter` and `runExporterDraft` (one body: `{artifact_id | definition, name, date,
-  project}`), each resolving every artifact it names — staged ones included — before its first
+  project}`) and `previewTransform {entry, date, project}`, each resolving every artifact it names — staged ones included — before its first
   step, so an artifact call that lands between its slices changes the next call's answer, never
   its own. `evaluateTable` keeps the order of its last 16 tables while the replica's `rev` and
   `staged_version` stand: a later page of one evaluates its own cells alone. The engine reads no
   clock: an export's `date` (`YYYYMMDD`, the UTC day of the call) and `project` (the
   project's id, non-empty) are params, else a 422 `date must be YYYYMMDD` / `project must be a
   non-empty string`; its `${rev}` and a manifest's `model_rev` are the committed `rev`. An
-  export answers `{parts, filename, content_type, truncated, script_errors: 0}`: the file's
+  export answers `{parts, filename, content_type, truncated, script_errors}`: `script_errors`
+  is `X-Table-Script-Errors`, a boolean, true when a script cell the export read was an error
+  (an xlsx file then ends in the server's notice row); the file's
   bytes as `ArrayBuffer`s of at most 4 MiB, transferred with the answer rather than copied (the
   engine's own are detached once it is posted), and the filename and media type the route's
   `Content-Disposition` and `Content-Type` carry; `previewTableJson` answers `{sample,
-  truncated}`. An export is a scan like any evaluation: a `stage` posted while it runs waits
+  truncated}`; `previewTransform` answers `POST /exports/preview-transform`'s body without its
+  `duration_ms`, `{files: [{filename, input, output, stdout, error}], split, truncated}`, `entry`
+  the exporter entry as drafted and `date` and `project` the split filenames' template tokens,
+  which the server reads off its clock and session. Where the replica evaluates scripts an export
+  runs its table's or its entries' `transform(doc)` once a file is shaped, the snippet's failure
+  a 422 of the export and a file's `error` of the preview, both held to the same size caps as the
+  server (8 MiB of compact JSON each way) and the same entry-point checks. An export is a scan like any evaluation: a `stage` posted while it runs waits
   for it, so it answers the state it ran on; a `close` or a divergence under it sends it back to
   start over on the next replica; either way it is answered once, and never with part of a
   file. `downloadModel {}` (params ignored) answers `GET /model/download`'s file over the

@@ -1,12 +1,14 @@
 """The entry arity of a snippet's top-level ``def``, which the engine scans for
 without a Python parser: parameter shapes, strings and comments that mention a
-``def``, nesting, and files that do not parse."""
+``def``, nesting, and files that do not parse. ``entry_points`` is what
+``derive_entry_points`` accepts of the code: an entry is in it when any
+top-level ``def`` of its name takes an accepted count."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from data_rover.core.script.lint import entry_arity
+from data_rover.core.script.lint import derive_entry_points, entry_arity
 
 from ..driver import scenario
 
@@ -62,6 +64,13 @@ _CASES: list[tuple[str, str]] = [
     ("def значение(a): pass\ndef value(a, b, c): pass", "value"),
     ("def step(a): pass", "step"),
     ("def transform(a): pass\ndef value(a, b): pass", "transform"),
+    ("def transform(a, b): pass\ndef transform(a): pass", "transform"),
+    ("def transform(a): pass\ndef transform(a, b): pass", "transform"),
+    ("def transform(a, b): pass\ndef value(a): pass\ndef transform(a, b, c): pass", "transform"),
+    ("def step(a, b): pass\ndef step(a): pass", "step"),
+    ("def value(a, b, c): pass\ndef value(a, b): pass", "value"),
+    ("def transform(a): pass\nx = (1,", "transform"),
+    ("def transform(a, b): pass\ndef transform(a", "transform"),
     ("def value(a): pass", "step"),
     ("", "value"),
     ("value = 1", "value"),
@@ -90,7 +99,12 @@ _UNPARSED: list[tuple[str, str]] = [
 def script_arity() -> Any:
     def row(case: tuple[str, str]) -> dict[str, Any]:
         code, name = case
-        return {"code": code, "name": name, "arity": entry_arity(code, name)}
+        return {
+            "code": code,
+            "name": name,
+            "arity": entry_arity(code, name),
+            "entry_points": derive_entry_points(code),
+        }
 
     return {
         "cases": [row(c) for c in _CASES],

@@ -138,18 +138,19 @@ describe('collect, fill, run again', () => {
 		]);
 	}, 60_000);
 
-	it('hands a call its inputs and document parsed exactly', async () => {
+	it('hands a call its inputs parsed exactly and its document as written', async () => {
 		const inputsText = '{"x": {"kind": "scalars", "values": [1.0, 12345678901234567890]}}';
+		const docText = '{"10": 1, "2": 2.0, "a": 3}';
 		const seen: ScriptBatch[] = [];
 		await evaluateFilled(
-			async (scripts) =>
-				scripts.read(call(TIMES_TEN, ['n1'], { inputsText, docText: '{"a": 2.0}' })),
+			async (scripts) => scripts.read(call(TIMES_TEN, ['n1'], { inputsText, docText })),
 			options(runnerOver(host, seen))
 		);
 		const [one] = seen[0]!.calls;
 		expect(one!.inputs).toEqual(parseExact(inputsText));
-		expect(one!.doc).toEqual(parseExact('{"a": 2.0}'));
-		expect(one!.doc).not.toEqual({ a: 2 });
+		// A parsed document would hold `2` before `10`.
+		expect(one!.docText).toBe(docText);
+		expect(one!.doc).toBeUndefined();
 	}, 60_000);
 
 	it('omits an input and a document it has no text for', async () => {
@@ -545,7 +546,7 @@ describe('the gates', () => {
 		};
 		const { ctx: exports } = exportFixture();
 		exports.artifacts.put([bareTable], []);
-		const reach = { source: { ref: 't_bare' }, format: 'csv', transform };
+		const reach = { source: { ref: 't_bare' }, format: 'json', transform };
 		return [
 			{
 				name: 'a table page',

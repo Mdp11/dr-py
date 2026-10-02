@@ -3,339 +3,606 @@
     {
       "code": "def value(): pass",
       "name": "value",
-      "arity": 0
+      "arity": 0,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, b, c): return 1",
       "name": "value",
-      "arity": 3
+      "arity": 3,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a, b=(1, 2), c=[3, 4]): pass",
       "name": "value",
-      "arity": 3
+      "arity": 3,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a, b={'k': 1, 'j': 2}, c=f(1, 2)): pass",
       "name": "value",
-      "arity": 3
+      "arity": 3,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a, b=')', c='#', d=\"(\"): pass",
       "name": "value",
-      "arity": 4
+      "arity": 4,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a, b=''')\n,''', c=1): pass",
       "name": "value",
-      "arity": 3
+      "arity": 3,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a=lambda x, y: x, b=2): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a: int, b: dict[str, int] = {}) -> list[int, str]: pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, /, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, b, /): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, *, b): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, *args): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, **kw): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, b=1, *args, c, **kw): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(*args): pass",
       "name": "value",
-      "arity": 0
+      "arity": 0,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(**kw): pass",
       "name": "value",
-      "arity": 0
+      "arity": 0,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a, b=2*3, c=2**3): pass",
       "name": "value",
-      "arity": 3
+      "arity": 3,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(\n    a,  # first, with a comma\n    b,\n    c,\n): pass",
       "name": "value",
-      "arity": 3
+      "arity": 3,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value (a, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value[T](a: T, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, \\\n  b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "@decorator\ndef value(a, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "@d(1, 2)\n@e\ndef value(a): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "class C:\n    def value(self, a, b): pass\n",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def other():\n    def value(a, b, c): pass\n",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "if True:\n    def value(a): pass\n",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a): pass\ndef value(a, b): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "async def value(a): pass\ndef value(a, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "async def value(a): pass",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "x = \"\"\"\ndef value(a, b)\n\"\"\"\ndef value(a): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "x = \"\"\"\ndef value(a, b)\n\"\"\"",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "x = '''def value(a)\n'''",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "# def value(a, b)\ndef value(a): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "# def value(a, b)\n",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "x = (1,\ndef value(a))",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "x = [\n1,\n]\ndef value(a, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "x = 1 \\\ndef value(a): pass",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "s = rb'\\'' \ndef value(a, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "s = f\"{d['k']}\" + F'{{'\ndef value(a): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "s = f\"{d[\"k\"]}\"\ndef value(a): pass",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "if 1:\n\tx = 1\ndef value(a,\tb):\n\treturn 1",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, b):\r\n    return 1\r\n",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "x = 1\r\ndef value(a):\r\n    pass\r\n",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def valué(a, b): pass",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def valué(a, b): pass",
       "name": "valué",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def ｖalue(a, b): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def значение(a): pass\ndef value(a, b, c): pass",
       "name": "value",
-      "arity": 3
+      "arity": 3,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def step(a): pass",
       "name": "step",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "step"
+      ]
     },
     {
       "code": "def transform(a): pass\ndef value(a, b): pass",
       "name": "transform",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "transform",
+        "value"
+      ]
+    },
+    {
+      "code": "def transform(a, b): pass\ndef transform(a): pass",
+      "name": "transform",
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "transform"
+      ]
+    },
+    {
+      "code": "def transform(a): pass\ndef transform(a, b): pass",
+      "name": "transform",
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "transform"
+      ]
+    },
+    {
+      "code": "def transform(a, b): pass\ndef value(a): pass\ndef transform(a, b, c): pass",
+      "name": "transform",
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
+    },
+    {
+      "code": "def step(a, b): pass\ndef step(a): pass",
+      "name": "step",
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "step"
+      ]
+    },
+    {
+      "code": "def value(a, b, c): pass\ndef value(a, b): pass",
+      "name": "value",
+      "arity": 3,
+      "entry_points": [
+        "script",
+        "value"
+      ]
+    },
+    {
+      "code": "def transform(a): pass\nx = (1,",
+      "name": "transform",
+      "arity": null,
+      "entry_points": []
+    },
+    {
+      "code": "def transform(a, b): pass\ndef transform(a",
+      "name": "transform",
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value(a): pass",
       "name": "step",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "value = 1",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def values(a): pass",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": [
+        "script"
+      ]
     },
     {
       "code": "def value(a): pass; x = 1",
       "name": "value",
-      "arity": 1
+      "arity": 1,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a, a): pass",
       "name": "value",
-      "arity": 2
+      "arity": 2,
+      "entry_points": [
+        "script",
+        "value"
+      ]
     },
     {
       "code": "def value(a): pass\nx = (1,",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value(a): pass\nx = 1)",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value(a): pass\nx = (1]",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value(a): pass\nx = 'abc",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value(a): pass\nx = '''abc",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value(a, b",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value:",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     }
   ],
   "unparsed": [
     {
       "code": "def value(a, b): pass\nx = = 1",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     },
     {
       "code": "def value(a, b):\nreturn 1",
       "name": "value",
-      "arity": null
+      "arity": null,
+      "entry_points": []
     }
   ]
 }

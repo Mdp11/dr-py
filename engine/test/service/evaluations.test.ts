@@ -48,6 +48,7 @@ describe('searchModel', () => {
 			'evaluateTable',
 			'exportTable',
 			'previewTableJson',
+			'previewTransform',
 			'runExporter',
 			'runExporterDraft',
 			'validateView'

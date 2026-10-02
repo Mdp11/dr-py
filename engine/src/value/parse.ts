@@ -1,4 +1,4 @@
-import { PyFloat, type Value } from './types.ts';
+import { PyFloat, type OrderedValue, type Value } from './types.ts';
 
 /**
  * A literal, in value position, that native `JSON.parse` would get wrong: a
@@ -35,16 +35,22 @@ const WHITESPACE = /[ \t\n\r]*/y;
  */
 export type ParseOptions = { floatConstants?: boolean; controlCharacters?: boolean };
 
+// An object property whose name reads as an array index sorts before the others.
+const ARRAY_INDEX = /^(?:0|[1-9][0-9]*)$/;
+const isArrayIndex = (key: string): boolean => ARRAY_INDEX.test(key) && Number(key) < 2 ** 32 - 1;
+
 class ExactParser {
 	private readonly text: string;
 	private readonly floatConstants: boolean;
 	private readonly controlCharacters: boolean;
+	private readonly ordered: boolean;
 	private pos = 0;
 
-	constructor(text: string, options: ParseOptions) {
+	constructor(text: string, options: ParseOptions, ordered = false) {
 		this.text = text;
 		this.floatConstants = options.floatConstants ?? false;
 		this.controlCharacters = options.controlCharacters ?? true;
+		this.ordered = ordered;
 	}
 
 	parse(): Value {
@@ -153,6 +159,10 @@ class ExactParser {
 
 	private object(): { [key: string]: Value } {
 		const out: { [key: string]: Value } = {};
+		// An ordered parse keeps the keys in the order they were read, to build a `Map` of them when
+		// one reads as an array index.
+		const order: [string, Value][] | null = this.ordered ? [] : null;
+		let indexed = false;
 		this.pos++;
 		this.skip();
 		if (this.text[this.pos] === '}') {
@@ -173,9 +183,16 @@ class ExactParser {
 				enumerable: true,
 				configurable: true
 			});
+			if (order !== null) {
+				order.push([key, value]);
+				indexed ||= isArrayIndex(key);
+			}
 			this.skip();
 			const ch = this.text[this.pos++];
-			if (ch === '}') return out;
+			if (ch === '}') {
+				// A `Map` is no `Value`: only `parseOrdered` asks for one, and types what it answers.
+				return indexed ? (new Map(order) as unknown as { [key: string]: Value }) : out;
+			}
 			if (ch !== ',') this.fail("Expecting ',' delimiter");
 		}
 	}
@@ -184,6 +201,15 @@ class ExactParser {
 /** Parses JSON exactly: floats as `PyFloat`, big integers as `bigint`. */
 export function parseExact(text: string, options: ParseOptions = {}): Value {
 	return new ExactParser(text, options).parse();
+}
+
+/**
+ * Parses JSON exactly, as `parseExact` does, with every object that holds a key
+ * that reads as an array index a `Map`: its keys keep the order they were
+ * written in, which an object would not.
+ */
+export function parseOrdered(text: string, options: ParseOptions = {}): OrderedValue {
+	return new ExactParser(text, options, true).parse();
 }
 
 /** Parses one JSON document, exactly, as fast as its content allows. */

@@ -67,6 +67,22 @@ describe('the keys', () => {
 		expect(new Set([base, ...others]).size).toBe(others.length + 1);
 	});
 
+	it('keeps a document as it stands, apart from none, an empty one and the same text as an input', () => {
+		const ids = new CodeIds();
+		const code = ids.id('def transform(doc): pass');
+		const doc = '{"10": "é\\n", "2": [1.0]}';
+		const key = cellKey(code, 'transform', [], null, doc);
+		expect(key.endsWith(`\u0000${doc}`)).toBe(true);
+		const keys = [
+			cellKey(code, 'transform', [], null, null),
+			cellKey(code, 'transform', [], null, ''),
+			cellKey(code, 'transform', [], doc, null),
+			cellKey(code, 'transform', [], null, `${doc} `),
+			key
+		];
+		expect(new Set(keys).size).toBe(keys.length);
+	});
+
 	it('does not grow with the code', () => {
 		const ids = new CodeIds();
 		const small = cellKey(ids.id('x'), 'value', ['a'], null, null);

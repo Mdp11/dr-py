@@ -155,7 +155,8 @@ function batchesOf(missed: ReadonlyMap<CellKey, ScriptCall>): Group[] {
 		group.calls.push({
 			elementIds: [...call.elementIds],
 			...(call.inputsText !== null && { inputs: parseExact(call.inputsText, FLOATS) }),
-			...(call.docText !== null && { doc: parseExact(call.docText, FLOATS) })
+			// A document goes to the guest as its text, so that the order of its keys stands.
+			...(call.docText !== null && { docText: call.docText })
 		});
 	}
 	return [...groups.values()].map(({ code, entry, keys, calls }) => ({

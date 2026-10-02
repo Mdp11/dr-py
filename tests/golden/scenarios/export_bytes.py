@@ -9,7 +9,12 @@ cannot hold. Steps are named by case, and later replays pick them by prefix:
 - ``xlsx_*``: workbooks read back as cell grids;
 - ``run_*``: exporters, saved and drafted, zipped and bare, and their
   refusals;
-- ``reach_*``: exports that reach a script or a transform.
+- ``reach_*``: exports that reach a script or a transform, as the server
+  answers them with no runner;
+- ``script_*``: exports and transform previews whose snippets run, on the
+  trusted runner in a child (see ``scripted.py``): script cells in every
+  format and an export's transform, each file of it, its refusals and the
+  preview; they come last, after a batch of bulk gadgets.
 """
 
 from __future__ import annotations
@@ -20,7 +25,8 @@ from typing import Any
 from data_rover.core.metamodel.schema import Metamodel
 
 from ..driver import scenario
-from ..model_steps import batch, export_step, read_step, run_steps
+from ..model_steps import batch, export_step, read_step
+from ..scripted import run_scripted
 from .table_rows import (
     _CODE,
     _ELEMENTS,
@@ -1043,6 +1049,862 @@ def _reach() -> list[dict[str, Any]]:
     ]
 
 
+# -- scripts ---------------------------------------------------------------------
+
+#: more gadgets than a transform preview's 200 files, named for a criterion no
+#: other table reads; ``i`` is an index-like key
+_BULK = 205
+_BULK_ELEMENTS = [
+    {
+        "kind": "create_element",
+        "temp_id": f"tmp_bulk{n}",
+        "type_name": "Gadget",
+        "properties": {"name": f"bulk-{n:03d}", "i": n},
+    }
+    for n in range(_BULK)
+]
+_BULK_ROWS = _scope_rows(
+    ["Gadget"], {"type": "name_id", "field": "name", "op": "contains", "value": "bulk-"}
+)
+
+
+def _fn(args: str, *lines: str, name: str = "value") -> dict[str, Any]:
+    body = "".join(f"    {line}\n" for line in lines)
+    return {"definition": {"code": f"def {name}({args}):\n{body}"}}
+
+
+_V_NAME = _fn("els", "return els[0].name")
+_V_TAGS = _fn("els", 'return els[0].get("tags") or []')
+_V_NUMBERS = _fn("els", "return [1, 1.0, 2.5, -0.0, 1e16, 2**70, None, True]")
+_V_NONE = _fn("els", "return None")
+_V_LINK = _fn(
+    "els",
+    'out = els[0].outgoing(stereotype="Links")',
+    "return out[0].destination() if out else None",
+)
+_V_BOOM = _fn(
+    "els",
+    'if int(els[0].id.split("-")[1]) % 3 == 0:',
+    '    raise KeyError("boom " + els[0].id)',
+    "return els[0].name",
+)
+_V_SYNTAX = {"definition": {"code": "def value(els:\n    return 1\n"}}
+_V_BAD_RETURN = _fn("els", 'return {"a": 1}')
+_V_BIG = _fn("els", 'return "y" * 45000')
+
+_T_WRAP = (
+    'def transform(doc):\n    print("n=%d" % len(doc))\n'
+    '    return {"count": len(doc), "doc": doc}\n'
+)
+_T_LIST = (
+    "def transform(doc):\n"
+    '    return [{"row": d} for d in doc] + [None, 1.5, "é", [1, [2]]]\n'
+)
+_T_DICT = 'def transform(doc):\n    return {"n": len(doc)}\n'
+_T_RAISE = 'def transform(doc):\n    raise ValueError("no way")\n'
+_T_BOOT = 'raise RuntimeError("boot")\n\ndef transform(doc):\n    return doc\n'
+_T_ORDER = "def transform(doc):\n    return dict(sorted(doc.items(), reverse=True))\n"
+_T_KEYS = (
+    "def transform(doc):\n"
+    '    return {"3": 1, "1": 2, "2": 3, "a": 4, "10": {"7": 0, "5": [1.0, 2**70]}}\n'
+)
+_T_ANY_ARITY = (
+    "def transform(a, b):\n    return None\n\ndef transform(doc):\n    return doc\n"
+)
+_T_ARITY_TWO = "def transform(a, b):\n    return None\n"
+_T_NOTHING = "x = 1\n"
+_T_BIG_RESULT = 'def transform(doc):\n    return ["x" * 1000] * 9000\n'
+_T_SURROGATE = 'def transform(doc):\n    return ["\\ud800"]\n'
+_T_SOME = (
+    "def transform(doc):\n"
+    '    if "dup" in str(doc):\n        raise KeyError("dup file")\n'
+    '    return {"ok": len(doc)}\n'
+)
+_T_NUMBERS = (
+    "def transform(doc):\n"
+    '    return {"a": 1.0, "b": 2**70, "c": -0.0, "d": [1e16, 0.1], "e": "é\\u2028"}\n'
+)
+
+_SCRIPT_ARTIFACTS: dict[str, dict[str, Any]] = {
+    "s_t_wrap": {"kind": "code_snippet", "payload": {"code": _T_WRAP}},
+    "s_t_list": {"kind": "code_snippet", "payload": {"code": _T_LIST}},
+    "s_t_dict": {"kind": "code_snippet", "payload": {"code": _T_DICT}},
+    "s_t_raise": {"kind": "code_snippet", "payload": {"code": _T_RAISE}},
+    "s_t_boot": {"kind": "code_snippet", "payload": {"code": _T_BOOT}},
+    "s_t_order": {"kind": "code_snippet", "payload": {"code": _T_ORDER}},
+    "s_t_keys": {"kind": "code_snippet", "payload": {"code": _T_KEYS}},
+    "s_t_any_arity": {"kind": "code_snippet", "payload": {"code": _T_ANY_ARITY}},
+    "s_t_arity_two": {"kind": "code_snippet", "payload": {"code": _T_ARITY_TWO}},
+    "s_t_nothing": {"kind": "code_snippet", "payload": {"code": _T_NOTHING}},
+    "s_t_big_result": {"kind": "code_snippet", "payload": {"code": _T_BIG_RESULT}},
+    "s_t_surrogate": {"kind": "code_snippet", "payload": {"code": _T_SURROGATE}},
+    "s_t_some": {"kind": "code_snippet", "payload": {"code": _T_SOME}},
+    "s_t_numbers": {"kind": "code_snippet", "payload": {"code": _T_NUMBERS}},
+    "t_sv": {
+        "kind": "table",
+        "payload": _table(
+            _BLOCKS,
+            _header(_el(), "Block"),
+            _header(_script(_V_NAME), "Name"),
+            _header(_script(_V_TAGS), "Tags"),
+            _header(_script(_V_NUMBERS), "Numbers"),
+            _header(_script(_V_NONE), "Nothing"),
+            _header(_script(_V_LINK), "Link"),
+            sort=[_asc(0)],
+        ),
+    },
+    "t_serr": {
+        "kind": "table",
+        "payload": _table(
+            _BLOCKS,
+            _header(_el(), "Block"),
+            _header(_script(_V_NAME), "Name"),
+            _header(_script(_V_BOOM), "Boom"),
+            _header(_script(_V_SYNTAX), "Syntax"),
+            _header(_script(_V_BAD_RETURN), "Bad"),
+            _header(_script({}), "Unset"),
+            sort=[_asc(0)],
+        ),
+    },
+    "t_tr_wrap": {
+        "kind": "table",
+        "payload": _with(
+            _table(_BLOCKS, _header(_el(), "Block"), _header(_prop("s"), "S")),
+            transform={"ref": "s_t_wrap"},
+        ),
+    },
+    "t_tr_list": {
+        "kind": "table",
+        "payload": _with(
+            _table(_BLOCKS, _header(_el(), "Block"), _header(_prop("s"), "S")),
+            transform={"ref": "s_t_list"},
+        ),
+    },
+    "t_tr_split": {
+        "kind": "table",
+        "payload": _with(
+            _PEOPLE_LINKED,
+            json_split=_split("${name}"),
+            transform={"ref": "s_t_wrap"},
+        ),
+    },
+    "t_tr_scripts": {
+        "kind": "table",
+        "payload": _with(
+            _table(
+                _BLOCKS,
+                _header(_el(), "Block"),
+                _header(_script(_V_NAME), "Name"),
+                _header(_script(_V_BOOM), "Boom"),
+                sort=[_asc(0)],
+            ),
+            transform={"ref": "s_t_wrap"},
+        ),
+    },
+    "t_bulk": {
+        "kind": "table",
+        "payload": _table(
+            _BULK_ROWS,
+            _header(_prop("i"), "I"),
+            _header(_prop("name"), "Name"),
+            sort=[_desc(0)],
+        ),
+    },
+    "t_bulk_split": {
+        "kind": "table",
+        "payload": _with(
+            _table(_BULK_ROWS, _header(_prop("i"), "I"), _header(_el(), "Gadget")),
+            json_split=_split("${name}"),
+            transform={"ref": "s_t_wrap"},
+        ),
+    },
+    "t_big": {
+        "kind": "table",
+        "payload": _table(
+            _BULK_ROWS, _header(_prop("i"), "I"), _header(_script(_V_BIG), "Big")
+        ),
+    },
+}
+_SCRIPT_ARTIFACTS["x_script"] = {
+    "kind": "exporter",
+    "payload": _exporter(
+        _entry("t_sv", format="csv"),
+        _entry("t_serr", format="csv", name="errors"),
+        _entry(
+            "t_blocks",
+            format="json",
+            name="wrapped",
+            transform={"ref": "s_t_wrap"},
+        ),
+    ),
+}
+
+
+def _scripted(step: dict[str, Any]) -> dict[str, Any]:
+    return {**step, "scripted": True}
+
+
+def _s_export(case: str, fmt: str, **source: Any) -> dict[str, Any]:
+    return _scripted(_export(f"script_{case}", fmt, **source))
+
+
+def _s_draft(case: str, definition: Any) -> dict[str, Any]:
+    return _scripted(_draft(f"script_{case}", definition))
+
+
+def _s_preview(case: str, entry: dict[str, Any]) -> dict[str, Any]:
+    step = read_step(
+        "previewTransform",
+        scripted=True,
+        entry=entry,
+        date=_DATE,
+        project="p",
+    )
+    return {**step, "case": f"script_{case}"}
+
+
+def _inline_transform(code: str) -> dict[str, Any]:
+    return {"definition": {"code": code}}
+
+
+def _scripts_cells() -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = []
+    for fmt in ("csv", "xlsx", "json", "jsonl"):
+        cases += [
+            _s_export(f"values_{fmt}", fmt, artifact_id="t_sv"),
+            _s_export(f"errors_{fmt}", fmt, artifact_id="t_serr"),
+        ]
+    cases += [
+        _s_export(
+            "expand_json",
+            "json",
+            definition=_table(
+                _BLOCKS,
+                _el(),
+                _nav(_inline(_ROW_LINKS)),
+                _script(_V_TAGS, "expand"),
+                _script(_V_NAME, source=_ref(1)),
+            ),
+        ),
+        _s_draft(
+            "run_clean",
+            _exporter(
+                _entry("t_sv", format="csv"),
+                _entry("t_sv", format="json", folder="j"),
+                _entry("t_sv", format="xlsx"),
+            ),
+        ),
+        _s_draft(
+            "run_errors",
+            _exporter(
+                _entry("t_sv", format="csv"),
+                _entry("t_serr", format="csv", name="errors"),
+                _entry("t_serr", format="xlsx", name="book"),
+                _entry("t_blocks", format="csv"),
+            ),
+        ),
+        _scripted(_saved_run("script_run_saved", "x_script")),
+        _s_draft(
+            "run_bare_errors",
+            _exporter(_entry("t_serr", format="json"), mode="bare"),
+        ),
+    ]
+    return cases
+
+
+def _scripts_transforms() -> list[dict[str, Any]]:
+    inline = _inline_transform("def transform(doc):\n    return doc\n")
+
+    def entry(table: str, **fields: Any) -> dict[str, Any]:
+        return _entry(table, **fields)
+
+    cases: list[dict[str, Any]] = [
+        _s_export("transform_table_json", "json", artifact_id="t_tr_wrap"),
+        _s_export("transform_table_jsonl_dict", "jsonl", artifact_id="t_tr_wrap"),
+        _s_export("transform_table_jsonl_list", "jsonl", artifact_id="t_tr_list"),
+        _s_export("transform_table_csv", "csv", artifact_id="t_tr_wrap"),
+        _s_export("transform_table_xlsx", "xlsx", artifact_id="t_tr_wrap"),
+        _s_export(
+            "transform_table_inline_json",
+            "json",
+            definition=_with(_table(_BLOCKS, _el(), _prop("s")), transform=inline),
+        ),
+        _s_export("transform_table_split_json", "json", artifact_id="t_tr_split"),
+        _s_export(
+            "transform_table_split_jsonl_list",
+            "jsonl",
+            definition=_with(
+                _PEOPLE_LINKED,
+                json_split=_split("${name}"),
+                transform={"ref": "s_t_list"},
+            ),
+        ),
+        _s_export("transform_table_scripts_json", "json", artifact_id="t_tr_scripts"),
+        _s_export("transform_table_bulk_split_json", "json", artifact_id="t_bulk_split"),
+        _s_export(
+            "transform_table_bad_split",
+            "json",
+            definition=_with(
+                _table(_BLOCKS, _el()),
+                json_split=_split("${name}${nope}"),
+                transform=inline,
+            ),
+        ),
+        _s_export(
+            "transform_table_bad_format_and_split",
+            "csv",
+            definition=_with(
+                _table(_BLOCKS, _el()),
+                json_split=_split("${name}${nope}"),
+                transform=inline,
+            ),
+        ),
+        _s_export(
+            "transform_table_empty",
+            "json",
+            definition=_with(_table(_BLOCKS, _el()), transform={}),
+        ),
+        _s_export(
+            "transform_table_not_a_snippet",
+            "json",
+            definition=_with(_table(_BLOCKS, _el()), transform={"ref": "n_links"}),
+        ),
+        _s_export(
+            "transform_table_gone",
+            "json",
+            definition=_with(_table(_BLOCKS, _el()), transform={"ref": "gone"}),
+        ),
+        _s_export(
+            "transform_table_floats",
+            "json",
+            definition=_with(
+                _table(_BLOCKS, _el()), transform={"ref": "s_t_numbers"}
+            ),
+        ),
+    ]
+    runs: list[tuple[str, dict[str, Any]]] = [
+        (
+            "run_transform_inline",
+            _exporter(
+                entry("t_blocks", format="json", transform=inline),
+                entry(
+                    "t_blocks",
+                    format="json",
+                    name="compact",
+                    json_doc={"pretty": False},
+                    transform=inline,
+                ),
+            ),
+        ),
+        (
+            "run_transform_mixed",
+            _exporter(
+                entry("t_blocks", format="csv"),
+                entry("t_blocks", format="json", transform={"ref": "s_t_wrap"}),
+                entry("t_probes", format="jsonl", transform={"ref": "s_t_list"}),
+                entry("t_blocks", format="json", name="same", transform=inline),
+                entry("t_blocks", format="json", name="same", transform=inline),
+                entry("t_blocks", format="jsonl", transform={}),
+            ),
+        ),
+        (
+            "run_transform_shared_code",
+            _exporter(
+                entry("t_blocks", format="json", transform={"ref": "s_t_dict"}),
+                entry(
+                    "t_probes",
+                    format="json",
+                    name="by ref",
+                    transform=_inline_transform(_T_DICT),
+                ),
+            ),
+        ),
+        (
+            "run_transform_split",
+            _exporter(
+                entry(
+                    "t_people",
+                    format="json",
+                    json_split=_split("${name}"),
+                    transform={"ref": "s_t_wrap"},
+                ),
+            ),
+        ),
+        (
+            "run_transform_split_fails",
+            _exporter(
+                entry(
+                    "t_people",
+                    format="json",
+                    json_split=_split("${name}"),
+                    transform={"ref": "s_t_some"},
+                ),
+            ),
+        ),
+        (
+            "run_transform_split_two",
+            _exporter(
+                entry(
+                    "t_alpha",
+                    format="json",
+                    json_split=_split("${name}-${id}"),
+                    transform={"ref": "s_t_wrap"},
+                ),
+                entry(
+                    "t_blocks",
+                    format="jsonl",
+                    json_split=_split("${name}"),
+                    split_folder=False,
+                    transform={"ref": "s_t_list"},
+                ),
+                mode="zip",
+            ),
+        ),
+        (
+            "run_transform_object_keys",
+            _exporter(
+                entry(
+                    "t_bulk",
+                    format="json",
+                    json_doc={"shape": "object", "key_column": 0, "pretty": False},
+                    transform={"ref": "s_t_order"},
+                ),
+            ),
+        ),
+        (
+            "run_transform_object_keys_identity",
+            _exporter(
+                entry(
+                    "t_bulk",
+                    format="json",
+                    json_doc={"shape": "object", "key_column": 0},
+                    transform=inline,
+                ),
+            ),
+        ),
+        (
+            "run_transform_key_order",
+            _exporter(entry("t_blocks", format="json", transform={"ref": "s_t_keys"})),
+        ),
+        (
+            "run_transform_scripts",
+            _exporter(
+                entry("t_sv", format="json", transform={"ref": "s_t_wrap"}),
+                entry("t_serr", format="jsonl", transform={"ref": "s_t_list"}),
+            ),
+        ),
+        (
+            "run_transform_dict_for_jsonl",
+            _exporter(entry("t_blocks", format="jsonl", transform={"ref": "s_t_dict"})),
+        ),
+        (
+            "run_transform_raise",
+            _exporter(
+                entry("t_blocks", format="json", transform={"ref": "s_t_raise"})
+            ),
+        ),
+        (
+            "run_transform_raise_named",
+            _exporter(
+                entry("t_blocks", format="csv"),
+                entry(
+                    "t_blocks",
+                    format="json",
+                    name="after ${name}",
+                    transform={"ref": "s_t_raise"},
+                ),
+            ),
+        ),
+        (
+            "run_transform_boot",
+            _exporter(entry("t_blocks", format="json", transform={"ref": "s_t_boot"})),
+        ),
+        (
+            "run_transform_over_input",
+            _exporter(entry("t_big", format="json", transform=inline)),
+        ),
+        (
+            "run_transform_over_result",
+            _exporter(
+                entry("t_blocks", format="json", transform={"ref": "s_t_big_result"})
+            ),
+        ),
+        (
+            "run_transform_surrogate",
+            _exporter(
+                entry("t_blocks", format="json", transform={"ref": "s_t_surrogate"})
+            ),
+        ),
+        (
+            "run_transform_on_error_fail",
+            _exporter(
+                entry(
+                    "t_serr",
+                    format="json",
+                    json_doc={"on_error": "fail"},
+                    transform=inline,
+                )
+            ),
+        ),
+        (
+            "run_transform_any_arity",
+            _exporter(
+                entry("t_blocks", format="json", transform={"ref": "s_t_any_arity"}),
+                entry(
+                    "t_blocks",
+                    format="json",
+                    name="inline",
+                    transform=_inline_transform(_T_ANY_ARITY),
+                ),
+            ),
+        ),
+        (
+            "run_transform_bare",
+            _exporter(
+                entry("t_blocks", format="json", transform={"ref": "s_t_wrap"}),
+                mode="bare",
+            ),
+        ),
+        (
+            "run_transform_object_key_missing",
+            _exporter(
+                entry(
+                    "t_blocks",
+                    format="json",
+                    json_doc={"shape": "object"},
+                    transform=inline,
+                )
+            ),
+        ),
+    ]
+    cases += [_s_draft(case, definition) for case, definition in runs]
+    return cases
+
+
+def _scripts_refusals() -> list[dict[str, Any]]:
+    inline = _inline_transform("def transform(doc):\n    return doc\n")
+    return [
+        _s_draft(
+            "refuse_lists",
+            _exporter(
+                _entry("gone", format="csv"),
+                _entry("t_blocks", format="csv", name="${nope}"),
+                _entry("t_blocks", format="xlsx", transform=inline),
+            ),
+        ),
+        _s_draft(
+            "refuse_templates_transforms",
+            _exporter(
+                _entry("t_blocks", format="json", transform={"ref": "gone"}),
+                _entry("t_blocks", format="csv", folder="/abs"),
+            ),
+        ),
+        _s_draft(
+            "refuse_transforms",
+            _exporter(
+                _entry("t_blocks", format="xlsx", name="book", transform=inline),
+                _entry("t_blocks", format="csv", transform={"ref": "s_transform"}),
+                _entry("t_blocks", format="json", transform={"ref": "gone"}),
+                _entry("t_blocks", format="json", transform={"ref": "s_step"}),
+                _entry("t_blocks", format="json", transform={"ref": "n_links"}),
+                _entry("t_blocks", format="json", transform={"ref": "s_t_arity_two"}),
+                _entry("t_blocks", format="json", transform={"ref": "s_t_nothing"}),
+                _entry(
+                    "t_blocks",
+                    format="json",
+                    name="inline parse",
+                    transform={"definition": {"code": "def nope(:\n"}},
+                ),
+                _entry(
+                    "t_blocks",
+                    format="json",
+                    name="inline nothing",
+                    transform=_inline_transform(_T_NOTHING),
+                ),
+                _entry(
+                    "t_blocks",
+                    format="json",
+                    name="inline arity",
+                    transform=_inline_transform(_T_ARITY_TWO),
+                ),
+                _entry(
+                    "t_blocks",
+                    format="json",
+                    name="async",
+                    transform=_inline_transform(
+                        "async def transform(doc):\n    return doc\n"
+                    ),
+                ),
+                _entry(
+                    "t_blocks",
+                    format="json",
+                    name="nested",
+                    transform=_inline_transform(
+                        "if True:\n    def transform(doc):\n        return doc\n"
+                    ),
+                ),
+                _entry("t_blocks", format="json", transform={}),
+            ),
+        ),
+        _s_draft(
+            "refuse_transform_bad_definition",
+            _exporter(
+                _entry(
+                    "t_blocks",
+                    format="json",
+                    transform={"definition": {"code": "x", "language": "js"}},
+                )
+            ),
+        ),
+        _s_draft(
+            "refuse_transform_both",
+            _exporter(
+                _entry(
+                    "t_blocks",
+                    format="json",
+                    transform={"ref": "s_t_wrap", "definition": {"code": "x"}},
+                )
+            ),
+        ),
+    ]
+
+
+def _entry_preview(table: str, **fields: Any) -> dict[str, Any]:
+    return _entry(table, **fields)
+
+
+def _scripts_previews() -> list[dict[str, Any]]:
+    wrap = {"ref": "s_t_wrap"}
+    inline = _inline_transform("def transform(doc):\n    return doc\n")
+    cases = [
+        _s_preview(
+            "preview_unsplit",
+            _entry_preview("t_blocks", format="json", transform=wrap),
+        ),
+        _s_preview(
+            "preview_unsplit_named",
+            _entry_preview(
+                "t_blocks", format="json", name="my ${name}", transform=inline
+            ),
+        ),
+        _s_preview(
+            "preview_jsonl_list",
+            _entry_preview("t_blocks", format="jsonl", transform={"ref": "s_t_list"}),
+        ),
+        _s_preview(
+            "preview_jsonl_dict",
+            _entry_preview("t_blocks", format="jsonl", transform={"ref": "s_t_dict"}),
+        ),
+        _s_preview(
+            "preview_scripts",
+            _entry_preview("t_sv", format="json", transform=wrap),
+        ),
+        _s_preview(
+            "preview_script_errors",
+            _entry_preview("t_serr", format="json", transform=wrap),
+        ),
+        _s_preview(
+            "preview_object_keys",
+            _entry_preview(
+                "t_bulk",
+                format="json",
+                json_doc={"shape": "object", "key_column": 0, "pretty": False},
+                transform={"ref": "s_t_order"},
+            ),
+        ),
+        _s_preview(
+            "preview_key_order",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_keys"}),
+        ),
+        _s_preview(
+            "preview_split_some_fail",
+            _entry_preview(
+                "t_people",
+                format="json",
+                json_split=_split("${name}"),
+                transform={"ref": "s_t_some"},
+            ),
+        ),
+        _s_preview(
+            "preview_split_table_own",
+            _entry_preview(
+                "t_alpha",
+                format="json",
+                json_split=_split("${name}-${id}-${rev}-${date}-${project}"),
+                transform=wrap,
+            ),
+        ),
+        _s_preview(
+            "preview_split_jsonl",
+            _entry_preview(
+                "t_blocks",
+                format="jsonl",
+                json_split=_split("${name}"),
+                transform={"ref": "s_t_list"},
+            ),
+        ),
+        _s_preview(
+            "preview_split_empty",
+            _entry_preview(
+                "t_empty",
+                format="json",
+                json_split=_split("${name}"),
+                transform=wrap,
+            ),
+        ),
+        _s_preview(
+            "preview_empty",
+            _entry_preview("t_empty", format="json", transform=wrap),
+        ),
+        _s_preview(
+            "preview_raise",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_raise"}),
+        ),
+        _s_preview(
+            "preview_boot",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_boot"}),
+        ),
+        _s_preview(
+            "preview_numbers",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_numbers"}),
+        ),
+        _s_preview(
+            "preview_bulk_unsplit",
+            _entry_preview("t_bulk", format="json", transform=wrap),
+        ),
+        _s_preview(
+            "preview_bulk_split",
+            _entry_preview(
+                "t_bulk_split",
+                format="json",
+                json_split=_split("${name}"),
+                transform=wrap,
+            ),
+        ),
+        _s_preview(
+            "preview_bulk_split_jsonl",
+            _entry_preview(
+                "t_bulk",
+                format="jsonl",
+                json_split=_split("bulk ${name}"),
+                transform={"ref": "s_t_list"},
+            ),
+        ),
+        # refused
+        _s_preview(
+            "preview_over_input",
+            _entry_preview("t_big", format="json", transform=inline),
+        ),
+        _s_preview(
+            "preview_over_result",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_big_result"}),
+        ),
+        _s_preview(
+            "preview_surrogate",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_surrogate"}),
+        ),
+        _s_preview("preview_xlsx", _entry_preview("t_blocks", format="xlsx", transform=wrap)),
+        _s_preview("preview_csv", _entry_preview("t_blocks", format="csv", transform=wrap)),
+        _s_preview(
+            "preview_csv_named",
+            _entry_preview("t_blocks", format="csv", name="book", transform=wrap),
+        ),
+        _s_preview("preview_none", _entry_preview("t_blocks", format="json")),
+        _s_preview("preview_empty_transform", _entry_preview("t_blocks", format="json", transform={})),
+        _s_preview(
+            "preview_gone",
+            _entry_preview("t_blocks", format="json", transform={"ref": "gone"}),
+        ),
+        _s_preview(
+            "preview_not_a_snippet",
+            _entry_preview("t_blocks", format="json", transform={"ref": "n_links"}),
+        ),
+        _s_preview(
+            "preview_arity",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_arity_two"}),
+        ),
+        _s_preview(
+            "preview_any_arity",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_any_arity"}),
+        ),
+        _s_preview(
+            "preview_inline_arity",
+            _entry_preview(
+                "t_blocks", format="json", transform=_inline_transform(_T_ARITY_TWO)
+            ),
+        ),
+        _s_preview(
+            "preview_inline_parse",
+            _entry_preview(
+                "t_blocks",
+                format="json",
+                transform={"definition": {"code": "def nope(:\n"}},
+            ),
+        ),
+        _s_preview(
+            "preview_missing_table",
+            _entry_preview("gone", format="json", transform=wrap),
+        ),
+        _s_preview(
+            "preview_not_a_table",
+            _entry_preview("n_links", format="json", transform=wrap),
+        ),
+        _s_preview(
+            "preview_bad_split",
+            _entry_preview(
+                "t_blocks",
+                format="json",
+                json_split=_split("${name}${nope}"),
+                transform=wrap,
+            ),
+        ),
+        _s_preview(
+            "preview_bad_split_and_key",
+            _entry_preview(
+                "t_blocks",
+                format="json",
+                json_split=_split("${name}${nope}"),
+                json_doc={"shape": "object"},
+                transform=wrap,
+            ),
+        ),
+        _s_preview(
+            "preview_key_missing",
+            _entry_preview(
+                "t_blocks",
+                format="json",
+                json_doc={"shape": "object"},
+                transform=wrap,
+            ),
+        ),
+        _s_preview(
+            "preview_key_out_of_range",
+            _entry_preview(
+                "t_blocks",
+                format="json",
+                json_doc={"shape": "object", "key_column": 9},
+                transform=wrap,
+            ),
+        ),
+        _s_preview(
+            "preview_bad_body",
+            {"source": {}, "format": "json"},
+        ),
+    ]
+    return cases
+
+
+def _scripts() -> list[dict[str, Any]]:
+    return [
+        batch(_BULK_ELEMENTS),
+        {"do": "artifacts", "_artifacts": {**_ARTIFACTS, **_SCRIPT_ARTIFACTS}},
+        *_scripts_cells(),
+        *_scripts_transforms(),
+        *_scripts_refusals(),
+        *_scripts_previews(),
+    ]
+
+
 def _steps() -> list[dict[str, Any]]:
     cases = [
         *_text(),
@@ -1053,7 +1915,8 @@ def _steps() -> list[dict[str, Any]]:
         *_runs(),
         *_reach(),
     ]
-    names = [step["case"] for step in cases]
+    scripts = _scripts()
+    names = [step["case"] for step in [*cases, *scripts] if "case" in step]
     assert len(set(names)) == len(names), "case names are unique"
     return [
         batch(_ELEMENTS),
@@ -1062,9 +1925,14 @@ def _steps() -> list[dict[str, Any]]:
         batch(_NAMED_LINKS),
         {"do": "artifacts", "_artifacts": _ARTIFACTS},
         *cases,
+        *scripts,
     ]
 
 
 @scenario("export_bytes")
 def export_bytes() -> Any:
-    return run_steps(Metamodel.model_validate(_metamodel()), _steps())
+    metamodel = Metamodel.model_validate(_metamodel())
+    return {
+        "metamodel": metamodel.model_dump(mode="json"),
+        "steps": run_scripted(metamodel, _steps()),
+    }

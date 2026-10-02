@@ -642,3 +642,169 @@ describe('a table with script columns', () => {
 		expect(new Set(shown).size).toBeGreaterThan(2);
 	}, 60_000);
 });
+
+describe('an export through a transform', () => {
+	type Shipped = { parts: ArrayBuffer[]; filename: string; script_errors: boolean };
+	type Preview = {
+		files: {
+			filename: string;
+			input: string;
+			output: string | null;
+			stdout: string;
+			error: object | null;
+		}[];
+		split: boolean;
+		truncated: boolean;
+	};
+
+	const NAMES = (tag: string) =>
+		`# ${tag}\ndef transform(doc):\n    return {"names": [d["element_0"] for d in doc]}\n`;
+	const PRINTS = (tag: string) =>
+		`# ${tag}\ndef transform(doc):\n    print("rows", len(doc))\n    return doc\n`;
+	const RAISING = (tag: string) => `# ${tag}\ndef transform(doc):\n    raise ValueError("no")\n`;
+	const SPINNING = (tag: string) =>
+		`# ${tag}\ndef transform(doc):\n    while True:\n        pass\n`;
+	const FAILS = '# fails\ndef value(els):\n    raise ValueError("no")\n';
+
+	const rows = { kind: 'scope', types: ['Node'], criteria: [] };
+	const table = (extra: object = {}, columns: object[] = []) => ({
+		row_source: rows,
+		columns: [{ kind: 'element' }, ...columns],
+		...extra
+	});
+	const params = (definition: object, format = 'json') => ({
+		definition,
+		format,
+		date: '20240229',
+		project: 'p'
+	});
+	const text = (file: Shipped) =>
+		new TextDecoder().decode(
+			new Uint8Array(file.parts.flatMap((part) => [...new Uint8Array(part)]))
+		);
+	const callsOf = (tracker: ReturnType<typeof tracked>, tag: string) =>
+		tracker.batches
+			.filter((batch) => batch.code.includes(`# ${tag}\n`))
+			.reduce((sum, batch) => sum + batch.ids.length, 0);
+	const names = (file: Shipped) => (JSON.parse(text(file)) as { names: string[] }).names;
+
+	it('writes what the transform returns, and keeps the call for the document it was asked about', async () => {
+		const { client, tracker } = await evaluating();
+		const definition = table({ transform: { definition: { code: NAMES('names') } } });
+		const first = await client.call<Shipped>('exportTable', params(definition));
+		expect(names(first)).toContain('one');
+		expect(first).toMatchObject({ filename: 'table.json', script_errors: false });
+		expect(callsOf(tracker, 'names')).toBe(1);
+		const second = await client.call<Shipped>('exportTable', params(definition));
+		expect(text(second)).toBe(text(first));
+		expect(callsOf(tracker, 'names')).toBe(1);
+	}, 60_000);
+
+	it('asks again for the document an edit staged changed, and for no other', async () => {
+		const { client, tracker } = await evaluating();
+		const definition = table({ transform: { definition: { code: NAMES('edited') } } });
+		const before = await client.call<Shipped>('exportTable', params(definition));
+		await stage(client, [rename('n1', 'uno')]);
+		const after = await client.call<Shipped>('exportTable', params(definition));
+		expect(names(after)).toContain('uno');
+		expect(names(after)).not.toContain('one');
+		expect(callsOf(tracker, 'edited')).toBe(2);
+		await client.call('unstage', { what: 'all' });
+		expect(text(await client.call<Shipped>('exportTable', params(definition)))).toBe(text(before));
+		expect(callsOf(tracker, 'edited')).toBe(2);
+	}, 60_000);
+
+	it('refuses with 422 when the transform raises', async () => {
+		const { client } = await evaluating();
+		const definition = table({ transform: { definition: { code: RAISING('raises') } } });
+		expect(await refusal(client.call('exportTable', params(definition)))).toEqual({
+			status: 422,
+			detail: 'table: transform failed (runtime): ValueError: no'
+		});
+	}, 60_000);
+
+	it('refuses a transform that times out and does not keep the timeout', async () => {
+		const { client, tracker } = await evaluating('evaluate', { callMs: 300, graceMs: 500 });
+		const definition = table({ transform: { definition: { code: SPINNING('spins') } } });
+		for (let attempt = 1; attempt <= 2; attempt++) {
+			const refused = await refusal(client.call('exportTable', params(definition)));
+			expect(refused.status).toBe(422);
+			expect(refused.detail).toMatch(/^table: transform failed \(timeout\): /);
+			expect(callsOf(tracker, 'spins')).toBe(attempt);
+		}
+	}, 60_000);
+
+	it('flags a file in which a script cell failed, and not one in which none did', async () => {
+		const { client } = await evaluating();
+		const column = { kind: 'script', snippet: { definition: { code: FAILS } } };
+		const failing = await client.call<Shipped>('exportTable', params(table({}, [column]), 'csv'));
+		expect(text(failing)).toContain('#ERROR');
+		expect(failing.script_errors).toBe(true);
+		const clean = await client.call<Shipped>('exportTable', params(table(), 'csv'));
+		expect(clean.script_errors).toBe(false);
+	}, 60_000);
+
+	it('is refused with 501, as it always was, where the replica was not opened to evaluate scripts', async () => {
+		const tracker = tracked();
+		trackers.push(tracker);
+		const client = connect(autoHost(), portPair(), { scripts: tracker.factory });
+		await openReplica(client, bridgeModel(), doc);
+		const transform = { definition: { code: NAMES('gated') } };
+		const gated = { status: 501, detail: 'reaches a script' };
+		expect(await refusal(client.call('exportTable', params(table({ transform }))))).toEqual(gated);
+		const entry = { source: { ref: 't_nodes' }, format: 'json', transform };
+		expect(
+			await refusal(client.call('previewTransform', { entry, date: '20240229', project: 'p' }))
+		).toEqual(gated);
+		expect(tracker.batches).toEqual([]);
+	}, 60_000);
+
+	describe('previewed', () => {
+		const saved = (payload: object) => [
+			{ id: 't_nodes', kind: 'table', name: 't_nodes', artifact_rev: 1, payload }
+		];
+		const preview = (client: Client, code: string, extra: object = {}) =>
+			client.call<Preview>('previewTransform', {
+				entry: {
+					source: { ref: 't_nodes' },
+					format: 'json',
+					transform: { definition: { code } },
+					...extra
+				},
+				date: '20240229',
+				project: 'p'
+			});
+
+		it('shows the document, what the transform made of it and what it printed', async () => {
+			const { client } = await evaluating();
+			await client.call('setArtifacts', { artifacts: saved(table()) });
+			const body = await preview(client, PRINTS('shows'));
+			expect(body).toMatchObject({ split: false, truncated: false });
+			expect(body.files).toHaveLength(1);
+			const [file] = body.files;
+			expect(file).toMatchObject({ filename: 't_nodes.json', error: null });
+			expect(file!.output).toBe(file!.input);
+			expect(file!.stdout).toMatch(/^rows \d+\n$/);
+			expect(Object.keys(body)).toEqual(['files', 'split', 'truncated']);
+			expect(Object.keys(file!)).toEqual(['filename', 'input', 'output', 'stdout', 'error']);
+		}, 60_000);
+
+		it('answers a transform that fails as the file`s own error, and a refused entry as 422', async () => {
+			const { client } = await evaluating();
+			await client.call('setArtifacts', { artifacts: saved(table()) });
+			const body = await preview(client, RAISING('previewed'));
+			expect(body.files[0]).toMatchObject({
+				output: null,
+				error: { kind: 'runtime', message: 'ValueError: no' }
+			});
+			expect(await refusal(preview(client, 'x = 1\n'))).toMatchObject({
+				status: 422,
+				detail: 't_nodes: transform code does not define a one-argument top-level transform(doc)'
+			});
+			expect(await refusal(preview(client, PRINTS('format'), { format: 'csv' }))).toMatchObject({
+				status: 422,
+				detail: "t_nodes: transform is only supported for JSON-family formats, not 'csv'"
+			});
+		}, 60_000);
+	});
+});

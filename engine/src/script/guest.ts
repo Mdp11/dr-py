@@ -136,11 +136,14 @@ random.seed()
 
 type Callable = ((...args: unknown[]) => unknown) & { destroy?: () => void };
 
-function callSpec(call: ScriptBatch['calls'][number]): Value {
+/** One call as the JSON object the guest reads; a `docText` is embedded as it stands. */
+function callText(call: ScriptBatch['calls'][number]): string {
 	const spec: { [key: string]: Value } = { element_ids: [...call.elementIds] };
 	if (call.inputs !== undefined) spec.inputs = call.inputs;
-	if (call.doc !== undefined) spec.doc = call.doc;
-	return spec;
+	if (call.doc !== undefined && call.docText === undefined) spec.doc = call.doc;
+	const text = dumpDefault(spec);
+	if (call.docText === undefined) return text;
+	return `${text.slice(0, -1)}, "doc": ${call.docText}}`;
 }
 
 /**
@@ -182,7 +185,7 @@ export function createGuest(
 				throw new Error(`${batch.calls.length} calls but ${roots.length} root texts`);
 			}
 			const rootTexts = batch.entry === 'transform' ? batch.calls.map(() => '[]') : [...roots];
-			const callsText = dumpDefault(batch.calls.map(callSpec));
+			const callsText = `[${batch.calls.map(callText).join(', ')}]`;
 			const consoleRun = batch.console === true || batch.entry === 'script';
 			const runner = py.globals.get('_dr_batch') as Callable;
 			let reply: unknown;

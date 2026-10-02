@@ -19,7 +19,7 @@ export type WireBatch = {
 	code: string;
 	entry: ScriptBatch['entry'];
 	console?: boolean;
-	calls: { elementIds: string[]; inputs?: WireValue; doc?: WireValue }[];
+	calls: { elementIds: string[]; inputs?: WireValue; doc?: WireValue; docText?: string }[];
 };
 
 function wire(value: Value): WireValue {
@@ -49,7 +49,8 @@ export function batchToWire(batch: ScriptBatch): WireBatch {
 		calls: batch.calls.map((call) => ({
 			elementIds: [...call.elementIds],
 			...(call.inputs !== undefined && { inputs: wire(call.inputs) }),
-			...(call.doc !== undefined && { doc: wire(call.doc) })
+			...(call.doc !== undefined && { doc: wire(call.doc) }),
+			...(call.docText !== undefined && { docText: call.docText })
 		}))
 	};
 }
@@ -62,7 +63,8 @@ export function batchFromWire(batch: WireBatch): ScriptBatch {
 		calls: batch.calls.map((call) => ({
 			elementIds: call.elementIds,
 			...(call.inputs !== undefined && { inputs: unwire(call.inputs) }),
-			...(call.doc !== undefined && { doc: unwire(call.doc) })
+			...(call.doc !== undefined && { doc: unwire(call.doc) }),
+			...(call.docText !== undefined && { docText: call.docText })
 		}))
 	};
 }

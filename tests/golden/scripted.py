@@ -38,7 +38,11 @@ def child_main() -> None:
     )
     for step in request["steps"]:
         recorder.run(step)
-    sys.stdout.write(json.dumps(recorder.document()["steps"]))
+    # A table's sweep runs snippets on threads, and the harness's print capture
+    # swaps ``sys.stdout`` without a lock, so one may be left in place.
+    stdout = sys.__stdout__
+    assert stdout is not None
+    stdout.write(json.dumps(recorder.document()["steps"]))
 
 
 def run_scripted(metamodel: Metamodel, steps: Iterable[dict[str, Any]]) -> list[dict]:
