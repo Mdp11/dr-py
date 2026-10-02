@@ -93,8 +93,8 @@ surface shows "scripts need the engine".
 - Answer: `stdout`, `result_repr`, `ops`, `error {kind, message, traceback}`, `truncated`,
   `duration_ms`, and `stamp {rev, staged}` — the working copy's committed rev and staged
   version when the run started. `run_id`, `model_rev` and `stale` go.
-- Every recorded op must be a model op (`update_element`, `delete_element`, `create_element`,
-  `create_relationship`, the facade's set); any other makes the run's answer an error of kind
+- Every recorded op must be a model op: one of the kinds `readOps` accepts (`src/read/wire.ts`
+  `OP_KINDS`: element and relationship create, update, delete); any other makes the run's answer an error of kind
   `runtime` with no ops. A script can call `_transport` directly, so this gate is the engine's,
   as it was the server route's.
 - `readScriptBatch` refuses `transform` with `console:true` (K-107 (1)).
