@@ -14,6 +14,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { server } from '../../../api/__tests__/server';
 import * as artifactsApi from '$lib/api/artifacts';
 import * as modelRead from '$lib/api/model-read';
+import * as snippetsApi from '$lib/api/snippets';
+import type { SnippetRunOut } from '$lib/api/snippets';
+import * as replica from '$lib/state/replica.svelte';
 import {
 	getArtifactHeaders,
 	getInlineEditorHeight,
@@ -29,7 +32,10 @@ import type { Artifact, ArtifactHeader, SnippetSource } from '$lib/api/types';
 import SnippetSourceEditor from '../SnippetSourceEditor.svelte';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-beforeEach(() => resetArtifacts());
+beforeEach(() => {
+	resetArtifacts();
+	vi.spyOn(replica, 'scriptsNeedEngine').mockReturnValue(false);
+});
 afterEach(() => {
 	server.resetHandlers();
 	resetArtifacts();
@@ -103,30 +109,26 @@ async function bindElement(id: string, label: string): Promise<void> {
 	click(option);
 }
 
-const OK_RUN_RESULT = {
-	run_id: 'r1',
+const OK_RUN_RESULT: SnippetRunOut = {
 	stdout: '',
 	result_repr: "['Alpha']",
 	ops: [],
 	error: null,
 	duration_ms: 3,
-	model_rev: 0,
-	stale: false,
+	stamp: { rev: 0, staged: 0 },
 	truncated: false
 };
 
-/** Capture the body of the next POST /snippets/run and answer `response`
+/** Answer the next engine run with `response`, keeping the body it was asked
  * (mirrors snippet-test-panel.test.ts's helper of the same name). */
-function captureRun(response: Record<string, unknown> = OK_RUN_RESULT): {
+function captureRun(response: SnippetRunOut = OK_RUN_RESULT): {
 	body: () => Record<string, unknown> | null;
 } {
 	let seen: Record<string, unknown> | null = null;
-	server.use(
-		http.post('*/snippets/run', async ({ request }) => {
-			seen = (await request.json()) as Record<string, unknown>;
-			return HttpResponse.json(response);
-		})
-	);
+	vi.spyOn(snippetsApi, 'runSnippet').mockImplementation((body) => {
+		seen = { ...body };
+		return Promise.resolve(response);
+	});
 	return { body: () => seen };
 }
 
@@ -524,28 +526,24 @@ describe('SnippetSourceEditor — test panel', () => {
 		server.use(
 			http.post('*/snippets/lint', () =>
 				HttpResponse.json({ diagnostics: [], entry_points: ['value'] })
-			),
-			http.post('*/snippets/run', () =>
-				HttpResponse.json({
-					run_id: 'r1',
-					stdout: '',
-					result_repr: null,
-					ops: [],
-					error: {
-						kind: 'runtime',
-						message: 'boom',
-						traceback:
-							'Traceback (most recent call last):\n' +
-							'  File "<snippet>", line 2, in value\n' +
-							'NameError: boom'
-					},
-					duration_ms: 3,
-					model_rev: 0,
-					stale: false,
-					truncated: false
-				})
 			)
 		);
+		captureRun({
+			stdout: '',
+			result_repr: null,
+			ops: [],
+			error: {
+				kind: 'runtime',
+				message: 'boom',
+				traceback:
+					'Traceback (most recent call last):\n' +
+					'  File "<snippet>", line 2, in value\n' +
+					'NameError: boom'
+			},
+			duration_ms: 3,
+			stamp: { rev: 0, staged: 0 },
+			truncated: false
+		});
 		const c = render(
 			inlineSnippet('def value(elements):\n    return undefined_name\n'),
 			'value',

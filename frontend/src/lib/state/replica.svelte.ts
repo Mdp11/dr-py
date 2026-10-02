@@ -66,6 +66,10 @@ import { getStagedViewDepth } from './view-edits.svelte';
 
 let _status = $state.raw<ReplicaStatus>(OFF);
 let _sync: ReplicaSync | null = null;
+/** Where the working copy stood at the last `changed` of the current link; null before the first one. */
+let _stamp = $state.raw<WorkingStamp | null>(null);
+/** Unsubscribes the stamp from the sync's `changed` events. */
+let _offStamp: (() => void) | null = null;
 let _deps: Partial<SyncDeps> | undefined;
 /** The switches, read at the first start and kept until `resetReplica()`; tracked so a `$derived` reading it stays live. */
 let _switches = $state.raw<Switches | null>(null);
@@ -187,6 +191,8 @@ function setStatus(status: ReplicaStatus): void {
 	const previous = _status;
 	if (status === previous) return;
 	_status = status;
+	// The staged version restarts with each worker: no stamp outlives its link.
+	if (status.phase !== 'ready') _stamp = null;
 	for (const listener of [..._statusListeners]) {
 		if (!_statusListeners.has(listener)) continue;
 		try {
@@ -207,6 +213,43 @@ export function subscribeReplicaStatus(listener: StatusListener): () => void {
 	return () => {
 		_statusListeners.delete(entry);
 	};
+}
+
+/** The committed rev and staged version of the engine's working copy. */
+export type WorkingStamp = { rev: number; staged: number };
+
+/** The working copy's stamp, or null when no `changed` of the current link has been heard. */
+export function getWorkingStamp(): WorkingStamp | null {
+	return _stamp;
+}
+
+/**
+ * Takes a run's stamp as the working stamp when none is known: a replica built
+ * again posts no `changed` for what it holds, and a later change moves it.
+ */
+export function adoptWorkingStamp(stamp: WorkingStamp): void {
+	if (_stamp === null) _stamp = { rev: stamp.rev, staged: stamp.staged };
+}
+
+/** Whether there is no engine to run scripts on: the replica is off or the server serves. Reactive. */
+export function scriptsNeedEngine(): boolean {
+	return _status.phase === 'off' || _status.phase === 'server';
+}
+
+/** One call to the engine; a cancelled `signal` rejects it locally. */
+export function callEngine<T>(method: string, params?: unknown, options?: CallOptions): Promise<T> {
+	if (_sync === null) return Promise.reject(new Error('the engine is not running'));
+	return _sync.call<T>(method, params, options);
+}
+
+function followStamp(sync: ReplicaSync): void {
+	_offStamp?.();
+	_stamp = null;
+	_offStamp = sync.on('changed', (event) => {
+		const current = _stamp;
+		if (current?.rev === event.rev && current.staged === event.staged_version) return;
+		_stamp = { rev: event.rev, staged: event.staged_version };
+	});
 }
 
 /** The model store's way into `sync`: its calls and `changed` events, and this store's status. */
@@ -358,6 +401,7 @@ export function startReplica(): void {
 	// Not with staging on legacy: attached, the engine half would move the
 	// structure rev on every delta the replica applies, as the legacy half does.
 	if (_switches?.staging === 'engine') attachEngine(engineHandle(sync));
+	followStamp(sync);
 	followIssues(sync);
 	followTables(sync);
 	followViews(sync);
@@ -571,6 +615,9 @@ export function metamodelIncludesStaged(): boolean {
 /** Every read goes to the server again; the sync forgets the placements, the engine half everything. */
 export function stopReplica(): void {
 	uninstallSeam();
+	_offStamp?.();
+	_offStamp = null;
+	_stamp = null;
 	stopFollowingIssues();
 	stopFollowingTables();
 	stopFollowingViews();
@@ -720,6 +767,9 @@ export function resetReplica(): void {
 	_sync = null;
 	_deps = undefined;
 	uninstallSeam();
+	_offStamp?.();
+	_offStamp = null;
+	_stamp = null;
 	stopFollowingIssues();
 	stopFollowingTables();
 	stopFollowingViews();

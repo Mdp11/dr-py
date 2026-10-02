@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { errorKindLabel, isResultStale, opSummary, tracebackLines } from '../console-view';
 
 describe('console-view', () => {
-	it('flags staleness from the flag or a moved rev', () => {
-		expect(isResultStale({ stale: false, model_rev: 5 }, 5)).toBe(false);
-		expect(isResultStale({ stale: true, model_rev: 5 }, 5)).toBe(true);
-		expect(isResultStale({ stale: false, model_rev: 5 }, 6)).toBe(true);
+	it('flags staleness from either half of the stamp, or an unknown current one', () => {
+		const result = { stamp: { rev: 5, staged: 2 } };
+		expect(isResultStale(result, { rev: 5, staged: 2 })).toBe(false);
+		expect(isResultStale(result, { rev: 5, staged: 3 })).toBe(true);
+		expect(isResultStale(result, { rev: 6, staged: 2 })).toBe(true);
+		expect(isResultStale(result, null)).toBe(true);
 	});
 
 	it('labels every error kind, including the never-produced ones', () => {

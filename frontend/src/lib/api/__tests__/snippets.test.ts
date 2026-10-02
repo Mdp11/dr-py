@@ -1,59 +1,73 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from './server';
-import { cancelSnippet, lintSnippet, runSnippet } from '../snippets';
+import { lintSnippet, runSnippet } from '../snippets';
+import { ApiError } from '../errors';
+import type { ReplicaSync } from '$lib/engine/sync';
+import { configureReplica, resetReplica } from '$lib/state/replica.svelte';
 
 const BASE = 'http://api.test/api/v1/projects/p1';
 const CFG = { baseUrl: BASE };
 
 const RUN_OUT = {
-	run_id: 'r-1',
 	stdout: 'hello\n',
 	result_repr: "'x'",
 	ops: [
 		{ kind: 'create_element', temp_id: 'tmp_1', type_name: 'Building', properties: { name: 'B' } }
 	],
 	error: null,
+	truncated: false,
 	duration_ms: 12,
-	model_rev: 7,
-	stale: false,
-	truncated: false
+	stamp: { rev: 7, staged: 1 }
 };
 
+/** The engine boundary: a sync whose `call` answers `answer`. */
+function engineAnswering(answer: () => Promise<unknown>) {
+	const call = vi.fn<(method: string, params?: unknown, options?: unknown) => Promise<unknown>>(
+		() => answer()
+	);
+	configureReplica({ sync: { call, stop() {} } as unknown as ReplicaSync });
+	return call;
+}
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+	server.resetHandlers();
+	resetReplica();
+});
 afterAll(() => server.close());
 
 describe('snippets api', () => {
-	it('runs inline code and parses the full response', async () => {
-		server.use(
-			http.post(`${BASE}/snippets/run`, async ({ request }) => {
-				const body = (await request.json()) as Record<string, unknown>;
-				expect(body.run_id).toBe('r-1');
-				expect(body.code).toBe('print(1)');
-				expect(body.entry).toBe('script');
-				return HttpResponse.json(RUN_OUT);
-			})
+	it("runs inline code on the engine with the run's signal", async () => {
+		const call = engineAnswering(() => Promise.resolve(RUN_OUT));
+		const controller = new AbortController();
+		const res = await runSnippet(
+			{ code: 'print(1)', entry: 'value', element_ids: ['e1'] },
+			{ signal: controller.signal }
 		);
-		const res = await runSnippet({ run_id: 'r-1', code: 'print(1)', entry: 'script' }, CFG);
+		expect(call).toHaveBeenCalledWith(
+			'runSnippet',
+			{ code: 'print(1)', entry: 'value', element_ids: ['e1'] },
+			{ signal: controller.signal }
+		);
 		expect(res.stdout).toBe('hello\n');
+		expect(res.stamp).toEqual({ rev: 7, staged: 1 });
 		expect(res.ops[0].kind).toBe('create_element');
-		expect(res.error).toBeNull();
 	});
 
-	it('parses an error result', async () => {
-		server.use(
-			http.post(`${BASE}/snippets/run`, () =>
-				HttpResponse.json({
-					...RUN_OUT,
-					ops: [],
-					result_repr: null,
-					error: { kind: 'timeout', message: 'wall timeout', traceback: null }
-				})
-			)
-		);
-		const res = await runSnippet({ run_id: 'r-1', code: 'while 1: pass' }, CFG);
-		expect(res.error?.kind).toBe('timeout');
+	it('defaults to the script entry over no elements', async () => {
+		const call = engineAnswering(() => Promise.resolve(RUN_OUT));
+		await runSnippet({ artifact_id: 'a1' });
+		expect(call.mock.calls[0]?.[1]).toEqual({
+			artifact_id: 'a1',
+			entry: 'script',
+			element_ids: []
+		});
+	});
+
+	it('rejects when the engine refuses the call', async () => {
+		engineAnswering(() => Promise.reject(new ApiError(422, { detail: 'bad' }, 'bad')));
+		await expect(runSnippet({ code: 'x' })).rejects.toMatchObject({ status: 422 });
 	});
 
 	it('lints code', async () => {
@@ -75,17 +89,6 @@ describe('snippets api', () => {
 		const res = await lintSnippet('import os', CFG);
 		expect(res.diagnostics[0].severity).toBe('warning');
 		expect(res.entry_points).toContain('value');
-	});
-
-	it('cancels by run id', async () => {
-		server.use(
-			http.post(`${BASE}/snippets/cancel`, async ({ request }) => {
-				const body = (await request.json()) as Record<string, unknown>;
-				expect(body.run_id).toBe('r-9');
-				return new HttpResponse(null, { status: 204 });
-			})
-		);
-		await cancelSnippet('r-9', CFG);
 	});
 
 	it('parses entry_points on artifact headers', async () => {

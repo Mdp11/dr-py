@@ -8,14 +8,12 @@ import SnippetResultView from '../SnippetResultView.svelte';
 
 function result(over: Partial<SnippetRunOut> = {}): SnippetRunOut {
 	return {
-		run_id: 'r1',
 		stdout: '',
 		result_repr: null,
 		ops: [],
 		error: null,
 		duration_ms: 7,
-		model_rev: 0,
-		stale: false,
+		stamp: { rev: 0, staged: 0 },
 		truncated: false,
 		...over
 	} as SnippetRunOut;

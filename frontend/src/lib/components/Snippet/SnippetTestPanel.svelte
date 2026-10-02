@@ -13,14 +13,16 @@
 	// result to another. The cost — collapsing the panel discards the last
 	// result — is accepted: this is a scratch test, not a saved artifact.
 	//
-	// There is no Stop button on purpose. POST /snippets/cancel performs
-	// a real registry + ownership check but the abort itself is a no-op: a run
-	// still ends only at wall_timeout_s (10s default). Offering Stop here
-	// would be a lie in a panel this small.
 	import { onDestroy } from 'svelte';
 	import { runSnippet, type SnippetRunBody, type SnippetRunOut } from '$lib/api/snippets';
 	import { ApiError } from '$lib/api/errors';
-	import { getModelRev, type SnippetBoundElement, type SnippetRunPhase } from '$lib/state';
+	import ScriptsNeedEngine from '$lib/components/ScriptsNeedEngine.svelte';
+	import {
+		getWorkingStamp,
+		scriptsNeedEngine,
+		type SnippetBoundElement,
+		type SnippetRunPhase
+	} from '$lib/state';
 	import { isResultStale } from '$lib/snippet/console-view';
 	import { entryAvailable, type ConsoleEntry } from '$lib/snippet/entry-stubs';
 	import { toWireInputs, type DeclaredInput, type InputBinding } from '$lib/snippet/run-inputs';
@@ -78,8 +80,11 @@
 	// `seq !== runSeq` check) confirmed today's redundancy: every test still
 	// passed, because there is no externally visible difference to assert on.
 	let runSeq = 0;
+	// The run in flight is cancelled with the panel: its script stops on the engine.
+	let controller: AbortController | null = null;
 	onDestroy(() => {
 		runSeq++;
+		controller?.abort();
 	});
 
 	// Gating mirrors the server's SnippetRunIn validators (`value` >= 1
@@ -94,8 +99,11 @@
 	const entryOk = $derived(entryAvailable(entry, entryPoints));
 	const countOk = $derived(entry === 'step' ? elements.length === 1 : elements.length >= 1);
 	const withInputs = $derived(entry === 'value' && declaredInputs.length > 0);
-	const runDisabled = $derived(phase !== 'idle' || !configured || !entryOk || !countOk);
-	const stale = $derived(result ? isResultStale(result, getModelRev()) : false);
+	const needsEngine = $derived(scriptsNeedEngine());
+	const runDisabled = $derived(
+		needsEngine || phase !== 'idle' || !configured || !entryOk || !countOk
+	);
+	const stale = $derived(result ? isResultStale(result, getWorkingStamp()) : false);
 
 	/** The list owner's half of the value-appends / step-replaces rule (the
 	 * entry-dependent half lives in ElementContextRow). */
@@ -113,6 +121,7 @@
 	 * state/snippet-editor.runSnippetTab's entryAvailable guard). */
 	export async function requestRun(): Promise<void> {
 		open = true;
+		if (needsEngine) return;
 		if (runDisabled) {
 			// First-use path: Ctrl-Enter (the button itself is `disabled`, so it
 			// can only arrive this way) can fire before the panel is actually
@@ -136,7 +145,6 @@
 		phase = 'running';
 		notice = null;
 		const body: SnippetRunBody = {
-			run_id: crypto.randomUUID(),
 			entry,
 			element_ids: elements.map((e) => e.id),
 			...(withInputs ? { inputs: toWireInputs(declaredInputs, inputBindings) } : {}),
@@ -144,23 +152,21 @@
 				? { code: snippet.definition.code }
 				: { artifact_id: snippet.ref ?? undefined })
 		};
+		controller = new AbortController();
 		try {
-			const out = await runSnippet(body);
+			const out = await runSnippet(body, { signal: controller.signal });
 			if (seq !== runSeq) return; // unmounted, or a newer run started
 			phase = 'idle';
 			result = out;
 		} catch (err) {
 			if (seq !== runSeq) return;
 			phase = 'idle';
-			// Same vocabulary as state/snippet-editor.runSnippetTab — a 429 is a
-			// normal occurrence, not a defect: snippet_per_user_concurrency
-			// defaults to 1, so testing while a console run is live hits it.
 			notice =
-				err instanceof ApiError && err.status === 429
-					? 'Another run is already in progress — wait for it to finish.'
-					: err instanceof ApiError && err.status === 503
-						? 'Code execution is unavailable on this server.'
-						: 'Run failed — check your connection and try again.';
+				err instanceof ApiError && err.status === 422
+					? typeof (err.body as { detail?: unknown } | null)?.detail === 'string'
+						? String((err.body as { detail: string }).detail)
+						: err.message
+					: 'Run failed — check your connection and try again.';
 		}
 	}
 </script>
@@ -211,7 +217,18 @@
 				</span>
 			</div>
 			<div class="max-h-56 overflow-y-auto border-t border-border/60">
-				<SnippetResultView {phase} {notice} {result} {stale} {onGoToLine} opsFooter={opsReadonly} />
+				{#if needsEngine}
+					<ScriptsNeedEngine />
+				{:else}
+					<SnippetResultView
+						{phase}
+						{notice}
+						{result}
+						{stale}
+						{onGoToLine}
+						opsFooter={opsReadonly}
+					/>
+				{/if}
 			</div>
 		</div>
 	{/if}

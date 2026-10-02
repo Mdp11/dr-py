@@ -44,6 +44,7 @@ import {
 import { releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
+import { adoptWorkingStamp, scriptsNeedEngine } from './replica.svelte';
 import {
 	bindTabToArtifact,
 	closeTab,
@@ -94,7 +95,7 @@ export interface SnippetLintState {
 	entryPoints: string[];
 }
 
-export type SnippetRunPhase = 'idle' | 'running' | 'stopping';
+export type SnippetRunPhase = 'idle' | 'running';
 
 export interface SnippetBoundElement {
 	id: string;
@@ -103,10 +104,9 @@ export interface SnippetBoundElement {
 
 export interface SnippetRunState {
 	phase: SnippetRunPhase;
-	runId: string | null;
 	result: SnippetRunOut | null;
-	/** run_id of the last result whose ops were staged (disables re-staging). */
-	stagedRunId: string | null;
+	/** The last result whose ops were staged (disables re-staging). */
+	stagedResult: SnippetRunOut | null;
 	notice: string | null;
 	entry: 'script' | 'value' | 'step';
 	/** Bound context elements, in bind order — `value` receives all of them,
@@ -116,9 +116,8 @@ export interface SnippetRunState {
 
 const IDLE_RUN: SnippetRunState = {
 	phase: 'idle',
-	runId: null,
 	result: null,
-	stagedRunId: null,
+	stagedResult: null,
 	notice: null,
 	entry: 'script',
 	elements: []
@@ -131,6 +130,14 @@ const _runs = new SvelteMap<string, SnippetRunState>();
 const _lintTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const _lintGenerations = new Map<string, number>();
 const _runGenerations = new Map<string, number>();
+/** The abort controller of each tab's run in flight. */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _runControllers = new Map<string, AbortController>();
+
+function abortRun(tabId: string): void {
+	_runControllers.get(tabId)?.abort();
+	_runControllers.delete(tabId);
+}
 
 function bump(map: Map<string, number>, tabId: string): number {
 	const next = (map.get(tabId) ?? 0) + 1;
@@ -172,7 +179,7 @@ export function clearSnippetElements(tabId: string): void {
 }
 export function markRunStaged(tabId: string): void {
 	const rs = getSnippetRun(tabId);
-	if (rs.result) setRun(tabId, { stagedRunId: rs.result.run_id });
+	if (rs.result) setRun(tabId, { stagedResult: rs.result });
 }
 
 async function lintNow(tabId: string): Promise<void> {
@@ -214,55 +221,48 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 	// Run button is disabled too, but Mod-Enter (CodeEditor keymap) calls this
 	// directly, so the store must refuse to send an entry lint hasn't unlocked.
 	if (!entryAvailable(rs.entry, getSnippetLint(tabId)?.entryPoints)) return;
-	const runId = crypto.randomUUID();
+	if (scriptsNeedEngine()) return; // scripts run on the engine only
 	const gen = bump(_runGenerations, tabId);
-	setRun(tabId, { phase: 'running', runId, notice: null });
+	const controller = new AbortController();
+	_runControllers.set(tabId, controller);
+	setRun(tabId, { phase: 'running', notice: null });
 	try {
-		const out = await snippetsApi.runSnippet({
-			run_id: runId,
-			code: draft.code,
-			entry: rs.entry,
-			element_ids: rs.entry === 'script' ? undefined : rs.elements.map((e) => e.id)
-		});
+		const out = await snippetsApi.runSnippet(
+			{
+				code: draft.code,
+				entry: rs.entry,
+				element_ids: rs.entry === 'script' ? undefined : rs.elements.map((e) => e.id)
+			},
+			{ signal: controller.signal }
+		);
 		if (_runGenerations.get(tabId) !== gen || !_drafts.has(tabId)) return; // stopped/closed/newer
-		setRun(tabId, { phase: 'idle', runId: null, result: out });
+		_runControllers.delete(tabId);
+		adoptWorkingStamp(out.stamp);
+		setRun(tabId, { phase: 'idle', result: out });
 	} catch (err) {
 		if (_runGenerations.get(tabId) !== gen || !_drafts.has(tabId)) return;
+		_runControllers.delete(tabId);
 		const notice =
-			err instanceof ApiError && err.status === 429
-				? 'Another run is already in progress — wait for it to finish.'
-				: err instanceof ApiError && err.status === 503
-					? 'Code execution is unavailable on this server.'
-					: 'Run failed — check your connection and try again.';
-		setRun(tabId, { phase: 'idle', runId: null, notice });
+			err instanceof ApiError && err.status === 422
+				? describeRefusal(err)
+				: 'Run failed — check your connection and try again.';
+		setRun(tabId, { phase: 'idle', notice });
 	}
 }
 
-/** Honest Stop: the server-side abort is a no-op — the run ends only at
- * wall_timeout_s. We cancel (deregisters + authorizes), orphan the
- * in-flight response via the generation bump, and say so. Until the server
- * slot frees, a new run may 429 (per-user cap) — that is honest too. */
-export async function stopSnippetTab(tabId: string): Promise<void> {
+/** The engine's own sentence for a run it refused before starting it. */
+function describeRefusal(err: ApiError): string {
+	const detail = (err.body as { detail?: unknown } | null)?.detail;
+	return typeof detail === 'string' ? detail : err.message;
+}
+
+/** Stop cancels the run on the engine: its script is stopped and the call rejects, so the tab is idle at once. */
+export function stopSnippetTab(tabId: string): void {
 	const rs = getSnippetRun(tabId);
-	if (rs.phase !== 'running' || rs.runId === null) return;
-	setRun(tabId, { phase: 'stopping' });
-	bump(_runGenerations, tabId); // discard the eventual response
-	try {
-		await snippetsApi.cancelSnippet(rs.runId);
-	} catch {
-		// 404 = run already finished or not ours anymore — nothing to do.
-	}
-	// Mirrors runSnippetTab's own re-check: the draft (and its `_runs` entry)
-	// may have been closed while `cancelSnippet` was in flight. Writing
-	// unconditionally here would resurrect a `_runs` entry for a draft-less
-	// tab id, which then surfaces a stale "Run stopped" notice if the same
-	// artifact id is reopened later (tab ids are deterministic `snip:<id>`).
-	if (!_drafts.has(tabId)) return;
-	setRun(tabId, {
-		phase: 'idle',
-		runId: null,
-		notice: 'Run stopped — the server ends it at the wall timeout.'
-	});
+	if (rs.phase !== 'running') return;
+	bump(_runGenerations, tabId); // discard the rejection
+	abortRun(tabId);
+	setRun(tabId, { phase: 'idle', notice: 'Run stopped.' });
 }
 
 export function getSnippetDraft(tabId: string): SnippetDraft | undefined {
@@ -418,7 +418,6 @@ function rekeySnippetTab(oldTab: string, newTab: string): void {
 				: {
 						...run,
 						phase: 'idle',
-						runId: null,
 						notice: 'Run discarded — the snippet was committed while it was running. Re-run.'
 					}
 		);
@@ -431,6 +430,7 @@ function rekeySnippetTab(oldTab: string, newTab: string): void {
 	}
 	bump(_lintGenerations, oldTab);
 	bump(_runGenerations, oldTab);
+	abortRun(oldTab);
 }
 
 /**
@@ -525,6 +525,7 @@ export function closeSnippetDraft(tabId: string): void {
 	_runs.delete(tabId);
 	bump(_lintGenerations, tabId);
 	bump(_runGenerations, tabId);
+	abortRun(tabId);
 	// Give the check-out back: no editor is behind this lease. A NO-OP
 	// when a staged op still needs it (a saved-but-uncommitted edit must keep its
 	// lease or the commit 409s "required lock not held") — that is
@@ -548,6 +549,7 @@ export function resetSnippetEditors(): void {
 	// could collide with a low gen the stale response already captured).
 	for (const tabId of _lintGenerations.keys()) bump(_lintGenerations, tabId);
 	for (const tabId of _runGenerations.keys()) bump(_runGenerations, tabId);
+	for (const tabId of [..._runControllers.keys()]) abortRun(tabId);
 }
 
 // ---------------------------------------------------------------------------

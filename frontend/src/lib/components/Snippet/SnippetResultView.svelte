@@ -46,8 +46,6 @@
 			<div class="h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-primary"></div>
 			Running…
 		</div>
-	{:else if phase === 'stopping'}
-		<p class="text-warning">Stopping — run ends at wall timeout.</p>
 	{/if}
 
 	{#if notice}

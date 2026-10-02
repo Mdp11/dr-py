@@ -8,11 +8,14 @@ import type { ModelOp } from '$lib/state/ops';
 import type { SnippetRunOut } from '$lib/api/snippets';
 import type { SnippetError } from '$lib/api/types';
 
+/** Whether the working copy moved since the run began; an unknown current stamp counts as moved. */
 export function isResultStale(
-	result: Pick<SnippetRunOut, 'stale' | 'model_rev'>,
-	currentRev: number
+	result: Pick<SnippetRunOut, 'stamp'>,
+	current: { rev: number; staged: number } | null
 ): boolean {
-	return result.stale || result.model_rev !== currentRev;
+	return (
+		current === null || result.stamp.rev !== current.rev || result.stamp.staged !== current.staged
+	);
 }
 
 /** The runner only produces syntax/runtime/timeout/memory today; cancelled/limit

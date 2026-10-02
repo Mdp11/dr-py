@@ -820,20 +820,6 @@ export const SnippetFormatOutSchema = z.object({
 });
 export type SnippetFormatOut = z.infer<typeof SnippetFormatOutSchema>;
 
-/** Wire shape; `ops` is refined to `Op[]` in api/snippets.ts (types.ts cannot
- * import state/ops — state/ops imports Element/Relationship from here). */
-export const SnippetRunOutSchema = z.object({
-	run_id: z.string(),
-	stdout: z.string(),
-	result_repr: z.string().nullable(),
-	ops: z.array(z.record(z.string(), z.unknown())),
-	error: SnippetErrorSchema.nullable(),
-	duration_ms: z.number().int(),
-	model_rev: z.number().int(),
-	stale: z.boolean(),
-	truncated: z.boolean()
-});
-
 export const FacadeDocEntrySchema = z.object({
 	name: z.string(),
 	kind: z.enum(['function', 'method', 'property', 'exception']),

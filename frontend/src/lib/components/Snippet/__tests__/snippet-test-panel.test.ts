@@ -1,51 +1,52 @@
 // The embedded Test panel: component-local run state, run gating mirroring
-// the server's SnippetRunIn validators, and a read-only ops surface. Follows
-// the repo's mount/flushSync convention and drives POST /snippets/run through
-// MSW (see snippet-source-editor.test.ts).
+// the engine's run validators, and a read-only ops surface. Follows the
+// repo's mount/flushSync convention and answers the engine boundary
+// (`runSnippet`) with a seam, since the test run has no script host.
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { server } from '../../../api/__tests__/server';
 import * as modelRead from '$lib/api/model-read';
+import * as snippetsApi from '$lib/api/snippets';
+import type { SnippetRunOut } from '$lib/api/snippets';
+import * as replica from '$lib/state/replica.svelte';
+import { ApiError } from '$lib/api/errors';
 import type { SnippetSource } from '$lib/api/types';
 import SnippetTestPanel from '../SnippetTestPanel.svelte';
 import type { DeclaredInput } from '$lib/snippet/run-inputs';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-beforeEach(() => vi.useFakeTimers()); // the element picker debounces 250 ms
+beforeEach(() => {
+	vi.useFakeTimers(); // the element picker debounces 250 ms
+	vi.spyOn(replica, 'scriptsNeedEngine').mockReturnValue(false);
+});
 afterEach(() => {
-	server.resetHandlers();
 	document.body.innerHTML = '';
 	vi.restoreAllMocks();
 	vi.useRealTimers();
 });
-afterAll(() => server.close());
 
-const OK_RESULT = {
-	run_id: 'r1',
+const OK_RESULT: SnippetRunOut = {
 	stdout: '',
 	result_repr: "['Alpha']",
 	ops: [],
 	error: null,
 	duration_ms: 3,
-	model_rev: 0,
-	stale: false,
+	stamp: { rev: 0, staged: 0 },
 	truncated: false
 };
 
-/** Capture the body of the next POST /snippets/run and answer `response`. */
-function captureRun(response: Record<string, unknown> = OK_RESULT): {
+/** Answer the next engine run with `response`, keeping the body it was asked. */
+function captureRun(response: SnippetRunOut = OK_RESULT): {
 	body: () => Record<string, unknown> | null;
+	signal: () => AbortSignal | undefined;
 } {
 	let seen: Record<string, unknown> | null = null;
-	server.use(
-		http.post('*/snippets/run', async ({ request }) => {
-			seen = (await request.json()) as Record<string, unknown>;
-			return HttpResponse.json(response);
-		})
-	);
-	return { body: () => seen };
+	let signal: AbortSignal | undefined;
+	vi.spyOn(snippetsApi, 'runSnippet').mockImplementation((body, options) => {
+		seen = { ...body };
+		signal = options?.signal;
+		return Promise.resolve(response);
+	});
+	return { body: () => seen, signal: () => signal };
 }
 
 function inline(code: string): SnippetSource {
@@ -172,7 +173,6 @@ it('posts inline code with the bound elements and renders the result', async () 
 		expect(body['artifact_id']).toBeUndefined();
 		expect(body['entry']).toBe('value');
 		expect(body['element_ids']).toEqual(['a']);
-		expect(typeof body['run_id']).toBe('string');
 		expect(testid('snippet-result')?.textContent).toBe("['Alpha']");
 	} finally {
 		unmount(c);
@@ -211,8 +211,12 @@ it('binds exactly one element for a step entry (a second pick replaces)', async 
 	}
 });
 
-it('surfaces the 429 and 503 notices', async () => {
-	server.use(http.post('*/snippets/run', () => new HttpResponse(null, { status: 429 })));
+it("shows the engine's own sentence for a refused run and a plain one for a failed call", async () => {
+	const run = vi
+		.spyOn(snippetsApi, 'runSnippet')
+		.mockRejectedValue(
+			new ApiError(422, { detail: "entry 'step' requires exactly one element id" }, 'x')
+		);
 	const c = render({
 		snippet: inline('def value(els): return 1\n'),
 		entry: 'value',
@@ -223,27 +227,64 @@ it('surfaces the 429 and 503 notices', async () => {
 		await bindElement('a', 'Alpha');
 		click(testid('snippet-test-run'));
 		await vi.waitFor(() =>
-			expect(testid('snippet-notice')?.textContent).toContain('Another run is already in progress')
+			expect(testid('snippet-notice')?.textContent).toBe(
+				"entry 'step' requires exactly one element id"
+			)
 		);
+		run.mockRejectedValue(new Error('gone'));
+		click(testid('snippet-test-run'));
+		await vi.waitFor(() => expect(testid('snippet-notice')?.textContent).toContain('Run failed'));
 	} finally {
 		unmount(c);
 	}
+});
 
-	server.use(http.post('*/snippets/run', () => new HttpResponse(null, { status: 503 })));
-	const c2 = render({
+it('shows that scripts need the engine, and calls nothing, without one', async () => {
+	vi.spyOn(replica, 'scriptsNeedEngine').mockReturnValue(true);
+	const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(OK_RESULT);
+	const c = render({
 		snippet: inline('def value(els): return 1\n'),
 		entry: 'value',
 		entryPoints: ['value']
 	});
 	try {
 		expand();
+		expect(testid('scripts-need-engine')).not.toBeNull();
+		expect((testid('snippet-test-run') as HTMLButtonElement).disabled).toBe(true);
+		await c.requestRun();
+		expect(run).not.toHaveBeenCalled();
+	} finally {
+		unmount(c);
+	}
+});
+
+it('cancels the run in flight when the panel unmounts', async () => {
+	const run = vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise(() => {}));
+	const c = render({ snippet: { ref: 'snip-1' }, entry: 'step', entryPoints: ['step'] });
+	expand();
+	await bindElement('a', 'Alpha');
+	click(testid('snippet-test-run'));
+	const signal = (run.mock.calls[0]?.[1] as { signal: AbortSignal }).signal;
+	expect(signal.aborted).toBe(false);
+	unmount(c);
+	expect(signal.aborted).toBe(true);
+});
+
+it('marks a result stale once the working copy moved past its stamp', async () => {
+	captureRun();
+	replica.adoptWorkingStamp({ rev: 0, staged: 0 });
+	const c = render({ snippet: { ref: 'snip-1' }, entry: 'step', entryPoints: ['step'] });
+	try {
+		expand();
 		await bindElement('a', 'Alpha');
 		click(testid('snippet-test-run'));
-		await vi.waitFor(() =>
-			expect(testid('snippet-notice')?.textContent).toContain('Code execution is unavailable')
-		);
+		await vi.waitFor(() => expect(testid('snippet-result')).not.toBeNull());
+		expect(testid('snippet-stale')).toBeNull();
+		replica.resetReplica(); // the stamp is unknown again
+		flushSync();
+		expect(testid('snippet-stale')).not.toBeNull();
 	} finally {
-		unmount(c2);
+		unmount(c);
 	}
 });
 

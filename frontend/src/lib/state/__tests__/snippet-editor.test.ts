@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
 import * as checkoutApi from '$lib/api/checkout';
 import * as snippetsApi from '$lib/api/snippets';
+import type { SnippetRunOut } from '$lib/api/snippets';
+import * as replica from '../replica.svelte';
+import { scriptsNeedEngine } from '../replica.svelte';
 import { ApiError, ConflictError } from '$lib/api/errors';
 import type { ArtifactHeader } from '$lib/api/types';
 import {
@@ -131,6 +134,7 @@ afterEach(() => {
 	resetSnippetEditors();
 	resetWorkspaceTabs();
 	resetArtifacts();
+	replica.resetReplica();
 	vi.restoreAllMocks();
 });
 
@@ -630,19 +634,40 @@ describe('staged-artifact listeners', () => {
 	});
 });
 
-const RUN_OUT = {
-	run_id: 'r-1',
+const RUN_OUT: SnippetRunOut = {
 	stdout: 'hello\n',
 	result_repr: null,
 	ops: [],
 	error: null,
 	duration_ms: 5,
-	model_rev: 0,
-	stale: false,
+	stamp: { rev: 0, staged: 0 },
 	truncated: false
 };
 
+/** The signal the run in flight was started with. */
+function runSignal(run: { mock: { calls: unknown[][] } }): AbortSignal {
+	const options = run.mock.calls.at(-1)?.[1] as { signal: AbortSignal } | undefined;
+	if (!options) throw new Error('runSnippet was not called');
+	return options.signal;
+}
+
+describe('snippet run without the engine', () => {
+	it('shows nothing to run on and calls nothing', async () => {
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		expect(scriptsNeedEngine()).toBe(true);
+		await runSnippetTab(tabId);
+		expect(run).not.toHaveBeenCalled();
+		expect(getSnippetRun(tabId).phase).toBe('idle');
+	});
+});
+
 describe('snippet lint + run', () => {
+	beforeEach(() => {
+		vi.spyOn(replica, 'scriptsNeedEngine').mockReturnValue(false);
+	});
+
 	it('debounces lint and applies the latest response', async () => {
 		vi.useFakeTimers();
 		const lint = vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
@@ -723,31 +748,69 @@ describe('snippet lint + run', () => {
 		expect(run).not.toHaveBeenCalled();
 	});
 
-	it('stop discards the eventual response', async () => {
-		let resolveRun!: (v: typeof RUN_OUT) => void;
-		vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise((r) => (resolveRun = r)));
-		vi.spyOn(snippetsApi, 'cancelSnippet').mockResolvedValue(undefined);
+	it("runs on the engine with the tab's signal and adopts the run's stamp", async () => {
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue({
+			...RUN_OUT,
+			stamp: { rev: 3, staged: 2 }
+		});
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		await runSnippetTab(tabId);
+		expect(runSignal(run).aborted).toBe(false);
+		expect(getSnippetRun(tabId).result?.stamp).toEqual({ rev: 3, staged: 2 });
+		expect(replica.getWorkingStamp()).toEqual({ rev: 3, staged: 2 });
+	});
+
+	it('stop cancels the run and returns the tab to idle', async () => {
+		let resolveRun!: (v: SnippetRunOut) => void;
+		const run = vi
+			.spyOn(snippetsApi, 'runSnippet')
+			.mockReturnValue(new Promise((r) => (resolveRun = r)));
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
 		const running = runSnippetTab(tabId);
 		expect(getSnippetRun(tabId).phase).toBe('running');
-		await stopSnippetTab(tabId);
+		const signal = runSignal(run);
+		stopSnippetTab(tabId);
+		expect(signal.aborted).toBe(true);
 		expect(getSnippetRun(tabId).phase).toBe('idle');
-		expect(getSnippetRun(tabId).notice).toContain('wall timeout');
+		expect(getSnippetRun(tabId).notice).toBe('Run stopped.');
 		resolveRun(RUN_OUT);
 		await running;
 		expect(getSnippetRun(tabId).result).toBeNull(); // discarded
 	});
 
-	it('maps 429 and 503 to notices', async () => {
+	it('a stopped run that rejects leaves the stop notice', async () => {
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockImplementation(
+			(_body, options) =>
+				new Promise((_resolve, reject) => {
+					options?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+				})
+		);
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
-		vi.spyOn(snippetsApi, 'runSnippet').mockRejectedValue(new ApiError(429, null, 'busy'));
+		const running = runSnippetTab(tabId);
+		stopSnippetTab(tabId);
+		await running;
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(getSnippetRun(tabId)).toMatchObject({ phase: 'idle', notice: 'Run stopped.' });
+	});
+
+	it("shows the engine's own sentence for a refused run and a plain one for a failed call", async () => {
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		vi.spyOn(snippetsApi, 'runSnippet').mockRejectedValue(
+			new ApiError(
+				422,
+				{ detail: 'provide exactly one of `code` / `artifact_id`' },
+				'unprocessable'
+			)
+		);
 		await runSnippetTab(tabId);
-		expect(getSnippetRun(tabId).notice).toContain('already in progress');
-		vi.spyOn(snippetsApi, 'runSnippet').mockRejectedValue(new ApiError(503, null, 'no runner'));
+		expect(getSnippetRun(tabId).notice).toBe('provide exactly one of `code` / `artifact_id`');
+		vi.spyOn(snippetsApi, 'runSnippet').mockRejectedValue(new Error('gone'));
 		await runSnippetTab(tabId);
-		expect(getSnippetRun(tabId).notice).toContain('unavailable');
+		expect(getSnippetRun(tabId).notice).toContain('Run failed');
 	});
 
 	it('leaves the entry selected even when a new lint drops it — the hint bar needs it', async () => {
@@ -829,13 +892,18 @@ describe('snippet lint + run', () => {
 		vi.useRealTimers();
 	});
 
-	it('markRunStaged pins the staged run id', async () => {
-		vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
+	it('markRunStaged pins the staged result, not a later one', async () => {
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue({ ...RUN_OUT });
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
 		await runSnippetTab(tabId);
 		markRunStaged(tabId);
-		expect(getSnippetRun(tabId).stagedRunId).toBe('r-1');
+		const first = getSnippetRun(tabId).result;
+		expect(getSnippetRun(tabId).stagedResult).toBe(first);
+		run.mockResolvedValue({ ...RUN_OUT });
+		await runSnippetTab(tabId);
+		expect(getSnippetRun(tabId).result).not.toBe(first);
+		expect(getSnippetRun(tabId).stagedResult).toBe(first);
 	});
 
 	it('rekey on COMMIT normalizes an in-flight run to idle with a discard notice', async () => {
@@ -843,13 +911,16 @@ describe('snippet lint + run', () => {
 		// in-flight run's closure is bound to the OLD tab id, so a running
 		// phase must never be carried to the new one.
 		let resolveRun!: (v: typeof RUN_OUT) => void;
-		vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise((r) => (resolveRun = r)));
+		const run = vi
+			.spyOn(snippetsApi, 'runSnippet')
+			.mockReturnValue(new Promise((r) => (resolveRun = r)));
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
 		await saveSnippetDraft(tabId);
 		const tempId = getSnippetDraft(tabId)!.artifactId!;
 		const running = runSnippetTab(tabId);
 		expect(getSnippetRun(tabId).phase).toBe('running');
+		const signal = runSignal(run);
 
 		notifyArtifactCommit({
 			idMap: { [tempId]: 's1' },
@@ -860,35 +931,41 @@ describe('snippet lint + run', () => {
 		const newTab = 'snip:s1';
 		expect(getSnippetRun(newTab)).toMatchObject({
 			phase: 'idle',
-			runId: null,
 			notice: expect.stringContaining('discarded')
 		});
+		expect(signal.aborted).toBe(true);
 		resolveRun(RUN_OUT); // the orphaned response must never land anywhere
 		await running;
 		expect(getSnippetRun(newTab).result).toBeNull();
 		expect(getSnippetRun(tabId).result).toBeNull();
 	});
 
-	it('stop drops its post-cancel write if the draft closed mid-cancel', async () => {
-		vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise(() => {})); // never resolves
-		let resolveCancel!: () => void;
-		vi.spyOn(snippetsApi, 'cancelSnippet').mockReturnValue(new Promise((r) => (resolveCancel = r)));
+	it('closing the tab aborts its run and leaves no state behind', async () => {
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise(() => {}));
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
 		void runSnippetTab(tabId);
-		expect(getSnippetRun(tabId).phase).toBe('running');
-		const stopping = stopSnippetTab(tabId);
-		closeSnippetDraft(tabId); // draft (and its _runs entry) gone before cancel settles
-		resolveCancel();
-		await stopping;
+		const signal = runSignal(run);
+		closeSnippetDraft(tabId);
+		expect(signal.aborted).toBe(true);
+		stopSnippetTab(tabId); // nothing running any more
 		expect(getSnippetRun(tabId)).toEqual({
 			phase: 'idle',
-			runId: null,
 			result: null,
-			stagedRunId: null,
+			stagedResult: null,
 			notice: null,
 			entry: 'script',
 			elements: []
 		});
+	});
+
+	it('resetting the editors aborts every run', async () => {
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise(() => {}));
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		void runSnippetTab(tabId);
+		const signal = runSignal(run);
+		resetSnippetEditors();
+		expect(signal.aborted).toBe(true);
 	});
 });

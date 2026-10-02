@@ -2,22 +2,22 @@ import { apiFetch, type ClientConfig } from './client';
 import {
 	SnippetFormatOutSchema,
 	SnippetLintOutSchema,
-	SnippetRunOutSchema,
 	SnippetDocsOutSchema,
 	type SnippetFormatOut,
 	type SnippetLintOut,
-	type SnippetDocsOut
+	type SnippetDocsOut,
+	type SnippetError
 } from './types';
 import type { ModelOp } from '$lib/state/ops';
-import type { z } from 'zod';
+import type { RunSnippetParams, RunSnippetResult } from '$engine';
+import { callEngine } from '$lib/state/replica.svelte';
 
-/** SnippetRunOut with `ops` typed as the staged-buffer wire format — the
- * backend records ops in exactly the `state/ops.ts` shape (validated through
- * OPS_ADAPTER server-side), so the cast is the contract, not a guess.
- * `ModelOp`, not the full `Op` union: the guest facade has no artifact
- * surface, and `POST /snippets/run` refuses a guest-proposed artifact op
- * outright (src/data_rover/api/README.md), so a dry-run batch can only ever hold model ops. */
-export type SnippetRunOut = Omit<z.infer<typeof SnippetRunOutSchema>, 'ops'> & { ops: ModelOp[] };
+/** The engine's run result with `ops` typed as the staged-buffer wire format and `error.kind` as the console's kinds.
+ * `ModelOp`, not the full `Op` union: the guest facade has no artifact surface and the engine gates a run's ops to model ops. */
+export type SnippetRunOut = Omit<RunSnippetResult, 'ops' | 'error'> & {
+	ops: ModelOp[];
+	error: SnippetError | null;
+};
 
 /** One named input for a two-argument `value(elements, inputs)` run — the
  * same wire shape a script column's resolved inputs take server-side
@@ -27,21 +27,27 @@ export type SnippetRunInput =
 	| { kind: 'scalars'; values: unknown[] };
 
 export interface SnippetRunBody {
-	run_id: string;
 	code?: string;
 	artifact_id?: string;
 	entry?: 'script' | 'value' | 'step';
 	element_ids?: string[];
-	/** Only meaningful for `entry: 'value'` — the route 422s it otherwise. */
+	/** Only meaningful for `entry: 'value'`. */
 	inputs?: Record<string, SnippetRunInput>;
 }
 
-export function runSnippet(body: SnippetRunBody, cfg?: ClientConfig): Promise<SnippetRunOut> {
-	return apiFetch(
-		'/snippets/run',
-		{ method: 'POST', body, schema: SnippetRunOutSchema },
-		cfg
-	) as Promise<SnippetRunOut>;
+/** One console run over the engine's working copy. `signal` cancels it: the run's script is stopped and the call rejects. */
+export function runSnippet(
+	body: SnippetRunBody,
+	options?: { signal?: AbortSignal }
+): Promise<SnippetRunOut> {
+	const params: RunSnippetParams = {
+		...(body.code !== undefined ? { code: body.code } : {}),
+		...(body.artifact_id !== undefined ? { artifact_id: body.artifact_id } : {}),
+		entry: body.entry ?? 'script',
+		element_ids: body.element_ids ?? [],
+		...(body.inputs !== undefined ? { inputs: body.inputs } : {})
+	};
+	return callEngine<SnippetRunOut>('runSnippet', params, options);
 }
 
 export function lintSnippet(code: string, cfg?: ClientConfig): Promise<SnippetLintOut> {
@@ -58,10 +64,6 @@ export function formatSnippet(code: string, cfg?: ClientConfig): Promise<Snippet
 		{ method: 'POST', body: { code }, schema: SnippetFormatOutSchema },
 		cfg
 	);
-}
-
-export function cancelSnippet(runId: string, cfg?: ClientConfig): Promise<void> {
-	return apiFetch('/snippets/cancel', { method: 'POST', body: { run_id: runId } }, cfg);
 }
 
 export function getSnippetDocs(cfg?: ClientConfig): Promise<SnippetDocsOut> {

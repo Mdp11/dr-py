@@ -290,7 +290,7 @@ describe('the compare surface on the engine', () => {
 		setModelRev(engine.project.rev);
 		expect(before.ok).toBe(true);
 		if (!before.ok) return;
-		await expect(stageProposedOps(before.ops, before.modelRev)).resolves.toEqual({
+		await expect(stageProposedOps(before.ops, { rev: before.modelRev })).resolves.toEqual({
 			ok: false,
 			reason: 'stale'
 		});

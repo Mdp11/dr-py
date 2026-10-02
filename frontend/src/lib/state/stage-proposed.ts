@@ -35,10 +35,24 @@ import {
 } from './model.svelte';
 import { acquireLocks } from './edit-gate';
 import { commitsLanded } from './checkout.svelte';
+import { getWorkingStamp } from './replica.svelte';
 
 export type StageOutcome =
 	| { ok: true; count: number }
 	| { ok: false; reason: 'empty' | 'stale' | 'locks' | 'missing' };
+
+/**
+ * Where the proposer saw the model. With `staged`, the working copy must stand
+ * exactly there (committed rev and staged version); with the rev alone, the
+ * committed rev must.
+ */
+export type StageStamp = { rev: number; staged?: number };
+
+function stampHolds(stamp: StageStamp): boolean {
+	if (stamp.staged === undefined) return stamp.rev === getModelRev();
+	const current = getWorkingStamp();
+	return current !== null && current.rev === stamp.rev && current.staged === stamp.staged;
+}
 
 export interface Prestate {
 	elements: Element[];
@@ -47,11 +61,11 @@ export interface Prestate {
 
 export async function stageProposedOps(
 	proposed: ModelOp[],
-	modelRev: number,
+	stamp: StageStamp,
 	prestate?: Prestate
 ): Promise<StageOutcome> {
 	if (proposed.length === 0) return { ok: false, reason: 'empty' };
-	if (modelRev !== getModelRev()) return { ok: false, reason: 'stale' };
+	if (!stampHolds(stamp)) return { ok: false, reason: 'stale' };
 
 	// 1. Remap proposer temp ids to fresh client temp ids (id hints untouched).
 	const mapping: Record<string, string> = {};
@@ -151,7 +165,9 @@ export async function stageProposedOps(
 	//    batch being committed, dropped with it on the answer. One batch on the
 	//    engine side: a list it refuses stages none of its ops, and the refusal
 	//    is the store's error, not this outcome.
+	//    A working-copy stamp is checked again: the awaits above let it move.
 	await commitsLanded();
+	if (stamp.staged !== undefined && !stampHolds(stamp)) return { ok: false, reason: 'stale' };
 	emitMany(ops);
 	return { ok: true, count: ops.length };
 }

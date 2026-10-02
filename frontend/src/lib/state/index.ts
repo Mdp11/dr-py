@@ -196,6 +196,8 @@ export {
 	stopRealtime
 } from './realtime.svelte';
 export {
+	adoptWorkingStamp,
+	callEngine,
 	beginReplicaCommit,
 	dismissReplicaNotice,
 	exportsIncludeStaged,
@@ -204,6 +206,7 @@ export {
 	forgetViewPlacements,
 	getReplicaNotice,
 	getReplicaStatus,
+	getWorkingStamp,
 	isReplicaBlocked,
 	isReplicaRetrying,
 	metamodelIncludesStaged,
@@ -211,8 +214,10 @@ export {
 	replicaGate,
 	replicaMetamodelAdopted,
 	retryReplica,
+	scriptsNeedEngine,
 	startReplica,
-	stopReplica
+	stopReplica,
+	type WorkingStamp
 } from './replica.svelte';
 export {
 	setCheckoutApiConfig,

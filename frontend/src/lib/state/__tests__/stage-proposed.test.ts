@@ -1,9 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
+import type { FeedEvent } from '$lib/api/feed';
 import { hold, PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
 import { stageProposedOps } from '../stage-proposed';
 import * as checkout from '../checkout.svelte';
+import * as editGate from '../edit-gate';
+import { getWorkingStamp, handReplicaFeed } from '../replica.svelte';
 import {
 	emit,
 	ensureElement,
@@ -35,11 +38,11 @@ afterEach(() => {
 
 describe('stageProposedOps', () => {
 	it('refuses empty and stale batches', async () => {
-		expect(await stageProposedOps([], 0)).toEqual({ ok: false, reason: 'empty' });
+		expect(await stageProposedOps([], { rev: 0 })).toEqual({ ok: false, reason: 'empty' });
 		const ops = [
 			{ kind: 'update_element', id: 'e1', properties_patch: { name: 'X' } }
 		] as ModelOp[];
-		expect(await stageProposedOps(ops, 99)).toEqual({
+		expect(await stageProposedOps(ops, { rev: 99 })).toEqual({
 			ok: false,
 			reason: 'stale'
 		});
@@ -63,7 +66,7 @@ describe('stageProposedOps', () => {
 				properties: {}
 			}
 		] as ModelOp[];
-		const res = await stageProposedOps(ops, 0);
+		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res).toEqual({ ok: true, count: 3 });
 		const staged = getStagedOps();
 		const [c1, c2, rel] = staged as [
@@ -84,7 +87,7 @@ describe('stageProposedOps', () => {
 		const ops = [
 			{ kind: 'update_element', id: 'e1', properties_patch: { name: 'X' } }
 		] as ModelOp[];
-		const res = await stageProposedOps(ops, 0);
+		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res).toEqual({ ok: false, reason: 'locks' });
 		expect(getStagedOps()).toHaveLength(0);
 		expect(ensure).toHaveBeenCalledWith([{ resource_id: 'e1', mode: 'exclusive' }], 'edit');
@@ -104,7 +107,7 @@ describe('stageProposedOps', () => {
 			},
 			{ kind: 'delete_relationship', id: 'r1' }
 		] as ModelOp[];
-		const res = await stageProposedOps(ops, 0);
+		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res.ok).toBe(true);
 		const intents = ensure.mock.calls.map(([targets, intent]) => [intent, targets]);
 		expect(intents).toContainEqual(['connect', [{ resource_id: 'e1', mode: 'exclusive' }]]);
@@ -116,7 +119,7 @@ describe('stageProposedOps', () => {
 		const ops = [
 			{ kind: 'update_element', id: 'e1', properties_patch: { name: 'Renamed' } }
 		] as ModelOp[];
-		await stageProposedOps(ops, 0);
+		await stageProposedOps(ops, { rev: 0 });
 		expect(getCachedElements().get('e1')?.properties.name).toBe('Renamed');
 	});
 
@@ -145,7 +148,7 @@ describe('stageProposedOps', () => {
 			},
 			{ kind: 'update_relationship', id: 'tmp_3', properties_patch: { note: 'x' } }
 		] as ModelOp[];
-		const res = await stageProposedOps(ops, 0);
+		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res).toEqual({ ok: true, count: 6 });
 
 		const staged = getStagedOps();
@@ -187,7 +190,7 @@ describe('stageProposedOps', () => {
 				properties: {}
 			}
 		] as ModelOp[];
-		const res = await stageProposedOps(ops, 0);
+		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res).toEqual({ ok: true, count: 2 });
 		const [c, r] = getStagedOps() as [
 			Extract<ModelOp, { kind: 'create_element' }>,
@@ -209,7 +212,7 @@ describe('stageProposedOps', () => {
 			elements: [{ id: 'e9', type_name: 'Building', properties: { name: 'Old' }, rev: 1 }],
 			relationships: []
 		};
-		const res = await stageProposedOps(ops, 0, prestate);
+		const res = await stageProposedOps(ops, { rev: 0 }, prestate);
 		expect(res).toEqual({ ok: true, count: 1 });
 		expect(getCachedElements().get('e9')?.properties.name).toBe('Renamed');
 	});
@@ -235,6 +238,61 @@ describe('stageProposedOps with staging on the engine', () => {
 		await stagedSettled();
 	}
 
+	describe("against the working copy's stamp", () => {
+		const UPDATE: ModelOp[] = [
+			{ kind: 'update_element', id: 'e_000003', properties_patch: { name: 'Proposed' } }
+		];
+
+		async function stamped(s: EngineStore): Promise<{ rev: number; staged: number }> {
+			await ensureElement('e_000002');
+			emit({ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'Mine' } });
+			await settled(s);
+			const stamp = getWorkingStamp();
+			if (stamp === null) throw new Error('the engine reported no change');
+			return stamp;
+		}
+
+		it('stages a batch proposed where the working copy stands', async () => {
+			const stamp = await stamped(await open());
+			expect(await stageProposedOps(UPDATE, stamp)).toEqual({ ok: true, count: 1 });
+		});
+
+		it('refuses a stamp that moved before staging', async () => {
+			const stamp = await stamped(await open());
+			expect(await stageProposedOps(UPDATE, { ...stamp, staged: stamp.staged - 1 })).toEqual({
+				ok: false,
+				reason: 'stale'
+			});
+			expect(getStagedOps()).toHaveLength(1);
+		});
+
+		it('refuses a stamp that moves while the locks are acquired', async () => {
+			const s = await open();
+			const stamp = await stamped(s);
+			vi.spyOn(editGate, 'acquireLocks').mockImplementation(async () => {
+				emit({ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'Raced' } });
+				await settled(s);
+				return true;
+			});
+			expect(await stageProposedOps(UPDATE, stamp)).toEqual({ ok: false, reason: 'stale' });
+			expect(getStagedOps().every((op) => (op as { id: string }).id === 'e_000002')).toBe(true);
+		});
+
+		it('refuses a stamp that moves while a commit lands', async () => {
+			const s = await open();
+			const stamp = await stamped(s);
+			vi.spyOn(checkout, 'commitsLanded').mockImplementation(async () => {
+				const committed = s.project.commit([
+					{ kind: 'update_element', id: 'e_000003', properties_patch: { name: 'peer' } }
+				]);
+				handReplicaFeed(JSON.parse(committed.eventText) as FeedEvent, committed.eventText);
+				await settled(s);
+			});
+			expect(await stageProposedOps(UPDATE, stamp)).toEqual({ ok: false, reason: 'stale' });
+			expect(getStagedOps()).toHaveLength(1);
+		});
+	});
+
 	it('stages the whole list as one batch, id hints kept', async () => {
 		const s = await open();
 		const call = vi.spyOn(s.sync, 'call');
@@ -250,7 +308,7 @@ describe('stageProposedOps with staging on the engine', () => {
 			{ kind: 'delete_element', id: 'e_000003' }
 		];
 
-		const res = await stageProposedOps(ops, getModelRev());
+		const res = await stageProposedOps(ops, { rev: getModelRev() });
 		expect(res).toEqual({ ok: true, count: 3 });
 		await settled(s);
 
@@ -291,7 +349,7 @@ describe('stageProposedOps with staging on the engine', () => {
 				{ kind: 'delete_element', id: 'e_000003' },
 				{ kind: 'update_element', id: 'e_000002', properties_patch: { nope: 1 } }
 			],
-			getModelRev()
+			{ rev: getModelRev() }
 		);
 		// `emit` answers nothing on either side: the refusal is the store's error.
 		expect(res).toEqual({ ok: true, count: 4 });
@@ -333,7 +391,7 @@ describe('stageProposedOps with staging on the engine', () => {
 		const call = vi.spyOn(s.sync, 'call');
 
 		// One update, which the engine would merge into the batch being committed.
-		const staging = stageProposedOps([rename('Quartzite')], getModelRev());
+		const staging = stageProposedOps([rename('Quartzite')], { rev: getModelRev() });
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(call.mock.calls.filter(([method]) => method === 'stage')).toEqual([]);
 

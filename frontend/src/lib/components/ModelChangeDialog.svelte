@@ -272,7 +272,7 @@
 				stagedBlocked = true;
 				return;
 			}
-			const outcome = await stageProposedOps(res.ops, res.modelRev, crPrestate(res.cr));
+			const outcome = await stageProposedOps(res.ops, { rev: res.modelRev }, crPrestate(res.cr));
 			if (!outcome.ok) {
 				error = STAGE_FAILURES[outcome.reason];
 				return;

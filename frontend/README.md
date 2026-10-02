@@ -80,7 +80,7 @@ The UI is a fixed grid:
   the top bar."). Closing the active tab focuses the previous tab in strip
   order; closing the last one leaves the placeholder. Tab kinds: **table**
   (`TableView`), **snippet** (`SnippetTab`) hosting a CodeMirror editor and
-  run console for server-executed Python snippets against the live model,
+  run console for Python snippets, run on the engine over the working copy,
   **navigation** (`NavigationBuilder`), **exporter** (`ExporterTab`),
   the singleton **metamodel** tab (`MetamodelTab`) — a YAML editor for the
   live metamodel with lint, preview and staged (commit-through) edits — and
@@ -379,8 +379,8 @@ engine store":
      add-time too, not just at render time. In `lib/snippet/entry-stubs.ts`,
      `BoundEntry = 'value' | 'step' | 'transform'` names all three and
      `ConsoleEntry = Exclude<BoundEntry, 'transform'>` carves out the subset a
-     console/embedded run (`POST /snippets/run`) supports — `transform` has
-     no `RunRequest.entry` member and no document to bind against in a
+     console/embedded run (the engine's `runSnippet`) supports — `transform` has
+     no console entry member and no document to bind against in a
      console run, ref or inline alike, so it is excluded from
      `SnippetRunBody`/`SnippetTestPanel`/`ElementContextRow` regardless of
      source form.
@@ -1413,7 +1413,26 @@ are answered by the engine or the server, one switch per surface:
   `previewTransform` routes through the `exports` surface to the engine's
   `previewTransform`; `Export/TransformTestPanel.svelte` shows
   `ScriptsNeedEngine` and calls nothing while the replica phase is `off` or
-  `server`. `evaluateNavigation` marks its
+  `server`.
+  **The snippet console** (`SnippetTab`, `SnippetConsole`) runs on the engine:
+  `runSnippetTab` (`state/snippet-editor.svelte.ts`) calls `runSnippet`
+  (`api/snippets.ts`, over `callEngine` of `state/replica.svelte.ts`) with an
+  `AbortController` held per tab. Stop aborts it — the engine stops the script
+  and the call rejects locally — so the tab is idle at once; closing, rekeying
+  or resetting a tab aborts its run too. With the replica `off` or `server`
+  (`scriptsNeedEngine()`) the console shows `ScriptsNeedEngine` and Run calls
+  nothing. A result carries the `stamp` `{rev, staged}` of the working copy
+  where the run began; `getWorkingStamp()` is the stamp of the latest `changed`
+  event of the current link (null before the first one, and again on a new
+  link, a re-bootstrap or phase `off`/`server`, since the staged version
+  restarts with each worker; a run's own stamp is adopted while it is null).
+  `isResultStale(result, getWorkingStamp())` (`snippet/console-view.ts`) is
+  true when the current stamp is null or differs in either field, and disables
+  Stage. `stageProposedOps(ops, stamp)` refuses a stamp that is not the
+  working copy's, and checks it again after the pre-state fetches, the locks
+  and `commitsLanded()`; a rev-only stamp (`{rev}`, change-request proposals)
+  checks the committed rev once. `stagedResult` is the result object whose ops
+  were staged. `evaluateNavigation` marks its
   page `fallback: 'pattern'`, which the navigation editor's
   preview keeps from its first page and `Navigation/ResultsDock.svelte`
   shows above the chains as a muted note (`data-testid="nav-fallback"`,
@@ -2295,13 +2314,14 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
 toggle`), a collapsed disclosure that expands to the shared
   `ElementContextRow` (chips + fuzzy search + "Use current selection"), a Run
   button, and `SnippetResultView` — the same result surface the tab console
-  renders, minus ops staging. Inline mode posts `{ code }` to
-  `POST /snippets/run`, ref mode posts `{ artifact_id }`; both post `entry` +
-  `element_ids`. Run is gated on all four of: a configured source, the entry
+  renders, minus ops staging. Inline mode calls the engine's `runSnippet` with
+  `{ code }`, ref mode with `{ artifact_id }`; both send `entry` +
+  `element_ids`. With the replica `off` or `server` the panel shows
+  `ScriptsNeedEngine` and calls nothing. Run is gated on all four of: a configured source, the entry
   point being available (`entryAvailable`, from the editor's local lint inline
   / implied by the pre-filtered dropdown in ref mode), and the element count
-  the server's `SnippetRunIn` validators require (`value` ≥ 1, `step` == 1) —
-  so the UI never sends a request that would 422. The gate lives in
+  the engine's validators require (`value` ≥ 1, `step` == 1) —
+  so the UI never sends a call the engine would refuse with a 422. The gate lives in
   `requestRun()` itself, not just on the button, because the editor's
   `Mod-Enter` keymap calls it directly. Run state is **component-local**
   (`$state` + a `runSeq` generation guard bumped in `onDestroy`), NOT the
@@ -2310,7 +2330,8 @@ toggle`), a collapsed disclosure that expands to the shared
   reorder. Recorded ops are listed but **never stageable** — embedded
   `value()`/`step()` evaluation is read-only, so the panel says so
   (`snippet-test-ops-readonly`) instead of offering a Stage button. There is
-  no Stop button: cancel is a server-side no-op and the wall timeout is 10s.
+  no Stop button; the run in flight is cancelled with the panel (its
+  `AbortController` aborts on unmount, which stops the script on the engine).
 - **Named-input bindings.** A script column that declares `inputs` passes them
   down as `declaredInputs` (`SnippetSourceEditor` → `SnippetTestPanel`), which
   is also what seeds a freshly-inlined snippet with the two-arg
