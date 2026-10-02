@@ -44,7 +44,7 @@ export type RouteOptions<T> = {
 	 * that answered may not be the one the call was routed to.
 	 */
 	recheck?: boolean;
-	/** What the shadow compares of an answer in its place; `SKIP` ends the comparison. */
+	/** What the shadow compares of an answer in its place. */
 	digest?: (value: T) => Promise<unknown>;
 	/**
 	 * Whether what the call was asked about may no longer be what the server
@@ -53,9 +53,6 @@ export type RouteOptions<T> = {
 	 */
 	stale?: () => boolean;
 };
-
-/** A digest that says the answer cannot be compared, such as an export the server is still preparing. */
-export const SKIP: unique symbol = Symbol('skip');
 
 /**
  * One read method of the engine, answered with the route's response body.

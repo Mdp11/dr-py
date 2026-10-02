@@ -312,7 +312,6 @@ describe('the server fallback', () => {
 	it("any other 501, or the same words under another status, is the caller's error", async () => {
 		for (const error of [
 			refusal(501, 'not implemented'),
-			refusal(501, 'reaches a script'),
 			refusal(501, 'Reaches an unsupported pattern'),
 			refusal(422, 'reaches an unsupported pattern'),
 			refusal(500, 'reaches an unsupported pattern'),

@@ -1224,14 +1224,14 @@ export const TransformPreviewFileOutSchema = z.object({
 	output: z.string().nullable(),
 	stdout: z.string(),
 	error: SnippetErrorSchema.nullable(),
-	duration_ms: z.number()
+	duration_ms: z.number().optional()
 });
 export type TransformPreviewFileOut = z.infer<typeof TransformPreviewFileOutSchema>;
 export const TransformPreviewOutSchema = z.object({
 	files: z.array(TransformPreviewFileOutSchema),
 	split: z.boolean(),
 	truncated: z.boolean(),
-	duration_ms: z.number()
+	duration_ms: z.number().optional()
 });
 export type TransformPreviewOut = z.infer<typeof TransformPreviewOutSchema>;
 

@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 
 import { server } from '../../../api/__tests__/server';
 import type { ExporterEntry } from '$lib/api/types';
+import { installEngineSeam } from '$lib/api/engine-route';
 import TransformTestPanel from '../TransformTestPanel.svelte';
 
 const replica = vi.hoisted(() => ({ phase: 'ready' as string }));
@@ -20,6 +21,7 @@ vi.mock('$lib/state/replica.svelte', () => ({
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
 	replica.phase = 'ready';
+	installEngineSeam(null);
 	server.resetHandlers();
 	document.body.innerHTML = '';
 });
@@ -119,6 +121,28 @@ describe('TransformTestPanel', () => {
 			unmount(c);
 		}
 	);
+
+	it('parses an engine answer without durations and renders no ms', async () => {
+		const { duration_ms: _t, ...body } = OK;
+		const { duration_ms: _f, ...file } = FILE;
+		let method = '';
+		installEngineSeam({
+			side: (surface) => (surface === 'exports' ? 'engine' : 'server'),
+			call: <T>(m: string) => {
+				method = m;
+				return Promise.resolve({ ...body, files: [file] } as T);
+			},
+			gone: () => false
+		});
+		const c = render({ entry: entry() });
+		click(testid('transform-test-toggle'));
+		click(testid('transform-test-run'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('rows: 1'));
+		expect(method).toBe('previewTransform');
+		expect(testid('transform-test-notice')).toBeNull();
+		expect(document.body.textContent).not.toMatch(/\d+ ms/);
+		unmount(c);
+	});
 
 	it('a server 409 renders the state', async () => {
 		capture({ detail: 'scripts need the engine' }, 409);

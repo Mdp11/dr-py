@@ -82,6 +82,7 @@
 		running = true;
 		notice = null;
 		refused = false;
+		result = null;
 		try {
 			const out = await previewTransform(entry);
 			if (seq !== runSeq) return;
@@ -186,7 +187,7 @@
 								{/if}
 							</span>
 						{/if}
-						<span>{result.duration_ms} ms</span>
+						{#if result.duration_ms !== undefined}<span>{result.duration_ms} ms</span>{/if}
 					</div>
 
 					{#if result.split}
@@ -216,9 +217,11 @@
 											failed
 										</span>
 									{/if}
-									<span class="ml-auto text-[10px] text-muted-foreground/70">
-										{file.duration_ms} ms
-									</span>
+									{#if file.duration_ms !== undefined}
+										<span class="ml-auto text-[10px] text-muted-foreground/70">
+											{file.duration_ms} ms
+										</span>
+									{/if}
 								</button>
 								{#if fileOpen}
 									<div id={fileId} class="border-t border-border/60 p-2">

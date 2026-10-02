@@ -84,17 +84,10 @@ export function previewTransform(
 	return route(
 		'exports',
 		cfg,
-		async (call) => {
-			const started = performance.now();
-			const answer = (await call('previewTransform', {
-				...(asSent(body) as object),
-				...exportContext()
-			})) as object;
-			return TransformPreviewOutSchema.parse({
-				...answer,
-				duration_ms: Math.round(performance.now() - started)
-			});
-		},
+		async (call) =>
+			TransformPreviewOutSchema.parse(
+				await call('previewTransform', { ...(asSent(body) as object), ...exportContext() })
+			),
 		() =>
 			apiFetch(
 				'/exports/preview-transform',
