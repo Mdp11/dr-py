@@ -1,9 +1,10 @@
 /**
  * The cache of embedded call results: one entry per `(code, entry, element ids,
- * inputs, doc)` call, the code held as an id from `codes`, evicted by what a transition touched. An entry carries
- * the keys its call read; a transition's touched keys evict every entry that
- * read one of them, and every entry that depends on everything. Entries leave
- * least recently used first once the entry or byte bound is passed.
+ * inputs, doc)` call, the code held as an id from `codes`, evicted by what a
+ * transition touched. An entry carries the keys its call read; a transition's
+ * touched keys evict every entry that read one of them, and every entry that
+ * depends on everything. Entries leave least recently used first once the
+ * entry or byte bound is passed.
  */
 import { pyDumps } from '../value/serialize.ts';
 import type { EmbeddedEntry, ReadKey, ScriptErrorKind, ScriptResult } from './result.ts';

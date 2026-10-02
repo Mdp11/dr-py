@@ -243,25 +243,26 @@ export function runExportSteps(
 			const results: ExportFiles[] = [];
 			// The oracle refuses every entry whose transform does not compile before it runs one,
 			// all in one list; the guest reports it when the call runs, so a run that has
-			// transforms goes on past an entry's refusal to find the others, and fails with the
-			// list, else with the first refusal.
+			// transforms goes on past an entry's failure to find the others, and fails with the
+			// list, else with the first failure. A later entry's failure never replaces it: the
+			// oracle stops at the first and never reaches the rest.
 			const deferring = planned.some(({ transform }) => transform !== null);
 			const syntax: string[] = [];
-			let first: ReadError | null = null;
+			let first: { readonly error: unknown } | null = null;
 			for (const { files } of planned) {
 				try {
 					if (files instanceof ReadError) throw files;
 					results.push(yield* files);
 				} catch (error) {
-					if (!deferring || !(error instanceof ReadError)) throw error;
+					if (!deferring) throw error;
 					if (error instanceof TransformSyntaxError) syntax.push(error.detail);
-					else first ??= error;
+					else first ??= { error };
 				}
 			}
 			if (syntax.length > 0) {
 				throw new ReadError(422, `invalid transform for entries: ${syntax.join('; ')}`);
 			}
-			if (first !== null) throw first;
+			if (first !== null) throw first.error;
 			return yield* assembled(def, run, modelRev, planned, results, vars, meter);
 		})()
 	);

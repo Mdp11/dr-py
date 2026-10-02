@@ -46,6 +46,9 @@ import {
 	rawProperty
 } from './virtual-props.ts';
 
+/** What a cell that nothing computed says, in the grid, the recap and the files. */
+export const NOT_COMPUTED_MESSAGE = 'not computed';
+
 /** One cell, as the route's `TableCellOut` carries it. */
 export type TableCell = {
 	kind: 'element' | 'value' | 'values' | 'elements' | 'error' | 'pending';

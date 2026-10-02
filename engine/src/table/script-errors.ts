@@ -8,7 +8,7 @@ import { Meter } from '../navigation/evaluate.ts';
 import { ReadError } from '../read/errors.ts';
 import { pageOf, type ReadParams } from '../read/params.ts';
 import type { Steps } from '../steps/steps.ts';
-import { evaluateCellsSteps } from './cells.ts';
+import { evaluateCellsSteps, NOT_COMPUTED_MESSAGE } from './cells.ts';
 import { NavMemo } from './nav-memo.ts';
 import { tableHasScript } from './resolve.ts';
 import { answered, orderedRows, resolved, sourceOf, tableScripts } from './route.ts';
@@ -16,9 +16,6 @@ import { DEFAULT_TABLE_LIMITS } from './rows.ts';
 
 /** The most error items one answer lists; `total_errors` counts them all. */
 export const SCRIPT_ERRORS_CAP = 200;
-
-/** What a cell that nothing computed says. */
-const NOT_COMPUTED_MESSAGE = 'not computed';
 
 /** One failed script cell: the row's place, the row's element if its key opens with one, and the column's. */
 export type ScriptErrorItem = {

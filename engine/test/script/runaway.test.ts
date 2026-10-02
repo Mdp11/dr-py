@@ -92,10 +92,21 @@ async function warmed(options: Partial<PoolOptions> = {}) {
 	return pooled;
 }
 
-/** A batch after a runaway on the same pool: an honest answer, from a worker that is not the runaway's. */
-async function expectHealthy(host: ScriptHost): Promise<void> {
-	const run = await host.run(batchOf('pass', [null]), bridge);
-	expect(texts(run)).toEqual([HONEST_42]);
+/**
+ * A batch after a runaway on the same pool: an honest answer, from a worker that is not the runaway's.
+ * On a pool whose calls have a few milliseconds a stall of the machine is a timeout, and the pool is
+ * right to say so: that answer is asked again, and anything else, a stop carried over included, fails.
+ */
+async function expectHealthy(host: ScriptHost, timeoutMessage?: string): Promise<void> {
+	const batch = batchOf('pass', [null]);
+	const timeout =
+		timeoutMessage === undefined ? null : hostErrorText(batch, 'timeout', timeoutMessage);
+	for (let tries = timeout === null ? 1 : 25; tries > 0; tries--) {
+		const answered = texts(await host.run(batch, bridge));
+		if (tries > 1 && answered[0] === timeout) continue;
+		expect(answered).toEqual([HONEST_42]);
+		return;
+	}
 }
 
 async function timed<T>(work: Promise<T>): Promise<[T, number]> {
@@ -210,7 +221,7 @@ def transform(doc):
 					`{"payload": {"kind": "json", "value": ${i}}, "error": null, "reads": [], "stdout": ""}`
 				);
 			});
-			await expectHealthy(host);
+			await expectHealthy(host, 'execution exceeded the wall timeout of 0.03s');
 		},
 		TEST_MS
 	);

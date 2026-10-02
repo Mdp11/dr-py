@@ -56,6 +56,7 @@ export {
 	evaluateFilled,
 	type BatchRunner,
 	type FillOptions,
+	type FillReader,
 	type FillSignal,
 	type FillStats,
 	type ScriptCall as ReaderCall,
@@ -536,7 +537,7 @@ export {
 export { sha256 } from './snapshot/sha256.ts';
 export { drain, isSteps, sortedInSlices, type Progress, type Steps } from './steps/steps.ts';
 export { cellText } from './table/cell-text.ts';
-export { evaluateCellsSteps, type TableCell } from './table/cells.ts';
+export { evaluateCellsSteps, NOT_COMPUTED_MESSAGE, type TableCell } from './table/cells.ts';
 export { NavMemo, type MemoEntry } from './table/nav-memo.ts';
 export {
 	orderKey,
@@ -597,6 +598,12 @@ export {
 	type SortKey,
 	type TableDefinition
 } from './table/schema.ts';
+export {
+	SCRIPT_ERRORS_CAP,
+	tableScriptErrors,
+	type ScriptErrorItem,
+	type ScriptErrorsBody
+} from './table/script-errors.ts';
 export {
 	orderRowsSteps,
 	pyCompare,

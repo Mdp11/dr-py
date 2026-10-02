@@ -322,6 +322,115 @@ describe('what a fill keeps', () => {
 		expect(stats).toEqual({ rounds: 0, calls: 0 });
 	});
 
+	describe('a pass that begins its scan', () => {
+		it('is answered when a transition landed after its scan, with no second pass', async () => {
+			let moved = 0;
+			let passes = 0;
+			const { value, stats } = await evaluateFilled(
+				async (scripts) => {
+					passes++;
+					scripts.begin();
+					// What lands behind the scan before the fill hears of its end.
+					moved++;
+					return passes;
+				},
+				{ ...options(async () => []), transitions: () => moved }
+			);
+			expect(value).toBe(1);
+			expect(stats).toEqual({ rounds: 0, calls: 0 });
+		});
+
+		it('is answered when it threw with no miss, whatever landed after its scan', async () => {
+			let moved = 0;
+			await expect(
+				evaluateFilled(
+					async (scripts) => {
+						scripts.begin();
+						moved++;
+						throw new Error('the scan failed');
+					},
+					{ ...options(async () => []), transitions: () => moved }
+				)
+			).rejects.toThrow('the scan failed');
+		});
+
+		it('keeps its round when the counter moved before the scan began, not after', async () => {
+			const cache = new CellCache();
+			let moved = 0;
+			let passes = 0;
+			const { value, stats } = await evaluateFilled(
+				async (scripts) => {
+					passes++;
+					// A transition queued ahead of the scan moves the counter before it starts.
+					if (passes === 1) moved++;
+					scripts.begin();
+					return shown(scripts.read(call(LEN, ['n1'])));
+				},
+				options(runnerOver(host), { cache, transitions: () => moved })
+			);
+			expect(value).toBe('1');
+			expect(stats).toEqual({ rounds: 1, calls: 1 });
+			expect(passes).toBe(2);
+			expect(cache.size).toBe(1);
+		}, 60_000);
+
+		it('drops its round and runs again, with no round, when a transition landed after its scan', async () => {
+			const cache = new CellCache();
+			let moved = 0;
+			let passes = 0;
+			const seen: ScriptBatch[] = [];
+			const { stats } = await evaluateFilled(
+				async (scripts) => {
+					passes++;
+					scripts.begin();
+					const answer = scripts.read(call(LEN, ['n1']));
+					if (passes === 1) moved++;
+					return shown(answer);
+				},
+				options(runnerOver(host, seen), { cache, transitions: () => moved })
+			);
+			expect(passes).toBe(3);
+			expect(stats).toEqual({ rounds: 1, calls: 1 });
+			expect(seen).toHaveLength(1);
+		}, 60_000);
+
+		it('does not answer a pass in another state from the memo of the state before', async () => {
+			let moved = 0;
+			let passes = 0;
+			const seen: ScriptBatch[] = [];
+			const { value } = await evaluateFilled(
+				async (scripts) => {
+					passes++;
+					// The second scan starts after a transition: what the first round answered is of the state before.
+					if (passes === 2) moved++;
+					scripts.begin();
+					const first = scripts.read(call(LEN, ['n1']));
+					if (first.error !== null) return shown(first);
+					return `${shown(first)} ${shown(scripts.read(call(TIMES_TEN, ['n1'])))}`;
+				},
+				options(runnerOver(host, seen), { transitions: () => moved })
+			);
+			expect(value).toBe('1 10');
+			expect(seen.map((batch) => batch.code)).toEqual([LEN, LEN, TIMES_TEN]);
+		}, 60_000);
+
+		it('forgets what a scan that starts over had missed', async () => {
+			const seen: ScriptBatch[] = [];
+			const { stats } = await evaluateFilled(
+				async (scripts) => {
+					scripts.begin();
+					scripts.read(call(TIMES_TEN, ['n1']));
+					// The scan starts over and no longer asks for it.
+					scripts.begin();
+					return shown(scripts.read(call(LEN, ['n1'])));
+				},
+				options(runnerOver(host, seen))
+			);
+			expect(seen.map((batch) => batch.code)).toEqual([LEN]);
+			expect(stats.calls).toBe(1);
+		}, 60_000);
+	});
+
 	it('forgets the memo of a state the model has left', async () => {
 		let moved = 0;
 		let passes = 0;

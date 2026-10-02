@@ -29,6 +29,12 @@ export type ScriptCall = {
 /** What a pass reads scripts through: the fill's memo, then the cache, else the miss is recorded and `PENDING` answered. */
 export type ScriptReader = { read(call: ScriptCall): ScriptResult };
 
+/**
+ * What a pass is given. A pass whose scan the model cannot move under calls `begin` the moment the
+ * scan starts, and the fill takes the state it ran on from then, not from when it queued the pass.
+ */
+export type FillReader = ScriptReader & { begin(): void };
+
 /** The signal a fill watches; an `AbortSignal` is one. */
 export type FillSignal = AbortSignalLike & { readonly reason?: unknown };
 
@@ -43,7 +49,7 @@ export type FillOptions = {
 	signal: FillSignal;
 	cache?: CellCache;
 	/**
-	 * A counter that moves on every transition of the model the scripts read.
+	 * A counter that moves on every transition that changes the model the scripts read.
 	 * Absent, the model does not move for the length of the fill.
 	 */
 	transitions?: () => number;
@@ -171,18 +177,26 @@ function batchesOf(missed: ReadonlyMap<CellKey, ScriptCall>): Group[] {
  * pass that throws having recorded a miss may have thrown from a pending
  * answer, so it is discarded like any other; one that throws with none throws.
  *
+ * A pass is read at the state the model was in when it began. One that calls
+ * `begin` as its scan starts, and whose scan nothing can interrupt, began
+ * then: it is answered whatever lands after it, as an evaluation answers the
+ * state it ran on. One that does not is taken to read across awaits, began
+ * when the loop started it, and is run again if the counter moved by its end.
+ *
  * What a round answers is kept, in the memo and the cache, only if no
  * transition moved since the pass that asked for it began: the keys of its
  * calls were read from that state and a transition would have evicted what the
- * cache then held. A pass the model moved under is run again without a round,
- * and a round it moved under is dropped and its calls are asked for again.
- * The batches of a round stop together: one that fails aborts the others, and
- * an abort of `signal` rejects the fill with its reason, whatever the runners
- * rejected with. The memo is the fill's own and a fresh fill starts empty,
- * so a result the cache does not keep (a timeout) runs again in the next one.
+ * cache then held. A pass the model moved from under is run again without a
+ * round, and a round it moved under is dropped and its calls are asked for
+ * again. The memo is dropped whenever a pass begins in another state than the
+ * one its entries answered. The batches of a round stop together: one that
+ * fails aborts the others, and an abort of `signal` rejects the fill with its
+ * reason, whatever the runners rejected with. The memo is the fill's own and a
+ * fresh fill starts empty, so a result the cache does not keep (a timeout)
+ * runs again in the next one.
  */
 export async function evaluateFilled<T>(
-	pass: (scripts: ScriptReader) => Promise<T>,
+	pass: (scripts: FillReader) => Promise<T>,
 	options: FillOptions
 ): Promise<{ value: T; stats: FillStats }> {
 	const { runner, signal, cache, onProgress } = options;
@@ -193,10 +207,22 @@ export async function evaluateFilled<T>(
 	const memo = new Map<CellKey, ScriptResult>();
 	let memoStamp = transitions();
 	let missed = new Map<CellKey, ScriptCall>();
+	// The state the running pass declared it began in; `null` until it does.
+	const scan: { began: number | null } = { began: null };
 	const stats: FillStats = { rounds: 0, calls: 0 };
 	let finished = 0;
 
-	const scripts: ScriptReader = {
+	const scripts: FillReader = {
+		begin() {
+			const stamp = transitions();
+			scan.began = stamp;
+			if (stamp !== memoStamp) {
+				memo.clear();
+				memoStamp = stamp;
+			}
+			// A scan that starts over reads everything again.
+			missed = new Map();
+		},
 		read(call) {
 			const key = cellKey(
 				codes.id(call.code),
@@ -250,11 +276,12 @@ export async function evaluateFilled<T>(
 
 	for (;;) {
 		if (signal.aborted) aborted(signal);
-		const stamp = transitions();
-		if (stamp !== memoStamp) {
+		const queued = transitions();
+		if (queued !== memoStamp) {
 			memo.clear();
-			memoStamp = stamp;
+			memoStamp = queued;
 		}
+		scan.began = null;
 		missed = new Map();
 		let value: T | undefined;
 		let failure: { error: unknown } | null = null;
@@ -264,13 +291,17 @@ export async function evaluateFilled<T>(
 			failure = { error };
 		}
 		if (signal.aborted) aborted(signal);
-		// The pass is one scan where the model cannot move under it; where it can, what it read is
-		// read again from the state it ended in.
-		if (transitions() !== stamp) continue;
-		if (missed.size === 0) {
+		const declared = scan.began !== null;
+		const stamp = scan.began ?? queued;
+		const moved = transitions() !== stamp;
+		// A declared pass was one scan where the model cannot move under it, whatever landed after;
+		// an undeclared one read across awaits and is read again from the state it ended in.
+		if (missed.size === 0 && (declared || !moved)) {
 			if (failure !== null) throw failure.error;
 			return { value: value as T, stats };
 		}
+		// What a pass that missed asked about is not the state the model is in.
+		if (moved) continue;
 
 		const groups = batchesOf(missed);
 		stats.rounds++;

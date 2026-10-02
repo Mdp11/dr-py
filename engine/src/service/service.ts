@@ -2,7 +2,7 @@ import { ArtifactSet, readArtifacts, readStagedArtifacts } from '../artifacts/ar
 import { compareSteps, UploadedFile } from '../cr/compare.ts';
 import { proposeSteps, readCrs, type ChangeRequest } from '../cr/propose.ts';
 import { modelFileSteps } from '../download/model-file.ts';
-import { evaluateFilled, type ScriptReader } from '../evaluate/fill.ts';
+import { evaluateFilled, type FillReader } from '../evaluate/fill.ts';
 import { EVALUATIONS } from '../evaluate/index.ts';
 import { Metamodel } from '../metamodel/metamodel.ts';
 import type { MetamodelDoc } from '../metamodel/types.ts';
@@ -686,10 +686,13 @@ class Service {
 	private readonly running = new Set<() => void>();
 	// The epoch the host was last told to prewarm for.
 	private prewarmed = -1;
-	// The cells of the scripts an evaluation reads, for a replica opened with `scripts: 'evaluate'`; `null` otherwise.
+	// The one cell cache, empty whenever no replica opened with `scripts: 'evaluate'` is in hand: a fill that
+	// waited for a replica reads it, and the replica it lands on says whether it may.
+	private readonly cellCache = new CellCache();
+	// `cellCache` for a replica opened with `scripts: 'evaluate'`; `null` otherwise.
 	private cells: CellCache | null = null;
-	// Moves with every transition of the replica's model and every clear of `cells`: a fill keeps what a round
-	// answered only if it has not moved since the pass that asked for it began.
+	// Moves with every transition that changes the replica's model and every clear of `cells`: a fill keeps what a
+	// round answered only if it has not moved since the pass that asked for it began.
 	private transitions = 0;
 	// The fills in flight, with the calls each has asked for and finished; `fillsEnded` holds those of the fills
 	// that ended while others ran, so that the sum only grows until the last one ends.
@@ -812,7 +815,7 @@ class Service {
 	 */
 	evaluate(method: string, call: Call): void {
 		if (this.cells !== null) {
-			this.evaluateFilled(method, call, this.cells);
+			this.evaluateFilled(method, call);
 			return;
 		}
 		this.submit<unknown>(
@@ -845,64 +848,72 @@ class Service {
 	 * An evaluation of a replica opened with `scripts: 'evaluate'`: the scan runs as a pass of a
 	 * fill, which runs the scripts the pass could not answer and runs it again. Each pass is a scan
 	 * of the model lane, so no transition lands within one, and the fill runs between passes,
-	 * outside the scheduler: a stage or a delta lands there and the fill sees it move. The call
-	 * belongs to the replica it arrived on: that replica dropped, it is answered 409, and a cancel
-	 * stops its batches and answers nothing.
+	 * outside the scheduler: a stage or a delta lands there and the fill sees it move. A pass is
+	 * read at the state its scan started in, as an evaluation without the option is, and answered
+	 * whatever lands after it. The call belongs to the replica its first scan started on, as a call
+	 * waiting for a replica to be ready waits for the next one, and on a replica not opened with
+	 * the option it reads no script, as an evaluation does without the option: that replica
+	 * dropped, it is answered 409, and a cancel stops its batches and answers nothing.
 	 */
-	private evaluateFilled(method: string, call: Call, cells: CellCache): void {
+	private evaluateFilled(method: string, call: Call): void {
 		const cancel = abortable();
 		call.onCancel = () => cancel.abort(new Error('the call was cancelled'));
-		this.answerLater(call, this.fill(method, call, cells, this.epoch, cancel), transferOf);
+		this.answerLater(call, this.fill(method, call, cancel), transferOf);
 	}
 
-	private async fill(
-		method: string,
-		call: Call,
-		cells: CellCache,
-		epoch: number,
-		cancel: Abortable
-	): Promise<unknown> {
+	private async fill(method: string, call: Call, cancel: Abortable): Promise<unknown> {
 		const mine = { done: 0, total: 0 };
+		// The replica of the first scan: -1 until it starts. Only from then does a replica dropped stop the fill.
+		let epoch = -1;
+		const start = () => {
+			if (epoch < 0) {
+				this.ready();
+				epoch = this.epoch;
+				this.running.add(cancel.abort);
+			} else {
+				this.stillReady(epoch);
+			}
+		};
 		this.fills.add(mine);
-		this.running.add(cancel.abort);
 		try {
 			const { value } = await evaluateFilled(
-				(scripts) => this.pass(method, call, epoch, scripts, cancel.signal),
+				(scripts) => this.pass(method, call, start, scripts, cancel.signal),
 				{
 					runner: async (batch, signal) => {
 						const { results } = await this.runBatch(batch, signal, epoch);
 						return results.map(({ text }) => text);
 					},
 					signal: cancel.signal,
-					cache: cells,
+					cache: this.cellCache,
 					transitions: () => this.transitions,
 					onProgress: (done, total) => {
 						mine.done = done;
 						mine.total = total;
-						this.postScripts();
+						if (this.epoch === epoch) this.postScripts();
 					}
 				}
 			);
 			return value;
 		} catch (error) {
 			// A replica dropped under the fill aborted it: the refusal is the one of a run on it.
-			if (this.epoch !== epoch) this.stillReady(epoch);
+			if (epoch >= 0 && this.epoch !== epoch) this.stillReady(epoch);
 			throw error;
 		} finally {
 			this.running.delete(cancel.abort);
-			this.endFill(mine);
+			this.endFill(mine, this.epoch === epoch || epoch < 0);
 		}
 	}
 
 	/**
 	 * One pass of a fill: the evaluation as a model-lane scan reading through `scripts`, answered
-	 * when the scan ends. An abort takes the scan out of the lane and rejects the pass.
+	 * when the scan ends. `start` pins the fill to the replica its first scan runs on and refuses a
+	 * scan on any other. An abort takes the scan out of the lane and rejects the pass.
 	 */
 	private pass(
 		method: string,
 		call: Call,
-		epoch: number,
-		scripts: ScriptReader,
+		start: () => void,
+		scripts: FillReader,
 		signal: AbortSignalLike & { readonly reason?: unknown }
 	): Promise<unknown> {
 		return new Promise((resolve, reject) => {
@@ -917,8 +928,10 @@ class Service {
 				{
 					kind: 'scan',
 					run: () => {
-						this.stillReady(epoch);
+						start();
 						const wc = this.ready();
+						// Nothing moves the model while the scan runs: this is the state it reads.
+						scripts.begin();
 						return EVALUATIONS[method]!(
 							{
 								model: wc.model,
@@ -929,7 +942,7 @@ class Service {
 									stagedVersion: wc.stagedVersion,
 									tableOrders: this.tableOrders
 								},
-								scripts
+								...(this.cells === null ? {} : { scripts })
 							},
 							call.params
 						);
@@ -956,14 +969,18 @@ class Service {
 		this.emit({ event: 'progress', task: 'scripts', done, total });
 	}
 
-	/** A fill is over: what it asked for counts as done, and the last one to end starts the count anew. */
-	private endFill(fill: { done: number; total: number }): void {
+	/**
+	 * A fill is over: what it asked for counts as done, and the last one to end starts the count
+	 * anew. `post` is false for a fill of a replica that was dropped: the next one's stream is not
+	 * told of it.
+	 */
+	private endFill(fill: { done: number; total: number }, post: boolean): void {
 		this.fills.delete(fill);
 		this.fillsEnded = {
 			done: this.fillsEnded.done + fill.total,
 			total: this.fillsEnded.total + fill.total
 		};
-		this.postScripts();
+		if (post) this.postScripts();
 		if (this.fills.size === 0) {
 			this.fillsEnded = { done: 0, total: 0 };
 			this.fillsPosted = { done: 0, total: 0 };
@@ -1558,9 +1575,12 @@ class Service {
 	 * calls recorded their reads in: those of the state the transition leaves, over the ids
 	 * `leaving` names, and those of the state it makes, over what it changed. An entity deleted is
 	 * read from its committed image where `leaving` did not name it. A transition that changed
-	 * nothing evicts nothing, though `transitions` moves; one that failed other than by leaving no
-	 * trace may have changed anything, so the cache is dropped. The eviction is bounded by the
-	 * cache (`CellCacheLimits.evictWork`) and the keys by the entities the transition names.
+	 * nothing evicts nothing and does not move `transitions`: a result computed before it is a
+	 * result of the state after it. One that moves it does so in the same synchronous step as the
+	 * eviction, so a result computed before it can never be kept after it. One that failed other
+	 * than by leaving no trace may have changed anything, so the cache is dropped. The eviction is
+	 * bounded by the cache (`CellCacheLimits.evictWork`) and the keys by the entities the
+	 * transition names.
 	 */
 	private transit<T>(
 		wc: WorkingCopy,
@@ -1587,8 +1607,6 @@ class Service {
 			if (!leftNoTrace(error)) this.dropCells();
 			throw error;
 		}
-		this.transitions++;
-		if (cells === null) return out;
 		const changes = changesOf(out);
 		const named =
 			changes.elementIds.length +
@@ -1596,6 +1614,8 @@ class Service {
 			changes.deletedElementIds.length +
 			changes.deletedRelationshipIds.length;
 		if (named === 0) return out;
+		this.transitions++;
+		if (cells === null) return out;
 		const model = wc.model;
 		const keys = touchedKeys(model, model.metamodel, changes, before ?? new Set<string>());
 		deletedKeys(
@@ -1682,7 +1702,7 @@ class Service {
 		this.discard();
 		this.failed = null;
 		// Without a host to run them, a script step is refused as it is without the option.
-		if (scripts === 'evaluate' && this.deps.scripts !== undefined) this.cells = new CellCache();
+		if (scripts === 'evaluate' && this.deps.scripts !== undefined) this.cells = this.cellCache;
 		const opening: Opening = {
 			projectId,
 			queue: new ByteQueue(),

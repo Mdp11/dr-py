@@ -290,6 +290,120 @@ describe('an edit that lands during a fill', () => {
 	}, 60_000);
 });
 
+describe('the state an evaluation answers', () => {
+	const search = (client: Client) => client.call('searchModel', { target: 'element' });
+	const text = (value: unknown) => JSON.stringify(value);
+
+	/** A client with no option, to say what an evaluation answers without it. */
+	async function plain(): Promise<Client> {
+		const client = connect(autoHost(), portPair());
+		await openReplica(client, bridgeModel(), doc);
+		return client;
+	}
+
+	it('is the state it ran on when a stage is posted right behind it, as without the option', async () => {
+		const { client } = await evaluating();
+		const bare = await plain();
+		const answers: string[] = [];
+		for (const one of [client, bare]) {
+			const sent = search(one);
+			const staged = stage(one, [rename('n1', 'changed')]);
+			answers.push(text(await sent));
+			await staged;
+			// The stage did land.
+			expect(text(await search(one))).toContain('changed');
+		}
+		expect(answers[0]).not.toContain('changed');
+		expect(answers[0]).toBe(answers[1]);
+	}, 60_000);
+
+	it('is not starved by a stream of stages', async () => {
+		const { client, tracker } = await evaluating();
+		const bare = await plain();
+		const streamed = autoHost(10);
+		const slow = connect(streamed, portPair(), { scripts: tracker.factory });
+		await openReplica(slow, bridgeModel(), doc, { scripts: 'evaluate' });
+		const STAGES = 200;
+		const answeredAfter = async (one: Client) => {
+			let stages = 0;
+			const loop = (async () => {
+				while (stages < STAGES) {
+					await stage(one, [rename('n1', `c${stages}`)]);
+					stages++;
+				}
+			})();
+			let at = -1;
+			const sent = search(one).then(() => (at = stages));
+			await Promise.all([loop, sent]);
+			return at;
+		};
+		// The evaluation was posted before the first stage, and answers before the stream is over.
+		expect(await answeredAfter(client)).toBeLessThan(10);
+		expect(await answeredAfter(slow)).toBeLessThan(10);
+		expect(await answeredAfter(bare)).toBeLessThan(10);
+	}, 120_000);
+
+	it('keeps a round across a transition that changed nothing', async () => {
+		const { client, tracker } = await evaluating();
+		const code = NAME('no-op');
+		let release!: () => void;
+		let arrived!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const reached = new Promise<void>((resolve) => (arrived = resolve));
+		tracker.hook.after = async () => {
+			tracker.hook.after = null;
+			arrived();
+			await held;
+		};
+		const answered = evaluate(client, 'n1', code);
+		await reached;
+		// Nothing is staged: neither the model nor a cell it could have read moved.
+		await client.call('unstage', { what: 'all' });
+		release();
+		expect(await answered.then(endsOf)).toEqual(['one']);
+		expect(tracker.batches).toHaveLength(1);
+		expect(await evaluate(client, 'n1', code).then(endsOf)).toEqual(['one']);
+		expect(tracker.batches).toHaveLength(1);
+	}, 60_000);
+
+	it('is not refused for arriving while the replica is diverged: it waits for the next one', async () => {
+		const { client, tracker } = await evaluating();
+		const delta = new Server(clone(bridgeModel())).commit([rename('n2', 'dos')]).delta;
+		const diverged = client.nextEvent(
+			(event) => event.event === 'replica' && event.state === 'diverged'
+		);
+		await client.call('applyDelta', {
+			text: deltaText({ ...delta, state_digest: '0'.repeat(16) })
+		});
+		await diverged;
+		const waiting = evaluate(client, 'n1', NAME('early'));
+		waiting.catch(() => undefined);
+		await settle();
+		expect(tracker.batches).toEqual([]);
+		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
+		expect(await waiting.then(endsOf)).toEqual(['one']);
+		// It filled on the new replica's cache, which a transition there evicts from.
+		await stage(client, [rename('n1', 'uno')]);
+		expect(await evaluate(client, 'n1', NAME('early')).then(endsOf)).toEqual(['uno']);
+	}, 60_000);
+
+	it('reads no script on a next replica that was not opened with the option, as without it', async () => {
+		const { client } = await evaluating();
+		const delta = new Server(clone(bridgeModel())).commit([rename('n2', 'dos')]).delta;
+		const diverged = client.nextEvent(
+			(event) => event.event === 'replica' && event.state === 'diverged'
+		);
+		await client.call('applyDelta', {
+			text: deltaText({ ...delta, state_digest: '0'.repeat(16) })
+		});
+		await diverged;
+		const waiting = refusal(evaluate(client, 'n1', NAME('bare')));
+		await settle();
+		await openReplica(client, bridgeModel(), doc);
+		expect((await waiting).status).toBe(501);
+	}, 60_000);
+});
+
 describe('progress', () => {
 	const scripts = (client: Client) =>
 		client.eventsOf('progress').filter((event) => event.task === 'scripts') as unknown as {
@@ -326,6 +440,33 @@ describe('progress', () => {
 		const events = scripts(client);
 		expect(events.at(-1)).toMatchObject({ done: 3, total: 3 });
 		expect(events.every((event) => event.done <= event.total)).toBe(true);
+	}, 60_000);
+
+	it('says nothing into the next replica for a fill the replica ended under', async () => {
+		const { client, tracker } = await evaluating();
+		const column = (code: string) => ({ kind: 'script', snippet: { definition: { code } } });
+		const sent = client.call('evaluateTable', {
+			definition: {
+				row_source: { kind: 'scope', types: ['Node'], criteria: [] },
+				columns: [
+					{ kind: 'element' },
+					column(`# spun\ndef value(els):\n    while True:\n        pass\n`),
+					column(`# quick\ndef value(els):\n    return str(els[0].name)\n`)
+				]
+			},
+			limit: 1
+		});
+		// One of the round's two batches is done: one call of two.
+		await until(() => scripts(client).some((event) => event.done === 1 && event.total === 2));
+		const before = scripts(client).length;
+		const ran = tracker.ran();
+		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
+		// The fill ends once its batches have: the one that spins is stopped.
+		await until(() => ran.every((one) => one.terminated));
+		await settle();
+		await expect(sent).rejects.toMatchObject({ status: 409 });
+		expect(scripts(client)).toHaveLength(before);
+		expect(scripts(client).every((event) => event.done < event.total)).toBe(true);
 	}, 60_000);
 
 	it('says nothing for an evaluation that finds every call cached', async () => {
@@ -758,6 +899,85 @@ describe('an export through a transform', () => {
 		).toEqual(gated);
 		expect(tracker.batches).toEqual([]);
 	}, 60_000);
+
+	describe('run as an exporter', () => {
+		const saved = (id: string, payload: object) => ({
+			id,
+			kind: 'table',
+			name: id,
+			artifact_rev: 1,
+			payload
+		});
+		// A row source whose columns read a chain slot it does not have: the evaluation itself raises.
+		const slotless = table({}, []);
+		slotless.row_source = {
+			kind: 'chains',
+			navigation: {
+				definition: {
+					kind: 'path',
+					start: { kind: 'scope', types: ['Node'], criteria: [] },
+					steps: []
+				}
+			}
+		} as never;
+		slotless.columns = [{ kind: 'element', source: { kind: 'row', chain_index: 3 } }];
+		const run = (client: Client, ...entries: object[]) =>
+			client.call('runExporterDraft', {
+				definition: { schema_version: 1, output: {}, entries },
+				date: '20240229',
+				project: 'p'
+			});
+		const withTransform = (tag: string) => ({ definition: { code: NAMES(tag) } });
+
+		it('stops at the first entry that fails, as the oracle does: a later entry that raises does not replace it', async () => {
+			const { client, tracker } = await evaluating();
+			await client.call('setArtifacts', {
+				artifacts: [saved('t_ok', table()), saved('t_slotless', slotless)]
+			});
+			// The first entry refuses for its own shape; the second, with a transform, raises in the evaluation.
+			const shapeless = {
+				source: { ref: 't_ok' },
+				format: 'json',
+				json_doc: { shape: 'object' }
+			};
+			const raising = {
+				source: { ref: 't_slotless' },
+				format: 'json',
+				transform: withTransform('later')
+			};
+			expect(await refusal(run(client, shapeless, raising))).toEqual({
+				status: 422,
+				detail: "t_ok: json_doc.shape 'object' requires key_column"
+			});
+			// Alone, the second entry is the refusal.
+			expect(await refusal(run(client, raising))).toMatchObject({
+				status: 422,
+				detail: expect.stringContaining('chain_index 3 out of range') as unknown as string
+			});
+			expect(tracker.batches).toEqual([]);
+		}, 60_000);
+
+		it('refuses every transform that does not parse in one list, whatever an entry before it raised', async () => {
+			const { client } = await evaluating();
+			await client.call('setArtifacts', { artifacts: [saved('t_slotless', slotless)] });
+			const raising = {
+				source: { ref: 't_slotless' },
+				format: 'json',
+				transform: withTransform('first')
+			};
+			const unparsed = (tag: string) => ({
+				source: { ref: 't_slotless' },
+				name: tag,
+				format: 'json',
+				transform: { definition: { code: `# ${tag}\ndef transform(doc:\n    return doc\n` } }
+			});
+			expect(await refusal(run(client, raising, unparsed('second'), unparsed('third')))).toEqual({
+				status: 422,
+				detail:
+					'invalid transform for entries: second: transform code does not parse; third: transform code does not parse'
+			});
+		}, 60_000);
+	});
 
 	describe('previewed', () => {
 		const saved = (payload: object) => [

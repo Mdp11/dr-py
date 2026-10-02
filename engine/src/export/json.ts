@@ -10,7 +10,7 @@ import { displayName } from '../model/naming.ts';
 import { Meter, PropertyValue } from '../navigation/evaluate.ts';
 import { ReadError } from '../read/errors.ts';
 import { drain, type Steps } from '../steps/steps.ts';
-import type { TableCell } from '../table/cells.ts';
+import { NOT_COMPUTED_MESSAGE, type TableCell } from '../table/cells.ts';
 import { expandSlotOf, type Binding, type RowKey } from '../table/rows.ts';
 import type { Column, TableDefinition } from '../table/schema.ts';
 import { pyKey } from '../value/key.ts';
@@ -230,7 +230,7 @@ function renderCell(model: Model, cell: TableCell, mode: ValueMode, single: bool
 		case 'error':
 			return new Map([['$error', cell.message]]);
 		case 'pending':
-			return new Map([['$error', 'not computed']]);
+			return new Map([['$error', NOT_COMPUTED_MESSAGE]]);
 	}
 }
 

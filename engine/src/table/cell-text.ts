@@ -7,7 +7,7 @@ import type { Model } from '../model/model.ts';
 import { displayName } from '../model/naming.ts';
 import { pyStr } from '../value/repr.ts';
 import type { Value } from '../value/types.ts';
-import type { TableCell } from './cells.ts';
+import { NOT_COMPUTED_MESSAGE, type TableCell } from './cells.ts';
 
 const nameOf = (model: Model, id: string): string => displayName(model.getElement(id));
 
@@ -22,7 +22,7 @@ export function cellText(model: Model, cell: TableCell): Value {
 		case 'error':
 			return `#ERROR: ${cell.message}`;
 		case 'pending':
-			return '#ERROR: not computed';
+			return `#ERROR: ${NOT_COMPUTED_MESSAGE}`;
 		case 'elements':
 			return cell.items!.map((item) => nameOf(model, item.id)).join('; ');
 	}
