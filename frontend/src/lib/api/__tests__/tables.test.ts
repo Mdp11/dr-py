@@ -5,6 +5,7 @@ import {
 	drain,
 	EVALUATIONS,
 	TableOrderCache,
+	NO_SCRIPTS,
 	ViewPlacements,
 	type ReadParams
 } from '$engine';
@@ -495,6 +496,7 @@ describe('evaluateTable on the tables surface', () => {
 			model: project.model,
 			artifacts: new ArtifactSet(),
 			placements: new ViewPlacements(),
+			scripts: NO_SCRIPTS,
 			working: { rev: project.rev, stagedVersion: 0, tableOrders: new TableOrderCache() }
 		};
 		return TablePageSchema.parse(

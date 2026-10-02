@@ -1,24 +1,13 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
-	ArtifactSet,
 	CellCache,
-	DEFAULT_TABLE_LIMITS,
-	drain,
-	evaluateCellsSteps,
 	evaluateFilled,
-	EVALUATIONS,
-	Meter,
 	parseExact,
 	PENDING,
-	readTableDefinition,
 	ReadError,
-	ViewPlacements,
 	type BatchRunner,
-	type CommittedArtifact,
-	type EvalContext,
 	type FillOptions,
 	type FillSignal,
-	type ReadParams,
 	type ReaderCall,
 	type ScriptBatch,
 	type ScriptHost,
@@ -29,9 +18,6 @@ import { BridgeDispatcher, dumpDefault, projectRoots } from '../../src/script/br
 import type { Bridge } from '../../src/script/host.ts';
 import { createPool } from '../../src/script/pool.ts';
 import { nodeScriptHost, spawnNodeWorker } from '../../node/script-host.ts';
-import { exportFixture } from '../export/xlsx-sample.ts';
-import { family } from '../model/fixtures.ts';
-import { thrown } from '../golden/thrown.ts';
 import { instrumented } from '../script/fixtures/instrumented.ts';
 import { parityModel } from '../script/parity.ts';
 
@@ -607,139 +593,5 @@ describe('an abort', () => {
 		).catch((error: unknown) => error);
 		expect(rejected).toBe(controller.signal.reason);
 		expect(seen).toEqual([]);
-	});
-});
-
-describe('the gates', () => {
-	const scripted = 'def step(el):\n    return el\n';
-	const reader: ScriptReader = { read: () => PENDING };
-	const refusedUpFront = (ctx: EvalContext, method: string, params: ReadParams) =>
-		thrown(() => EVALUATIONS[method]!(ctx, params));
-	const reaches = (error: unknown) => {
-		expect(error).toBeInstanceOf(ReadError);
-		expect(error).toMatchObject({ status: 501, detail: 'reaches a script' });
-	};
-
-	const tableWithScript = {
-		row_source: { kind: 'scope', types: ['Node'] },
-		columns: [{ kind: 'script', snippet: { definition: { code: scripted } } }]
-	};
-	const navigationWithScript = {
-		kind: 'path',
-		start: { kind: 'row' },
-		steps: [{ kind: 'script', snippet: { definition: { code: scripted } } }]
-	};
-	const draft = (entry: object) => ({
-		definition: { schema_version: 1, output: {}, entries: [entry] },
-		date: '20240229',
-		project: 'p'
-	});
-	const transform = { definition: { code: 'def transform(doc):\n    return doc\n' } };
-	const bareTable: CommittedArtifact = {
-		id: 't_bare',
-		kind: 'table',
-		name: 'Bare',
-		rev: 1,
-		payload: {
-			row_source: { kind: 'scope', types: ['Block'] },
-			columns: [{ kind: 'element' }]
-		} as unknown as CommittedArtifact['payload']
-	};
-
-	/** Each gated evaluation, a call that reaches a script and the context it runs over. */
-	function sites(): { name: string; ctx: EvalContext; method: string; params: ReadParams }[] {
-		const base = {
-			model: family(),
-			artifacts: new ArtifactSet(),
-			placements: new ViewPlacements()
-		};
-		const { ctx: exports } = exportFixture();
-		exports.artifacts.put([bareTable], []);
-		const reach = { source: { ref: 't_bare' }, format: 'json', transform };
-		return [
-			{
-				name: 'a table page',
-				ctx: base,
-				method: 'evaluateTable',
-				params: { definition: tableWithScript }
-			},
-			{
-				name: 'a navigation',
-				ctx: base,
-				method: 'evaluateNavigation',
-				params: { definition: navigationWithScript }
-			},
-			{
-				name: 'a table export',
-				ctx: base,
-				method: 'exportTable',
-				params: { definition: tableWithScript, format: 'csv', date: '20240229', project: 'p' }
-			},
-			{
-				name: 'a table export through a transform',
-				ctx: exports,
-				method: 'exportTable',
-				params: {
-					definition: {
-						row_source: { kind: 'scope', types: ['Block'] },
-						columns: [{ kind: 'element' }],
-						transform
-					},
-					format: 'json',
-					date: '20240229',
-					project: 'p'
-				}
-			},
-			{
-				name: 'a json preview',
-				ctx: base,
-				method: 'previewTableJson',
-				params: { definition: tableWithScript }
-			},
-			{
-				name: 'a run with a transform',
-				ctx: exports,
-				method: 'runExporterDraft',
-				params: draft(reach)
-			}
-		];
-	}
-
-	it.each(sites().map((site) => [site.name, site] as const))(
-		'refuses %s with 501 without a reader, and not with one',
-		(_, site) => {
-			reaches(refusedUpFront(site.ctx, site.method, site.params));
-			expect(refusedUpFront({ ...site.ctx, scripts: reader }, site.method, site.params)).toBe(
-				undefined
-			);
-		}
-	);
-
-	it('refuses a run whose table reaches a script, without a reader, after resolving it', () => {
-		const { ctx } = exportFixture();
-		const scriptTable: CommittedArtifact = {
-			id: 't_script',
-			kind: 'table',
-			name: 'Scripted',
-			rev: 1,
-			payload: {
-				row_source: { kind: 'scope', types: ['Block'] },
-				columns: [{ kind: 'element' }, ...tableWithScript.columns]
-			} as unknown as CommittedArtifact['payload']
-		};
-		ctx.artifacts.put([scriptTable], []);
-		const params = draft({ source: { ref: 't_script' }, format: 'csv' });
-		reaches(refusedUpFront(ctx, 'runExporterDraft', params));
-		expect(refusedUpFront({ ...ctx, scripts: reader }, 'runExporterDraft', params)).toBe(undefined);
-	});
-
-	it('answers 501, never a plain error, for a configured script column reached with no reader', () => {
-		const defn = readTableDefinition(tableWithScript, 'definition');
-		const cells = () =>
-			drain(
-				evaluateCellsSteps(family(), defn, [['a']], 1, DEFAULT_TABLE_LIMITS, new Meter(0), null)
-			);
-		const error = thrown(cells);
-		reaches(error);
 	});
 });

@@ -19,13 +19,7 @@ import {
 	type ChainNode,
 	type ChainResult
 } from './evaluate.ts';
-import {
-	navigationHasScript,
-	NavigationResolveError,
-	RefNotFoundError,
-	resolveRefs,
-	type Fetch
-} from './resolve.ts';
+import { NavigationResolveError, RefNotFoundError, resolveRefs, type Fetch } from './resolve.ts';
 import { readNavigation, type NavigationDefinition } from './schema.ts';
 
 /** A chain's terminal value, told from a `TreeItem` by its `kind`. */
@@ -97,9 +91,7 @@ function chainItem(model: Model, node: ChainNode): TreeItem | ChainValueOut {
 /**
  * `POST .../artifacts/navigation/evaluate` in steps. Before the first step it
  * reads its params and resolves every ref through the working copy's
- * artifacts; a definition that reaches a script refuses with 501, for the
- * server to run, before any pattern is translated, unless the context reads
- * scripts, which a script step then runs through. An id no element has,
+ * artifacts; a script step runs through the context's scripts. An id no element has,
  * read where the core indexes the model raw, is answered as the route's
  * `LookupError` handler answers it: `unknown navigation artifact 'x'`.
  */
@@ -108,14 +100,10 @@ export function evaluateNavigation(ctx: EvalContext, params: ReadParams): Steps<
 	const rowElementId = optionalString(params, 'row_element_id');
 	const { limit, offset } = pageOf(params);
 	const defn = resolved(ctx.artifacts, source);
-	if (ctx.scripts === undefined && navigationHasScript(defn)) {
-		throw new ReadError(501, 'reaches a script');
-	}
 	const { model } = ctx;
 	const meter = new Meter(DEFAULT_LIMITS.maxVisited);
 	const rowElements = rowElementId === null ? null : [rowElementId];
-	const scripts =
-		ctx.scripts === undefined ? null : { reader: ctx.scripts, warnings: new ScriptWarningLog() };
+	const scripts = { reader: ctx.scripts, warnings: new ScriptWarningLog() };
 	const evaluation = evaluateSteps(
 		model.metamodel,
 		model,

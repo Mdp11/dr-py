@@ -20,6 +20,7 @@ import {
 } from '../../src/index.ts';
 import { thrown } from '../golden/thrown.ts';
 import { nodeMetamodel } from '../model/fixtures.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 const COUNT = 3_000;
 
@@ -78,6 +79,7 @@ const context = (
 	model,
 	artifacts: set,
 	placements: new ViewPlacements(),
+	scripts: NO_SCRIPTS,
 	...(cache === null ? {} : { working: { ...stamp, tableOrders: cache } })
 });
 

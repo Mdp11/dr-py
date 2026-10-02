@@ -1,69 +1,58 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
 	drain,
 	EVALUATIONS,
-	ReadError,
 	type CommittedArtifact,
 	type EvalContext,
 	type ExportFileResult,
-	type ReadParams
+	type ReadParams,
+	type ScriptReader
 } from '../../src/index.ts';
 import { thrown } from '../golden/thrown.ts';
-import { exportFixture, joinedParts, type SetupStep } from './xlsx-sample.ts';
+import { filled as scripted } from '../evaluate/filled.ts';
+import { nodeScriptHost } from '../../node/script-host.ts';
+import { exportFixture, joinedParts } from './xlsx-sample.ts';
 
 const CONTEXT = { date: '20240229', project: 'p' };
 
-const paramsOf = (step: SetupStep): ReadParams =>
-	step.do === 'read' ? step.params! : { ...step.body!, date: step.date!, project: 'p' };
+const host = nodeScriptHost();
+afterAll(() => host.dispose());
 
-/** What an evaluation throws when called, before any step: its generator is never started. */
-function refusedUpFront(ctx: EvalContext, method: string, params: ReadParams): unknown {
-	return thrown(() => EVALUATIONS[method]!(ctx, params));
-}
-
-/** A 501 `reaches a script`, as a `ReadError`. */
-function expectReaches(error: unknown, label?: string): void {
-	expect(error, label).toBeInstanceOf(ReadError);
-	const { status, detail } = error as ReadError;
-	expect({ status, detail }, label).toEqual({ status: 501, detail: 'reaches a script' });
-}
+const filled = <T = unknown>(ctx: EvalContext, method: string, params: ReadParams) =>
+	scripted<T>(host, ctx, method, params);
 
 const draft = (entries: object[]): ReadParams => ({
 	definition: { schema_version: 1, output: {}, entries },
 	...CONTEXT
 });
 
-describe('an export that reaches a script refuses with 501 before its first step', () => {
-	it('refuses every reach case of export_bytes', () => {
-		const { ctx, cases } = exportFixture();
-		const reach = cases.filter((step) => step.case!.startsWith('reach_'));
-		expect(reach).toHaveLength(15);
-		for (const step of reach) {
-			expectReaches(refusedUpFront(ctx, step.method!, paramsOf(step)), step.case);
-		}
-	});
-
-	it('refuses a run whose one entry of five carries an inline transform', () => {
+describe('an export that reaches a script is filled', () => {
+	it('runs a transform: the identity leaves the file as it is, and a run with one entry carrying it is filled', async () => {
 		const { ctx } = exportFixture();
-		const entry = (format: string) => ({ source: { ref: 't_blocks' }, format });
-		const params = draft([
-			entry('csv'),
-			entry('json'),
-			entry('xlsx'),
-			{
-				...entry('jsonl'),
-				transform: { definition: { code: 'def transform(doc):\n    return doc\n' } }
-			},
-			entry('csv')
-		]);
-		expectReaches(refusedUpFront(ctx, 'runExporterDraft', params));
-		// Without it the same run is the engine's.
-		const plain = draft([entry('csv'), entry('json'), entry('xlsx'), entry('jsonl'), entry('csv')]);
-		const result = drain(EVALUATIONS.runExporterDraft!(ctx, plain)) as ExportFileResult;
-		expect(result.content_type).toBe('application/zip');
-	});
+		const transform = { definition: { code: 'def transform(doc):\n    return doc\n' } };
+		const table = {
+			row_source: { kind: 'scope', types: ['Block'] },
+			columns: [{ kind: 'element' }]
+		};
+		const body = (extra: object) => ({
+			definition: { ...table, ...extra },
+			format: 'jsonl',
+			...CONTEXT
+		});
+		const plain = (await filled(ctx, 'exportTable', body({}))) as ExportFileResult;
+		const through = (await filled(ctx, 'exportTable', body({ transform }))) as ExportFileResult;
+		expect(joinedParts(through)).toEqual(joinedParts(plain));
 
-	it('follows a staged navigation that gains a script step under a committed table, and its unstaging', () => {
+		const entry = (format: string) => ({ source: { ref: 't_blocks' }, format });
+		const run = (await filled(
+			ctx,
+			'runExporterDraft',
+			draft([entry('csv'), { ...entry('jsonl'), transform }, entry('csv')])
+		)) as ExportFileResult;
+		expect(run.content_type).toBe('application/zip');
+	}, 60_000);
+
+	it('follows a staged navigation that gains a script step under a committed table, and its unstaging', async () => {
 		const { ctx } = exportFixture();
 		const table: CommittedArtifact = {
 			id: 't_nav',
@@ -80,15 +69,39 @@ describe('an export that reaches a script refuses with 501 before its first step
 			{ source: { ref: 't_blocks' }, format: 'csv' },
 			{ source: { ref: 't_nav' }, format: 'json' }
 		]);
-		const committed = drain(EVALUATIONS.runExporterDraft!(ctx, params)) as ExportFileResult;
+		const committed = (await filled(ctx, 'runExporterDraft', params)) as ExportFileResult;
 		expect(committed.content_type).toBe('application/zip');
 
 		const script = ctx.artifacts.resolve('n_script')!.payload as CommittedArtifact['payload'];
 		ctx.artifacts.setStaged([{ op: 'update', id: 'n_links', payload: script }]);
-		expectReaches(refusedUpFront(ctx, 'runExporterDraft', params));
+		const staged = (await filled(ctx, 'runExporterDraft', params)) as ExportFileResult;
+		expect(joinedParts(staged)).not.toEqual(joinedParts(committed));
 
 		ctx.artifacts.setStaged([]);
-		const again = drain(EVALUATIONS.runExporterDraft!(ctx, params)) as ExportFileResult;
+		const again = (await filled(ctx, 'runExporterDraft', params)) as ExportFileResult;
 		expect(joinedParts(again)).toEqual(joinedParts(committed));
+	}, 60_000);
+
+	it('an internal error in an entry with a transform throws at once', () => {
+		const { ctx } = exportFixture();
+		const transform = { definition: { code: 'def transform(doc):\n    return doc\n' } };
+		const entry = { source: { ref: 't_blocks' }, format: 'json', transform };
+		let reads = 0;
+		const scripts: ScriptReader = {
+			read: () => {
+				reads++;
+				throw new Error('boom');
+			}
+		};
+		const error = thrown(() =>
+			drain(
+				EVALUATIONS.runExporterDraft!(
+					{ ...ctx, scripts },
+					draft([entry, { ...entry, name: 'second' }])
+				)
+			)
+		);
+		expect(error).toMatchObject({ message: 'boom' });
+		expect(reads).toBe(1);
 	});
 });

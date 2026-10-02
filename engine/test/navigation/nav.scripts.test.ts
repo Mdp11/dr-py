@@ -26,6 +26,7 @@ import { BridgeDispatcher, dumpDefault, projectRoots } from '../../src/script/br
 import { nodeScriptHost } from '../../node/script-host.ts';
 import { thrown } from '../golden/thrown.ts';
 import { family } from '../model/fixtures.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 // The script step over real Pyodide in real worker threads, on the small `family` model.
 
@@ -64,7 +65,8 @@ function evaluated(model: Model, definition: object, seen: ScriptBatch[] = []) {
 	const context: EvalContext = {
 		model,
 		artifacts: new ArtifactSet(),
-		placements: new ViewPlacements()
+		placements: new ViewPlacements(),
+		scripts: NO_SCRIPTS
 	};
 	return evaluateFilled(
 		(scripts) =>

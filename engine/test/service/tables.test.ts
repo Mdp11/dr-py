@@ -24,6 +24,7 @@ import {
 	settle,
 	type Client
 } from './helpers.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 type Event = Client['events'][number];
 
@@ -117,7 +118,12 @@ function expected(staged: readonly object[]): string {
 		committed.map((a) => ({ ...a, rev: 1, payload: a.payload as CommittedArtifact['payload'] }))
 	);
 	set.setStaged(staged as StagedArtifact[]);
-	const ctx = { model: ring(), artifacts: set, placements: new ViewPlacements() };
+	const ctx = {
+		model: ring(),
+		artifacts: set,
+		placements: new ViewPlacements(),
+		scripts: NO_SCRIPTS
+	};
 	return JSON.stringify(drain(evaluateTable(ctx, PARAMS)));
 }
 
@@ -235,7 +241,8 @@ describe('evaluateTable over the service', () => {
 				);
 				return set;
 			})(),
-			placements: new ViewPlacements()
+			placements: new ViewPlacements(),
+			scripts: NO_SCRIPTS
 		};
 		const own = JSON.stringify(drain(evaluateTable(ctx, PARAMS)));
 		expect(own).not.toBe(expected([]));

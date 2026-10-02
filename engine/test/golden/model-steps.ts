@@ -103,6 +103,7 @@ import { joined } from '../download/helpers.ts';
 import { readXlsx } from '../export/xlsx-reader.ts';
 import { clone, workingCopy } from '../working/helpers.ts';
 import { untag, type Tagged } from './load.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 /**
  * What `tests/golden/model_steps.py` records of the model after a step: always
@@ -513,7 +514,7 @@ function tableLimits(step: Step): TableLimits {
 
 /**
  * The row build and order of a definition resolved against the artifacts, a
- * table that reaches a script not built; a core `ValueError` or `KeyError`
+ * table that reaches a script built over the scripts it is given; a core `ValueError` or `KeyError`
  * answered as the tables route answers it.
  */
 function tableRows(model: Model, artifacts: ArtifactSet, step: Step): unknown {
@@ -670,7 +671,9 @@ function apply(
 				return isSteps(out) ? drain(out) : out;
 			}
 			if (Object.hasOwn(EVALUATIONS, method)) {
-				return drain(EVALUATIONS[method]!({ model, artifacts, placements }, params));
+				return drain(
+					EVALUATIONS[method]!({ model, artifacts, placements, scripts: NO_SCRIPTS }, params)
+				);
 			}
 			throw new Error(`no read ${method}`);
 		}
@@ -758,7 +761,10 @@ function apply(
 			// The view checked over the working model (the step's ops staged) and the artifacts.
 			const { model: working } = stagedReplica(model, step, carried);
 			return drain(
-				EVALUATIONS['validateView']!({ model: working, artifacts, placements }, { view: step.view })
+				EVALUATIONS['validateView']!(
+					{ model: working, artifacts, placements, scripts: NO_SCRIPTS },
+					{ view: step.view }
+				)
 			);
 		}
 		case 'issues': {
@@ -809,7 +815,7 @@ function apply(
 			return exported(
 				drain(
 					EVALUATIONS[step.method!]!(
-						{ model, artifacts, placements },
+						{ model, artifacts, placements, scripts: NO_SCRIPTS },
 						{ ...step.body!, date: step.date!, project: 'p' }
 					)
 				) as ExportFileResult

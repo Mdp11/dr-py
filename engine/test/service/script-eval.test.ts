@@ -19,7 +19,7 @@ import {
 } from './helpers.ts';
 
 // Evaluations that reach a script, over the real service, the real pool and real Pyodide: the
-// option, the cell cache evicted by what a transition touched, and the progress of a fill. The
+// host, the cell cache evicted by what a transition touched, and the progress of a fill. The
 // model is the script bridge fixture: n1 owns n2 and l1 (a Leaf), n3 stands alone.
 
 type Fixture = { metamodel: MetamodelDoc; elements: string[]; relationships: string[] };
@@ -112,15 +112,12 @@ async function until(ready: () => boolean, ms = 30_000): Promise<void> {
 const trackers: ReturnType<typeof tracked>[] = [];
 afterEach(() => trackers.splice(0).forEach((tracker) => tracker.dispose()));
 
-/** A service over a tracked pool, its replica open with `scripts: 'evaluate'`. */
-async function evaluating(
-	scripts: unknown = 'evaluate',
-	limits?: { callMs: number; graceMs: number }
-) {
+/** A service over a tracked pool, its replica open. */
+async function evaluating(limits?: { callMs: number; graceMs: number }) {
 	const tracker = tracked(limits);
 	trackers.push(tracker);
 	const client = connect(autoHost(), portPair(), { scripts: tracker.factory });
-	await openReplica(client, bridgeModel(), doc, { scripts });
+	await openReplica(client, bridgeModel(), doc);
 	return { client, tracker };
 }
 
@@ -132,49 +129,7 @@ const stage = (client: Client, ops: ModelOp[]) => client.call('stage', { ops });
 /** The service's own model, one revision on: the delta of `ops` committed at the server. */
 const commit = (ops: ModelOp[]) => deltaText(new Server(clone(bridgeModel())).commit(ops).delta);
 
-describe('the option', () => {
-	it('is off by default: a script step answers 501 and no host is asked', async () => {
-		const tracker = tracked();
-		trackers.push(tracker);
-		const client = connect(autoHost(), portPair(), { scripts: tracker.factory });
-		await openReplica(client, bridgeModel(), doc);
-		expect(await refusal(evaluate(client, 'n1', NAME('off')))).toEqual({
-			status: 501,
-			detail: 'reaches a script'
-		});
-		expect(tracker.batches).toEqual([]);
-	});
-
-	it('is refused as 422 for any value but "evaluate", and leaves the open replica as it was', async () => {
-		const { client, tracker } = await evaluating();
-		const code = NAME('bogus');
-		expect(await evaluate(client, 'n1', code).then(endsOf)).toEqual(['one']);
-		const before = client.eventsOf('replica').length;
-		for (const scripts of ['bogus', true, null, 1, 'Evaluate']) {
-			const refused = await refusal(
-				client.call('open', { project_id: 'demo', metamodel: doc, scripts })
-			);
-			expect(refused.status).toBe(422);
-		}
-		await settle();
-		// Nothing was discarded: no replica event, and the cache still holds the call.
-		expect(client.eventsOf('replica')).toHaveLength(before);
-		expect(await evaluate(client, 'n1', code).then(endsOf)).toEqual(['one']);
-		expect(tracker.batches).toHaveLength(1);
-	}, 60_000);
-
-	it('lives with the replica: a replica opened again without it refuses, and one with it starts empty', async () => {
-		const { client, tracker } = await evaluating();
-		const code = NAME('life');
-		await evaluate(client, 'n1', code);
-		await client.call('close');
-		await openReplica(client, bridgeModel(), doc);
-		expect((await refusal(evaluate(client, 'n1', code))).status).toBe(501);
-		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
-		expect(await evaluate(client, 'n1', code).then(endsOf)).toEqual(['one']);
-		expect(tracker.batches).toHaveLength(2);
-	}, 60_000);
-
+describe('evaluating scripts', () => {
 	it('leaves an evaluation that reaches no script as it was', async () => {
 		const { client, tracker } = await evaluating();
 		const page = await client.call<{ total: number }>('searchModel', { target: 'element' });
@@ -182,14 +137,55 @@ describe('the option', () => {
 		expect(tracker.batches).toEqual([]);
 	});
 
-	it('does nothing where the host gave the engine no script host', async () => {
+	it('answers 503 where the host gave the engine no script host, for a table that has a script column only', async () => {
 		const client = connect(autoHost());
-		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
-		expect(await refusal(evaluate(client, 'n1', NAME('hostless')))).toEqual({
-			status: 501,
-			detail: 'reaches a script'
+		await openReplica(client, bridgeModel(), doc);
+		const definition = (columns: object[]) => ({
+			definition: {
+				row_source: { kind: 'scope', types: ['Node'], criteria: [] },
+				columns: [{ kind: 'element' }, ...columns]
+			}
 		});
+		const scripted = definition([
+			{ kind: 'script', snippet: { definition: { code: NAME('hostless') } } }
+		]);
+		expect(await refusal(client.call('evaluateTable', scripted))).toEqual({
+			status: 503,
+			detail: 'no script host'
+		});
+		const page = await client.call<{ total: number }>('evaluateTable', definition([]));
+		expect(page.total).toBeGreaterThan(0);
 	});
+
+	it('waits for the first replica, and an evaluation sent before the open is filled', async () => {
+		const tracker = tracked();
+		trackers.push(tracker);
+		const client = connect(autoHost(), portPair(), { scripts: tracker.factory });
+		const sent = client.call<{ rows: { key: unknown[]; cells: { value?: unknown }[] }[] }>(
+			'evaluateTable',
+			{
+				definition: {
+					row_source: { kind: 'scope', types: ['Node'], criteria: [] },
+					columns: [
+						{ kind: 'element' },
+						{
+							kind: 'script',
+							snippet: {
+								definition: {
+									code: `# early\ndef value(els):\n    return str(els[0].name)\n`
+								}
+							}
+						}
+					]
+				}
+			}
+		);
+		await openReplica(client, bridgeModel(), doc);
+		const page = await sent;
+		expect(page.rows.find((row) => row.key[0] === 'n1')!.cells[1]).toMatchObject({
+			value: 'one'
+		});
+	}, 60_000);
 });
 
 describe('a fill that is stopped', () => {
@@ -222,7 +218,7 @@ describe('a fill that is stopped', () => {
 		expect(await refused).toEqual({ status: 409, detail: 'replica closed' });
 		const ran = tracker.ran();
 		await until(() => ran.every((one) => one.terminated));
-		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
+		await openReplica(client, bridgeModel(), doc);
 		expect(await evaluate(client, 'n2', NAME('after close')).then(endsOf)).toEqual(['two']);
 	}, 60_000);
 
@@ -230,7 +226,7 @@ describe('a fill that is stopped', () => {
 		const { client, tracker } = await evaluating();
 		const refused = refusal(evaluate(client, 'n1', SPIN('reopen')));
 		await tracker.started();
-		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
+		await openReplica(client, bridgeModel(), doc);
 		expect(await refused).toEqual({ status: 409, detail: 'replica closed' });
 		expect(await evaluate(client, 'n2', NAME('after reopen')).then(endsOf)).toEqual(['two']);
 	}, 60_000);
@@ -254,7 +250,7 @@ describe('a replica that diverges', () => {
 		await diverged;
 		expect(await refused).toEqual({ status: 409, detail: 'replica is not ready' });
 		await until(() => tracker.ran().every((one) => one.terminated));
-		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
+		await openReplica(client, bridgeModel(), doc);
 		expect(await evaluate(client, 'n1', code).then(endsOf)).toEqual(['one']);
 		expect(tracker.batches.map((batch) => batch.code)).toEqual([code, SPIN('diverge'), code]);
 	}, 60_000);
@@ -294,14 +290,14 @@ describe('the state an evaluation answers', () => {
 	const search = (client: Client) => client.call('searchModel', { target: 'element' });
 	const text = (value: unknown) => JSON.stringify(value);
 
-	/** A client with no option, to say what an evaluation answers without it. */
+	/** A client on an engine with no script host, to say what a scan that reads no script answers there. */
 	async function plain(): Promise<Client> {
 		const client = connect(autoHost(), portPair());
 		await openReplica(client, bridgeModel(), doc);
 		return client;
 	}
 
-	it('is the state it ran on when a stage is posted right behind it, as without the option', async () => {
+	it('is the state it ran on when a stage is posted right behind it, as without a script host', async () => {
 		const { client } = await evaluating();
 		const bare = await plain();
 		const answers: string[] = [];
@@ -322,7 +318,7 @@ describe('the state an evaluation answers', () => {
 		const bare = await plain();
 		const streamed = autoHost(10);
 		const slow = connect(streamed, portPair(), { scripts: tracker.factory });
-		await openReplica(slow, bridgeModel(), doc, { scripts: 'evaluate' });
+		await openReplica(slow, bridgeModel(), doc);
 		const STAGES = 200;
 		const answeredAfter = async (one: Client) => {
 			let stages = 0;
@@ -380,27 +376,11 @@ describe('the state an evaluation answers', () => {
 		waiting.catch(() => undefined);
 		await settle();
 		expect(tracker.batches).toEqual([]);
-		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
+		await openReplica(client, bridgeModel(), doc);
 		expect(await waiting.then(endsOf)).toEqual(['one']);
 		// It filled on the new replica's cache, which a transition there evicts from.
 		await stage(client, [rename('n1', 'uno')]);
 		expect(await evaluate(client, 'n1', NAME('early')).then(endsOf)).toEqual(['uno']);
-	}, 60_000);
-
-	it('reads no script on a next replica that was not opened with the option, as without it', async () => {
-		const { client } = await evaluating();
-		const delta = new Server(clone(bridgeModel())).commit([rename('n2', 'dos')]).delta;
-		const diverged = client.nextEvent(
-			(event) => event.event === 'replica' && event.state === 'diverged'
-		);
-		await client.call('applyDelta', {
-			text: deltaText({ ...delta, state_digest: '0'.repeat(16) })
-		});
-		await diverged;
-		const waiting = refusal(evaluate(client, 'n1', NAME('bare')));
-		await settle();
-		await openReplica(client, bridgeModel(), doc);
-		expect((await waiting).status).toBe(501);
 	}, 60_000);
 });
 
@@ -456,11 +436,12 @@ describe('progress', () => {
 			},
 			limit: 1
 		});
+		sent.catch(() => undefined);
 		// One of the round's two batches is done: one call of two.
 		await until(() => scripts(client).some((event) => event.done === 1 && event.total === 2));
 		const before = scripts(client).length;
 		const ran = tracker.ran();
-		await openReplica(client, bridgeModel(), doc, { scripts: 'evaluate' });
+		await openReplica(client, bridgeModel(), doc);
 		// The fill ends once its batches have: the one that spins is stopped.
 		await until(() => ran.every((one) => one.terminated));
 		await settle();
@@ -645,7 +626,7 @@ describe('a table with script columns', () => {
 	}, 60_000);
 
 	it('answers a timeout as an error cell and does not keep it: the next evaluation runs it again', async () => {
-		const { client, tracker } = await evaluating('evaluate', { callMs: 300, graceMs: 500 });
+		const { client, tracker } = await evaluating({ callMs: 300, graceMs: 500 });
 		const params = table([column(SPINS('spin')), column(NAMED('beside'))], {}, { limit: 1 });
 		const first = await evaluateTable(client, params);
 		expect(first.rows[0]!.cells[1]).toMatchObject({ kind: 'error' });
@@ -865,7 +846,7 @@ describe('an export through a transform', () => {
 	}, 60_000);
 
 	it('refuses a transform that times out and does not keep the timeout', async () => {
-		const { client, tracker } = await evaluating('evaluate', { callMs: 300, graceMs: 500 });
+		const { client, tracker } = await evaluating({ callMs: 300, graceMs: 500 });
 		const definition = table({ transform: { definition: { code: SPINNING('spins') } } });
 		for (let attempt = 1; attempt <= 2; attempt++) {
 			const refused = await refusal(client.call('exportTable', params(definition)));
@@ -883,21 +864,6 @@ describe('an export through a transform', () => {
 		expect(failing.script_errors).toBe(true);
 		const clean = await client.call<Shipped>('exportTable', params(table(), 'csv'));
 		expect(clean.script_errors).toBe(false);
-	}, 60_000);
-
-	it('is refused with 501, as it always was, where the replica was not opened to evaluate scripts', async () => {
-		const tracker = tracked();
-		trackers.push(tracker);
-		const client = connect(autoHost(), portPair(), { scripts: tracker.factory });
-		await openReplica(client, bridgeModel(), doc);
-		const transform = { definition: { code: NAMES('gated') } };
-		const gated = { status: 501, detail: 'reaches a script' };
-		expect(await refusal(client.call('exportTable', params(table({ transform }))))).toEqual(gated);
-		const entry = { source: { ref: 't_nodes' }, format: 'json', transform };
-		expect(
-			await refusal(client.call('previewTransform', { entry, date: '20240229', project: 'p' }))
-		).toEqual(gated);
-		expect(tracker.batches).toEqual([]);
 	}, 60_000);
 
 	describe('run as an exporter', () => {

@@ -5,6 +5,7 @@ import {
 	drain,
 	EVALUATIONS,
 	TableOrderCache,
+	NO_SCRIPTS,
 	ViewPlacements,
 	type ReadParams
 } from '$engine';
@@ -159,6 +160,7 @@ function direct(
 		model: project.model,
 		artifacts: set,
 		placements: new ViewPlacements(),
+		scripts: NO_SCRIPTS,
 		working: { rev: project.rev, stagedVersion: 0, tableOrders: new TableOrderCache() }
 	};
 	return drain(EVALUATIONS[method]!(ctx, params)) as {

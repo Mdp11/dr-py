@@ -148,7 +148,7 @@ async function open(): Promise<OpenReport> {
 	const start = now();
 	const stopOpenPings = ping(client);
 	const response = fetch('/data/snapshot.gz', { cache: 'no-store' });
-	await client.call('open', { project_id: PROJECT_ID, metamodel, scripts: 'evaluate' });
+	await client.call('open', { project_id: PROJECT_ID, metamodel });
 	const body = (await response).body;
 	if (body === null) throw new Error('the snapshot response has no body');
 	const reader = body.getReader();

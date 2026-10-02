@@ -21,6 +21,7 @@ import {
 	type ReadParams
 } from '../../src/index.ts';
 import { loadFixture, untag, type Tagged } from '../golden/load.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 export const SAMPLE_CASE = 'xlsx_types';
 
@@ -64,7 +65,10 @@ export function exportFixture(): { ctx: EvalContext; cases: SetupStep[] } {
 			);
 		} else if (step.case !== undefined) cases.push(step);
 	}
-	return { ctx: { model, artifacts, placements: new ViewPlacements() }, cases };
+	return {
+		ctx: { model, artifacts, placements: new ViewPlacements(), scripts: NO_SCRIPTS },
+		cases
+	};
 }
 
 /** A shipped file's parts, joined. */

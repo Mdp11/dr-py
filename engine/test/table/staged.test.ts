@@ -16,6 +16,7 @@ import {
 import { loadFixture, untag } from '../golden/load.ts';
 import { parseOps, replaySteps, type Step, type StepsFixture } from '../golden/model-steps.ts';
 import { thrown } from '../golden/thrown.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 type Payload = CommittedArtifact['payload'];
 
@@ -71,7 +72,12 @@ const model = fixtureModel();
 
 const evaluate = (artifacts: ArtifactSet, params: ReadParams) =>
 	JSON.stringify(
-		drain(evaluateTable({ model, artifacts, placements: new ViewPlacements() }, params))
+		drain(
+			evaluateTable(
+				{ model, artifacts, placements: new ViewPlacements(), scripts: NO_SCRIPTS },
+				params
+			)
+		)
 	);
 
 describe('staged artifacts', () => {
@@ -103,7 +109,10 @@ describe('staged artifacts', () => {
 		const artifacts = committed();
 		artifacts.setStaged([{ op: 'delete', id: 'nr' }]);
 		const error = thrown(() =>
-			evaluateTable({ model, artifacts, placements: new ViewPlacements() }, { artifact_id: 't1' })
+			evaluateTable(
+				{ model, artifacts, placements: new ViewPlacements(), scripts: NO_SCRIPTS },
+				{ artifact_id: 't1' }
+			)
 		);
 		expect(error).toBeInstanceOf(ReadError);
 		// The oracle's text for t2, whose navigation is missing: `unknown artifact nope`.
@@ -111,7 +120,10 @@ describe('staged artifacts', () => {
 		artifacts.setStaged([{ op: 'delete', id: 't1' }]);
 		expect(
 			thrown(() =>
-				evaluateTable({ model, artifacts, placements: new ViewPlacements() }, { artifact_id: 't1' })
+				evaluateTable(
+					{ model, artifacts, placements: new ViewPlacements(), scripts: NO_SCRIPTS },
+					{ artifact_id: 't1' }
+				)
 			)
 		).toMatchObject({ status: 422, detail: 'unknown artifact t1' });
 	});

@@ -686,11 +686,10 @@ class Service {
 	private readonly running = new Set<() => void>();
 	// The epoch the host was last told to prewarm for.
 	private prewarmed = -1;
-	// The one cell cache, empty whenever no replica opened with `scripts: 'evaluate'` is in hand: a fill that
-	// waited for a replica reads it, and the replica it lands on says whether it may.
+	// The one cell cache: a fill that waited for a replica reads it, empty whenever no replica is in hand.
 	private readonly cellCache = new CellCache();
-	// `cellCache` for a replica opened with `scripts: 'evaluate'`; `null` otherwise.
-	private cells: CellCache | null = null;
+	// `cellCache` where the host gave the engine a script host; `null` otherwise.
+	private readonly cells: CellCache | null;
 	// Moves with every transition that changes the replica's model and every clear of `cells`: a fill keeps what a
 	// round answered only if it has not moved since the pass that asked for it began.
 	private transitions = 0;
@@ -703,6 +702,7 @@ class Service {
 	constructor(port: Port, deps: ServiceDeps) {
 		this.port = port;
 		this.deps = deps;
+		this.cells = deps.scripts === undefined ? null : this.cellCache;
 		this.scheduler = new Scheduler(deps, {
 			onSliceEnd: () => {
 				this.flushProgress();
@@ -814,46 +814,17 @@ class Service {
 	 * byte parts are transferred, not copied: nothing keeps them.
 	 */
 	evaluate(method: string, call: Call): void {
-		if (this.cells !== null) {
-			this.evaluateFilled(method, call);
-			return;
-		}
-		this.submit<unknown>(
-			call,
-			'model',
-			{
-				kind: 'scan',
-				run: () => {
-					const wc = this.ready();
-					return EVALUATIONS[method]!(
-						{
-							model: wc.model,
-							artifacts: this.artifacts,
-							placements: this.placements,
-							working: {
-								rev: wc.rev,
-								stagedVersion: wc.stagedVersion,
-								tableOrders: this.tableOrders
-							}
-						},
-						call.params
-					);
-				}
-			},
-			transferOf
-		);
+		this.evaluateFilled(method, call);
 	}
 
 	/**
-	 * An evaluation of a replica opened with `scripts: 'evaluate'`: the scan runs as a pass of a
-	 * fill, which runs the scripts the pass could not answer and runs it again. Each pass is a scan
+	 * An evaluation: the scan runs as a pass of a fill, which runs the scripts the pass could not answer and runs it again. Each pass is a scan
 	 * of the model lane, so no transition lands within one, and the fill runs between passes,
 	 * outside the scheduler: a stage or a delta lands there and the fill sees it move. A pass is
-	 * read at the state its scan started in, as an evaluation without the option is, and answered
-	 * whatever lands after it. The call belongs to the replica its first scan started on, as a call
-	 * waiting for a replica to be ready waits for the next one, and on a replica not opened with
-	 * the option it reads no script, as an evaluation does without the option: that replica
-	 * dropped, it is answered 409, and a cancel stops its batches and answers nothing.
+	 * read at the state its scan started in, and answered whatever lands after it. The call belongs
+	 * to the replica its first scan started on, as a call waiting for a replica to be ready waits
+	 * for the next one: that replica dropped, it is answered 409, and a cancel stops its batches
+	 * and answers nothing. Without a script host a pass that needs a script run answers 503.
 	 */
 	private evaluateFilled(method: string, call: Call): void {
 		const cancel = abortable();
@@ -880,11 +851,12 @@ class Service {
 				(scripts) => this.pass(method, call, start, scripts, cancel.signal),
 				{
 					runner: async (batch, signal) => {
+						if (this.deps.scripts === undefined) throw new ReadError(503, 'no script host');
 						const { results } = await this.runBatch(batch, signal, epoch);
 						return results.map(({ text }) => text);
 					},
 					signal: cancel.signal,
-					cache: this.cellCache,
+					...(this.cells === null ? {} : { cache: this.cells }),
 					transitions: () => this.transitions,
 					onProgress: (done, total) => {
 						mine.done = done;
@@ -942,7 +914,7 @@ class Service {
 									stagedVersion: wc.stagedVersion,
 									tableOrders: this.tableOrders
 								},
-								...(this.cells === null ? {} : { scripts })
+								scripts
 							},
 							call.params
 						);
@@ -1671,7 +1643,6 @@ class Service {
 		this.progressHeld.clear();
 		this.tableOrders.clear();
 		this.dropCells();
-		this.cells = null;
 		this.scheduler.setOpen(false);
 		this.scheduler.setBackground(null);
 		this.dropIssues();
@@ -1686,10 +1657,6 @@ class Service {
 
 	open(params: ReadParams): null {
 		const projectId = text(params, 'project_id');
-		const scripts = params['scripts'];
-		if (scripts !== undefined && scripts !== 'evaluate') {
-			throw new Refused(422, "scripts must be 'evaluate'");
-		}
 		let metamodel: Metamodel;
 		try {
 			metamodel = Metamodel.fromJSON(params['metamodel'] as MetamodelDoc);
@@ -1701,8 +1668,6 @@ class Service {
 		}
 		this.discard();
 		this.failed = null;
-		// Without a host to run them, a script step is refused as it is without the option.
-		if (scripts === 'evaluate' && this.deps.scripts !== undefined) this.cells = this.cellCache;
 		const opening: Opening = {
 			projectId,
 			queue: new ByteQueue(),

@@ -87,7 +87,7 @@ export type NavigationColumn = {
 	cell_cap: number;
 } & Presentation;
 
-/** Its snippet is not read further: a table that reaches a script runs on the server. */
+/** Its snippet is not read further here: the script host runs it. */
 export type ScriptColumn = {
 	kind: 'script';
 	source: ColumnSource;
@@ -451,8 +451,8 @@ function checkInputs(
  * The core's `_validate_sources`, in its order: a column ref points strictly
  * back; a ref's step index needs a navigation column; a row slot past 0 needs
  * chains; an element column needs one element a row. The `value()` arity of an
- * inline snippet is not checked: such a table reaches a script and is read
- * from the server, which checks it.
+ * inline snippet is not checked here: `checkTableSnippets` checks it where the
+ * table is read.
  */
 function checkSources(defn: TableDefinition, where: string): void {
 	const chains = defn.row_source.kind === 'chains';

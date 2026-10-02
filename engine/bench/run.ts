@@ -57,6 +57,7 @@ import {
 	type Value,
 	type WorkingCopy
 } from '../src/index.ts';
+import { NO_SCRIPTS } from '../src/evaluate/fill.ts';
 
 const PASSES = 3;
 /** The copies of one element staged for the duplicate-group sweep. */
@@ -262,7 +263,7 @@ const search = (model: Model, q: string) =>
 
 const criteriaScan = (model: Model) =>
 	EVALUATIONS['searchModel']!(
-		{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements() },
+		{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements(), scripts: NO_SCRIPTS },
 		{
 			target: 'element',
 			criteria: [{ type: 'property', name: 'name', op: 'contains', value: 'a' }],
@@ -272,7 +273,7 @@ const criteriaScan = (model: Model) =>
 
 const navigation = (model: Model) =>
 	EVALUATIONS['evaluateNavigation']!(
-		{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements() },
+		{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements(), scripts: NO_SCRIPTS },
 		{
 			definition: {
 				kind: 'path',
@@ -715,6 +716,7 @@ function measureTable(workingCopy: WorkingCopy): void {
 		model,
 		artifacts: new ArtifactSet(),
 		placements: new ViewPlacements(),
+		scripts: NO_SCRIPTS,
 		working: { rev: workingCopy.rev, stagedVersion: 0, tableOrders: new TableOrderCache() }
 	};
 	const params = { definition: rawBigTable, limit: 500 };
@@ -749,6 +751,7 @@ function measureExport(workingCopy: WorkingCopy): void {
 		model,
 		artifacts: new ArtifactSet(),
 		placements: new ViewPlacements(),
+		scripts: NO_SCRIPTS,
 		working: { rev: workingCopy.rev, stagedVersion: 0, tableOrders: new TableOrderCache() }
 	});
 	const params = { definition: rawBigTable, date: '20240229', project: 'bench' };

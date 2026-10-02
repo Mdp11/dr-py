@@ -1,11 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
 	ArtifactSet,
 	drain,
 	evaluateTable,
 	NavMemo,
 	readTableDefinition,
-	ReadError,
 	ViewPlacements,
 	type CommittedArtifact,
 	type MemoEntry,
@@ -13,10 +12,15 @@ import {
 	type ReadParams,
 	type TablePageBody
 } from '../../src/index.ts';
-import { thrown } from '../golden/thrown.ts';
+import { filled } from '../evaluate/filled.ts';
+import { nodeScriptHost } from '../../node/script-host.ts';
 import { family } from '../model/fixtures.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 type Payload = CommittedArtifact['payload'];
+
+const host = nodeScriptHost();
+afterAll(() => host.dispose());
 
 const CODE = { code: 'def step(el):\n    return el\n' };
 const scope = { kind: 'scope', types: ['Node'] };
@@ -64,14 +68,20 @@ describe('NavMemo', () => {
 describe('evaluateTable and scripts', () => {
 	function evaluate(artifacts: ArtifactSet, params: ReadParams): TablePageBody {
 		return drain(
-			evaluateTable({ model: family(), artifacts, placements: new ViewPlacements() }, params)
+			evaluateTable(
+				{ model: family(), artifacts, placements: new ViewPlacements(), scripts: NO_SCRIPTS },
+				params
+			)
 		);
 	}
 
-	/** The refusal, thrown before the evaluation has a first step to run. */
-	const refusal = (artifacts: ArtifactSet, params: ReadParams) =>
-		thrown(() =>
-			evaluateTable({ model: family(), artifacts, placements: new ViewPlacements() }, params)
+	/** The page of an evaluation that reads its scripts through a real host. */
+	const withScripts = (artifacts: ArtifactSet, params: ReadParams) =>
+		filled<TablePageBody>(
+			host,
+			{ model: family(), artifacts, placements: new ViewPlacements() },
+			'evaluateTable',
+			params
 		);
 
 	function saved(): ArtifactSet {
@@ -98,23 +108,31 @@ describe('evaluateTable and scripts', () => {
 		['inline code, empty', { kind: 'script', snippet: { definition: { code: '' } } }],
 		['a navigation with a script step', navColumn({ definition: rowPath(scriptStep) })],
 		['a saved navigation with a script step', navColumn({ ref: 'ns' })]
-	])('refuses a table reaching %s with 501, before any step', (_, column) => {
-		const error = refusal(saved(), { definition: table({ kind: 'element' }, column) });
-		expect(error).toBeInstanceOf(ReadError);
-		expect(error).toMatchObject({ status: 501, detail: 'reaches a script' });
-	});
+	])(
+		'answers a table reaching %s, its rows built',
+		async (_, column) => {
+			const page = await withScripts(saved(), { definition: table({ kind: 'element' }, column) });
+			expect(page.total).toBe(4);
+			expect(page.rows).toHaveLength(4);
+		},
+		60_000
+	);
 
-	it('refuses a row source reaching a script', () => {
+	it('answers a row source reaching a script', async () => {
 		const definition = {
-			row_source: { kind: 'chains', navigation: { ref: 'ns' } },
+			row_source: {
+				kind: 'chains',
+				navigation: { definition: { kind: 'path', start: scope, steps: [scriptStep] } }
+			},
 			columns: [{ kind: 'element' }]
 		};
-		expect(refusal(saved(), { definition })).toMatchObject({ status: 501 });
-	});
+		const page = await withScripts(saved(), { definition });
+		expect(page.rows.length).toBe(page.total);
+	}, 60_000);
 
-	it('flips to 501 while a staged navigation gains a script step, and back', () => {
+	it('follows a staged navigation that gains a script step, and back', async () => {
 		const artifacts = saved();
-		const before = evaluate(artifacts, { artifact_id: 't1' });
+		const before = await withScripts(artifacts, { artifact_id: 't1' });
 		expect(before.rows.map((row) => row.cells[1]!.items?.map((item) => item.id))).toEqual([
 			['c'],
 			[],
@@ -124,13 +142,17 @@ describe('evaluateTable and scripts', () => {
 		artifacts.setStaged([
 			{ op: 'update', id: 'nr', payload: rowPath(refers, scriptStep) as Payload }
 		]);
-		expect(refusal(artifacts, { artifact_id: 't1' })).toMatchObject({
-			status: 501,
-			detail: 'reaches a script'
-		});
+		// The staged script step ends the chain the committed one reached.
+		const staged = await withScripts(artifacts, { artifact_id: 't1' });
+		expect(staged.rows.map((row) => row.cells[1]!.items?.map((item) => item.id))).toEqual([
+			[],
+			[],
+			[],
+			[]
+		]);
 		artifacts.setStaged([]);
-		expect(evaluate(artifacts, { artifact_id: 't1' })).toEqual(before);
-	});
+		expect(await withScripts(artifacts, { artifact_id: 't1' })).toEqual(before);
+	}, 60_000);
 
 	it('answers an unconfigured script column as empty cells', () => {
 		const page = evaluate(saved(), {

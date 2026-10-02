@@ -5,7 +5,6 @@
 import type { EvalContext } from '../evaluate/index.ts';
 import { displayName } from '../model/naming.ts';
 import { Meter } from '../navigation/evaluate.ts';
-import { ReadError } from '../read/errors.ts';
 import { pageOf, type ReadParams } from '../read/params.ts';
 import type { Steps } from '../steps/steps.ts';
 import { evaluateCellsSteps, NOT_COMPUTED_MESSAGE } from './cells.ts';
@@ -39,15 +38,13 @@ const EMPTY: ScriptErrorsBody = { state: 'ready', errors: [], total_errors: 0, t
 /**
  * The route body in steps. `offset` and `limit` are read for their bounds and
  * then ignored: the recap spans the whole table, in the order its page shows.
- * A table that reaches no script has none to list; one that does refuses with
- * 501 when the context reads no scripts.
+ * A table that reaches no script has none to list.
  */
 export function tableScriptErrors(ctx: EvalContext, params: ReadParams): Steps<ScriptErrorsBody> {
 	const source = sourceOf(params);
 	pageOf(params);
-	const defn = resolved(ctx.artifacts, source, ctx.scripts !== undefined);
+	const defn = resolved(ctx.artifacts, source);
 	const reaches = tableHasScript(defn);
-	if (reaches && ctx.scripts === undefined) throw new ReadError(501, 'reaches a script');
 	const scripts = tableScripts(ctx, defn);
 	const { model } = ctx;
 	const meter = new Meter(0);

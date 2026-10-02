@@ -14,6 +14,7 @@ import { loadFixture } from '../golden/load.ts';
 import { replaySteps, type StepsFixture } from '../golden/model-steps.ts';
 import { thrown } from '../golden/thrown.ts';
 import { family } from '../model/fixtures.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 type Payload = CommittedArtifact['payload'];
 
@@ -31,7 +32,10 @@ const ids = (page: ChainPageOut) =>
 
 function evaluate(artifacts: ArtifactSet, params: ReadParams): ChainPageOut {
 	return drain(
-		evaluateNavigation({ model: family(), artifacts, placements: new ViewPlacements() }, params)
+		evaluateNavigation(
+			{ model: family(), artifacts, placements: new ViewPlacements(), scripts: NO_SCRIPTS },
+			params
+		)
 	);
 }
 
@@ -68,7 +72,7 @@ describe('staged artifacts', () => {
 		artifacts.setStaged([staged[1]!, { op: 'delete', id: 'tmp_b' }]);
 		const error = thrown(() =>
 			evaluateNavigation(
-				{ model: family(), artifacts, placements: new ViewPlacements() },
+				{ model: family(), artifacts, placements: new ViewPlacements(), scripts: NO_SCRIPTS },
 				{ artifact_id: 'tmp_a' }
 			)
 		);

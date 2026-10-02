@@ -4,12 +4,11 @@
  * led by the manifest — or, `bare`, the run's one file alone.
  */
 import type { EvalContext } from '../evaluate/index.ts';
-import { Meter } from '../navigation/evaluate.ts';
+import { Meter, NavKeyError, NavValueError } from '../navigation/evaluate.ts';
 import { ReadError } from '../read/errors.ts';
 import type { ReadParams } from '../read/params.ts';
 import type { Steps } from '../steps/steps.ts';
 import { resolveTransformSource, transformSyntaxRefusal } from '../script/snippets.ts';
-import { tableHasScript } from '../table/resolve.ts';
 import { answered, resolved } from '../table/route.ts';
 import type { TableDefinition } from '../table/schema.ts';
 import { pyRepr } from '../value/repr.ts';
@@ -59,20 +58,6 @@ export type RunIdentity = {
 	project: string;
 };
 
-/**
- * Whether a run reaches a script: an entry carries a transform, or one of
- * the resolved entry tables (`null` where none resolved) reaches one.
- */
-export function exportReachesScript(
-	entries: readonly ExporterEntry[],
-	resolvedTables: readonly (TableDefinition | null)[]
-): boolean {
-	return (
-		entries.some(hasEntryTransform) ||
-		resolvedTables.some((defn) => defn !== null && tableHasScript(defn))
-	);
-}
-
 /** `str.rpartition`. */
 function rpartition(text: string, sep: string): [string, string, string] {
 	const at = text.lastIndexOf(sep);
@@ -119,7 +104,7 @@ function entryTransform(
 	label: string,
 	bad: string[]
 ): ResolvedTransform | null {
-	if (ctx.scripts === undefined || !hasEntryTransform(entry)) return null;
+	if (!hasEntryTransform(entry)) return null;
 	if (!isJsonFamily(entry.format)) {
 		bad.push(transformFormatRefusal(label, entry.format).detail);
 		return null;
@@ -150,12 +135,10 @@ type Planned = {
 
 /**
  * `_execute_export` in steps, in its order. Before the first step: a run
- * that reaches a script refuses with 501, an entry's transform before any
- * table is looked up; then no entries, the output filename's tokens, and
+ * with no entries, the output filename's tokens, and
  * the missing tables and bad templates, each list a 422 naming its entries.
  * A table's resolution that fails refuses when the run reaches its entry,
- * as the route's does. Where the context reads scripts an entry's transform
- * runs, and the entries whose transform is on a format that is not JSON-family
+ * as the route's does. An entry's transform runs, and the entries whose transform is on a format that is not JSON-family
  * or does not resolve are one more list, a 422 after the others. `${rev}` and
  * the manifest's `model_rev` are the committed rev.
  */
@@ -164,10 +147,6 @@ export function runExportSteps(
 	def: ExporterDefinition,
 	run: RunIdentity
 ): Steps<ExportFileResult> {
-	const scripted = ctx.scripts !== undefined;
-	if (!scripted && exportReachesScript(def.entries, [])) {
-		throw new ReadError(501, 'reaches a script');
-	}
 	if (def.entries.length === 0) throw new ReadError(422, 'exporter has no entries');
 	const vars = templateVars(ctx, run);
 	const badFilename = validateTokens(def.output.filename, NAME_TOKENS);
@@ -203,16 +182,12 @@ export function runExportSteps(
 
 	const tables = found.map(({ entry }): TableDefinition | ReadError => {
 		try {
-			return resolved(ctx.artifacts, entry.source.ref, scripted);
+			return resolved(ctx.artifacts, entry.source.ref);
 		} catch (error) {
 			if (error instanceof ReadError) return error;
 			throw error;
 		}
 	});
-	const reached = tables.map((defn) => (defn instanceof ReadError ? null : defn));
-	if (!scripted && exportReachesScript(def.entries, reached)) {
-		throw new ReadError(501, 'reaches a script');
-	}
 
 	const modelRev = ctx.working?.rev ?? 0;
 	const meter = new Meter(0);
@@ -254,7 +229,12 @@ export function runExportSteps(
 					if (files instanceof ReadError) throw files;
 					results.push(yield* files);
 				} catch (error) {
-					if (!deferring) throw error;
+					// Only a refusal is deferred; `answered` turns the core's `ValueError` and `KeyError` into one.
+					const refusal =
+						error instanceof ReadError ||
+						error instanceof NavValueError ||
+						error instanceof NavKeyError;
+					if (!deferring || !refusal) throw error;
 					if (error instanceof TransformSyntaxError) syntax.push(error.detail);
 					else first ??= { error };
 				}

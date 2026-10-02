@@ -29,6 +29,13 @@ export type ScriptCall = {
 /** What a pass reads scripts through: the fill's memo, then the cache, else the miss is recorded and `PENDING` answered. */
 export type ScriptReader = { read(call: ScriptCall): ScriptResult };
 
+/** The reader for an evaluation over definitions that reach no script: reading through it throws. */
+export const NO_SCRIPTS: ScriptReader = {
+	read: () => {
+		throw new Error('no script is expected');
+	}
+};
+
 /**
  * What a pass is given. A pass whose scan the model cannot move under calls `begin` the moment the
  * scan starts, and the fill takes the state it ran on from then, not from when it queued the pass.

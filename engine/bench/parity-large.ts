@@ -72,6 +72,7 @@ import {
 	type IssueOut,
 	type MetamodelDoc
 } from '../src/index.ts';
+import { NO_SCRIPTS } from '../src/evaluate/fill.ts';
 
 const SHOWN = 20;
 const CHUNK_BYTES = 1 << 16;
@@ -233,7 +234,8 @@ for (const format of ['csv', 'json'] as const) {
 	const ctx: EvalContext = {
 		model: workingCopy.model,
 		artifacts: new ArtifactSet(),
-		placements: new ViewPlacements()
+		placements: new ViewPlacements(),
+		scripts: NO_SCRIPTS
 	};
 	const result: ExportFileResult = drain(
 		exportTable(ctx, {

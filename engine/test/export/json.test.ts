@@ -23,6 +23,7 @@ import {
 } from '../../src/index.ts';
 import { thrown } from '../golden/thrown.ts';
 import { NODE_DOC } from '../model/fixtures.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 const node = NODE_DOC.elements[0]!;
 const DOC: MetamodelDoc = {
@@ -64,7 +65,12 @@ const decode = (result: ExportFileResult) =>
 
 function exportJson(model: Model, definition: object): string {
 	const params: ReadParams = { definition, format: 'json', date: '20240229', project: 'p' };
-	const ctx = { model, artifacts: new ArtifactSet(), placements: new ViewPlacements() };
+	const ctx = {
+		model,
+		artifacts: new ArtifactSet(),
+		placements: new ViewPlacements(),
+		scripts: NO_SCRIPTS
+	};
 	return decode(drain(EVALUATIONS.exportTable!(ctx, params)) as ExportFileResult);
 }
 
@@ -229,7 +235,12 @@ describe('the key column', () => {
 describe('an export file', () => {
 	function exported(model: Model, definition: object, format: string): unknown {
 		const params: ReadParams = { definition, format, date: '20240229', project: 'p' };
-		const ctx = { model, artifacts: new ArtifactSet(), placements: new ViewPlacements() };
+		const ctx = {
+			model,
+			artifacts: new ArtifactSet(),
+			placements: new ViewPlacements(),
+			scripts: NO_SCRIPTS
+		};
 		return thrown(() => drain(EVALUATIONS.exportTable!(ctx, params)));
 	}
 

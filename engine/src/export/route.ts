@@ -15,7 +15,6 @@ import { evaluateCellsSteps, type TableCell } from '../table/cells.ts';
 import { NavMemo } from '../table/nav-memo.ts';
 import type { CachedOrder } from '../table/order-cache.ts';
 import { resolveTransformSource, transformSyntaxRefusal } from '../script/snippets.ts';
-import { tableHasScript } from '../table/resolve.ts';
 import { answered, orderedRows, resolved, sourceOf, tableScripts } from '../table/route.ts';
 import { EXPORT_TABLE_LIMITS, type RowKey } from '../table/rows.ts';
 import type { TableScripts } from '../table/script-inputs.ts';
@@ -352,7 +351,7 @@ export function exportFilesSteps(
 			const shaped = shapeJsonDocs(format === 'jsonl' ? 'jsonl' : 'json', docs, docKeys);
 			// A transform sits after the shaping and before the writing.
 			const payload =
-				transform === null || ctx.scripts === undefined
+				transform === null
 					? shaped
 					: yield* transformedSteps(
 							ctx.scripts,
@@ -403,10 +402,8 @@ export function exportFilesSteps(
  * table's own `json_split` enabled (JSON-family formats only; xlsx and CSV
  * ignore it), an `application/zip` named `{name}.zip` of one file a partition.
  * Before the first step it reads its params and resolves the table through
- * the working copy's artifacts; a table that reaches a script, or carries a
- * transform, refuses with 501 for the server to run where the context reads no
- * scripts. Where it does, a transform on a format that is not JSON-family or
- * that does not resolve refuses with 422, and so does a bad split template.
+ * the working copy's artifacts. A transform on a format that is not JSON-family
+ * or that does not resolve refuses with 422, and so does a bad split template.
  * The file is named after the saved table, or `table`. JSON is written pretty.
  */
 export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportFileResult> {
@@ -414,10 +411,7 @@ export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportF
 	pageOf(params);
 	const format = formatOf(params);
 	const context = exportContext(params);
-	const defn = resolved(ctx.artifacts, source, ctx.scripts !== undefined);
-	if (ctx.scripts === undefined && (tableHasScript(defn) || hasTransform(defn))) {
-		throw new ReadError(501, 'reaches a script');
-	}
+	const defn = resolved(ctx.artifacts, source);
 	const name = typeof source === 'string' ? ctx.artifacts.resolve(source)!.name : 'table';
 	let transform: ResolvedTransform | null = null;
 	if (hasTransform(defn)) {
@@ -466,10 +460,7 @@ export type JsonPreviewBody = { sample: string; truncated: boolean };
 export function previewTableJson(ctx: EvalContext, params: ReadParams): Steps<JsonPreviewBody> {
 	const source = sourceOf(params);
 	pageOf(params);
-	const defn = resolved(ctx.artifacts, source, ctx.scripts !== undefined);
-	if (ctx.scripts === undefined && tableHasScript(defn)) {
-		throw new ReadError(501, 'reaches a script');
-	}
+	const defn = resolved(ctx.artifacts, source);
 	const { model } = ctx;
 	const meter = new Meter(0);
 	const scripts = tableScripts(ctx, defn);

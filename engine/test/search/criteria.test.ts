@@ -16,6 +16,7 @@ import {
 	type Criterion
 } from '../../src/index.ts';
 import { nodeMetamodel } from '../model/fixtures.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 /** The refusal `run` throws, as `{status, detail}`. */
 function refusal(run: () => unknown): { status: number; detail: string } {
@@ -195,7 +196,12 @@ describe('compileCriteria', () => {
 				target: 'element',
 				criteria: [{ type: 'property', name: 'name', op: 'matches', value: pattern }]
 			};
-			const ctx = { model: empty, artifacts: new ArtifactSet(), placements: new ViewPlacements() };
+			const ctx = {
+				model: empty,
+				artifacts: new ArtifactSet(),
+				placements: new ViewPlacements(),
+				scripts: NO_SCRIPTS
+			};
 			expect(refusal(() => drain(searchModel(ctx, params)))).toEqual(unsupported);
 		}
 		// Short of V8's limit, the same literal compiles and runs.

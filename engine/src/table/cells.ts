@@ -7,7 +7,6 @@
  */
 import type { Model } from '../model/model.ts';
 import { PropertyValue, type Meter } from '../navigation/evaluate.ts';
-import { ReadError } from '../read/errors.ts';
 import { treeItem, type TreeItem } from '../read/tree.ts';
 import type { ValuePayload } from '../script/result.ts';
 import type { Steps } from '../steps/steps.ts';
@@ -316,8 +315,8 @@ function* scriptCell(
 	if (col.snippet.definition === null) return emptyValueCell();
 	const roots = yield* resolveSourceElements(pass, key, col.source);
 	if (roots.length === 0) return emptyValueCell();
-	// Only an evaluation without scripts reaches here, and it refused before its first step.
-	if (pass.scripts === null) throw new ReadError(501, 'reaches a script');
+	// A table with a script column has scripts.
+	if (pass.scripts === null) throw new Error('a script column without scripts');
 	const result = yield* evaluateScriptColumn(pass, key, col, roots);
 	if (result.error !== null) return failedCell(result.error);
 	const payload = result.payload as ValuePayload;

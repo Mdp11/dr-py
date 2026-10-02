@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { ArtifactSet, drain, EVALUATIONS, ViewPlacements, type ReadParams } from '$engine';
+import { ArtifactSet, drain, EVALUATIONS, NO_SCRIPTS, ViewPlacements, type ReadParams } from '$engine';
 import { createEngineSeam } from '$lib/engine/seam';
 import { SURFACES } from '$lib/engine/surfaces';
 import {
@@ -163,7 +163,8 @@ describe('evaluateNavigation on the navigation surface', () => {
 		const ctx = {
 			model: project.model,
 			artifacts: new ArtifactSet(),
-			placements: new ViewPlacements()
+			placements: new ViewPlacements(),
+			scripts: NO_SCRIPTS
 		};
 		return ChainPageSchema.parse(
 			JSON.parse(JSON.stringify(drain(EVALUATIONS['evaluateNavigation']!(ctx, params))))

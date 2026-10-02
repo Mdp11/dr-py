@@ -86,8 +86,7 @@ function* previewFile(
 /**
  * The route's body without `duration_ms`. Before the first step it reads the
  * entry, `date` and `project` (the split filenames' `${date}` and `${project}`)
- * and resolves its transform and table through the working copy's artifacts;
- * where the context reads no scripts it refuses with 501 `reaches a script`.
+ * and resolves its transform and table through the working copy's artifacts.
  */
 export function previewTransform(
 	ctx: EvalContext,
@@ -96,7 +95,6 @@ export function previewTransform(
 	const entry = readExporterEntry(params['entry'], 'entry');
 	const context = exportContext(params);
 	const { scripts: reader } = ctx;
-	if (reader === undefined) throw new ReadError(501, 'reaches a script');
 	const label = entry.name || entry.source.ref;
 	const { format } = entry;
 	if (!isJsonFamily(format)) throw transformFormatRefusal(label, format);
@@ -107,7 +105,7 @@ export function previewTransform(
 	if (table === null || table.kind !== 'table') {
 		throw new ReadError(422, `missing table(s) for entries: ${label}`);
 	}
-	const defn = resolved(ctx.artifacts, entry.source.ref, true);
+	const defn = resolved(ctx.artifacts, entry.source.ref);
 
 	const { model } = ctx;
 	const meter = new Meter(0);

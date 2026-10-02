@@ -15,6 +15,7 @@ import { loadFixture } from '../golden/load.ts';
 import { replaySteps, type StepsFixture } from '../golden/model-steps.ts';
 import { nodeMetamodel } from '../model/fixtures.ts';
 import { joinedParts } from './xlsx-sample.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 const fixture = loadFixture<StepsFixture>('export_bytes');
 
@@ -77,6 +78,7 @@ describe('exports over staged artifacts', () => {
 			model,
 			artifacts,
 			placements: new ViewPlacements(),
+			scripts: NO_SCRIPTS,
 			working: { rev: 7, stagedVersion: 3, tableOrders: new TableOrderCache() }
 		};
 	}

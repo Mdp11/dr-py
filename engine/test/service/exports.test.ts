@@ -27,6 +27,7 @@ import {
 	type Client,
 	type Post
 } from './helpers.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 type Event = Client['events'][number];
 
@@ -106,7 +107,7 @@ function direct(model: Model, staged: readonly object[] = []): string {
 		committed.map((a) => ({ ...a, rev: 1, payload: a.payload as CommittedArtifact['payload'] }))
 	);
 	set.setStaged(staged as StagedArtifact[]);
-	const ctx = { model, artifacts: set, placements: new ViewPlacements() };
+	const ctx = { model, artifacts: set, placements: new ViewPlacements(), scripts: NO_SCRIPTS };
 	return text(drain(exportTable(ctx, CSV)));
 }
 
@@ -267,20 +268,23 @@ describe('an export over the scheduler', () => {
 		expect(answersTo(client, 'export')).toBe(1);
 	});
 
-	it('restarts an export whose replica closes between its slices, answering once from the next replica', async () => {
-		const before = direct(ring());
+	it('answers 409 for an export whose replica closes between its slices, and a later call from the next replica', async () => {
 		const after = direct(renamed());
-		expect(after).not.toBe(before);
+		expect(after).not.toBe(direct(ring()));
 		const { host, client } = await paused();
 
 		const exporting = client.callAs<ExportFileResult>('export', 'exportTable', CSV);
+		const refused = exporting.then(
+			() => null,
+			(error: unknown) => error
+		);
 		await settle();
 		expect(host.waiting).toBe(1);
 		await client.call('close');
 		host.auto = true;
 		host.turn();
+		expect(await refused).toMatchObject({ status: 409, detail: 'replica closed' });
 		await openReplica(client, renamed(), NODE_DOC);
-		expect(text(await exporting)).toBe(after);
 
 		expect(text(await client.call<ExportFileResult>('exportTable', CSV))).toBe(after);
 		await settle();

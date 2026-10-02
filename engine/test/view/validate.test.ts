@@ -13,6 +13,7 @@ import {
 	type ViewDoc
 } from '../../src/index.ts';
 import { smartCity } from '../service/helpers.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 const { model } = smartCity();
 const all = [...model.elements()];
@@ -173,7 +174,12 @@ describe('validateViewDoc', () => {
 		const raw = JSON.parse(JSON.stringify({ name: "it's", folders: [bottom] }));
 		const out = drain(
 			EVALUATIONS['validateView']!(
-				{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements() },
+				{
+					model,
+					artifacts: new ArtifactSet(),
+					placements: new ViewPlacements(),
+					scripts: NO_SCRIPTS
+				},
 				{ view: raw }
 			)
 		) as { message: string; target_ids: string[] }[];
@@ -204,7 +210,7 @@ describe('validateViewDoc', () => {
 		);
 		const out = drain(
 			EVALUATIONS['validateView']!(
-				{ model, artifacts: set, placements: new ViewPlacements() },
+				{ model, artifacts: set, placements: new ViewPlacements(), scripts: NO_SCRIPTS },
 				{ view: v }
 			)
 		) as { message: string; origin: string }[];
@@ -252,7 +258,12 @@ describe('readViewDoc', () => {
 	it('refuses a `validateView` call whose view is unreadable before it yields', () => {
 		expect(() =>
 			EVALUATIONS['validateView']!(
-				{ model, artifacts: new ArtifactSet(), placements: new ViewPlacements() },
+				{
+					model,
+					artifacts: new ArtifactSet(),
+					placements: new ViewPlacements(),
+					scripts: NO_SCRIPTS
+				},
 				{ view: { name: 1 } }
 			)
 		).toThrow(ReadError);

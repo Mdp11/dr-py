@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
 	ArtifactSet,
 	drain,
@@ -14,11 +14,18 @@ import {
 	type CommittedArtifact,
 	type EvalContext,
 	type NavigationDefinition,
-	type Progress
+	type Progress,
+	type ReadParams
 } from '../../src/index.ts';
 import { seededRandom } from '../golden/model-steps.ts';
 import { thrown } from '../golden/thrown.ts';
 import { family, nodeMetamodel } from '../model/fixtures.ts';
+import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
+import { filled } from '../evaluate/filled.ts';
+import { nodeScriptHost } from '../../node/script-host.ts';
+
+const host = nodeScriptHost();
+afterAll(() => host.dispose());
 
 const refusal = (run: () => unknown) => {
 	const error = thrown(run);
@@ -413,7 +420,7 @@ describe('evaluateSteps', () => {
 });
 
 function context(model: Model = family(), artifacts = new ArtifactSet()): EvalContext {
-	return { model, artifacts, placements: new ViewPlacements() };
+	return { model, artifacts, placements: new ViewPlacements(), scripts: NO_SCRIPTS };
 }
 
 const committed = (id: string, kind: string, payload: object) => ({
@@ -428,42 +435,40 @@ describe('evaluateNavigation', () => {
 	const scripted = {
 		kind: 'path',
 		start: scope,
-		steps: [{ kind: 'script', snippet: { definition: { code: 'def step(el):\n    return el\n' } } }]
+		steps: [
+			{ kind: 'script', snippet: { definition: { code: 'def step(el):\n    return [el.name]\n' } } }
+		]
 	};
 
-	it('answers 501 for a script step, before any step', () => {
-		expect(refusal(() => evaluateNavigation(context(), { definition: scripted }))).toEqual({
-			status: 501,
-			detail: 'reaches a script'
-		});
+	const run = (artifacts: ArtifactSet, params: ReadParams) =>
+		filled<{ chains: { kind: string; id?: string }[][] }>(
+			host,
+			{ model: family(), artifacts, placements: new ViewPlacements() },
+			'evaluateNavigation',
+			params
+		);
+
+	it('runs a script step through the context scripts, a saved one or a dangling one', async () => {
+		const page = await run(new ArtifactSet(), { definition: scripted });
+		expect(page.chains.length).toBeGreaterThan(0);
+		expect(page.chains.every((chain) => chain.at(-1)!.kind === 'value')).toBe(true);
 		const byRef = {
 			kind: 'path',
 			start: scope,
 			steps: [{ kind: 'script', snippet: { ref: 'gone' } }]
 		};
-		expect(refusal(() => evaluateNavigation(context(), { definition: byRef }))).toEqual({
-			status: 501,
-			detail: 'reaches a script'
-		});
-	});
+		expect((await run(new ArtifactSet(), { definition: byRef })).chains).toEqual([]);
+	}, 60_000);
 
-	it('answers 501 for a script step reached only through a saved navigation', () => {
+	it('runs a script step reached only through a saved navigation', async () => {
 		const artifacts = new ArtifactSet();
 		artifacts.setCommitted([committed('n1', 'navigation', scripted)]);
 		const through = { kind: 'set_op', op: 'union', operands: [{ ref: 'n1', step_index: 0 }] };
-		expect(
-			refusal(() => evaluateNavigation(context(family(), artifacts), { definition: through }))
-		).toEqual({
-			status: 501,
-			detail: 'reaches a script'
-		});
-		expect(
-			refusal(() => evaluateNavigation(context(family(), artifacts), { artifact_id: 'n1' }))
-		).toEqual({
-			status: 501,
-			detail: 'reaches a script'
-		});
-	});
+		const viaSetOp = await run(artifacts, { definition: through });
+		const direct = await run(artifacts, { artifact_id: 'n1' });
+		expect(direct.chains.length).toBeGreaterThan(0);
+		expect(viaSetOp.chains.length).toBeGreaterThan(0);
+	}, 60_000);
 
 	it('answers 501 for an unsupported pattern anywhere in the resolved definition, before any step', () => {
 		const artifacts = new ArtifactSet();

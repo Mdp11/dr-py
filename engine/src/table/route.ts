@@ -42,13 +42,12 @@ export function sourceOf(params: ReadParams): TableDefinition | string {
 
 /**
  * The table with every navigation and snippet it names inlined, through the
- * working copy's artifacts. With `scripts`, the table's own inline snippets are
- * checked first, as the core's schema checks them where the table is read.
+ * working copy's artifacts, the table's own inline snippets checked first, as the
+ * core's schema checks them where the table is read.
  */
 export function resolved(
 	artifacts: ArtifactSet,
-	source: TableDefinition | string,
-	scripts = false
+	source: TableDefinition | string
 ): TableDefinition {
 	let defn: TableDefinition;
 	if (typeof source === 'string') {
@@ -60,7 +59,7 @@ export function resolved(
 			throw error;
 		}
 	} else defn = source;
-	if (scripts) checkTableSnippets(defn);
+	checkTableSnippets(defn);
 	return resolveTableRefs(defn, navigationFetch(artifacts), snippetFetch(artifacts));
 }
 
@@ -83,7 +82,7 @@ export function* answered<T>(steps: Steps<T>): Steps<T> {
  * the evaluation's warnings and whether any call it read was an error.
  */
 export function tableScripts(ctx: EvalContext, defn: TableDefinition): TableScripts | null {
-	return ctx.scripts !== undefined && tableHasScript(defn) ? new TableScripts(ctx.scripts) : null;
+	return tableHasScript(defn) ? new TableScripts(ctx.scripts) : null;
 }
 
 /**
@@ -152,9 +151,7 @@ export function orderedRows(
 /**
  * The route body in steps. Before the first step it reads its params and
  * resolves the table and every navigation and snippet it names through the
- * working copy's artifacts; a table that reaches a script refuses with 501, for
- * the server to run, unless the context reads scripts, which then run through
- * it and whose inline snippets are checked first. The rows come from
+ * working copy's artifacts, the table's own inline snippets checked first. The rows come from
  * `orderedRows`, then only the page's cells are evaluated, with a memo of their
  * own. A table that reaches a script answers complete, with the evaluation's
  * warnings.
@@ -162,10 +159,7 @@ export function orderedRows(
 export function evaluateTable(ctx: EvalContext, params: ReadParams): Steps<TablePageBody> {
 	const source = sourceOf(params);
 	const { limit, offset } = pageOf(params);
-	const defn = resolved(ctx.artifacts, source, ctx.scripts !== undefined);
-	if (ctx.scripts === undefined && tableHasScript(defn)) {
-		throw new ReadError(501, 'reaches a script');
-	}
+	const defn = resolved(ctx.artifacts, source);
 	const scripts = tableScripts(ctx, defn);
 	const { model } = ctx;
 	const rev = ctx.working?.rev ?? 0;
