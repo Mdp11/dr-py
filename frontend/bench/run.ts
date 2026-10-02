@@ -34,7 +34,8 @@ const BACKING = '  ArrayBuffer backing stores beside it (not added), MB';
 const OPEN = 'cold open: first byte asked to replica ready';
 const SLICES = [
 	'longest staged round trip during the open (slice bound)',
-	'longest staged round trip during it (slice bound)'
+	'longest staged round trip during it (slice bound)',
+	'longest staged round trip during the script table (slice bound)'
 ];
 const TABLE_SLICE = 'longest staged round trip during the table (slice bound)';
 const RESCAN_SLICE = 'longest staged round trip during the rescan (slice bound)';

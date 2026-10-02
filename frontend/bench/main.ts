@@ -593,9 +593,11 @@ async function scriptTable(): Promise<Measures> {
 	// The pool's spares are ready before the timer, as in `scripts()`.
 	await client.call('scriptWarm');
 	const roundsBefore = scriptRounds;
+	const stopPings = ping(client);
 	const start = now();
 	const records = await exported();
 	const wall = now() - start;
+	const slice = longest(await stopPings()).ms;
 	const rounds = scriptRounds - roundsBefore;
 	if (records !== SCRIPT_IDS + 1)
 		throw new Error(`the script table's csv holds ${records} records`);
@@ -620,6 +622,7 @@ async function scriptTable(): Promise<Measures> {
 	}
 	return {
 		'script table export (10,000 cells)': wall,
+		'longest staged round trip during the script table (slice bound)': slice,
 		'  script rounds in it (count)': rounds,
 		'script table export (cached)': cached,
 		'script table first page (cached)': firstPage
