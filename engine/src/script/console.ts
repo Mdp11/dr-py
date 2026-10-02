@@ -1,5 +1,5 @@
 import { ReadError } from '../read/errors.ts';
-import { OP_KINDS, toWire } from '../read/wire.ts';
+import { OP_KINDS, readOps, toWire, wireOps } from '../read/wire.ts';
 import { parseExact } from '../value/parse.ts';
 import type { Value } from '../value/types.ts';
 
@@ -34,6 +34,28 @@ const ENTRIES: readonly string[] = ['script', 'value', 'step'];
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/** Each input is `{kind: 'elements', ids?: string[]}` or `{kind: 'scalars', values?: any[]}`. */
+function readInputs(inputs: unknown): void {
+	if (!isObject(inputs)) throw new ReadError(422, 'inputs must be an object');
+	for (const [name, spec] of Object.entries(inputs)) {
+		const where = `inputs.${name}`;
+		if (!isObject(spec)) throw new ReadError(422, `${where} must be an object`);
+		const { kind } = spec;
+		if (kind === 'elements') {
+			const ids = spec['ids'] ?? [];
+			if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
+				throw new ReadError(422, `${where}.ids must be a list of strings`);
+			}
+		} else if (kind === 'scalars') {
+			if (!Array.isArray(spec['values'] ?? [])) {
+				throw new ReadError(422, `${where}.values must be a list`);
+			}
+		} else {
+			throw new ReadError(422, `${where}.kind must be 'elements' or 'scalars'`);
+		}
+	}
+}
+
 /** `runSnippet`'s params, read whole before anything runs. */
 export function readRunSnippet(params: unknown): RunSnippetParams {
 	if (!isObject(params)) throw new ReadError(422, 'params must be an object');
@@ -64,7 +86,7 @@ export function readRunSnippet(params: unknown): RunSnippetParams {
 	if (hasInputs && entry !== 'value') {
 		throw new ReadError(422, "`inputs` is only meaningful for entry 'value'");
 	}
-	if (hasInputs && !isObject(inputs)) throw new ReadError(422, 'inputs must be an object');
+	if (hasInputs) readInputs(inputs);
 	return {
 		...(hasCode ? { code: code as string } : { artifact_id: artifactId as string }),
 		entry: entry as ConsoleEntry,
@@ -73,15 +95,26 @@ export function readRunSnippet(params: unknown): RunSnippetParams {
 	};
 }
 
-/** Whether every op a run proposed is a model op: nothing else is staged from a console. */
-export function gateOps(ops: readonly unknown[]): { ok: true } | { ok: false; kind: string } {
+/**
+ * Reads the ops a run proposed as the stage would: only model ops, each well formed. The ops are
+ * answered as `readOps` normalises them.
+ */
+export function gateOps(
+	ops: readonly unknown[]
+): { ok: true; ops: unknown[] } | { ok: false; message: string } {
 	for (const op of ops) {
 		const kind = isObject(op) ? op['kind'] : undefined;
 		if (typeof kind !== 'string' || !OP_KINDS.includes(kind)) {
-			return { ok: false, kind: typeof kind === 'string' ? kind : String(kind) };
+			const named = typeof kind === 'string' ? kind : String(kind);
+			return { ok: false, message: `the script proposed a ${named} op, which is not a model op` };
 		}
 	}
-	return { ok: true };
+	try {
+		return { ok: true, ops: wireOps(readOps([...ops])) };
+	} catch (error) {
+		if (!(error instanceof ReadError)) throw error;
+		return { ok: false, message: `the script proposed a malformed op: ${error.detail}` };
+	}
 }
 
 /** A harness answer (`{stdout, result_repr, truncated, error?}`) and the ops its run proposed. */
@@ -101,7 +134,7 @@ export function consoleAnswer(
 	return {
 		stdout: typeof body['stdout'] === 'string' ? body['stdout'] : '',
 		result_repr: typeof body['result_repr'] === 'string' ? body['result_repr'] : null,
-		ops: gate.ok ? [...ops] : [],
+		ops: gate.ok ? gate.ops : [],
 		error: gate.ok
 			? error === null
 				? null
@@ -112,7 +145,7 @@ export function consoleAnswer(
 					}
 			: {
 					kind: 'runtime',
-					message: `the script proposed a ${gate.kind} op, which is not a model op`,
+					message: gate.message,
 					traceback: null
 				},
 		truncated: body['truncated'] === true,

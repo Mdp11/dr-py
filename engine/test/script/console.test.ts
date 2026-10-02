@@ -37,15 +37,41 @@ describe('readRunSnippet', () => {
 		);
 		expect(refused({ code: 'x', entry: 'transform' }).status).toBe(422);
 	});
+
+	it('refuses an input that is no elements or scalars', () => {
+		const value = { code: 'x', entry: 'value', element_ids: ['a'] };
+		expect(refused({ ...value, inputs: { x: { kind: 'values', values: [] } } }).status).toBe(422);
+		expect(refused({ ...value, inputs: { x: { kind: 'elements', ids: [1] } } }).status).toBe(422);
+		expect(refused({ ...value, inputs: { x: { kind: 'scalars', values: 1 } } }).status).toBe(422);
+		expect(refused({ ...value, inputs: { x: 3 } }).status).toBe(422);
+		expect(
+			readRunSnippet({ ...value, inputs: { x: { kind: 'elements' }, y: { kind: 'scalars' } } })
+		).toBeDefined();
+	});
 });
 
 describe('gateOps', () => {
 	it('passes the model op kinds and refuses the rest', () => {
-		expect(gateOps([{ kind: 'update_element' }, { kind: 'delete_relationship' }])).toEqual({
+		expect(
+			gateOps([
+				{ kind: 'update_element', id: 'a', properties_patch: {} },
+				{ kind: 'delete_relationship', id: 'r' }
+			])
+		).toMatchObject({
 			ok: true
 		});
-		expect(gateOps([{ kind: 'create_artifact' }])).toEqual({ ok: false, kind: 'create_artifact' });
+		expect(gateOps([{ kind: 'create_artifact' }])).toMatchObject({ ok: false });
 		expect(gateOps([{}])).toMatchObject({ ok: false });
+	});
+
+	it('refuses a malformed model op, as the stage would', () => {
+		const missingId = gateOps([{ kind: 'update_element', properties_patch: {} }]);
+		expect(missingId).toMatchObject({ ok: false });
+		const wrongType = gateOps([{ kind: 'delete_element', id: 5 }]);
+		expect(wrongType).toMatchObject({ ok: false });
+		expect(gateOps([{ kind: 'update_element', id: 'n1', properties_patch: {} }])).toMatchObject({
+			ok: true
+		});
 	});
 });
 
@@ -53,10 +79,12 @@ describe('consoleAnswer', () => {
 	const stamp = { rev: 3, staged: 1 };
 	it('shapes the harness answer', () => {
 		const text = '{"stdout": "hi", "result_repr": "1", "truncated": false}';
-		expect(consoleAnswer(text, [{ kind: 'update_element' }], 7, stamp)).toEqual({
+		expect(
+			consoleAnswer(text, [{ kind: 'update_element', id: 'n1', properties_patch: {} }], 7, stamp)
+		).toEqual({
 			stdout: 'hi',
 			result_repr: '1',
-			ops: [{ kind: 'update_element' }],
+			ops: [{ kind: 'update_element', id: 'n1', properties_patch: {} }],
 			error: null,
 			truncated: false,
 			duration_ms: 7,

@@ -38,6 +38,17 @@ const factory: ScriptHostFactory = (...args) => {
 	};
 };
 
+describe('runSnippet without a script host', () => {
+	it('is refused 501', async () => {
+		const client = connect();
+		await openReplica(client, model(), doc);
+		expect(await refusal(client.call('runSnippet', { code: 'result = 1' }))).toEqual({
+			status: 501,
+			detail: 'scripts are not available'
+		});
+	});
+});
+
 describe('runSnippet', () => {
 	let client: Client;
 	beforeAll(async () => {
@@ -75,7 +86,7 @@ describe('runSnippet', () => {
 			code: 'def value(els, inputs):\n    return [els[0].name, inputs["x"][0]]',
 			entry: 'value',
 			element_ids: ['n1'],
-			inputs: { x: { kind: 'values', values: [5] } }
+			inputs: { x: { kind: 'scalars', values: [5] } }
 		});
 		expect(result.error).toBeNull();
 		expect(result.result_repr).toBe("['one', 5]");
@@ -138,6 +149,31 @@ describe('runSnippet', () => {
 			message: 'the script proposed a create_artifact op, which is not a model op',
 			traceback: null
 		});
+	}, 60_000);
+
+	it('runs a step entry on one element', async () => {
+		const result = await client.call<RunSnippetResult>('runSnippet', {
+			code: 'def step(el):\n    return el.id',
+			entry: 'step',
+			element_ids: ['n1']
+		});
+		expect(result.error).toBeNull();
+		expect(result.result_repr).toBe("'n1'");
+	}, 60_000);
+
+	it('refuses both code and artifact_id with 422', async () => {
+		expect(
+			await refusal(client.call('runSnippet', { code: 'x = 1', artifact_id: 'snip' }))
+		).toEqual({ status: 422, detail: 'provide exactly one of `code` / `artifact_id`' });
+	});
+
+	it('answers a malformed forged op as a runtime error', async () => {
+		const result = await client.call<RunSnippetResult>('runSnippet', {
+			code: '_transport({"id": 1, "op": {"kind": "update_element"}})'
+		});
+		expect(result.ops).toEqual([]);
+		expect(result.error?.kind).toBe('runtime');
+		expect(result.error?.message).toContain('malformed op');
 	}, 60_000);
 
 	it('refuses a transform entry with console', async () => {
