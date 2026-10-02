@@ -19,7 +19,6 @@ export const EXPORT_MAX_ATTEMPTS = 120;
 
 /** Why an export the engine refused is the server's file, of committed state. */
 export const EXPORT_FALLBACK_NOTE = {
-	script: 'Exported from committed state: reaches a script',
 	pattern: 'Exported from committed state: a search pattern needs the server'
 } as const satisfies Record<Exclude<Fallback, 'rules'>, string>;
 

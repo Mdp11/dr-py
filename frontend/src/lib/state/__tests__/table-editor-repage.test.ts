@@ -14,7 +14,6 @@ import type { ChangedEvent } from '$lib/engine/sync';
 import { PAGE_ORIGIN, fakeProject } from '$lib/engine/__tests__/support/project-server';
 import {
 	resetArtifactEdits,
-	revertStagedArtifact,
 	stageArtifactDelete,
 	stageArtifactUpdate
 } from '../artifact-edits.svelte';
@@ -85,8 +84,7 @@ const SERVED = {
 	truncated: false,
 	offset: 0,
 	model_rev: 0,
-	warnings: [],
-	script_status: null
+	warnings: []
 };
 
 type Started = {
@@ -210,7 +208,7 @@ describe('a staged edit re-pages the open tables', () => {
 		// No later debounce sneaks in a second re-page.
 		await flushTablesRepage();
 		expect(asked).toHaveLength(1);
-		expect(getTableError('tbl:draft:1')).toBeUndefined();
+		expect(getTableError('tbl:draft:1')).toBeNull();
 	});
 
 	it('three edits within the window re-page once, with the last', async () => {
@@ -316,11 +314,11 @@ describe('a staged edit re-pages the open tables', () => {
 		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
 		await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(false));
 		expect(getTablePage('tbl:draft:1')).toBe(before);
-		expect(getTableError('tbl:draft:1')).toBeUndefined();
+		expect(getTableError('tbl:draft:1')).toBeNull();
 
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'), { timeout: 5000 });
 		expect(spy).toHaveBeenCalledTimes(2);
-		expect(getTableError('tbl:draft:1')).toBeUndefined();
+		expect(getTableError('tbl:draft:1')).toBeNull();
 	});
 
 	it('a retry that comes due while the settings dialog is open waits for its resume', async () => {
@@ -348,7 +346,7 @@ describe('a staged edit re-pages the open tables', () => {
 		expect(spy).toHaveBeenCalledTimes(2);
 		expect(spy.mock.calls[1]![0]).toMatchObject({ definition: PEOPLE });
 		expect(spy.mock.calls[1]![0].definition?.sort ?? []).toEqual([]);
-		expect(getTableError('tbl:draft:1')).toBeUndefined();
+		expect(getTableError('tbl:draft:1')).toBeNull();
 	});
 
 	it('a re-page that keeps failing shows the last failure once its retries are spent', async () => {
@@ -364,11 +362,14 @@ describe('a staged edit re-pages the open tables', () => {
 		await stageRename(s, first, 'staged');
 		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
 		await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(false));
-		expect(getTableError('tbl:draft:1')).toBeUndefined();
+		expect(getTableError('tbl:draft:1')).toBeNull();
 
-		await vi.waitFor(() => expect(getTableError('tbl:draft:1')).toBe('failure 4'), {
-			timeout: 15000
-		});
+		await vi.waitFor(
+			() => expect(getTableError('tbl:draft:1')).toEqual({ kind: 'error', message: 'failure 4' }),
+			{
+				timeout: 15000
+			}
+		);
 		expect(spy).toHaveBeenCalledTimes(4);
 		expect(getTablePage('tbl:draft:1')).toBe(before);
 		expect(getTableLoading('tbl:draft:1')).toBe(false);
@@ -384,59 +385,17 @@ describe('a staged edit re-pages the open tables', () => {
 			.mockRejectedValueOnce(new TypeError('second failure'))
 			.mockImplementation((args) => real(args));
 		await loadTablePage('tbl:draft:1', 0);
-		expect(getTableError('tbl:draft:1')).toBe('first refusal');
+		expect(getTableError('tbl:draft:1')).toEqual({ kind: 'error', message: 'first refusal' });
 
 		await stageRename(s, first, 'staged');
 
-		await vi.waitFor(() => expect(getTableError('tbl:draft:1')).toBe('second failure'));
+		await vi.waitFor(() =>
+			expect(getTableError('tbl:draft:1')).toEqual({ kind: 'error', message: 'second failure' })
+		);
 		// Retried, the re-page lands and takes the error with it.
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'), { timeout: 5000 });
-		expect(getTableError('tbl:draft:1')).toBeUndefined();
+		expect(getTableError('tbl:draft:1')).toBeNull();
 		expect(spy).toHaveBeenCalledTimes(3);
-	});
-
-	it('a re-page that replaces a poll in flight and fails transiently keeps the grid', async () => {
-		const COMPUTING = {
-			...SERVED,
-			script_status: { state: 'computing', done: 0, total: 1, message: null }
-		};
-		let release!: () => void;
-		const held = new Promise<void>((resolve) => (release = resolve));
-		const { s, served } = await start({
-			serve: async (n) => {
-				if (n === 2) await held;
-				return COMPUTING;
-			}
-		});
-		try {
-			const scripted = TableDefinitionSchema.parse({
-				row_source: { kind: 'scope', types: ['Person'], criteria: [] },
-				columns: [
-					{ kind: 'element', source: { kind: 'row', chain_index: 0 } },
-					{ kind: 'script', source: { kind: 'row', chain_index: 0 }, snippet: { ref: 'sn1' } }
-				]
-			});
-			await open('tbl:draft:1', scripted);
-			const before = getTablePage('tbl:draft:1');
-			expect(before!.fallback).toBe('script');
-			let calls = 0;
-			const spy = vi.spyOn(tablesApi, 'evaluateTable').mockImplementation((args) => {
-				calls += 1;
-				return calls === 1 ? real(args) : Promise.reject(new TypeError('Failed to fetch'));
-			});
-			// The status poll goes out a second after the computing page, and is held.
-			await vi.waitFor(() => expect(served).toHaveLength(2), { timeout: 3000 });
-			expect(spy).toHaveBeenCalledOnce();
-
-			await stageRename(s, 'e_000031', 'staged');
-			await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
-			await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(false));
-
-			expect(getTableError('tbl:draft:1')).toBeUndefined();
-			expect(getTablePage('tbl:draft:1')).toBe(before);
-		} finally {
-			release();
-		}
 	});
 
 	it('a re-page that supersedes a definition edit still out reports its failure', async () => {
@@ -453,7 +412,10 @@ describe('a staged edit re-pages the open tables', () => {
 		await stageRename(s, first, 'staged');
 
 		await vi.waitFor(() =>
-			expect(getTableError('tbl:draft:1')).toBe('the edited table is refused')
+			expect(getTableError('tbl:draft:1')).toEqual({
+				kind: 'error',
+				message: 'the edited table is refused'
+			})
 		);
 		expect(spy).toHaveBeenCalledTimes(2);
 		expect(spy.mock.calls[1]![0]).toMatchObject({ definition: { sort: [{ column: 1 }] } });
@@ -483,7 +445,7 @@ describe('a staged edit re-pages the open tables', () => {
 
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'));
 		expect(getTableLoading('tbl:draft:1')).toBe(false);
-		expect(getTableError('tbl:draft:1')).toBeUndefined();
+		expect(getTableError('tbl:draft:1')).toBeNull();
 		expect(spy).toHaveBeenCalledTimes(2);
 	});
 
@@ -541,7 +503,12 @@ describe('a staged navigation re-pages a table that reads it', () => {
 
 		stageArtifactDelete('n1', header);
 
-		await vi.waitFor(() => expect(getTableError('tbl:draft:1')).toMatch(/n1/));
+		await vi.waitFor(() =>
+			expect(getTableError('tbl:draft:1')).toEqual({
+				kind: 'error',
+				message: expect.stringMatching(/n1/)
+			})
+		);
 		expect(getTableLoading('tbl:draft:1')).toBe(false);
 		// A refusal is not retried: asking again over the same state answers the same.
 		await sleep(2500);
@@ -549,8 +516,8 @@ describe('a staged navigation re-pages a table that reads it', () => {
 		await expect(spy.mock.results[0]!.value).rejects.toMatchObject({ status: 422 });
 	});
 
-	it('when only the artifacts moved, and flips to the server and back with a script step', async () => {
-		const { s, changes, served } = await start({ artifacts: [['n1', nav('Organization')]] });
+	it('when only the artifacts moved', async () => {
+		const { s, changes } = await start({ artifacts: [['n1', nav('Organization')]] });
 		await open('tbl:draft:1', READS_N1);
 		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 5 });
 		expect(getTablePage('tbl:draft:1')!.fallback).toBeUndefined();
@@ -566,20 +533,6 @@ describe('a staged navigation re-pages a table that reads it', () => {
 			expect([event.rev, event.staged_version]).toEqual([s.project.rev, 0]);
 		}
 		expect(new Set(moved.map((event) => event.artifacts_version)).size).toBe(moved.length);
-
-		// A script step sends the table to the server, over committed state, marked.
-		stageArtifactUpdate('n1', {
-			payload: scope('Project', [{ kind: 'script', snippet: { ref: 'sn1' } }])
-		});
-		await vi.waitFor(() => expect(getTablePage('tbl:draft:1')!.fallback).toBe('script'));
-		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 1 });
-		expect(served).toHaveLength(1);
-
-		// Unstaged, the engine answers again, from the committed navigation.
-		revertStagedArtifact('n1');
-		await vi.waitFor(() => expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 5 }));
-		expect(getTablePage('tbl:draft:1')!.fallback).toBeUndefined();
-		expect(served).toHaveLength(1);
 	});
 });
 

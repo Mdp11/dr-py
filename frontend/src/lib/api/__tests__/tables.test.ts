@@ -135,50 +135,6 @@ describe('TablePageSchema', () => {
 			{ code: 'nav_step_failed', occurrences: 1, total: 0, detail: 'warning 1' }
 		]);
 	});
-
-	it('parses pending cells and script_status', () => {
-		const page = TablePageSchema.parse({
-			columns: [{ kind: 'script', header: '', width_px: null }],
-			rows: [{ key: [null], cells: [{ kind: 'pending' }] }],
-			total: 1,
-			base_total: 1,
-			truncated: false,
-			offset: 0,
-			model_rev: 3,
-			warnings: [],
-			script_status: { state: 'computing', done: 10, total: 3000, message: null }
-		});
-		expect(page.script_status?.state).toBe('computing');
-		expect(page.rows[0].cells[0].kind).toBe('pending');
-	});
-
-	it('tolerates absent script_status (older responses)', () => {
-		const page = TablePageSchema.parse({
-			columns: [],
-			rows: [],
-			total: 0,
-			base_total: 0,
-			truncated: false,
-			offset: 0,
-			model_rev: 1,
-			warnings: []
-		});
-		expect(page.script_status ?? null).toBeNull();
-	});
-
-	it('tolerates a null script_status', () => {
-		const page = TablePageSchema.parse({
-			columns: [],
-			rows: [],
-			total: 0,
-			truncated: false,
-			offset: 0,
-			model_rev: 1,
-			warnings: [],
-			script_status: null
-		});
-		expect(page.script_status ?? null).toBeNull();
-	});
 });
 
 describe('TableDefinitionSchema', () => {
@@ -360,9 +316,8 @@ describe('fetchScriptErrors', () => {
 			)
 		);
 		const recap = await fetchScriptErrors({ artifactId: 'a1' }, cfg);
-		expect('retry' in recap).toBe(false);
 		expect(recap).toMatchObject({ state: 'ready', total_errors: 2, truncated: false });
-		expect('retry' in recap ? [] : recap.errors[0]).toMatchObject({
+		expect(recap.errors[0]).toMatchObject({
 			row_index: 1,
 			column_index: 1,
 			column_label: 'script',
@@ -370,23 +325,7 @@ describe('fetchScriptErrors', () => {
 		});
 	});
 
-	// The 202 is discriminated by the STATUS CODE, never the body: a 202 body
-	// routinely says `computing` for a sweep that already finished (the server
-	// decides ship-vs-retry by re-probing its cache, not by the job's state).
-	it('returns { retry: true } on a 202 (sweep still filling the cache)', async () => {
-		server.use(
-			http.post(`${BASE}/tables/script-errors`, () =>
-				HttpResponse.json(
-					{ state: 'computing', done: 10, total: 3000, message: null },
-					{ status: 202, headers: { 'Retry-After': '1' } }
-				)
-			)
-		);
-		expect(await fetchScriptErrors({ artifactId: 'a1' }, cfg)).toEqual({ retry: true });
-	});
-
-	// `offset`/`limit` are IGNORED by the route (the recap is always
-	// whole-table) but `sort` is load-bearing: `row_index` is only a valid grid
+	// The recap is always whole-table, and the sort is load-bearing: `row_index` is only a valid grid
 	// address for the (definition, sort, model_rev) the page was rendered with.
 	it('sends the table address only — the definition carries the sort', async () => {
 		let body: Record<string, unknown> = {};
@@ -429,8 +368,7 @@ describe('evaluateTable on the tables surface', () => {
 		truncated: false,
 		offset: 0,
 		model_rev: 0,
-		warnings: [],
-		script_status: null
+		warnings: []
 	};
 
 	/**
@@ -539,17 +477,27 @@ describe('evaluateTable on the tables surface', () => {
 		expect(bodies).toEqual([]);
 	});
 
-	it("on the engine, a table that reaches a script is the server's page marked script", async () => {
+	it('on the engine, the script-error recap is the engine answer and the server is never asked', async () => {
 		const project = fakeProject();
-		const { call, bodies } = await over(project, 'engine');
-		const definition = scripted();
+		const { call } = await over(project, 'engine');
+		const definition = namesOf(typeOf(project));
+		let asked = 0;
+		server.use(
+			http.post(`${project.baseUrl}/tables/script-errors`, () => {
+				asked += 1;
+				return HttpResponse.json({});
+			})
+		);
 
-		const page = await evaluateTable({ definition, limit: 10 });
+		const recap = await fetchScriptErrors({ definition });
 
-		expect(page).toEqual({ ...TablePageSchema.parse(SERVED), fallback: 'script' });
-		expect(answeredBy(page)).toBe('server');
-		expect(call).toHaveBeenCalledOnce();
-		expect(bodies).toEqual([asSent({ definition, offset: 0, limit: 10 })]);
+		expect(call).toHaveBeenCalledWith(
+			'tableScriptErrors',
+			JSON.parse(JSON.stringify({ definition })),
+			{}
+		);
+		expect(recap).toMatchObject({ state: 'ready', errors: [], total_errors: 0 });
+		expect(asked).toBe(0);
 	});
 
 	it('on the server, both reach the server alone, unmarked', async () => {

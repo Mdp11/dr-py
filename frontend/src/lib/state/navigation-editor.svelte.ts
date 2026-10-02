@@ -129,7 +129,7 @@ export interface NavPreview {
 	 * page's (possibly empty) warnings. */
 	warnings: ScriptWarning[];
 	/** Why the server answered the first page instead of the replica, if it did. */
-	fallback: 'script' | 'pattern' | null;
+	fallback: 'pattern' | null;
 }
 
 const _drafts = new SvelteMap<string, NavDraft>();

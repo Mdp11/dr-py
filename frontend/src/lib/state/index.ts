@@ -538,7 +538,6 @@ export {
 	getTableLoading,
 	getTableLockHolder,
 	getTablePage,
-	getTableScriptStatus,
 	getTableWarnings,
 	getUncomputedScriptCellReason,
 	hasDirtyTableDrafts,

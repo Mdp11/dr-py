@@ -293,7 +293,7 @@ describe('previewMetamodelChanges', () => {
 		const diff = vi
 			.spyOn(mmApi, 'diffMetamodel')
 			.mockRejectedValueOnce(new ValidationError(422, null, 'Invalid metamodel'))
-			.mockRejectedValueOnce(new ApiError(501, null, 'reaches a script'));
+			.mockRejectedValueOnce(new ApiError(501, null, 'not implemented'));
 		await initMetamodelEditor(PROJECT);
 		editMetamodelBuffer(`${BASE}p`);
 

@@ -60,7 +60,6 @@
 	}
 
 	const FALLBACK_NOTE = {
-		script: 'Reads committed state: this navigation runs a script on the server.',
 		pattern: 'Reads committed state: a pattern here runs on the server.'
 	} as const;
 

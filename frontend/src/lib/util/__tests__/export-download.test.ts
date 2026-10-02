@@ -28,7 +28,7 @@ describe('retryAndDownload', () => {
 			blob: new Blob(['a,b\r\n']),
 			filename: 't.csv',
 			truncated: true,
-			fallback: 'script'
+			fallback: 'pattern'
 		};
 		const run = vi
 			.fn<() => Promise<ExportResult>>()

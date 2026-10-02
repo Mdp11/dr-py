@@ -396,11 +396,11 @@ it('Load more pages the selected node’s chains', async () => {
 	}
 });
 
-it('a preview the server answered for a script shows the fallback note above the chains', async () => {
-	const tabId = 'nav:draft:fallback-script';
+it('a preview the server answered for a pattern shows the fallback note above the chains', async () => {
+	const tabId = 'nav:draft:fallback-pattern';
 	await ensureDraft(tabId);
 	vi.spyOn(artifactsApi, 'evaluateNavigation')
-		.mockResolvedValueOnce({ ...PAGE_1, fallback: 'script' })
+		.mockResolvedValueOnce({ ...PAGE_1, fallback: 'pattern' })
 		.mockResolvedValueOnce(PAGE_2);
 	updateDefinition(tabId, runnablePath());
 	await runPreview(tabId, []).catch(() => {});
@@ -409,7 +409,7 @@ it('a preview the server answered for a script shows the fallback note above the
 	try {
 		const note = document.querySelector('[data-testid="nav-fallback"]');
 		expect(note?.textContent?.trim()).toBe(
-			'Reads committed state: this navigation runs a script on the server.'
+			'Reads committed state: a pattern here runs on the server.'
 		);
 		const table = document.querySelector('table');
 		expect(note!.compareDocumentPosition(table!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

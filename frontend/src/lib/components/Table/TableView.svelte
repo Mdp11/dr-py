@@ -20,7 +20,6 @@
 		getTableLoading,
 		getTableLockHolder,
 		getTablePage,
-		getTableScriptStatus,
 		getTableWarnings,
 		getUncomputedScriptCellReason,
 		hasSuspendedTableEdits,
@@ -104,33 +103,19 @@
 	// A table the engine refused is the server's, read from committed state:
 	// staged edits do not show in it, and the tab says why.
 	const FALLBACK_NOTE = {
-		script: 'Reads committed state: this table runs a script',
 		pattern: 'Reads committed state: a search pattern needs the server'
 	} as const;
-	// Progress of the background script-value sweep: `computing` means some
-	// cells came back `pending` and the store has a re-poll scheduled (rows are
-	// in BUILD order until it lands — a sort over half-computed values would
-	// reshuffle on every poll, so the backend deliberately doesn't sort them).
-	const scriptStatus = $derived(getTableScriptStatus(tabId));
 	// Whole-table recap of the failing script cells. The grid is virtualized, so
 	// without this a failure a few thousand rows down is unreachable — the badge
 	// is how it is found.
 	//
-	// It is fetched ON DEMAND, on the badge click, and the up-front error count
-	// is deliberately given up: `POST /tables/script-errors` renders the whole
-	// table cache-only, so for the commonest shape (an unsorted collapse script
-	// column, whose page never computes anything outside the visible window)
-	// fetching it on settle would kick a full background sweep on every table
-	// open. So the badge is NEUTRAL until a recap says otherwise.
+	// It is fetched ON DEMAND, on the badge click: the recap evaluates every
+	// script cell, so the badge is NEUTRAL until a recap says otherwise.
 	const scriptErrors = $derived(getScriptErrors(tabId));
 	const scriptErrorsPhase = $derived(getScriptErrorsPhase(tabId));
 	// The badge shows exactly while asking would DO something — the store's own
-	// answer, not a re-derivation from `scriptStatus`. A settled status is
-	// necessary (while `computing` the grid is in degraded build order, which a
-	// recap's row indices would not address) but NOT sufficient: a sort or reload
-	// in flight has already dropped the askable page state while the previous
-	// page's status is still sitting there, and a badge lit in that window
-	// invites a click that does nothing at all.
+	// answer: a sort or reload in flight has already dropped the askable page
+	// state, and a badge lit in that window invites a click that does nothing.
 	const canCheckScriptErrors = $derived(canRequestScriptErrors(tabId));
 	const scriptErrorCount = $derived(scriptErrors?.total_errors ?? 0);
 	// An empty recap means "we checked, there are none" — UNLESS the cells on
@@ -147,7 +132,7 @@
 	);
 	let scriptErrorsOpen = $state(false);
 	// The panel must not outlive what it describes: the badge going away (the
-	// table went back to computing, or lost its script column), or the recap
+	// table lost its script column), or the recap
 	// being invalidated under it by a newer page state — `idle` means nothing
 	// was asked for the state now on screen, so there is nothing to show.
 	$effect(() => {
@@ -186,13 +171,6 @@
 		if (e.key === 'Escape') warningsOpen = false;
 	}
 	const loading = $derived(getTableLoading(tabId));
-	// The sweep's fraction, or null when it has no total to divide by. Drives a
-	// DETERMINATE bar; everything else falls back to the indeterminate sweep.
-	const sweepPercent = $derived.by(() => {
-		const s = scriptStatus;
-		if (s?.state !== 'computing' || !s.total || s.total <= 0) return null;
-		return Math.min(100, Math.round((s.done / s.total) * 100));
-	});
 	// Any expand column multiplies rows — then the count reads
 	// "N elements → M rows" (the pre-split base vs the split result).
 	const hasSplit = $derived(
@@ -226,7 +204,7 @@
 	// Surfaced as an always-visible bar in the tab's FIXED chrome — muted text
 	// or a line at the bottom of a scrolled grid would let a long computation
 	// read as a frozen table.
-	const busy = $derived(loading || scriptStatus?.state === 'computing' || exporting);
+	const busy = $derived(loading || exporting);
 	let settingsOpen = $state(false);
 	// Which column the settings dialog is scoped to — null shows the whole
 	// definition editor (row source + every column); a definition index shows
@@ -734,18 +712,10 @@
 		<!-- Activity bar. Always occupies its 2px of chrome (an appearing/
 		     disappearing element here would shift the grid, and the grid's
 		     virtualizer measures row tops against a stable origin), and only
-		     paints while something is in flight. Determinate whenever the sweep
-		     reports a total; an indeterminate sweep otherwise. -->
+		     paints while something is in flight. -->
 		<div class="h-0.5 w-full overflow-hidden" data-testid="table-activity" data-busy={busy}>
 			{#if busy}
-				{#if sweepPercent !== null}
-					<div
-						class="h-full bg-primary transition-[width] duration-300"
-						style:width={`${sweepPercent}%`}
-					></div>
-				{:else}
-					<div class="activity-sweep h-full w-1/4 bg-primary"></div>
-				{/if}
+				<div class="activity-sweep h-full w-1/4 bg-primary"></div>
 			{/if}
 		</div>
 		{#if page?.fallback}
@@ -805,46 +775,6 @@
 					<ScriptWarningsPanel id="script-warnings-panel-{tabId}" {warnings} />
 				{/if}
 			</div>
-		{/if}
-		<!-- Script-sweep readout. It lives HERE, in the tab's fixed chrome beside
-		     the conflict/warnings strips, and NOT inside TableGrid: an in-flow
-		     element inside the grid's scroll container would (a) scroll out of
-		     view on a long table, hiding the only explanation for the blank
-		     `pending` cells, and (b) shift every row's true y relative to the
-		     virtualizer's window math (`computeWindowVariable` assumes row 0's
-		     top sits at scroll y = 0).
-		     The strip mounts only while `computing` (and briefly for `failed`)
-		     — idle/ready render nothing here, so a table with no script
-		     columns, which never sweeps, never pays a permanent chrome tax.
-		     Known, accepted tradeoff: `role="status"` on an element that did
-		     not exist a moment ago is generally NOT announced by a screen
-		     reader — an `aria-live` region normally has to already be present
-		     in the DOM before content changing *inside* it gets announced, and
-		     appearing already-populated doesn't count. We're keeping the
-		     text-free spinner (see below) rather than reserving a blank band
-		     on every table just to guarantee that announcement. -->
-		{#if scriptStatus?.state === 'computing'}
-			<!-- Spinner only. The sweep's done/total counters and the "values fill
-			     in as they finish" clause were removed deliberately: they narrated
-			     an internal mechanism. -->
-			<div
-				class="flex items-center gap-2 bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground"
-				data-testid="table-script-status"
-				role="status"
-			>
-				<span
-					class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
-				></span>
-				<span class="sr-only">Computing script columns</span>
-			</div>
-		{:else if scriptStatus?.state === 'failed'}
-			<p
-				class="px-3 py-1.5 text-xs text-destructive"
-				data-testid="table-script-status"
-				role="status"
-			>
-				{scriptStatus.message ?? 'Computing this table’s script values failed.'}
-			</p>
 		{/if}
 		<!-- Script-error badge + panel. Same fixed-chrome strip family as the
 		     conflict/warnings/status lines above (and for the same reason: it

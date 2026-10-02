@@ -260,34 +260,29 @@ export function previewTableJson(
 
 /**
  * Every failing script cell in the WHOLE table, with the grid position to jump
- * to (`POST /tables/script-errors`). The grid is virtualized, so the client
- * only ever holds a window of rows — this route is the only complete answer.
+ * to (`POST /tables/script-errors`, the `tables` surface). The grid is
+ * virtualized, so the client only ever holds a window of rows — this route is
+ * the only complete answer.
  *
- * `offset`/`limit` are not load-bearing: the recap is always whole-table (the
- * route ignores the window fields), but `row_index` is only a valid grid
- * address for the `(definition, model_rev)` the page was rendered with — the
- * definition carries the sort — so the caller must send the definition the
- * grid is showing.
- *
- * THE STATUS CODE IS THE RETRY SIGNAL, exactly as for `exportTable`: while the
- * background sweep is still filling this table's script cells the route answers
- * **202 + Retry-After: 1** with a status body, which resolves here to
- * `{ retry: true }`. The body's own `state` is a convenience and must not be
- * switched on — a 202 body routinely says `computing` for a sweep that already
- * finished (the server decides ship-vs-retry by re-probing its cache).
+ * `row_index` is only a valid grid address for the `(definition, model_rev)`
+ * the page was rendered with — the definition carries the sort — so the caller
+ * must send the definition the grid is showing.
  */
-export async function fetchScriptErrors(
-	args: Omit<EvaluateArgs, 'offset' | 'limit'>,
+export function fetchScriptErrors(
+	args: Omit<EvaluateArgs, 'offset' | 'limit'> & { signal?: AbortSignal },
 	cfg?: ClientConfig
-): Promise<ScriptErrorsRecap | { retry: true }> {
-	const res = await apiFetchRaw(
-		'/tables/script-errors',
-		{
-			method: 'POST',
-			body: { definition: args.definition, artifact_id: args.artifactId }
-		},
-		cfg
+): Promise<ScriptErrorsRecap> {
+	const body = { definition: args.definition, artifact_id: args.artifactId };
+	const { signal } = args;
+	return route(
+		'tables',
+		cfg,
+		(call) => call('tableScriptErrors', asSent(body), signal) as Promise<ScriptErrorsRecap>,
+		() =>
+			apiFetch<ScriptErrorsRecap>(
+				'/tables/script-errors',
+				{ method: 'POST', body, ...(signal === undefined ? {} : { signal }) },
+				cfg
+			)
 	);
-	if (res.status === 202) return { retry: true };
-	return (await res.json()) as ScriptErrorsRecap;
 }

@@ -70,6 +70,10 @@ const _SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
 const CSRF_HEADER = 'X-Requested-With';
 const CSRF_VALUE = 'data-rover';
 
+/** Asks the server never to evaluate scripts: they run in the engine. */
+export const SCRIPTS_HEADER = 'X-Data-Rover-Scripts';
+export const SCRIPTS_ENGINE_ONLY = 'engine-only';
+
 function buildUrl(baseUrl: string, path: string, query?: ApiFetchInit['query']): string {
 	const normalizedBase = baseUrl.replace(/\/$/, '');
 	const normalizedPath = path.startsWith('/') ? path : `/${path}`;
@@ -148,6 +152,7 @@ export async function apiFetchRaw(
 	if (!_SAFE_METHODS.has(method) && !headers.has(CSRF_HEADER)) {
 		headers.set(CSRF_HEADER, CSRF_VALUE);
 	}
+	if (!headers.has(SCRIPTS_HEADER)) headers.set(SCRIPTS_HEADER, SCRIPTS_ENGINE_ONLY);
 
 	// Strip the non-RequestInit keys (schema, query, onText) before handing
 	// the init to fetch — a real fetch ignores extra properties, but onText's
@@ -215,6 +220,7 @@ export function apiUpload<T = unknown>(
 		xhr.open('POST', url);
 		xhr.withCredentials = true;
 		xhr.setRequestHeader(CSRF_HEADER, CSRF_VALUE);
+		xhr.setRequestHeader(SCRIPTS_HEADER, SCRIPTS_ENGINE_ONLY);
 		xhr.upload.addEventListener('progress', (e) => {
 			init.onProgress?.(e.loaded, e.lengthComputable ? e.total : null);
 		});

@@ -689,7 +689,7 @@ describe('ExporterTab', () => {
 
 		const blob = new Blob(['x'], { type: 'application/zip' });
 		vi.spyOn(exportsApi, 'runExporter')
-			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip', fallback: 'script' })
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip', fallback: 'pattern' })
 			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip' });
 		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
 		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
@@ -700,7 +700,7 @@ describe('ExporterTab', () => {
 		await vi.waitFor(() => {
 			flushSync();
 			expect(fallbackNote()?.textContent?.trim()).toBe(
-				'Exported from committed state: reaches a script'
+				'Exported from committed state: a search pattern needs the server'
 			);
 		});
 

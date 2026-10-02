@@ -271,25 +271,7 @@ describe('the server fallback', () => {
 	/** An engine refusal as the engine client makes it: the detail is the message. */
 	const refusal = (status: number, detail: string) => errorForStatus(status, { detail }, detail);
 
-	const mark = <T>(value: T, reason: 'script' | 'pattern') => ({ value, reason }) as T;
-
-	it('a 501 "reaches a script" is answered by the server, marked script, with no shadow', async () => {
-		const shadow = vi.fn();
-		const { seam, calls } = seamOf(
-			() => Promise.reject(refusal(501, 'reaches a script')),
-			{},
-			shadow
-		);
-		installEngineSeam(seam);
-		const server = serverOf('from server');
-		await expect(
-			route('navigation', undefined, engineRead({ definition: {} }), server, { mark })
-		).resolves.toEqual({ value: 'from server', reason: 'script' });
-		expect(calls).toHaveLength(1);
-		expect(server).toHaveBeenCalledOnce();
-		await flush();
-		expect(shadow).not.toHaveBeenCalled();
-	});
+	const mark = <T>(value: T, reason: 'pattern' | 'rules') => ({ value, reason }) as T;
 
 	it('a 501 "reaches an unsupported pattern" is answered by the server, marked pattern', async () => {
 		const shadow = vi.fn();
@@ -310,7 +292,7 @@ describe('the server fallback', () => {
 	});
 
 	it("without a mark the server's value is the answer as it is", async () => {
-		const { seam } = seamOf(() => Promise.reject(refusal(501, 'reaches a script')));
+		const { seam } = seamOf(() => Promise.reject(refusal(501, 'reaches an unsupported pattern')));
 		installEngineSeam(seam);
 		await expect(route('navigation', undefined, engineRead({}), serverOf())).resolves.toBe(
 			'server'
@@ -318,7 +300,7 @@ describe('the server fallback', () => {
 	});
 
 	it("the server's error on a fallback reaches the caller", async () => {
-		const { seam } = seamOf(() => Promise.reject(refusal(501, 'reaches a script')));
+		const { seam } = seamOf(() => Promise.reject(refusal(501, 'reaches an unsupported pattern')));
 		installEngineSeam(seam);
 		const failed = new Error('server failed');
 		const server = vi.fn(() => Promise.reject(failed));
@@ -330,10 +312,11 @@ describe('the server fallback', () => {
 	it("any other 501, or the same words under another status, is the caller's error", async () => {
 		for (const error of [
 			refusal(501, 'not implemented'),
-			refusal(501, 'Reaches a script'),
-			refusal(422, 'reaches a script'),
+			refusal(501, 'reaches a script'),
+			refusal(501, 'Reaches an unsupported pattern'),
+			refusal(422, 'reaches an unsupported pattern'),
 			refusal(500, 'reaches an unsupported pattern'),
-			new Error('reaches a script')
+			new Error('reaches an unsupported pattern')
 		]) {
 			const shadow = vi.fn();
 			const { seam } = seamOf(() => Promise.reject(error), {}, shadow);

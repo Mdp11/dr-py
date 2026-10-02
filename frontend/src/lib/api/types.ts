@@ -690,7 +690,7 @@ export const ChainPageSchema = z.object({
 	truncated: z.boolean().default(false),
 	warnings: z.array(ScriptWarningSchema).default([]),
 	/** Set when the engine refused the call and the server answered it, on committed state. */
-	fallback: z.enum(['script', 'pattern']).optional()
+	fallback: z.enum(['pattern']).optional()
 });
 export type ChainPage = z.infer<typeof ChainPageSchema>;
 
@@ -1302,27 +1302,12 @@ export const TableCellSchema = z.discriminatedUnion('kind', [
 		total: z.number().int(),
 		truncated: z.boolean()
 	}),
-	z.object({ kind: z.literal('error'), message: z.string(), traceback: z.string().nullish() }),
-	// A cell whose script value hasn't been computed by the background sweep
-	// yet (core/table's cache-only evaluate path). No other fields — the
-	// client polls script_status and/or re-evaluates until it resolves.
-	z.object({ kind: z.literal('pending') })
+	z.object({ kind: z.literal('error'), message: z.string(), traceback: z.string().nullish() })
 ]);
 export const TableRowSchema = z.object({
 	key: z.array(z.unknown()),
 	cells: z.array(TableCellSchema)
 });
-
-/** Progress of the background script-cache sweep for a table's script
- * column(s). Absent/null for tables with no script column, or for older
- * backend responses that predate this field. */
-export const ScriptStatusSchema = z.object({
-	state: z.enum(['ready', 'computing', 'failed']),
-	done: z.number().int().default(0),
-	total: z.number().int().nullish(),
-	message: z.string().nullish()
-});
-export type ScriptStatus = z.infer<typeof ScriptStatusSchema>;
 
 export const TablePageSchema = z.object({
 	columns: z.array(TableColumnSchema),
@@ -1335,9 +1320,8 @@ export const TablePageSchema = z.object({
 	offset: z.number().int(),
 	model_rev: z.number().int(),
 	warnings: z.array(ScriptWarningSchema).default([]),
-	script_status: ScriptStatusSchema.nullish(),
 	/** Set when the engine refused the call and the server answered it, on committed state. */
-	fallback: z.enum(['script', 'pattern']).optional()
+	fallback: z.enum(['pattern']).optional()
 });
 export type TablePage = z.infer<typeof TablePageSchema>;
 export type TableCell = z.infer<typeof TableCellSchema>;
@@ -1370,10 +1354,8 @@ export interface ScriptErrorItem {
 
 /**
  * The recap body itself (`ScriptErrorsOut`). `truncated` means `errors` was
- * capped server-side while `total_errors` is the true count, so the panel says
- * "showing first N". `state` is a one-valued literal: the 200 body is always
- * `ready`, and the retry signal for a still-computing sweep is the 202 STATUS
- * CODE, never a body field (see `fetchScriptErrors`).
+ * capped while `total_errors` is the true count, so the panel says "showing
+ * first N". `state` is always `ready`.
  */
 export interface ScriptErrorsRecap {
 	state: 'ready';

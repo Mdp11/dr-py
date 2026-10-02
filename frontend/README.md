@@ -445,8 +445,8 @@ engine store":
      working copy, staged tables included, and `export-staged-note`
      ("Includes staged changes") shows beside the button while anything is
      staged (`exportsIncludeStaged()`, `state/replica.svelte.ts`). A run the
-     engine sent to the server (it reaches a script) shows
-     `export-fallback` ("Exported from committed state: reaches a script";
+     engine sent to the server (it reaches a pattern) shows
+     `export-fallback` ("Exported from committed state: a search pattern needs the server";
      the texts are `EXPORT_FALLBACK_NOTE` in `util/export-download.ts`,
      shared with `TableView`) until the next run lands unmarked, and the
      staged note hides meanwhile: `retryAndDownload` resolves to the result
@@ -1390,21 +1390,28 @@ are answered by the engine or the server, one switch per surface:
   the server instead, any other reaches the caller. `engineSide(surface)`
   is the side now, `server` without a seam.
 - The engine refuses an evaluation it must not answer with a 501 —
-  `reaches a script` (a navigation reaching a configured script step) or
   `reaches an unsupported pattern` (a criterion pattern its regex
   translator cannot vouch for). `route`'s optional fifth argument,
-  `{mark?(value, reason)}`, is for those: exactly those two (an `ApiError`
-  of status 501 with that message) are answered by the server, the value
-  handed to `mark` with `'script'` or `'pattern'`, and no shadow probe
-  runs; any other 501 reaches the caller. `evaluateNavigation` marks its
-  page `fallback: 'script' | 'pattern'`, which the navigation editor's
+  `{mark?(value, reason)}`, is for it: an `ApiError` of status 501 with that
+  message is answered by the server, the value handed to `mark` with
+  `'pattern'`, and no shadow probe runs; any other 501 reaches the caller.
+  Scripts have no fallback: they run in the engine, and every request carries
+  `X-Data-Rover-Scripts: engine-only` (`SCRIPTS_HEADER` in `api/client.ts`,
+  set by `apiFetchRaw` and `apiUpload`), which asks the server never to
+  evaluate one. A server that is asked to answer a script table anyway says
+  409 `scripts need the engine` (`isScriptsNeedEngine`, `api/errors.ts`), and
+  the table tab shows `ScriptsNeedEngine.svelte` ("Scripts need the engine")
+  in place of the grid: the store's `getTableError(tabId)` answers
+  `{kind: 'scripts'}` for it, `{kind: 'error', message}` for any other
+  failure, `null` for none. `evaluateNavigation` marks its
+  page `fallback: 'pattern'`, which the navigation editor's
   preview keeps from its first page and `Navigation/ResultsDock.svelte`
   shows above the chains as a muted note (`data-testid="nav-fallback"`,
   "Reads committed state: …"); `evaluateTable` marks its page the same way
   (`TablePageSchema.fallback`), which the table store keeps on its
   `TableData` and `Table/TableView.svelte` shows in the tab's fixed chrome
-  (`data-testid="table-fallback"`, "Reads committed state: this table runs
-  a script", or "…: a search pattern needs the server"); `searchModel`
+  (`data-testid="table-fallback"`, "Reads committed state: a search pattern
+  needs the server"); `searchModel`
   passes no mark. A third 501,
   `reaches unreadable rules` (an issue call over a rule set the engine
   cannot read, or that reached it without the server's parse — the
@@ -1434,9 +1441,8 @@ are answered by the engine or the server, one switch per surface:
   percent-decoded before its `filename="…"`, and `truncated` from
   `X-Table-Truncated`; a 202 is `preparing`. `previewTableJson` sends the
   body alone, both sides parsed by `JsonPreviewSchema`. An export that
-  reaches a script (a script column, a transform on the table or on any
-  entry of a run) is the server's file over committed state, marked
-  `fallback: 'script'` (`markExport`; a `preparing` result stays as it is).
+  reaches a pattern is the server's file over committed state, marked
+  `fallback: 'pattern'` (`markExport`; a `preparing` result stays as it is).
   The shadow compares a download by `exportDigest` (see "Shadow
   comparison").
 - The `issues` surface: `getModelIssues` is the engine's `getModelIssues {}`
@@ -2193,7 +2199,7 @@ than the commit feed:
   error already on screen always reads the latest failure's message. A
   re-page that supersedes a foreground load still out (a definition edit, a
   reload) is a foreground one: the page on screen may be of the older
-  definition, and its failure is the user's to see. A poll, or a load
+  definition, and its failure is the user's to see. A load
   re-issued for a re-keyed tab, keeps the kind of the load it continues.
 - **Aborts.** Every load and chunk carries the signal of its tab's current
   generation (`_controllers`); `bumpGeneration` aborts it, so a superseded
@@ -2213,11 +2219,11 @@ than the commit feed:
   answer (its worker gone, its replica not ready) to the server, whose page
   is committed state, so a chunk of the other side is installed fresh, never
   spliced; the re-page the rebuilt replica asks replaces it.
-- **Script tables.** A table the engine refuses (a script, or a pattern) is
-  the server's page, over committed state, marked `fallback` (see "Surfaces");
-  its pending cells, status poll and script-error recap are the server's, as
-  before. A staged navigation that gains a script step flips an open table
-  to the server on its next re-page; unstaged, it flips back.
+- **Script tables.** A script table is the engine's: scripts never fall back
+  to the server (see "Surfaces"). A table the engine refuses for a pattern is
+  the server's page, over committed state, marked `fallback`; against a server
+  that answers 409 `scripts need the engine` the tab shows the "Scripts need
+  the engine" state.
 
 ### Script columns & steps
 
@@ -2317,50 +2323,17 @@ toggle`), a collapsed disclosure that expands to the shared
   `ValueCell`, showing `cell.message` with `cell.traceback ?? cell.message` as
   the hover title. The row otherwise renders normally — one bad cell never
   blanks the row, and sorting/paging keep working around it.
-- **Pending cells + the sweep poll.** Whole-table script passes do not run
-  inline: `/tables/evaluate` reads a per-session value cache a **background
-  sweep** fills, so uncomputed cells come back as `{kind:'pending'}` (rendered
-  by `Table/Cell/PendingCell.svelte`, the same pulsing bar as an un-fetched
-  row) and the response carries a `script_status`
-  (`ready`/`computing`/`failed` + `done`/`total`/`message`). While `computing`,
-  `state/table-editor.svelte.ts` keeps **exactly one** pending timer per tab
-  (`_pollTimers`, cancelled on every landing page, on close/reload/reset, and
-  guarded by the tab's generation counter) and re-requests the **visible
-  window** (`visibleRequest`, shared with the commit refresh) every second
-  until the status turns terminal. Rows arrive in build order while computing —
-  a response that saw pending values never reports `ready`, so the last poll
-  always lands a clean, correctly-sorted page. `TableView` shows
-  `Computing script columns {done}/{total}` (or the failure message) via
-  `getTableScriptStatus(tabId)`, as **fixed chrome** beside the lock-denied
-  and warnings strips — deliberately _not_ inside `TableGrid`, whose scroll
-  container would both scroll the readout out of view on a long table and, as
-  an in-flow element ahead of the `padTop` spacer, offset every row relative to
-  what the virtualizer's window math assumes. `failed` is terminal — stop
-  polling; the work
-  is dead and only the next commit revives it (a commit re-keys the server's
-  sweep registry, and `script_status` starts over from the new rev).
-  **Export** mirrors this: `/tables/export` answers **202 + Retry-After: 1**
-  while values are still computing, and `downloadTable` retries (bounded,
-  `onProgress` on the Export button, abortable on unmount) until the xlsx
-  arrives. Retry off the **HTTP status code, never the body's `state`**: a 202
-  body routinely says `computing` for a sweep that already finished (the server
-  decides ship-vs-retry by re-probing its cache, not by the job's state), and a
-  200 always carries a real workbook — possibly with `#ERROR` cells and
-  `X-Table-Script-Errors` set, which is the server saying "retrying will not
-  help", not an invitation to poll again.
 - **Script-error recap (badge → panel → jump), fetched ON DEMAND.** A failing
   script cell can be anywhere in a table the grid only ever holds a WINDOW of,
   so scrolling is not a way to find one. Whenever asking would actually do
-  something — `canRequestScriptErrors(tabId)`, i.e. the store holds a settled
+  something — `canRequestScriptErrors(tabId)`, i.e. the store holds a
   page-state signature for the tab — `TableView` shows a **neutral** "Check for
-  script errors" affordance (`script-errors-badge`) beside the status readout.
-  That gate is the STORE's, deliberately not a re-derivation from
-  `script_status`: a sort/reload drops the signature the instant its request
-  goes out while the previous page's status survives until the new page lands
-  (or forever, if the load fails), and a badge lit in that window invited a
-  click that did nothing at all. Clicking it calls `requestScriptErrors(tabId)`
+  script errors" affordance (`script-errors-badge`) in the tab's fixed chrome.
+  That gate is the STORE's: a sort/reload drops the signature the instant its
+  request goes out, and a badge lit in that window invited a click that did
+  nothing at all. Clicking it calls `requestScriptErrors(tabId)`
   — the only thing that ever fetches the backend's whole-table recap
-  (`POST /tables/script-errors` → `getScriptErrors(tabId)`) — and opens
+  (`tableScriptErrors`, through the `tables` surface → `getScriptErrors(tabId)`) — and opens
   `Table/ScriptErrorsPanel.svelte`, which reports whichever of the
   four `getScriptErrorsPhase(tabId)` outcomes applies: `loading` ("checking…"),
   `done` with failures (the list: row label, column, message — and the badge
@@ -2379,49 +2352,32 @@ toggle`), a collapsed disclosure that expands to the shared
   (its `state` is a one-valued literal and the wire shape is frozen), so the
   client earns the distinction from the page it is already showing:
   `getUncomputedScriptCellReason(tabId)` returns the message of the first
-  SCRIPT-column cell in the loaded rows that came back `error` or `pending`, and
+  SCRIPT-column cell in the loaded rows that came back `error`, and
   an empty recap over such a page is rendered as a warning-toned "Script errors
   unknown" badge and a panel saying the cells were never computed, with the
-  reason. The CELLS are the reliable signal here: for the commonest shape (an
-  unsorted `collapse` column) a runner-less page reports `script_status: ready`
-  — no strip, no message — while the window pass, which is live, renders every
-  cell an error saying exactly why; only the sorted/`expand` shape reports
-  `failed`. And `failed` alone would over-suppress, because the client's own
-  poll give-up writes a `failed` status while the backend is healthy. Narrow on
+  reason. The cells are the reliable signal here: a recap cannot say which zero it is. Narrow on
   purpose: script columns only (a broken navigation column is not something a
   script-error recap covered), only when the recap came back EMPTY (a real count
   is a stronger statement and is never downgraded), and `&&`-short-circuited so
   no other table pays for the scan.
-  **WHY on demand** (this is not a UX preference): the recap route renders the whole
-  table CACHE-ONLY, and for the commonest shape — an unsorted `collapse` script
-  column with `keep_empty` — the page route makes **zero** `value()` calls (the
-  build pass skips it, the order pass short-circuits with no sort) and computes
-  only the visible window live, so the page reports `ready` **without ever
-  kicking a sweep**. The recap then misses on every row outside that window and
-  kicks a full background sweep. Fetching it automatically would turn
-  "open a table with a script column" into "sweep the whole table", plus up to
-  120 once-a-second retries each re-paying a full build + order + render.
-  `/tables/export` has the identical loop, but only behind an explicit click —
-  so the recap is behind one too, and the up-front error count is deliberately
-  given up.
+  **WHY on demand**: the recap evaluates every script cell of the table, so the
+  up-front error count is deliberately given up and the badge is neutral until
+  asked.
   **Fetch-ONCE per page state**: the recap is keyed by
-  `"<status>:<model_rev>:<generation>"`, the signature of the page state on
-  screen — background chunk fills as the user scrolls change none of the
-  three, so they neither re-fetch nor drop the recap already paid for, while a
-  peer's commit (new rev) **and** a sort change, a definition edit or a reload
-  (all of which bump the tab's page-load **generation**) DROP it on the spot,
-  without fetching anything; the next click re-fetches. All three parts are
-  load-bearing: `row_index`/`column_index` address the order the grid is
-  _currently_ showing, and a sort or definition edit reorders every row at a
-  CONSTANT `model_rev` — keyed without the generation the tab would keep
-  showing the recap built for the previous order, and jump-to-cell would scroll
-  to whatever row now sits at that index. The recap is also dropped whenever the table
-  stops being settled (which also hides the badge). A **202** (sweep still
-  filling the cache — the STATUS CODE is the retry signal, as for export)
-  schedules exactly ONE delayed retry per tab, bounded like the sweep poll;
-  exhausting that budget, like any failed fetch, reports the `error` phase and
-  never anything worse, because this surface must never be what breaks a table
-  view.
+  `"<model_rev>:<generation>"`, the signature of the page state on screen —
+  background chunk fills as the user scrolls change neither, so they neither
+  re-fetch nor drop the recap already paid for, while a peer's commit (new
+  rev) **and** a sort change, a definition edit or a reload (all of which bump
+  the tab's page-load **generation**) DROP it on the spot, without fetching
+  anything; the next click re-fetches. Both parts are load-bearing:
+  `row_index`/`column_index` address the order the grid is _currently_
+  showing, and a sort or definition edit reorders every row at a CONSTANT
+  `model_rev` — keyed without the generation the tab would keep showing the
+  recap built for the previous order, and jump-to-cell would scroll to
+  whatever row now sits at that index. A page with no script column holds no
+  signature (which also hides the badge). A failed fetch reports the `error`
+  phase and never anything worse, because this surface must never be what
+  breaks a table view.
 - **Staged definition edits (the settings dialog).** `updateTableDefinition`
   normally re-evaluates the whole table — a fresh backend cache key, and for a
   script column a fresh sweep. Inside the settings dialog the user is
@@ -2542,7 +2498,7 @@ behind a modal overlay.
 
 The loop (`retryAndDownload`) resolves to the last result, which
 `downloadTable` returns: `TableView` keeps its `fallback` and shows
-`export-fallback` ("Exported from committed state: reaches a script") until an
+`export-fallback` ("Exported from committed state: a search pattern needs the server") until an
 unmarked export lands. Beside the Export ▾ trigger, `export-staged-note`
 ("Includes staged changes") shows while `exportsIncludeStaged()` — the
 `exports` surface on the engine and a staged model edit or staged artifact in

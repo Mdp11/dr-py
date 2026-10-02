@@ -342,7 +342,7 @@ describe('table-editor', () => {
 		vi.spyOn(tablesApi, 'evaluateTable').mockRejectedValue(new Error('boom'));
 		await ensureTableDraft('tbl:draft:4');
 		await loadTablePage('tbl:draft:4', 0);
-		expect(getTableError('tbl:draft:4')).toBe('boom');
+		expect(getTableError('tbl:draft:4')).toEqual({ kind: 'error', message: 'boom' });
 		expect(getTablePage('tbl:draft:4')).toBeUndefined();
 	});
 
@@ -538,7 +538,7 @@ describe('table-editor', () => {
 		expect(getTableDraft('tbl:draft:7')).toBeUndefined();
 		expect(getTablePage('tbl:draft:7')).toBeUndefined();
 		expect(getTableLoading('tbl:draft:7')).toBe(false);
-		expect(getTableError('tbl:draft:7')).toBeUndefined();
+		expect(getTableError('tbl:draft:7')).toBeNull();
 		expect(getTableLockHolder('tbl:draft:7')).toBeNull();
 	});
 

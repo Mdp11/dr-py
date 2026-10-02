@@ -24,8 +24,8 @@ export type Surface =
 	| 'compare';
 export type Side = 'engine' | 'server';
 
-/** Why the server answered a call the engine refused: it reaches a script, a pattern, or rules it cannot read. */
-export type Fallback = 'script' | 'pattern' | 'rules';
+/** Why the server answered a call the engine refused: it reaches a pattern or rules it cannot read. */
+export type Fallback = 'pattern' | 'rules';
 
 /**
  * When the shadow compares an engine answer: only while nothing is staged
@@ -118,7 +118,6 @@ export function engineSide(surface: Surface): Side {
 type Refusal = Fallback | 'file' | 'change request';
 
 const FALLBACKS: { readonly [detail: string]: Refusal } = {
-	'reaches a script': 'script',
 	'reaches an unsupported pattern': 'pattern',
 	'reaches unreadable rules': 'rules',
 	'reaches an unreadable file': 'file',
@@ -238,7 +237,7 @@ export function route<T>(
 			const reason = fallbackOf(error);
 			if (reason !== null) {
 				const { mark } = options;
-				return mark !== undefined && (reason === 'script' || reason === 'pattern')
+				return mark !== undefined && reason === 'pattern'
 					? serverCall().then((value) => mark(value, reason))
 					: serverCall();
 			}

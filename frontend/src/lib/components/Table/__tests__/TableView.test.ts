@@ -41,7 +41,6 @@ const h = vi.hoisted(() => ({
 	// Warnings are structured (`ScriptWarning[]`, formatted via
 	// `formatScriptWarning`), not a joined-string strip.
 	warnings: [] as ScriptWarning[],
-	scriptStatus: null as unknown,
 	scriptErrors: null as unknown,
 	scriptErrorsPhase: 'idle' as 'idle' | 'loading' | 'error' | 'done',
 	/** Mirrors the store's `_recapKeys.has(tab)`: is there a settled page state
@@ -64,6 +63,7 @@ const h = vi.hoisted(() => ({
 	 * the one on screen (it is portaled to `<body>`, so it would otherwise
 	 * float over whatever tab the user switched to). */
 	activeTab: 'tbl:draft:1' as string | null,
+	tableError: null as unknown,
 	/** Mirrors `exportsIncludeStaged`: an export now would hold staged edits. */
 	exportsStaged: false,
 	draft: {
@@ -119,7 +119,6 @@ vi.mock('$lib/state', () => ({
 	// TableGrid's dependencies (always mounted below the chrome bar).
 	getTablePage: () => h.page,
 	getTableLoading: () => h.loading,
-	getTableScriptStatus: () => h.scriptStatus,
 	getScriptErrors: () => h.scriptErrors,
 	getScriptErrorsPhase: () => h.scriptErrorsPhase,
 	canRequestScriptErrors: () => h.canCheckScriptErrors,
@@ -127,7 +126,7 @@ vi.mock('$lib/state', () => ({
 	requestScriptErrors: h.requestScriptErrors,
 	requestScrollToCell: h.jump,
 	consumeScrollRequest: () => null,
-	getTableError: () => undefined,
+	getTableError: () => h.tableError,
 	updateTableDefinition: vi.fn(),
 	ensureTableRange: vi.fn(),
 	lockBadgeFor: () => ({ state: 'none' }),
@@ -168,7 +167,6 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	h.editable = true;
 	h.warnings = [];
-	h.scriptStatus = null;
 	h.scriptErrors = null;
 	h.scriptErrorsPhase = 'idle';
 	h.canCheckScriptErrors = true;
@@ -665,45 +663,39 @@ describe('TableView settings discard confirmation', () => {
 	});
 });
 
-// The sweep readout is FIXED chrome next to the conflict and warnings
-// strips, NOT an in-flow element inside TableGrid's scroll container (where
-// it would scroll away on a long table and offset the virtualizer's row math
-// while `computing`).
-describe('TableView script-status strip', () => {
-	it('shows a bare spinner while computing, with no progress text', () => {
-		h.scriptStatus = { state: 'computing', done: 7, total: 42 };
-		const c = render('tbl:draft:computing');
+// A table the engine refuses (it reaches a pattern) is read from
+// the server, over committed state: the page says so, and the tab shows it.
+describe('TableView scripts need the engine', () => {
+	afterEach(() => {
+		h.tableError = null;
+	});
+
+	it('shows the engine-only state, and no rows, for a server refusal of scripts', () => {
+		h.tableError = { kind: 'scripts' };
+		const c = render('tbl:draft:scripts');
 		try {
-			const strip = document.querySelector('[data-testid="table-script-status"]');
-			expect(strip).not.toBeNull();
-			// The sweep's internal counters explained a mechanism nobody asked
-			// about; only the spinner (and an sr-only label) survive.
-			expect(strip?.textContent).not.toContain('Computing script columns 7/42');
-			expect(strip?.textContent).not.toContain('values fill in');
-			expect(strip?.querySelector('.animate-spin')).not.toBeNull();
-			expect(strip?.getAttribute('role')).toBe('status');
-			// It is chrome, not grid content: outside the scrolling body.
-			expect(strip?.closest('[data-testid="table-header"]')).toBeNull();
+			expect(document.body.textContent).toContain('Scripts need the engine');
+			expect(document.body.textContent).toContain(
+				'Open the app where the engine can run — scripts are not evaluated on the server.'
+			);
+			expect(document.querySelector('[data-testid="table-row"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}
 	});
 
-	it('surfaces a failed sweep message instead of the progress readout', () => {
-		h.scriptStatus = { state: 'failed', done: 3, total: 42, message: 'sweep died' };
-		const c = render('tbl:draft:failed');
+	it('shows any other failure as its message', () => {
+		h.tableError = { kind: 'error', message: 'boom' };
+		const c = render('tbl:draft:boom');
 		try {
-			const strip = document.querySelector('[data-testid="table-script-status"]');
-			expect(strip?.textContent).toContain('sweep died');
-			expect(strip?.className).toContain('text-destructive');
+			expect(document.body.textContent).toContain('boom');
+			expect(document.body.textContent).not.toContain('Scripts need the engine');
 		} finally {
 			unmount(c);
 		}
 	});
 });
 
-// A table the engine refuses (it reaches a script, or a pattern) is read from
-// the server, over committed state: the page says so, and the tab shows it.
 describe('TableView fallback marker', () => {
 	const PAGE = {
 		columns: [{ kind: 'element', header: '', width_px: null }],
@@ -718,18 +710,6 @@ describe('TableView fallback marker', () => {
 	afterEach(() => {
 		h.page = undefined;
 		h.loading = false;
-	});
-
-	it('says the table reads committed state when its page ran a script on the server', () => {
-		h.page = { ...PAGE, fallback: 'script' };
-		const c = render('tbl:draft:script');
-		try {
-			const note = document.querySelector('[data-testid="table-fallback"]');
-			expect(note?.textContent?.trim()).toBe('Reads committed state: this table runs a script');
-			expect(note?.closest('[data-testid="table-header"]')).toBeNull();
-		} finally {
-			unmount(c);
-		}
 	});
 
 	it('names a pattern the server evaluates', () => {
@@ -796,7 +776,6 @@ describe('TableView fallback marker', () => {
 // fetch/retry discipline is pinned in
 // state/__tests__/table-editor-script-errors.test.ts.
 describe('TableView script-error badge + panel', () => {
-	const READY = { state: 'ready', done: 10, total: 10 };
 	const RECAP = {
 		state: 'ready',
 		errors: [
@@ -814,20 +793,6 @@ describe('TableView script-error badge + panel', () => {
 	};
 
 	it('shows no badge for a table with no script work', () => {
-		h.scriptStatus = null;
-		h.canCheckScriptErrors = false;
-		const c = render('tbl:draft:1');
-		try {
-			expect(document.querySelector('[data-testid="script-errors-badge"]')).toBeNull();
-		} finally {
-			unmount(c);
-		}
-	});
-
-	it('shows no badge while the sweep is still computing', () => {
-		// Row order is degraded (build order) until it settles, so a recap's row
-		// indices would not address what the grid is showing.
-		h.scriptStatus = { state: 'computing', done: 2, total: 42 };
 		h.canCheckScriptErrors = false;
 		const c = render('tbl:draft:1');
 		try {
@@ -844,7 +809,6 @@ describe('TableView script-error badge + panel', () => {
 	// at all (`requestScriptErrors` no-ops, the panel opens and the effect
 	// shuts it in the same flush). Gate on the store's askability instead.
 	it('hides the badge while a re-evaluation is in flight', () => {
-		h.scriptStatus = READY; // still the previous page's, and stale
 		h.canCheckScriptErrors = false;
 		const c = render('tbl:draft:1');
 		try {
@@ -855,7 +819,6 @@ describe('TableView script-error badge + panel', () => {
 	});
 
 	it('offers a NEUTRAL check affordance once settled, and fetches only on click', () => {
-		h.scriptStatus = READY;
 		const c = render('tbl:draft:1');
 		try {
 			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
@@ -878,7 +841,6 @@ describe('TableView script-error badge + panel', () => {
 	});
 
 	it('says so while the check is in flight', () => {
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'loading';
 		const c = render('tbl:draft:1');
 		try {
@@ -895,7 +857,6 @@ describe('TableView script-error badge + panel', () => {
 	});
 
 	it('answers plainly when the fetched recap is empty', () => {
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
 		const c = render('tbl:draft:1');
@@ -920,7 +881,6 @@ describe('TableView script-error badge + panel', () => {
 	// cell reads `#ERROR: script runner unavailable`. The cells are the
 	// evidence, so the client uses them.
 	it('does not claim a clean table when script cells were never computed', () => {
-		h.scriptStatus = READY; // the unsorted-collapse shape: no calls, so `ready`
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
 		h.uncomputedScriptCellReason = 'script runner unavailable';
@@ -944,7 +904,6 @@ describe('TableView script-error badge + panel', () => {
 	it('still answers a plain "none" when the check really did cover the table', () => {
 		// The guard must not become a shrug: a healthy runner that found nothing
 		// is a useful answer, and the user asked for it.
-		h.scriptStatus = { state: 'failed', done: 4, total: 10, message: 'sweep died' };
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
 		h.uncomputedScriptCellReason = null;
@@ -964,7 +923,6 @@ describe('TableView script-error badge + panel', () => {
 
 	it('leaves a real error count alone when cells are uncomputed too', () => {
 		// A known count is a stronger statement than "unknown": never downgrade it.
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = RECAP;
 		h.uncomputedScriptCellReason = 'script runner unavailable';
@@ -978,7 +936,6 @@ describe('TableView script-error badge + panel', () => {
 	});
 
 	it('reports a failed check instead of pretending there are no errors', () => {
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'error';
 		const c = render('tbl:draft:1');
 		try {
@@ -993,7 +950,6 @@ describe('TableView script-error badge + panel', () => {
 	});
 
 	it('badges the error count, opens the panel, and jumps to the cell on click', () => {
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = RECAP;
 		const c = render('tbl:draft:1');
@@ -1031,7 +987,6 @@ describe('TableView script-error badge + panel', () => {
 	});
 
 	it('wires the badge to the panel for assistive tech', () => {
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = RECAP;
 		const c = render('tbl:draft:1');
@@ -1057,7 +1012,6 @@ describe('TableView script-error badge + panel', () => {
 	// the user tabs into the list there is otherwise no keyboard way out of it
 	// (the panel deliberately does not trap focus, but it does overlay the grid).
 	it('dismisses the panel on Escape from the badge and from an entry', () => {
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = RECAP;
 		const c = render('tbl:draft:1');
@@ -1085,7 +1039,6 @@ describe('TableView script-error badge + panel', () => {
 	});
 
 	it('leaves the panel open on any other key', () => {
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = RECAP;
 		const c = render('tbl:draft:1');
@@ -1102,7 +1055,6 @@ describe('TableView script-error badge + panel', () => {
 	});
 
 	it('says how many of the total are listed when the recap is truncated', () => {
-		h.scriptStatus = READY;
 		h.scriptErrorsPhase = 'done';
 		h.scriptErrors = { ...RECAP, total_errors: 4021, truncated: true };
 		const c = render('tbl:draft:1');
@@ -1583,7 +1535,7 @@ describe('TableView export format menu', () => {
 	it('says an export came from committed state once a marked one lands, and not after an unmarked one', async () => {
 		const blob = new Blob(['x']);
 		vi.mocked(downloadTable)
-			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx', fallback: 'script' })
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx', fallback: 'pattern' })
 			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx' });
 		const c = render('tbl:draft:1');
 		try {
@@ -1592,7 +1544,7 @@ describe('TableView export format menu', () => {
 			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
 			await waitFor(() => fallbackNote() !== null);
 			expect(fallbackNote()!.textContent?.trim()).toBe(
-				'Exported from committed state: reaches a script'
+				'Exported from committed state: a search pattern needs the server'
 			);
 
 			await chooseFormat('xlsx');
@@ -1644,7 +1596,7 @@ describe('TableView export format menu', () => {
 		const note = () => document.querySelector('[data-testid="export-staged-note"]');
 		const blob = new Blob(['x']);
 		vi.mocked(downloadTable)
-			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx', fallback: 'script' })
+			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx', fallback: 'pattern' })
 			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx' });
 		h.exportsStaged = true;
 		const c = render('tbl:draft:1');

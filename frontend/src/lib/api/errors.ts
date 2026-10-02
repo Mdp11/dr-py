@@ -37,6 +37,11 @@ export function errorForStatus(status: number, body: unknown, message: string): 
 	return new ApiError(status, body, message);
 }
 
+/** True for the server's refusal to evaluate a script: scripts run in the engine only. */
+export function isScriptsNeedEngine(err: unknown): boolean {
+	return err instanceof ApiError && err.status === 409 && err.message === 'scripts need the engine';
+}
+
 export function isUnauthorized(err: unknown): boolean {
 	return err instanceof ApiError && err.status === 401;
 }

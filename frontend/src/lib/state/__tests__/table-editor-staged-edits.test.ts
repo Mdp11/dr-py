@@ -35,8 +35,7 @@ function page(): TablePage {
 		truncated: false,
 		offset: 0,
 		model_rev: 1,
-		warnings: [],
-		script_status: { state: 'ready', done: 1, total: 1 }
+		warnings: []
 	};
 }
 

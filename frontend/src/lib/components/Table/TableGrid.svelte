@@ -28,7 +28,7 @@
 	import ElementCell from './Cell/ElementCell.svelte';
 	import ElementsCell from './Cell/ElementsCell.svelte';
 	import ErrorCell from './Cell/ErrorCell.svelte';
-	import PendingCell from './Cell/PendingCell.svelte';
+	import ScriptsNeedEngine from '../ScriptsNeedEngine.svelte';
 	import ValueCell from './Cell/ValueCell.svelte';
 	import ValuesCell from './Cell/ValuesCell.svelte';
 
@@ -528,12 +528,13 @@
 		{/if}
 	</div>
 
-	{#if error}
-		<p class="p-4 text-xs text-destructive">{error}</p>
+	{#if error?.kind === 'scripts'}
+		<ScriptsNeedEngine />
+	{:else if error}
+		<p class="p-4 text-xs text-destructive">{error.message}</p>
 	{:else if loading && !page}
 		<!-- First load: pulsing skeleton rows, not a static "Loading…" line. A
-		     table whose script columns are still being computed can sit here for
-		     a while, and a word that never moves reads as a hung UI. -->
+		     word that never moves reads as a hung UI. -->
 		<div data-testid="table-loading-skeleton" class="p-2">
 			{#each { length: 8 }, i (i)}
 				<div class="flex gap-2 border-b border-border/40 py-2" style="opacity:{1 - i * 0.1}">
@@ -609,13 +610,11 @@
 									<ErrorCell {cell} />
 								{:else if cell.kind === 'elements'}
 									<ElementsCell {cell} />
-								{:else if cell.kind === 'pending'}
-									<PendingCell />
 								{:else}
 									<!-- Exhaustiveness guard: `cell` is `never` here, so a new
 									     TableCell kind fails `npm run check` at THIS line instead
 									     of silently rendering a blank cell (which is exactly how
-									     `pending` shipped invisible). Renders nothing at runtime,
+									     a kind shipped invisible). Renders nothing at runtime,
 									     so an unknown kind from a newer backend degrades to an
 									     empty cell rather than throwing. -->
 									<!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->

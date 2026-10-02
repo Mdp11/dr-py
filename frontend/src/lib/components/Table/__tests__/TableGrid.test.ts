@@ -146,24 +146,22 @@ describe('TableGrid', () => {
 		}
 	});
 
-	// A script cell the sweep hasn't computed yet arrives as `{kind:'pending'}`
-	// and must render a placeholder, not a silently blank cell. The sweep's
-	// done/total readout is NOT the grid's job: it is fixed chrome in
-	// TableView (see TableView.test.ts) so it cannot scroll away or offset the
-	// virtualizer's row math.
-	it('renders a pending script cell as a placeholder', () => {
-		const pendingPage: TablePage = {
-			...PAGE,
-			rows: [{ key: ['e1'], cells: [PAGE.rows[0].cells[0], { kind: 'pending' }] }],
-			script_status: { state: 'computing', done: 7, total: 42 }
-		};
-		vi.spyOn(store, 'getTablePage').mockReturnValue(pendingPage);
+	it('renders the engine-only state for a scripts failure and the message for any other', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(undefined);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
-		const c = render('tbl:draft:pending');
+		const failure = vi.spyOn(store, 'getTableError').mockReturnValue({ kind: 'scripts' });
+		let c = render('tbl:draft:scripts');
 		try {
-			expect(document.querySelectorAll('[data-testid="pending-cell"]')).toHaveLength(1);
-			// The grid renders no status strip of its own.
-			expect(document.querySelector('[data-testid="table-script-status"]')).toBeNull();
+			expect(document.body.textContent).toContain('Scripts need the engine');
+			expect(document.querySelector('.text-destructive')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+		failure.mockReturnValue({ kind: 'error', message: 'boom' });
+		c = render('tbl:draft:boom');
+		try {
+			expect(document.querySelector('.text-destructive')?.textContent).toBe('boom');
+			expect(document.body.textContent).not.toContain('Scripts need the engine');
 		} finally {
 			unmount(c);
 		}
