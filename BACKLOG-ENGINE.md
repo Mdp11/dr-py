@@ -112,15 +112,19 @@ feature there lands on both sides with a fixture until F. The diff route's model
 `core/view/validation.py` and the `GET /views/{id}` route that serves its warnings, are frozen for
 behaviour from C's plan 6a on; the engine replays them from the `model_download` and
 `view_warnings` fixtures.
-D (scripts in the browser) is in progress, its second plan built: `scriptCalls` runs user Python
-in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; at M, in
-Chromium, 10,000 script cells take 2,284 ms prewarmed against CN-3's 3 s, within it (`K-100`)
-*(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-01)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `T-12` to `T-15`.
+D (scripts in the browser) is in progress, its third plan built: `scriptCalls` runs user Python
+in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; with the
+service option `scripts: 'evaluate'` the engine evaluates navigation script steps, table script
+columns, export transforms and the script-error recap through a cell cache evicted by read-set (AD-34).
+At M, in Chromium, 10,000 script cells take 2,284 ms prewarmed through `scriptCalls` and 2,765 ms as table
+columns exported as csv, against CN-3's 3 s (`K-100`) *(measured, Chromium 148, Ryzen 9 3900X under WSL2,
+median of 3, 2026-10-01 and 2026-10-02)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`,
+`K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `T-12` to `T-15`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -1022,6 +1026,8 @@ describe title overclaims on Node (`K-106`). (6) `service.ts:454`'s `one?.text` 
 comment; `DEFAULT_HARNESS_LIMITS` and `Interpreter` are exported without a user; `engines` allows Node
 20.19 where native type stripping needs 22.18. (7) The soft stop can re-interrupt a script's own
 `KeyboardInterrupt` cleanup (documented in `engine/README.md`). (8) A throw from `onViolation` becomes an uncaught error, and a running worker's violations are forgeable.
+Items (1) and (3) are plan 4's: with the option on, the console and the removal of polling make the pool's
+main-thread relay and `prewarmScripts` per-move cost the steady state, not a bench path.
 
 ### K-109 · The runaway "soft stop on a snapshot worker" test sometimes booted cold · `done` · *2026-10-01*
 `engine/test/script/runaway.test.ts` "ends a runaway loop at the call's deadline on a snapshot worker"
@@ -1069,6 +1075,19 @@ answer through `sys.__stdout__` to get past it. A real fix is a lock or a per-th
 [23 22 24] without them (the README's 2026-09-28 figure is 23 ms), and `exportTable: csv` at 407 against
 347 ms. Both are over CN-3's 16 ms either way; the delta suggests the cache's bookkeeping or the filled
 path runs in a slice. Not analysed, nothing tuned.
+
+### K-114 · What the scripts evaluation leaves open · `open` · *2026-10-02*
+(1) The fill memo has no byte bound. It lives for one evaluation and is bounded by its scope; a bound
+that stops memoizing belongs to plan 4. (2) The cell cache's code-id map (`CodeIds`) has no bound until the
+cache clears and is not counted in the 32 MB. (3) With the option on, an evaluation that arrives during a
+diverge or re-bootstrap window answers 409 `replica closed`, against CT-4's "nothing is refused for arriving
+early"; the fix is to pin the epoch when the first pass's `run()` starts. (4) `hopScript`'s per-node work in
+a navigation script step is unmetered and never yields (CN-3 risk). (5) A fill round's batching and settle
+run synchronously, and eviction's key computation runs inside the transition's slice (CN-3; measured only by
+the K-100 bench, see `K-113`). (6) `entryArities` (`src/script/arity.ts`) scans a file that does not parse
+as `null`, so the engine answers by the call where the oracle refuses before running (`K-111` (2)). (7) A
+round's passes can fill a page that a script sort then moves away from, so the next pass asks again for the
+cells of the new page; the cost is a round, not a wrong answer.
 
 ### T-15 · Full-run flakes in e2e and the frontend's download-route test · `open` · *2026-10-01*
 In the full `pixi run frontend-test-e2e` run of the scripts plan's last task, `e2e/eval-exports.spec.ts:176`

@@ -340,3 +340,24 @@ staged model edits do not reach per `rev` and rule-set change, so a keystroke do
 again. A document the engine's reader refuses, or a rule set that arrives without its parse, is
 refused (`reaches unreadable rules`), never guessed at; `rules_status` comes from the working
 compile, which with nothing staged equals the server's.
+
+## AD-34 · Scripts evaluate in the engine by collect, fill, re-run, behind a service option
+**Decision.** An evaluation that reaches a script runs as a fill in the service loop: a pass scans
+the model lane with the cell cache as its reader and collects the calls it could not answer; the
+fill runs them as batches on the script pool, enters the results in the cache and runs the pass
+again, until a pass asks for nothing. Cells are keyed by the script, its code and its inputs, and
+evicted by the keys a transition touches (the read-set). The replica opts in with
+`open {scripts: 'evaluate'}`; without it an evaluation that reaches a script is 501
+`reaches a script`, as before, until plan 4 removes the option.
+**Why.** The oracle's evaluators are synchronous and the script host is not: a pass that records
+what it lacks and an engine that fills between passes keep the evaluators single-sourced with
+the oracle and leave the model lane free of awaits. Rounds run outside the scheduler, so a stage
+or a delta lands between passes and the answer reflects it; a counter of transitions stops a
+result computed before a transition from entering the cache after that transition's eviction.
+**Rejected.** Awaiting inside the evaluators: a second, asynchronous copy of each one. Dropping
+the cache at every transition: a keystroke would rerun every script. Gating nothing: the option
+keeps the server's answer until the console and the removal of `pending` cells are built.
+**Consequences.** A call belongs to its replica: one closed, replaced or diverged under it is
+409 (`K-114` (3) for the early-arrival case). The fill memo and the code-id map are unbounded
+within their lifetimes (`K-114`). The script-cell budget is measured through an engine export
+(`K-100`).
