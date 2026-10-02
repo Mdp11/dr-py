@@ -3,8 +3,9 @@ export type Progress = { done: number; total: number };
 
 /**
  * A long operation cut into steps: each `yield` ends one, about a millisecond
- * of work, and says where the operation stands. It publishes nothing before
- * its last step, so a caller may abandon it at any yield and leave no trace.
+ * of work, and says where the operation stands. Most publish nothing before
+ * their last step, so a caller may abandon them at any yield and leave no
+ * trace; a settle writes stamp-checked entries at each step.
  */
 export type Steps<T> = Generator<Progress, T, void>;
 

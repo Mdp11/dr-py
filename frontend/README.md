@@ -449,7 +449,7 @@ engine store":
      `export-fallback` ("Exported from committed state: a search pattern needs the server";
      the texts are `EXPORT_FALLBACK_NOTE` in `util/export-download.ts`,
      shared with `TableView`) until the next run lands unmarked, and the
-     staged note hides meanwhile: `retryAndDownload` resolves to the result
+     staged note hides meanwhile: `downloadExport` resolves to the result
      it downloaded.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
@@ -1450,7 +1450,7 @@ are answered by the engine or the server, one switch per surface:
   `reaches ops the candidate refuses` (a staged op the candidate does not
   admit, which the server refuses with its own 422). So is a 409 the engine answers when the staged batches, the
   `base_rev` or the replica moved under the call (`stale staged batches`,
-  `stale base_rev`, `replica is not ready`): the server answers the whole
+  `stale base_rev`, `replica is not ready`, `replica closed`): the server answers the whole
   request. `route`'s options also take `shadow` (`'unstaged'`, the default;
   `'always'`, compared with edits staged, for a call that sends them to the
   server too; `'never'`), `recheck` (the side is asked again once the
@@ -1468,10 +1468,10 @@ are answered by the engine or the server, one switch per surface:
   the parts with `content_type` as its type). The server's side reads the
   file name from `Content-Disposition`, its `filename*=UTF-8''…`
   percent-decoded before its `filename="…"`, and `truncated` from
-  `X-Table-Truncated`; a 202 is `preparing`. `previewTableJson` sends the
+  `X-Table-Truncated`. `previewTableJson` sends the
   body alone, both sides parsed by `JsonPreviewSchema`. An export that
   reaches a pattern is the server's file over committed state, marked
-  `fallback: 'pattern'` (`markExport`; a `preparing` result stays as it is).
+  `fallback: 'pattern'` (`markExport`).
   The shadow compares a download by `exportDigest` (see "Shadow
   comparison").
 - The `issues` surface: `getModelIssues` is the engine's `getModelIssues {}`
@@ -1563,18 +1563,15 @@ the engine's answer to a switched-on read to the server's own, in dev only.
   `undo_depth` first, since the engine always answers those `null` / `0` and
   the store keeps the server's own (see "Surfaces" — `getModelSummary`). A
   probe that carries a `digest` compares each side's digest instead of its
-  answer (a digest that throws is a failure of its own), and a digest of
-  `SKIP` on either side ends the comparison silently only when both
-  sides answered ok (a failure against a server still `preparing` is a
-  difference; staging is checked again after a re-test's digest). An export's is
+  answer (a digest that throws is a failure of its own); staging is checked
+  again after a re-test's digest. An export's is
   `exportDigest` (`api/tables.ts`): `{filename, content_type, truncated,
 body}`, the media type without its parameters (a fetched body's
   `res.blob()` keeps only the media type), `body` the decoded text of a JSON, JSONL or CSV file
   (a byte-order mark kept), a zip's members in order as `[path, text]`
   (unzipped with `fflate`, imported dynamically; an `.xlsx` member
   `[path, 'xlsx']`), and absent for an xlsx — the engine's workbooks and
-  zips are not the server's bytes, so only what they hold compares. A
-  server still `preparing` (202) digests to `SKIP`.
+  zips are not the server's bytes, so only what they hold compares.
   Equal: nothing happens. Different: it awaits `quiet()`, notes the
   replica's `rev`, runs `again()` and `server()` once more, and notes `rev`
   again — a `rev` that moved during that round makes the round's answers
@@ -2521,14 +2518,13 @@ The Export button is a dropdown of the four `EXPORT_FORMATS` (Excel `.xlsx` /
 JSON `.json` / CSV `.csv` / JSON Lines `.jsonl`). No item
 downloads directly: all four open `components/Table/ExportDialog.svelte` with that
 format preselected, and a segmented control switches format in place. Confirming
-runs the `downloadTable` retry loop — the backend's 202 +
-`Retry-After` protocol is format-agnostic — and the dialog **closes first and
-does not await it**, because that loop can run for minutes while a script sweep
-fills the cell cache and the progress belongs on the chrome's Export button, not
-behind a modal overlay.
+runs `downloadTable` — one call, no 202 — and the dialog **closes first and
+does not await it**, because an export can take a while and the progress belongs
+on the chrome's Export button, not behind a modal overlay. A server that holds
+script columns answers 409 `scripts need the engine`, which the tab shows as
+`ScriptsNeedEngine`.
 
-The loop (`retryAndDownload`) resolves to the last result, which
-`downloadTable` returns: `TableView` keeps its `fallback` and shows
+`downloadTable` resolves to the export result: `TableView` keeps its `fallback` and shows
 `export-fallback` ("Exported from committed state: a search pattern needs the server") until an
 unmarked export lands. Beside the Export ▾ trigger, `export-staged-note`
 ("Includes staged changes") shows while `exportsIncludeStaged()` — the

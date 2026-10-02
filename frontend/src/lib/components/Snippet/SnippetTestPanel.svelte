@@ -14,7 +14,7 @@
 	// result — is accepted: this is a scratch test, not a saved artifact.
 	import { onDestroy } from 'svelte';
 	import { runSnippet, type SnippetRunBody, type SnippetRunOut } from '$lib/api/snippets';
-	import { ApiError } from '$lib/api/errors';
+	import { ApiError, refusalMessage } from '$lib/api/errors';
 	import ScriptsNeedEngine from '$lib/components/ScriptsNeedEngine.svelte';
 	import {
 		adoptWorkingStamp,
@@ -165,10 +165,8 @@
 			if (seq !== runSeq) return;
 			phase = 'idle';
 			notice =
-				err instanceof ApiError && err.status === 422
-					? typeof (err.body as { detail?: unknown } | null)?.detail === 'string'
-						? String((err.body as { detail: string }).detail)
-						: err.message
+				err instanceof ApiError
+					? refusalMessage(err)
 					: 'Run failed — check your connection and try again.';
 		}
 	}

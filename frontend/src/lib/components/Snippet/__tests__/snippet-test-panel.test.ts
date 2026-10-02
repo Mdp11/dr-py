@@ -231,6 +231,9 @@ it("shows the engine's own sentence for a refused run and a plain one for a fail
 				"entry 'step' requires exactly one element id"
 			)
 		);
+		run.mockRejectedValue(new ApiError(409, { detail: 'replica closed' }, 'replica closed'));
+		click(testid('snippet-test-run'));
+		await vi.waitFor(() => expect(testid('snippet-notice')?.textContent).toBe('replica closed'));
 		run.mockRejectedValue(new Error('gone'));
 		click(testid('snippet-test-run'));
 		await vi.waitFor(() => expect(testid('snippet-notice')?.textContent).toContain('Run failed'));

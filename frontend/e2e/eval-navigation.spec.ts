@@ -256,8 +256,11 @@ test('a navigation that reaches a script is answered by the engine', async ({ pa
 
 	// The engine runs the step: every SoftwareSystem expands, so the chain
 	// count grows past the 12 starts, with no marker and no warnings.
-	await expect(status).not.toContainText('✓ 12 chains', { timeout: 30_000 });
-	await expect(status).toContainText(/✓ \d+ chains/);
+	await expect
+		.poll(async () => Number(/✓ (\d+) chains/.exec((await status.textContent()) ?? '')?.[1] ?? 0), {
+			timeout: 30_000
+		})
+		.toBeGreaterThan(12);
 	await expect(dock.locator('tbody tr').first()).toBeVisible();
 	await expect(dock.getByTestId('nav-fallback')).toHaveCount(0);
 	await expect(dock.getByTestId('nav-warnings')).toBeHidden();

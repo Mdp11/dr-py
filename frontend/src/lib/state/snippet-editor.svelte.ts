@@ -30,7 +30,7 @@ import * as artifactsApi from '$lib/api/artifacts';
 import * as snippetsApi from '$lib/api/snippets';
 import type { SnippetRunOut } from '$lib/api/snippets';
 import type { SnippetDiagnostic } from '$lib/api/types';
-import { ApiError } from '$lib/api/errors';
+import { ApiError, refusalMessage } from '$lib/api/errors';
 import { entryAvailable } from '$lib/snippet/entry-stubs';
 import { assertNoNameClash } from './artifacts.svelte';
 import {
@@ -244,17 +244,11 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 		if (_runGenerations.get(tabId) !== gen || !_drafts.has(tabId)) return;
 		_runControllers.delete(tabId);
 		const notice =
-			err instanceof ApiError && err.status === 422
-				? describeRefusal(err)
+			err instanceof ApiError
+				? refusalMessage(err)
 				: 'Run failed — check your connection and try again.';
 		setRun(tabId, { phase: 'idle', notice });
 	}
-}
-
-/** The engine's own sentence for a run it refused before starting it. */
-function describeRefusal(err: ApiError): string {
-	const detail = (err.body as { detail?: unknown } | null)?.detail;
-	return typeof detail === 'string' ? detail : err.message;
 }
 
 /** Stop cancels the run on the engine: its script is stopped and the call rejects, so the tab is idle at once. */

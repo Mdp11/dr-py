@@ -2,7 +2,7 @@
  * E2E: embedded script evaluation — script table columns (`ScriptColumn`)
  * and navigation script steps (`NavScriptStep`) driven on the engine in the real
  * sandbox, following the conventions of `snippet-flow.spec.ts`
- * (setCode / runner-availability skip)
+ * (setCode)
  * and `table.spec.ts` (nav -> "Open as table", the ColumnManager's "Table
  * settings" dialog, its documented selectors).
  *
@@ -89,9 +89,9 @@ async function readColumnCells(
 	return out;
 }
 
-/** True once `colIndex`'s cells hold every error/pending cell in one
+/** True once `colIndex`'s cells hold every error cell in one
  * contiguous trailing run and the value cells before it read `dir`-sorted —
- * `core/table/evaluate.py::order_rows`'s rule: an error or pending result
+ * `core/table/evaluate.py::order_rows`'s rule: an error result
  * sorts with the empties, which land after every real value regardless of
  * direction (never reversed for `desc`). */
 async function isSortedByScriptColumn(
@@ -102,7 +102,7 @@ async function isSortedByScriptColumn(
 	const cells = await readColumnCells(rows, colIndex);
 	const firstErrorAt = cells.findIndex((c) => c.isError);
 	const tail = firstErrorAt === -1 ? [] : cells.slice(firstErrorAt);
-	if (tail.some((c) => !c.isError)) return false; // a value cell after an error/pending one
+	if (tail.some((c) => !c.isError)) return false; // a value cell after an error one
 	const values = cells.slice(0, cells.length - tail.length).map((c) => c.text);
 	if (values.length === 0) return false;
 	const sorted = [...values].sort((a, b) =>
@@ -215,9 +215,9 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	// direction, and `sort-done` closes it). The engine re-evaluates the
 	// sort asynchronously, so a single read right
 	// after `sort-done` can land before the re-page — `expect.poll` for the
-	// actual ordering instead: every value cell sorted, every error/pending
+	// actual ordering instead: every value cell sorted, every error
 	// cell trailing in a contiguous tail (`order_rows`' "empties last in both
-	// directions" — a script column's error/pending result sorts with the
+	// directions" — a script column's error result sorts with the
 	// empties). The settings dialog was already saved-and-closed above, so
 	// nothing is intercepting the grid. -------------------------------------
 	const sortDialog = page.getByTestId('column-sort-dialog');
@@ -232,7 +232,7 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 		.poll(() => isSortedByScriptColumn(rows, scriptColIndex, 'asc'), { timeout: 20_000 })
 		.toBe(true);
 
-	// Flip to descending — the value cells reorder, the error/pending tail stays last.
+	// Flip to descending — the value cells reorder, the error tail stays last.
 	await tabpanel.getByTestId('table-sort-button').click();
 	await expect(sortDialog).toBeVisible();
 	await sortDir.click();

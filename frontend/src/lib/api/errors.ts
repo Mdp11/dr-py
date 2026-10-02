@@ -83,3 +83,9 @@ export function messageFromBody(body: unknown, status: number): string {
 	if (status === 413) return 'The file is too large for this server to accept.';
 	return `HTTP ${status}`;
 }
+
+/** The refusal's own sentence: the body's string `detail`, else the error's message. */
+export function refusalMessage(err: ApiError): string {
+	const detail = (err.body as { detail?: unknown } | null)?.detail;
+	return typeof detail === 'string' ? detail : err.message;
+}

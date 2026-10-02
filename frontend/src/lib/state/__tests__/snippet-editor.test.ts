@@ -808,6 +808,11 @@ describe('snippet lint + run', () => {
 		);
 		await runSnippetTab(tabId);
 		expect(getSnippetRun(tabId).notice).toBe('provide exactly one of `code` / `artifact_id`');
+		vi.spyOn(snippetsApi, 'runSnippet').mockRejectedValue(
+			new ApiError(409, { detail: 'replica is not ready' }, 'replica is not ready')
+		);
+		await runSnippetTab(tabId);
+		expect(getSnippetRun(tabId).notice).toBe('replica is not ready');
 		vi.spyOn(snippetsApi, 'runSnippet').mockRejectedValue(new Error('gone'));
 		await runSnippetTab(tabId);
 		expect(getSnippetRun(tabId).notice).toContain('Run failed');

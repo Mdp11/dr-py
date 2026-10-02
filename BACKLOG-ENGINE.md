@@ -1144,7 +1144,10 @@ for `evaluateTable`; `NO_SCRIPTS` widens the public `index.ts`. (5) `readInputs`
 accepts `null` ids and values that pydantic refuses with a 422. (6) No component test for the stale banner
 suppressed after Stage. (7) `TableView.test`'s 409 path goes through a mocked state barrel; the real 409 to
 `{kind: 'scripts'}` is covered in `table-editor-script-errors.test.ts`. (8) The drop test in
-`script-eval.test.ts` does not isolate the settle's own epoch guard. None changes an answer; none blocks.
+`script-eval.test.ts` does not isolate the settle's own epoch guard. (9) `eval-tables.spec`'s staged-step check (~372) is
+absence-only. (10) A navigation preview that hit a transient 409 (scripts-need-engine during the
+artifact-follower gate at open, or a server fallback during a resync) stays in its error state until
+re-run: nothing re-runs navigations on ready. None changes an answer; none blocks.
 
 ### T-15 · Full-run flakes in e2e and the frontend's download-route test · `open` · *2026-10-01*
 In the full `pixi run frontend-test-e2e` run of the scripts plan's last task, `e2e/eval-exports.spec.ts:176`

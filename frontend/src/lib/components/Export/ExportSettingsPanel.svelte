@@ -35,6 +35,8 @@
 	import { ROW_NUMBER_SLOT, exportEntries, type ExportEntry } from '$lib/table/export-layout';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import { previewTableJson } from '$lib/api/tables';
+	import { isScriptsNeedEngine } from '$lib/api/errors';
+	import ScriptsNeedEngine from '$lib/components/ScriptsNeedEngine.svelte';
 	import { Eye, EyeOff } from '@lucide/svelte';
 	import {
 		isJsonFamily,
@@ -181,6 +183,7 @@
 	let sample = $state('');
 	let truncated = $state(false);
 	let previewError = $state<string | null>(null);
+	let previewNeedsEngine = $state(false);
 	let token = 0;
 	$effect(() => {
 		if (!jsonFamily) return;
@@ -193,9 +196,11 @@
 					sample = r.sample;
 					truncated = r.truncated;
 					previewError = null;
+					previewNeedsEngine = false;
 				})
 				.catch((e: unknown) => {
 					if (mine !== token) return;
+					previewNeedsEngine = isScriptsNeedEngine(e);
 					previewError = e instanceof Error ? e.message : 'Preview failed';
 				});
 		}, 300);
@@ -371,7 +376,9 @@
 				</span>
 			{/if}
 		</div>
-		{#if previewError}
+		{#if previewNeedsEngine}
+			<ScriptsNeedEngine />
+		{:else if previewError}
 			<p class="text-xs text-destructive">{previewError}</p>
 		{:else}
 			<pre

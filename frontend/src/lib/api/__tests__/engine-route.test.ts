@@ -392,7 +392,12 @@ describe('the server fallback', () => {
 	});
 
 	it('a 409 that says the staged batches, the base_rev or the replica moved is answered by the server', async () => {
-		for (const detail of ['stale staged batches', 'stale base_rev', 'replica is not ready']) {
+		for (const detail of [
+			'stale staged batches',
+			'stale base_rev',
+			'replica is not ready',
+			'replica closed'
+		]) {
 			const shadow = vi.fn();
 			const { seam, calls } = seamOf(() => Promise.reject(refusal(409, detail)), {}, shadow);
 			installEngineSeam(seam);
@@ -406,7 +411,7 @@ describe('the server fallback', () => {
 	});
 
 	it("any other 409, or the same words under another status, is the caller's error", async () => {
-		for (const error of [refusal(409, 'replica closed'), refusal(501, 'stale staged batches')]) {
+		for (const error of [refusal(409, 'something else'), refusal(501, 'stale staged batches')]) {
 			const { seam } = seamOf(() => Promise.reject(error));
 			installEngineSeam(seam);
 			const server = serverOf();

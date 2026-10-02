@@ -8,6 +8,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as tablesApi from '$lib/api/tables';
+import { ConflictError } from '$lib/api/errors';
 import type { ExporterEntry, TableDefinition } from '$lib/api/types';
 import EntryLayoutDialog from '../EntryLayoutDialog.svelte';
 
@@ -296,5 +297,21 @@ describe('on_error checkbox', () => {
 		document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-save"]')!.click();
 		flushSync();
 		expect(saved!.json_doc?.on_error).toBe('fail');
+	});
+
+	it('a 409 scripts need the engine on the JSON preview renders that state', async () => {
+		vi.spyOn(tablesApi, 'previewTableJson').mockRejectedValue(
+			new ConflictError(409, { detail: 'scripts need the engine' }, 'scripts need the engine')
+		);
+		render({
+			tableDefinition: baseDefinition(),
+			entry: { ...entryOverridingColumn1(), format: 'json' },
+			onSave: () => {},
+			onClose: () => {}
+		});
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="scripts-need-engine"]')).not.toBeNull()
+		);
+		expect(document.querySelector('[data-testid="json-preview"]')).toBeNull();
 	});
 });

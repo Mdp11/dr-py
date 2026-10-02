@@ -138,7 +138,12 @@ function refusedOps(error: unknown): boolean {
 }
 
 /** The engine's 409s for a call whose staged batches, `base_rev` or replica moved under it. */
-const MOVED = new Set(['stale staged batches', 'stale base_rev', 'replica is not ready']);
+const MOVED = new Set([
+	'stale staged batches',
+	'stale base_rev',
+	'replica is not ready',
+	'replica closed'
+]);
 
 function movedUnder(error: unknown): boolean {
 	return error instanceof ApiError && error.status === 409 && MOVED.has(error.message);
