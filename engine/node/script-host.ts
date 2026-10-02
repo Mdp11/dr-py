@@ -49,3 +49,12 @@ export const nodeScriptHost: ScriptHostFactory = () =>
 		cap: poolCap(availableParallelism()),
 		now: () => performance.now()
 	});
+
+/**
+ * The pool over `worker_threads` with at most `cap` workers: a test that runs many batches beside
+ * its neighbours in a suite caps its own, so that their boots do not take every core.
+ */
+export const cappedNodeScriptHost =
+	(cap: number): ScriptHostFactory =>
+	() =>
+		createPool(spawnNodeWorker, { cap, now: () => performance.now() });

@@ -13,7 +13,7 @@ import { Meter } from '../navigation/evaluate.ts';
 import { ReadError } from '../read/errors.ts';
 import type { ReadParams } from '../read/params.ts';
 import type { ScriptError } from '../script/result.ts';
-import { resolveTransformSource } from '../script/snippets.ts';
+import { resolveTransformSource, transformSyntaxRefusal } from '../script/snippets.ts';
 import type { Steps } from '../steps/steps.ts';
 import { evaluateCellsSteps, type TableCell } from '../table/cells.ts';
 import { NavMemo } from '../table/nav-memo.ts';
@@ -69,7 +69,7 @@ function* previewFile(
 ): Steps<TransformPreviewFile> {
 	const input = yield* pretty(sample.doc, meter);
 	const file = { filename: sample.filename, input, output: null, stdout: '', error: null };
-	if (outcome.kind === 'pending') return file;
+	if (outcome.kind !== 'ok' && outcome.kind !== 'failed') return file;
 	if (outcome.kind === 'failed') return { ...file, stdout: outcome.stdout, error: outcome.error };
 	if (jsonl && !Array.isArray(outcome.value)) {
 		const message = `transform must return a list for jsonl; got ${pyTypeName(outcome.value)}`;
@@ -102,6 +102,7 @@ export function previewTransform(
 	if (!isJsonFamily(format)) throw transformFormatRefusal(label, format);
 	if (!hasEntryTransform(entry)) throw new ReadError(422, `${label}: no transform configured`);
 	const code = resolveTransformSource(ctx.artifacts, entry.transform!, label);
+	const syntaxRefusal = transformSyntaxRefusal(entry.transform!, label);
 	const table = ctx.artifacts.resolve(entry.source.ref);
 	if (table === null || table.kind !== 'table') {
 		throw new ReadError(422, `missing table(s) for entries: ${label}`);
@@ -180,6 +181,7 @@ export function previewTransform(
 			const files: TransformPreviewFile[] = [];
 			for (const sample of samples) {
 				const outcome = yield* transformSteps(reader, code, sample.doc, label, meter);
+				if (outcome.kind === 'syntax') throw new ReadError(422, syntaxRefusal);
 				files.push(yield* previewFile(sample, outcome, jsonl, meter));
 			}
 			return { files, split: split !== null && split.enabled, truncated };

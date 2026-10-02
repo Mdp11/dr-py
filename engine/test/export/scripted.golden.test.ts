@@ -1,12 +1,15 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import type { ScriptHost } from '../../src/index.ts';
-import { nodeScriptHost } from '../../node/script-host.ts';
+import { cappedNodeScriptHost } from '../../node/script-host.ts';
 import { loadFixture } from '../golden/load.ts';
 import { type StepsFixture } from '../golden/model-steps.ts';
 import { replayScripted } from '../golden/scripted-steps.ts';
 
 // The exports and transform previews of `export_bytes` that run snippets, answered by the oracle on its trusted runner
 // and run again here by the fill loop over real Pyodide in worker threads.
+
+// Two workers: these replays run beside vitest's other files, and the boots, not the calls, cost the CPU.
+const GOLDEN_WORKERS = 2;
 
 const hosts: ScriptHost[] = [];
 afterAll(() => hosts.forEach((host) => host.dispose()));
@@ -22,14 +25,14 @@ const scripted: StepsFixture = {
 describe('exports and transform previews that run snippets answer as the oracle answers', () => {
 	it('holds every scripted case', () => {
 		const cases = scripted.steps.filter((step) => step.case !== undefined);
-		expect(cases).toHaveLength(95);
-		expect(cases.filter((step) => step.method === 'previewTransform')).toHaveLength(40);
+		expect(cases).toHaveLength(106);
+		expect(cases.filter((step) => step.method === 'previewTransform')).toHaveLength(43);
 	});
 
 	it.each(['committed', 'staged'] as const)(
 		'every script cell, transform, refusal and preview, artifacts %s',
 		async (layer) => {
-			const host = nodeScriptHost();
+			const host = cappedNodeScriptHost(GOLDEN_WORKERS)();
 			hosts.push(host);
 			await replayScripted(scripted, host, layer);
 		},

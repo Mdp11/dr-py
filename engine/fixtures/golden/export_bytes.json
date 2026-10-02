@@ -23203,6 +23203,36 @@
             ]
           }
         },
+        "s_t_no_colon": {
+          "kind": "code_snippet",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "code",
+                {
+                  "t": "str",
+                  "v": "def transform(doc)\n    return doc\n"
+                }
+              ]
+            ]
+          }
+        },
+        "s_t_dangling": {
+          "kind": "code_snippet",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "code",
+                {
+                  "t": "str",
+                  "v": "def transform(doc):\n    return doc +\n"
+                }
+              ]
+            ]
+          }
+        },
         "s_t_wrap": {
           "kind": "code_snippet",
           "payload": {
@@ -34144,6 +34174,399 @@
             "msg": "Field required"
           }
         ]
+      },
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "script_syntax_table_inline",
+      "method": "exportTable",
+      "body": {
+        "format": "json",
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            }
+          ],
+          "transform": {
+            "definition": {
+              "code": "def transform(doc)\n    return doc\n"
+            }
+          }
+        }
+      },
+      "date": "20240229",
+      "scripted": true,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "table: transform code does not parse"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "script_syntax_table_saved",
+      "method": "exportTable",
+      "body": {
+        "format": "jsonl",
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            }
+          ],
+          "transform": {
+            "ref": "s_t_dangling"
+          }
+        }
+      },
+      "date": "20240229",
+      "scripted": true,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "table: snippet s_t_dangling does not define a one-argument top-level transform(doc)"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "script_syntax_table_indent",
+      "method": "exportTable",
+      "body": {
+        "format": "json",
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            }
+          ],
+          "transform": {
+            "definition": {
+              "code": "def transform(doc):\nreturn doc\n"
+            }
+          }
+        }
+      },
+      "date": "20240229",
+      "scripted": true,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "table: transform code does not parse"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "script_syntax_run_inline",
+      "method": "runExporterDraft",
+      "body": {
+        "definition": {
+          "schema_version": 1,
+          "output": {},
+          "entries": [
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "json",
+              "transform": {
+                "definition": {
+                  "code": "def transform(doc)\n    return doc\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "date": "20240229",
+      "scripted": true,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "invalid transform for entries: t_blocks: transform code does not parse"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "script_syntax_run_saved",
+      "method": "runExporterDraft",
+      "body": {
+        "definition": {
+          "schema_version": 1,
+          "output": {},
+          "entries": [
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "json",
+              "transform": {
+                "ref": "s_t_no_colon"
+              }
+            }
+          ]
+        }
+      },
+      "date": "20240229",
+      "scripted": true,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "invalid transform for entries: t_blocks: snippet s_t_no_colon does not define a one-argument top-level transform(doc)"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "script_syntax_run_all_listed",
+      "method": "runExporterDraft",
+      "body": {
+        "definition": {
+          "schema_version": 1,
+          "output": {},
+          "entries": [
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "json",
+              "name": "first",
+              "transform": {
+                "definition": {
+                  "code": "def transform(doc)\n    return doc\n"
+                }
+              }
+            },
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "json",
+              "name": "fine",
+              "transform": {
+                "definition": {
+                  "code": "def transform(doc):\n    return doc\n"
+                }
+              }
+            },
+            {
+              "source": {
+                "ref": "t_sv"
+              },
+              "format": "json",
+              "transform": {
+                "ref": "s_t_dangling"
+              }
+            },
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "jsonl",
+              "name": "third",
+              "transform": {
+                "definition": {
+                  "code": "def transform(doc)\n    return doc\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "date": "20240229",
+      "scripted": true,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "invalid transform for entries: first: transform code does not parse; t_sv: snippet s_t_dangling does not define a one-argument top-level transform(doc); third: transform code does not parse"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "script_syntax_run_before_a_failure",
+      "method": "runExporterDraft",
+      "body": {
+        "definition": {
+          "schema_version": 1,
+          "output": {},
+          "entries": [
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "json",
+              "transform": {
+                "ref": "s_t_raise"
+              }
+            },
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "json",
+              "name": "syntax",
+              "transform": {
+                "definition": {
+                  "code": "def transform(doc)\n    return doc\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "date": "20240229",
+      "scripted": true,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "invalid transform for entries: syntax: transform code does not parse"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "export",
+      "case": "script_syntax_run_with_failure_alone",
+      "method": "runExporterDraft",
+      "body": {
+        "definition": {
+          "schema_version": 1,
+          "output": {},
+          "entries": [
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "json",
+              "transform": {
+                "ref": "s_t_raise"
+              }
+            },
+            {
+              "source": {
+                "ref": "t_blocks"
+              },
+              "format": "json",
+              "name": "fine",
+              "transform": {
+                "ref": "s_t_wrap"
+              }
+            }
+          ]
+        }
+      },
+      "date": "20240229",
+      "scripted": true,
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "t_blocks: transform failed (runtime): ValueError: no way"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "previewTransform",
+      "params": {
+        "entry": {
+          "source": {
+            "ref": "t_blocks"
+          },
+          "format": "json",
+          "transform": {
+            "definition": {
+              "code": "def transform(doc)\n    return doc\n"
+            }
+          }
+        },
+        "date": "20240229",
+        "project": "p"
+      },
+      "scripted": true,
+      "case": "script_syntax_preview_inline",
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "t_blocks: transform code does not parse"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "previewTransform",
+      "params": {
+        "entry": {
+          "source": {
+            "ref": "t_blocks"
+          },
+          "format": "json",
+          "transform": {
+            "ref": "s_t_no_colon"
+          }
+        },
+        "date": "20240229",
+        "project": "p"
+      },
+      "scripted": true,
+      "case": "script_syntax_preview_saved",
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "t_blocks: snippet s_t_no_colon does not define a one-argument top-level transform(doc)"
+      },
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "previewTransform",
+      "params": {
+        "entry": {
+          "source": {
+            "ref": "t_people"
+          },
+          "format": "json",
+          "json_split": {
+            "enabled": true,
+            "filename_template": "${name}"
+          },
+          "transform": {
+            "definition": {
+              "code": "def transform(doc):\n    return doc +\n"
+            }
+          }
+        },
+        "date": "20240229",
+        "project": "p"
+      },
+      "scripted": true,
+      "case": "script_syntax_preview_split",
+      "result": null,
+      "error": {
+        "status": 422,
+        "detail": "t_people: transform code does not parse"
       },
       "unchanged": true
     }

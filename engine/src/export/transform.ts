@@ -27,7 +27,14 @@ export const TRANSFORM_MAX_BYTES = 8 * 1024 * 1024;
 export type TransformOutcome =
 	| { kind: 'ok'; value: OrderedValue; stdout: string }
 	| { kind: 'failed'; error: ScriptError; stdout: string; boot: boolean }
+	| { kind: 'syntax' }
 	| { kind: 'pending' };
+
+/**
+ * A transform whose code does not compile, as the oracle refuses it before anything runs:
+ * `detail` is that refusal. Thrown where the guest reported it, which is when the call runs.
+ */
+export class TransformSyntaxError extends ReadError {}
 
 /** `type(value).__name__` of a JSON value. */
 export function pyTypeName(value: OrderedValue): string {
@@ -39,12 +46,8 @@ export function pyTypeName(value: OrderedValue): string {
 	return Array.isArray(value) ? 'list' : 'dict';
 }
 
-/**
- * Whether `error` is the module failing to run rather than `transform` raising:
- * code that did not compile, or a traceback through the module's own frame.
- */
+/** Whether `error` is the module failing to run rather than `transform` raising: a traceback through its own frame. */
 function failedToLoad(error: ScriptError): boolean {
-	if (error.kind === 'syntax') return true;
 	return (
 		error.traceback !== null &&
 		/\n {2}File "<snippet>", line \d+, in <module>\n/.test(error.traceback)
@@ -104,6 +107,7 @@ export function* transformSteps(
 	});
 	if (result.error !== null) {
 		if (result.error.kind === 'pending') return { kind: 'pending' };
+		if (result.error.kind === 'syntax') return { kind: 'syntax' };
 		return {
 			kind: 'failed',
 			error: result.error,
@@ -124,7 +128,7 @@ export function* transformSteps(
 /**
  * `TransformHost.apply` and the `jsonl` check: the document `doc` becomes, or the
  * export's 422. A call that has not run answers `doc` itself, for the pass that
- * asked to be run again.
+ * asked to be run again. Code the guest could not compile is `syntaxRefusal`.
  */
 export function* transformedSteps(
 	scripts: ScriptReader,
@@ -132,10 +136,12 @@ export function* transformedSteps(
 	doc: JsonOut,
 	jsonl: boolean,
 	name: string,
-	meter: Meter
+	meter: Meter,
+	syntaxRefusal: string
 ): Steps<JsonOut> {
 	const out = yield* transformSteps(scripts, code, doc, name, meter);
 	if (out.kind === 'pending') return doc;
+	if (out.kind === 'syntax') throw new TransformSyntaxError(422, syntaxRefusal);
 	if (out.kind === 'failed') {
 		throw new ReadError(
 			422,

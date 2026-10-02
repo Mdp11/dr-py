@@ -8,7 +8,7 @@ import { Meter } from '../navigation/evaluate.ts';
 import { ReadError } from '../read/errors.ts';
 import type { ReadParams } from '../read/params.ts';
 import type { Steps } from '../steps/steps.ts';
-import { resolveTransformSource } from '../script/snippets.ts';
+import { resolveTransformSource, transformSyntaxRefusal } from '../script/snippets.ts';
 import { tableHasScript } from '../table/resolve.ts';
 import { answered, resolved } from '../table/route.ts';
 import type { TableDefinition } from '../table/schema.ts';
@@ -38,8 +38,10 @@ import {
 	templateVars,
 	transformFormatRefusal,
 	type ExportFileResult,
-	type ExportFiles
+	type ExportFiles,
+	type ResolvedTransform
 } from './route.ts';
+import { TransformSyntaxError } from './transform.ts';
 import {
 	hasEntryTransform,
 	overriddenTable,
@@ -116,14 +118,17 @@ function entryTransform(
 	entry: ExporterEntry,
 	label: string,
 	bad: string[]
-): string | null {
+): ResolvedTransform | null {
 	if (ctx.scripts === undefined || !hasEntryTransform(entry)) return null;
 	if (!isJsonFamily(entry.format)) {
 		bad.push(transformFormatRefusal(label, entry.format).detail);
 		return null;
 	}
 	try {
-		return resolveTransformSource(ctx.artifacts, entry.transform!, label);
+		return {
+			code: resolveTransformSource(ctx.artifacts, entry.transform!, label),
+			syntaxRefusal: transformSyntaxRefusal(entry.transform!, label)
+		};
 	} catch (error) {
 		if (error instanceof ReadError) {
 			bad.push(error.detail);
@@ -136,6 +141,7 @@ function entryTransform(
 /** An entry as the run renders it, or the refusal its table's resolution met. */
 type Planned = {
 	entry: ExporterEntry;
+	transform: ResolvedTransform | null;
 	tableName: string;
 	segments: string[];
 	outName: string;
@@ -229,16 +235,33 @@ export function runExportSteps(
 						},
 						meter
 					);
-		return { entry, tableName, segments, outName, files };
+		return { entry, transform, tableName, segments, outName, files };
 	});
 
 	return answered(
 		(function* (): Steps<ExportFileResult> {
 			const results: ExportFiles[] = [];
+			// The oracle refuses every entry whose transform does not compile before it runs one,
+			// all in one list; the guest reports it when the call runs, so a run that has
+			// transforms goes on past an entry's refusal to find the others, and fails with the
+			// list, else with the first refusal.
+			const deferring = planned.some(({ transform }) => transform !== null);
+			const syntax: string[] = [];
+			let first: ReadError | null = null;
 			for (const { files } of planned) {
-				if (files instanceof ReadError) throw files;
-				results.push(yield* files);
+				try {
+					if (files instanceof ReadError) throw files;
+					results.push(yield* files);
+				} catch (error) {
+					if (!deferring || !(error instanceof ReadError)) throw error;
+					if (error instanceof TransformSyntaxError) syntax.push(error.detail);
+					else first ??= error;
+				}
 			}
+			if (syntax.length > 0) {
+				throw new ReadError(422, `invalid transform for entries: ${syntax.join('; ')}`);
+			}
+			if (first !== null) throw first;
 			return yield* assembled(def, run, modelRev, planned, results, vars, meter);
 		})()
 	);

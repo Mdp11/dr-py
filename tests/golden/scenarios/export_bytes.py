@@ -1125,7 +1125,14 @@ _T_NUMBERS = (
     '    return {"a": 1.0, "b": 2**70, "c": -0.0, "d": [1e16, 0.1], "e": "é\\u2028"}\n'
 )
 
+#: code the scan of the engine cannot tell from valid code, which `ast.parse` refuses
+_T_NO_COLON = "def transform(doc)\n    return doc\n"
+_T_DANGLING = "def transform(doc):\n    return doc +\n"
+_T_INDENT = "def transform(doc):\nreturn doc\n"
+
 _SCRIPT_ARTIFACTS: dict[str, dict[str, Any]] = {
+    "s_t_no_colon": {"kind": "code_snippet", "payload": {"code": _T_NO_COLON}},
+    "s_t_dangling": {"kind": "code_snippet", "payload": {"code": _T_DANGLING}},
     "s_t_wrap": {"kind": "code_snippet", "payload": {"code": _T_WRAP}},
     "s_t_list": {"kind": "code_snippet", "payload": {"code": _T_LIST}},
     "s_t_dict": {"kind": "code_snippet", "payload": {"code": _T_DICT}},
@@ -1669,6 +1676,81 @@ def _scripts_refusals() -> list[dict[str, Any]]:
     ]
 
 
+def _scripts_syntax() -> list[dict[str, Any]]:
+    """Transforms that do not parse, which the oracle refuses before anything runs."""
+    inline = _inline_transform("def transform(doc):\n    return doc\n")
+    bad = _inline_transform(_T_NO_COLON)
+    wrap = {"ref": "s_t_wrap"}
+    return [
+        _s_export(
+            "syntax_table_inline",
+            "json",
+            definition=_with(_table(_BLOCKS, _el()), transform=bad),
+        ),
+        _s_export(
+            "syntax_table_saved",
+            "jsonl",
+            definition=_with(_table(_BLOCKS, _el()), transform={"ref": "s_t_dangling"}),
+        ),
+        _s_export(
+            "syntax_table_indent",
+            "json",
+            definition=_with(
+                _table(_BLOCKS, _el()), transform=_inline_transform(_T_INDENT)
+            ),
+        ),
+        _s_draft(
+            "syntax_run_inline",
+            _exporter(_entry("t_blocks", format="json", transform=bad)),
+        ),
+        _s_draft(
+            "syntax_run_saved",
+            _exporter(_entry("t_blocks", format="json", transform={"ref": "s_t_no_colon"})),
+        ),
+        _s_draft(
+            "syntax_run_all_listed",
+            _exporter(
+                _entry("t_blocks", format="json", name="first", transform=bad),
+                _entry("t_blocks", format="json", name="fine", transform=inline),
+                _entry("t_sv", format="json", transform={"ref": "s_t_dangling"}),
+                _entry("t_blocks", format="jsonl", name="third", transform=bad),
+            ),
+        ),
+        # an entry before it that would fail is not reached: the oracle refuses first
+        _s_draft(
+            "syntax_run_before_a_failure",
+            _exporter(
+                _entry("t_blocks", format="json", transform={"ref": "s_t_raise"}),
+                _entry("t_blocks", format="json", name="syntax", transform=bad),
+            ),
+        ),
+        _s_draft(
+            "syntax_run_with_failure_alone",
+            _exporter(
+                _entry("t_blocks", format="json", transform={"ref": "s_t_raise"}),
+                _entry("t_blocks", format="json", name="fine", transform=wrap),
+            ),
+        ),
+        _s_preview(
+            "syntax_preview_inline",
+            _entry_preview("t_blocks", format="json", transform=bad),
+        ),
+        _s_preview(
+            "syntax_preview_saved",
+            _entry_preview("t_blocks", format="json", transform={"ref": "s_t_no_colon"}),
+        ),
+        _s_preview(
+            "syntax_preview_split",
+            _entry_preview(
+                "t_people",
+                format="json",
+                json_split=_split("${name}"),
+                transform=_inline_transform(_T_DANGLING),
+            ),
+        ),
+    ]
+
+
 def _entry_preview(table: str, **fields: Any) -> dict[str, Any]:
     return _entry(table, **fields)
 
@@ -1902,6 +1984,7 @@ def _scripts() -> list[dict[str, Any]]:
         *_scripts_transforms(),
         *_scripts_refusals(),
         *_scripts_previews(),
+        *_scripts_syntax(),
     ]
 
 

@@ -92,16 +92,17 @@ export function snippetFetch(artifacts: ArtifactSet): SnippetFetch {
 	};
 }
 
-/** Whether `code` defines a top-level `transform` taking one argument, which is what `derive_entry_points` accepts. */
-const definesTransform = (code: string): boolean =>
-	(entryArities(code, 'transform') ?? []).includes(1);
+const NO_TRANSFORM = 'does not define a one-argument top-level transform(doc)';
 
 /**
  * The code of an exporter entry's transform, `label` naming the entry in the
  * refusal. Every failure is a 422, none degrading to an untransformed export: a
  * ref that is no snippet, a source that is neither a ref nor inline code, code that
  * does not parse (inline only: a saved snippet is not parsed first) or that defines no
- * top-level `transform(doc)`. Unparseable is what `entryArities` can see of it.
+ * top-level `transform(doc)` (any of several taking one argument is one, as
+ * `derive_entry_points` has it). Unparseable is what `entryArities` can see of it; a
+ * syntax error it cannot see is the guest's, answered when the transform runs, and
+ * `transformSyntaxRefusal` is the refusal for it.
  */
 export function resolveTransformSource(
 	artifacts: ArtifactSet,
@@ -110,14 +111,10 @@ export function resolveTransformSource(
 ): string {
 	if (transform.definition !== null) {
 		const { code } = transform.definition;
-		if (entryArities(code, 'transform') === null) {
-			throw new ReadError(422, `${label}: transform code does not parse`);
-		}
-		if (!definesTransform(code)) {
-			throw new ReadError(
-				422,
-				`${label}: transform code does not define a one-argument top-level transform(doc)`
-			);
+		const arities = entryArities(code, 'transform');
+		if (arities === null) throw new ReadError(422, `${label}: transform code does not parse`);
+		if (!arities.includes(1)) {
+			throw new ReadError(422, `${label}: transform code ${NO_TRANSFORM}`);
 		}
 		return code;
 	}
@@ -126,11 +123,19 @@ export function resolveTransformSource(
 	if (snippet === null) {
 		throw new ReadError(422, `${label}: unknown transform snippet ${transform.ref}`);
 	}
-	if (!definesTransform(snippet.code)) {
-		throw new ReadError(
-			422,
-			`${label}: snippet ${transform.ref} does not define a one-argument top-level transform(doc)`
-		);
+	if (!(entryArities(snippet.code, 'transform') ?? []).includes(1)) {
+		throw new ReadError(422, `${label}: snippet ${transform.ref} ${NO_TRANSFORM}`);
 	}
 	return snippet.code;
+}
+
+/**
+ * The refusal of a transform whose code the guest could not compile, which the oracle's
+ * `ast.parse` refuses before anything runs: inline code does not parse, a saved snippet that
+ * does not parse defines no transform.
+ */
+export function transformSyntaxRefusal(transform: EntryTransform, label: string): string {
+	return transform.definition !== null
+		? `${label}: transform code does not parse`
+		: `${label}: snippet ${transform.ref} ${NO_TRANSFORM}`;
 }

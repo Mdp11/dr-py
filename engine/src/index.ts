@@ -394,7 +394,12 @@ export {
 	type TransformPayload,
 	type ValuePayload
 } from './script/result.ts';
-export { resolveTransformSource, SNIPPET_KIND, snippetFetch } from './script/snippets.ts';
+export {
+	resolveTransformSource,
+	SNIPPET_KIND,
+	snippetFetch,
+	transformSyntaxRefusal
+} from './script/snippets.ts';
 export {
 	pyTypeName,
 	TRANSFORM_MAX_BYTES,

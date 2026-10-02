@@ -1028,6 +1028,27 @@ from. (3) Forward-looking comments, which RC-6 forbids, at `engine/test/script/p
 bullet in `architecture/contracts.md` is over-long. Not logged, judged not worth an item: the
 `harness_src.py` docstring path and cosmetic re-wraps (in K-107), which cost nothing to leave.
 
+### K-111 · Where the engine's exports differ from the server's when scripts run · `open` · *2026-10-02*
+(1) A script step in a navigation column: the server's export reads every cell cache-only and its sweep
+runs script columns, row sources and expand items, never a display navigation's step, so the cell is
+shipped empty and the export flagged `script_errors`; the engine runs the step and answers its values. The
+goldens avoid such tables. (2) A transform's syntax error the scan of `entryArities` cannot see: the oracle
+refuses it before anything runs (`ast.parse`), the engine on the call, as the same 422 (`does not parse` for
+inline code, `does not define ...` for a saved snippet). A run lists every entry it finds this way after
+running the entries before them, so one that also has an entry on a non-JSON format, or whose table fails
+first, is answered with that entry's refusal alone; a preview refuses after its other 422s. Code that
+`ast.parse` accepts and `compile` refuses (`return` outside a function) is the oracle's `failed to load` and
+the engine's `does not parse`. (3) A transform that times out, or whose module loops, ends the oracle's
+session, so every later file reports `failed to load`; the engine reports `timeout` for each call. (4) A
+malformed saved snippet payload: the engine's 422 text approximates pydantic's. The fix for (2) is a parser
+or a compile-only harness mode.
+
+### K-112 · The trusted runner's print capture races on threads · `open` · *2026-10-02*
+The harness swaps `sys.stdout` around each call without a lock, so the sweep threads of a scripted oracle run
+can leave a `_CappedStdout` installed and the child answered nothing; `tests/golden/scripted.py` writes its
+answer through `sys.__stdout__` to get past it. A real fix is a lock or a per-thread stream in
+`core/script/harness_src.py` (frozen: lands on both sides with a fixture).
+
 ### T-15 · Full-run flakes in e2e and the frontend's download-route test · `open` · *2026-10-01*
 In the full `pixi run frontend-test-e2e` run of the scripts plan's last task, `e2e/eval-exports.spec.ts:176`
 ("an exporter with two entries and a manifest downloads a zip") and `e2e/table.spec.ts:290` ("inline

@@ -14,7 +14,7 @@ import type { Steps } from '../steps/steps.ts';
 import { evaluateCellsSteps, type TableCell } from '../table/cells.ts';
 import { NavMemo } from '../table/nav-memo.ts';
 import type { CachedOrder } from '../table/order-cache.ts';
-import { resolveTransformSource } from '../script/snippets.ts';
+import { resolveTransformSource, transformSyntaxRefusal } from '../script/snippets.ts';
 import { tableHasScript } from '../table/resolve.ts';
 import { answered, orderedRows, resolved, sourceOf, tableScripts } from '../table/route.ts';
 import { EXPORT_TABLE_LIMITS, type RowKey } from '../table/rows.ts';
@@ -35,7 +35,7 @@ import {
 } from './json.ts';
 import { exportDefinition, exportLayout, type ExportLayout } from './layout.ts';
 import { SPLIT_TOKENS, validateTokens } from './naming.ts';
-import type { EntryTransform, JsonDocumentOptions } from './schema.ts';
+import { hasTransformSource, type EntryTransform, type JsonDocumentOptions } from './schema.ts';
 import { partitionLabel, renderFilenames, splitPartitions, validateTemplate } from './split.ts';
 import { transformedSteps } from './transform.ts';
 import { utf8 } from './utf8.ts';
@@ -144,8 +144,7 @@ export function templateVars(
 }
 
 /** Whether the table's own `transform` is set, which only `/tables/export` runs. */
-const hasTransform = (defn: TableDefinition): boolean =>
-	defn.transform !== null && (defn.transform.ref !== null || defn.transform.definition !== null);
+const hasTransform = (defn: TableDefinition): boolean => hasTransformSource(defn.transform);
 
 /** The table's own transform, as an entry's is read: a definition holds its code. */
 export const tableTransform = (defn: TableDefinition): EntryTransform => {
@@ -155,6 +154,12 @@ export const tableTransform = (defn: TableDefinition): EntryTransform => {
 		definition: definition === null ? null : { code: (definition as { code: string }).code }
 	};
 };
+
+/**
+ * A transform that resolved: its code, and the refusal that stands for a syntax error the
+ * scan of its source could not see, which the guest reports when it runs.
+ */
+export type ResolvedTransform = { code: string; syntaxRefusal: string };
 
 /** The formats a transform and a split apply to. */
 export const isJsonFamily = (format: ExportFormat): format is 'json' | 'jsonl' =>
@@ -240,8 +245,8 @@ export type ExportJob = {
 	format: ExportFormat;
 	vars: Readonly<Record<string, string>>;
 	jsonDoc: JsonDocumentOptions | null;
-	/** The code of the `transform(doc)` each JSON-family file goes through, resolved; `null` for none. */
-	transform: string | null;
+	/** The `transform(doc)` each JSON-family file goes through, resolved; `null` for none. */
+	transform: ResolvedTransform | null;
 };
 
 /**
@@ -351,11 +356,12 @@ export function exportFilesSteps(
 					? shaped
 					: yield* transformedSteps(
 							ctx.scripts,
-							transform,
+							transform.code,
 							shaped,
 							format === 'jsonl',
 							name,
-							meter
+							meter,
+							transform.syntaxRefusal
 						);
 			const pieces =
 				format === 'jsonl'
@@ -413,10 +419,14 @@ export function exportTable(ctx: EvalContext, params: ReadParams): Steps<ExportF
 		throw new ReadError(501, 'reaches a script');
 	}
 	const name = typeof source === 'string' ? ctx.artifacts.resolve(source)!.name : 'table';
-	let transform: string | null = null;
+	let transform: ResolvedTransform | null = null;
 	if (hasTransform(defn)) {
 		if (!isJsonFamily(format)) throw transformFormatRefusal(name, format);
-		transform = resolveTransformSource(ctx.artifacts, tableTransform(defn), name);
+		const source = tableTransform(defn);
+		transform = {
+			code: resolveTransformSource(ctx.artifacts, source, name),
+			syntaxRefusal: transformSyntaxRefusal(source, name)
+		};
 	}
 	const badSplit = splitRefusal(format, defn.json_split);
 	if (badSplit !== null) throw new ReadError(422, badSplit);

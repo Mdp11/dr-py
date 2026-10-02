@@ -156,9 +156,14 @@ export function readExporterDefinition(raw: unknown, where: string): ExporterDef
 
 // -- the render copy -------------------------------------------------------------
 
-/** Whether an entry's transform is set: an empty source is no transform. */
+/** Whether a transform source is set, a table's or an entry's: an empty one is no transform. */
+export const hasTransformSource = (
+	source: { readonly ref: string | null; readonly definition: object | null } | null
+): boolean => source !== null && (source.ref !== null || source.definition !== null);
+
+/** Whether an entry's transform is set. */
 export const hasEntryTransform = (entry: ExporterEntry): boolean =>
-	entry.transform !== null && (entry.transform.ref !== null || entry.transform.definition !== null);
+	hasTransformSource(entry.transform);
 
 /**
  * A copy of `defn` whose presentation is the entry's. A column the entry does

@@ -9,6 +9,7 @@ import {
 	resolveRefs,
 	resolveTableRefs,
 	resolveTransformSource,
+	transformSyntaxRefusal,
 	snippetFetch,
 	tableHasScript,
 	type CommittedArtifact,
@@ -378,6 +379,15 @@ describe('an export transform', () => {
 	it('takes a one-argument transform wherever it stands among the same name, as the oracle does', () => {
 		const code = 'def transform(a, b):\n    return a\n\ndef transform(doc):\n    return doc\n';
 		expect(resolveTransformSource(set, { ref: null, definition: { code } }, label)).toBe(code);
+	});
+
+	it('words the refusal of code the guest could not compile as the oracle words an unparseable source', () => {
+		expect(transformSyntaxRefusal({ ref: null, definition: { code: 'x' } }, label)).toBe(
+			'entry 0: transform code does not parse'
+		);
+		expect(transformSyntaxRefusal({ ref: 's1', definition: null }, label)).toBe(
+			'entry 0: snippet s1 does not define a one-argument top-level transform(doc)'
+		);
 	});
 
 	it('refuses a saved snippet that defines no transform of one argument, with its id', () => {
