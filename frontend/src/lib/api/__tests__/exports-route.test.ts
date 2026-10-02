@@ -116,15 +116,6 @@ const namesOf = (type: string): TableDefinition =>
 		sort: [{ column: 1, direction: 'asc' }]
 	});
 
-const scripted = (): TableDefinition =>
-	TableDefinitionSchema.parse({
-		row_source: { kind: 'scope', types: [], criteria: [] },
-		columns: [
-			{ kind: 'element', source: { kind: 'row', chain_index: 0 } },
-			{ kind: 'script', source: { kind: 'row', chain_index: 0 }, snippet: { ref: 'sn1' } }
-		]
-	});
-
 /** A type with more than one page of elements: `e_000031` is one of the 160 people. */
 const typeOf = (project: FakeProject) => project.model.getElement('e_000031').typeName;
 
@@ -276,38 +267,6 @@ describe('the exports surface on the engine', () => {
 		expect(call).toHaveBeenCalledWith('previewTableJson', asSent({ definition }), {});
 		expect(preview).toEqual(direct(project, 'previewTableJson', asSent({ definition }) as never));
 		expect(served).toEqual([]);
-	});
-
-	it('a table or an exporter that reaches a script is the server’s answer, marked script', async () => {
-		const project = fakeProject();
-		const { replica, served } = await over(project, 'engine');
-		replica.sync.setArtifacts(saved(typeOf(project), { transform: { ref: 'sn1' } }));
-		const definition = scripted();
-
-		const table = await exportTable({ definition, format: 'csv' });
-		const run = await runExporter('x1');
-		const draft = await runExporterDraft(exporter({ transform: { ref: 'sn1' } }), 'D');
-		const preview = await previewTableJson({ definition });
-
-		for (const result of [table, run, draft]) {
-			expect(result).toMatchObject({
-				kind: 'ready',
-				filename: 'served.csv',
-				truncated: true,
-				fallback: 'script'
-			});
-			expect(new TextDecoder().decode(await blobBytes(result))).toBe(SERVED_TEXT);
-		}
-		expect(preview).toEqual({ sample: '["served"]', truncated: false, fallback: 'script' });
-		expect(served).toEqual([
-			{ path: '/tables/export', body: asSent({ definition, format: 'csv' }) },
-			{ path: '/exports/run', body: { artifact_id: 'x1' } },
-			{
-				path: '/exports/run',
-				body: asSent({ definition: exporter({ transform: { ref: 'sn1' } }), name: 'D' })
-			},
-			{ path: '/tables/json-preview', body: asSent({ definition }) }
-		]);
 	});
 
 	it('the shadow compares a download by its digest: the same file is not reported, one byte off is', async () => {

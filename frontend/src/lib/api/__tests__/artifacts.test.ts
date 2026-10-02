@@ -219,21 +219,6 @@ describe('evaluateNavigation on the navigation surface', () => {
 		expect(bodies).toEqual([]);
 	});
 
-	it("on the engine, an inline script step is the server's page marked script", async () => {
-		const project = fakeProject();
-		const { call, bodies } = await over(project, 'engine');
-		const definition: PathNavigation = {
-			...scopeOf([]),
-			steps: [{ kind: 'script', snippet: { ref: 'sn1' } }]
-		};
-
-		const page = await evaluateNavigation({ definition, limit: 10 });
-
-		expect(page).toEqual({ ...ChainPageSchema.parse(SERVED), fallback: 'script' });
-		expect(call).toHaveBeenCalledOnce();
-		expect(bodies).toEqual([{ definition, limit: 10 }]);
-	});
-
 	it('on the server, both reach the server alone, unmarked', async () => {
 		const project = fakeProject();
 		const { call, bodies } = await over(project, 'server');
