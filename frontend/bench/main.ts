@@ -611,6 +611,13 @@ async function scriptTable(): Promise<Measures> {
 	const firstPage = now() - pageStart;
 	if (page.rows.length !== 500)
 		throw new Error(`the script table's page holds ${page.rows.length} rows`);
+	for (const row of page.rows) {
+		for (const cell of row.cells) {
+			if (cell.kind === 'error' || cell.kind === 'pending') {
+				throw new Error(`the script table's cached page holds a ${cell.kind} cell`);
+			}
+		}
+	}
 	return {
 		'script table export (10,000 cells)': wall,
 		'  script rounds in it (count)': rounds,
