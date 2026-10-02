@@ -818,8 +818,8 @@ class Service {
 	}
 
 	/**
-	 * An evaluation: the scan runs as a pass of a fill, which runs the scripts the pass could not answer and runs it again. Each pass is a scan
-	 * of the model lane, so no transition lands within one, and the fill runs between passes,
+	 * An evaluation: the scan runs as a pass of a fill, which runs the scripts the pass
+	 * could not answer and runs it again. Each pass is a scan of the model lane, so no transition lands within one, and the fill runs between passes,
 	 * outside the scheduler: a stage or a delta lands there and the fill sees it move. A pass is
 	 * read at the state its scan started in, and answered whatever lands after it. The call belongs
 	 * to the replica its first scan started on, as a call waiting for a replica to be ready waits

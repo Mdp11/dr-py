@@ -134,12 +134,12 @@ type Planned = {
 };
 
 /**
- * `_execute_export` in steps, in its order. Before the first step: a run
- * with no entries, the output filename's tokens, and
- * the missing tables and bad templates, each list a 422 naming its entries.
- * A table's resolution that fails refuses when the run reaches its entry,
- * as the route's does. An entry's transform runs, and the entries whose transform is on a format that is not JSON-family
- * or does not resolve are one more list, a 422 after the others. `${rev}` and
+ * `_execute_export` in steps, in its order. Before the first step: no entries,
+ * the output filename's tokens, and the missing tables and bad templates, each
+ * list a 422 naming its entries. A table's resolution that fails refuses when
+ * the run reaches its entry, as the route's does. An entry's transform runs,
+ * and the entries whose transform is on a format that is not JSON-family or
+ * does not resolve are one more list, a 422 after the others. `${rev}` and
  * the manifest's `model_rev` are the committed rev.
  */
 export function runExportSteps(
