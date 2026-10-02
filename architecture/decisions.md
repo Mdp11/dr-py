@@ -251,7 +251,7 @@ commit; while a commit's payloads are fetched, the entries it carried stay in th
 no evaluation reads a committed artifact as missing.
 
 ## AD-31 · Before scripts run in the browser, a call that reaches a script is the server's
-**Decision.** Until sub-project D, the engine refuses a navigation that reaches a configured
+**Decision.** (Narrowed for scripts by AD-34, which ended the script half.) Until sub-project D, the engine refuses a navigation that reaches a configured
 script step — and a criterion pattern it cannot match exactly as Python's `re` does — with 501
 before any work, and the client asks the server instead, whole.
 **Why.** One table or navigation never mixes committed and working state: a result is either
@@ -371,7 +371,7 @@ read-set no transition touched when other transitions moved the stamp: it change
 invariant that keeps a stale result out of the cache.
 **Consequences.** Every evaluation is a pinned fill: a call belongs to the replica its first scan
 starts on, and one whose replica is closed, replaced or diverged under it, between slices
-included, answers 409 `replica closed` instead of restarting on the next replica; one that
+included, answers 409 (`replica closed` or `replica is not ready`) instead of restarting on the next replica; one that
 arrives while no replica is ready waits for the next, as any call does. A cold evaluation that a
 steady stream of transitions keeps moving is run again for every transition that lands within a
 round, and answers once a round fits between two transitions: accepted, since the visible table

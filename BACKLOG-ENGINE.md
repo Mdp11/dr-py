@@ -627,8 +627,8 @@ as a suspended tab already is (`_suspendedStale`), re-paging a stale tab when it
 ### K-74 · The degraded export path is unreachable in the engine · `done` · *2026-09-28*
 The server's export writers have a degraded path: a script cell that is not computed writes a
 notice row, the text `#ERROR: not computed` (xlsx and CSV) or `{"$error": …}` (JSON), and an
-exporter run's manifest says `degraded: true`. The engine refuses a table that reaches a script
-(`501`, answered by the server behind the `export-fallback` marker), so it never has an
+exporter run's manifest says `degraded: true`. The engine then refused a table that reaches a script
+(`501`, answered by the server behind the `export-fallback` marker), so it never had an
 uncomputed cell to write. The engine does not port the degraded path itself: it has no notice
 row and no `not computed` text, and `degraded` is fixed at `false` (`engine/src/export/run.ts`);
 only the generic per-cell error text exists (`#ERROR: <message>` in `engine/src/table/cell-text.ts`,
@@ -1067,16 +1067,16 @@ the engine's `does not parse`. (3) A transform that times out, or whose module l
 session, so every later file reports `failed to load`; the engine reports `timeout` for each call. (4) A
 malformed saved snippet payload: the engine's 422 text approximates pydantic's. The fix for (2) is a parser
 or a compile-only harness mode.
-None blocks: each is a difference on a path the app's engine does not exercise through the console, and the goldens avoid them.
+None blocks: each is an oracle-vs-engine difference on a rare input the goldens avoid.
 
 ### K-112 · The trusted runner's print capture races on threads · `open` · *2026-10-02*
 The harness swaps `sys.stdout` around each call without a lock, so the sweep threads of a scripted oracle run
 can leave a `_CappedStdout` installed and the child answered nothing; `tests/golden/scripted.py` writes its
 answer through `sys.__stdout__` to get past it. A real fix is a lock or a per-thread stream in
 `core/script/harness_src.py` (frozen: lands on both sides with a fixture).
-It does not block: the engine's own scripts run one call per worker batch and the race needs the oracle's sweep threads.
+It does not block: a Pyodide worker is single-threaded, so the engine has no sweep threads to race.
 
-### K-113 · The exports' longest slice is 32 ms with the option on, 23 ms with it off · `open` · perf · *2026-10-02*
+### K-113 · The exports' longest slice is 32 ms with cached script cells, 23 ms without · `open` · perf · *2026-10-02*
 `engine-bench-browser` with the engine evaluating scripts and ~10,000 cached script cells ahead of
 `transitions()` shows `longest staged round trip during the exports` at 32 ms [32 23 36], against 23 ms
 [23 22 24] without them (the README's 2026-09-28 figure is 23 ms), and `exportTable: csv` at 407 against

@@ -114,8 +114,8 @@ features with B's fifth plan, when the five read surfaces defaulted to the engin
 (`core/table/{evaluate,cells,nav_memo,resolve,schema}.py`) left the FEATURE freeze with plan 4, which
 ported it (`tables` defaults to the engine), and its exports exception lifted with plan 5, which
 flipped `exports` to the engine: `/tables/export`, `/tables/json-preview` and `routes/exports.py`
-read the Python evaluator only as the `exports` surface's server path (the switch, and the
-fallback for a table that reaches a script). `core/navigation`, `core/search`, `api/search.py` and
+read the Python evaluator only as the `exports` surface's server path (the switch, and CI
+exports of a table that reaches a script). `core/navigation`, `core/search`, `api/search.py` and
 the `search_model` and `evaluate_navigation` route functions leave the feature freeze then too, as
 do the writers (`core/table/{csv_export,json_export,export_layout,exporter,naming,split,cell_text}.py`),
 `api/table_export*.py` and `api/export_manifest.py`, which froze at plan 5's start: a feature in
@@ -126,8 +126,8 @@ navigation with a script step) was the one exception until D's third plan: the e
 it, so a new script-table feature lands in TypeScript only. The server's path, which builds such a
 table entirely in Python (its rows, its order, every cell and its export), answers 409 to a client
 that sends `X-Data-Rover-Scripts: engine-only` and stays for CI exports until E. `api/search.py` and the route
-functions are also the 501 fallback's server side from C's first plan on (AD-31) — a script or an
-unsupported pattern reads them whatever plan C is on — and `api/artifact_kinds.py` validates
+functions are also the 501 fallback's server side from C's first plan on (AD-31) — an
+unsupported pattern reads them whatever plan C is on (a script did until D's fourth plan) — and `api/artifact_kinds.py` validates
 every committed navigation payload with `NAVIGATION_ADAPTER`.
 `core/table/resolve.py` (ref resolution and script reach) is frozen from C's plan 1 on.
 `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's conformance half
