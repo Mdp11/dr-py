@@ -19,6 +19,7 @@ import {
 	wireElementImage,
 	wireOps,
 	wireRelationship,
+	toWire,
 	wireRelImage
 } from '../read/wire.ts';
 import {
@@ -30,6 +31,13 @@ import {
 import { RulesUnreadable } from '../rules/document.ts';
 import { ruleSources } from '../rules/sources.ts';
 import { BridgeDispatcher, dumpDefault, projectRoots } from '../script/bridge.ts';
+import {
+	consoleAnswer,
+	readRunSnippet,
+	type RunSnippetParams,
+	type RunStamp
+} from '../script/console.ts';
+import { snippetFetch } from '../script/snippets.ts';
 import { CellCache } from '../script/cell-cache.ts';
 import type {
 	AbortSignalLike,
@@ -350,6 +358,9 @@ function readScriptBatch(params: ReadParams): ScriptBatch {
 	if (consoleRun !== undefined && typeof consoleRun !== 'boolean') {
 		throw new Refused(422, 'console must be a boolean');
 	}
+	if (entry === 'transform' && consoleRun === true) {
+		throw new Refused(422, 'a console run has no transform entry');
+	}
 	const raw = params['calls'];
 	if (!Array.isArray(raw)) throw new Refused(422, 'calls must be a list');
 	if (entry === 'script' && raw.length !== 1) {
@@ -479,6 +490,7 @@ const METHODS: { readonly [method: string]: Method } = {
 	end: later((service) => service.end()),
 	close: now((service) => service.close()),
 	scriptCalls: (service, call) => service.scriptCalls(call),
+	runSnippet: (service, call) => service.runSnippet(call),
 	scriptWarm: (service, call) => service.scriptWarm(call),
 	adoptStaged: (service, call) => service.adoptStaged(call),
 	applyTail: (service, call) => service.applyTail(call),
@@ -818,9 +830,9 @@ class Service {
 	}
 
 	/**
-	 * An evaluation: the scan runs as a pass of a fill, which runs the scripts the pass
-	 * could not answer and runs it again. Each pass is a scan of the model lane, so no transition lands within one, and the fill runs between passes,
-	 * outside the scheduler: a stage or a delta lands there and the fill sees it move. A pass is
+	 * An evaluation: the scan runs as a pass of a fill, which runs the scripts the pass could not
+	 * answer and runs it again. Each pass is a scan of the model lane, so no transition lands
+	 * within one, and the fill runs between passes, outside the scheduler: a stage or a delta lands there and the fill sees it move. A pass is
 	 * read at the state its scan started in, and answered whatever lands after it. The call belongs
 	 * to the replica its first scan started on, as a call waiting for a replica to be ready waits
 	 * for the next one: that replica dropped, it is answered 409, and a cancel stops its batches
@@ -1034,6 +1046,58 @@ class Service {
 		const run = abortable();
 		call.onCancel = run.abort;
 		this.answerLater(call, this.runScripts(batch, run));
+	}
+
+	/**
+	 * `runSnippet`: one console run over the working copy, answered with the ops it proposes (a
+	 * `script` entry only) and the stamp the replica stood at when it began. It runs as `scriptCalls`
+	 * does, and a cancel stops it.
+	 */
+	runSnippet(call: Call): void {
+		const params = readRunSnippet(call.params);
+		const code = this.snippetCode(params);
+		const stamp = this.stamp();
+		const batch: ScriptBatch = {
+			code,
+			entry: params.entry,
+			console: true,
+			calls: [
+				{
+					elementIds: params.element_ids,
+					...(params.inputs === undefined
+						? {}
+						: { inputs: parseExact(JSON.stringify(params.inputs), { floatConstants: true }) })
+				}
+			]
+		};
+		const run = abortable();
+		call.onCancel = run.abort;
+		this.answerLater(
+			call,
+			this.runScripts(batch, run).then((done) => {
+				const opsText = done.ops;
+				const ops = opsText === undefined ? [] : (toWire(parseExact(opsText)) as unknown[]);
+				return consoleAnswer(done.results[0]!.text, ops, done.ms, stamp);
+			})
+		);
+	}
+
+	/** Where the working copy stands, for a run to carry. */
+	private stamp(): RunStamp {
+		const wc = this.ready();
+		return { rev: wc.rev, staged: wc.stagedVersion };
+	}
+
+	/** The code `params` runs: inline, or a saved snippet's. */
+	private snippetCode(params: RunSnippetParams): string {
+		if (params.code !== undefined) return params.code;
+		const ref = params.artifact_id!;
+		const artifact = this.artifacts.resolve(ref);
+		if (artifact === null) throw new Refused(404, 'snippet not found');
+		if (artifact.kind !== SNIPPET_KIND) {
+			throw new Refused(422, `artifact kind '${artifact.kind}' is not a code_snippet`);
+		}
+		return snippetFetch(this.artifacts)(ref)!.code;
 	}
 
 	/**

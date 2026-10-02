@@ -115,7 +115,7 @@ function hint(op: Doc, where: string): { id?: string | null } {
 	return { id: id as string | null };
 }
 
-const OP_KINDS = [
+export const OP_KINDS = [
 	'create_element',
 	'update_element',
 	'delete_element',

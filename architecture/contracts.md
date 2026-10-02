@@ -295,6 +295,7 @@ event     {event, …}                     engine → client, unsolicited
   boot or stopped mid-run starts over on the next call, and a failed boot (a 500 for every
   call waiting on it) is not remembered by the engine. A host answer that is not one result
   object per call is a 500.
+- Console runs: `runSnippet {code | artifact_id, entry, element_ids, inputs?}` → `{stdout, result_repr, ops, error, truncated, duration_ms, stamp: {rev, staged}}`, one console run over the working copy (`entry` `script`, `value` or `step`, params as the server's `/snippets/run` read them; 404 `snippet not found`, 422 bad params or a snippet of another kind, 409 and 501 as `scriptCalls`). `ops` holds model ops only; any other kind empties it and answers a `runtime` error. `{cancel: id}` stops it unanswered.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed

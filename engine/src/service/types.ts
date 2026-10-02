@@ -142,5 +142,7 @@ export type ScriptCallsResult = {
 	ops?: string;
 };
 
+export type { RunSnippetParams, RunSnippetResult, RunStamp } from '../script/console.ts';
+
 /** `scriptWarm`'s answer: how many spares the pool holds ready. */
 export type ScriptWarmResult = { spares: number };

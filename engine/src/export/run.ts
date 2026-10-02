@@ -95,7 +95,7 @@ function entrySegments(
 }
 
 /**
- * The code of an entry's transform where the context reads scripts, else `null`: an entry whose
+ * The code of an entry's transform, or `null` for an entry with none: an entry whose
  * transform is on a format that is not JSON-family, or does not resolve, is listed in `bad`.
  */
 function entryTransform(
