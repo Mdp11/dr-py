@@ -124,7 +124,7 @@ function isEntity(doc: Value): doc is { [key: string]: Value } {
 }
 
 /** Every id a delta names or deletes, read leniently: the working copy refuses a malformed one. */
-function deltaIds(delta: Delta): string[] {
+export function deltaIds(delta: Delta): string[] {
 	const ids: string[] = [];
 	for (const docs of [delta.changed_elements, delta.changed_relationships]) {
 		if (!Array.isArray(docs)) continue;
@@ -146,7 +146,7 @@ function deltaIds(delta: Delta): string[] {
 }
 
 /** The ends of a delta's changed relationships, as it names them. */
-function deltaEnds(delta: Delta): string[] {
+export function deltaEnds(delta: Delta): string[] {
 	const ids: string[] = [];
 	if (!Array.isArray(delta.changed_relationships)) return ids;
 	for (const doc of delta.changed_relationships) {

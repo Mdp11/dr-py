@@ -120,7 +120,7 @@ event     {event, …}                     engine → client, unsolicited
   with the server's quote-stripped text (`No element with id 'x`), a `ValueError` 422; a
   snapshot or delta the engine cannot read is 422; an unknown method is 404
   `No method 'x'`; anything else is 500 with its message.
-- Replica methods, answered in any state, in this order: `open {project_id, metamodel}` →
+- Replica methods, answered in any state, in this order: `open {project_id, metamodel, scripts?}` →
   `chunk {bytes}` … (the gzip bytes as received, in transferred buffers) → `end` (answers the
   snapshot header once the replica is read and indexed; the replica stays `opening`) →
   `adoptStaged {batches}` (a re-bootstrap only: the staged batches carried over, under their
@@ -128,7 +128,13 @@ event     {event, …}                     engine → client, unsolicited
   one included. Then `applyDelta {text, own?}` → `applied | duplicate | gap`, a 409 unless
   `ready` (the shell buffers). `close` drops the replica, and any open in flight. A delta and
   a tail cross as the text the shell received (AD-26); a commit response is a delta as it
-  stands, its `model_rev` read as `rev`.
+  stands, its `model_rev` read as `rev`. `scripts: 'evaluate'` (any other value is a 422, before
+  the replica in hand is discarded; the app does not send it) has an evaluation that reaches a
+  script run it, as CT-6 says; the option lives with the replica, and without it, or where the
+  host gave the engine no script host, every `reaches a script` refusal answers 501 as before.
+  With it `progress {task: 'scripts', done, total}` counts the script calls the evaluations in
+  flight have asked for and finished, summed, at each batch result, ending `done === total`
+  when the last of them ends.
 - Staging: `stage {ops}` → `{batch, coalesced, changes, elements, relationships}` — the
   post-state of what it changed, both lists `null` past 500 entities; a single property update
   merges into the first staged update of the same entity (CT-5). `unstage {what}` (`'all'`,
@@ -290,9 +296,10 @@ event     {event, …}                     engine → client, unsolicited
   that arrived before it and holds everything behind it, and between the slices of a long
   read, reads that arrived later are answered.
 - Events: `replica {state: opening|ready|diverged, rev}` (`rev` null while opening);
-  `progress {task, done, total}` for the tasks `parse`, `index`, `tail`, `verify` and `sweep`
+  `progress {task, done, total}` for the tasks `parse`, `index`, `tail`, `verify`, `sweep`
   (AD-32's background revalidation, resumable, one background slot each with the digest check)
-  — at most once per slice per task, plus a task's first and last; `changed {rev,
+  and `scripts` (below) — at most once per slice per task, plus a task's first and last, except
+  `scripts`, posted at each batch result; `changed {rev,
   staged_version, issues_version, artifacts_version, element_ids, relationship_ids,
   deleted_element_ids, deleted_relationship_ids, structural}` after every transition of a
   `ready` replica that changed something. `structural` says the element set or a relationship may have moved;
@@ -390,8 +397,27 @@ event     {event, …}                     engine → client, unsolicited
   to `1750000000000` and `Date`'s local getters and `getTimezoneOffset` to UTC,
   `crypto.getRandomValues` filled with `0x42` (and `node:crypto`'s on the Node host),
   `PYTHONHASHSEED=0`, and `random.seed()` after every image restore.
-- Results are cached in the engine, keyed `(code, entry, element ids, inputs digest)`, with
-  read-sets; deltas and staged ops evict by read-set.
+- Evaluation (the replica opened with `scripts: 'evaluate'`): an evaluation is a loop of passes
+  over the model lane and rounds of batches outside it. A pass answers a call from the
+  evaluation's memo or the cell cache, else records it and answers it pending; a pass that
+  recorded one is discarded, its calls run as one batch per `(code, entry)` through the pool
+  and the pass runs again, until a pass records none. A `stage`, `unstage` or delta lands
+  between passes, never within one, and the evaluation answers from the state it ends in; a
+  round that began before it is dropped, results and all. The call belongs to its replica: that
+  replica closed, replaced or diverged answers it 409 (`replica closed`, `replica is not
+  ready`), `{cancel}` stops its batches, soft then hard, and answers nothing.
+- Results are cached in the engine, keyed `(code, entry, element ids, inputs, doc)` (the code is
+  in the key, so an edited snippet is another call), with read-sets. Bounds: 50,000 entries,
+  32 MiB of keys and result texts, a result over 64 KiB not stored, a read-set over 128 keys
+  stored as "depends on everything"; a value, a `runtime` and a `syntax` error are stored, a
+  `timeout`, `cancelled`, `memory`, `unavailable`, `pending` or `limit` is not. A
+  transition evicts the entries that read a key it touched, in the oracle's keys
+  (`api/invalidation.py`), the union over the state it leaves and the state it makes, and every
+  entry that depends on everything; one that changed nothing evicts nothing. A cascade is in it:
+  the contained elements and incident relationships a delete removed. A result is stored only
+  if no transition moved since the pass that asked for it began, so nothing computed before a
+  transition enters the cache after its eviction. The cache is dropped at `close`, a new
+  `open` and a divergence.
 
 ## CT-7 · Fidelity to the oracle
 

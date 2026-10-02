@@ -267,10 +267,14 @@ export async function openReplica(
 	client: Client,
 	model: Model,
 	doc: MetamodelDoc,
-	options: SnapshotOptions & { chunk?: number; adopt?: unknown[] } = {}
+	options: SnapshotOptions & { chunk?: number; adopt?: unknown[]; scripts?: unknown } = {}
 ): Promise<unknown> {
 	const projectId = options.projectId ?? 'demo';
-	await client.call('open', { project_id: projectId, metamodel: doc });
+	await client.call('open', {
+		project_id: projectId,
+		metamodel: doc,
+		...(options.scripts === undefined ? {} : { scripts: options.scripts })
+	});
 	const chunks = gzChunks(snapshotText(model, options), options.chunk ?? 1 << 16).map((bytes) =>
 		client.call('chunk', { bytes }, [bytes])
 	);

@@ -60,6 +60,43 @@ function aborted(signal: FillSignal): never {
 	throw signal.reason ?? new Error('the fill was aborted');
 }
 
+/**
+ * A signal that aborts with `parent` or on its own: the runners of one round
+ * watch it, so a batch that fails stops its siblings.
+ */
+function linked(parent: FillSignal): {
+	readonly signal: FillSignal;
+	abort(reason: unknown): void;
+	dispose(): void;
+} {
+	let done = false;
+	let why: unknown;
+	const listeners = new Set<() => void>();
+	const abort = (reason: unknown) => {
+		if (done) return;
+		done = true;
+		why = reason;
+		for (const listener of [...listeners]) listener();
+	};
+	const onParent = () => abort(parent.reason ?? new Error('the fill was aborted'));
+	parent.addEventListener('abort', onParent);
+	if (parent.aborted) onParent();
+	return {
+		signal: {
+			get aborted() {
+				return done;
+			},
+			get reason() {
+				return why;
+			},
+			addEventListener: (_type, listener) => void listeners.add(listener),
+			removeEventListener: (_type, listener) => void listeners.delete(listener)
+		},
+		abort,
+		dispose: () => parent.removeEventListener('abort', onParent)
+	};
+}
+
 const MALFORMED: ScriptResult = Object.freeze({
 	payload: null,
 	error: Object.freeze({ kind: 'runtime', message: 'malformed call result', traceback: null }),
@@ -133,8 +170,11 @@ function batchesOf(missed: ReadonlyMap<CellKey, ScriptCall>): Group[] {
  * What a round answers is kept, in the memo and the cache, only if no
  * transition moved since the pass that asked for it began: the keys of its
  * calls were read from that state and a transition would have evicted what the
- * cache then held. A round the model moved under is dropped and its calls are
- * asked for again. The memo is the fill's own and a fresh fill starts empty,
+ * cache then held. A pass the model moved under is run again without a round,
+ * and a round it moved under is dropped and its calls are asked for again.
+ * The batches of a round stop together: one that fails aborts the others, and
+ * an abort of `signal` rejects the fill with its reason, whatever the runners
+ * rejected with. The memo is the fill's own and a fresh fill starts empty,
  * so a result the cache does not keep (a timeout) runs again in the next one.
  */
 export async function evaluateFilled<T>(
@@ -163,6 +203,39 @@ export async function evaluateFilled<T>(
 		}
 	};
 
+	/**
+	 * Every batch of a round, at once. The first to fail stops the others, and the round
+	 * answers once all have ended: an abort is rejected with its reason, any other failure with
+	 * the first one.
+	 */
+	async function runRound(groups: readonly Group[]): Promise<(readonly string[])[]> {
+		const round = linked(signal);
+		const failures: unknown[] = [];
+		const outcomes = await Promise.allSettled(
+			groups.map(async ({ batch }) => {
+				try {
+					const answered = await runner(batch, round.signal);
+					if (answered.length !== batch.calls.length) {
+						throw new Error(
+							`the runner answered ${answered.length} results for ${batch.calls.length} calls`
+						);
+					}
+					finished += batch.calls.length;
+					onProgress?.(finished, stats.calls);
+					return answered;
+				} catch (error) {
+					failures.push(error);
+					round.abort(error);
+					throw error;
+				}
+			})
+		);
+		round.dispose();
+		if (signal.aborted) aborted(signal);
+		if (failures.length > 0) throw failures[0];
+		return outcomes.map((outcome) => (outcome as PromiseFulfilledResult<readonly string[]>).value);
+	}
+
 	for (;;) {
 		if (signal.aborted) aborted(signal);
 		const stamp = transitions();
@@ -179,6 +252,9 @@ export async function evaluateFilled<T>(
 			failure = { error };
 		}
 		if (signal.aborted) aborted(signal);
+		// The pass is one scan where the model cannot move under it; where it can, what it read is
+		// read again from the state it ended in.
+		if (transitions() !== stamp) continue;
 		if (missed.size === 0) {
 			if (failure !== null) throw failure.error;
 			return { value: value as T, stats };
@@ -187,19 +263,7 @@ export async function evaluateFilled<T>(
 		const groups = batchesOf(missed);
 		stats.rounds++;
 		stats.calls += missed.size;
-		const texts = await Promise.all(
-			groups.map(async ({ batch }) => {
-				const answered = await runner(batch, signal);
-				if (answered.length !== batch.calls.length) {
-					throw new Error(
-						`the runner answered ${answered.length} results for ${batch.calls.length} calls`
-					);
-				}
-				finished += batch.calls.length;
-				onProgress?.(finished, stats.calls);
-				return answered;
-			})
-		);
+		const texts = await runRound(groups);
 		if (signal.aborted) aborted(signal);
 		if (transitions() !== stamp) continue;
 		groups.forEach(({ entry, keys }, g) => {

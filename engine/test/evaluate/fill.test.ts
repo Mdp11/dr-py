@@ -17,6 +17,7 @@ import {
 	type CommittedArtifact,
 	type EvalContext,
 	type FillOptions,
+	type FillSignal,
 	type ReadParams,
 	type ReaderCall,
 	type ScriptBatch,
@@ -287,21 +288,38 @@ describe('what a fill keeps', () => {
 		expect(cache.size).toBe(1);
 	}, 60_000);
 
-	it('drops a round whose pass began before a transition that landed during the pass', async () => {
+	it('runs a pass again, with no round, when a transition landed during it', async () => {
 		const cache = new CellCache();
 		let moved = 0;
+		const seen: ScriptBatch[] = [];
 		const { stats } = await evaluateFilled(
 			async (scripts) => {
 				const answer = scripts.read(call(LEN, ['n1']));
 				if (answer.error !== null && moved === 0) moved++;
 				return shown(answer);
 			},
-			options(runnerOver(host), { cache, transitions: () => moved })
+			options(runnerOver(host, seen), { cache, transitions: () => moved })
 		);
-		// The first pass began before the move, so its round is dropped; the second began after it.
-		expect(stats.rounds).toBe(2);
+		// The first pass ended in another state than it began in: its misses are not run.
+		expect(stats).toEqual({ rounds: 1, calls: 1 });
+		expect(seen).toHaveLength(1);
 		expect(cache.size).toBe(1);
 	}, 60_000);
+
+	it('runs a pass that recorded no miss again when a transition landed during it', async () => {
+		let moved = 0;
+		let passes = 0;
+		const { value, stats } = await evaluateFilled(
+			async () => {
+				passes++;
+				if (passes === 1) moved++;
+				return passes;
+			},
+			{ ...options(async () => []), transitions: () => moved }
+		);
+		expect(value).toBe(2);
+		expect(stats).toEqual({ rounds: 0, calls: 0 });
+	});
 
 	it('forgets the memo of a state the model has left', async () => {
 		let moved = 0;
@@ -320,9 +338,9 @@ describe('what a fill keeps', () => {
 			options(runnerOver(host, seen), { transitions: () => moved })
 		);
 		expect(value).toEqual(['1', '10']);
-		// Round 2 ran `TIMES_TEN` and was dropped; the pass after it had to ask for `LEN` again.
+		// The second pass was run again in the new state, and had to ask for `LEN` again.
 		expect(passes).toBe(5);
-		expect(seen.map((batch) => batch.code)).toEqual([LEN, TIMES_TEN, LEN, TIMES_TEN]);
+		expect(seen.map((batch) => batch.code)).toEqual([LEN, LEN, TIMES_TEN]);
 	}, 60_000);
 
 	it('caps an output as the oracle’s session does', async () => {
@@ -339,6 +357,54 @@ describe('what a fill keeps', () => {
 				.stdout
 		).toBe('abcde...');
 	}, 60_000);
+});
+
+describe('a round that fails', () => {
+	const slow = (signal: FillSignal) =>
+		new Promise<never>((_resolve, reject) => {
+			const stop = () => reject(new Error('stopped'));
+			if (signal.aborted) stop();
+			else signal.addEventListener('abort', stop);
+		});
+
+	it('stops its other batches and rejects with the first failure', async () => {
+		const failure = new Error('boot failed');
+		const signals: FillSignal[] = [];
+		const runner: BatchRunner = async (batch, signal) => {
+			if (batch.code === LEN) throw failure;
+			signals.push(signal);
+			return slow(signal);
+		};
+		const rejected = await evaluateFilled(
+			async (scripts) => [
+				shown(scripts.read(call(LEN, ['n1']))),
+				shown(scripts.read(call(TIMES_TEN, ['n1'])))
+			],
+			options(runner)
+		).catch((error: unknown) => error);
+		expect(rejected).toBe(failure);
+		expect(signals.map((signal) => signal.aborted)).toEqual([true]);
+	});
+
+	it('rejects with the abort reason, not the runner’s error, and stops the other batches', async () => {
+		const controller = new AbortController();
+		const reason = new Error('stopped by the test');
+		const signals: FillSignal[] = [];
+		const runner: BatchRunner = async (batch, signal) => {
+			signals.push(signal);
+			if (signals.length === 2) controller.abort(reason);
+			return slow(signal);
+		};
+		const rejected = await evaluateFilled(
+			async (scripts) => [
+				shown(scripts.read(call(LEN, ['n1']))),
+				shown(scripts.read(call(TIMES_TEN, ['n1'])))
+			],
+			options(runner, { signal: controller.signal })
+		).catch((error: unknown) => error);
+		expect(rejected).toBe(reason);
+		expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
+	});
 });
 
 describe('a call text that is not the harness’s', () => {

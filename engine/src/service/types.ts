@@ -33,7 +33,11 @@ export type ResponseMessage =
 	| { id: string | number; ok: true; result: unknown }
 	| { id: string | number; ok: false; error: ErrorBody };
 
-export type ProgressTask = 'parse' | 'index' | 'tail' | 'verify' | 'sweep';
+/**
+ * `scripts` counts the calls the evaluations of a replica opened with `scripts: 'evaluate'` have
+ * asked the script host for, summed over every fill in flight.
+ */
+export type ProgressTask = 'parse' | 'index' | 'tail' | 'verify' | 'sweep' | 'scripts';
 
 /** The ids a transition may have changed, in the wire's names. */
 export type WireChanges = {
@@ -68,7 +72,11 @@ export type WireConflict = { batch: WireBatch; error: ErrorBody };
 
 // -- params and results, per method ------------------------------------------
 
-export type OpenParams = { project_id: string; metamodel: unknown };
+/**
+ * `scripts: 'evaluate'` has an evaluation that reaches a script run the scripts through the
+ * script host, over a cache of their results, where it would answer 501 `reaches a script`.
+ */
+export type OpenParams = { project_id: string; metamodel: unknown; scripts?: 'evaluate' };
 export type ChunkParams = { bytes: ArrayBuffer };
 export type EndResult = SnapshotHeader;
 export type AdoptParams = { batches: { id: number; ops: unknown }[] };

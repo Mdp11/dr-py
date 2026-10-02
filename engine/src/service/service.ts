@@ -2,6 +2,7 @@ import { ArtifactSet, readArtifacts, readStagedArtifacts } from '../artifacts/ar
 import { compareSteps, UploadedFile } from '../cr/compare.ts';
 import { proposeSteps, readCrs, type ChangeRequest } from '../cr/propose.ts';
 import { modelFileSteps } from '../download/model-file.ts';
+import { evaluateFilled, type ScriptReader } from '../evaluate/fill.ts';
 import { EVALUATIONS } from '../evaluate/index.ts';
 import { Metamodel } from '../metamodel/metamodel.ts';
 import type { MetamodelDoc } from '../metamodel/types.ts';
@@ -29,6 +30,7 @@ import {
 import { RulesUnreadable } from '../rules/document.ts';
 import { ruleSources } from '../rules/sources.ts';
 import { BridgeDispatcher, dumpDefault, projectRoots } from '../script/bridge.ts';
+import { CellCache } from '../script/cell-cache.ts';
 import type {
 	AbortSignalLike,
 	Bridge,
@@ -36,6 +38,7 @@ import type {
 	ScriptCall,
 	ScriptHost
 } from '../script/host.ts';
+import { deletedKeys, touchedKeys } from '../script/touched.ts';
 import { openSnapshot, type OpenedSnapshot, type SnapshotHeader } from '../snapshot/open.ts';
 import { drain, isSteps, type Steps } from '../steps/steps.ts';
 import { TableOrderCache } from '../table/order-cache.ts';
@@ -49,12 +52,12 @@ import {
 	type Candidate
 } from '../validation/candidate.ts';
 import type { Issue } from '../validation/issue.ts';
-import { LiveIssues, type SweepStep } from '../validation/live.ts';
+import { deltaEnds, deltaIds, LiveIssues, type SweepStep } from '../validation/live.ts';
 import { PatternUnusable } from '../validation/pipeline.ts';
 import { parseExact } from '../value/parse.ts';
 import { pyRepr } from '../value/repr.ts';
 import type { Value } from '../value/types.ts';
-import { readDeltaText, readTailText } from '../working/delta.ts';
+import { readDeltaText, readTailText, type Delta } from '../working/delta.ts';
 import type {
 	ChangeSet,
 	Conflict,
@@ -165,6 +168,34 @@ const REFUSED_OPS = 'reaches ops the candidate refuses';
 const NOT_READY = 'replica is not ready';
 const STALE_BATCHES = 'stale staged batches';
 const STALE_BASE = 'stale base_rev';
+
+// -- the cell cache's view of a transition -------------------------------------
+
+/**
+ * The ids a stage may remove from the state it leaves, besides what it names itself: a staged
+ * entity it deletes is known only there, where a committed one has its committed image. A merge
+ * into a staged batch replays the batches from it on, which may park one.
+ */
+function stageLeaves(wc: WorkingCopy, ops: readonly ModelOp[]): readonly string[] | null {
+	const op = ops.length === 1 ? ops[0]! : null;
+	if (op?.kind === 'update_element' || op?.kind === 'update_relationship') {
+		const at = wc.mergePoint(op);
+		if (at >= 0) return [...wc.touchedIds(at), op.id];
+	}
+	const deletes = ops.some(
+		(one) => one.kind === 'delete_element' || one.kind === 'delete_relationship'
+	);
+	return deletes ? wc.touchedIds() : null;
+}
+
+/** The ids a delta may touch in the state it leaves, as the issue store reads them: none when it moves nothing. */
+function deltaLeaves(wc: WorkingCopy, delta: Delta, own: OwnCommit | undefined) {
+	if (delta.prev_rev !== wc.rev && own === undefined) return null;
+	return [...wc.touchedIds(), ...deltaIds(delta), ...deltaEnds(delta)];
+}
+
+/** Whether a transition's error left the model as it was: a refused batch leaves no trace, nor a delta it cannot read. */
+const leftNoTrace = (error: unknown) => error instanceof OpError || error instanceof SnapshotError;
 
 // -- the boundary in -----------------------------------------------------------
 
@@ -348,20 +379,30 @@ function readScriptBatch(params: ReadParams): ScriptBatch {
 }
 
 /** What a run watches to be cancelled: the engine's sources have no DOM to name an `AbortController`. */
-function abortable(): { readonly signal: AbortSignalLike; abort(): void } {
+type Abortable = {
+	readonly signal: AbortSignalLike & { readonly reason?: unknown };
+	abort(reason?: unknown): void;
+};
+
+function abortable(): Abortable {
 	let aborted = false;
+	let why: unknown;
 	const listeners = new Set<() => void>();
 	return {
 		signal: {
 			get aborted() {
 				return aborted;
 			},
+			get reason() {
+				return why;
+			},
 			addEventListener: (_type, listener) => void listeners.add(listener),
 			removeEventListener: (_type, listener) => void listeners.delete(listener)
 		},
-		abort() {
+		abort(reason) {
 			if (aborted) return;
 			aborted = true;
+			why = reason;
 			for (const listener of [...listeners]) listener();
 		}
 	};
@@ -645,6 +686,16 @@ class Service {
 	private readonly running = new Set<() => void>();
 	// The epoch the host was last told to prewarm for.
 	private prewarmed = -1;
+	// The cells of the scripts an evaluation reads, for a replica opened with `scripts: 'evaluate'`; `null` otherwise.
+	private cells: CellCache | null = null;
+	// Moves with every transition of the replica's model and every clear of `cells`: a fill keeps what a round
+	// answered only if it has not moved since the pass that asked for it began.
+	private transitions = 0;
+	// The fills in flight, with the calls each has asked for and finished; `fillsEnded` holds those of the fills
+	// that ended while others ran, so that the sum only grows until the last one ends.
+	private readonly fills = new Set<{ done: number; total: number }>();
+	private fillsEnded = { done: 0, total: 0 };
+	private fillsPosted = { done: 0, total: 0 };
 
 	constructor(port: Port, deps: ServiceDeps) {
 		this.port = port;
@@ -711,9 +762,13 @@ class Service {
 		call.onCancel?.();
 	}
 
-	answerLater(call: Call, work: Promise<unknown>): void {
+	answerLater(
+		call: Call,
+		work: Promise<unknown>,
+		transfer?: (result: unknown) => readonly ArrayBuffer[] | undefined
+	): void {
 		this.awaiting.set(call.id, call);
-		work.then(call.answer, call.refuse);
+		work.then((result) => call.answer(result, transfer?.(result)), call.refuse);
 	}
 
 	private submit<T>(
@@ -756,6 +811,10 @@ class Service {
 	 * byte parts are transferred, not copied: nothing keeps them.
 	 */
 	evaluate(method: string, call: Call): void {
+		if (this.cells !== null) {
+			this.evaluateFilled(method, call, this.cells);
+			return;
+		}
 		this.submit<unknown>(
 			call,
 			'model',
@@ -780,6 +839,135 @@ class Service {
 			},
 			transferOf
 		);
+	}
+
+	/**
+	 * An evaluation of a replica opened with `scripts: 'evaluate'`: the scan runs as a pass of a
+	 * fill, which runs the scripts the pass could not answer and runs it again. Each pass is a scan
+	 * of the model lane, so no transition lands within one, and the fill runs between passes,
+	 * outside the scheduler: a stage or a delta lands there and the fill sees it move. The call
+	 * belongs to the replica it arrived on: that replica dropped, it is answered 409, and a cancel
+	 * stops its batches and answers nothing.
+	 */
+	private evaluateFilled(method: string, call: Call, cells: CellCache): void {
+		const cancel = abortable();
+		call.onCancel = () => cancel.abort(new Error('the call was cancelled'));
+		this.answerLater(call, this.fill(method, call, cells, this.epoch, cancel), transferOf);
+	}
+
+	private async fill(
+		method: string,
+		call: Call,
+		cells: CellCache,
+		epoch: number,
+		cancel: Abortable
+	): Promise<unknown> {
+		const mine = { done: 0, total: 0 };
+		this.fills.add(mine);
+		this.running.add(cancel.abort);
+		try {
+			const { value } = await evaluateFilled(
+				(scripts) => this.pass(method, call, epoch, scripts, cancel.signal),
+				{
+					runner: async (batch, signal) => {
+						const { results } = await this.runBatch(batch, signal, epoch);
+						return results.map(({ text }) => text);
+					},
+					signal: cancel.signal,
+					cache: cells,
+					transitions: () => this.transitions,
+					onProgress: (done, total) => {
+						mine.done = done;
+						mine.total = total;
+						this.postScripts();
+					}
+				}
+			);
+			return value;
+		} catch (error) {
+			// A replica dropped under the fill aborted it: the refusal is the one of a run on it.
+			if (this.epoch !== epoch) this.stillReady(epoch);
+			throw error;
+		} finally {
+			this.running.delete(cancel.abort);
+			this.endFill(mine);
+		}
+	}
+
+	/**
+	 * One pass of a fill: the evaluation as a model-lane scan reading through `scripts`, answered
+	 * when the scan ends. An abort takes the scan out of the lane and rejects the pass.
+	 */
+	private pass(
+		method: string,
+		call: Call,
+		epoch: number,
+		scripts: ScriptReader,
+		signal: AbortSignalLike & { readonly reason?: unknown }
+	): Promise<unknown> {
+		return new Promise((resolve, reject) => {
+			const stop = () => {
+				this.scheduler.cancel(call.id);
+				reject(signal.reason);
+			};
+			signal.addEventListener('abort', stop);
+			this.scheduler.submit(
+				call.id,
+				'model',
+				{
+					kind: 'scan',
+					run: () => {
+						this.stillReady(epoch);
+						const wc = this.ready();
+						return EVALUATIONS[method]!(
+							{
+								model: wc.model,
+								artifacts: this.artifacts,
+								placements: this.placements,
+								working: {
+									rev: wc.rev,
+									stagedVersion: wc.stagedVersion,
+									tableOrders: this.tableOrders
+								},
+								scripts
+							},
+							call.params
+						);
+					}
+				},
+				(outcome) => {
+					signal.removeEventListener('abort', stop);
+					if (outcome.ok) resolve(outcome.value);
+					else reject(outcome.error);
+				}
+			);
+		});
+	}
+
+	/** Posts the calls the fills in flight and those just ended have finished and asked for, summed. */
+	private postScripts(): void {
+		let { done, total } = this.fillsEnded;
+		for (const fill of this.fills) {
+			done += fill.done;
+			total += fill.total;
+		}
+		if (total === 0 || (done === this.fillsPosted.done && total === this.fillsPosted.total)) return;
+		this.fillsPosted = { done, total };
+		this.emit({ event: 'progress', task: 'scripts', done, total });
+	}
+
+	/** A fill is over: what it asked for counts as done, and the last one to end starts the count anew. */
+	private endFill(fill: { done: number; total: number }): void {
+		this.fills.delete(fill);
+		this.fillsEnded = {
+			done: this.fillsEnded.done + fill.total,
+			total: this.fillsEnded.total + fill.total
+		};
+		this.postScripts();
+		if (this.fills.size === 0) {
+			this.fillsEnded = { done: 0, total: 0 };
+			this.fillsPosted = { done: 0, total: 0 };
+		}
 	}
 
 	/**
@@ -867,16 +1055,30 @@ class Service {
 	 * host that failed or stopped starts over; a failed boot is refused, not kept. A `script` run
 	 * gets a dispatcher of its own that records the ops its code proposes, answered as `ops`.
 	 */
-	private async runScripts(
+	private async runScripts(batch: ScriptBatch, cancel: Abortable): Promise<ScriptCallsResult> {
+		this.ready();
+		this.running.add(cancel.abort);
+		try {
+			return await this.runBatch(batch, cancel.signal, this.epoch);
+		} finally {
+			this.running.delete(cancel.abort);
+		}
+	}
+
+	/**
+	 * One batch on the replica of `epoch`, which is stopped by `signal` or by that replica dropped.
+	 * The caller registers the abort of `signal` to be run when the replica is dropped.
+	 */
+	private async runBatch(
 		batch: ScriptBatch,
-		cancel: { readonly signal: AbortSignalLike; abort(): void }
+		signal: AbortSignalLike,
+		epoch: number
 	): Promise<ScriptCallsResult> {
+		this.stillReady(epoch);
 		const wc = this.ready();
-		const epoch = this.epoch;
 		const host = this.scriptHost();
 		const recording = batch.entry === 'script' ? new BridgeDispatcher(wc.model, true) : null;
 		const bridge = this.bridgeOf(epoch, wc, recording ?? this.sharedDispatcher(wc));
-		this.running.add(cancel.abort);
 		try {
 			// Calls waiting on one boot share it, and share its failure.
 			await host.boot();
@@ -888,7 +1090,7 @@ class Service {
 				dispatchMs: dispatch_ms,
 				bootMs: boot_ms,
 				boot
-			} = await host.run(batch, bridge, cancel.signal);
+			} = await host.run(batch, bridge, signal);
 			this.stillReady(epoch);
 			if (results.length !== batch.calls.length) {
 				throw new Refused(
@@ -912,8 +1114,6 @@ class Service {
 			// `close` disposed the host under the run.
 			if (this.scripting !== host) throw new Refused(409, 'replica closed');
 			throw error;
-		} finally {
-			this.running.delete(cancel.abort);
 		}
 	}
 
@@ -1345,6 +1545,72 @@ class Service {
 		this.progressHeld.clear();
 	}
 
+	// -- the cell cache ------------------------------------------------------
+
+	/** Empties the cell cache: what a fill in flight holds does not match the model any more. */
+	private dropCells(): void {
+		this.transitions++;
+		this.cells?.clear();
+	}
+
+	/**
+	 * Runs a transition of `wc` and evicts from the cell cache what it touched, in the keys its
+	 * calls recorded their reads in: those of the state the transition leaves, over the ids
+	 * `leaving` names, and those of the state it makes, over what it changed. An entity deleted is
+	 * read from its committed image where `leaving` did not name it. A transition that changed
+	 * nothing evicts nothing, though `transitions` moves; one that failed other than by leaving no
+	 * trace may have changed anything, so the cache is dropped. The eviction is bounded by the
+	 * cache (`CellCacheLimits.evictWork`) and the keys by the entities the transition names.
+	 */
+	private transit<T>(
+		wc: WorkingCopy,
+		leaving: () => readonly string[] | null,
+		run: () => T,
+		changesOf: (out: T) => ChangeSet
+	): T {
+		// An empty cache has nothing to evict, which is all that a replica nobody evaluates scripts on costs.
+		const cells =
+			this.state === 'ready' && this.cells !== null && this.cells.size > 0 ? this.cells : null;
+		let before: Set<string> | null = null;
+		const ids = cells === null ? null : leaving();
+		if (ids !== null) {
+			const model = wc.model;
+			before = touchedKeys(model, model.metamodel, {
+				elementIds: ids.filter((id) => model.findElement(id) !== undefined),
+				relationshipIds: ids.filter((id) => model.findRelationship(id) !== undefined)
+			});
+		}
+		let out: T;
+		try {
+			out = run();
+		} catch (error) {
+			if (!leftNoTrace(error)) this.dropCells();
+			throw error;
+		}
+		this.transitions++;
+		if (cells === null) return out;
+		const changes = changesOf(out);
+		const named =
+			changes.elementIds.length +
+			changes.relationshipIds.length +
+			changes.deletedElementIds.length +
+			changes.deletedRelationshipIds.length;
+		if (named === 0) return out;
+		const model = wc.model;
+		const keys = touchedKeys(model, model.metamodel, changes, before ?? new Set<string>());
+		deletedKeys(
+			model.metamodel,
+			{ elementIds: changes.deletedElementIds, relationshipIds: changes.deletedRelationshipIds },
+			{
+				element: (id) => wc.committedElement(id),
+				relationship: (id) => wc.committedRelationship(id)
+			},
+			keys
+		);
+		cells.evict(keys);
+		return out;
+	}
+
 	/**
 	 * After a transition: the digest check starts over when an entity or the
 	 * staged list moved, and a ready replica says what changed.
@@ -1384,6 +1650,8 @@ class Service {
 		this.nextEpoch();
 		this.progressHeld.clear();
 		this.tableOrders.clear();
+		this.dropCells();
+		this.cells = null;
 		this.scheduler.setOpen(false);
 		this.scheduler.setBackground(null);
 		this.dropIssues();
@@ -1398,6 +1666,10 @@ class Service {
 
 	open(params: ReadParams): null {
 		const projectId = text(params, 'project_id');
+		const scripts = params['scripts'];
+		if (scripts !== undefined && scripts !== 'evaluate') {
+			throw new Refused(422, "scripts must be 'evaluate'");
+		}
 		let metamodel: Metamodel;
 		try {
 			metamodel = Metamodel.fromJSON(params['metamodel'] as MetamodelDoc);
@@ -1409,6 +1681,8 @@ class Service {
 		}
 		this.discard();
 		this.failed = null;
+		// Without a host to run them, a script step is refused as it is without the option.
+		if (scripts === 'evaluate' && this.deps.scripts !== undefined) this.cells = new CellCache();
 		const opening: Opening = {
 			projectId,
 			queue: new ByteQueue(),
@@ -1521,7 +1795,12 @@ class Service {
 					run: () => {
 						if (tail.stopped || this.wc !== wc) return;
 						const version = wc.stagedVersion;
-						const { status, changes } = this.moving(wc).applyDelta(delta);
+						const { status, changes } = this.transit(
+							wc,
+							() => deltaLeaves(wc, delta, undefined),
+							() => this.moving(wc).applyDelta(delta),
+							(out) => out.changes
+						);
 						if (status === 'gap') {
 							tail.status = 'gap';
 							tail.stopped = true;
@@ -1562,7 +1841,12 @@ class Service {
 		const own = readOwn(call.params['own']);
 		this.transition(call, (wc): DeltaResult => {
 			const version = wc.stagedVersion;
-			const { status, changes } = this.moving(wc).applyDelta(delta, own);
+			const { status, changes } = this.transit(
+				wc,
+				() => deltaLeaves(wc, delta, own),
+				() => this.moving(wc).applyDelta(delta, own),
+				(out) => out.changes
+			);
 			this.changed(wc, changes, version, status === 'applied');
 			if (wc.diverged) this.diverge(wc);
 			return { status, rev: wc.rev, diverged: wc.diverged };
@@ -1601,6 +1885,7 @@ class Service {
 		this.nextEpoch();
 		this.progressHeld.clear();
 		this.tableOrders.clear();
+		this.dropCells();
 		this.scheduler.setOpen(false);
 		this.scheduler.setBackground(null);
 		this.dropIssues();
@@ -1611,7 +1896,12 @@ class Service {
 
 	stage(wc: WorkingCopy, ops: readonly ModelOp[]): StageResult {
 		const version = wc.stagedVersion;
-		const { batch, coalesced, changes } = this.moving(wc).stage(ops, { coalesce: true });
+		const { batch, coalesced, changes } = this.transit(
+			wc,
+			() => stageLeaves(wc, ops),
+			() => this.moving(wc).stage(ops, { coalesce: true }),
+			(out) => out.changes
+		);
 		this.changed(wc, changes, version);
 		const many = changes.elementIds.length + changes.relationshipIds.length > STAGE_POST_STATE_MAX;
 		const model = wc.model;
@@ -1636,7 +1926,12 @@ class Service {
 
 	unstage(wc: WorkingCopy, what: Unstage): { changes: WireChanges } {
 		const version = wc.stagedVersion;
-		const changes = this.moving(wc).unstage(what);
+		const changes = this.transit(
+			wc,
+			() => wc.touchedIds(),
+			() => this.moving(wc).unstage(what),
+			(out) => out
+		);
 		this.changed(wc, changes, version);
 		return { changes: wireChanges(changes) };
 	}

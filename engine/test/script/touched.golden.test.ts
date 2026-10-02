@@ -3,7 +3,7 @@ import type { MetamodelDoc } from '../../src/index.ts';
 import { applyBatch } from '../../src/ops/apply.ts';
 import type { ModelOp } from '../../src/ops/types.ts';
 import { readKeyText } from '../../src/script/cell-cache.ts';
-import { touchedKeys } from '../../src/script/touched.ts';
+import { deletedKeys, touchedKeys } from '../../src/script/touched.ts';
 import { loadFixture } from '../golden/load.ts';
 import { loadLines } from '../golden/model-load.ts';
 
@@ -46,5 +46,33 @@ describe('the keys a batch touches match the oracle', () => {
 		expect(oracle.size).toBe(c.keys.length);
 		for (const key of oracle) expect(touched, `${JSON.stringify(key)} is touched`).toContain(key);
 		if (!c.moves_containment) expect([...touched].toSorted()).toEqual([...oracle].toSorted());
+	});
+});
+
+describe('the keys from the state after and the before-images of what is gone match the oracle', () => {
+	it.each(fixture.cases.map((c) => [c.name, c] as const))('%s', (_name, c) => {
+		const model = freshModel();
+		const result = applyBatch(model, c.ops);
+		// What the service has after the transition: the post-state, and an image of each entity
+		// that is gone.
+		const keys = touchedKeys(model, model.metamodel, {
+			elementIds: result.changedElementIds,
+			relationshipIds: result.changedRelationshipIds
+		});
+		deletedKeys(
+			model.metamodel,
+			{
+				elementIds: result.deletedElementIds,
+				relationshipIds: result.deletedRelationshipIds
+			},
+			{
+				element: (id) => result.beforeElements.get(id) ?? null,
+				relationship: (id) => result.beforeRelationships.get(id) ?? null
+			},
+			keys
+		);
+		const oracle = new Set(c.keys.map(([tag, id]) => readKeyText([tag as 'el', id])));
+		for (const key of oracle) expect(keys, `${JSON.stringify(key)} is touched`).toContain(key);
+		if (!c.moves_containment) expect([...keys].toSorted()).toEqual([...oracle].toSorted());
 	});
 });

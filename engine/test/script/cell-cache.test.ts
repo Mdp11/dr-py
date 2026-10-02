@@ -314,6 +314,49 @@ describe('eviction by read-set', () => {
 	});
 });
 
+describe('the work an eviction may spend', () => {
+	it('drops the entries one by one while their read-sets fit the budget', () => {
+		const cache = new CellCache(limits({ evictWork: 6 }));
+		cache.put('a', reading(['el', 'x'], ['el', 'y']), '{}');
+		cache.put('b', reading(['el', 'x']), '{}');
+		cache.put('c', reading(['el', 'z']), '{}');
+		// Three for the first, two for the second.
+		expect(cache.evict(touching(['el', 'x']))).toBe(2);
+		expect(cache.size).toBe(1);
+		expect(cache.get('c')).toBeDefined();
+	});
+
+	it('clears the cache, answering what it held, when they would pass it', () => {
+		const cache = new CellCache(limits({ evictWork: 4 }));
+		cache.put('a', reading(['el', 'x'], ['el', 'y']), '{}');
+		cache.put('b', reading(['el', 'x']), '{}');
+		cache.put('c', reading(['el', 'z']), '{}');
+		expect(cache.evict(touching(['el', 'x']))).toBe(3);
+		expect(cache.size).toBe(0);
+		expect(cache.bytes).toBe(0);
+		cache.put('d', reading(['el', 'x']), '{}');
+		expect(cache.evict(touching(['el', 'x']))).toBe(1);
+	});
+
+	it('keeps the bound for entries that each read 128 keys: 700 are dropped one by one, 1,000 clear the cache', () => {
+		const keys: ReadKey[] = Array.from({ length: 128 }, (_, i) => ['el', `k${i}`]);
+		const filled = (readers: number) => {
+			const cache = new CellCache();
+			for (let i = 0; i < readers; i++) cache.put(`call ${i}`, value(keys), '{}');
+			cache.put('other', reading(['el', 'other']), '{}');
+			return cache;
+		};
+		const some = filled(700);
+		expect(some.evict(touching(['el', 'k0']))).toBe(700);
+		expect(some.size).toBe(1);
+		expect(some.get('other')).toBeDefined();
+		const many = filled(1_000);
+		expect(many.evict(touching(['el', 'k0']))).toBe(1_001);
+		expect(many.size).toBe(0);
+		expect(many.bytes).toBe(0);
+	});
+});
+
 describe('clearing', () => {
 	it('empties the cache and its byte count, and takes nothing after', () => {
 		const cache = new CellCache();

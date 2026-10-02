@@ -46,13 +46,19 @@ export type CellCacheLimits = {
 	entryBytes: number;
 	/** A read-set above this many keys is stored as "depends on everything". */
 	reads: number;
+	/**
+	 * What one `evict` may spend removing entries, in map operations: an entry costs one
+	 * and one for each key it read. A transition that would spend more clears the cache.
+	 */
+	evictWork: number;
 };
 
 export const CELL_CACHE_LIMITS: CellCacheLimits = {
 	entries: 50_000,
 	bytes: 32 * 1024 * 1024,
 	entryBytes: 64 * 1024,
-	reads: 128
+	reads: 128,
+	evictWork: 100_000
 };
 
 // What reproduces: a value, or an error the same code and state raise again.
@@ -125,13 +131,28 @@ export class CellCache {
 	/**
 	 * Drops the entries that read a key in `touched` and every entry that
 	 * depends on everything, the latter whatever `touched` holds; answers how
-	 * many went.
+	 * many went. A transition that touched nothing does not call it. Dropping
+	 * costs the entries' read-sets, which the bounds allow to be 6.4 million
+	 * map operations: one that would pass `evictWork` clears the cache instead,
+	 * which drops more and never less.
 	 */
 	evict(touched: ReadonlySet<string>): number {
+		const budget = this.limits.evictWork;
 		const doomed = new Set(this.everything);
+		let work = doomed.size;
 		for (const read of touched) {
 			const readers = this.byRead.get(read);
-			if (readers !== undefined) for (const key of readers) doomed.add(key);
+			if (readers === undefined) continue;
+			for (const key of readers) {
+				if (doomed.has(key)) continue;
+				doomed.add(key);
+				work += 1 + this.entries.get(key)!.reads!.length;
+				if (work > budget) {
+					const held = this.entries.size;
+					this.clear();
+					return held;
+				}
+			}
 		}
 		for (const key of doomed) this.remove(key);
 		return doomed.size;
