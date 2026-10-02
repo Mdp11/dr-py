@@ -390,6 +390,8 @@ function readScriptBatch(params: ReadParams): ScriptBatch {
 }
 
 /** What a run watches to be cancelled: the engine's sources have no DOM to name an `AbortController`. */
+type FillCount = { done: number; total: number; epoch: number };
+
 type Abortable = {
 	readonly signal: AbortSignalLike & { readonly reason?: unknown };
 	abort(reason?: unknown): void;
@@ -698,6 +700,8 @@ class Service {
 	private readonly running = new Set<() => void>();
 	// The epoch the host was last told to prewarm for.
 	private prewarmed = -1;
+	// The artifacts' version at the last scan that found no snippet.
+	private prewarmScanned = -1;
 	// The one cell cache: a fill that waited for a replica reads it, empty whenever no replica is in hand.
 	private readonly cellCache = new CellCache();
 	// `cellCache` where the host gave the engine a script host; `null` otherwise.
@@ -707,7 +711,7 @@ class Service {
 	private transitions = 0;
 	// The fills in flight, with the calls each has asked for and finished; `fillsEnded` holds those of the fills
 	// that ended while others ran, so that the sum only grows until the last one ends.
-	private readonly fills = new Set<{ done: number; total: number }>();
+	private readonly fills = new Set<FillCount>();
 	private fillsEnded = { done: 0, total: 0 };
 	private fillsPosted = { done: 0, total: 0 };
 
@@ -846,13 +850,14 @@ class Service {
 	}
 
 	private async fill(method: string, call: Call, cancel: Abortable): Promise<unknown> {
-		const mine = { done: 0, total: 0 };
+		const mine: FillCount = { done: 0, total: 0, epoch: -1 };
 		// The replica of the first scan: -1 until it starts. Only from then does a replica dropped stop the fill.
 		let epoch = -1;
 		const start = () => {
 			if (epoch < 0) {
 				this.ready();
 				epoch = this.epoch;
+				mine.epoch = epoch;
 				this.running.add(cancel.abort);
 			} else {
 				this.stillReady(epoch);
@@ -956,6 +961,7 @@ class Service {
 	private postScripts(): void {
 		let { done, total } = this.fillsEnded;
 		for (const fill of this.fills) {
+			if (fill.epoch >= 0 && fill.epoch !== this.epoch) continue;
 			done += fill.done;
 			total += fill.total;
 		}
@@ -966,16 +972,17 @@ class Service {
 
 	/**
 	 * A fill is over: what it asked for counts as done, and the last one to end starts the count
-	 * anew. `post` is false for a fill of a replica that was dropped: the next one's stream is not
-	 * told of it.
+	 * anew. `post` is false for a fill of a replica that was dropped: it counts in no sum of the next.
 	 */
-	private endFill(fill: { done: number; total: number }, post: boolean): void {
+	private endFill(fill: FillCount, post: boolean): void {
 		this.fills.delete(fill);
-		this.fillsEnded = {
-			done: this.fillsEnded.done + fill.total,
-			total: this.fillsEnded.total + fill.total
-		};
-		if (post) this.postScripts();
+		if (post) {
+			this.fillsEnded = {
+				done: this.fillsEnded.done + fill.total,
+				total: this.fillsEnded.total + fill.total
+			};
+			this.postScripts();
+		}
 		if (this.fills.size === 0) {
 			this.fillsEnded = { done: 0, total: 0 };
 			this.fillsPosted = { done: 0, total: 0 };
@@ -1018,6 +1025,8 @@ class Service {
 	private nextEpoch(): void {
 		this.bridged = null;
 		this.epoch++;
+		this.fillsEnded = { done: 0, total: 0 };
+		this.fillsPosted = { done: 0, total: 0 };
 		for (const abort of this.running) abort();
 	}
 
@@ -1224,14 +1233,18 @@ class Service {
 		if (
 			this.deps.prewarmScripts !== true ||
 			this.deps.scripts === undefined ||
-			this.prewarmed === this.epoch
+			this.prewarmed === this.epoch ||
+			this.artifacts.version === this.prewarmScanned
 		)
 			return;
 		if (this.state !== 'ready' || this.wc === null) return;
 		const holdsSnippet = this.artifacts
 			.ids()
 			.some((id) => this.artifacts.resolve(id)?.kind === SNIPPET_KIND);
-		if (!holdsSnippet) return;
+		if (!holdsSnippet) {
+			this.prewarmScanned = this.artifacts.version;
+			return;
+		}
 		this.prewarmed = this.epoch;
 		this.scriptHost().prewarm();
 	}

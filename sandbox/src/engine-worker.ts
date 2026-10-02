@@ -25,5 +25,9 @@ scope.addEventListener('message', (event) => {
 	if (typeof data !== 'object' || data === null || port === undefined) return;
 	if ((data as { type?: unknown }).type !== 'port') return;
 	served = true;
-	createService(portOf(port), { ...createHost().deps, scripts: browserScriptHost });
+	createService(portOf(port), {
+		...createHost().deps,
+		scripts: browserScriptHost,
+		prewarmScripts: true
+	});
 });

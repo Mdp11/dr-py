@@ -454,6 +454,35 @@ describe('progress', () => {
 		expect(scripts(client).every((event) => event.done < event.total)).toBe(true);
 	}, 60_000);
 
+	it('counts a fill of a dropped replica in no progress of the next', async () => {
+		const { client, tracker } = await evaluating();
+		const column = (code: string) => ({ kind: 'script', snippet: { definition: { code } } });
+		const sent = client.call('evaluateTable', {
+			definition: {
+				row_source: { kind: 'scope', types: ['Node'], criteria: [] },
+				columns: [
+					{ kind: 'element' },
+					column(`# spun2\ndef value(els):\n    while True:\n        pass\n`),
+					column(`# quick2\ndef value(els):\n    return str(els[0].name)\n`)
+				]
+			},
+			limit: 1
+		});
+		sent.catch(() => undefined);
+		await until(() => scripts(client).some((event) => event.done === 1 && event.total === 2));
+		const ran = tracker.ran();
+		await openReplica(client, bridgeModel(), doc);
+		await until(() => ran.every((one) => one.terminated));
+		await expect(sent).rejects.toMatchObject({ status: 409 });
+		const before = scripts(client).length;
+		await Promise.all([evaluate(client, 'n1', NAME('next')), evaluate(client, 'n2', NAME('next'))]);
+		await settle();
+		const after = scripts(client).slice(before);
+		expect(after.length).toBeGreaterThan(0);
+		expect(after.every((event) => event.total <= 2)).toBe(true);
+		expect(after.at(-1)).toMatchObject({ done: 2, total: 2 });
+	}, 60_000);
+
 	it('says nothing for an evaluation that finds every call cached', async () => {
 		const { client } = await evaluating();
 		await evaluate(client, 'n1', NAME('cached'));
@@ -1088,7 +1117,7 @@ describe('a round settled in slices', () => {
 		};
 	}
 
-	it('answers an edit staged between its slices, which evicts a cell that was put before it', async () => {
+	it('answers an edit staged during a settle after the settle, which evicts a cell that was put before it', async () => {
 		const { host, tracker, client, answered, release } = await held('mid');
 		await release();
 		let landed = false;

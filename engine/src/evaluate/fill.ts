@@ -328,9 +328,9 @@ export async function evaluateFilled<T>(
 		if (signal.aborted) aborted(signal);
 		let settled = false;
 		// A restarted job runs this afresh: the stamp is checked at every start and every resume, so
-		// a result is never kept in a state other than the one it was asked in. What an earlier run
-		// kept is in the memo, which the loop head drops once the stamp has moved, and a transition
-		// evicts it from the cache.
+		// a result is never kept in a state other than the one it was asked in. It writes memo and
+		// cache at every step, each write checked against the stamp, so an abandoned settle leaves
+		// only entries a transition evicts; the loop head drops the memo once the stamp has moved.
 		const settleRound = function* (): Steps<void> {
 			if (transitions() !== stamp) return;
 			let done = 0;

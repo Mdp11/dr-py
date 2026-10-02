@@ -4,6 +4,7 @@ import { applyBatch, type MetamodelDoc, type ModelOp } from '../../src/index.ts'
 import type { Bridge, ScriptHost, ScriptHostFactory, ScriptRun } from '../../src/script/host.ts';
 import { createPool, type WorkerSpawner } from '../../src/script/pool.ts';
 import { poolCap, spawnNodeWorker } from '../../node/script-host.ts';
+import { ArtifactSet } from '../../src/artifacts/artifact-set.ts';
 import { loadFixture } from '../golden/load.ts';
 import { loadLines } from '../golden/model-load.ts';
 import { clone, Server } from '../working/helpers.ts';
@@ -757,6 +758,34 @@ describe('prewarming the script host', () => {
 			deleted_ids: []
 		});
 		expect(counts).toEqual({ prewarm: 1, made: 1 });
+	}, 60_000);
+
+	it('skips the snippet scan while the artifacts have not moved', async () => {
+		const { counts, factory } = counting();
+		const client = connect(autoHost(), portPair(), { scripts: factory, prewarmScripts: true });
+		const artifacts = [artifact('t1', 'table')];
+		await openReplica(client, bridgeModel(), doc);
+		await client.call('setArtifacts', { artifacts });
+		const ids = ArtifactSet.prototype.ids;
+		const scan = vi.spyOn(ArtifactSet.prototype, 'ids').mockImplementation(function (
+			this: ArtifactSet
+		) {
+			if (new Error().stack?.includes('prewarmScripts')) scanned++;
+			return ids.call(this);
+		});
+		let scanned = 0;
+		try {
+			await client.call('setArtifacts', { artifacts });
+			await client.call('setArtifacts', { artifacts });
+			expect(scanned).toBe(0);
+			await client.call('setArtifacts', {
+				artifacts: [...artifacts, artifact('t2', 'table')]
+			});
+			expect(scanned).toBe(1);
+		} finally {
+			scan.mockRestore();
+		}
+		expect(counts.prewarm).toBe(0);
 	}, 60_000);
 
 	it('does not prewarm for a replica that has diverged', async () => {
