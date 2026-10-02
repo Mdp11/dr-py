@@ -126,6 +126,8 @@ from data_rover.api.schemas import (
     RuleSkipOut,
     RulesStatusOut,
     RunExportIn,
+    ScriptErrorsOut,
+    ScriptStatusOut,
     TableRowOut,
     TransformPreviewIn,
     ValidateRequest,
@@ -589,6 +591,12 @@ def _payload[M: BaseModel](cls: type[M], params: dict[str, Any]) -> M:
         raise HTTPException(status_code=422, detail=detail) from exc
 
 
+class _StillComputing(BaseModel):
+    """A recap the route answered 202: the recorder asks again."""
+
+    script_status: ScriptStatusOut
+
+
 def _read(
     session: Session,
     artifacts: Artifacts,
@@ -681,6 +689,20 @@ def _read(
                     runner=runner,
                     settings=settings,
                 )
+        case "tableScriptErrors":
+            response = table_routes.table_script_errors(
+                _payload(EvaluateTableIn, params),
+                project_id="p",
+                session=session,
+                db=_ArtifactDb(artifacts),  # type: ignore[arg-type]
+                runner=runner,
+                settings=settings,
+            )
+            if response.status_code == 202:
+                return _StillComputing(
+                    script_status=ScriptStatusOut.model_validate_json(bytes(response.body))
+                )
+            return ScriptErrorsOut.model_validate_json(bytes(response.body))
         case "previewTableJson":
             return table_routes.json_preview(
                 _payload(EvaluateTableIn, params),

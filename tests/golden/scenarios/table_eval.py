@@ -513,6 +513,14 @@ def _run_saved(artifact_id: str, **params: Any) -> dict[str, Any]:
     return read_step("evaluateTable", scripted=True, artifact_id=artifact_id, **params)
 
 
+def _recap(definition: dict[str, Any], **params: Any) -> dict[str, Any]:
+    return read_step("tableScriptErrors", scripted=True, definition=definition, **params)
+
+
+def _headed(column: dict[str, Any], header: str) -> dict[str, Any]:
+    return {**column, "header": header}
+
+
 def _preview(definition: dict[str, Any]) -> dict[str, Any]:
     return read_step("previewTableJson", scripted=True, definition=definition)
 
@@ -1075,6 +1083,38 @@ def _previews() -> list[dict[str, Any]]:
     ]
 
 
+def _recaps() -> list[dict[str, Any]]:
+    # two failing columns, one of them headed, beside one that holds
+    errors = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script(_BOOM_THIRDS),
+        _headed(_script(_BOOM), "Boom"),
+        _script(_NAME),
+    )
+    # more failures than the recap lists: the count stays whole
+    many = _table(
+        _BLOCK_ROWS, _el(), *[_script(_BOOM) for _ in range(40)], sort=[_desc(0)]
+    )
+    return [
+        _recap(_table(_BLOCK_ROWS, _el(), _script(_NAME), _script(_TAGS))),
+        _recap(_table(_BLOCK_ROWS, _el(), _prop("name"))),
+        _recap(errors),
+        _recap(errors, offset=3, limit=1),
+        # row indexes are those of the sorted grid
+        _recap({**errors, "sort": [_desc(0)]}),
+        _recap({**errors, "sort": [_desc(2)]}),
+        _recap(many),
+        _recap(_table(_BLOCK_ROWS, _el(), _script(_BOOM_THIRDS, "expand"))),
+        _recap(_table(_BLOCK_ROWS, _el(), _script(_TAGS, "expand"), _script(_BOOM))),
+        _recap(_table(_BLOCK_ROWS, _el(), _script(_SYNTAX))),
+        # a row keyed by a value, not an element
+        _recap(_table(_BLOCK_ROWS, _script(_BOOM_THIRDS, "expand", False))),
+        _recap(_table(_BLOCK_ROWS, _el(), _script({"ref": "gone"}))),
+        _recap(_table(_BLOCK_ROWS, _script({"ref": "snip"}, "expand"), _script(_BOOM))),
+    ]
+
+
 _SCRIPTED_STEPS: list[dict[str, Any]] = [
     batch(_ELEMENTS),
     batch(_RELATIONSHIPS),
@@ -1103,4 +1143,22 @@ def table_eval_scripted() -> Any:
     return {
         "metamodel": metamodel.model_dump(mode="json"),
         "steps": run_scripted(metamodel, _SCRIPTED_STEPS),
+    }
+
+
+@scenario("table_script_errors")
+def table_script_errors() -> Any:
+    metamodel = Metamodel.model_validate(_METAMODEL)
+    steps = [
+        batch(_ELEMENTS),
+        batch(_RELATIONSHIPS),
+        {"do": "artifacts", "_artifacts": _SNIPPET_ARTIFACTS},
+        *_recaps(),
+        # the model moves under the cells
+        {"do": "delete_element", "id": "id-14"},
+        _recap(_table(_BLOCK_ROWS, _el(), _script(_BOOM_THIRDS), _script(_BOOM))),
+    ]
+    return {
+        "metamodel": metamodel.model_dump(mode="json"),
+        "steps": run_scripted(metamodel, steps),
     }

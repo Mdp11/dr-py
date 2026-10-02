@@ -156,7 +156,7 @@ event     {event, …}                     engine → client, unsolicited
   Evaluations are reads over the working copy: `searchModel {target, criteria, limit,
   offset}`, `evaluateNavigation {definition | artifact_id, row_element_id, limit, offset}`,
   `evaluateTable {definition | artifact_id, offset, limit}`, `previewTableJson {definition |
-  artifact_id}` and the exports `exportTable {definition | artifact_id, format, date, project}`,
+  artifact_id}`, `tableScriptErrors {definition | artifact_id}` (`offset` and `limit` are read and ignored) and the exports `exportTable {definition | artifact_id, format, date, project}`,
   `runExporter` and `runExporterDraft` (one body: `{artifact_id | definition, name, date,
   project}`) and `previewTransform {entry, date, project}`, each resolving every artifact it names — staged ones included — before its first
   step, so an artifact call that lands between its slices changes the next call's answer, never

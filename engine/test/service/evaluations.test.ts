@@ -46,6 +46,7 @@ describe('searchModel', () => {
 			'searchModel',
 			'evaluateNavigation',
 			'evaluateTable',
+			'tableScriptErrors',
 			'exportTable',
 			'previewTableJson',
 			'previewTransform',

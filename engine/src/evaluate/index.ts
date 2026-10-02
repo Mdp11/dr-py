@@ -11,6 +11,7 @@ import { searchModel } from '../search/search-model.ts';
 import type { Steps } from '../steps/steps.ts';
 import type { TableOrderCache } from '../table/order-cache.ts';
 import { evaluateTable } from '../table/route.ts';
+import { tableScriptErrors } from '../table/script-errors.ts';
 import { validateView } from '../view/validate.ts';
 
 /**
@@ -47,6 +48,7 @@ export const EVALUATIONS: { readonly [method: string]: Evaluation } = {
 	searchModel,
 	evaluateNavigation,
 	evaluateTable,
+	tableScriptErrors,
 	exportTable,
 	previewTableJson,
 	previewTransform,

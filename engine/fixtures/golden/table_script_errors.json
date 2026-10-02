@@ -1,0 +1,4721 @@
+{
+  "metamodel": {
+    "enums": {},
+    "elements": [
+      {
+        "name": "Base",
+        "abstract": true,
+        "extends": null,
+        "properties": [
+          {
+            "name": "name",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Person",
+        "abstract": false,
+        "extends": "Base",
+        "properties": [
+          {
+            "name": "s",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Thing",
+        "abstract": true,
+        "extends": "Base",
+        "properties": [
+          {
+            "name": "s",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "i",
+            "datatype": "integer",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "f",
+            "datatype": "float",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "b",
+            "datatype": "boolean",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "d",
+            "datatype": "date",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "tags",
+            "datatype": "string",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "mixed",
+            "datatype": "string",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Block",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [
+          {
+            "name": "owner",
+            "datatype": "Person",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          },
+          {
+            "name": "parts",
+            "datatype": "Block",
+            "multiplicity": "0..*",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      },
+      {
+        "name": "Part",
+        "abstract": false,
+        "extends": "Block",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "Leaf",
+        "abstract": false,
+        "extends": "Part",
+        "properties": [],
+        "key": null
+      },
+      {
+        "name": "Gadget",
+        "abstract": false,
+        "extends": "Thing",
+        "properties": [
+          {
+            "name": "owner",
+            "datatype": "string",
+            "multiplicity": "0..1",
+            "min": null,
+            "max": null,
+            "pattern": null,
+            "max_length": null
+          }
+        ],
+        "key": null
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Links",
+        "abstract": false,
+        "extends": null,
+        "containment": false,
+        "source": "Base",
+        "target": "Base",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Base"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "SubLinks",
+        "abstract": false,
+        "extends": "Links",
+        "containment": false,
+        "source": "Base",
+        "target": "Base",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Base"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      },
+      {
+        "name": "Owns",
+        "abstract": false,
+        "extends": null,
+        "containment": true,
+        "source": "Base",
+        "target": "Base",
+        "mappings": [
+          {
+            "source": "Base",
+            "target": "Base"
+          }
+        ],
+        "source_multiplicity": "0..*",
+        "target_multiplicity": "0..*",
+        "properties": []
+      }
+    ]
+  },
+  "steps": [
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_1\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Straße\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"STRASSE\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Strasze\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_4\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ςb\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_5\",\"type_name\":\"Person\",\"properties\":{\"name\":\"σa\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_6\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ꭰx\",\"s\":\"ꭰ\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_7\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ᐁ\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_8\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ﬁle\",\"s\":\"FILE\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_9\",\"type_name\":\"Person\",\"properties\":{\"name\":\"fim\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_10\",\"type_name\":\"Person\",\"properties\":{\"name\":\"µ\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"İstanbul\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_12\",\"type_name\":\"Person\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_13\",\"type_name\":\"Block\",\"properties\":{\"name\":\"alpha\",\"s\":\"b\",\"i\":9007199254740992,\"f\":1.5,\"b\":true,\"d\":\"2024-01-01\",\"tags\":[\"x\",\"y\"],\"mixed\":[1,\"id-1\"],\"owner\":\"id-1\",\"parts\":[\"id-14\",\"id-15\",\"id-14\",\"ghost\"]},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_14\",\"type_name\":\"Block\",\"properties\":{\"name\":\"Beta\",\"i\":9007199254740993,\"f\":-0.0,\"b\":false,\"tags\":[],\"mixed\":[\"B\",2.5],\"owner\":\"id-2\",\"parts\":[\"id-13\"]},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_15\",\"type_name\":\"Part\",\"properties\":{\"name\":\"gamma\",\"s\":\"C\",\"i\":18446744073709551616,\"f\":2.0,\"tags\":[\"x\"],\"mixed\":[true,1.0],\"owner\":\"id-12\",\"parts\":[]},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_16\",\"type_name\":\"Part\",\"properties\":{\"name\":\"Delta\",\"s\":\"a\",\"i\":-3,\"tags\":[\"z\",\"x\",\"x\"],\"mixed\":\"solo\",\"owner\":\"id-99\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_17\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"epsilon\",\"i\":0,\"f\":1e+16,\"b\":true,\"tags\":[\"single\",\"x\"],\"mixed\":[null,{\"k\":1},[1,2]],\"parts\":[\"id-17\"]},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_18\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"Straße\",\"s\":\"ß\",\"tags\":[\"ß\",\"SS\"],\"owner\":\"id-2\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_19\",\"type_name\":\"Block\",\"properties\":{\"name\":\"zeta\",\"tags\":\"solo-tag\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_20\",\"type_name\":\"Part\",\"properties\":{\"name\":\"Eta\",\"s\":\"b\",\"i\":9007199254740992,\"tags\":[1,1.0,true,\"1\"],\"mixed\":[\"id-13\",\"ALPHA\"],\"owner\":\"id-6\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_21\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"theta\",\"s\":null,\"i\":100000000000000000000,\"owner\":\"id-8\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_22\",\"type_name\":\"Block\",\"properties\":{\"name\":\"iota\",\"f\":1.0,\"tags\":[\"ﬁ\",\"Ꭰ\"],\"owner\":\"id-4\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_23\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-a\",\"s\":\"b\",\"owner\":\"text owner\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_24\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"Gadget-B\",\"owner\":\"alpha\"},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_25\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-c\",\"owner\":\"id-1\",\"tags\":[\"q\"]},\"id\":null}",
+        "{\"kind\":\"create_element\",\"temp_id\":\"tmp_26\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-d\"},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_1",
+            "id-1"
+          ],
+          [
+            "tmp_2",
+            "id-2"
+          ],
+          [
+            "tmp_3",
+            "id-3"
+          ],
+          [
+            "tmp_4",
+            "id-4"
+          ],
+          [
+            "tmp_5",
+            "id-5"
+          ],
+          [
+            "tmp_6",
+            "id-6"
+          ],
+          [
+            "tmp_7",
+            "id-7"
+          ],
+          [
+            "tmp_8",
+            "id-8"
+          ],
+          [
+            "tmp_9",
+            "id-9"
+          ],
+          [
+            "tmp_10",
+            "id-10"
+          ],
+          [
+            "tmp_11",
+            "id-11"
+          ],
+          [
+            "tmp_12",
+            "id-12"
+          ],
+          [
+            "tmp_13",
+            "id-13"
+          ],
+          [
+            "tmp_14",
+            "id-14"
+          ],
+          [
+            "tmp_15",
+            "id-15"
+          ],
+          [
+            "tmp_16",
+            "id-16"
+          ],
+          [
+            "tmp_17",
+            "id-17"
+          ],
+          [
+            "tmp_18",
+            "id-18"
+          ],
+          [
+            "tmp_19",
+            "id-19"
+          ],
+          [
+            "tmp_20",
+            "id-20"
+          ],
+          [
+            "tmp_21",
+            "id-21"
+          ],
+          [
+            "tmp_22",
+            "id-22"
+          ],
+          [
+            "tmp_23",
+            "id-23"
+          ],
+          [
+            "tmp_24",
+            "id-24"
+          ],
+          [
+            "tmp_25",
+            "id-25"
+          ],
+          [
+            "tmp_26",
+            "id-26"
+          ]
+        ],
+        "changed_element_ids": [
+          "id-1",
+          "id-2",
+          "id-3",
+          "id-4",
+          "id-5",
+          "id-6",
+          "id-7",
+          "id-8",
+          "id-9",
+          "id-10",
+          "id-11",
+          "id-12",
+          "id-13",
+          "id-14",
+          "id-15",
+          "id-16",
+          "id-17",
+          "id-18",
+          "id-19",
+          "id-20",
+          "id-21",
+          "id-22",
+          "id-23",
+          "id-24",
+          "id-25",
+          "id-26"
+        ],
+        "changed_relationship_ids": [],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [
+          [
+            "id-1",
+            null
+          ],
+          [
+            "id-2",
+            null
+          ],
+          [
+            "id-3",
+            null
+          ],
+          [
+            "id-4",
+            null
+          ],
+          [
+            "id-5",
+            null
+          ],
+          [
+            "id-6",
+            null
+          ],
+          [
+            "id-7",
+            null
+          ],
+          [
+            "id-8",
+            null
+          ],
+          [
+            "id-9",
+            null
+          ],
+          [
+            "id-10",
+            null
+          ],
+          [
+            "id-11",
+            null
+          ],
+          [
+            "id-12",
+            null
+          ],
+          [
+            "id-13",
+            null
+          ],
+          [
+            "id-14",
+            null
+          ],
+          [
+            "id-15",
+            null
+          ],
+          [
+            "id-16",
+            null
+          ],
+          [
+            "id-17",
+            null
+          ],
+          [
+            "id-18",
+            null
+          ],
+          [
+            "id-19",
+            null
+          ],
+          [
+            "id-20",
+            null
+          ],
+          [
+            "id-21",
+            null
+          ],
+          [
+            "id-22",
+            null
+          ],
+          [
+            "id-23",
+            null
+          ],
+          [
+            "id-24",
+            null
+          ],
+          [
+            "id-25",
+            null
+          ],
+          [
+            "id-26",
+            null
+          ]
+        ],
+        "before_relationships": [],
+        "inverse_ops": [
+          "{\"kind\":\"delete_element\",\"id\":\"id-26\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-25\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-24\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-23\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-22\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-21\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-20\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-19\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-18\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-17\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-16\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-15\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-14\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-13\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-12\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-11\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-10\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-9\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-8\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-7\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-6\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-5\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-4\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-3\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-2\"}",
+          "{\"kind\":\"delete_element\",\"id\":\"id-1\"}"
+        ],
+        "changed_elements": [
+          "{\"id\":\"id-1\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Straße\"},\"rev\":1}",
+          "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"STRASSE\"},\"rev\":1}",
+          "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Strasze\"},\"rev\":1}",
+          "{\"id\":\"id-4\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ςb\"},\"rev\":1}",
+          "{\"id\":\"id-5\",\"type_name\":\"Person\",\"properties\":{\"name\":\"σa\"},\"rev\":1}",
+          "{\"id\":\"id-6\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ꭰx\",\"s\":\"ꭰ\"},\"rev\":2}",
+          "{\"id\":\"id-7\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ᐁ\"},\"rev\":1}",
+          "{\"id\":\"id-8\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ﬁle\",\"s\":\"FILE\"},\"rev\":2}",
+          "{\"id\":\"id-9\",\"type_name\":\"Person\",\"properties\":{\"name\":\"fim\"},\"rev\":1}",
+          "{\"id\":\"id-10\",\"type_name\":\"Person\",\"properties\":{\"name\":\"µ\"},\"rev\":1}",
+          "{\"id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"İstanbul\"},\"rev\":1}",
+          "{\"id\":\"id-12\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-13\",\"type_name\":\"Block\",\"properties\":{\"name\":\"alpha\",\"s\":\"b\",\"i\":9007199254740992,\"f\":1.5,\"b\":true,\"d\":\"2024-01-01\",\"tags\":[\"x\",\"y\"],\"mixed\":[1,\"id-1\"],\"owner\":\"id-1\",\"parts\":[\"id-14\",\"id-15\",\"id-14\",\"ghost\"]},\"rev\":10}",
+          "{\"id\":\"id-14\",\"type_name\":\"Block\",\"properties\":{\"name\":\"Beta\",\"i\":9007199254740993,\"f\":-0.0,\"b\":false,\"tags\":[],\"mixed\":[\"B\",2.5],\"owner\":\"id-2\",\"parts\":[\"id-13\"]},\"rev\":8}",
+          "{\"id\":\"id-15\",\"type_name\":\"Part\",\"properties\":{\"name\":\"gamma\",\"s\":\"C\",\"i\":18446744073709551616,\"f\":2.0,\"tags\":[\"x\"],\"mixed\":[true,1.0],\"owner\":\"id-12\",\"parts\":[]},\"rev\":8}",
+          "{\"id\":\"id-16\",\"type_name\":\"Part\",\"properties\":{\"name\":\"Delta\",\"s\":\"a\",\"i\":-3,\"tags\":[\"z\",\"x\",\"x\"],\"mixed\":\"solo\",\"owner\":\"id-99\"},\"rev\":6}",
+          "{\"id\":\"id-17\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"epsilon\",\"i\":0,\"f\":1e+16,\"b\":true,\"tags\":[\"single\",\"x\"],\"mixed\":[null,{\"k\":1},[1,2]],\"parts\":[\"id-17\"]},\"rev\":7}",
+          "{\"id\":\"id-18\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"Straße\",\"s\":\"ß\",\"tags\":[\"ß\",\"SS\"],\"owner\":\"id-2\"},\"rev\":4}",
+          "{\"id\":\"id-19\",\"type_name\":\"Block\",\"properties\":{\"name\":\"zeta\",\"tags\":\"solo-tag\"},\"rev\":2}",
+          "{\"id\":\"id-20\",\"type_name\":\"Part\",\"properties\":{\"name\":\"Eta\",\"s\":\"b\",\"i\":9007199254740992,\"tags\":[1,1.0,true,\"1\"],\"mixed\":[\"id-13\",\"ALPHA\"],\"owner\":\"id-6\"},\"rev\":6}",
+          "{\"id\":\"id-21\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"theta\",\"s\":null,\"i\":100000000000000000000,\"owner\":\"id-8\"},\"rev\":4}",
+          "{\"id\":\"id-22\",\"type_name\":\"Block\",\"properties\":{\"name\":\"iota\",\"f\":1.0,\"tags\":[\"ﬁ\",\"Ꭰ\"],\"owner\":\"id-4\"},\"rev\":4}",
+          "{\"id\":\"id-23\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-a\",\"s\":\"b\",\"owner\":\"text owner\"},\"rev\":3}",
+          "{\"id\":\"id-24\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"Gadget-B\",\"owner\":\"alpha\"},\"rev\":2}",
+          "{\"id\":\"id-25\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-c\",\"owner\":\"id-1\",\"tags\":[\"q\"]},\"rev\":3}",
+          "{\"id\":\"id-26\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-d\"},\"rev\":1}"
+        ],
+        "changed_relationships": []
+      },
+      "error": null,
+      "digest": "a34b43ddd32b5735",
+      "fingerprint": "0cc19b72a8fa180d",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Straße\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"STRASSE\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Strasze\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ςb\"},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Person\",\"properties\":{\"name\":\"σa\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ꭰx\",\"s\":\"ꭰ\"},\"rev\":2}",
+        "{\"id\":\"id-7\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ᐁ\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ﬁle\",\"s\":\"FILE\"},\"rev\":2}",
+        "{\"id\":\"id-9\",\"type_name\":\"Person\",\"properties\":{\"name\":\"fim\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Person\",\"properties\":{\"name\":\"µ\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"İstanbul\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-13\",\"type_name\":\"Block\",\"properties\":{\"name\":\"alpha\",\"s\":\"b\",\"i\":9007199254740992,\"f\":1.5,\"b\":true,\"d\":\"2024-01-01\",\"tags\":[\"x\",\"y\"],\"mixed\":[1,\"id-1\"],\"owner\":\"id-1\",\"parts\":[\"id-14\",\"id-15\",\"id-14\",\"ghost\"]},\"rev\":10}",
+        "{\"id\":\"id-14\",\"type_name\":\"Block\",\"properties\":{\"name\":\"Beta\",\"i\":9007199254740993,\"f\":-0.0,\"b\":false,\"tags\":[],\"mixed\":[\"B\",2.5],\"owner\":\"id-2\",\"parts\":[\"id-13\"]},\"rev\":8}",
+        "{\"id\":\"id-15\",\"type_name\":\"Part\",\"properties\":{\"name\":\"gamma\",\"s\":\"C\",\"i\":18446744073709551616,\"f\":2.0,\"tags\":[\"x\"],\"mixed\":[true,1.0],\"owner\":\"id-12\",\"parts\":[]},\"rev\":8}",
+        "{\"id\":\"id-16\",\"type_name\":\"Part\",\"properties\":{\"name\":\"Delta\",\"s\":\"a\",\"i\":-3,\"tags\":[\"z\",\"x\",\"x\"],\"mixed\":\"solo\",\"owner\":\"id-99\"},\"rev\":6}",
+        "{\"id\":\"id-17\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"epsilon\",\"i\":0,\"f\":1e+16,\"b\":true,\"tags\":[\"single\",\"x\"],\"mixed\":[null,{\"k\":1},[1,2]],\"parts\":[\"id-17\"]},\"rev\":7}",
+        "{\"id\":\"id-18\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"Straße\",\"s\":\"ß\",\"tags\":[\"ß\",\"SS\"],\"owner\":\"id-2\"},\"rev\":4}",
+        "{\"id\":\"id-19\",\"type_name\":\"Block\",\"properties\":{\"name\":\"zeta\",\"tags\":\"solo-tag\"},\"rev\":2}",
+        "{\"id\":\"id-20\",\"type_name\":\"Part\",\"properties\":{\"name\":\"Eta\",\"s\":\"b\",\"i\":9007199254740992,\"tags\":[1,1.0,true,\"1\"],\"mixed\":[\"id-13\",\"ALPHA\"],\"owner\":\"id-6\"},\"rev\":6}",
+        "{\"id\":\"id-21\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"theta\",\"s\":null,\"i\":100000000000000000000,\"owner\":\"id-8\"},\"rev\":4}",
+        "{\"id\":\"id-22\",\"type_name\":\"Block\",\"properties\":{\"name\":\"iota\",\"f\":1.0,\"tags\":[\"ﬁ\",\"Ꭰ\"],\"owner\":\"id-4\"},\"rev\":4}",
+        "{\"id\":\"id-23\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-a\",\"s\":\"b\",\"owner\":\"text owner\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"Gadget-B\",\"owner\":\"alpha\"},\"rev\":2}",
+        "{\"id\":\"id-25\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-c\",\"owner\":\"id-1\",\"tags\":[\"q\"]},\"rev\":3}",
+        "{\"id\":\"id-26\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-d\"},\"rev\":1}"
+      ],
+      "indexes": "{\"by_type\":[[\"Block\",[\"id-13\",\"id-14\",\"id-19\",\"id-22\"]],[\"Gadget\",[\"id-23\",\"id-24\",\"id-25\",\"id-26\"]],[\"Leaf\",[\"id-17\",\"id-18\",\"id-21\"]],[\"Part\",[\"id-15\",\"id-16\",\"id-20\"]],[\"Person\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[],\"in\":[],\"out_count\":[],\"in_count\":[],\"parents\":[],\"refs\":[[\"id-13\",[\"ghost\",\"id-1\",\"id-14\",\"id-15\"]],[\"id-14\",[\"id-13\",\"id-2\"]],[\"id-15\",[\"id-12\"]],[\"id-16\",[\"id-99\"]],[\"id-17\",[\"id-17\"]],[\"id-18\",[\"id-2\"]],[\"id-20\",[\"id-6\"]],[\"id-21\",[\"id-8\"]],[\"id-22\",[\"id-4\"]]],\"referencers\":[[\"ghost\",[\"id-13\"]],[\"id-1\",[\"id-13\"]],[\"id-12\",[\"id-15\"]],[\"id-13\",[\"id-14\"]],[\"id-14\",[\"id-13\"]],[\"id-15\",[\"id-13\"]],[\"id-17\",[\"id-17\"]],[\"id-2\",[\"id-14\",\"id-18\"]],[\"id-4\",[\"id-22\"]],[\"id-6\",[\"id-20\"]],[\"id-8\",[\"id-21\"]],[\"id-99\",[\"id-16\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-14\"],[\"id-15\"],[\"id-16\"],[\"id-17\"],[\"id-18\"],[\"id-19\"],[\"id-2\"],[\"id-20\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"Beta\",\"id-14\"],[\"Delta\",\"id-16\"],[\"Eta\",\"id-20\"],[\"Gadget-B\",\"id-24\"],[\"STRASSE\",\"id-2\"],[\"Strasze\",\"id-3\"],[\"Straße\",\"id-1\"],[\"Straße\",\"id-18\"],[\"alpha\",\"id-13\"],[\"epsilon\",\"id-17\"],[\"fim\",\"id-9\"],[\"gadget-a\",\"id-23\"],[\"gadget-c\",\"id-25\"],[\"gadget-d\",\"id-26\"],[\"gamma\",\"id-15\"],[\"id-12\",\"id-12\"],[\"iota\",\"id-22\"],[\"theta\",\"id-21\"],[\"zeta\",\"id-19\"],[\"µ\",\"id-10\"],[\"İstanbul\",\"id-11\"],[\"ςb\",\"id-4\"],[\"σa\",\"id-5\"],[\"Ꭰx\",\"id-6\"],[\"ᐁ\",\"id-7\"],[\"ﬁle\",\"id-8\"]]}"
+    },
+    {
+      "do": "batch",
+      "ops": [
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r0\",\"type_name\":\"Links\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r1\",\"type_name\":\"SubLinks\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r2\",\"type_name\":\"Links\",\"source_id\":\"id-14\",\"target_id\":\"id-15\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r3\",\"type_name\":\"Links\",\"source_id\":\"id-15\",\"target_id\":\"id-16\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r4\",\"type_name\":\"Links\",\"source_id\":\"id-16\",\"target_id\":\"id-17\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r5\",\"type_name\":\"SubLinks\",\"source_id\":\"id-17\",\"target_id\":\"id-13\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r6\",\"type_name\":\"Links\",\"source_id\":\"id-18\",\"target_id\":\"id-18\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r7\",\"type_name\":\"SubLinks\",\"source_id\":\"id-19\",\"target_id\":\"id-19\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r8\",\"type_name\":\"Links\",\"source_id\":\"id-20\",\"target_id\":\"id-13\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r9\",\"type_name\":\"Links\",\"source_id\":\"id-20\",\"target_id\":\"id-14\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r10\",\"type_name\":\"SubLinks\",\"source_id\":\"id-21\",\"target_id\":\"id-20\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r11\",\"type_name\":\"Links\",\"source_id\":\"id-13\",\"target_id\":\"id-1\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r12\",\"type_name\":\"Links\",\"source_id\":\"id-14\",\"target_id\":\"id-2\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r13\",\"type_name\":\"Links\",\"source_id\":\"id-15\",\"target_id\":\"id-1\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r14\",\"type_name\":\"Links\",\"source_id\":\"id-16\",\"target_id\":\"id-3\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r15\",\"type_name\":\"Links\",\"source_id\":\"id-23\",\"target_id\":\"id-13\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r16\",\"type_name\":\"Links\",\"source_id\":\"id-24\",\"target_id\":\"id-23\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r17\",\"type_name\":\"Links\",\"source_id\":\"id-5\",\"target_id\":\"id-13\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r18\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-18\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r19\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-19\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r20\",\"type_name\":\"Owns\",\"source_id\":\"id-20\",\"target_id\":\"id-21\",\"properties\":{},\"id\":null}",
+        "{\"kind\":\"create_relationship\",\"temp_id\":\"tmp_r21\",\"type_name\":\"Owns\",\"source_id\":\"id-23\",\"target_id\":\"id-24\",\"properties\":{},\"id\":null}"
+      ],
+      "result": {
+        "id_map": [
+          [
+            "tmp_r0",
+            "id-27"
+          ],
+          [
+            "tmp_r1",
+            "id-28"
+          ],
+          [
+            "tmp_r2",
+            "id-29"
+          ],
+          [
+            "tmp_r3",
+            "id-30"
+          ],
+          [
+            "tmp_r4",
+            "id-31"
+          ],
+          [
+            "tmp_r5",
+            "id-32"
+          ],
+          [
+            "tmp_r6",
+            "id-33"
+          ],
+          [
+            "tmp_r7",
+            "id-34"
+          ],
+          [
+            "tmp_r8",
+            "id-35"
+          ],
+          [
+            "tmp_r9",
+            "id-36"
+          ],
+          [
+            "tmp_r10",
+            "id-37"
+          ],
+          [
+            "tmp_r11",
+            "id-38"
+          ],
+          [
+            "tmp_r12",
+            "id-39"
+          ],
+          [
+            "tmp_r13",
+            "id-40"
+          ],
+          [
+            "tmp_r14",
+            "id-41"
+          ],
+          [
+            "tmp_r15",
+            "id-42"
+          ],
+          [
+            "tmp_r16",
+            "id-43"
+          ],
+          [
+            "tmp_r17",
+            "id-44"
+          ],
+          [
+            "tmp_r18",
+            "id-45"
+          ],
+          [
+            "tmp_r19",
+            "id-46"
+          ],
+          [
+            "tmp_r20",
+            "id-47"
+          ],
+          [
+            "tmp_r21",
+            "id-48"
+          ]
+        ],
+        "changed_element_ids": [],
+        "changed_relationship_ids": [
+          "id-27",
+          "id-28",
+          "id-29",
+          "id-30",
+          "id-31",
+          "id-32",
+          "id-33",
+          "id-34",
+          "id-35",
+          "id-36",
+          "id-37",
+          "id-38",
+          "id-39",
+          "id-40",
+          "id-41",
+          "id-42",
+          "id-43",
+          "id-44",
+          "id-45",
+          "id-46",
+          "id-47",
+          "id-48"
+        ],
+        "deleted_element_ids": [],
+        "deleted_relationship_ids": [],
+        "recreated_element_ids": [],
+        "recreated_relationship_ids": [],
+        "before_elements": [],
+        "before_relationships": [
+          [
+            "id-27",
+            null
+          ],
+          [
+            "id-28",
+            null
+          ],
+          [
+            "id-29",
+            null
+          ],
+          [
+            "id-30",
+            null
+          ],
+          [
+            "id-31",
+            null
+          ],
+          [
+            "id-32",
+            null
+          ],
+          [
+            "id-33",
+            null
+          ],
+          [
+            "id-34",
+            null
+          ],
+          [
+            "id-35",
+            null
+          ],
+          [
+            "id-36",
+            null
+          ],
+          [
+            "id-37",
+            null
+          ],
+          [
+            "id-38",
+            null
+          ],
+          [
+            "id-39",
+            null
+          ],
+          [
+            "id-40",
+            null
+          ],
+          [
+            "id-41",
+            null
+          ],
+          [
+            "id-42",
+            null
+          ],
+          [
+            "id-43",
+            null
+          ],
+          [
+            "id-44",
+            null
+          ],
+          [
+            "id-45",
+            null
+          ],
+          [
+            "id-46",
+            null
+          ],
+          [
+            "id-47",
+            null
+          ],
+          [
+            "id-48",
+            null
+          ]
+        ],
+        "inverse_ops": [
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-48\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-47\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-46\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-45\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-44\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-43\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-42\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-41\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-40\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-39\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-38\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-37\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-36\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-35\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-34\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-33\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-32\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-31\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-30\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-29\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-28\"}",
+          "{\"kind\":\"delete_relationship\",\"id\":\"id-27\"}"
+        ],
+        "changed_elements": [],
+        "changed_relationships": [
+          "{\"id\":\"id-27\",\"type_name\":\"Links\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-28\",\"type_name\":\"SubLinks\",\"source_id\":\"id-13\",\"target_id\":\"id-14\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-29\",\"type_name\":\"Links\",\"source_id\":\"id-14\",\"target_id\":\"id-15\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-30\",\"type_name\":\"Links\",\"source_id\":\"id-15\",\"target_id\":\"id-16\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-31\",\"type_name\":\"Links\",\"source_id\":\"id-16\",\"target_id\":\"id-17\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-32\",\"type_name\":\"SubLinks\",\"source_id\":\"id-17\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-33\",\"type_name\":\"Links\",\"source_id\":\"id-18\",\"target_id\":\"id-18\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-34\",\"type_name\":\"SubLinks\",\"source_id\":\"id-19\",\"target_id\":\"id-19\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-35\",\"type_name\":\"Links\",\"source_id\":\"id-20\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-36\",\"type_name\":\"Links\",\"source_id\":\"id-20\",\"target_id\":\"id-14\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-37\",\"type_name\":\"SubLinks\",\"source_id\":\"id-21\",\"target_id\":\"id-20\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-38\",\"type_name\":\"Links\",\"source_id\":\"id-13\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-39\",\"type_name\":\"Links\",\"source_id\":\"id-14\",\"target_id\":\"id-2\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-40\",\"type_name\":\"Links\",\"source_id\":\"id-15\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-41\",\"type_name\":\"Links\",\"source_id\":\"id-16\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-42\",\"type_name\":\"Links\",\"source_id\":\"id-23\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-43\",\"type_name\":\"Links\",\"source_id\":\"id-24\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-44\",\"type_name\":\"Links\",\"source_id\":\"id-5\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-45\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-18\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-46\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-19\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-47\",\"type_name\":\"Owns\",\"source_id\":\"id-20\",\"target_id\":\"id-21\",\"properties\":{},\"rev\":0}",
+          "{\"id\":\"id-48\",\"type_name\":\"Owns\",\"source_id\":\"id-23\",\"target_id\":\"id-24\",\"properties\":{},\"rev\":0}"
+        ]
+      },
+      "error": null,
+      "digest": "081aec22507f9c39",
+      "fingerprint": "8f4916c414ef7cc3"
+    },
+    {
+      "do": "artifacts",
+      "artifacts": {
+        "snip": {
+          "kind": "code_snippet",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "code",
+                {
+                  "t": "str",
+                  "v": "def value(els):\n    return els[0].name\n"
+                }
+              ]
+            ]
+          }
+        },
+        "inputs": {
+          "kind": "code_snippet",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "code",
+                {
+                  "t": "str",
+                  "v": "def value(els, inputs):\n    return \"<\" + \",\".join(str(x) for x in inputs[\"a\"]) + \">\"\n"
+                }
+              ]
+            ]
+          }
+        },
+        "hop": {
+          "kind": "code_snippet",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "code",
+                {
+                  "t": "str",
+                  "v": "def step(el):\n    return [r.destination().id for r in el.outgoing(stereotype=\"Links\")]\n"
+                }
+              ]
+            ]
+          }
+        },
+        "one_arg": {
+          "kind": "code_snippet",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "code",
+                {
+                  "t": "str",
+                  "v": "def value(els):\n    return len(els)\n"
+                }
+              ]
+            ]
+          }
+        },
+        "two_args": {
+          "kind": "code_snippet",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "code",
+                {
+                  "t": "str",
+                  "v": "def value(els, inputs):\n    return len(inputs)\n"
+                }
+              ]
+            ]
+          }
+        },
+        "not_a_snippet": {
+          "kind": "navigation",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "kind",
+                {
+                  "t": "str",
+                  "v": "path"
+                }
+              ],
+              [
+                "start",
+                {
+                  "t": "dict",
+                  "v": [
+                    [
+                      "kind",
+                      {
+                        "t": "str",
+                        "v": "scope"
+                      }
+                    ],
+                    [
+                      "types",
+                      {
+                        "t": "list",
+                        "v": [
+                          {
+                            "t": "str",
+                            "v": "Block"
+                          }
+                        ]
+                      }
+                    ]
+                  ]
+                }
+              ],
+              [
+                "steps",
+                {
+                  "t": "list",
+                  "v": []
+                }
+              ]
+            ]
+          }
+        },
+        "saved": {
+          "kind": "table",
+          "payload": {
+            "t": "dict",
+            "v": [
+              [
+                "row_source",
+                {
+                  "t": "dict",
+                  "v": [
+                    [
+                      "kind",
+                      {
+                        "t": "str",
+                        "v": "scope"
+                      }
+                    ],
+                    [
+                      "types",
+                      {
+                        "t": "list",
+                        "v": [
+                          {
+                            "t": "str",
+                            "v": "Block"
+                          }
+                        ]
+                      }
+                    ]
+                  ]
+                }
+              ],
+              [
+                "columns",
+                {
+                  "t": "list",
+                  "v": [
+                    {
+                      "t": "dict",
+                      "v": [
+                        [
+                          "kind",
+                          {
+                            "t": "str",
+                            "v": "element"
+                          }
+                        ]
+                      ]
+                    },
+                    {
+                      "t": "dict",
+                      "v": [
+                        [
+                          "kind",
+                          {
+                            "t": "str",
+                            "v": "script"
+                          }
+                        ],
+                        [
+                          "snippet",
+                          {
+                            "t": "dict",
+                            "v": [
+                              [
+                                "ref",
+                                {
+                                  "t": "str",
+                                  "v": "snip"
+                                }
+                              ]
+                            ]
+                          }
+                        ]
+                      ]
+                    },
+                    {
+                      "t": "dict",
+                      "v": [
+                        [
+                          "kind",
+                          {
+                            "t": "str",
+                            "v": "script"
+                          }
+                        ],
+                        [
+                          "snippet",
+                          {
+                            "t": "dict",
+                            "v": [
+                              [
+                                "ref",
+                                {
+                                  "t": "str",
+                                  "v": "snip"
+                                }
+                              ]
+                            ]
+                          }
+                        ],
+                        [
+                          "mode",
+                          {
+                            "t": "str",
+                            "v": "expand"
+                          }
+                        ],
+                        [
+                          "keep_empty",
+                          {
+                            "t": "bool",
+                            "v": false
+                          }
+                        ]
+                      ]
+                    }
+                  ]
+                }
+              ],
+              [
+                "sort",
+                {
+                  "t": "list",
+                  "v": [
+                    {
+                      "t": "dict",
+                      "v": [
+                        [
+                          "column",
+                          {
+                            "t": "int",
+                            "v": "1"
+                          }
+                        ],
+                        [
+                          "direction",
+                          {
+                            "t": "str",
+                            "v": "desc"
+                          }
+                        ]
+                      ]
+                    },
+                    {
+                      "t": "dict",
+                      "v": [
+                        [
+                          "column",
+                          {
+                            "t": "int",
+                            "v": "0"
+                          }
+                        ]
+                      ]
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      },
+      "result": null,
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    return els[0].name\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    return els[0].get(\"tags\") or []\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [],
+        "total_errors": 0,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "property",
+              "name": "name"
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [],
+        "total_errors": 0,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    if int(els[0].id.split(\"-\")[1]) % 3 == 0:\n        raise KeyError(els[0].id)\n    return els[0].name\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              },
+              "header": "Boom"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    return els[0].name\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-13"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-14",
+            "row_label": "Beta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-14"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-15'"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-17"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-18'"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-21'"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 9,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-22"
+          }
+        ],
+        "total_errors": 13,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    if int(els[0].id.split(\"-\")[1]) % 3 == 0:\n        raise KeyError(els[0].id)\n    return els[0].name\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              },
+              "header": "Boom"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    return els[0].name\n"
+                }
+              }
+            }
+          ]
+        },
+        "offset": 3,
+        "limit": 1
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-13"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-14",
+            "row_label": "Beta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-14"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-15'"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-17"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-18'"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-21'"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 9,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-22"
+          }
+        ],
+        "total_errors": 13,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    if int(els[0].id.split(\"-\")[1]) % 3 == 0:\n        raise KeyError(els[0].id)\n    return els[0].name\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              },
+              "header": "Boom"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    return els[0].name\n"
+                }
+              }
+            }
+          ],
+          "sort": [
+            {
+              "column": 0,
+              "direction": "desc"
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-21'"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-18'"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-15'"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-17"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-14",
+            "row_label": "Beta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-14"
+          },
+          {
+            "row_index": 9,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-13"
+          }
+        ],
+        "total_errors": 13,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    if int(els[0].id.split(\"-\")[1]) % 3 == 0:\n        raise KeyError(els[0].id)\n    return els[0].name\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              },
+              "header": "Boom"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    return els[0].name\n"
+                }
+              }
+            }
+          ],
+          "sort": [
+            {
+              "column": 2,
+              "direction": "desc"
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-13"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-14",
+            "row_label": "Beta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-14"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-15'"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-17"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-18'"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-21'"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 9,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 2,
+            "column_label": "Boom",
+            "message": "ValueError: boom id-22"
+          }
+        ],
+        "total_errors": 13,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            }
+          ],
+          "sort": [
+            {
+              "column": 0,
+              "direction": "desc"
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 3,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 4,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 5,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 6,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 7,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 8,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 9,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 10,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 11,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 12,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 13,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 14,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 15,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 16,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 17,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 18,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 19,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 20,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 21,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 22,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 23,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 24,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 25,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 26,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 27,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 28,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 29,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 30,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 31,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 32,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 33,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 34,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 35,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 36,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 37,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 38,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 39,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 0,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 40,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 3,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 4,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 5,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 6,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 7,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 8,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 9,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 10,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 11,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 12,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 13,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 14,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 15,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 16,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 17,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 18,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 19,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 20,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 21,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 22,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 23,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 24,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 25,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 26,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 27,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 28,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 29,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 30,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 31,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 32,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 33,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 34,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 35,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 36,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 37,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 38,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 39,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 40,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 3,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 4,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 5,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 6,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 7,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 8,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 9,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 10,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 11,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 12,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 13,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 14,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 15,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 16,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 17,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 18,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 19,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 20,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 21,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 22,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 23,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 24,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 25,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 26,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 27,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 28,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 29,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 30,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 31,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 32,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 33,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 34,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 35,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 36,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 37,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 38,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 39,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 40,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 3,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 4,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 5,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 6,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 7,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 8,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 9,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 10,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 11,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 12,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 13,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 14,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 15,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 16,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 17,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 18,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 19,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 20,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 21,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 22,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 23,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 24,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 25,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 26,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 27,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 28,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 29,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 30,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 31,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 32,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 33,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 34,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 35,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 36,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 37,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 38,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 39,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 40,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 3,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 4,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 5,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 6,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 7,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 8,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 9,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 10,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 11,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 12,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 13,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 14,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 15,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 16,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 17,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 18,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 19,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 20,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 21,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 22,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 23,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 24,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 25,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 26,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 27,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 28,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 29,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 30,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 31,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 32,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 33,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 34,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 35,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 36,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 37,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 38,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 39,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 40,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          }
+        ],
+        "total_errors": 400,
+        "truncated": true
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    if int(els[0].id.split(\"-\")[1]) % 3 == 0:\n        raise KeyError(els[0].id)\n    return els[0].name\n"
+                }
+              },
+              "mode": "expand"
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-15'"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-18'"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-21'"
+          }
+        ],
+        "total_errors": 3,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    return els[0].get(\"tags\") or []\n"
+                }
+              },
+              "mode": "expand"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-13"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-13"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-14",
+            "row_label": "Beta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-14"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-17"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-17"
+          },
+          {
+            "row_index": 9,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 10,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 11,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 12,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 13,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 14,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 15,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 16,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 17,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          },
+          {
+            "row_index": 18,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          }
+        ],
+        "total_errors": 19,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els:\n    return 1\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-14",
+            "row_label": "Beta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          },
+          {
+            "row_index": 9,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "'(' was never closed (<snippet>, line 1)"
+          }
+        ],
+        "total_errors": 10,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    if int(els[0].id.split(\"-\")[1]) % 3 == 0:\n        raise KeyError(els[0].id)\n    return els[0].name\n"
+                }
+              },
+              "mode": "expand",
+              "keep_empty": false
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 0,
+            "column_label": "script",
+            "message": "KeyError: 'id-15'"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 0,
+            "column_label": "script",
+            "message": "KeyError: 'id-18'"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 0,
+            "column_label": "script",
+            "message": "KeyError: 'id-21'"
+          }
+        ],
+        "total_errors": 3,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "ref": "gone"
+              }
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-14",
+            "row_label": "Beta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          },
+          {
+            "row_index": 9,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "snippet artifact 'gone' not found"
+          }
+        ],
+        "total_errors": 10,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "script",
+              "snippet": {
+                "ref": "snip"
+              },
+              "mode": "expand"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-13"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-14",
+            "row_label": "Beta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-14"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-17"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 9,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          }
+        ],
+        "total_errors": 10,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    },
+    {
+      "do": "delete_element",
+      "id": "id-14",
+      "result": null,
+      "error": null,
+      "digest": "71058359728a7825",
+      "fingerprint": "269f97fac1e2e902",
+      "state": [
+        "{\"id\":\"id-1\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Straße\"},\"rev\":1}",
+        "{\"id\":\"id-2\",\"type_name\":\"Person\",\"properties\":{\"name\":\"STRASSE\"},\"rev\":1}",
+        "{\"id\":\"id-3\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Strasze\"},\"rev\":1}",
+        "{\"id\":\"id-4\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ςb\"},\"rev\":1}",
+        "{\"id\":\"id-5\",\"type_name\":\"Person\",\"properties\":{\"name\":\"σa\"},\"rev\":1}",
+        "{\"id\":\"id-6\",\"type_name\":\"Person\",\"properties\":{\"name\":\"Ꭰx\",\"s\":\"ꭰ\"},\"rev\":2}",
+        "{\"id\":\"id-7\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ᐁ\"},\"rev\":1}",
+        "{\"id\":\"id-8\",\"type_name\":\"Person\",\"properties\":{\"name\":\"ﬁle\",\"s\":\"FILE\"},\"rev\":2}",
+        "{\"id\":\"id-9\",\"type_name\":\"Person\",\"properties\":{\"name\":\"fim\"},\"rev\":1}",
+        "{\"id\":\"id-10\",\"type_name\":\"Person\",\"properties\":{\"name\":\"µ\"},\"rev\":1}",
+        "{\"id\":\"id-11\",\"type_name\":\"Person\",\"properties\":{\"name\":\"İstanbul\"},\"rev\":1}",
+        "{\"id\":\"id-12\",\"type_name\":\"Person\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-13\",\"type_name\":\"Block\",\"properties\":{\"name\":\"alpha\",\"s\":\"b\",\"i\":9007199254740992,\"f\":1.5,\"b\":true,\"d\":\"2024-01-01\",\"tags\":[\"x\",\"y\"],\"mixed\":[1,\"id-1\"],\"owner\":\"id-1\",\"parts\":[\"id-14\",\"id-15\",\"id-14\",\"ghost\"]},\"rev\":10}",
+        "{\"id\":\"id-15\",\"type_name\":\"Part\",\"properties\":{\"name\":\"gamma\",\"s\":\"C\",\"i\":18446744073709551616,\"f\":2.0,\"tags\":[\"x\"],\"mixed\":[true,1.0],\"owner\":\"id-12\",\"parts\":[]},\"rev\":8}",
+        "{\"id\":\"id-16\",\"type_name\":\"Part\",\"properties\":{\"name\":\"Delta\",\"s\":\"a\",\"i\":-3,\"tags\":[\"z\",\"x\",\"x\"],\"mixed\":\"solo\",\"owner\":\"id-99\"},\"rev\":6}",
+        "{\"id\":\"id-17\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"epsilon\",\"i\":0,\"f\":1e+16,\"b\":true,\"tags\":[\"single\",\"x\"],\"mixed\":[null,{\"k\":1},[1,2]],\"parts\":[\"id-17\"]},\"rev\":7}",
+        "{\"id\":\"id-18\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"Straße\",\"s\":\"ß\",\"tags\":[\"ß\",\"SS\"],\"owner\":\"id-2\"},\"rev\":4}",
+        "{\"id\":\"id-19\",\"type_name\":\"Block\",\"properties\":{\"name\":\"zeta\",\"tags\":\"solo-tag\"},\"rev\":2}",
+        "{\"id\":\"id-20\",\"type_name\":\"Part\",\"properties\":{\"name\":\"Eta\",\"s\":\"b\",\"i\":9007199254740992,\"tags\":[1,1.0,true,\"1\"],\"mixed\":[\"id-13\",\"ALPHA\"],\"owner\":\"id-6\"},\"rev\":6}",
+        "{\"id\":\"id-21\",\"type_name\":\"Leaf\",\"properties\":{\"name\":\"theta\",\"s\":null,\"i\":100000000000000000000,\"owner\":\"id-8\"},\"rev\":4}",
+        "{\"id\":\"id-22\",\"type_name\":\"Block\",\"properties\":{\"name\":\"iota\",\"f\":1.0,\"tags\":[\"ﬁ\",\"Ꭰ\"],\"owner\":\"id-4\"},\"rev\":4}",
+        "{\"id\":\"id-23\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-a\",\"s\":\"b\",\"owner\":\"text owner\"},\"rev\":3}",
+        "{\"id\":\"id-24\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"Gadget-B\",\"owner\":\"alpha\"},\"rev\":2}",
+        "{\"id\":\"id-25\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-c\",\"owner\":\"id-1\",\"tags\":[\"q\"]},\"rev\":3}",
+        "{\"id\":\"id-26\",\"type_name\":\"Gadget\",\"properties\":{\"name\":\"gadget-d\"},\"rev\":1}",
+        "{\"id\":\"id-30\",\"type_name\":\"Links\",\"source_id\":\"id-15\",\"target_id\":\"id-16\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-31\",\"type_name\":\"Links\",\"source_id\":\"id-16\",\"target_id\":\"id-17\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-32\",\"type_name\":\"SubLinks\",\"source_id\":\"id-17\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-33\",\"type_name\":\"Links\",\"source_id\":\"id-18\",\"target_id\":\"id-18\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-34\",\"type_name\":\"SubLinks\",\"source_id\":\"id-19\",\"target_id\":\"id-19\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-35\",\"type_name\":\"Links\",\"source_id\":\"id-20\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-37\",\"type_name\":\"SubLinks\",\"source_id\":\"id-21\",\"target_id\":\"id-20\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-38\",\"type_name\":\"Links\",\"source_id\":\"id-13\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-40\",\"type_name\":\"Links\",\"source_id\":\"id-15\",\"target_id\":\"id-1\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-41\",\"type_name\":\"Links\",\"source_id\":\"id-16\",\"target_id\":\"id-3\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-42\",\"type_name\":\"Links\",\"source_id\":\"id-23\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-43\",\"type_name\":\"Links\",\"source_id\":\"id-24\",\"target_id\":\"id-23\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-44\",\"type_name\":\"Links\",\"source_id\":\"id-5\",\"target_id\":\"id-13\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-45\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-18\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-46\",\"type_name\":\"Owns\",\"source_id\":\"id-13\",\"target_id\":\"id-19\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-47\",\"type_name\":\"Owns\",\"source_id\":\"id-20\",\"target_id\":\"id-21\",\"properties\":{},\"rev\":0}",
+        "{\"id\":\"id-48\",\"type_name\":\"Owns\",\"source_id\":\"id-23\",\"target_id\":\"id-24\",\"properties\":{},\"rev\":0}"
+      ],
+      "indexes": "{\"by_type\":[[\"Block\",[\"id-13\",\"id-19\",\"id-22\"]],[\"Gadget\",[\"id-23\",\"id-24\",\"id-25\",\"id-26\"]],[\"Leaf\",[\"id-17\",\"id-18\",\"id-21\"]],[\"Part\",[\"id-15\",\"id-16\",\"id-20\"]],[\"Person\",[\"id-1\",\"id-10\",\"id-11\",\"id-12\",\"id-2\",\"id-3\",\"id-4\",\"id-5\",\"id-6\",\"id-7\",\"id-8\",\"id-9\"]]],\"out\":[[\"id-13\",[\"id-38\",\"id-45\",\"id-46\"]],[\"id-15\",[\"id-30\",\"id-40\"]],[\"id-16\",[\"id-31\",\"id-41\"]],[\"id-17\",[\"id-32\"]],[\"id-18\",[\"id-33\"]],[\"id-19\",[\"id-34\"]],[\"id-20\",[\"id-35\",\"id-47\"]],[\"id-21\",[\"id-37\"]],[\"id-23\",[\"id-42\",\"id-48\"]],[\"id-24\",[\"id-43\"]],[\"id-5\",[\"id-44\"]]],\"in\":[[\"id-1\",[\"id-38\",\"id-40\"]],[\"id-13\",[\"id-32\",\"id-35\",\"id-42\",\"id-44\"]],[\"id-16\",[\"id-30\"]],[\"id-17\",[\"id-31\"]],[\"id-18\",[\"id-33\",\"id-45\"]],[\"id-19\",[\"id-34\",\"id-46\"]],[\"id-20\",[\"id-37\"]],[\"id-21\",[\"id-47\"]],[\"id-23\",[\"id-43\"]],[\"id-24\",[\"id-48\"]],[\"id-3\",[\"id-41\"]]],\"out_count\":[[\"id-13\",\"Links\",1],[\"id-13\",\"Owns\",2],[\"id-15\",\"Links\",2],[\"id-16\",\"Links\",2],[\"id-17\",\"SubLinks\",1],[\"id-18\",\"Links\",1],[\"id-19\",\"SubLinks\",1],[\"id-20\",\"Links\",1],[\"id-20\",\"Owns\",1],[\"id-21\",\"SubLinks\",1],[\"id-23\",\"Links\",1],[\"id-23\",\"Owns\",1],[\"id-24\",\"Links\",1],[\"id-5\",\"Links\",1]],\"in_count\":[[\"id-1\",\"Links\",2],[\"id-13\",\"Links\",3],[\"id-13\",\"SubLinks\",1],[\"id-16\",\"Links\",1],[\"id-17\",\"Links\",1],[\"id-18\",\"Links\",1],[\"id-18\",\"Owns\",1],[\"id-19\",\"Owns\",1],[\"id-19\",\"SubLinks\",1],[\"id-20\",\"SubLinks\",1],[\"id-21\",\"Owns\",1],[\"id-23\",\"Links\",1],[\"id-24\",\"Owns\",1],[\"id-3\",\"Links\",1]],\"parents\":[[\"id-18\",[\"id-13\"],[\"id-45\"]],[\"id-19\",[\"id-13\"],[\"id-46\"]],[\"id-21\",[\"id-20\"],[\"id-47\"]],[\"id-24\",[\"id-23\"],[\"id-48\"]]],\"refs\":[[\"id-13\",[\"ghost\",\"id-1\",\"id-14\",\"id-15\"]],[\"id-15\",[\"id-12\"]],[\"id-16\",[\"id-99\"]],[\"id-17\",[\"id-17\"]],[\"id-18\",[\"id-2\"]],[\"id-20\",[\"id-6\"]],[\"id-21\",[\"id-8\"]],[\"id-22\",[\"id-4\"]]],\"referencers\":[[\"ghost\",[\"id-13\"]],[\"id-1\",[\"id-13\"]],[\"id-12\",[\"id-15\"]],[\"id-14\",[\"id-13\"]],[\"id-15\",[\"id-13\"]],[\"id-17\",[\"id-17\"]],[\"id-2\",[\"id-18\"]],[\"id-4\",[\"id-22\"]],[\"id-6\",[\"id-20\"]],[\"id-8\",[\"id-21\"]],[\"id-99\",[\"id-16\"]]],\"uniq_groups\":[[\"id-1\"],[\"id-10\"],[\"id-11\"],[\"id-12\"],[\"id-13\"],[\"id-15\"],[\"id-16\"],[\"id-17\"],[\"id-18\"],[\"id-19\"],[\"id-2\"],[\"id-20\"],[\"id-21\"],[\"id-22\"],[\"id-23\"],[\"id-24\"],[\"id-25\"],[\"id-26\"],[\"id-3\"],[\"id-4\"],[\"id-5\"],[\"id-6\"],[\"id-7\"],[\"id-8\"],[\"id-9\"]],\"duplicates\":[],\"roots\":[[\"Delta\",\"id-16\"],[\"Eta\",\"id-20\"],[\"STRASSE\",\"id-2\"],[\"Strasze\",\"id-3\"],[\"Straße\",\"id-1\"],[\"alpha\",\"id-13\"],[\"epsilon\",\"id-17\"],[\"fim\",\"id-9\"],[\"gadget-a\",\"id-23\"],[\"gadget-c\",\"id-25\"],[\"gadget-d\",\"id-26\"],[\"gamma\",\"id-15\"],[\"id-12\",\"id-12\"],[\"iota\",\"id-22\"],[\"µ\",\"id-10\"],[\"İstanbul\",\"id-11\"],[\"ςb\",\"id-4\"],[\"σa\",\"id-5\"],[\"Ꭰx\",\"id-6\"],[\"ᐁ\",\"id-7\"],[\"ﬁle\",\"id-8\"]]}"
+    },
+    {
+      "do": "read",
+      "method": "tableScriptErrors",
+      "params": {
+        "definition": {
+          "row_source": {
+            "kind": "scope",
+            "types": [
+              "Block"
+            ]
+          },
+          "columns": [
+            {
+              "kind": "element"
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    if int(els[0].id.split(\"-\")[1]) % 3 == 0:\n        raise KeyError(els[0].id)\n    return els[0].name\n"
+                }
+              }
+            },
+            {
+              "kind": "script",
+              "snippet": {
+                "definition": {
+                  "code": "def value(els):\n    raise ValueError(\"boom \" + els[0].id)\n"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "scripted": true,
+      "result": {
+        "state": "ready",
+        "errors": [
+          {
+            "row_index": 0,
+            "row_element_id": "id-13",
+            "row_label": "alpha",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-13"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-15'"
+          },
+          {
+            "row_index": 1,
+            "row_element_id": "id-15",
+            "row_label": "gamma",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-15"
+          },
+          {
+            "row_index": 2,
+            "row_element_id": "id-16",
+            "row_label": "Delta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-16"
+          },
+          {
+            "row_index": 3,
+            "row_element_id": "id-17",
+            "row_label": "epsilon",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-17"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-18'"
+          },
+          {
+            "row_index": 4,
+            "row_element_id": "id-18",
+            "row_label": "Straße",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-18"
+          },
+          {
+            "row_index": 5,
+            "row_element_id": "id-19",
+            "row_label": "zeta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-19"
+          },
+          {
+            "row_index": 6,
+            "row_element_id": "id-20",
+            "row_label": "Eta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-20"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 1,
+            "column_label": "script",
+            "message": "KeyError: 'id-21'"
+          },
+          {
+            "row_index": 7,
+            "row_element_id": "id-21",
+            "row_label": "theta",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-21"
+          },
+          {
+            "row_index": 8,
+            "row_element_id": "id-22",
+            "row_label": "iota",
+            "column_index": 2,
+            "column_label": "script",
+            "message": "ValueError: boom id-22"
+          }
+        ],
+        "total_errors": 12,
+        "truncated": false
+      },
+      "error": null,
+      "unchanged": true
+    }
+  ]
+}
