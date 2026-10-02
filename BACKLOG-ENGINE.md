@@ -1081,12 +1081,13 @@ path runs in a slice. Not analysed, nothing tuned.
 (1) The fill memo has no byte bound. It lives for one evaluation and is bounded by its scope; a bound that
 stops memoizing is not scheduled. (2) The cell cache's code-id map (`CodeIds`) has no bound until the cache
 clears and is not counted in the 32 MB. (3) `hopScript`'s per-node work in a navigation script step is
-unmetered and never yields (CN-3 risk). (4) A fill round's batching and settle run synchronously, and
-eviction's key computation runs inside the transition's slice (CN-3). The settle and `CellCache.put` of a
-round come to about 65 ms per 10,000 calls and about 280 ms per 50,000 (Node 22), one synchronous block
-outside the scheduler. `window.bench.scriptTable()` pings nothing during the export, so the bench gates wall
-time only and does not see the block. This blocks enabling the option (plan 4): the bench should ping during
-`scriptTable` first. (5) `entryArities` (`src/script/arity.ts`) refuses valid transforms the oracle accepts:
+unmetered and never yields (CN-3 risk). (4) A fill round's batching (`batchesOf`) and eviction's key computation (`touchedKeys`, `deletedKeys` in
+`transit`) run synchronously, the first outside the scheduler and the second inside the transition's slice
+(CN-3); nothing meters either. The settle and `CellCache.put` of a round (about 65 ms per 10,000 calls and
+280 ms per 50,000, Node 22) are fixed: they run as a model-lane scan in steps of 256 calls (`SETTLE_STEP`).
+`window.bench.scriptTable()` is to ping during the export so that the bench sees a slice
+(`longest staged round trip during the script table (slice bound)`); it gated wall time only before that.
+(5) `entryArities` (`src/script/arity.ts`) refuses valid transforms the oracle accepts:
 `def transform(doc): return f"{doc:'>10}"` scans `null` and is a 422 `does not parse`; a form feed before
 `def` scans `[]` and is a 422 `does not define ...`; `ast.parse` gives `[1]` for both. The other direction,
 code the scan reads as fine that the oracle refuses, is `K-111` (2). (6) With a script sort, pass 1 orders by

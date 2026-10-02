@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { SETTLE_STEP } from '../../src/evaluate/fill.ts';
 import type { MetamodelDoc, ModelOp } from '../../src/index.ts';
 import type { ScriptHost, ScriptHostFactory } from '../../src/script/host.ts';
 import { createPool } from '../../src/script/pool.ts';
@@ -10,10 +11,13 @@ import {
 	autoHost,
 	connect,
 	deltaText,
+	fakeHost,
+	gzChunks,
 	openReplica,
 	portPair,
 	refusal,
 	settle,
+	snapshotText,
 	tailText,
 	type Client
 } from './helpers.ts';
@@ -993,4 +997,143 @@ describe('an export through a transform', () => {
 			});
 		}, 60_000);
 	});
+});
+
+describe('a round settled in slices', () => {
+	// More rows than one settle step, so the settle of a round spans two scan steps.
+	const EXTRA = SETTLE_STEP + 44;
+	const wideModel = () =>
+		loadLines(
+			doc,
+			[
+				...fixture.elements,
+				...Array.from(
+					{ length: EXTRA },
+					(_, i) => `{"id":"x${i}","type_name":"Node","properties":{"name":"x${i}"},"rev":0}`
+				)
+			],
+			fixture.relationships
+		);
+	const NAMED = (tag: string) => `# ${tag}\ndef value(els):\n    return str(els[0].name)\n`;
+	const params = (tag: string) => ({
+		definition: {
+			row_source: { kind: 'scope', types: ['Node'], criteria: [] },
+			columns: [
+				{ kind: 'element' },
+				{ kind: 'script', snippet: { definition: { code: NAMED(tag) } } }
+			]
+		},
+		limit: EXTRA + 10
+	});
+	type TablePage = { rows: { key: unknown[]; cells: { value?: unknown }[] }[]; total: number };
+	const valueOf = (page: TablePage, id: string) =>
+		page.rows.find((row) => row.key[0] === id)!.cells[1]!.value;
+	const callsOf = (tracker: ReturnType<typeof tracked>, tag: string) =>
+		tracker.batches
+			.filter((batch) => batch.code.includes(`# ${tag}\n`))
+			.reduce((sum, batch) => sum + batch.ids.length, 0);
+	const verified = (event: Client['events'][number]) =>
+		event.event === 'progress' && event.task === 'verify' && event.done === event.total;
+
+	/**
+	 * A service whose replica is open and idle, over a host whose every unit of work ends a slice.
+	 * The first batch of the evaluation is held back until `release`; the slices after it wait for
+	 * `turn`, and `slice` resolves at the next one.
+	 */
+	async function held(tag: string) {
+		const host = fakeHost({ tick: 10 });
+		host.auto = true;
+		const tracker = tracked();
+		trackers.push(tracker);
+		const gate: { slice: (() => void) | null } = { slice: null };
+		const client = connect(host, portPair(), {
+			scripts: tracker.factory,
+			yieldToHost: () => {
+				const hit = gate.slice;
+				gate.slice = null;
+				const turn = host.deps.yieldToHost();
+				hit?.();
+				return turn;
+			}
+		});
+		await openReplica(client, wideModel(), doc);
+		await client.nextEvent(verified);
+		await settle();
+		let release!: () => void;
+		let arrived!: () => void;
+		const releasing = new Promise<void>((resolve) => (release = resolve));
+		const reached = new Promise<void>((resolve) => (arrived = resolve));
+		tracker.hook.after = async () => {
+			tracker.hook.after = null;
+			arrived();
+			await releasing;
+		};
+		const answered = client.call<TablePage>('evaluateTable', params(tag));
+		// The answer may be refused before anyone awaits it.
+		answered.catch(() => undefined);
+		await reached;
+		await settle();
+		return {
+			host,
+			tracker,
+			client,
+			answered,
+			/** Lets the fill settle its round, and resolves at the first slice that ends. */
+			release: () => {
+				const sliced = new Promise<void>((resolve) => (gate.slice = resolve));
+				host.auto = false;
+				release();
+				return sliced;
+			}
+		};
+	}
+
+	it('answers an edit staged between its slices, which evicts a cell that was put before it', async () => {
+		const { host, tracker, client, answered, release } = await held('mid');
+		await release();
+		let landed = false;
+		const staged = stage(client, [rename('n1', 'uno')]).then((out) => ((landed = true), out));
+		await settle();
+		// The stage waits behind the settle, which has settled one step of its two.
+		expect(landed).toBe(false);
+		host.turn();
+		await settle();
+		// The settle's second step has run; the stage is next.
+		expect(landed).toBe(false);
+		host.auto = true;
+		host.turn();
+		await staged;
+		const page = await answered;
+		expect(valueOf(page, 'n1')).toBe('uno');
+		expect(valueOf(page, 'n2')).toBe('two');
+		expect(valueOf(page, 'x0')).toBe('x0');
+		// The round it spanned was kept for every row but the edited one, which asked again.
+		expect(callsOf(tracker, 'mid')).toBe(page.total + 1);
+		expect(valueOf(await client.call<TablePage>('evaluateTable', params('mid')), 'n1')).toBe('uno');
+		expect(callsOf(tracker, 'mid')).toBe(page.total + 1);
+	}, 120_000);
+
+	it('keeps no cell of a settle that its replica was dropped under', async () => {
+		const { host, tracker, client, answered, release } = await held('drop');
+		await release();
+		// A second open drops the replica between the two steps of the settle.
+		const opening = client.call('open', { project_id: 'demo', metamodel: doc });
+		await settle();
+		host.auto = true;
+		host.turn();
+		await opening;
+		expect(await refusal(answered)).toEqual({ status: 409, detail: 'replica closed' });
+		const chunks = gzChunks(snapshotText(wideModel()), 1 << 16).map((bytes) =>
+			client.call('chunk', { bytes }, [bytes])
+		);
+		await client.call('end');
+		await Promise.all(chunks);
+		const ready = client.nextEvent((event) => event.event === 'replica' && event.state === 'ready');
+		await client.call('applyTail', { text: tailText([], 0) });
+		await ready;
+		const page = await client.call<TablePage>('evaluateTable', params('drop'));
+		expect(valueOf(page, 'n1')).toBe('one');
+		// The new replica found nothing of the half-settled round: every call ran again.
+		expect(callsOf(tracker, 'drop')).toBe(2 * page.total);
+	}, 120_000);
 });

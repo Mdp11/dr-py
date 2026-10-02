@@ -14,6 +14,8 @@ import {
 	type ScriptReader,
 	type ScriptResult
 } from '../../src/index.ts';
+import { SETTLE_STEP } from '../../src/evaluate/fill.ts';
+import { drain } from '../../src/steps/steps.ts';
 import { BridgeDispatcher, dumpDefault, projectRoots } from '../../src/script/bridge.ts';
 import type { Bridge } from '../../src/script/host.ts';
 import { createPool } from '../../src/script/pool.ts';
@@ -452,6 +454,147 @@ describe('what a fill keeps', () => {
 			(await evaluateFilled(pass, options(runnerOver(host), { cache, stdoutChars: 5 }))).value
 				.stdout
 		).toBe('abcde...');
+	}, 60_000);
+});
+
+describe('a round settled through `slices`', () => {
+	// More calls than one settle step, so a settle can stop part of the way.
+	const CALLS = SETTLE_STEP + 44;
+
+	/** A pass over `CALLS` distinct calls, each its own key by its document. */
+	const wide = async (scripts: ScriptReader) =>
+		Array.from({ length: CALLS }, (_, i) =>
+			shown(scripts.read(call(LEN, ['n1'], { docText: `{"i": ${i}}` })))
+		);
+	const ones = Array.from({ length: CALLS }, () => '1');
+
+	it('settles through `slices` when given', async () => {
+		const cache = new CellCache();
+		let slicedRounds = 0;
+		const { value, stats } = await evaluateFilled(
+			wide,
+			options(runnerOver(host), {
+				cache,
+				slices: async (run) => {
+					slicedRounds++;
+					drain(run());
+				}
+			})
+		);
+		expect(value).toEqual(ones);
+		expect(slicedRounds).toBe(1);
+		expect(stats).toEqual({ rounds: 1, calls: CALLS });
+		expect(cache.size).toBe(CALLS);
+	}, 60_000);
+
+	it('keeps nothing of a settle that starts after a transition, and runs another round', async () => {
+		const cache = new CellCache();
+		let moved = 0;
+		const sizes: number[] = [];
+		const { value, stats } = await evaluateFilled(
+			wide,
+			options(runnerOver(host), {
+				cache,
+				transitions: () => moved,
+				slices: async (run) => {
+					if (sizes.length === 0) moved++;
+					drain(run());
+					sizes.push(cache.size);
+				}
+			})
+		);
+		expect(value).toEqual(ones);
+		expect(sizes).toEqual([0, CALLS]);
+		expect(stats).toEqual({ rounds: 2, calls: 2 * CALLS });
+	}, 60_000);
+
+	it('stops a settle restarted after a transition where the transition fell', async () => {
+		const cache = new CellCache();
+		let moved = 0;
+		const sizes: number[] = [];
+		const { value, stats } = await evaluateFilled(
+			wide,
+			options(runnerOver(host), {
+				cache,
+				transitions: () => moved,
+				slices: async (run) => {
+					if (sizes.length > 0) return void drain(run());
+					// One step in, a transition lands, and the job starts over.
+					run().next();
+					moved++;
+					drain(run());
+					sizes.push(cache.size);
+					// What a transition does to what the cache held.
+					cache.clear();
+				}
+			})
+		);
+		expect(value).toEqual(ones);
+		expect(sizes).toEqual([SETTLE_STEP]);
+		expect(stats).toEqual({ rounds: 2, calls: 2 * CALLS });
+		expect(cache.size).toBe(CALLS);
+	}, 60_000);
+
+	it('stops a settle that resumes after a transition, with no restart', async () => {
+		const cache = new CellCache();
+		let moved = 0;
+		const sizes: number[] = [];
+		const { stats } = await evaluateFilled(
+			wide,
+			options(runnerOver(host), {
+				cache,
+				transitions: () => moved,
+				slices: async (run) => {
+					if (sizes.length > 0) return void drain(run());
+					const steps = run();
+					steps.next();
+					moved++;
+					drain(steps);
+					sizes.push(cache.size);
+					cache.clear();
+				}
+			})
+		);
+		expect(sizes).toEqual([SETTLE_STEP]);
+		expect(stats.rounds).toBe(2);
+		expect(cache.size).toBe(CALLS);
+	}, 60_000);
+
+	it('settles a call once when the job restarts with nothing moved', async () => {
+		const cache = new CellCache();
+		const put = vi.spyOn(cache, 'put');
+		const { value, stats } = await evaluateFilled(
+			wide,
+			options(runnerOver(host), {
+				cache,
+				slices: async (run) => {
+					run().next();
+					drain(run());
+				}
+			})
+		);
+		expect(value).toEqual(ones);
+		expect(stats).toEqual({ rounds: 1, calls: CALLS });
+		expect(put).toHaveBeenCalledTimes(CALLS);
+	}, 60_000);
+
+	it('rejects with the abort reason when `slices` does', async () => {
+		const controller = new AbortController();
+		const reason = new Error('stop');
+		const cache = new CellCache();
+		const rejected = await evaluateFilled(
+			wide,
+			options(runnerOver(host), {
+				cache,
+				signal: controller.signal,
+				slices: async (run) => {
+					run().next();
+					controller.abort(reason);
+					throw reason;
+				}
+			})
+		).catch((error: unknown) => error);
+		expect(rejected).toBe(reason);
 	}, 60_000);
 });
 

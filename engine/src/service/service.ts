@@ -831,12 +831,13 @@ class Service {
 
 	/**
 	 * An evaluation: the scan runs as a pass of a fill, which runs the scripts the pass could not
-	 * answer and runs it again. Each pass is a scan of the model lane, so no transition lands
-	 * within one, and the fill runs between passes, outside the scheduler: a stage or a delta lands
-	 * there and the fill sees it move. A pass is read at the state its scan started in, and answered whatever lands after it. The call belongs
-	 * to the replica its first scan started on, as a call waiting for a replica to be ready waits
-	 * for the next one: that replica dropped, it is answered 409, and a cancel stops its batches
-	 * and answers nothing. Without a script host a pass that needs a script run answers 503.
+	 * answer and runs it again. Each pass and each round's settle is a scan of the model lane, so
+	 * no model-lane transition lands within one, and the fill runs between them, outside the
+	 * scheduler: a stage or a delta lands there and the fill sees it move. A pass is read at the
+	 * state its scan started in, and answered whatever lands after it. The call belongs to the
+	 * replica its first scan started on, as a call waiting for a replica to be ready waits for the
+	 * next one: that replica dropped, it is answered 409, and a cancel stops its batches and
+	 * answers nothing. Without a script host a pass that needs a script run answers 503.
 	 */
 	private evaluateFilled(method: string, call: Call): void {
 		const cancel = abortable();
@@ -868,6 +869,11 @@ class Service {
 						return results.map(({ text }) => text);
 					},
 					signal: cancel.signal,
+					slices: (run, signal) =>
+						this.modelScan(call, signal, () => {
+							start();
+							return run();
+						}),
 					...(this.cells === null ? {} : { cache: this.cells }),
 					transitions: () => this.transitions,
 					onProgress: (done, total) => {
@@ -900,44 +906,49 @@ class Service {
 		scripts: FillReader,
 		signal: AbortSignalLike & { readonly reason?: unknown }
 	): Promise<unknown> {
+		return this.modelScan(call, signal, () => {
+			start();
+			const wc = this.ready();
+			// Nothing moves the model while the scan runs: this is the state it reads.
+			scripts.begin();
+			return EVALUATIONS[method]!(
+				{
+					model: wc.model,
+					artifacts: this.artifacts,
+					placements: this.placements,
+					working: {
+						rev: wc.rev,
+						stagedVersion: wc.stagedVersion,
+						tableOrders: this.tableOrders
+					},
+					scripts
+				},
+				call.params
+			);
+		});
+	}
+
+	/**
+	 * A scan of the model lane for a fill, answered when it ends; `run` makes the steps afresh on
+	 * every start. An abort takes the scan out of the lane, or drops it at its next step, and
+	 * rejects with the abort's reason. A scan that is dropped is not answered.
+	 */
+	private modelScan<T>(
+		call: Call,
+		signal: AbortSignalLike & { readonly reason?: unknown },
+		run: () => Steps<T>
+	): Promise<T> {
 		return new Promise((resolve, reject) => {
 			const stop = () => {
 				this.scheduler.cancel(call.id);
 				reject(signal.reason);
 			};
 			signal.addEventListener('abort', stop);
-			this.scheduler.submit(
-				call.id,
-				'model',
-				{
-					kind: 'scan',
-					run: () => {
-						start();
-						const wc = this.ready();
-						// Nothing moves the model while the scan runs: this is the state it reads.
-						scripts.begin();
-						return EVALUATIONS[method]!(
-							{
-								model: wc.model,
-								artifacts: this.artifacts,
-								placements: this.placements,
-								working: {
-									rev: wc.rev,
-									stagedVersion: wc.stagedVersion,
-									tableOrders: this.tableOrders
-								},
-								scripts
-							},
-							call.params
-						);
-					}
-				},
-				(outcome) => {
-					signal.removeEventListener('abort', stop);
-					if (outcome.ok) resolve(outcome.value);
-					else reject(outcome.error);
-				}
-			);
+			this.scheduler.submit<T>(call.id, 'model', { kind: 'scan', run }, (outcome) => {
+				signal.removeEventListener('abort', stop);
+				if (outcome.ok) resolve(outcome.value);
+				else reject(outcome.error);
+			});
 		});
 	}
 

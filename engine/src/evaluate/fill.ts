@@ -15,6 +15,7 @@ import {
 	type EmbeddedEntry,
 	type ScriptResult
 } from '../script/result.ts';
+import { drain, type Steps } from '../steps/steps.ts';
 import { parseExact } from '../value/parse.ts';
 
 /** One embedded call: the code, the entry, the ids it runs over, and the texts of its resolved inputs and document. */
@@ -64,7 +65,15 @@ export type FillOptions = {
 	onProgress?: (done: number, total: number) => void;
 	/** The harness's stdout cap, in characters; a longer output is cut as the oracle cuts it. */
 	stdoutChars?: number;
+	/**
+	 * Runs the settle of a round as model-lane work in slices; `run` makes the steps afresh on
+	 * every start. Absent, the steps are drained at once.
+	 */
+	slices?: (run: () => Steps<void>, signal: FillSignal) => Promise<void>;
 };
+
+/** Calls settled between two yields of a round's settle. */
+export const SETTLE_STEP = 256;
 
 /** The rounds the fill ran and the calls it asked the runner for, a round that was dropped included. */
 export type FillStats = { rounds: number; calls: number };
@@ -195,8 +204,10 @@ function batchesOf(missed: ReadonlyMap<CellKey, ScriptCall>): Group[] {
  * calls were read from that state and a transition would have evicted what the
  * cache then held. A pass the model moved from under is run again without a
  * round, and a round it moved under is dropped and its calls are asked for
- * again. The memo is dropped whenever a pass begins in another state than the
- * one its entries answered. The batches of a round stop together: one that
+ * again. The settle of a round is steps: with `slices` they run as model-lane work and start
+ * over if the job is restarted, checking the stamp at every start and resume; a settle the model
+ * moved under keeps nothing past the move and the round is dropped. The memo is dropped whenever
+ * a pass begins in another state than the one its entries answered. The batches of a round stop together: one that
  * fails aborts the others, and an abort of `signal` rejects the fill with its
  * reason, whatever the runners rejected with. The memo is the fill's own and a
  * fresh fill starts empty, so a result the cache does not keep (a timeout)
@@ -206,7 +217,7 @@ export async function evaluateFilled<T>(
 	pass: (scripts: FillReader) => Promise<T>,
 	options: FillOptions
 ): Promise<{ value: T; stats: FillStats }> {
-	const { runner, signal, cache, onProgress } = options;
+	const { runner, signal, cache, onProgress, slices } = options;
 	const transitions = options.transitions ?? (() => 0);
 	const stdoutChars = options.stdoutChars ?? DEFAULT_HARNESS_LIMITS.stdoutChars;
 	// Keys name a code by an id: the cache's, so a key is the cache's key, else the fill's own.
@@ -315,14 +326,33 @@ export async function evaluateFilled<T>(
 		stats.calls += missed.size;
 		const texts = await runRound(groups);
 		if (signal.aborted) aborted(signal);
-		if (transitions() !== stamp) continue;
-		groups.forEach(({ entry, keys }, g) => {
-			keys.forEach((key, i) => {
-				const text = texts[g]![i]!;
-				const { result, sound } = settle(text, entry, stdoutChars);
-				memo.set(key, result);
-				if (sound) cache?.put(key, result, text);
-			});
-		});
+		let settled = false;
+		// A restarted job runs this afresh: the stamp is checked at every start and every resume, so
+		// a result is never kept in a state other than the one it was asked in. What an earlier run
+		// kept is in the memo, which the loop head drops once the stamp has moved, and a transition
+		// evicts it from the cache.
+		const settleRound = function* (): Steps<void> {
+			if (transitions() !== stamp) return;
+			let done = 0;
+			for (let g = 0; g < groups.length; g++) {
+				const { entry, keys } = groups[g]!;
+				for (let i = 0; i < keys.length; i++) {
+					if (memo.has(keys[i]!)) continue;
+					const text = texts[g]![i]!;
+					const { result, sound } = settle(text, entry, stdoutChars);
+					memo.set(keys[i]!, result);
+					if (sound) cache?.put(keys[i]!, result, text);
+					if (++done % SETTLE_STEP === 0) {
+						yield { done, total: stats.calls };
+						if (transitions() !== stamp) return;
+					}
+				}
+			}
+			settled = true;
+		};
+		if (slices !== undefined) await slices(settleRound, signal);
+		else drain(settleRound());
+		if (signal.aborted) aborted(signal);
+		if (!settled) continue;
 	}
 }
