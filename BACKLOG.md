@@ -1341,6 +1341,9 @@ component is now an option (it wasn't when the finding was raised).
   integers`), passes in isolation and on re-run. **Reconfirmed 2026-08-16, pre-existing**:
   flakes roughly 1 run in 30 even in isolation, so "passes in isolation" above was an
   under-sample, not a clean bill of health.
+- `tests/api/test_projects_wizard.py::test_wizard_creates_project_with_artifact_bundle` —
+  `KeyError: 'payload'` in the full `dr-test` run (2026-10-02, the scripts evaluation's last
+  fix wave), passes alone: the same order-dependent family as the test above.
 - `tests/api/test_exports_route.py::test_two_runs_at_one_rev_are_byte_identical` —
   a zip/xlsx determinism test, unrelated to validation rules. Flaked once on a
   full-suite run during the custom-validation-rules branch's work (2026-08-24),

@@ -21,8 +21,9 @@ read them only as the `tables` and `exports` surfaces' server paths now, and `ap
 the route functions are also the 501 fallback's server side (AD-31); `api/artifact_kinds.py`
 validates every committed navigation payload against them. The freeze has lifted for FEATURES in
 all of them and in the export writers (`core/table/{csv_export,json_export,export_layout,exporter,naming,split,cell_text}.py`,
-`api/table_export*.py`, `api/export_manifest.py`), except for a table that reaches a script, which
-stays on both sides until D; a bug found in any of them still lands on both sides with a
+`api/table_export*.py`, `api/export_manifest.py`), a table that reaches a script included since D's third
+plan (a feature there lands in TypeScript behind `scripts: 'evaluate'`; the server fallback stays the
+default until plan 4 removes the option); a bug found in any of them still lands on both sides with a
 fixture until F (MR-1) regardless. `core/table/resolve.py` (ref resolution and script reach) is frozen from C's
 first plan on. `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's
 conformance half (`routes/commits.py::preview_commit`'s model half,
@@ -85,8 +86,8 @@ surfaces' defaults. `core/search`, `core/navigation`, `api/search.py` and the `s
 and `evaluate_navigation` route functions stay frozen past C's first plan's flip of navigation
 and criteria search until C's plan 5 flipped `exports` to the engine, when they left the
 feature freeze (`core/table`'s evaluator and `api/routes/{tables,exports}.py` read them only as
-the server paths of the `tables` and `exports` surfaces now, and the export writers left it too,
-a script table excepted until D); `api/search.py` and the route functions are also the 501
+the server paths of the `tables` and `exports` surfaces now, and the export writers left it too, a script
+table included since D's third plan); `api/search.py` and the route functions are also the 501
 fallback's server side; `api/artifact_kinds.py` validates every committed navigation payload
 against them; `core/table/resolve.py` (ref resolution and
 script reach) is frozen from C's first plan on too. `core/validation` minus `rules/`,
@@ -1077,17 +1078,29 @@ answer through `sys.__stdout__` to get past it. A real fix is a lock or a per-th
 path runs in a slice. Not analysed, nothing tuned.
 
 ### K-114 · What the scripts evaluation leaves open · `open` · *2026-10-02*
-(1) The fill memo has no byte bound. It lives for one evaluation and is bounded by its scope; a bound
-that stops memoizing belongs to plan 4. (2) The cell cache's code-id map (`CodeIds`) has no bound until the
-cache clears and is not counted in the 32 MB. (3) With the option on, an evaluation that arrives during a
-diverge or re-bootstrap window answers 409 `replica closed`, against CT-4's "nothing is refused for arriving
-early"; the fix is to pin the epoch when the first pass's `run()` starts. (4) `hopScript`'s per-node work in
-a navigation script step is unmetered and never yields (CN-3 risk). (5) A fill round's batching and settle
-run synchronously, and eviction's key computation runs inside the transition's slice (CN-3; measured only by
-the K-100 bench, see `K-113`). (6) `entryArities` (`src/script/arity.ts`) scans a file that does not parse
-as `null`, so the engine answers by the call where the oracle refuses before running (`K-111` (2)). (7) A
-round's passes can fill a page that a script sort then moves away from, so the next pass asks again for the
-cells of the new page; the cost is a round, not a wrong answer.
+(1) The fill memo has no byte bound. It lives for one evaluation and is bounded by its scope; a bound that
+stops memoizing is not scheduled. (2) The cell cache's code-id map (`CodeIds`) has no bound until the cache
+clears and is not counted in the 32 MB. (3) `hopScript`'s per-node work in a navigation script step is
+unmetered and never yields (CN-3 risk). (4) A fill round's batching and settle run synchronously, and
+eviction's key computation runs inside the transition's slice (CN-3). The settle and `CellCache.put` of a
+round come to about 65 ms per 10,000 calls and about 280 ms per 50,000 (Node 22), one synchronous block
+outside the scheduler. `window.bench.scriptTable()` pings nothing during the export, so the bench gates wall
+time only and does not see the block. This blocks enabling the option (plan 4): the bench should ping during
+`scriptTable` first. (5) `entryArities` (`src/script/arity.ts`) refuses valid transforms the oracle accepts:
+`def transform(doc): return f"{doc:'>10}"` scans `null` and is a 422 `does not parse`; a form feed before
+`def` scans `[]` and is a 422 `does not define ...`; `ast.parse` gives `[1]` for both. The other direction,
+code the scan reads as fine that the oracle refuses, is `K-111` (2). (6) With a script sort, pass 1 orders by
+build order (a pending sort key sorts as empty) and collects that page's other script-column cells beside the
+sort's calls for every row; the real order then moves the page, so those calls are wasted and the real page
+costs another round. It falls short of the design's "a script-dependent sort fills the whole scope in one
+round" (spec §3). If only the sort column is a script there is no extra round. (7) A transform call's key
+holds the document's text, up to 8 MiB, and the key and the join that builds it are made inside one slice
+(CN-3). (8) A transform that does not parse, over a table that yields no partition or file, answers 200
+where the oracle refuses it with 422: the guest reports a syntax error only when a call runs. (9) The recap
+(`tableScriptErrors`) materializes the whole grid, every row by every column, before it lists the first 200
+errors. (10) An evaluation whose script cells are cold and that a stream of transitions keeps moving is run
+again for every transition that lands within a round: results computed before a transition are dropped, never
+patched, so it answers only once a round fits between two transitions.
 
 ### T-15 · Full-run flakes in e2e and the frontend's download-route test · `open` · *2026-10-01*
 In the full `pixi run frontend-test-e2e` run of the scripts plan's last task, `e2e/eval-exports.spec.ts:176`

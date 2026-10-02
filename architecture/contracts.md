@@ -134,7 +134,7 @@ event     {event, …}                     engine → client, unsolicited
   host gave the engine no script host, every `reaches a script` refusal answers 501 as before.
   With it `progress {task: 'scripts', done, total}` counts the script calls the evaluations in
   flight have asked for and finished, summed, at each batch result, ending `done === total`
-  when the last of them ends.
+  when the last of them ends; a fill of a replica that was dropped posts nothing as it ends.
 - Staging: `stage {ops}` → `{batch, coalesced, changes, elements, relationships}` — the
   post-state of what it changed, both lists `null` past 500 entities; a single property update
   merges into the first staged update of the same entity (CT-5). `unstage {what}` (`'all'`,
@@ -410,10 +410,16 @@ event     {event, …}                     engine → client, unsolicited
   evaluation's memo or the cell cache, else records it and answers it pending; a pass that
   recorded one is discarded, its calls run as one batch per `(code, entry)` through the pool
   and the pass runs again, until a pass records none. A `stage`, `unstage` or delta lands
-  between passes, never within one, and the evaluation answers from the state it ends in; a
-  round that began before it is dropped, results and all. The call belongs to its replica: that
-  replica closed, replaced or diverged answers it 409 (`replica closed`, `replica is not
-  ready`), `{cancel}` stops its batches, soft then hard, and answers nothing.
+  between passes, never within one, and a pass is read at the state its scan started in: a
+  pass that records no call is answered whatever lands after it, so a `stage` posted behind
+  an evaluation waits for it and the evaluation answers the state it ran on, as without the
+  option, and a stream of stages does not starve one. A transition that changes the model
+  and lands while a round runs drops that round, results and all, and the pass runs again from
+  the state it ends in; one that changes nothing leaves it. The call belongs to the replica its
+  first scan starts on, so one that arrives while the replica is diverged or not yet ready waits
+  for the next, as any call does; that replica closed, replaced or diverged answers it 409
+  (`replica closed`, `replica is not ready`), `{cancel}` stops its batches, soft then hard,
+  and answers nothing.
 - Results are cached in the engine, keyed `(code, entry, element ids, inputs, doc)` (the code is
   in the key, so an edited snippet is another call), with read-sets. Bounds: 50,000 entries,
   32 MiB of keys and result texts, a result over 64 KiB not stored, a read-set over 128 keys

@@ -122,9 +122,10 @@ do the writers (`core/table/{csv_export,json_export,export_layout,exporter,namin
 any of them lands in TypeScript only. A bug found in `core/table`'s evaluator, in the writers or in
 any of these areas, wherever it is reached from, lands on both sides, with a fixture, until F
 (MR-1), as MR-3's opening rule already says. A table that reaches a script (a script column, or a
-navigation with a script step) is the one exception that stays until D: the engine refuses it and
-the server's fallback builds it entirely in Python — its rows, its order, every cell and its
-export — so a feature there lands on both sides too, or waits for D. `api/search.py` and the route
+navigation with a script step) was the one exception until D's third plan: the engine now evaluates
+it behind `open {scripts: 'evaluate'}`, so a new script-table feature lands in TypeScript behind the
+option. The server's fallback, which builds such a table entirely in Python (its rows, its order,
+every cell and its export), stays the default until plan 4 removes the option. `api/search.py` and the route
 functions are also the 501 fallback's server side from C's first plan on (AD-31) — a script or an
 unsupported pattern reads them whatever plan C is on — and `api/artifact_kinds.py` validates
 every committed navigation payload with `NAVIGATION_ADAPTER`.

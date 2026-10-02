@@ -345,19 +345,24 @@ compile, which with nothing staged equals the server's.
 **Decision.** An evaluation that reaches a script runs as a fill in the service loop: a pass scans
 the model lane with the cell cache as its reader and collects the calls it could not answer; the
 fill runs them as batches on the script pool, enters the results in the cache and runs the pass
-again, until a pass asks for nothing. Cells are keyed by the script, its code and its inputs, and
-evicted by the keys a transition touches (the read-set). The replica opts in with
-`open {scripts: 'evaluate'}`; without it an evaluation that reaches a script is 501
-`reaches a script`, as before, until plan 4 removes the option.
+again, until a pass asks for nothing. Cells are keyed by the code's id, the entry, the element ids,
+the inputs' text and the document's text, and evicted by the keys a transition touches (the
+read-set). The replica opts in with `open {scripts: 'evaluate'}`; without it an evaluation that
+reaches a script is 501 `reaches a script`, as before, until plan 4 removes the option. This
+narrows AD-31 for scripts: a call that reaches one is the engine's, over the working copy, on a
+replica opened with the option, and the server's, over committed state, on one opened without it.
 **Why.** The oracle's evaluators are synchronous and the script host is not: a pass that records
 what it lacks and an engine that fills between passes keep the evaluators single-sourced with
 the oracle and leave the model lane free of awaits. Rounds run outside the scheduler, so a stage
-or a delta lands between passes and the answer reflects it; a counter of transitions stops a
-result computed before a transition from entering the cache after that transition's eviction.
+or a delta lands between passes and the answer reflects it; a counter of transitions that change
+the model, read when a pass's scan starts, stops a result computed before a transition from
+entering the cache after that transition's eviction, and a pass is answered as the state its scan
+ran on, as an evaluation without scripts is.
 **Rejected.** Awaiting inside the evaluators: a second, asynchronous copy of each one. Dropping
 the cache at every transition: a keystroke would rerun every script. Gating nothing: the option
 keeps the server's answer until the console and the removal of `pending` cells are built.
-**Consequences.** A call belongs to its replica: one closed, replaced or diverged under it is
-409 (`K-114` (3) for the early-arrival case). The fill memo and the code-id map are unbounded
+**Consequences.** A call belongs to the replica its first scan starts on: one closed, replaced or
+diverged under it is 409, and one that arrives while no replica is ready waits for the next, as
+any call does. The fill memo and the code-id map are unbounded
 within their lifetimes (`K-114`). The script-cell budget is measured through an engine export
 (`K-100`).
