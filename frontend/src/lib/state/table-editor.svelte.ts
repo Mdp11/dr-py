@@ -84,14 +84,8 @@ import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
 import { onCommitEvent } from './realtime.svelte';
 import { onTablesMoved } from './replica.svelte';
-import { retryAndDownload, type ExportProgress } from '$lib/util/export-download';
+import { downloadExport } from '$lib/util/export-download';
 import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
-
-// Re-exported so `$lib/state`'s barrel (and TableView.svelte, which imports
-// the type through it) need no change: the retry-and-download loop itself
-// lives in `$lib/util/export-download.ts` so `/exports/run`
-// (`ExporterTab.svelte`) can share it instead of copying it.
-export type { ExportProgress };
 
 /** Chunk size for both full loads and lazy range fills. */
 const PAGE = 100;
@@ -271,7 +265,7 @@ let _repageTimer: ReturnType<typeof setTimeout> | null = null;
 const _repageFlushWaiters: (() => void)[] = [];
 /**
  * Tabs whose load in flight is a foreground one (a definition edit, a reload;
- * not a re-page, not a poll): a re-page that supersedes it is foreground too,
+ * not a re-page): a re-page that supersedes it is foreground too,
  * since the page on screen may be of an older definition and its failure is
  * the user's to see. Control state, never read from templates.
  */
@@ -828,43 +822,21 @@ export function canRequestScriptErrors(tabId: string): boolean {
 
 /**
  * Why a script cell on screen holds no value — the message of the first script
- * cell in the LOADED rows that came back an `error`, or `null`
- * when every one of them produced a value (including when the table has no
- * script column, or no page yet).
+ * cell in the LOADED rows that came back an `error`, or `null` when every one
+ * of them produced a value (including when the table has no script column, or
+ * no page yet).
  *
- * WHY THIS EXISTS. `POST /tables/script-errors` answers ZERO errors when the
- * server has no script runner: nothing was evaluated, so nothing is KNOWN to
- * have failed, and reporting one "not computed" error per cell instead would
- * badge a 50 000-row table with "50000 script errors" for a sandbox that simply
- * is not running. That is the honest answer, but `ScriptErrorsOut` cannot carry
- * the difference between "we checked and there are none" and "we could not
- * check" — its `state` is a one-valued literal and the wire shape is
- * deliberately frozen. Rendered as an affirmative, the honest zero becomes a
- * green tick over a grid whose every script cell reads `script runner
- * unavailable`.
- *
- * So the client earns the distinction from evidence it already holds. THE CELLS
- * ARE THE RELIABLE SIGNAL, and better than the alternatives:
- *
- *   * the page's `script_status` does NOT cover it. For the commonest shape (an
- *     unsorted `collapse` script column) the whole-table passes make no
- *     `value()` calls at all, so a runner-less page reports `ready` — no strip,
- *     no message, nothing to key off — while the window pass, which is LIVE,
- *     renders every cell an error saying exactly why. Only the sorted/`expand`
- *     shape reports `failed`;
- *   * `failed` alone would also OVER-suppress: the client's own poll give-up
- *     writes a `failed` status while the backend sweep is still healthy, and a
- *     recap that then comes back empty is a real, trustworthy "none".
+ * A recap that finds no failing cell is a clean bill of health only when the
+ * cells on screen back it: a grid whose every script cell is an error says the
+ * check could not have found anything, and the badge must not read as an
+ * affirmative over it. The cells ARE the evidence, since the recap's wire
+ * shape cannot carry the difference.
  *
  * Restricted to SCRIPT columns on purpose — a broken navigation column's error
- * cell is not something a script-error recap ever claimed to cover, and
- * suppressing a good answer because of it would turn a useful check into a
- * shrug. Loaded rows only: un-fetched slots of the sparse cache are `undefined`
- * and say nothing either way.
- *
- * Cheap in the only place it is used: the badge consults it only once a recap
- * has landed EMPTY (`&&`-guarded, so the page is not even read otherwise), and
- * the scan stops at the first uncomputed cell.
+ * cell is not something a script-error recap ever claimed to cover. Loaded rows
+ * only: un-fetched slots of the sparse cache are `undefined` and say nothing
+ * either way. Cheap in the only place it is used: the badge consults it only
+ * once a recap has landed EMPTY, and the scan stops at the first error cell.
  */
 export function getUncomputedScriptCellReason(tabId: string): string | null {
 	const data = _pages.get(tabId);
@@ -1480,25 +1452,16 @@ export function closeTableDraft(tabId: string): void {
 
 /**
  * Export the current definition (or saved artifact) in any `ExportFormat`
- * and trigger a browser download via a synthetic anchor click.
- *
- * While the backend's script-cache sweep is still filling in a script column's
- * cells, `/tables/export` answers **202 + Retry-After: 1** (surfaced by the API
- * client as `{ kind: 'preparing' }`) instead of the file. THE STATUS CODE IS
- * THE RETRY SIGNAL: retry until the call resolves `ready`, reporting each wait
- * through `onProgress` so the caller can keep the user informed, and stop early
- * when `signal` aborts (the tab was closed / the user navigated away). The
- * retry/download loop itself is `$lib/util/export-download.ts`'s
- * `retryAndDownload`, shared with `/exports/run` (`ExporterTab.svelte`) —
- * this function's only job is producing the args `exportTable` needs. Resolves
- * to the last result (its `fallback` says the server exported committed
- * state), `null` for a tab with no draft.
+ * and trigger a browser download via a synthetic anchor click. Resolves to
+ * the result (its `fallback` says the server exported committed state),
+ * `null` for a tab with no draft. `signal` aborts the call. A table with a
+ * script is refused by the server with a 409 `scripts need the engine`, which
+ * rejects.
  */
 export async function downloadTable(
 	tabId: string,
 	opts?: {
 		format?: ExportFormat;
-		onProgress?: (p: ExportProgress) => void;
 		signal?: AbortSignal;
 	}
 ): Promise<ExportResult | null> {
@@ -1509,7 +1472,7 @@ export async function downloadTable(
 		format: opts?.format ?? 'xlsx',
 		...(opts?.signal === undefined ? {} : { signal: opts.signal })
 	};
-	return retryAndDownload(() => exportTable(args), opts);
+	return downloadExport(() => exportTable(args));
 }
 
 /**

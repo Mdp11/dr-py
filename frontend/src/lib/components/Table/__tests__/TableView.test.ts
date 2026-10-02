@@ -28,6 +28,7 @@ vi.mock('$lib/api/tables', async () => ({
 // The whole `$lib/state` barrel is mocked below (`downloadTable: vi.fn(...)`)
 // — importing the name here resolves to that SAME mock instance, so calls
 // made through TableView's onclick handlers show up on it.
+import { ConflictError } from '$lib/api/errors';
 import { downloadTable, saveAsTableDraft, updateTableDefinition } from '$lib/state';
 import TableView from '../TableView.svelte';
 
@@ -663,8 +664,8 @@ describe('TableView settings discard confirmation', () => {
 	});
 });
 
-// A table the engine refuses (it reaches a pattern) is read from
-// the server, over committed state: the page says so, and the tab shows it.
+// The server refuses a table that reaches a script; the tab says scripts need
+// the engine instead of showing rows.
 describe('TableView scripts need the engine', () => {
 	afterEach(() => {
 		h.tableError = null;
@@ -1510,6 +1511,21 @@ describe('TableView export format menu', () => {
 				'tbl:draft:1',
 				expect.objectContaining({ format: 'json' })
 			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('a 409 scripts need the engine from the export shows that state', async () => {
+		vi.mocked(downloadTable).mockRejectedValueOnce(
+			new ConflictError(409, { detail: 'scripts need the engine' }, 'scripts need the engine')
+		);
+		const c = render('tbl:draft:1');
+		try {
+			await chooseFormat('xlsx');
+			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
+			await waitFor(() => !!document.querySelector('[data-testid="scripts-need-engine"]'));
+			expect(document.querySelector('[data-testid="scripts-need-engine"]')).not.toBeNull();
 		} finally {
 			unmount(c);
 		}

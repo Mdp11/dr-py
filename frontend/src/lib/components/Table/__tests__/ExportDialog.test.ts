@@ -381,11 +381,9 @@ describe('ExportDialog', () => {
 		expect(formats).toEqual(['json']);
 	});
 
-	// `onExport` runs `downloadTable`'s 202/Retry-After loop, which can wait
-	// minutes on a script sweep. Awaiting it here would pin the modal open for
-	// that whole time, its overlay covering the chrome button that reports the
-	// real `Preparing… n/m` progress — and would swallow the close on a failed
-	// export too. The download that never settles below is exactly that case:
+	// Awaiting `onExport` here would pin the modal open while the download
+	// runs, its overlay covering the chrome button that shows the export is
+	// alive — and would swallow the close on a failed export too. The download that never settles below is exactly that case:
 	// everything asserted after the click is unreachable if the handler awaits.
 	it('Export closes the dialog immediately instead of awaiting the download', async () => {
 		let closed = false;

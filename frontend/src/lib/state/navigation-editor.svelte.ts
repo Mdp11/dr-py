@@ -58,6 +58,7 @@
  */
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
+import { isScriptsNeedEngine } from '$lib/api/errors';
 import type { ChainNode, NavigationDefinition, ScriptWarning } from '$lib/api/types';
 import {
 	containsRowStart,
@@ -132,6 +133,9 @@ export interface NavPreview {
 	fallback: 'pattern' | null;
 }
 
+/** Why a node's last evaluate failed: the server refused scripts without the engine, or anything else. */
+export type EvalError = 'scripts' | 'error';
+
 const _drafts = new SvelteMap<string, NavDraft>();
 /** previewKey (`${tabId}::${pathKey(path)}`) -> the node's preview. */
 const _previews = new SvelteMap<string, NavPreview>();
@@ -194,7 +198,7 @@ const _visibleCounts = new Map<string, number>();
  * (`unregisterVisibleNode`), `closeDraft`, `reloadDraft`, and reset — an error
  * must never outlive the node it belongs to.
  */
-const _evalErrors = new SvelteMap<string, true>();
+const _evalErrors = new SvelteMap<string, EvalError>();
 
 /**
  * Per-NODE preview generation, keyed by previewKey. Anything that makes an
@@ -449,9 +453,9 @@ export function setNavLockDenied(tabId: string, holder: string): void {
 	_lockDenied.set(tabId, holder);
 }
 
-/** True when the node's last evaluate attempt failed (see `_evalErrors`). */
-export function getEvalError(tabId: string, path: NodePath = []): boolean {
-	return _evalErrors.has(previewKey(tabId, path));
+/** Why the node's last evaluate attempt failed, `null` when it did not (see `_evalErrors`). */
+export function getEvalError(tabId: string, path: NodePath = []): EvalError | null {
+	return _evalErrors.get(previewKey(tabId, path)) ?? null;
 }
 /** True when the node at `path` is rendered somewhere (and thus previewed). */
 export function isNodeVisible(tabId: string, path: NodePath = []): boolean {
@@ -950,7 +954,7 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 			// Surface the failure (the auto-run callers swallow the rethrow):
 			// only for a CURRENT failure — a stale one belongs to a node that is
 			// no longer on screen and must not tag the newer one.
-			_evalErrors.set(key, true);
+			_evalErrors.set(key, isScriptsNeedEngine(err) ? 'scripts' : 'error');
 		}
 		throw err;
 	}

@@ -1,6 +1,6 @@
 import { utcDate } from '$lib/util/utc-date';
 import { activeProjectId, apiFetch, apiFetchRaw, type ClientConfig } from './client';
-import { asSent, route, SKIP, type Fallback, type Side } from './engine-route';
+import { asSent, route, type Fallback, type Side } from './engine-route';
 import {
 	EngineExportFileSchema,
 	JsonPreviewSchema,
@@ -75,22 +75,17 @@ export function evaluateTable(
 }
 
 /**
- * Outcome of an export. `'preparing'` means the backend's cache-only export
- * path hasn't finished computing every script cell yet — it answered 202
- * with `Retry-After: 1` instead of the file; the caller retries after a short
- * delay. A `'ready'` file says whether rows were left out (`truncated`) and,
- * when the engine sent it to the server, why (`fallback`): it then holds the
- * committed state, not the staged one.
+ * A finished export: whether rows were left out (`truncated`) and, when the
+ * engine sent it to the server, why (`fallback`): it then holds the committed
+ * state, not the staged one.
  */
-export type ExportResult =
-	| {
-			kind: 'ready';
-			blob: Blob;
-			filename: string;
-			truncated?: boolean;
-			fallback?: Exclude<Fallback, 'rules'>;
-	  }
-	| { kind: 'preparing'; done: number; total: number | null };
+export type ExportResult = {
+	kind: 'ready';
+	blob: Blob;
+	filename: string;
+	truncated?: boolean;
+	fallback?: Exclude<Fallback, 'rules'>;
+};
 
 /**
  * The file name a response's `Content-Disposition` gives (e.g.
@@ -115,16 +110,10 @@ export function parseAttachmentFilename(res: Response): string | undefined {
 }
 
 /**
- * A download route's answer: 202 is `preparing` (THE STATUS CODE IS THE
- * RETRY SIGNAL, never the body's `state`), anything else the file, named by
- * its `Content-Disposition` or `fallbackName`, truncated when
- * `X-Table-Truncated` says so.
+ * A download route's answer: the file, named by its `Content-Disposition` or
+ * `fallbackName`, truncated when `X-Table-Truncated` says so.
  */
 export async function exportResponse(res: Response, fallbackName: string): Promise<ExportResult> {
-	if (res.status === 202) {
-		const body = (await res.json()) as { done?: number; total?: number | null };
-		return { kind: 'preparing', done: body.done ?? 0, total: body.total ?? null };
-	}
 	return {
 		kind: 'ready',
 		blob: await res.blob(),
@@ -146,7 +135,7 @@ export function engineExport(answer: unknown): ExportResult {
 
 /** Marks a file the server answered for the engine, with why. */
 export function markExport(result: ExportResult, reason: Exclude<Fallback, 'rules'>): ExportResult {
-	return result.kind === 'ready' ? { ...result, fallback: reason } : result;
+	return { ...result, fallback: reason };
 }
 
 /** An export's `date` and `project` on the engine: the server reads its own clock and URL. */
@@ -171,10 +160,9 @@ function decoded(bytes: Uint8Array): string {
  * (without parameters) and `truncated`, and a `body` that is the text of a
  * JSON, JSONL or CSV file, a zip's members in order as `[path, text]` (an xlsx member `[path,
  * 'xlsx']`), and nothing for an xlsx — the engine's workbooks and zips are
- * not the server's bytes. A file still `preparing` is `SKIP`.
+ * not the server's bytes.
  */
 export async function exportDigest(result: ExportResult): Promise<unknown> {
-	if (result.kind === 'preparing') return SKIP;
 	const contentType = mediaType(result.blob.type);
 	const digest = {
 		filename: result.filename,
@@ -197,9 +185,8 @@ export async function exportDigest(result: ExportResult): Promise<unknown> {
  * (`POST /tables/export`), the `exports` surface: the engine answers from
  * the working copy, staged edits and artifacts included; a table it refuses
  * (a script, a pattern) is the server's file, on committed state, marked
- * with why. On the server, `{ kind: 'preparing' }` while the script-cache
- * sweep is still filling in cells for this table (202 + Retry-After) — the
- * 202 protocol is format-agnostic. `signal` aborts the call on either side.
+ * with why. A table with a script is refused with a 409 `scripts need the
+ * engine` on the server. `signal` aborts the call on either side.
  */
 export function exportTable(
 	args: {

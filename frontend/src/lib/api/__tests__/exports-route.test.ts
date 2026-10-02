@@ -369,16 +369,4 @@ describe('the exports surface on the server', () => {
 		});
 		expect(await runExporter('x1')).toMatchObject({ filename: 'plain.zip', truncated: false });
 	});
-
-	it('a 202 is still preparing', async () => {
-		const project = fakeProject();
-		await over(project, 'server');
-		server.use(
-			http.post(`${project.baseUrl}/exports/run`, () =>
-				HttpResponse.json({ state: 'computing', done: 2, total: 5 }, { status: 202 })
-			)
-		);
-
-		expect(await runExporter('x1')).toEqual({ kind: 'preparing', done: 2, total: 5 });
-	});
 });

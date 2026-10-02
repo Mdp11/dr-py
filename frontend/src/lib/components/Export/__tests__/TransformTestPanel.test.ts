@@ -6,14 +6,20 @@
 // scaffolding as Snippet/__tests__/snippet-test-panel.test.ts.
 import { flushSync, mount, unmount } from 'svelte';
 import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../../../api/__tests__/server';
 import type { ExporterEntry } from '$lib/api/types';
 import TransformTestPanel from '../TransformTestPanel.svelte';
 
+const replica = vi.hoisted(() => ({ phase: 'ready' as string }));
+vi.mock('$lib/state/replica.svelte', () => ({
+	getReplicaStatus: () => ({ phase: replica.phase })
+}));
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
+	replica.phase = 'ready';
 	server.resetHandlers();
 	document.body.innerHTML = '';
 });
@@ -92,6 +98,37 @@ async function runAndSettle(): Promise<void> {
 }
 
 describe('TransformTestPanel', () => {
+	it.each(['off', 'server'])(
+		'with the replica %s it shows that scripts need the engine and calls nothing',
+		async (phase) => {
+			replica.phase = phase;
+			let called = false;
+			server.use(
+				http.post('*/exports/preview-transform', () => {
+					called = true;
+					return HttpResponse.json(OK);
+				})
+			);
+			const c = render({ entry: entry() });
+			click(testid('transform-test-toggle'));
+			expect(testid('scripts-need-engine')).not.toBeNull();
+			expect(testid('transform-test-run')!.hasAttribute('disabled')).toBe(true);
+			await (c as unknown as { requestRun(): Promise<void> }).requestRun();
+			flushSync();
+			expect(called).toBe(false);
+			unmount(c);
+		}
+	);
+
+	it('a server 409 renders the state', async () => {
+		capture({ detail: 'scripts need the engine' }, 409);
+		const c = render({ entry: entry() });
+		click(testid('transform-test-toggle'));
+		click(testid('transform-test-run'));
+		await vi.waitFor(() => expect(testid('scripts-need-engine')).not.toBeNull());
+		unmount(c);
+	});
+
 	it('starts collapsed and needs no element binding', () => {
 		const c = render({ entry: entry() });
 		expect(testid('transform-test-run')).toBeNull();

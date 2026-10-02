@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExportResult } from '$lib/api/tables';
-import { retryAndDownload } from '../export-download';
+import { downloadExport } from '../export-download';
 import { utcDate } from '../utc-date';
 
 afterEach(() => {
@@ -20,8 +20,8 @@ function downloads(): string[] {
 	return names;
 }
 
-describe('retryAndDownload', () => {
-	it('returns the ready result it downloaded, its marks included', async () => {
+describe('downloadExport', () => {
+	it('calls the export once and downloads the file it returns, marks included', async () => {
 		const names = downloads();
 		const ready: ExportResult = {
 			kind: 'ready',
@@ -30,30 +30,18 @@ describe('retryAndDownload', () => {
 			truncated: true,
 			fallback: 'pattern'
 		};
-		const run = vi
-			.fn<() => Promise<ExportResult>>()
-			.mockResolvedValueOnce({ kind: 'preparing', done: 0, total: 2 })
-			.mockResolvedValueOnce(ready);
+		const run = vi.fn<() => Promise<ExportResult>>().mockResolvedValue(ready);
 
-		const result = await retryAndDownload(run);
+		const result = await downloadExport(run);
 
 		expect(result).toBe(ready);
-		expect(run).toHaveBeenCalledTimes(2);
+		expect(run).toHaveBeenCalledTimes(1);
 		expect(names).toEqual(['t.csv']);
 	});
 
-	it('an abort while preparing returns the last result, downloading nothing', async () => {
+	it('downloads nothing when the export fails', async () => {
 		const names = downloads();
-		const controller = new AbortController();
-		const preparing: ExportResult = { kind: 'preparing', done: 1, total: 2 };
-		const run = vi.fn(() => {
-			controller.abort();
-			return Promise.resolve(preparing);
-		});
-
-		const result = await retryAndDownload(run, { signal: controller.signal });
-
-		expect(result).toBe(preparing);
+		await expect(downloadExport(() => Promise.reject(new Error('nope')))).rejects.toThrow('nope');
 		expect(names).toEqual([]);
 	});
 });

@@ -7,12 +7,9 @@
 	// draft/lease/staging model this drives.
 	import * as artifactsApi from '$lib/api/artifacts';
 	import type { Fallback } from '$lib/api/engine-route';
+	import { isScriptsNeedEngine } from '$lib/api/errors';
 	import { runExporter, runExporterDraft } from '$lib/api/exports';
-	import {
-		EXPORT_FALLBACK_NOTE,
-		retryAndDownload,
-		type ExportProgress
-	} from '$lib/util/export-download';
+	import { EXPORT_FALLBACK_NOTE, downloadExport } from '$lib/util/export-download';
 	import {
 		addExporterEntry,
 		artifactHeaderById,
@@ -41,6 +38,7 @@
 	} from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import { isEmptySnippetSource } from '$lib/snippet/source';
+	import ScriptsNeedEngine from '$lib/components/ScriptsNeedEngine.svelte';
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
 	import AddTablePicker from './AddTablePicker.svelte';
 	import TransformSourceEditor from './TransformSourceEditor.svelte';
@@ -182,12 +180,12 @@
 		onDrop: (from, to) => moveExporterEntryInList(tabId, from, to)
 	});
 
-	// --- Export: run the committed artifact or the draft inline, 202-poll, download ---
+	// --- Export: run the committed artifact or the draft inline, download ---
 	let exporting = $state(false);
-	let exportProgress = $state<ExportProgress | null>(null);
 	let exportError = $state<string | null>(null);
-	let exportAbort: AbortController | null = null;
-	$effect(() => () => exportAbort?.abort());
+	// The run was refused because an entry reaches a script and the engine is
+	// not answering.
+	let exportNeedsEngine = $state(false);
 	// Why the last run was the server's, over committed state; null once one
 	// comes from the engine again.
 	let exportFallback = $state<Exclude<Fallback, 'rules'> | null>(null);
@@ -217,20 +215,16 @@
 							d.name || 'export'
 						);
 		exportError = null;
+		exportNeedsEngine = false;
 		exporting = true;
-		exportAbort = new AbortController();
 		try {
-			const result = await retryAndDownload(start, {
-				onProgress: (p) => (exportProgress = p),
-				signal: exportAbort.signal
-			});
-			if (result.kind === 'ready') exportFallback = result.fallback ?? null;
+			const result = await downloadExport(start);
+			exportFallback = result.fallback ?? null;
 		} catch (e) {
-			exportError = e instanceof Error ? e.message : 'Export failed';
+			if (isScriptsNeedEngine(e)) exportNeedsEngine = true;
+			else exportError = e instanceof Error ? e.message : 'Export failed';
 		} finally {
 			exporting = false;
-			exportProgress = null;
-			exportAbort = null;
 		}
 	}
 </script>
@@ -256,11 +250,7 @@
 				onclick={() => void runExport()}
 			>
 				{#if exporting}
-					{#if exportProgress}
-						Preparing… {exportProgress.done}/{exportProgress.total ?? '…'}
-					{:else}
-						Exporting…
-					{/if}
+					Exporting…
 				{:else}
 					Export
 				{/if}
@@ -341,6 +331,9 @@
 		{/if}
 		{#if exportError}
 			<p class="px-3 py-1 text-xs text-destructive">{exportError}</p>
+		{/if}
+		{#if exportNeedsEngine}
+			<ScriptsNeedEngine />
 		{/if}
 		{#if exportFallback}
 			<p data-testid="export-fallback" class="px-3 py-1 text-[11px] text-muted-foreground/70">

@@ -1203,9 +1203,9 @@ describe('evaluation error surfacing', () => {
 		await ensureDraft('nav:draft:1');
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockRejectedValue(new Error('boom'));
 		updateDefinition('nav:draft:1', runnableDef());
-		expect(getEvalError('nav:draft:1')).toBe(false); // not before the run fires
+		expect(getEvalError('nav:draft:1')).toBeNull(); // not before the run fires
 		await vi.advanceTimersByTimeAsync(400);
-		expect(getEvalError('nav:draft:1')).toBe(true);
+		expect(getEvalError('nav:draft:1')).toBe('error');
 		expect(getPreview('nav:draft:1')).toBeUndefined();
 	});
 
@@ -1217,13 +1217,13 @@ describe('evaluation error surfacing', () => {
 			.mockResolvedValueOnce(CHAIN_PAGE);
 		updateDefinition('nav:draft:1', runnableDef());
 		await vi.advanceTimersByTimeAsync(400);
-		expect(getEvalError('nav:draft:1')).toBe(true);
+		expect(getEvalError('nav:draft:1')).toBe('error');
 		updateDefinition('nav:draft:1', runnableDef(['C']));
 		// The edit itself clears the stale error immediately (the preview slot
 		// must always match what's on screen — same rule as the preview).
-		expect(getEvalError('nav:draft:1')).toBe(false);
+		expect(getEvalError('nav:draft:1')).toBeNull();
 		await vi.advanceTimersByTimeAsync(400);
-		expect(getEvalError('nav:draft:1')).toBe(false);
+		expect(getEvalError('nav:draft:1')).toBeNull();
 		expect(getPreview('nav:draft:1')?.total).toBe(1);
 	});
 
@@ -1236,16 +1236,16 @@ describe('evaluation error surfacing', () => {
 		d.reject(new Error('boom'));
 		await inflight;
 		// Stale failure: it belongs to a definition that is no longer on screen.
-		expect(getEvalError('nav:draft:1')).toBe(false);
+		expect(getEvalError('nav:draft:1')).toBeNull();
 	});
 
 	it('closeDraft clears the eval-error state', async () => {
 		await ensureDraft('nav:draft:1');
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockRejectedValue(new Error('boom'));
 		await runPreview('nav:draft:1').catch(() => {});
-		expect(getEvalError('nav:draft:1')).toBe(true);
+		expect(getEvalError('nav:draft:1')).toBe('error');
 		closeDraft('nav:draft:1');
-		expect(getEvalError('nav:draft:1')).toBe(false);
+		expect(getEvalError('nav:draft:1')).toBeNull();
 	});
 });
 
@@ -1600,7 +1600,7 @@ describe('embedded drafts', () => {
 		await Promise.resolve();
 		expect(evalSpy).not.toHaveBeenCalled();
 		expect(getPreview('navemb:t2')).toBeUndefined();
-		expect(getEvalError('navemb:t2')).toBe(false);
+		expect(getEvalError('navemb:t2')).toBeNull();
 	});
 
 	it('setEmbeddedRowElement re-runs expanded previews under the new binding', async () => {

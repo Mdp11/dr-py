@@ -5,8 +5,9 @@
 	// of Snippet/SnippetTestPanel — same disclosure, same component-local run
 	// state and generation guard (see that file's header for why the state is
 	// NOT store-keyed) — minus the element binding: the document IS the input,
-	// and the server builds it (`POST /exports/preview-transform`), so there is
-	// nothing to bind.
+	// and the engine builds it (`previewTransform`), so there is nothing to
+	// bind. Without the engine (replica `off` or `server`) the panel shows
+	// that scripts need it and calls nothing.
 	//
 	// The whole ENTRY is the request, not just the snippet: the sample is
 	// rendered under the entry's column overrides, `json_doc` shaping and
@@ -21,7 +22,9 @@
 	import { onDestroy } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { previewTransform } from '$lib/api/exports';
-	import { ApiError } from '$lib/api/errors';
+	import { ApiError, isScriptsNeedEngine } from '$lib/api/errors';
+	import ScriptsNeedEngine from '$lib/components/ScriptsNeedEngine.svelte';
+	import { getReplicaStatus } from '$lib/state/replica.svelte';
 	import type { ExporterEntry, TransformPreviewOut } from '$lib/api/types';
 	import { isEmptySnippetSource } from '$lib/snippet/source';
 	import TransformTestFile from './TransformTestFile.svelte';
@@ -40,6 +43,11 @@
 	let running = $state(false);
 	let result = $state<TransformPreviewOut | null>(null);
 	let notice = $state<string | null>(null);
+	// Scripts run in the engine only: with no engine nothing is called.
+	const needsEngine = $derived(
+		getReplicaStatus().phase === 'off' || getReplicaStatus().phase === 'server'
+	);
+	let refused = $state(false);
 	/** Indices of the expanded files of a split result; reset per run so a
 	 * fresh run always starts fully collapsed. */
 	const expanded = new SvelteSet<number>();
@@ -57,7 +65,7 @@
 		!isEmptySnippetSource(entry.transform) &&
 			(entry.transform?.definition ? entry.transform.definition.code.trim() !== '' : true)
 	);
-	const runDisabled = $derived(running || !configured);
+	const runDisabled = $derived(running || !configured || needsEngine);
 	const failedCount = $derived(result?.files.filter((f) => f.error !== null).length ?? 0);
 
 	/** Also reachable from the inline CodeEditor's Mod-Enter (through
@@ -65,6 +73,7 @@
 	 * the button. */
 	export async function requestRun(): Promise<void> {
 		open = true;
+		if (needsEngine) return;
 		if (runDisabled) {
 			if (!running) notice = 'Pick a saved snippet or write some code first.';
 			return;
@@ -72,6 +81,7 @@
 		const seq = ++runSeq;
 		running = true;
 		notice = null;
+		refused = false;
 		try {
 			const out = await previewTransform(entry);
 			if (seq !== runSeq) return;
@@ -81,7 +91,8 @@
 		} catch (err) {
 			if (seq !== runSeq) return;
 			running = false;
-			notice = describeFailure(err);
+			if (isScriptsNeedEngine(err)) refused = true;
+			else notice = describeFailure(err);
 		}
 	}
 
@@ -92,15 +103,13 @@
 
 	/** 422 carries the server's own sentence naming the entry's problem
 	 * (missing table, non-JSON format, unresolvable ref…) — show it verbatim.
-	 * The rest is SnippetTestPanel's vocabulary. */
+	 * Anything else is a failed call. */
 	function describeFailure(err: unknown): string {
 		if (err instanceof ApiError) {
 			if (err.status === 422) {
 				const detail = (err.body as { detail?: unknown } | null)?.detail;
 				return typeof detail === 'string' ? detail : err.message;
 			}
-			if (err.status === 429) return 'Another run is already in progress — wait for it to finish.';
-			if (err.status === 503) return 'Code execution is unavailable on this server.';
 		}
 		return 'Run failed — check your connection and try again.';
 	}
@@ -138,6 +147,10 @@
 				</span>
 			</div>
 			<div class="flex flex-col gap-2 border-t border-border/60 p-2 text-xs">
+				{#if needsEngine || refused}
+					<ScriptsNeedEngine />
+				{/if}
+
 				{#if running}
 					<div class="flex items-center gap-2 text-muted-foreground">
 						<div

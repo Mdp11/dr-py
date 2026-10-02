@@ -9,7 +9,6 @@ import * as exportsApi from '$lib/api/exports';
 import { installEngineSeam } from '$lib/api/engine-route';
 import { ConflictError } from '$lib/api/errors';
 import { TableDefinitionSchema } from '$lib/api/types';
-import { EXPORT_RETRY_MS } from '$lib/util/export-download';
 import {
 	addExporterEntry,
 	getExporterDraft,
@@ -281,7 +280,7 @@ describe('ExporterTab', () => {
 		]);
 	});
 
-	it('runs the 202-retry download loop for a clean committed draft (Export stays enabled while dirty)', async () => {
+	it('downloads once for a clean committed draft (Export stays enabled while dirty)', async () => {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
 		render('exp:art-1');
 		await vi.waitFor(() =>
@@ -302,11 +301,9 @@ describe('ExporterTab', () => {
 		flushSync();
 		expect(runBtn.disabled).toBe(false);
 
-		vi.useFakeTimers();
 		const blob = new Blob(['x'], { type: 'application/zip' });
 		const runSpy = vi
 			.spyOn(exportsApi, 'runExporter')
-			.mockResolvedValueOnce({ kind: 'preparing', done: 1, total: 2 })
 			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip' });
 		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
 		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
@@ -316,12 +313,24 @@ describe('ExporterTab', () => {
 		await Promise.resolve();
 		await Promise.resolve();
 		flushSync();
-		await vi.advanceTimersByTimeAsync(EXPORT_RETRY_MS);
-		await Promise.resolve();
-		await Promise.resolve();
-		flushSync();
 
-		expect(runSpy).toHaveBeenCalledTimes(2);
+		expect(runSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it('a 409 scripts need the engine renders that state', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+		vi.spyOn(exportsApi, 'runExporter').mockRejectedValue(
+			new ConflictError(409, { detail: 'scripts need the engine' }, 'scripts need the engine')
+		);
+
+		document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!.click();
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="scripts-need-engine"]')).not.toBeNull()
+		);
 	});
 
 	it('a peer lease conflict shows the read-only banner and disables entry inputs', async () => {

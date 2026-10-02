@@ -559,7 +559,6 @@ export {
 	updateTableDefinition,
 	updateTableDisplayOrder,
 	updateTableExportSettings,
-	type ExportProgress,
 	type TableData,
 	type TableDraft
 } from './table-editor.svelte';

@@ -39,6 +39,10 @@
 		<span class="font-mono text-success">✓ {preview.total} chains</span>
 	{:else if needsRow}
 		<span class="text-muted-foreground/70 italic">no row to preview against</span>
+	{:else if errored === 'scripts'}
+		<span class="font-mono text-muted-foreground/70" title="Scripts need the engine"
+			>needs engine</span
+		>
 	{:else if errored}
 		<span class="font-mono text-destructive">⚠ failed</span>
 	{:else if !runnable}

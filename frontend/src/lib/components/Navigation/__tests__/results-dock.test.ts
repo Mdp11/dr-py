@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import * as artifactsApi from '$lib/api/artifacts';
+import { ConflictError } from '$lib/api/errors';
 import type { PathNavigation, SetExpression } from '$lib/api/types';
 import {
 	ensureDraft,
@@ -218,6 +219,24 @@ it('shows the evaluation error line when the last run failed', async () => {
 	const c = render(tabId);
 	try {
 		expect(document.body.textContent).toContain('Evaluation failed — edit the definition to retry');
+	} finally {
+		unmount(c);
+	}
+});
+
+it('shows that scripts need the engine when the server refused the evaluation', async () => {
+	const tabId = 'nav:draft:scripts';
+	await ensureDraft(tabId);
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockRejectedValue(
+		new ConflictError(409, { detail: 'scripts need the engine' }, 'scripts need the engine')
+	);
+	updateDefinition(tabId, runnablePath());
+	await runPreview(tabId, []).catch(() => {});
+	await flushEvaluate();
+	const c = render(tabId);
+	try {
+		expect(document.querySelector('[data-testid="scripts-need-engine"]')).not.toBeNull();
+		expect(document.body.textContent).not.toContain('Evaluation failed');
 	} finally {
 		unmount(c);
 	}

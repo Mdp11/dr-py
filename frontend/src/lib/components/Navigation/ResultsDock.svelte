@@ -8,6 +8,7 @@
 	// card (no collapse toggle — see navigation-editor.svelte.ts), so the
 	// selected node's preview is already kept live by that card's own
 	// register/unregister effect.
+	import ScriptsNeedEngine from '$lib/components/ScriptsNeedEngine.svelte';
 	import {
 		artifactHeaderById,
 		getDraft,
@@ -85,7 +86,9 @@
 			{/each}
 		</select>
 		<span data-testid="results-status" class="ml-auto font-mono text-[11px]">
-			{#if errored && !preview}
+			{#if errored === 'scripts' && !preview}
+				<span class="text-muted-foreground/70">Scripts need the engine</span>
+			{:else if errored && !preview}
 				<span class="text-destructive">Evaluation failed — edit the definition to retry</span>
 			{:else if preview?.loading}
 				<span class="text-muted-foreground/70">auto-runs as you edit · evaluating…</span>
@@ -103,6 +106,8 @@
 			<p class="text-xs text-muted-foreground/70">
 				Linked saved navigation — open it in its own tab to see its results.
 			</p>
+		{:else if errored === 'scripts' && !preview}
+			<ScriptsNeedEngine />
 		{:else if errored && !preview}
 			<p class="text-xs text-destructive">Evaluation failed — edit the definition to retry</p>
 		{:else if !preview && !runnable}

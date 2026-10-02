@@ -758,50 +758,6 @@ describe('createShadow', () => {
 			).toHaveLength(1);
 		});
 
-		it('a server still preparing is not, first or in a re-test', async () => {
-			const csv = ready('a\r\n', 'text/csv; charset=utf-8', 't.csv');
-			const preparing: ExportResult = { kind: 'preparing', done: 1, total: 3 };
-			expect(await reports(csv, preparing)).toEqual([]);
-
-			const lines: string[] = [];
-			let served = 0;
-			await run(
-				{
-					surface: 'exports',
-					method: 'exportTable',
-					engine: { ok: true, value: csv },
-					again: () => Promise.resolve(csv),
-					server: () =>
-						Promise.resolve(
-							++served === 1 ? ready('b\r\n', 'text/csv; charset=utf-8', 't.csv') : preparing
-						),
-					digest: (value) => exportDigest(value as ExportResult)
-				},
-				{},
-				(line) => lines.push(line)
-			);
-			expect(served).toBe(2);
-			expect(lines).toEqual([]);
-		});
-
-		it('an engine failure against a server still preparing is reported', async () => {
-			const lines: string[] = [];
-			const failure = new Error('engine broke');
-			await run(
-				{
-					surface: 'exports',
-					method: 'exportTable',
-					engine: { ok: false, error: failure },
-					again: () => Promise.reject(failure),
-					server: () => Promise.resolve({ kind: 'preparing', done: 1, total: 3 }),
-					digest: (value) => exportDigest(value as ExportResult)
-				},
-				{},
-				(line) => lines.push(line)
-			);
-			expect(lines).toHaveLength(1);
-		});
-
 		it('an edit staged while a re-test digest is awaited ends it silently', async () => {
 			let staged = false;
 			const lines: string[] = [];

@@ -34,11 +34,12 @@
 		seedSnippetExpanded,
 		setTableName,
 		suspendTableEvaluation,
-		updateTableDefinition,
-		type ExportProgress
+		updateTableDefinition
 	} from '$lib/state';
 	import type { Fallback } from '$lib/api/engine-route';
 	import type { ExportFormat } from '$lib/api/types';
+	import { isScriptsNeedEngine } from '$lib/api/errors';
+	import ScriptsNeedEngine from '../ScriptsNeedEngine.svelte';
 	import { EXPORT_FALLBACK_NOTE } from '$lib/util/export-download';
 	import {
 		AlertTriangle,
@@ -119,12 +120,10 @@
 	const canCheckScriptErrors = $derived(canRequestScriptErrors(tabId));
 	const scriptErrorCount = $derived(scriptErrors?.total_errors ?? 0);
 	// An empty recap means "we checked, there are none" — UNLESS the cells on
-	// screen say nothing was ever computed. The backend answers a runner-less
-	// recap with zero errors (the honest count: nothing ran, so nothing is known
-	// to have failed) and `ScriptErrorsOut` has no room to say which zero it is,
-	// so the client tells them apart from the page it is already showing. Only
-	// consulted for an empty recap, and `&&` short-circuits, so a table with a
-	// real count (or no answer yet) never pays for the scan.
+	// screen say nothing was computed: the recap has no room to say which zero
+	// it is, so the client tells them apart from the page it is already
+	// showing. Only consulted for an empty recap, and `&&` short-circuits, so a
+	// table with a real count (or no answer yet) never pays for the scan.
 	const uncomputedReason = $derived(
 		scriptErrorsPhase === 'done' && scriptErrorCount === 0
 			? getUncomputedScriptCellReason(tabId)
@@ -177,12 +176,12 @@
 		draft?.definition.columns.some((c) => c.kind !== 'element' && c.mode === 'expand') ?? false
 	);
 	let saveError = $state<string | null>(null);
-	// Export is a retry loop while the backend's script sweep is still filling
-	// in this table's cells (202 + Retry-After): the button reports progress and
-	// stays disabled for the duration, and the controller aborts the loop when
-	// the tab unmounts so it can't keep polling for a view that is gone.
+	// The Export button stays disabled while a download runs, and the
+	// controller aborts the call when the tab unmounts.
 	let exporting = $state(false);
-	let exportProgress = $state<ExportProgress | null>(null);
+	// The last export was refused because the table reaches a script and the
+	// engine is not answering.
+	let exportNeedsEngine = $state(false);
 	let exportAbort: AbortController | null = null;
 	// The Export ▾ items open the export settings dialog on the chosen
 	// format, which owns the per-column include/rename/order overrides and
@@ -520,20 +519,20 @@
 	async function exportTable(format: ExportFormat): Promise<void> {
 		if (exporting) return; // one export at a time — the trigger is disabled too
 		saveError = null;
+		exportNeedsEngine = false;
 		exporting = true;
 		exportAbort = new AbortController();
 		try {
 			const result = await downloadTable(tabId, {
 				format,
-				onProgress: (p) => (exportProgress = p),
 				signal: exportAbort.signal
 			});
 			if (result?.kind === 'ready') exportFallback = result.fallback ?? null;
 		} catch (e) {
-			saveError = e instanceof Error ? e.message : 'Export failed';
+			if (isScriptsNeedEngine(e)) exportNeedsEngine = true;
+			else saveError = e instanceof Error ? e.message : 'Export failed';
 		} finally {
 			exporting = false;
-			exportProgress = null;
 			exportAbort = null;
 		}
 	}
@@ -616,21 +615,15 @@
 						data-testid="table-export-button"
 						class="flex items-center gap-1.5 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-60"
 						disabled={exporting}
-						title={exporting
-							? 'Waiting for this table\u2019s script values to finish computing'
-							: undefined}
 					>
 						<!-- A disabled trigger with static text is the whole "the export
-						     did nothing" complaint: the spinner is what says the retry
-						     loop is alive while the backend answers 202. -->
+						     did nothing" complaint: the spinner says the call is alive. -->
 						{#if exporting}
 							<span
 								class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
 							></span>
 						{/if}
-						{#if exportProgress}
-							Preparing… {exportProgress.done}/{exportProgress.total ?? '…'}
-						{:else if exporting}
+						{#if exporting}
 							Exporting…
 						{:else}
 							Export ▾
@@ -839,6 +832,9 @@
 		{/if}
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
+		{/if}
+		{#if exportNeedsEngine}
+			<ScriptsNeedEngine />
 		{/if}
 		{#if columnError}
 			<p class="px-3 py-1 text-xs text-destructive" data-testid="table-column-error">

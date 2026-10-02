@@ -389,8 +389,9 @@ engine store":
      transform editor whenever `entry.transform != null`), not the shared
      `SnippetTestPanel`: the document a transform receives only exists in
      the context of an entry, so the panel posts the WHOLE entry as drafted
-     (unsaved inline code included) to `POST /exports/preview-transform`
-     (`previewTransform` in `api/exports.ts`) and renders, per file the
+     (unsaved inline code included) to the engine's `previewTransform`
+     (`api/exports.ts`; the server's `POST /exports/preview-transform` answers
+     409 `scripts need the engine`) and renders, per file the
      export would write (`TransformPreviewOut.files[]`), prints, then
      before | after panes of the server-rendered JSON text — never
      re-serialized client-side (`Export/TransformTestFile.svelte` is that
@@ -401,8 +402,7 @@ engine store":
      partition is found by name. The server answers 200 even when the
      snippet fails (`error` block with a go-to-line traceback, no after-pane);
      a 422 (missing table, non-JSON format, unresolvable ref…) shows the
-     server's own sentence as the notice, 429/503 use `SnippetTestPanel`'s
-     wording. Run state is component-local with the same generation guard
+     server's own sentence as the notice. Run state is component-local with the same generation guard
      as `SnippetTestPanel`. Mod-Enter in the inline editor reaches the panel
      through `SnippetSourceEditor`'s `onRun` prop (honored only for
      `entry="transform"`, where no `SnippetTestPanel` claims the shortcut),
@@ -1403,7 +1403,17 @@ are answered by the engine or the server, one switch per surface:
   the table tab shows `ScriptsNeedEngine.svelte` ("Scripts need the engine")
   in place of the grid: the store's `getTableError(tabId)` answers
   `{kind: 'scripts'}` for it, `{kind: 'error', message}` for any other
-  failure, `null` for none. `evaluateNavigation` marks its
+  failure, `null` for none. The same 409 shows the state where each other
+  surface meets it: a table export (`TableView`) and an exporter run
+  (`ExporterTab`) render `ScriptsNeedEngine` under the toolbar, and a
+  navigation node's `getEvalError(tabId, path)` answers `'scripts'` (the
+  results dock body, a "needs engine" status chip) or `'error'`, `null` for none.
+  An export is one call: `downloadExport` (`util/export-download.ts`) runs it
+  and downloads its file; there is no 202 and no `preparing` result.
+  `previewTransform` routes through the `exports` surface to the engine's
+  `previewTransform`; `Export/TransformTestPanel.svelte` shows
+  `ScriptsNeedEngine` and calls nothing while the replica phase is `off` or
+  `server`. `evaluateNavigation` marks its
   page `fallback: 'pattern'`, which the navigation editor's
   preview keeps from its first page and `Navigation/ResultsDock.svelte`
   shows above the chains as a muted note (`data-testid="nav-fallback"`,

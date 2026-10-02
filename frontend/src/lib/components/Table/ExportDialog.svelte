@@ -46,9 +46,8 @@
 		format: ExportFormat;
 		onClose: () => void;
 		/** How the download is actually run — required, never defaulted: the
-		 *  table tab's wrapper is what keeps the 202-retry loop reporting
-		 *  through the chrome's Export button and aborting when the tab
-		 *  unmounts. This dialog decides WHAT is exported, not how the waiting
+		 *  table tab's wrapper is what reports it through the chrome's Export
+		 *  button and aborts it when the tab unmounts. This dialog decides WHAT is exported, not how the waiting
 		 *  is surfaced, and it is closed long before the wait is over. */
 		onExport: (format: ExportFormat) => Promise<void>;
 	} = $props();
@@ -121,14 +120,10 @@
 
 	/** Close FIRST, then start the download — deliberately not awaited.
 	 *
-	 *  `onExport` runs `downloadTable`'s whole 202/`Retry-After` loop, which
-	 *  can wait minutes while a script sweep fills the cell cache. Awaiting it
-	 *  here would hold the modal open for that entire time, showing a static
-	 *  label over an overlay that covers the chrome's Export button — the one
-	 *  place the real `Preparing… 3/40` progress is reported. The dialog picks
-	 *  WHAT to export; the tab owns the waiting, the progress and the failure
-	 *  message (`TableView.exportTable` catches into its own `saveError`), so
-	 *  there is nothing left here to await for. */
+	 *  The dialog picks WHAT to export; the tab owns the wait, the spinner on
+	 *  its Export button and the failure message (`TableView.exportTable`
+	 *  catches into its own `saveError`), so there is nothing left here to
+	 *  await for. */
 	function runExport(): void {
 		// Dropped BEFORE the close so the dismissal path below cannot mistake a
 		// started export for a discard and revert the settings it is using.

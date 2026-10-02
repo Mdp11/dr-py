@@ -211,19 +211,6 @@ describe('ChainPageSchema', () => {
 });
 
 describe('exportTable', () => {
-	it('returns a preparing result on a 202 (script-cache sweep still running)', async () => {
-		server.use(
-			http.post(`${BASE}/tables/export`, () =>
-				HttpResponse.json(
-					{ state: 'computing', done: 10, total: 3000, message: null },
-					{ status: 202, headers: { 'Retry-After': '1' } }
-				)
-			)
-		);
-		const result = await exportTable({ artifactId: 'a1' }, cfg);
-		expect(result).toEqual({ kind: 'preparing', done: 10, total: 3000 });
-	});
-
 	it('returns a ready result with the blob + filename on 200', async () => {
 		server.use(
 			http.post(`${BASE}/tables/export`, () =>

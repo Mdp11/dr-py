@@ -11,19 +11,6 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 describe('runExporter', () => {
-	it('returns a preparing result on a 202 (script-cache sweep still running)', async () => {
-		server.use(
-			http.post(`${BASE}/exports/run`, () =>
-				HttpResponse.json(
-					{ state: 'computing', done: 1, total: 4 },
-					{ status: 202, headers: { 'Retry-After': '1' } }
-				)
-			)
-		);
-		const result = await runExporter('a1', cfg);
-		expect(result).toEqual({ kind: 'preparing', done: 1, total: 4 });
-	});
-
 	it('returns a ready result with the blob + filename on 200', async () => {
 		server.use(
 			http.post(`${BASE}/exports/run`, () =>
