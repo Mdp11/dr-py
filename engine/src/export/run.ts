@@ -157,7 +157,7 @@ export function runExportSteps(
 
 	const tables = found.map(({ entry }): TableDefinition | ReadError => {
 		try {
-			return resolved(ctx.artifacts, entry.source.ref);
+			return resolved(ctx.artifacts, entry.source.ref, scripted);
 		} catch (error) {
 			if (error instanceof ReadError) return error;
 			throw error;

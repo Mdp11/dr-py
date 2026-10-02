@@ -8,6 +8,7 @@
  */
 import type { ArtifactSet } from '../artifacts/artifact-set.ts';
 import {
+	checkNavigationSnippets,
 	navigationHasScript,
 	NavigationResolveError,
 	RefNotFoundError,
@@ -17,6 +18,8 @@ import {
 	type SnippetFetch
 } from '../navigation/resolve.ts';
 import { ReadError } from '../read/errors.ts';
+import { entryArity } from '../script/arity.ts';
+import { checkSnippetDefinition } from '../script/snippets.ts';
 import { pyRepr } from '../value/repr.ts';
 import {
 	readTableDefinition,
@@ -106,4 +109,40 @@ export function tableHasScript(defn: TableDefinition): boolean {
 			col.navigation.definition !== null &&
 			navigationHasScript(col.navigation.definition)
 	);
+}
+
+/**
+ * Refuses, with 422, what the core's schema refuses in a resolved table's
+ * inline snippets: a snippet definition that is not one, in a script column,
+ * a navigation or the transform, and a script column whose `value()` takes
+ * other arguments than the column has inputs. A saved snippet is held to its
+ * arity when it runs.
+ */
+export function checkTableSnippets(defn: TableDefinition, where = 'definition'): void {
+	const rs = defn.row_source;
+	if (rs.kind !== 'scope' && rs.navigation.definition !== null) {
+		checkNavigationSnippets(rs.navigation.definition, `${where}.row_source.navigation.definition`);
+	}
+	defn.columns.forEach((col, i) => {
+		const at = `${where}.columns[${i}]`;
+		if (col.kind === 'navigation' && col.navigation.definition !== null) {
+			checkNavigationSnippets(col.navigation.definition, `${at}.navigation.definition`);
+		}
+		if (col.kind !== 'script' || col.snippet.definition === null) return;
+		checkSnippetDefinition(col.snippet.definition, `${at}.snippet.definition`);
+		const arity = entryArity((col.snippet.definition as { code: string }).code, 'value');
+		const n = col.inputs.length;
+		if (arity === 1 && n > 0) {
+			throw new ReadError(
+				422,
+				`${at}: value() takes 1 argument but column declares ${n} input${n !== 1 ? 's' : ''}`
+			);
+		}
+		if (arity === 2 && n === 0) {
+			throw new ReadError(422, `${at}: value() takes 2 arguments but column declares no inputs`);
+		}
+	});
+	if (defn.transform !== null && defn.transform.definition !== null) {
+		checkSnippetDefinition(defn.transform.definition, `${where}.transform.definition`);
+	}
 }

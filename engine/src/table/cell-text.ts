@@ -21,6 +21,8 @@ export function cellText(model: Model, cell: TableCell): Value {
 			return cell.values!.map(pyStr).join('; ');
 		case 'error':
 			return `#ERROR: ${cell.message}`;
+		case 'pending':
+			return '#ERROR: not computed';
 		case 'elements':
 			return cell.items!.map((item) => nameOf(model, item.id)).join('; ');
 	}

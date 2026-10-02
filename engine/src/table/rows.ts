@@ -3,8 +3,9 @@
  * `core/table/evaluate.py` build them, in steps. A row key holds the row
  * source's slots, then one slot per expand column: an element id, a raw
  * property value, a navigation's value terminal, or `null` for a row kept
- * empty. Every definition here is resolved (no navigation ref) and reaches no
- * script, so a script column is always unconfigured or never evaluated.
+ * empty. Every definition here is resolved (no navigation ref). A script
+ * column asks its snippet through the pass's scripts: an answer it does not
+ * hold yet is pending, and the pass is discarded for a fill to run it again.
  */
 import type { Metamodel } from '../metamodel/metamodel.ts';
 import type { Model } from '../model/model.ts';
@@ -15,11 +16,14 @@ import {
 	NavValueError,
 	PropertyValue,
 	scopeSteps,
-	type ChainNode
+	type ChainNode,
+	type ScalarValue
 } from '../navigation/evaluate.ts';
+import type { ValuePayload } from '../script/result.ts';
 import type { Steps } from '../steps/steps.ts';
 import { PyFloat, type Value } from '../value/types.ts';
 import type { MemoEntry, NavMemo } from './nav-memo.ts';
+import { evaluateScriptColumn, payloadElementIds, type TableScripts } from './script-inputs.ts';
 import type {
 	ColumnSource,
 	NavigationColumn,
@@ -57,7 +61,11 @@ export type RowKey = readonly Binding[];
  */
 export type RowBuild = { keys: RowKey[]; truncated: boolean; baseTotal: number; baseSlots: number };
 
-/** What one pass over the rows reads: the model, the definition, the key's layout, the meter and memo. */
+/**
+ * What one pass over the rows reads: the model, the definition, the key's
+ * layout, the meter and memo, and the scripts a snippet is asked through
+ * (`null`: none runs, and a script column reaches nothing).
+ */
 export type Pass = {
 	model: Model;
 	mm: Metamodel;
@@ -65,6 +73,7 @@ export type Pass = {
 	baseSlots: number;
 	meter: Meter;
 	memo: NavMemo | null;
+	scripts: TableScripts | null;
 };
 
 type Reached = ChainNode[];
@@ -110,15 +119,15 @@ export function expandSlotOf(defn: TableDefinition, baseSlots: number, index: nu
 
 /** `col`'s chains from `roots`, through the pass's memo unless its navigation may run a snippet. */
 function* navigate(pass: Pass, col: NavigationColumn, roots: readonly string[]): Steps<MemoEntry> {
-	const { mm, model, meter, memo } = pass;
+	const { mm, model, meter, memo, scripts } = pass;
 	const defn = col.navigation.definition!;
 	if (memo === null || memo.scripted(col)) {
-		return yield* evaluateSteps(mm, model, defn, DEFAULT_LIMITS, roots, meter);
+		return yield* evaluateSteps(mm, model, defn, DEFAULT_LIMITS, roots, meter, scripts);
 	}
 	const key = memo.key(col, roots);
 	const hit = memo.get(key);
 	if (hit !== undefined) return hit;
-	const result = yield* evaluateSteps(mm, model, defn, DEFAULT_LIMITS, roots, meter);
+	const result = yield* evaluateSteps(mm, model, defn, DEFAULT_LIMITS, roots, meter, scripts);
 	const entry: MemoEntry = { chains: result.chains, truncated: result.truncated };
 	memo.put(key, entry);
 	return entry;
@@ -312,16 +321,22 @@ export function* resolveSourceElements(
 			const owners = yield* resolveSourceElements(pass, key, ref.source);
 			return propertyElementIds(pass, ref, owners);
 		}
-		case 'script':
-			// No snippet runs here: a script column binds nothing.
-			return [];
+		case 'script': {
+			// A collapse script column binds the elements its call returns; a value binds nothing.
+			if (ref.snippet.definition === null || pass.scripts === null) return [];
+			const roots = yield* resolveSourceElements(pass, key, ref.source);
+			if (roots.length === 0) return [];
+			const result = yield* evaluateScriptColumn(pass, key, ref, roots);
+			if (result.error !== null) return [];
+			return payloadElementIds(model, result.payload as ValuePayload);
+		}
 	}
 }
 
 // -- the build -------------------------------------------------------------------
 
 function* baseRowKeys(pass: Pass): Steps<[RowKey[], boolean]> {
-	const { mm, model, defn, meter } = pass;
+	const { mm, model, defn, meter, scripts } = pass;
 	const rs = defn.row_source;
 	if (rs.kind === 'scope') {
 		const ids = yield* scopeSteps(
@@ -334,7 +349,7 @@ function* baseRowKeys(pass: Pass): Steps<[RowKey[], boolean]> {
 	}
 	const nav = rs.navigation.definition;
 	if (nav === null) return [[], false];
-	const result = yield* evaluateSteps(mm, model, nav, DEFAULT_LIMITS, null, meter);
+	const result = yield* evaluateSteps(mm, model, nav, DEFAULT_LIMITS, null, meter, scripts);
 	if (rs.kind === 'navigation') {
 		// A value at the projected step seeds no row.
 		const i = rs.step_index ?? -1;
@@ -363,12 +378,30 @@ function* baseRowKeys(pass: Pass): Steps<[RowKey[], boolean]> {
 /** Whether a collapse column's cell for one row would hold anything, and whether its navigation was cut short. */
 function* collapseHasValue(
 	pass: Pass,
+	key: RowKey,
 	col: PropertyColumn | NavigationColumn | ScriptColumn,
 	roots: readonly string[]
 ): Steps<[boolean, boolean]> {
 	if (col.kind === 'script') {
-		// A dangling ref's error cell stays; nothing else runs here.
-		return [col.snippet.ref !== null, false];
+		// A call that failed or is pending counts as a value, so the row stays to show it.
+		if (col.snippet.ref !== null) return [true, false];
+		if (col.snippet.definition === null || pass.scripts === null || roots.length === 0) {
+			return [false, false];
+		}
+		const result = yield* evaluateScriptColumn(pass, key, col, roots);
+		if (result.error !== null) return [true, false];
+		const payload = result.payload as ValuePayload;
+		const { model } = pass;
+		switch (payload.kind) {
+			case 'scalar':
+				return [payload.value !== null, false];
+			case 'scalars':
+				return [payload.values.some((v) => v !== null), false];
+			case 'element':
+				return [model.findElement(payload.id) !== undefined, false];
+			case 'elements':
+				return [payload.ids.some((id) => model.findElement(id) !== undefined), false];
+		}
 	}
 	if (col.kind === 'navigation') {
 		const [reached, truncated] = yield* navigationReached(pass, col, roots);
@@ -385,10 +418,28 @@ function* collapseHasValue(
 /** What an expand column contributes for one row, and whether its navigation was cut short. */
 function* expandValues(
 	pass: Pass,
+	key: RowKey,
 	col: PropertyColumn | NavigationColumn | ScriptColumn,
 	roots: readonly string[]
 ): Steps<[Binding[], boolean]> {
-	if (col.kind === 'script') return [col.snippet.ref !== null ? [null] : [], false];
+	if (col.kind === 'script') {
+		// Element ids promote as they are and scalars wrapped, so a text value is never taken for
+		// an id; a `null` is skipped. A failed or pending call promotes one `null`, whatever
+		// `keep_empty` says, and the cell re-derives which of the two it was.
+		if (col.snippet.ref !== null) return [[null], false];
+		if (col.snippet.definition === null || pass.scripts === null || roots.length === 0) {
+			return [[], false];
+		}
+		const result = yield* evaluateScriptColumn(pass, key, col, roots);
+		if (result.error !== null) return [[null], false];
+		const payload = result.payload as ValuePayload;
+		if (payload.kind === 'element' || payload.kind === 'elements') {
+			return [payloadElementIds(pass.model, payload), false];
+		}
+		const values = payload.kind === 'scalar' ? [payload.value] : payload.values;
+		const scalars = values.filter((v) => v !== null) as ScalarValue[];
+		return [scalars.map((v) => new PropertyValue(v)), false];
+	}
 	if (col.kind === 'navigation') return yield* navigationReached(pass, col, roots);
 	return [expandPropertyValues(pass, col, roots), false];
 }
@@ -405,9 +456,10 @@ export function* buildRowsSteps(
 	defn: TableDefinition,
 	limits: TableLimits,
 	meter: Meter,
-	memo: NavMemo | null
+	memo: NavMemo | null,
+	scripts: TableScripts | null = null
 ): Steps<RowBuild> {
-	const probe: Pass = { model, mm: model.metamodel, defn, baseSlots: 1, meter, memo };
+	const probe: Pass = { model, mm: model.metamodel, defn, baseSlots: 1, meter, memo, scripts };
 	const [base, cut] = yield* baseRowKeys(probe);
 	let keys = base;
 	let truncated = cut;
@@ -421,7 +473,7 @@ export function* buildRowsSteps(
 			const kept: RowKey[] = [];
 			for (const key of keys) {
 				const roots = yield* resolveSourceElements(pass, key, col.source);
-				const [hasValue, navCut] = yield* collapseHasValue(pass, col, roots);
+				const [hasValue, navCut] = yield* collapseHasValue(pass, key, col, roots);
 				if (navCut) truncated = true;
 				if (hasValue) kept.push(key);
 				if (meter.tick()) yield meter.end();
@@ -432,7 +484,7 @@ export function* buildRowsSteps(
 		const next: RowKey[] = [];
 		for (const key of keys) {
 			const roots = yield* resolveSourceElements(pass, key, col.source);
-			const [reached, navCut] = yield* expandValues(pass, col, roots);
+			const [reached, navCut] = yield* expandValues(pass, key, col, roots);
 			if (navCut) truncated = true;
 			if (reached.length === 0) {
 				if (col.keep_empty) next.push([...key, null]);

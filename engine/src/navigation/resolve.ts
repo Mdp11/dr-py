@@ -5,6 +5,7 @@
  * snippet fetch is given and finds it; a dangling ref stays, and evaluates to
  * the step's error. Resolved or dangling, a script step reaches a script.
  */
+import { checkSnippetDefinition } from '../script/snippets.ts';
 import { pyRepr } from '../value/repr.ts';
 import type {
 	NavigationDefinition,
@@ -122,4 +123,24 @@ export function navigationHasScript(defn: NavigationDefinition): boolean {
 	);
 	if (scripted) return true;
 	return defn.start.kind === 'set_op' && setHasScript(defn.start);
+}
+
+/**
+ * Refuses, with 422, an inline snippet in any script step of `defn`, operands
+ * and set starts included, that the core's snippet schema refuses.
+ */
+export function checkNavigationSnippets(defn: NavigationDefinition, where = 'definition'): void {
+	const ofSet = (expr: SetExpression, at: string) =>
+		expr.operands.forEach((operand, i) => {
+			if (operand.definition !== null) {
+				checkNavigationSnippets(operand.definition, `${at}.operands[${i}].definition`);
+			}
+		});
+	if (defn.kind === 'set_op') return ofSet(defn, where);
+	if (defn.start.kind === 'set_op') ofSet(defn.start, `${where}.start`);
+	defn.steps.forEach((step, i) => {
+		if (step.kind === 'script' && step.snippet.definition !== null) {
+			checkSnippetDefinition(step.snippet.definition, `${where}.steps[${i}].snippet.definition`);
+		}
+	});
 }

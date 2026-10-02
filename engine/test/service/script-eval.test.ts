@@ -64,13 +64,13 @@ const rename = (id: string, name: string): ModelOp => ({
  * The real pool over `worker_threads`, with each batch it is asked to run recorded, the workers
  * it spawns watched, and a hook that holds a finished batch's result back from the fill.
  */
-function tracked() {
+function tracked(limits?: { callMs: number; graceMs: number }) {
 	const ported = instrumented();
 	const batches: { code: string; ids: string[][] }[] = [];
 	const hosts: ScriptHost[] = [];
 	const hook: { after: (() => Promise<void>) | null } = { after: null };
 	const factory: ScriptHostFactory = () => {
-		const host = createPool(ported.spawn, { cap: 2, now: () => performance.now() });
+		const host = createPool(ported.spawn, { cap: 2, limits, now: () => performance.now() });
 		hosts.push(host);
 		return {
 			boot: () => host.boot(),
@@ -113,8 +113,11 @@ const trackers: ReturnType<typeof tracked>[] = [];
 afterEach(() => trackers.splice(0).forEach((tracker) => tracker.dispose()));
 
 /** A service over a tracked pool, its replica open with `scripts: 'evaluate'`. */
-async function evaluating(scripts: unknown = 'evaluate') {
-	const tracker = tracked();
+async function evaluating(
+	scripts: unknown = 'evaluate',
+	limits?: { callMs: number; graceMs: number }
+) {
+	const tracker = tracked(limits);
 	trackers.push(tracker);
 	const client = connect(autoHost(), portPair(), { scripts: tracker.factory });
 	await openReplica(client, bridgeModel(), doc, { scripts });
@@ -451,5 +454,176 @@ describe('what a transition evicts', () => {
 		await stage(client, [rename('n2', 'dos')]);
 		await evaluate(client, 'n1', code);
 		expect(tracker.batches).toHaveLength(2);
+	}, 60_000);
+});
+
+describe('a table with script columns', () => {
+	type Cell = { kind: string; value?: unknown; message?: string | null };
+	type TablePage = { rows: { key: unknown[]; cells: Cell[] }[]; total: number };
+
+	const column = (code: string, extra: object = {}) => ({
+		kind: 'script',
+		snippet: { definition: { code } },
+		...extra
+	});
+	const table = (columns: object[], extra: object = {}, page: object = {}) => ({
+		definition: {
+			row_source: { kind: 'scope', types: ['Node'], criteria: [] },
+			columns: [{ kind: 'element' }, ...columns],
+			...extra
+		},
+		...page
+	});
+	const evaluateTable = (client: Client, params: object) =>
+		client.call<TablePage>('evaluateTable', params);
+
+	const NAMED = (tag: string) => `# ${tag}\ndef value(els):\n    return str(els[0].name)\n`;
+	const FAILS = (tag: string) => `# ${tag}\ndef value(els):\n    raise ValueError("no")\n`;
+	const SPINS = (tag: string) => `# ${tag}\ndef value(els):\n    while True:\n        pass\n`;
+	const WIDTH = (tag: string) => `# ${tag}\ndef value(els, inputs):\n    return len(inputs["x"])\n`;
+	const valueOf = (page: TablePage, id: string, col = 1) =>
+		page.rows.find((row) => row.key[0] === id)!.cells[col]!;
+	/** How many calls the hosts were asked for, over every batch. */
+	const callsOf = (tracker: ReturnType<typeof tracked>, tag?: string) =>
+		tracker.batches
+			.filter((batch) => tag === undefined || batch.code.includes(`# ${tag}\n`))
+			.reduce((sum, batch) => sum + batch.ids.length, 0);
+
+	it('shows the value of a row element the working copy has an edit staged on', async () => {
+		const { client, tracker } = await evaluating();
+		const params = table([column(NAMED('edit'))]);
+		expect(valueOf(await evaluateTable(client, params), 'n1')).toMatchObject({ value: 'one' });
+		await stage(client, [rename('n1', 'uno')]);
+		const page = await evaluateTable(client, params);
+		expect(valueOf(page, 'n1')).toMatchObject({ kind: 'value', value: 'uno' });
+		expect(valueOf(page, 'n2')).toMatchObject({ value: 'two' });
+		// Only the edited row asked again.
+		expect(callsOf(tracker, 'edit')).toBe(page.total + 1);
+		await client.call('unstage', { what: 'all' });
+		expect(valueOf(await evaluateTable(client, params), 'n1')).toMatchObject({ value: 'one' });
+	}, 60_000);
+
+	it('answers a timeout as an error cell and does not keep it: the next evaluation runs it again', async () => {
+		const { client, tracker } = await evaluating('evaluate', { callMs: 300, graceMs: 500 });
+		const params = table([column(SPINS('spin')), column(NAMED('beside'))], {}, { limit: 1 });
+		const first = await evaluateTable(client, params);
+		expect(first.rows[0]!.cells[1]).toMatchObject({ kind: 'error' });
+		expect(first.rows[0]!.cells[1]!.message).toMatch(/time/i);
+		expect(first.rows[0]!.cells[2]).toMatchObject({ kind: 'value' });
+		const second = await evaluateTable(client, params);
+		expect(second.rows[0]!.cells[1]).toMatchObject({ kind: 'error' });
+		expect(callsOf(tracker, 'spin')).toBe(2);
+		// The value beside it was kept.
+		expect(callsOf(tracker, 'beside')).toBe(1);
+	}, 60_000);
+
+	it('never sends a cell whose input failed to the host', async () => {
+		const { client, tracker } = await evaluating();
+		const x = { name: 'x', ref: { kind: 'column', index: 1 } };
+		const params = table(
+			[column(FAILS('source')), column(WIDTH('dependent'), { inputs: [x] })],
+			{},
+			{ limit: 3 }
+		);
+		const page = await evaluateTable(client, params);
+		for (const row of page.rows) {
+			expect(row.cells[1]).toMatchObject({ kind: 'error' });
+			expect(row.cells[2]).toMatchObject({ kind: 'error' });
+			expect(row.cells[2]!.message).toMatch(/^input 'x': ValueError: no/);
+		}
+		expect(callsOf(tracker, 'source')).toBe(3);
+		expect(tracker.batches.some((batch) => batch.code.includes('# dependent\n'))).toBe(false);
+	}, 60_000);
+
+	it('fills the whole scope for a sort by a script column, and only the page for a plain one', async () => {
+		const { client, tracker } = await evaluating();
+		const plain = await evaluateTable(client, table([column(NAMED('plain'))], {}, { limit: 2 }));
+		expect(plain.rows).toHaveLength(2);
+		expect(callsOf(tracker, 'plain')).toBe(2);
+		const sorted = await evaluateTable(
+			client,
+			table([column(NAMED('sorted'))], { sort: [{ column: 1 }] }, { limit: 2 })
+		);
+		expect(sorted.rows).toHaveLength(2);
+		expect(callsOf(tracker, 'sorted')).toBe(sorted.total);
+		expect(sorted.total).toBeGreaterThan(2);
+	}, 60_000);
+
+	it('orders by the snippet as it is staged: an edit of a saved snippet moves the kept order', async () => {
+		const { client } = await evaluating();
+		const snippet = (code: string) => ({ code: `# saved\ndef value(els):\n    return ${code}\n` });
+		const LENGTH = 'len(str(els[0].name))';
+		await client.call('setArtifacts', {
+			artifacts: [
+				{ id: 'snip', kind: 'code_snippet', name: 'S', artifact_rev: 1, payload: snippet(LENGTH) },
+				{
+					id: 'tbl',
+					kind: 'table',
+					name: 'T',
+					artifact_rev: 1,
+					payload: table([{ kind: 'script', snippet: { ref: 'snip' } }], { sort: [{ column: 1 }] })
+						.definition
+				}
+			]
+		});
+		const firstOf = async () =>
+			(await evaluateTable(client, { artifact_id: 'tbl', limit: 1 })).rows[0]!.key[0];
+		// The shortest name first; l1's name is a list.
+		expect(await firstOf()).toBe('é1');
+		await client.call('setStagedArtifacts', {
+			entries: [{ op: 'update', id: 'snip', payload: snippet(`-${LENGTH}`) }]
+		});
+		expect(await firstOf()).toBe('l1');
+		await client.call('setStagedArtifacts', { entries: [] });
+		expect(await firstOf()).toBe('é1');
+	}, 60_000);
+
+	it('tells a sort that falls back to the build order every time, from the kept order too', async () => {
+		const { client, tracker } = await evaluating();
+		const navigation = {
+			kind: 'navigation',
+			navigation: {
+				definition: {
+					kind: 'path',
+					start: { kind: 'row' },
+					steps: [{ kind: 'script', snippet: { definition: { code: NAME('fallback') } } }]
+				}
+			}
+		};
+		const params = table([navigation], { sort: [{ column: 1, direction: 'desc' }] }, { limit: 2 });
+		const first = await client.call<TablePage & { warnings: unknown[] }>('evaluateTable', params);
+		expect(first.warnings).toEqual([
+			{ code: 'sort_needs_script_nav', occurrences: 1, total: 0, detail: null }
+		]);
+		// Build order (ids by code point), whatever the sort says; the step ran for the page's cells.
+		expect(first.rows.map((row) => row.key[0])).toEqual(['l1', 'n1']);
+		expect(callsOf(tracker, 'fallback')).toBe(2);
+		const second = await client.call<TablePage & { warnings: unknown[] }>('evaluateTable', params);
+		expect(second).toEqual(first);
+		expect(callsOf(tracker, 'fallback')).toBe(2);
+	}, 60_000);
+
+	it('passes a non-finite float on to the column that reads it as an input', async () => {
+		const { client } = await evaluating();
+		const x = { name: 'x', ref: { kind: 'column', index: 1 } };
+		const page = await evaluateTable(
+			client,
+			table(
+				[
+					column(
+						'# infinite\ndef value(els):\n    return [float("inf"), float("-inf"), float("nan")]\n'
+					),
+					column(
+						'# echo\ndef value(els, inputs):\n    return "|".join(str(v) for v in inputs["x"])\n',
+						{
+							inputs: [x]
+						}
+					)
+				],
+				{},
+				{ limit: 1 }
+			)
+		);
+		expect(page.rows[0]!.cells[2]).toMatchObject({ kind: 'value', value: 'inf|-inf|nan' });
 	}, 60_000);
 });

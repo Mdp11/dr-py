@@ -6,10 +6,10 @@
  * expand cell reads back the slot the build promoted into its row's key.
  */
 import type { Model } from '../model/model.ts';
-import { displayName } from '../model/naming.ts';
 import { PropertyValue, type Meter } from '../navigation/evaluate.ts';
 import { ReadError } from '../read/errors.ts';
 import { treeItem, type TreeItem } from '../read/tree.ts';
+import type { ValuePayload } from '../script/result.ts';
 import type { Steps } from '../steps/steps.ts';
 import type { Value } from '../value/types.ts';
 import type { NavMemo } from './nav-memo.ts';
@@ -23,6 +23,14 @@ import {
 	type RowKey,
 	type TableLimits
 } from './rows.ts';
+import {
+	danglingRefMessage,
+	evaluateScriptColumn,
+	navigationDisplayValues,
+	payloadElementIds,
+	propertyInputValues,
+	type TableScripts
+} from './script-inputs.ts';
 import type {
 	ElementColumn,
 	NavigationColumn,
@@ -40,7 +48,7 @@ import {
 
 /** One cell, as the route's `TableCellOut` carries it. */
 export type TableCell = {
-	kind: 'element' | 'value' | 'values' | 'elements' | 'error';
+	kind: 'element' | 'value' | 'values' | 'elements' | 'error' | 'pending';
 	/** element: the element referred to. */
 	item: TreeItem | null;
 	/** element: the type an editable reference's picker offers. */
@@ -143,28 +151,38 @@ function elementsCell(model: Model, ids: string[], total: number, truncated: boo
 	};
 }
 
+const blankCell = (kind: TableCell['kind']): TableCell => ({
+	kind,
+	item: null,
+	ref_type: null,
+	present: null,
+	value: null,
+	element_id: null,
+	editable: null,
+	items: null,
+	values: null,
+	total: null,
+	truncated: null,
+	message: null,
+	traceback: null
+});
+
+/** A script cell whose call failed, or whose input did. */
+const errorCell = (message: string, traceback: string | null): TableCell => ({
+	...blankCell('error'),
+	message,
+	traceback
+});
+
+/** A script cell no fill has computed yet. */
+const pendingCell = (): TableCell => blankCell('pending');
+
 /** A slot's value; a value terminal's is the value it carries. */
 const slotValue = (b: Binding): Value => (b instanceof PropertyValue ? b.value : b);
 
 /** An id naming an element, else nothing. */
 const elementRef = (model: Model, value: Value): string | null =>
 	typeof value === 'string' && model.findElement(value) !== undefined ? value : null;
-
-/**
- * What a collapse property column holds over `owners`: lists flattened,
- * `null` skipped, an owner whose type does not declare it contributing nothing.
- */
-function propertyValues(pass: Pass, col: PropertyColumn, owners: readonly string[]): Value[] {
-	const values: Value[] = [];
-	for (const id of owners) {
-		const element = pass.model.getElement(id);
-		if (!propertyDeclared(pass.mm, element.typeName, col.name)) continue;
-		const v = rawProperty(element, col.name);
-		if (Array.isArray(v)) values.push(...v);
-		else if (v !== undefined && v !== null) values.push(v);
-	}
-	return values;
-}
 
 function* elementColumnCell(pass: Pass, key: RowKey, col: ElementColumn): Steps<TableCell> {
 	const ids = yield* resolveSourceElements(pass, key, col.source);
@@ -213,7 +231,7 @@ function* propertyCell(
 		}
 		return valueCell(present, value, id, present && !isVirtualProperty(col.name));
 	}
-	const values = propertyValues(pass, col, owners);
+	const values = propertyInputValues(pass, col, owners);
 	if (elementTyped) {
 		const ids = elementIds(model, values);
 		return elementsCell(model, ids, ids.length, false);
@@ -247,31 +265,78 @@ function* navigationCell(
 			? limits.maxCellElements
 			: Math.min(col.cell_cap, limits.maxCellElements);
 	if (reached.some((node) => node instanceof PropertyValue)) {
-		const values = reached.map((node) =>
-			typeof node === 'string' ? displayName(model.getElement(node)) : node.value
-		);
+		const values = navigationDisplayValues(model, reached);
 		return valuesCell(values.slice(0, cap), values.length, values.length > cap);
 	}
 	const ids = reached as string[];
 	return elementsCell(model, ids.slice(0, cap), ids.length, ids.length > cap);
 }
 
-/** A script column here runs no snippet: a configured one reaches a script and answers 501. */
-function scriptCell(pass: Pass, key: RowKey, col: ScriptColumn, index: number): TableCell {
-	if (col.snippet.ref !== null || col.snippet.definition !== null) {
-		throw new ReadError(501, 'reaches a script');
-	}
+/** The cell of a failed or pending call. */
+const failedCell = (error: {
+	kind: string;
+	message: string;
+	traceback: string | null;
+}): TableCell =>
+	error.kind === 'pending' ? pendingCell() : errorCell(error.message, error.traceback);
+
+/**
+ * A script column's cell. An expand cell reads back the binding the build
+ * promoted into its slot; an empty slot is a row kept empty, or a call that
+ * failed or is pending, which the call tells apart. A collapse cell asks its
+ * snippet afresh: the pass's scripts answer from what the evaluation already
+ * holds, so it agrees with any call the build made over the same roots.
+ */
+function* scriptCell(
+	pass: Pass,
+	key: RowKey,
+	col: ScriptColumn,
+	index: number,
+	limits: TableLimits
+): Steps<TableCell> {
+	const { model, defn, baseSlots } = pass;
 	if (col.mode === 'expand') {
-		const b = key[expandSlotOf(pass.defn, pass.baseSlots, index)];
+		const b = key[expandSlotOf(defn, baseSlots, index)];
 		if (b instanceof PropertyValue) return valueCell(true, b.value, null, false);
-		if (typeof b === 'string') return elementCell(pass.model, b);
+		if (typeof b === 'string') return elementCell(model, b);
+		if (col.snippet.ref !== null) return errorCell(danglingRefMessage(col.snippet.ref), null);
+		if (col.snippet.definition !== null && pass.scripts !== null) {
+			const roots = yield* resolveSourceElements(pass, key, col.source);
+			if (roots.length > 0) {
+				const result = yield* evaluateScriptColumn(pass, key, col, roots);
+				if (result.error !== null) return failedCell(result.error);
+			}
+		}
+		return emptyValueCell();
 	}
-	return emptyValueCell();
+	if (col.snippet.ref !== null) return errorCell(danglingRefMessage(col.snippet.ref), null);
+	if (col.snippet.definition === null) return emptyValueCell();
+	const roots = yield* resolveSourceElements(pass, key, col.source);
+	if (roots.length === 0) return emptyValueCell();
+	// Only an evaluation without scripts reaches here, and it refused before its first step.
+	if (pass.scripts === null) throw new ReadError(501, 'reaches a script');
+	const result = yield* evaluateScriptColumn(pass, key, col, roots);
+	if (result.error !== null) return failedCell(result.error);
+	const payload = result.payload as ValuePayload;
+	const cap = limits.maxCellElements;
+	if (payload.kind === 'scalar') {
+		return payload.value === null ? emptyValueCell() : valueCell(true, payload.value, null, false);
+	}
+	if (payload.kind === 'scalars') {
+		const { values } = payload;
+		return valuesCell(values.slice(0, cap), values.length, values.length > cap);
+	}
+	if (payload.kind === 'element') {
+		return elementCell(model, model.findElement(payload.id) === undefined ? null : payload.id);
+	}
+	const ids = payloadElementIds(model, payload);
+	return elementsCell(model, ids.slice(0, cap), ids.length, ids.length > cap);
 }
 
 /**
- * The cells of `keys`, a row of cells per key, over a definition resolved and
- * reaching no script. `baseSlots` is the build's; `memo` is this pass's own.
+ * The cells of `keys`, a row of cells per key, over a resolved definition.
+ * `baseSlots` is the build's; `memo` is this pass's own; a definition that
+ * reaches a script is read through `scripts`.
  */
 export function* evaluateCellsSteps(
 	model: Model,
@@ -280,9 +345,10 @@ export function* evaluateCellsSteps(
 	baseSlots: number,
 	limits: TableLimits,
 	meter: Meter,
-	memo: NavMemo | null
+	memo: NavMemo | null,
+	scripts: TableScripts | null = null
 ): Steps<TableCell[][]> {
-	const pass: Pass = { model, mm: model.metamodel, defn, baseSlots, meter, memo };
+	const pass: Pass = { model, mm: model.metamodel, defn, baseSlots, meter, memo, scripts };
 	const rows: TableCell[][] = [];
 	for (const key of keys) {
 		const row: TableCell[] = [];
@@ -298,7 +364,7 @@ export function* evaluateCellsSteps(
 					row.push(yield* navigationCell(pass, key, col, index, limits));
 					break;
 				case 'script':
-					row.push(scriptCell(pass, key, col, index));
+					row.push(yield* scriptCell(pass, key, col, index, limits));
 					break;
 			}
 			if (meter.tick()) yield meter.end();

@@ -4,8 +4,9 @@
  * `(code, detail)`, each kind counting its occurrences.
  */
 
-/** The degradations a navigation reports. */
-export type ScriptWarningCode = 'nav_snippet_not_found' | 'nav_step_failed';
+/** The degradations an evaluation reports. */
+export type ScriptWarningCode =
+	'nav_snippet_not_found' | 'nav_step_failed' | 'sort_needs_script_nav';
 
 /**
  * One aggregated kind, in the field order of the wire. `total` sums the

@@ -229,6 +229,8 @@ function renderCell(model: Model, cell: TableCell, mode: ValueMode, single: bool
 		}
 		case 'error':
 			return new Map([['$error', cell.message]]);
+		case 'pending':
+			return new Map([['$error', 'not computed']]);
 	}
 }
 

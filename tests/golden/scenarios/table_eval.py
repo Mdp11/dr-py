@@ -8,7 +8,9 @@ cell cap (1, 20 and 21; 2, 20, 21 reached, and more); a build cut at the
 route's 50,000 rows with expand columns after the cut; sorts over value labels;
 the route's refusals; saved tables. ``cell_text`` records a page as an export
 renders it, a page of a capped build included, and one cell joining ``None``, a
-dict, nested lists, ``1e16`` and ``2**64``."""
+dict, nested lists, ``1e16`` and ``2**64``. ``table_eval_scripted`` runs the
+script columns and script steps those tables reach, on the oracle's trusted
+runner."""
 
 from __future__ import annotations
 
@@ -18,12 +20,14 @@ from data_rover.core.metamodel.schema import Metamodel
 
 from ..driver import scenario
 from ..model_steps import batch, read_step, run_steps
+from ..scripted import run_scripted
 from .table_rows import (
     _BLOCKS_SCOPE,
     _ELEMENTS,
     _LINKED,
     _METAMODEL,
     _RELATIONSHIPS,
+    _ROW,
     _ROW_EITHER,
     _ROW_LINK_TAGS,
     _ROW_LINKS,
@@ -47,6 +51,7 @@ from .table_rows import (
     _scope,
     _scope_rows,
     _script,
+    _script_step,
     _step,
     _table,
 )
@@ -473,3 +478,629 @@ _STEPS: list[dict[str, Any]] = [
 @scenario("table_eval")
 def table_eval() -> Any:
     return run_steps(Metamodel.model_validate(_METAMODEL), _STEPS)
+
+
+# -- script columns ---------------------------------------------------------------
+
+
+def _code(args: str, body: str) -> str:
+    lines = "".join(f"    {line}\n" for line in body.splitlines())
+    return f"def value({args}):\n{lines}"
+
+
+def _value(body: str) -> dict[str, Any]:
+    return {"definition": {"code": _code("els", body)}}
+
+
+def _valued(body: str) -> dict[str, Any]:
+    return {"definition": {"code": _code("els, inputs", body)}}
+
+
+def _step_def(body: str) -> dict[str, Any]:
+    lines = "".join(f"    {line}\n" for line in body.splitlines())
+    return {"definition": {"code": f"def step(el):\n{lines}"}}
+
+
+def _in(name: str, index: int, step_index: int | None = None) -> dict[str, Any]:
+    return {"name": name, "ref": _ref(index, step_index)}
+
+
+def _run(definition: dict[str, Any], **params: Any) -> dict[str, Any]:
+    return read_step("evaluateTable", scripted=True, definition=definition, **params)
+
+
+def _run_saved(artifact_id: str, **params: Any) -> dict[str, Any]:
+    return read_step("evaluateTable", scripted=True, artifact_id=artifact_id, **params)
+
+
+def _preview(definition: dict[str, Any]) -> dict[str, Any]:
+    return read_step("previewTableJson", scripted=True, definition=definition)
+
+
+_NAME = _value("return els[0].name")
+_NAMES = _value("return [e.name for e in els]")
+_RANGE = _value("return list(range(25))")
+_OR_NONE = _value('return els[0].get("s")')
+_MIXED = _value('return [1, 1.0, True, "1", None, 2**70, -0.0, 1e16, "ünï"]')
+_BIG = _value("return 2**70")
+_TAGS = _value('return els[0].get("tags") or []')
+_TAG_COUNT = _value('return len(els[0].get("tags") or [])')
+_FIRST_LINK = _value(
+    'out = els[0].outgoing(stereotype="Links")\nreturn out[0].destination() if out else None'
+)
+_ALL_LINKS = _value(
+    'return [r.destination() for r in els[0].outgoing(stereotype="Links")] * 2'
+)
+_LINK_OR_NOTHING = _value(
+    'out = els[0].outgoing(stereotype="Links")\nreturn out[0].destination() if out else []'
+)
+_EVERYTHING = _value("return list(dr.elements())")
+#: the same elements in an order that moves with the row, so that sorting them matters
+_PAIRS = _value(
+    'if int(els[0].id.split("-")[1]) % 2 == 0:\n'
+    '    return [dr.element("id-16"), dr.element("id-13")]\n'
+    'return [dr.element("id-13"), dr.element("id-15")]'
+)
+_NONES = _value("return [None, None]")
+_HALF_NONES = _value(
+    'return [None, None] if int(els[0].id.split("-")[1]) % 2 else [None, "x", None]'
+)
+_NULLY = _value(
+    'name = str(els[0].name)\n'
+    'return [None, name] if int(els[0].id.split("-")[1]) % 2 else [name, None]'
+)
+_GHOST = _value(
+    'return type(els[0])({"id": "ghost", "type": "Block", "name": None, "properties": {}})'
+)
+_GHOSTS = _value(
+    "return [type(els[0])({\"id\": \"ghost\", \"type\": \"Block\", \"name\": None, \"properties\": {}}), els[0]]"
+)
+_BOOM = _value('raise ValueError("boom " + els[0].id)')
+_BOOM_THIRDS = _value(
+    'if int(els[0].id.split("-")[1]) % 3 == 0:\n    raise KeyError(els[0].id)\nreturn els[0].name'
+)
+_SYNTAX = {"definition": {"code": "def value(els:\n    return 1\n"}}
+_NO_VALUE = {"definition": {"code": "x = 1\n"}}
+_BAD_RETURN = _value('return {"a": 1}')
+_KINDS = _value(
+    'n = int(els[0].id.split("-")[1])\nreturn els[0].name if n % 3 == 0 else (n if n % 3 == 1 else els[0])'
+)
+_SHOW_INPUTS = _valued(
+    'return "|".join(k + "=" + str([getattr(x, "id", x) for x in inputs[k]]) for k in inputs)'
+)
+_JOIN = _valued('return "<" + ",".join(str(x) for x in inputs["a"]) + ">"')
+_WIDTH = _valued('return len(inputs["b"][0])')
+
+_THINGS_ROWS = _scope_rows(["Block", "Gadget"])
+_BLOCK_ROWS = _scope_rows(["Block"])
+_ROW_OWNER = _path(_ROW, _step("owner"))
+
+#: owners are elements on blocks and a mix of elements and text on gadgets
+_MIXED_OWNER = _nav(_inline(_ROW_OWNER))
+#: a hop that fails for some elements, and a step that is not defined
+_HOP = _step_def(
+    'return [r.destination().id for r in el.outgoing(stereotype="Links")]'
+)
+_HOP_OR_BOOM = _step_def(
+    'if int(el.id.split("-")[1]) % 4 == 0:\n    raise ValueError("no hop " + el.id)\n'
+    'return [r.destination().id for r in el.outgoing(stereotype="Links")]'
+)
+
+
+def _values() -> list[dict[str, Any]]:
+    scalars = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script(_NAME),
+        _script(_RANGE),
+        _script(_OR_NONE),
+        _script(_MIXED),
+        _script(_BIG),
+        _script(_TAGS),
+        _script(_TAG_COUNT),
+    )
+    elements = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _nav(_inline(_ROW_LINKS)),
+        _script(_FIRST_LINK),
+        _script(_ALL_LINKS),
+        _script(_LINK_OR_NOTHING),
+        _script(_GHOST),
+        _script(_GHOSTS),
+        _script(_EVERYTHING),
+        _script(_NAMES, source=_ref(1)),
+        _script(_NAME, source=_ref(1)),
+        _script(_FIRST_LINK, source=_ref(1)),
+    )
+    failures = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script(_BOOM),
+        _script(_BOOM_THIRDS),
+        _script(_SYNTAX),
+        _script(_NO_VALUE),
+        _script(_BAD_RETURN),
+    )
+    return [
+        _run(scalars),
+        _run(scalars, offset=3, limit=4),
+        _run(elements),
+        _run(failures),
+        _run(failures, offset=8, limit=2),
+        # over people, one of whom has no name
+        _run(_table(_scope_rows(["Person"]), _el(), _script(_NAME), _script(_OR_NONE))),
+        # unconfigured, and no source elements
+        _run(_table(_BLOCK_ROWS, _el(), _script({}), _script(_NAME, source=_ref(1)))),
+        _run(_table(_scope_rows(["Leaf"]), _nav({}), _script(_NAME, source=_ref(0)))),
+    ]
+
+
+def _inputs() -> list[dict[str, Any]]:
+    collapse = _table(
+        _THINGS_ROWS,
+        _el(),
+        _prop("s"),
+        _prop("tags"),
+        _nav(_inline(_ROW_LINKS)),
+        _nav(_inline(_ROW_TAGS)),
+        _MIXED_OWNER,
+        _nav(_inline(_ROW_LINK_TAGS), step_index=1),
+        _script(_NAME),
+        _script(_NAMES, source=_ref(3)),
+        _script(_FIRST_LINK),
+        _script(_ALL_LINKS),
+        _script(
+            _SHOW_INPUTS,
+            inputs=[_in(f"c{k}", k) for k in range(11)]
+            + [_in("step0", 3, 0), _in("step1", 3, 1)],
+        ),
+        # the same inputs, named and ordered another way
+        _script(_SHOW_INPUTS, inputs=[_in("z", 8), _in("y", 1), _in("x", 0)]),
+        # a column that is a source and an input at once
+        _script(_SHOW_INPUTS, source=_ref(3), inputs=[_in("n", 3), _in("only", 8)]),
+    )
+    expand = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _prop("tags", "expand"),
+        _nav(_inline(_ROW_LINKS), "expand"),
+        _nav(_inline(_ROW_TAGS), "expand", False),
+        _prop("owner", "expand"),
+        _script(_NAME, "expand"),
+        _script(_FIRST_LINK, "expand", False),
+        _script(_BOOM_THIRDS, "expand"),
+        _script(_SHOW_INPUTS, inputs=[_in(f"e{k}", k) for k in range(1, 8)]),
+    )
+    failing = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script(_BOOM_THIRDS),
+        _script(_SHOW_INPUTS, inputs=[_in("x", 1)]),
+        _script(_SHOW_INPUTS, inputs=[_in("x", 1), _in("y", 0)]),
+        _script(_BOOM_THIRDS, "expand"),
+        _script(_SHOW_INPUTS, inputs=[_in("x", 4)]),
+        _script(_SYNTAX),
+        _script(_SHOW_INPUTS, inputs=[_in("x", 6)]),
+    )
+    one_arg = _value("return len(els)")
+    two_args = _valued("return len(inputs)")
+    # a snippet by ref is held to its arity when it runs
+    by_ref = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script({"ref": "one_arg"}, inputs=[_in("x", 0)]),
+        _script({"ref": "one_arg"}, inputs=[_in("x", 0), _in("y", 0)]),
+        _script({"ref": "two_args"}),
+        _script({"ref": "two_args"}, inputs=[_in("x", 0)]),
+        _script({"ref": "one_arg"}),
+        _script({"ref": "two_args"}, "expand", False),
+    )
+    # inline code is held to it before anything runs, and these are not mismatches
+    runs = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script({"definition": {"code": "def value(*els):\n    return len(els)\n"}}),
+        _script(
+            {"definition": {"code": "def value(a, b, c):\n    return 3\n"}},
+            inputs=[_in("x", 0)],
+        ),
+        _script({"definition": {"code": "def other(els):\n    return 1\n"}}),
+        _script(
+            {"definition": {"code": "def value(els, inputs=None):\n    return 1\n"}},
+            inputs=[_in("x", 0)],
+        ),
+    )
+    mismatch = [
+        _run(by_ref),
+        _run(runs),
+        _run(_table(_BLOCK_ROWS, _el(), _script(one_arg, inputs=[_in("x", 0)]))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(one_arg, inputs=[_in("x", 0), _in("y", 0)]))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(two_args))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(two_args, inputs=[_in("x", 0)]))),
+    ]
+    chain = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script(_NAME),
+        _script(_JOIN, inputs=[_in("a", 1)]),
+        _script(_WIDTH, inputs=[_in("b", 2)]),
+        _script(_JOIN, inputs=[_in("a", 3)]),
+    )
+    return [
+        _run(collapse),
+        _run(collapse, offset=2, limit=3),
+        _run(expand, limit=40),
+        _run(expand, offset=30, limit=40),
+        _run(failing),
+        *mismatch,
+        _run(chain),
+    ]
+
+
+def _expand_and_keep() -> list[dict[str, Any]]:
+    sourced = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script(_ALL_LINKS, "expand"),
+        _el(_ref(1)),
+        _prop("name", source=_ref(1)),
+        _script(_TAGS, "expand", False),
+        _script(_NAME, source=_ref(1)),
+    )
+    errors = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script(_BOOM_THIRDS, "expand", False),
+        _script(_BOOM_THIRDS, "expand", True),
+        _script(_NAME, source=_ref(1)),
+    )
+    return [
+        _run(_table(_BLOCK_ROWS, _el(), _script(_TAGS, "expand"))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_TAGS, "expand", False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_LINK_OR_NOTHING, "expand"))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_MIXED, "expand"))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_GHOSTS, "expand"))),
+        _run(sourced),
+        _run(errors),
+        # one value, none, or an error: how many rows each keeps
+        _run(_table(_BLOCK_ROWS, _el(), _script(_OR_NONE, "expand", False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_OR_NONE, "expand", True))),
+        # keep_empty over collapse columns: empty, none and errors
+        _run(_table(_BLOCK_ROWS, _el(), _script(_OR_NONE, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_TAGS, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_BOOM_THIRDS, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_LINK_OR_NOTHING, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_GHOST, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_GHOSTS, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_ALL_LINKS, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_NONES, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_HALF_NONES, keep_empty=False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_HALF_NONES, "expand", False))),
+        _run(_table(_BLOCK_ROWS, _el(), _script(_PAIRS, "expand"))),
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _el(),
+                _script(_OR_NONE, keep_empty=False),
+                _script(_TAGS, keep_empty=False),
+                _script(_BOOM_THIRDS, keep_empty=False),
+            )
+        ),
+        # a script column keeping nothing leaves no rows, and a nav column feeds it
+        _run(_table(_BLOCK_ROWS, _el(), _script(_value_none(), keep_empty=False))),
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _nav(_inline(_ROW_LINKS), "expand", False),
+                _script(_NAMES, keep_empty=False, source=_ref(0)),
+            )
+        ),
+    ]
+
+
+def _value_none() -> dict[str, Any]:
+    return _value("return None")
+
+
+def _sorts_of_scripts() -> list[dict[str, Any]]:
+    def table(col: dict[str, Any], *sort: Any) -> dict[str, Any]:
+        return _table(_BLOCK_ROWS, _el(), col, sort=list(sort))
+
+    return [
+        *[_run(table(_script(_NAME), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_OR_NONE), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_TAGS), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_MIXED), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_KINDS), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_FIRST_LINK), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_ALL_LINKS), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_GHOSTS), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_PAIRS), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_NULLY), key(1))) for key in (_asc, _desc)],
+        *[_run(table(_script(_BOOM_THIRDS), key(1))) for key in (_asc, _desc)],
+        _run(table(_script(_TAG_COUNT), _desc(1), _asc(0))),
+        _run(table(_script(_NAME), _asc(1), _desc(0))),
+        # an expand script column sorts by the value it promoted
+        *[_run(table(_script(_TAGS, "expand"), key(1))) for key in (_asc, _desc)],
+        _run(table(_script(_FIRST_LINK, "expand", False), _desc(1))),
+        # a script column beside a plain one, sorted with a page cut out of the order
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _el(),
+                _prop("name"),
+                _script(_TAG_COUNT),
+                sort=[_desc(2), _asc(1)],
+            ),
+            offset=2,
+            limit=3,
+        ),
+        # a sort by a script column that errors on a source nothing has
+        _run(
+            _table(
+                _scope_rows(["Leaf"]),
+                _nav({}),
+                _script(_NAME, source=_ref(0)),
+                sort=[_asc(1)],
+            )
+        ),
+        # the column that is sorted fed by one that is not
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _el(),
+                _script(_NAME),
+                _script(_JOIN, inputs=[_in("a", 1)]),
+                sort=[_desc(2)],
+            )
+        ),
+    ]
+
+
+def _navigations_with_scripts() -> list[dict[str, Any]]:
+    scripted = _path(_BLOCKS_SCOPE, _script_step(_HOP))
+    failing = _path(_BLOCKS_SCOPE, _script_step(_HOP_OR_BOOM))
+    hop = _path(_ROW, _script_step(_HOP))
+    hop_or_boom = _path(_ROW, _script_step(_HOP_OR_BOOM))
+    return [
+        # script row sources, by step and as chains
+        _run(_table(_nav_rows(_inline(scripted)), _el(), _prop("name"), _script(_NAME))),
+        _run(_table(_nav_rows(_inline(scripted), 0), _el(), _script(_NAME))),
+        _run(_table(_nav_rows(_inline(failing)), _el(), _script(_NAME))),
+        _run(_table(_chains(_inline(scripted)), _el(), _el(_row(1)), _script(_NAME, source=_row(1)))),
+        _run(_table(_chains(_inline(scripted), True), _el(_row(1)), _script(_NAME, source=_row(1)))),
+        _run(_table(_nav_rows(_inline(_path(_BLOCKS_SCOPE, _script_step({"ref": "gone"})))), _el())),
+        # a navigation column holding a script step, as a cell, an expand, a filter and a source
+        _run(_table(_BLOCK_ROWS, _el(), _nav(_inline(hop)), _nav(_inline(hop_or_boom)))),
+        _run(_table(_BLOCK_ROWS, _el(), _nav(_inline(hop), "expand"), _script(_NAME, source=_ref(1)))),
+        _run(_table(_BLOCK_ROWS, _el(), _nav(_inline(hop_or_boom), "expand", False))),
+        _run(_table(_BLOCK_ROWS, _el(), _nav(_inline(hop_or_boom), keep_empty=False))),
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _el(),
+                _nav(_inline(hop)),
+                _script(_NAMES, source=_ref(1)),
+                _script(_SHOW_INPUTS, inputs=[_in("n", 1)]),
+            )
+        ),
+        # a sort cannot drive a script step: build order, and a warning
+        _run(_table(_BLOCK_ROWS, _el(), _nav(_inline(hop)), sort=[_desc(1)])),
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _el(),
+                _nav(_inline(hop)),
+                _script(_NAME),
+                _prop("name", source=_ref(1)),
+                sort=[_asc(1), _desc(2)],
+            )
+        ),
+        _run(_table(_BLOCK_ROWS, _el(), _el(_ref(1)), _nav(_inline(hop)), sort=[_asc(2)])),
+        _run(_table(_BLOCK_ROWS, _el(), _nav(_inline(hop), "expand"), sort=[_desc(1)])),
+        # the same navigation without a script step sorts
+        _run(_table(_BLOCK_ROWS, _el(), _nav(_inline(_ROW_LINKS)), sort=[_desc(1)])),
+        # and a snippet by ref in a step
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _el(),
+                _nav(_inline(_path(_ROW, _script_step({"ref": "hop"})))),
+                _nav(_inline(_path(_ROW, _script_step({"ref": "gone"})))),
+            )
+        ),
+    ]
+
+
+def _refs() -> list[dict[str, Any]]:
+    by_ref = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script({"ref": "snip"}),
+        _script({"ref": "gone"}),
+        _script({"ref": "not_a_snippet"}),
+        _script({"ref": "snip"}, "expand", False),
+        _script({"ref": "gone"}, "expand"),
+        _script({"ref": "snip"}, keep_empty=False),
+    )
+    sorted_by_ref = _table(
+        _BLOCK_ROWS, _el(), _script({"ref": "snip"}), sort=[_desc(1)]
+    )
+    # a preview reads its row order cache-only, so what it sorts by is no script
+    preview_by_ref = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _prop("name"),
+        _script({"ref": "snip"}),
+        sort=[_desc(1)],
+    )
+    inputs_by_ref = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script({"ref": "snip"}),
+        _script({"ref": "inputs"}, inputs=[_in("a", 1)]),
+        _script({"ref": "gone"}),
+        _script({"ref": "inputs"}, inputs=[_in("a", 3)]),
+    )
+    return [
+        _run(by_ref),
+        _run(sorted_by_ref),
+        _run(inputs_by_ref),
+        _run_saved("saved"),
+        _preview(preview_by_ref),
+        # the snippet edited, the same tables again
+        {"do": "artifacts", "_artifacts": _SNIPPET_EDITED},
+        _run(by_ref),
+        _run(sorted_by_ref),
+        _run(inputs_by_ref),
+        _run_saved("saved"),
+        _preview(preview_by_ref),
+        # and the snippet that was gone, now defined
+        {"do": "artifacts", "_artifacts": {**_SNIPPET_EDITED, "gone": _SNIPPET_EDITED["snip"]}},
+        _run(by_ref),
+        _run_saved("saved"),
+        {"do": "artifacts", "_artifacts": _SNIPPET_ARTIFACTS},
+        _run(by_ref),
+    ]
+
+
+_SNIPPET_ARTIFACTS: dict[str, Any] = {
+    "snip": {"kind": "code_snippet", "payload": _NAME["definition"]},
+    "inputs": {"kind": "code_snippet", "payload": _JOIN["definition"]},
+    "hop": {"kind": "code_snippet", "payload": _HOP["definition"]},
+    "one_arg": {"kind": "code_snippet", "payload": _value("return len(els)")["definition"]},
+    "two_args": {"kind": "code_snippet", "payload": _valued("return len(inputs)")["definition"]},
+    "not_a_snippet": {"kind": "navigation", "payload": _path(_scope(["Block"]))},
+    "saved": {
+        "kind": "table",
+        "payload": _table(
+            _BLOCK_ROWS,
+            _el(),
+            _script({"ref": "snip"}),
+            _script({"ref": "snip"}, "expand", False),
+            sort=[_desc(1), _asc(0)],
+        ),
+    },
+}
+_SNIPPET_EDITED: dict[str, Any] = {
+    **_SNIPPET_ARTIFACTS,
+    "snip": {
+        "kind": "code_snippet",
+        "payload": _value('return "edited " + str(els[0].name)')["definition"],
+    },
+}
+
+
+def _definitions() -> list[dict[str, Any]]:
+    def snippet(**fields: Any) -> dict[str, Any]:
+        return {"definition": fields}
+
+    def column(definition: dict[str, Any]) -> dict[str, Any]:
+        return _table(_BLOCK_ROWS, _el(), _script(definition))
+
+    code = _code("els", "return 1")
+    return [
+        # a definition the oracle's schema reads, in forms it admits
+        _run(column(snippet(code=code, language="python", entry_points=["value"]))),
+        _run(column(snippet(code=code, schema_version="1", future="ignored"))),
+        _run(column(snippet(code=code, schema_version=True))),
+        _run(column(snippet(code=code, schema_version=1.0))),
+        _run(column(snippet(code=code, entry_points=[]))),
+        # and ones it refuses, before anything runs
+        _run(column({"definition": {}})),
+        _run(column(snippet(code=5))),
+        _run(column(snippet(code=None))),
+        _run(column(snippet(code=["def value(els): return 1"]))),
+        _run(column(snippet(code=code, language="js"))),
+        _run(column(snippet(code=code, language=None))),
+        _run(column(snippet(code=code, entry_points="value"))),
+        _run(column(snippet(code=code, entry_points=[1]))),
+        _run(column(snippet(code=code, entry_points=None))),
+        _run(column(snippet(code=code, schema_version="one"))),
+        _run(column(snippet(code=code, schema_version=1.5))),
+        _run(column(snippet(code=code, schema_version=None))),
+        _run(column(snippet(code="x" * (64 * 1024 + 1)))),
+        # characters, not UTF-16 units: this is 66,000 of those and 33,000 of the first
+        _run(column(snippet(code="😀" * 33_000))),
+        _run(column(snippet(code="😀" * (64 * 1024 + 1)))),
+        # a step of a navigation column is held to the same schema
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _el(),
+                _nav(_inline(_path(_ROW, _script_step(snippet(code=7))))),
+            )
+        ),
+        _run(
+            _table(
+                _BLOCK_ROWS,
+                _el(),
+                _nav(_inline(_path(_ROW, _script_step(snippet(code="x", language="js"))))),
+            )
+        ),
+        _run(
+            _table(
+                _nav_rows(_inline(_path(_BLOCKS_SCOPE, _script_step(snippet(entry_points=3))))),
+                _el(),
+            )
+        ),
+    ]
+
+
+def _previews() -> list[dict[str, Any]]:
+    values = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _script(_NAME),
+        _script(_TAGS),
+        _script(_FIRST_LINK),
+        _script(_BOOM_THIRDS),
+    )
+    # a preview's rows and their order are read cache-only and its cells live, so a
+    # script that decides either would show the cold answer: these decide neither
+    plain_sort = _table(
+        _BLOCK_ROWS,
+        _el(),
+        _prop("name"),
+        _script(_TAGS),
+        _script(_SHOW_INPUTS, inputs=[_in("n", 1)]),
+        sort=[_desc(1)],
+    )
+    return [
+        _run(values),
+        _preview(values),
+        _run(plain_sort),
+        _preview(plain_sort),
+    ]
+
+
+_SCRIPTED_STEPS: list[dict[str, Any]] = [
+    batch(_ELEMENTS),
+    batch(_RELATIONSHIPS),
+    {"do": "artifacts", "_artifacts": _SNIPPET_ARTIFACTS},
+    *_values(),
+    *_inputs(),
+    *_expand_and_keep(),
+    *_sorts_of_scripts(),
+    *_navigations_with_scripts(),
+    *_refs(),
+    *_definitions(),
+    *_previews(),
+    # the model moves under the cells
+    batch(
+        [{"kind": "update_element", "id": "id-13", "properties_patch": {"name": "alpha2", "tags": ["t"]}}]
+    ),
+    _run(_table(_BLOCK_ROWS, _el(), _script(_NAME), _script(_TAGS), sort=[_asc(1)])),
+    {"do": "delete_element", "id": "id-14"},
+    _run(_table(_BLOCK_ROWS, _el(), _script(_FIRST_LINK), _script(_NAMES, source=_ref(1)))),
+]
+
+
+@scenario("table_eval_scripted")
+def table_eval_scripted() -> Any:
+    metamodel = Metamodel.model_validate(_METAMODEL)
+    return {
+        "metamodel": metamodel.model_dump(mode="json"),
+        "steps": run_scripted(metamodel, _SCRIPTED_STEPS),
+    }

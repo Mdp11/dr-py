@@ -17,7 +17,7 @@ import { evaluateCellsSteps, type TableCell } from './cells.ts';
 import { NavMemo } from './nav-memo.ts';
 import { orderKey, type CachedOrder } from './order-cache.ts';
 import { pageBody, type TablePageBody } from './page.ts';
-import { resolveTableRefs, tableFetch, tableHasScript } from './resolve.ts';
+import { checkTableSnippets, resolveTableRefs, tableFetch, tableHasScript } from './resolve.ts';
 import {
 	buildRowsSteps,
 	DEFAULT_TABLE_LIMITS,
@@ -26,7 +26,8 @@ import {
 	type TableLimits
 } from './rows.ts';
 import { readTableDefinition, type TableDefinition } from './schema.ts';
-import { orderRowsSteps } from './sort.ts';
+import { TableScripts } from './script-inputs.ts';
+import { orderRowsSteps, sortFallsBackToBuildOrder, sortKeys } from './sort.ts';
 
 /** The body's table: an inline definition, or the id of a saved one. */
 export function sourceOf(params: ReadParams): TableDefinition | string {
@@ -39,10 +40,15 @@ export function sourceOf(params: ReadParams): TableDefinition | string {
 	return artifactId;
 }
 
-/** The table with every navigation and snippet it names inlined, through the working copy's artifacts. */
+/**
+ * The table with every navigation and snippet it names inlined, through the
+ * working copy's artifacts. With `scripts`, the table's own inline snippets are
+ * checked first, as the core's schema checks them where the table is read.
+ */
 export function resolved(
 	artifacts: ArtifactSet,
-	source: TableDefinition | string
+	source: TableDefinition | string,
+	scripts = false
 ): TableDefinition {
 	let defn: TableDefinition;
 	if (typeof source === 'string') {
@@ -54,6 +60,7 @@ export function resolved(
 			throw error;
 		}
 	} else defn = source;
+	if (scripts) checkTableSnippets(defn);
 	return resolveTableRefs(defn, navigationFetch(artifacts), snippetFetch(artifacts));
 }
 
@@ -71,16 +78,31 @@ export function* answered<T>(steps: Steps<T>): Steps<T> {
 }
 
 /**
- * The rows of a resolved `defn` that reaches no script, built and sorted
- * whole, each pass with a memo of its own. With `ctx.working`, the order is
- * kept once sorted, under the table and where the working copy stood at the
- * call, and a later call there reads it back without a step. Rows and order
- * read only `maxRows`, which every route's limits share.
+ * The scripts an evaluation of `defn` reads through, for `ctx` that reads any
+ * and a table that reaches one; `null` otherwise. One per evaluation: it holds
+ * the evaluation's warnings and whether any call it read was an error.
+ */
+export function tableScripts(ctx: EvalContext, defn: TableDefinition): TableScripts | null {
+	return ctx.scripts !== undefined && tableHasScript(defn) ? new TableScripts(ctx.scripts) : null;
+}
+
+/**
+ * The rows of a resolved `defn`, built and sorted whole, each pass with a memo
+ * of its own. With `ctx.working`, the order is kept once sorted, under the
+ * table and where the working copy stood at the call, and a later call there
+ * reads it back without a step. Rows and order read only `maxRows`, which
+ * every route's limits share.
+ *
+ * With `scripts`, the passes read through it, and an order is kept only if no
+ * call it read was an error: a pending call sorts as empty, and a timeout is
+ * not the answer the next call gets. A kept order that falls back to the build
+ * order tells so again, as the pass that built it did.
  */
 export function orderedRows(
 	ctx: EvalContext,
 	defn: TableDefinition,
-	meter: Meter
+	meter: Meter,
+	scripts: TableScripts | null = null
 ): Steps<CachedOrder> {
 	const { model, working } = ctx;
 	const kept =
@@ -93,15 +115,28 @@ export function orderedRows(
 				};
 	return (function* (): Steps<CachedOrder> {
 		const hit = kept?.cache.get(kept.key, kept.stamp);
-		if (hit !== undefined) return hit;
-		const built = yield* buildRowsSteps(model, defn, DEFAULT_TABLE_LIMITS, meter, new NavMemo());
+		if (hit !== undefined) {
+			if (scripts !== null && sortFallsBackToBuildOrder(defn, sortKeys(defn))) {
+				scripts.warnings.add('sort_needs_script_nav');
+			}
+			return hit;
+		}
+		const built = yield* buildRowsSteps(
+			model,
+			defn,
+			DEFAULT_TABLE_LIMITS,
+			meter,
+			new NavMemo(),
+			scripts
+		);
 		const keys = yield* orderRowsSteps(
 			model,
 			defn,
 			built.keys,
 			built.baseSlots,
 			meter,
-			new NavMemo()
+			new NavMemo(),
+			scripts
 		);
 		const order: CachedOrder = {
 			keys,
@@ -109,29 +144,33 @@ export function orderedRows(
 			baseTotal: built.baseTotal,
 			baseSlots: built.baseSlots
 		};
-		kept?.cache.put(kept.key, kept.stamp, order);
+		if (scripts === null || !scripts.errored) kept?.cache.put(kept.key, kept.stamp, order);
 		return order;
 	})();
 }
 
 /**
  * The route body in steps. Before the first step it reads its params and
- * resolves the table and every navigation it names through the working copy's
- * artifacts; a table that reaches a script refuses with 501, for the server
- * to run. The rows come from `orderedRows`, then only the page's cells are
- * evaluated, with a memo of their own.
+ * resolves the table and every navigation and snippet it names through the
+ * working copy's artifacts; a table that reaches a script refuses with 501, for
+ * the server to run, unless the context reads scripts, which then run through
+ * it and whose inline snippets are checked first. The rows come from
+ * `orderedRows`, then only the page's cells are evaluated, with a memo of their
+ * own. A table that reaches a script answers complete, with the evaluation's
+ * warnings.
  */
 export function evaluateTable(ctx: EvalContext, params: ReadParams): Steps<TablePageBody> {
 	const source = sourceOf(params);
 	const { limit, offset } = pageOf(params);
-	const defn = resolved(ctx.artifacts, source);
+	const defn = resolved(ctx.artifacts, source, ctx.scripts !== undefined);
 	if (ctx.scripts === undefined && tableHasScript(defn)) {
 		throw new ReadError(501, 'reaches a script');
 	}
+	const scripts = tableScripts(ctx, defn);
 	const { model } = ctx;
 	const rev = ctx.working?.rev ?? 0;
 	const meter = new Meter(0);
-	const rows = orderedRows(ctx, defn, meter);
+	const rows = orderedRows(ctx, defn, meter, scripts);
 
 	return answered(
 		(function* (): Steps<TablePageBody> {
@@ -144,7 +183,8 @@ export function evaluateTable(ctx: EvalContext, params: ReadParams): Steps<Table
 				order.baseSlots,
 				DEFAULT_TABLE_LIMITS,
 				meter,
-				new NavMemo()
+				new NavMemo(),
+				scripts
 			);
 			return pageBody(defn, {
 				keys,
@@ -153,7 +193,8 @@ export function evaluateTable(ctx: EvalContext, params: ReadParams): Steps<Table
 				baseTotal: order.baseTotal,
 				truncated: order.truncated,
 				offset,
-				rev
+				rev,
+				warnings: scripts === null ? null : scripts.warnings.entries
 			});
 		})()
 	);

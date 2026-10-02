@@ -22,13 +22,13 @@ import {
 	type CompiledCriteria,
 	type Criterion
 } from '../search/criteria.ts';
-import { ReadError } from '../read/errors.ts';
 import type { ScriptResult, StepPayload } from '../script/result.ts';
 import type { ScriptWarning, ScriptWarningLog } from '../script/warnings.ts';
 import { drain, sortedInSlices, type Progress, type Steps } from '../steps/steps.ts';
 import { cmpCodePoint } from '../value/compare.ts';
 import { pyReprValue } from '../value/repr.ts';
 import { PyFloat, type Value } from '../value/types.ts';
+import { checkNavigationSnippets } from './resolve.ts';
 import type {
 	FilterStep,
 	NavigationDefinition,
@@ -225,23 +225,6 @@ function criteriaOf(defn: NavigationDefinition, into: Criterion[]): Criterion[] 
 	else if (defn.start.kind === 'set_op') ofSet(defn.start);
 	for (const step of defn.steps) if (step.kind === 'filter') into.push(...step.criteria);
 	return into;
-}
-
-/** Refuses an inline snippet that holds no code, as the core's schema does. */
-function checkSnippets(defn: NavigationDefinition): void {
-	const ofSet = (expr: SetExpression) => {
-		for (const operand of expr.operands) {
-			if (operand.definition !== null) checkSnippets(operand.definition);
-		}
-	};
-	if (defn.kind === 'set_op') return ofSet(defn);
-	if (defn.start.kind === 'set_op') ofSet(defn.start);
-	for (const step of defn.steps) {
-		if (step.kind !== 'script' || step.snippet.definition === null) continue;
-		if (typeof (step.snippet.definition as { code?: unknown }).code !== 'string') {
-			throw new ReadError(422, 'a script step snippet definition needs a string `code`');
-		}
-	}
 }
 
 // -- starts --------------------------------------------------------------------
@@ -586,6 +569,9 @@ function* evaluate(ctx: Context, defn: NavigationDefinition): Steps<ChainResult>
 	};
 }
 
+/** Definitions whose inline snippets were read, so a table's evaluations of one read them once. */
+const checked = new WeakSet<object>();
+
 /**
  * A ref-free definition (see `resolveRefs`) evaluated in steps. `rowElements`
  * binds every row start, nested ones included; a row start with none throws
@@ -605,7 +591,10 @@ export function evaluateSteps(
 	scripts: NavScripts | null = null
 ): Steps<ChainResult> {
 	const compiled = compileCriteria(criteriaOf(defn, []));
-	if (scripts !== null) checkSnippets(defn);
+	if (scripts !== null && !checked.has(defn)) {
+		checkNavigationSnippets(defn);
+		checked.add(defn);
+	}
 	return evaluate({ mm, model, limits, rowElements, meter, compiled, scripts }, defn);
 }
 

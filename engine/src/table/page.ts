@@ -5,6 +5,7 @@
  */
 import { PropertyValue } from '../navigation/evaluate.ts';
 import { toWire, type Wire } from '../read/wire.ts';
+import type { ScriptWarning } from '../script/warnings.ts';
 import type { TableCell } from './cells.ts';
 import type { Binding, RowKey } from './rows.ts';
 import type { TableDefinition } from './schema.ts';
@@ -19,7 +20,12 @@ export type TableCellBody = Omit<TableCell, 'value' | 'values'> & {
 
 export type TableRowBody = { key: Wire[]; cells: TableCellBody[] };
 
-/** `warnings` and `script_status` concern scripts, which never reach the engine. */
+/**
+ * `script_status` is `null` for a table that reaches no script, and `ready`
+ * for one that does: an answer here is complete, never polled for.
+ */
+export type ScriptStatusBody = { state: 'ready'; done: number; total: null; message: null };
+
 export type TablePageBody = {
 	columns: TableColumnBody[];
 	rows: TableRowBody[];
@@ -28,8 +34,8 @@ export type TablePageBody = {
 	truncated: boolean;
 	offset: number;
 	model_rev: number;
-	warnings: [];
-	script_status: null;
+	warnings: ScriptWarning[];
+	script_status: ScriptStatusBody | null;
 };
 
 const wireSlot = (b: Binding): Wire =>
@@ -63,6 +69,8 @@ export type PageOf = {
 	truncated: boolean;
 	offset: number;
 	rev: number;
+	/** What the evaluation's scripts reported; `null` when it ran none. */
+	warnings: ScriptWarning[] | null;
 };
 
 /** The body of one page: the columns as `defn` asks for them, the rows with their cells. */
@@ -79,7 +87,8 @@ export function pageBody(defn: TableDefinition, page: PageOf): TablePageBody {
 		truncated: page.truncated,
 		offset: page.offset,
 		model_rev: page.rev,
-		warnings: [],
-		script_status: null
+		warnings: page.warnings ?? [],
+		script_status:
+			page.warnings === null ? null : { state: 'ready', done: 0, total: null, message: null }
 	};
 }

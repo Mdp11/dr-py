@@ -7,16 +7,23 @@
  * their order. A property's value leads with its shape (0 scalar, 1 element)
  * so one property element-typed on one type and scalar on another orders
  * without comparing the two.
+ *
+ * A script column sorts by what its call returns. A key whose value would take a
+ * navigation's script step, which no fill computes for a sort, is not driven:
+ * the step prunes, every row ties, and the order is the build's, with a warning.
  */
 import type { Model } from '../model/model.ts';
 import { displayName } from '../model/naming.ts';
 import { PropertyValue, type Meter } from '../navigation/evaluate.ts';
+import { navigationHasScript } from '../navigation/resolve.ts';
+import type { ValuePayload } from '../script/result.ts';
 import type { Steps } from '../steps/steps.ts';
 import { pyCasefold } from '../value/casefold.ts';
 import { cmpCodePoint } from '../value/compare.ts';
 import { pyStr } from '../value/repr.ts';
 import { PyFloat, type Value } from '../value/types.ts';
 import type { NavMemo } from './nav-memo.ts';
+import { evaluateScriptColumn, type TableScripts } from './script-inputs.ts';
 import {
 	expandedPropertyIsElementTyped,
 	expandSlotOf,
@@ -26,7 +33,7 @@ import {
 	type Pass,
 	type RowKey
 } from './rows.ts';
-import type { Column, TableDefinition } from './schema.ts';
+import type { Column, ColumnSource, NavigationColumn, TableDefinition } from './schema.ts';
 import { propertyIsElementTyped, rawProperty } from './virtual-props.ts';
 
 export type SortSpec = { column: number; direction: 'asc' | 'desc' };
@@ -129,12 +136,33 @@ function* sortValue(pass: Pass, key: RowKey, col: Column, index: number): Steps<
 		return [0, values.map((v) => atom(model, v))];
 	}
 	if (col.kind === 'script') {
-		// No snippet runs here: only an expand column's promoted slot has a value.
-		if (col.mode !== 'expand') return null;
-		const b = key[expandSlotOf(defn, baseSlots, index)];
-		if (b instanceof PropertyValue) return [atom(model, b.value)];
-		if (typeof b === 'string') return [atom(model, b)];
-		return null;
+		if (col.mode === 'expand') {
+			const b = key[expandSlotOf(defn, baseSlots, index)];
+			if (b instanceof PropertyValue) return [atom(model, b.value)];
+			if (typeof b === 'string') return [atom(model, b)];
+			return null; // a row kept empty, a failed call, or a pending one
+		}
+		if (col.snippet.definition === null || pass.scripts === null) return null;
+		const els = yield* resolveSourceElements(pass, key, col.source);
+		if (els.length === 0) return null;
+		const result = yield* evaluateScriptColumn(pass, key, col, els);
+		if (result.error !== null) return null; // failed and pending sort with the empties
+		const payload = result.payload as ValuePayload;
+		if (payload.kind === 'scalar') {
+			return payload.value === null ? null : [atom(model, payload.value)];
+		}
+		if (payload.kind === 'scalars') {
+			const values = payload.values.filter((v) => v !== null);
+			return values.length === 0 ? null : values.map((v) => atom(model, v));
+		}
+		if (payload.kind === 'element') {
+			return model.findElement(payload.id) === undefined ? null : [atom(model, payload.id)];
+		}
+		const atoms = payload.ids
+			.filter((id) => model.findElement(id) !== undefined)
+			.map((id) => atom(model, id))
+			.sort(pyCompare);
+		return atoms.length === 0 ? null : atoms;
 	}
 	if (col.mode === 'expand') {
 		const b = key[expandSlotOf(defn, baseSlots, index)];
@@ -151,6 +179,67 @@ function* sortValue(pass: Pass, key: RowKey, col: Column, index: number): Steps<
 		.sort(cmpCodePoint);
 }
 
+// -- sorts a script cannot fill -------------------------------------------------------
+
+const navigationScripted = (col: NavigationColumn): boolean =>
+	col.navigation.definition !== null && navigationHasScript(col.navigation.definition);
+
+/**
+ * Whether resolving `source` evaluates a navigation holding a script step.
+ * Mirrors `resolveSourceElements` branch for branch: a row slot and an expand
+ * reference read a key slot and evaluate nothing; a collapse script column
+ * ends the walk, since the fill resolves its source for every row it computes,
+ * which fills every step underneath it.
+ */
+function sourceReachesScriptNavigation(defn: TableDefinition, source: ColumnSource): boolean {
+	if (source.kind === 'row') return false;
+	const ref = defn.columns[source.index]!;
+	if (ref.kind === 'navigation' && source.step_index !== null) {
+		return navigationScripted(ref) || sourceReachesScriptNavigation(defn, ref.source);
+	}
+	if (ref.kind !== 'element' && ref.mode === 'expand') return false;
+	if (ref.kind === 'script') return false;
+	if (ref.kind === 'navigation') {
+		return navigationScripted(ref) || sourceReachesScriptNavigation(defn, ref.source);
+	}
+	return sourceReachesScriptNavigation(defn, ref.source);
+}
+
+/** Whether computing `col`'s sort value evaluates a navigation holding a script step that nothing fills. */
+function sortReachesScriptNavigation(defn: TableDefinition, col: Column): boolean {
+	if (col.kind === 'element') return sourceReachesScriptNavigation(defn, col.source);
+	if (col.mode === 'expand' || col.kind === 'script') return false;
+	if (col.kind === 'navigation') {
+		return navigationScripted(col) || sourceReachesScriptNavigation(defn, col.source);
+	}
+	return sourceReachesScriptNavigation(defn, col.source);
+}
+
+/**
+ * Whether any of `sort` falls back to the build order. It reads the definition
+ * alone, so a served order that was kept can tell it again.
+ */
+export function sortFallsBackToBuildOrder(
+	defn: TableDefinition,
+	sort: readonly SortSpec[]
+): boolean {
+	return sort.some((spec) => sortReachesScriptNavigation(defn, defn.columns[spec.column]!));
+}
+
+/**
+ * The scripts the pass for `col` may drive: `scripts`, or `null` for the key
+ * that falls back to the build order, which warns once per key.
+ */
+function sortScripts(
+	defn: TableDefinition,
+	col: Column,
+	scripts: TableScripts | null
+): TableScripts | null {
+	if (scripts === null || !sortReachesScriptNavigation(defn, col)) return scripts;
+	scripts.warnings.add('sort_needs_script_nav');
+	return null;
+}
+
 type Decorated = { value: Comparable; key: RowKey };
 
 /** `keys` in the order `defn.sort` gives them; `baseSlots` is the build's. */
@@ -160,14 +249,23 @@ export function* orderRowsSteps(
 	keys: readonly RowKey[],
 	baseSlots: number,
 	meter: Meter,
-	memo: NavMemo | null
+	memo: NavMemo | null,
+	scripts: TableScripts | null = null
 ): Steps<RowKey[]> {
 	const sort = sortKeys(defn);
 	let ordered = [...keys];
 	if (sort.length === 0) return ordered;
-	const pass: Pass = { model, mm: model.metamodel, defn, baseSlots, meter, memo };
 	for (const { column, direction } of sort.reverse()) {
 		const col = defn.columns[column]!;
+		const pass: Pass = {
+			model,
+			mm: model.metamodel,
+			defn,
+			baseSlots,
+			meter,
+			memo,
+			scripts: sortScripts(defn, col, scripts)
+		};
 		const valued: Decorated[] = [];
 		const empty: RowKey[] = [];
 		for (const key of ordered) {

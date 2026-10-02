@@ -133,6 +133,9 @@ function settle(
 	return { result: stdout === parsed.stdout ? parsed : { ...parsed, stdout }, sound: true };
 }
 
+/** The texts of inputs and documents are `json.dumps`'s, which writes a non-finite float as a bare constant. */
+const FLOATS = { floatConstants: true };
+
 type Group = { batch: ScriptBatch; entry: EmbeddedEntry; keys: CellKey[] };
 
 /** The misses of one pass as batches: first miss first, a batch per code and entry. */
@@ -151,8 +154,8 @@ function batchesOf(missed: ReadonlyMap<CellKey, ScriptCall>): Group[] {
 		group.keys.push(key);
 		group.calls.push({
 			elementIds: [...call.elementIds],
-			...(call.inputsText !== null && { inputs: parseExact(call.inputsText) }),
-			...(call.docText !== null && { doc: parseExact(call.docText) })
+			...(call.inputsText !== null && { inputs: parseExact(call.inputsText, FLOATS) }),
+			...(call.docText !== null && { doc: parseExact(call.docText, FLOATS) })
 		});
 	}
 	return [...groups.values()].map(({ code, entry, keys, calls }) => ({

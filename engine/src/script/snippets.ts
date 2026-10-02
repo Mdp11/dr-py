@@ -15,6 +15,55 @@ import { PyFloat, type Value } from '../value/types.ts';
 /** The kind of a snippet artifact, as the server stores it. */
 export const SNIPPET_KIND = 'code_snippet';
 
+/** The longest inline snippet, in characters (`SNIPPET_MAX_CODE_BYTES`). */
+export const SNIPPET_MAX_CODE_CHARS = 64 * 1024;
+
+// What Rust's `str::trim` takes off, which is what pydantic's text-to-int conversion strips.
+const SPACE = '\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
+const INT_TEXT = new RegExp(`^[${SPACE}]*[+-]?[0-9]+(?:_[0-9]+)*(?:\\.0+)?[${SPACE}]*$`);
+
+/** Whether pydantic's lax `int` takes `value`: an int, a bool, an integral float inside 64 bits, or text of one. */
+function laxInt(value: unknown): boolean {
+	if (typeof value === 'bigint' || typeof value === 'boolean') return true;
+	if (typeof value === 'number') return Number.isInteger(value);
+	if (value instanceof PyFloat) {
+		return Number.isInteger(value.value) && Math.abs(value.value) < 2 ** 63;
+	}
+	return typeof value === 'string' && INT_TEXT.test(value);
+}
+
+/**
+ * Refuses an inline snippet definition the core's `SnippetDefinition` refuses,
+ * with 422: `code` a string of at most 64 Ki characters, `language` `python`,
+ * `entry_points` a list of strings, `schema_version` an integer as pydantic
+ * reads one. Other keys are ignored. `where` names the definition in the refusal.
+ */
+export function checkSnippetDefinition(definition: object, where: string): void {
+	const d = definition as { readonly [key: string]: unknown };
+	const refuse = (message: string): never => {
+		throw new ReadError(422, `${where}.${message}`);
+	};
+	if (!Object.hasOwn(d, 'code')) refuse('code: field required');
+	const { code } = d;
+	if (typeof code !== 'string') refuse('code: must be a string');
+	else if (/\p{Cs}/u.test(code)) refuse('code: must be valid unicode');
+	else if (code.length > SNIPPET_MAX_CODE_CHARS && [...code].length > SNIPPET_MAX_CODE_CHARS) {
+		refuse(`code: must hold at most ${SNIPPET_MAX_CODE_CHARS} characters`);
+	}
+	if (Object.hasOwn(d, 'language') && d['language'] !== 'python') {
+		refuse("language: must be 'python'");
+	}
+	if (Object.hasOwn(d, 'entry_points')) {
+		const points = d['entry_points'];
+		if (!Array.isArray(points) || !points.every((point) => typeof point === 'string')) {
+			refuse('entry_points: must be a list of strings');
+		}
+	}
+	if (Object.hasOwn(d, 'schema_version') && !laxInt(d['schema_version'])) {
+		refuse('schema_version: must be an integer');
+	}
+}
+
 function codeOf(payload: Value): Value | undefined {
 	const holdsCode =
 		typeof payload === 'object' &&
