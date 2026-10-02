@@ -65,6 +65,9 @@ export type PoolOptions = {
 
 const DEFAULT_SPARE_IDLE_MS = 30_000;
 
+/** CSP-violation reports relayed per worker between one batch start and the next; a worker can flood them. */
+export const VIOLATION_REPORTS_PER_BATCH = 16;
+
 /** The pool's size for `parallelism` cores: two are left to the engine and the page, and it is between one and four. */
 export function poolCap(parallelism: number): number {
 	return Math.max(1, Math.min(4, parallelism - 2));
@@ -124,6 +127,8 @@ type Slot = {
 	bootMs: number;
 	boot: 'snapshot' | 'cold';
 	readyAt: number;
+	/** Violation reports seen since the last batch started, relayed or not. */
+	violations: number;
 	active: Active | null;
 };
 
@@ -431,6 +436,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			bootMs: 0,
 			boot: 'cold',
 			readyAt: 0,
+			violations: 0,
 			active: null
 		};
 		slot.bootTimer = timers().setTimeout(() => {
@@ -517,6 +523,7 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 			return;
 		}
 		slot.phase = 'running';
+		slot.violations = 0;
 		const active: Active = {
 			waiting,
 			trips: 0,
@@ -605,7 +612,11 @@ export function createPool(spawn: WorkerSpawner, options: PoolOptions): ScriptHo
 		const { type } = message;
 		if (type === 'csp-violation') {
 			const { directive, blocked } = message;
-			if (typeof directive === 'string' && typeof blocked === 'string') {
+			if (
+				typeof directive === 'string' &&
+				typeof blocked === 'string' &&
+				slot.violations++ < VIOLATION_REPORTS_PER_BATCH
+			) {
 				try {
 					options.onViolation?.({ directive, blocked });
 				} catch {

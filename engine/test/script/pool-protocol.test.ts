@@ -418,6 +418,53 @@ describe('a forged or broken message', () => {
 	});
 });
 
+describe('the CSP violation cap', () => {
+	it('relays at most 16 CSP violations per batch and counts again on the next', async () => {
+		const seen: unknown[] = [];
+		let batches = 0;
+		const { pool } = poolOf(
+			[
+				answers((fake) => {
+					const count = batches++ === 0 ? 40 : 3;
+					for (let i = 0; i < count; i++) {
+						fake.say({ type: 'csp-violation', directive: 'script-src', blocked: `b${i}` });
+					}
+					fake.say({ type: 'done', results: [{ text: 'x' }], trips: 0, ms: 1 });
+				})
+			],
+			{ onViolation: (v) => seen.push(v) }
+		);
+		await pool.run(batchOf(), bridge);
+		expect(seen).toHaveLength(16);
+		await pool.run(batchOf(), bridge);
+		expect(seen).toHaveLength(19);
+	});
+
+	it('relays a violation while no batch runs under the same cap, and a batch starts it over', async () => {
+		const seen: unknown[] = [];
+		const { pool, fakes } = poolOf(
+			[
+				answers((fake) => {
+					fake.say({ type: 'csp-violation', directive: 'script-src', blocked: 'run' });
+					fake.say({ type: 'done', results: [{ text: 'x' }], trips: 0, ms: 1 });
+				})
+			],
+			{ cap: 2, onViolation: (v) => seen.push(v) }
+		);
+		await pool.run(batchOf(), bridge);
+		expect(seen).toHaveLength(1);
+		// A finished worker ends; the spare that replaced it has no batch yet.
+		await until(() => fakes[1] !== undefined);
+		for (let i = 0; i < 40; i++) {
+			fakes[1]!.say({ type: 'csp-violation', directive: 'script-src', blocked: `idle${i}` });
+		}
+		await settle();
+		expect(seen).toHaveLength(17);
+		await pool.run(batchOf(), bridge);
+		expect(seen).toHaveLength(18);
+	});
+});
+
 describe('a CSP violation handler that throws', () => {
 	it('changes nothing: the batch answers, and every report was still delivered', async () => {
 		let calls = 0;
