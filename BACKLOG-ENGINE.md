@@ -820,6 +820,11 @@ until `cap` spares are ready. Closing measurement (`engine-bench-browser`, 2026-
 the first use's cold boot 2,102 ms [2,044 2,102 2,125] is its own row. Cost: `cap` interpreters
 stay resident (about 90 MB each) while the pool is hot.
 
+The same ten scripts as table columns over those 1,000 rows, exported as csv through the engine
+(`engine-bench-browser`, 2026-10-02, median of 3, one fill): **2,765 ms** [2,735 2,775 2,765]
+against 3,000, within budget (`script table export (10,000 cells)`, gated). Cached, not gated: the
+same export again 34 ms, the first page of 500 rows 28 ms.
+
 The record below is the earlier measurement and its split.
 
 The first measurement, on one warm script worker (Chromium 148, Ryzen 9 3900X under WSL2, load 1.4,

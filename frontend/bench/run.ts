@@ -21,6 +21,7 @@ const HEAP_BUDGET_MB = 400;
 const SLICE_BUDGET_MS = 16;
 const TRANSITION_BUDGET_MS = 100;
 const SCRIPT_CELLS_BUDGET_MS = 3000;
+const SCRIPT_TABLE_BUDGET_MS = 3000;
 
 const BENCH_URL = 'http://127.0.0.1:5173/';
 const SANDBOX_URL = 'http://localhost:5174/';
@@ -42,6 +43,7 @@ const DOWNLOAD_SLICE = '  longest staged round trip during it (downloadModel)';
 const DOWNLOAD_BYTES = '  its bytes (downloadModel)';
 const CANDIDATE_SLICE = 'longest staged round trip during candidateIssues (slice bound)';
 const SCRIPT_CELLS = '10,000 script cells';
+const SCRIPT_TABLE = 'script table export (10,000 cells)';
 const TRANSITIONS = [
 	'stage 1,000 update_element ops',
 	'unstage all',
@@ -214,6 +216,7 @@ try {
 		const heap = await workerHeap(debugPort);
 		record({ [HEAP]: mb(heap.usedSize), [BACKING]: mb(heap.backingStorageSize ?? NaN) });
 		record(await page.evaluate(() => window.bench.scripts()));
+		record(await page.evaluate(() => window.bench.scriptTable()));
 		const total = await page.evaluate(() => window.bench.violations());
 		hosts[hosts.length - 1] += `, ${total} after the scripts`;
 		record(await page.evaluate(() => window.bench.transitions()));
@@ -259,6 +262,7 @@ if (downloadBytes !== oracleBytes) {
 	process.exit(1);
 }
 const scriptCells = median(rows.get(SCRIPT_CELLS)!);
+const scriptTable = median(rows.get(SCRIPT_TABLE)!);
 const candidateSlice = median(rows.get(CANDIDATE_SLICE)!);
 const edits = TRANSITIONS.map(
 	(label) => `${label}: ${verdict(median(rows.get(label)!), TRANSITION_BUDGET_MS, 'ms')}`
@@ -272,5 +276,6 @@ console.log(
 		`download's longest slice: ${verdict(downloadSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`candidateIssues' longest slice: ${verdict(candidateSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`10,000 script cells: ${verdict(scriptCells, SCRIPT_CELLS_BUDGET_MS, 'ms')}; ` +
+		`script table export: ${verdict(scriptTable, SCRIPT_TABLE_BUDGET_MS, 'ms')}; ` +
 		`${edits.join('; ')}`
 );

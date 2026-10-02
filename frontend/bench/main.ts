@@ -36,6 +36,8 @@ export type Bench = {
 	open(): Promise<OpenReport>;
 	/** Ten scripts over 1,000 `Microservice` ids each, concurrently on the pool. */
 	scripts(): Promise<Measures>;
+	/** The same ten scripts as a table's columns over those 1,000 rows, exported as csv through the engine. */
+	scriptTable(): Promise<Measures>;
 	/** The script parity corpus through the pool in the built sandbox, on a replica of the corpus model. */
 	parity(): Promise<ParityReport>;
 	/** The soft stop, the hard stops and a cancel, with the default limits. */
@@ -111,10 +113,13 @@ const CR_CREATED_AT = '2026-01-01T00:00:00.000Z';
 let link: EngineLink | null = null;
 let rev = 0;
 let violations = 0;
+/** Script fills that finished since the open, counted from the engine's progress events. */
+let scriptRounds = 0;
 
 async function open(): Promise<OpenReport> {
 	link = await connectFrame();
 	const client = link.client;
+	scriptRounds = 0;
 	violations = 0;
 	link.onViolation(() => violations++);
 	const metamodel: unknown = await (await fetch('/data/metamodel.json')).json();
@@ -126,7 +131,9 @@ async function open(): Promise<OpenReport> {
 	const seeded = deferred();
 	client.on((event) => {
 		const at = now();
-		if (event.event === 'progress') {
+		if (event.event === 'progress' && event.task === 'scripts') {
+			if (event.done === event.total) scriptRounds++;
+		} else if (event.event === 'progress') {
 			if (!began.has(event.task)) began.set(event.task, at);
 			if (event.done === event.total && !ended.has(event.task)) {
 				ended.set(event.task, at);
@@ -141,7 +148,7 @@ async function open(): Promise<OpenReport> {
 	const start = now();
 	const stopOpenPings = ping(client);
 	const response = fetch('/data/snapshot.gz', { cache: 'no-store' });
-	await client.call('open', { project_id: PROJECT_ID, metamodel });
+	await client.call('open', { project_id: PROJECT_ID, metamodel, scripts: 'evaluate' });
 	const body = (await response).body;
 	if (body === null) throw new Error('the snapshot response has no body');
 	const reader = body.getReader();
@@ -451,9 +458,8 @@ const SCRIPT_BODIES = [
 	'return len(els[0].children())'
 ];
 
-async function scripts(): Promise<Measures> {
-	if (link === null) throw new Error('open first');
-	const client = link.client;
+/** The first `SCRIPT_IDS` ids of the model's `SCRIPT_TYPE` elements. */
+async function scriptIds(client: EngineClient): Promise<string[]> {
 	const ids: string[] = [];
 	for (let offset = 0; ids.length < SCRIPT_IDS; offset += 500) {
 		const page = await client.call<ElementPage>('listElementsPage', {
@@ -468,6 +474,15 @@ async function scripts(): Promise<Measures> {
 		throw new Error(`model M holds ${ids.length} ${SCRIPT_TYPE} elements, ${SCRIPT_IDS} needed`);
 	}
 	ids.length = SCRIPT_IDS;
+	return ids;
+}
+
+const scriptCode = (body: string) => `def value(els):\n    ${body}\n`;
+
+async function scripts(): Promise<Measures> {
+	if (link === null) throw new Error('open first');
+	const client = link.client;
+	const ids = await scriptIds(client);
 
 	const run = async (code: string, calls: { element_ids: string[] }[]) => {
 		const result = await client.call<ScriptCallsResult>('scriptCalls', {
@@ -488,9 +503,7 @@ async function scripts(): Promise<Measures> {
 
 	const calls = ids.map((id) => ({ element_ids: [id] }));
 	const start = now();
-	const results = await Promise.all(
-		SCRIPT_BODIES.map((body) => run(`def value(els):\n    ${body}\n`, calls))
-	);
+	const results = await Promise.all(SCRIPT_BODIES.map((body) => run(scriptCode(body), calls)));
 	const wall = now() - start;
 	let trips = 0;
 	let ms = 0;
@@ -524,9 +537,73 @@ async function scripts(): Promise<Measures> {
 	};
 }
 
+async function scriptTable(): Promise<Measures> {
+	if (link === null) throw new Error('open first');
+	const client = link.client;
+	const ids = await scriptIds(client);
+	const definition = {
+		row_source: {
+			kind: 'scope',
+			types: [SCRIPT_TYPE],
+			criteria: [
+				{
+					type: 'any_of',
+					criteria: ids.map((id) => ({ type: 'name_id', field: 'id', op: 'equals', value: id }))
+				}
+			]
+		},
+		columns: [
+			{ kind: 'element' },
+			{ kind: 'property', name: 'name' },
+			...SCRIPT_BODIES.map((body) => ({
+				kind: 'script',
+				snippet: { definition: { code: scriptCode(body) } }
+			}))
+		],
+		sort: [{ column: 1 }]
+	};
+	const params = { definition, format: 'csv', date: '20240229', project: PROJECT_ID };
+	const exported = async () => {
+		const file = await client.call<ExportFileResult>('exportTable', params);
+		const csv = file.parts.map((part) => new TextDecoder().decode(part)).join('');
+		if (file.script_errors || csv.includes('#ERROR')) {
+			throw new Error('a script table cell holds an error');
+		}
+		return csv.split('\n').filter((line) => line !== '').length;
+	};
+
+	// The pool's spares are ready before the timer, as in `scripts()`.
+	await client.call('scriptWarm');
+	const roundsBefore = scriptRounds;
+	const start = now();
+	const lines = await exported();
+	const wall = now() - start;
+	const rounds = scriptRounds - roundsBefore;
+	if (lines < SCRIPT_IDS + 1) throw new Error(`the script table's csv holds ${lines} lines`);
+	const again = now();
+	await exported();
+	const cached = now() - again;
+	const pageStart = now();
+	const page = await client.call<TablePageBody>('evaluateTable', {
+		definition,
+		offset: 0,
+		limit: 500
+	});
+	const firstPage = now() - pageStart;
+	if (page.rows.length !== 500)
+		throw new Error(`the script table's page holds ${page.rows.length} rows`);
+	return {
+		'script table export (10,000 cells)': wall,
+		'  script fills in it (count)': rounds,
+		'script table export (cached)': cached,
+		'script table first page (cached)': firstPage
+	};
+}
+
 window.bench = {
 	open,
 	scripts,
+	scriptTable,
 	parity,
 	runaway,
 	isolation,
