@@ -28,12 +28,15 @@ export async function engineMode(context: BrowserContext): Promise<void> {
 	});
 }
 
+const SCRIPTS_NEED_ENGINE = 'ConflictError 409: scripts need the engine';
+
 /** Collects every `[shadow]` console line any page of `context` prints from now on. */
 export function watchShadow(context: BrowserContext): string[] {
 	const lines: string[] = [];
 	context.on('console', (message) => {
 		const text = message.text();
-		if (text.startsWith('[shadow]')) lines.push(text);
+		// The server does not evaluate scripts, so its refusal is not a difference.
+		if (text.startsWith('[shadow]') && !text.endsWith(SCRIPTS_NEED_ENGINE)) lines.push(text);
 	});
 	return lines;
 }

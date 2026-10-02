@@ -1,7 +1,7 @@
 /**
  * E2E: embedded script evaluation — script table columns (`ScriptColumn`)
- * and navigation script steps (`NavScriptStep`) driven against the real
- * WASM sandbox, following the conventions of `snippet-flow.spec.ts`
+ * and navigation script steps (`NavScriptStep`) driven on the engine in the real
+ * sandbox, following the conventions of `snippet-flow.spec.ts`
  * (setCode / runner-availability skip)
  * and `table.spec.ts` (nav -> "Open as table", the ColumnManager's "Table
  * settings" dialog, its documented selectors).
@@ -202,15 +202,6 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 
 	const cells = await readColumnCells(rows, scriptColIndex);
 
-	// Runner-availability guard (mirrors snippet-flow.spec.ts's `runAndAwait`):
-	// a missing/unfetched WASM guest binary makes every embedded call fail
-	// with "script runner unavailable" (core/script/embed.py), which the
-	// table renders as an error-cell carrying that exact message — degrade
-	// gracefully to a skip rather than failing on infra the harness lacks.
-	if (cells.some((c) => c.text.toLowerCase().includes('unavailable'))) {
-		test.skip(true, 'snippet runner not booted (guest binary not fetched)');
-	}
-
 	// --- 3. Assert: computed values AND at least one error cell. -----------
 	const errorCells = cells.filter((c) => c.isError);
 	const valueCells = cells.filter((c) => !c.isError);
@@ -221,8 +212,8 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	// --- 4. Sort by the script column through the Sorting dialog (the header
 	// `Sort by` button is gone — `table-sort-button` opens `column-sort-dialog`,
 	// whose `sort-toggle-{i}` ticks a column on, `sort-dir-{i}` shows/flips its
-	// direction, and `sort-done` closes it). The table is server-served with
-	// `script_status: computing` while its cells settle, so a single read right
+	// direction, and `sort-done` closes it). The engine re-evaluates the
+	// sort asynchronously, so a single read right
 	// after `sort-done` can land before the re-page — `expect.poll` for the
 	// actual ordering instead: every value cell sorted, every error/pending
 	// cell trailing in a contiguous tail (`order_rows`' "empties last in both
@@ -305,21 +296,7 @@ test('script step: el.outgoing() renders real chains; a raising step surfaces na
 	const status = tabpanel.getByTestId('results-status');
 	await expect(status).toContainText(/✓ \d+ chains/, { timeout: 30_000 });
 
-	// Runner-availability guard: with no runner booted, EVERY step() call
-	// fails with "...script runner unavailable" (core/script/embed.py),
-	// which `_hop_script` (core/navigation/evaluate.py) turns into a
-	// structured NAV_STEP_FAILED warning that `formatScriptWarning`
-	// (frontend/src/lib/script/warnings.ts) renders as "script step
-	// failed: script runner unavailable" — surfacing here even for this
-	// non-raising snippet.
 	const navWarnings = tabpanel.getByTestId('nav-warnings');
-	if (await navWarnings.isVisible().catch(() => false)) {
-		const title = (await navWarnings.getAttribute('title')) ?? '';
-		test.skip(
-			title.includes('unavailable'),
-			'snippet runner not booted (guest binary not fetched)'
-		);
-	}
 
 	// --- 2. Happy path: real neighbor ids -> non-empty chains, no warnings. -
 	await expect(navWarnings).toBeHidden();
@@ -375,13 +352,7 @@ test('script column: the Test panel runs the inline snippet against a bound elem
 	await expect(runButton).toBeEnabled({ timeout: 15_000 }); // lint must unlock value()
 	await runButton.click();
 
-	// Runner-availability guard, same rationale as the test above: without the
-	// fetched WASM guest the route 503s and the panel says so.
-	const notice = editor.getByTestId('snippet-notice');
 	const result = editor.getByTestId('snippet-result');
-	await expect(result.or(notice)).toBeVisible({ timeout: 60_000 });
-	if ((await notice.count()) > 0 && (await notice.textContent())?.includes('unavailable')) {
-		test.skip(true, 'snippet runner not booted (guest binary not fetched)');
-	}
+	await expect(result).toBeVisible({ timeout: 60_000 });
 	await expect(result).toHaveText('2'); // INLINE_COLUMN_CODE returns the constant 2
 });

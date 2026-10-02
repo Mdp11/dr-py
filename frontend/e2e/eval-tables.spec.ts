@@ -3,9 +3,9 @@
  * against the real backend, with shadow on: a table reads a staged
  * navigation before any commit, an open table sorted by name re-sorts after
  * a staged rename in the side panel (and Discard restores the order), a
- * script column falls back to the server behind the `table-fallback` marker,
- * and staging a script step onto a table's navigation column flips an open
- * table to the same marker without a reload — unstaging flips it back.
+ * script column is evaluated by the engine with no fallback marker, and
+ * staging a script step onto a table's navigation column keeps an open
+ * table served by the engine.
  *
  * Fixture facts (examples/smart-city.model.json — see table.spec.ts and
  * script-embedding.spec.ts for the fuller writeup of the same fixture): 12
@@ -31,7 +31,6 @@ const EXAMPLES = join(__dirname, '..', '..', 'examples');
 
 const INLINE_COLUMN_CODE = 'def value(els): return 2\n';
 const STEP_CODE = 'def step(el): return [r.destination().id for r in el.outgoing()]\n';
-const SCRIPT_MARKER = 'Reads committed state: this table runs a script';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -274,7 +273,7 @@ test('an open table sorted by name re-sorts after a staged rename in the side pa
 	await expect.poll(cellTexts, { timeout: 15_000 }).toEqual(before);
 });
 
-test('a table with a script column shows the fallback marker and its server-served cells', async ({
+test('a table with a script column is evaluated by the engine, with no fallback marker', async ({
 	page
 }) => {
 	test.setTimeout(120_000);
@@ -297,11 +296,10 @@ test('a table with a script column shows the fallback marker and its server-serv
 	await settings.getByTestId('settings-save').click();
 	await expect(settings).toBeHidden();
 
-	// The table reaches a script: it falls back to the server, on committed
-	// state, and says so.
-	await expect(fallback).toHaveText(SCRIPT_MARKER, { timeout: 30_000 });
+	// The engine evaluates the script: no fallback marker, no engine notice.
+	await expect(tabpanel.getByTestId('scripts-need-engine')).toHaveCount(0);
 
-	// Its cells settle from pending to the computed constant.
+	// Its cells settle to the computed constant.
 	await expect
 		.poll(
 			async () => {
@@ -313,15 +311,11 @@ test('a table with a script column shows the fallback marker and its server-serv
 		.toBeGreaterThanOrEqual(12);
 
 	const cells = await readColumnCells(rows, scriptColIndex);
-	// Runner-availability guard (as script-embedding.spec.ts): degrade to a
-	// skip rather than failing on infra the harness lacks.
-	if (cells.some((c) => c.text.toLowerCase().includes('unavailable'))) {
-		test.skip(true, 'snippet runner not booted (guest binary not fetched)');
-	}
 	expect(cells.every((c) => !c.isError && c.text === '2')).toBeTruthy();
+	await expect(fallback).toHaveCount(0);
 });
 
-test("staging a script step onto a table's navigation column flips it to the server marker; unstaging flips it back", async ({
+test("staging a script step onto a table's navigation column evaluates on the engine with no marker; unstaging leaves it unchanged", async ({
 	page
 }) => {
 	test.setTimeout(180_000);
@@ -378,13 +372,15 @@ test("staging a script step onto a table's navigation column flips it to the ser
 	await refTabpanel.getByRole('button', { name: /^Save( \*)?$/ }).click();
 	await expect.poll(() => stagedChangeCount(page), { timeout: 15_000 }).toBe(1);
 
-	// Back at the table, without a reload, it flips to the server marker.
+	// Back at the table, without a reload, the engine still serves it: no
+	// marker, no engine notice, all rows present.
 	await page.getByRole('tab', { name: tableTabName }).click();
-	await expect(fallback).toHaveText(SCRIPT_MARKER, { timeout: 30_000 });
 	await expect(rows).toHaveCount(12, { timeout: 15_000 });
+	await expect(fallback).toHaveCount(0);
+	await expect(tabpanel.getByTestId('scripts-need-engine')).toHaveCount(0);
 
 	// Unstage the script step (discard the one staged artifact update — the
-	// footer Undo only pops MODEL ops): the table flips back.
+	// footer Undo only pops MODEL ops).
 	await page.getByRole('tab', { name: refNav.name }).click();
 	await page.getByRole('button', { name: 'Commit', exact: true }).click();
 	const drawer = page.getByRole('dialog', { name: /commit changes/i });
@@ -396,6 +392,6 @@ test("staging a script step onto a table's navigation column flips it to the ser
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(0);
 
 	await page.getByRole('tab', { name: tableTabName }).click();
-	await expect(fallback).toHaveCount(0, { timeout: 30_000 });
+	await expect(fallback).toHaveCount(0);
 	await expect(rows).toHaveCount(12, { timeout: 15_000 });
 });

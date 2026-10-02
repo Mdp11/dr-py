@@ -4,8 +4,8 @@
  * to the engine: a table's CSV is the server's bytes, an exporter with two
  * entries and a manifest downloads a zip whose entries and `model_rev` are
  * the expected ones, a staged rename lands in the file behind the
- * `export-staged-note`, and a table with a script column is the server's file
- * behind `export-fallback`.
+ * `export-staged-note`, and a table with a script column exports the engine's
+ * computed cells.
  *
  * Fixture facts (examples/smart-city.model.json): 12 SoftwareSystem
  * elements, "SoftwareSystem-001".."SoftwareSystem-012", each with a string
@@ -227,15 +227,17 @@ test("a staged rename is in the table's CSV, behind the staged note", async ({ p
 	}
 });
 
-test('a table with a script column exports through the server behind the fallback note', async ({
-	page
-}) => {
+test('a table with a script column exports the engine-computed cells', async ({ page }) => {
 	test.setTimeout(180_000);
 	await openReady(page);
 	await openArtifact(page, scriptTableId);
 	const tabpanel = page.getByRole('tabpanel');
-	await expect(tabpanel.getByTestId('export-fallback')).toHaveCount(0);
+	await expect(tabpanel.getByTestId('scripts-need-engine')).toHaveCount(0);
 	const download = await exportTable(page, 'csv');
 	expect(download.suggestedFilename()).toMatch(/\.csv$/);
-	await expect(tabpanel.getByTestId('export-fallback')).toBeVisible({ timeout: 30_000 });
+	const lines = (await readFile(await download.path())).toString('utf8').trim().split(/\r?\n/);
+	expect(lines[0]).toContain('Computed');
+	expect(lines).toHaveLength(13);
+	expect(lines.slice(1).every((line) => line.trim().endsWith('2'))).toBeTruthy();
+	await expect(tabpanel.getByTestId('export-fallback')).toHaveCount(0);
 });

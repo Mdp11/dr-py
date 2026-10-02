@@ -2,7 +2,7 @@
  * Navigations and criteria searches served by the engine over the working
  * copy, in the real sandbox against the real backend, with shadow on: a
  * navigation reads a staged navigation it refers to before any commit, one
- * that reaches a script is answered by the server and says so, a criteria
+ * that reaches a script is answered by the engine, a criteria
  * search finds a staged rename, and after a commit and a reload the same
  * navigation reads the committed artifacts.
  *
@@ -229,9 +229,7 @@ test('a navigation reads the staged navigation it refers to, then the committed 
 	await expect.poll(() => afterReload.length, { timeout: 10_000 }).toBeGreaterThan(0);
 });
 
-test('a navigation that reaches a script is answered by the server and says so', async ({
-	page
-}) => {
+test('a navigation that reaches a script is answered by the engine', async ({ page }) => {
 	test.setTimeout(120_000);
 	await openReady(page);
 
@@ -251,37 +249,19 @@ test('a navigation that reaches a script is answered by the server and says so',
 	const stepRow = tabpanel.getByTestId('script-step');
 	await expect(stepRow).toHaveCount(1);
 	await stepRow.getByTestId('snippet-mode-inline').click();
-	const answered = page.waitForResponse(
-		(response) =>
-			response.request().method() === 'POST' &&
-			response.url().endsWith('/navigations/evaluate') &&
-			(response.request().postData() ?? '').includes('r.destination().id'),
-		{ timeout: 30_000 }
-	);
 	await stepRow.locator('.cm-content').click();
 	await page.keyboard.press('ControlOrMeta+a');
 	await page.keyboard.press('Delete');
 	await page.keyboard.insertText(STEP_CODE);
-	const response = await answered;
-	expect(response.ok(), await response.text()).toBeTruthy();
-	const server = (await response.json()) as { total: number; warnings: unknown[] };
 
-	const navWarnings = dock.getByTestId('nav-warnings');
-	if (await navWarnings.isVisible().catch(() => false)) {
-		const title = (await navWarnings.getAttribute('title')) ?? '';
-		test.skip(
-			title.includes('unavailable'),
-			'snippet runner not booted (guest binary not fetched)'
-		);
-	}
-	await expect(dock.getByTestId('nav-fallback')).toHaveText(
-		'Reads committed state: this navigation runs a script on the server.',
-		{ timeout: 30_000 }
-	);
-	expect(server.total).toBeGreaterThan(12);
-	await expect(status).toContainText(`✓ ${server.total} chains`, { timeout: 30_000 });
+	// The engine runs the step: every SoftwareSystem expands, so the chain
+	// count grows past the 12 starts, with no marker and no warnings.
+	await expect(status).not.toContainText('✓ 12 chains', { timeout: 30_000 });
+	await expect(status).toContainText(/✓ \d+ chains/);
 	await expect(dock.locator('tbody tr').first()).toBeVisible();
-	await expect(navWarnings).toBeHidden();
+	await expect(dock.getByTestId('nav-fallback')).toHaveCount(0);
+	await expect(dock.getByTestId('nav-warnings')).toBeHidden();
+	await expect(dock.getByTestId('scripts-need-engine')).toHaveCount(0);
 });
 
 test('the advanced search finds a staged rename', async ({ page }) => {

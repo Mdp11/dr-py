@@ -1,10 +1,7 @@
 /**
- * E2E: snippet workspace tab — lint, run (real WASM sandbox), stage, commit.
+ * E2E: snippet workspace tab — lint, run (engine sandbox), stage, commit.
  *
- * Requires the WASM guest binary to be fetched (spikes/code_exec/vendor/
- * python.wasm — see spikes/code_exec/fetch_python_wasi.sh); without it
- * /snippets/run 503s and the run-dependent tests self-skip via
- * runAndAwait's runner-unavailable notice check below.
+ * Runs on the engine's script sandbox in the browser.
  */
 import { expect, test } from './fixtures';
 import type { Page } from '@playwright/test';
@@ -33,8 +30,7 @@ async function openNewSnippet(page: Page): Promise<void> {
 	await expect(page.locator('[data-testid="snippet-editor"] .cm-content')).toBeVisible();
 }
 
-/** Run current code; resolve to 'ok' or skip the test when the backend has no
- * runner (guest binary not fetched — /snippets/run 503s). A run that only
+/** Run current code and wait for its terminal state. A run that only
  * mutates the model (no print, no trailing expression) produces neither
  * stdout nor a result_repr — its terminal state is the ops list instead, so
  * that testid is included too. */
@@ -47,11 +43,6 @@ async function runAndAwait(page: Page): Promise<void> {
 		.or(page.getByTestId('snippet-notice'))
 		.or(page.getByTestId('snippet-ops'));
 	await expect(outcome.first()).toBeVisible({ timeout: 30_000 });
-	const notice = page.getByTestId('snippet-notice');
-	if (await notice.isVisible()) {
-		const text = (await notice.textContent()) ?? '';
-		test.skip(text.includes('unavailable'), 'snippet runner not booted (guest binary not fetched)');
-	}
 }
 
 test('lint gutter surfaces a sandbox-import warning', async ({ page }) => {
@@ -118,7 +109,7 @@ test('stage a snippet edit and commit it', async ({ page }) => {
 	// The committed rename is findable via the sidebar search.
 	const searchInput = page.getByPlaceholder('Filter by name, type, id…');
 	await searchInput.fill('Renamed by snippet');
-	await expect(page.getByRole('button', { name: /Renamed by snippet/ })).toBeVisible({
+	await expect(page.getByRole('option', { name: /Renamed by snippet/ })).toBeVisible({
 		timeout: 10_000
 	});
 });
