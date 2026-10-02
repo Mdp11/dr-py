@@ -626,4 +626,19 @@ describe('a table with script columns', () => {
 		);
 		expect(page.rows[0]!.cells[2]).toMatchObject({ kind: 'value', value: 'inf|-inf|nan' });
 	}, 60_000);
+
+	it('previews a script-sorted table in the order of its first rows', async () => {
+		const { client } = await evaluating();
+		const params = table(
+			[column('# preview\ndef value(els):\n    return len(str(els[0].name))\n')],
+			{ sort: [{ column: 1, direction: 'desc' }] }
+		);
+		const page = await evaluateTable(client, params);
+		const { sample } = await client.call<{ sample: string }>('previewTableJson', params);
+		const shown = (JSON.parse(sample) as { script_1: number }[]).map((doc) => doc.script_1);
+		expect(shown).toEqual(page.rows.map((row) => row.cells[1]!.value));
+		// A real sort: the longest name first.
+		expect(shown[0]).toBe(Math.max(...shown));
+		expect(new Set(shown).size).toBeGreaterThan(2);
+	}, 60_000);
 });

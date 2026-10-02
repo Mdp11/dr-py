@@ -3,6 +3,7 @@ import {
 	CELL_CACHE_LIMITS,
 	CellCache,
 	cellKey,
+	CodeIds,
 	readKeyText,
 	type CellCacheLimits
 } from '../../src/script/cell-cache.ts';
@@ -49,19 +50,42 @@ describe('the keys', () => {
 	});
 
 	it('tells every part of a call apart', () => {
-		const base = cellKey('def value(e): pass', 'value', ['a', 'b'], null, null);
-		expect(cellKey('def value(e): pass', 'value', ['a', 'b'], null, null)).toBe(base);
+		const ids = new CodeIds();
+		const code = ids.id('def value(e): pass');
+		const base = cellKey(code, 'value', ['a', 'b'], null, null);
+		expect(cellKey(ids.id('def value(e): pass'), 'value', ['a', 'b'], null, null)).toBe(base);
 		const others = [
-			cellKey('def value(e): pass ', 'value', ['a', 'b'], null, null),
-			cellKey('def value(e): pass', 'step', ['a', 'b'], null, null),
-			cellKey('def value(e): pass', 'value', ['a'], null, null),
-			cellKey('def value(e): pass', 'value', ['ab'], null, null),
-			cellKey('def value(e): pass', 'value', ['b', 'a'], null, null),
-			cellKey('def value(e): pass', 'value', ['a', 'b'], '{}', null),
-			cellKey('def value(e): pass', 'value', ['a', 'b'], null, '{}'),
-			cellKey('def value(e): pass', 'value', ['a', 'b'], 'null', null)
+			cellKey(ids.id('def value(e): pass '), 'value', ['a', 'b'], null, null),
+			cellKey(code, 'step', ['a', 'b'], null, null),
+			cellKey(code, 'value', ['a'], null, null),
+			cellKey(code, 'value', ['ab'], null, null),
+			cellKey(code, 'value', ['b', 'a'], null, null),
+			cellKey(code, 'value', ['a', 'b'], '{}', null),
+			cellKey(code, 'value', ['a', 'b'], null, '{}'),
+			cellKey(code, 'value', ['a', 'b'], 'null', null)
 		];
 		expect(new Set([base, ...others]).size).toBe(others.length + 1);
+	});
+
+	it('does not grow with the code', () => {
+		const ids = new CodeIds();
+		const small = cellKey(ids.id('x'), 'value', ['a'], null, null);
+		const large = cellKey(ids.id('y'.repeat(64 * 1024)), 'value', ['a'], null, null);
+		expect(large.length).toBe(small.length);
+	});
+
+	it('never names two codes alike, across a clear', () => {
+		const cache = new CellCache();
+		const first = cellKey(cache.codes.id('def value(e): return 1'), 'value', ['a'], null, null);
+		cache.put(first, value(), '{}');
+		cache.clear();
+		const other = cellKey(cache.codes.id('def value(e): return 2'), 'value', ['a'], null, null);
+		expect(other).not.toBe(first);
+		expect(cache.get(first)).toBeUndefined();
+		// The first code asked for again is a new id, so what was kept under the old one is not found.
+		const again = cellKey(cache.codes.id('def value(e): return 1'), 'value', ['a'], null, null);
+		expect(new Set([first, other, again]).size).toBe(3);
+		expect(cache.get(again)).toBeUndefined();
 	});
 });
 

@@ -579,7 +579,8 @@ const checked = new WeakSet<object>();
  * generator exists, so an unsupported one refuses (501) before any step.
  * `meter` counts the units of the whole call when the caller shares it. With
  * `scripts`, a script step runs its snippet through it, and one whose inline
- * snippet holds no code refuses with 422; without, it prunes.
+ * snippet the core's `SnippetDefinition` refuses refuses with 422; without, it
+ * prunes.
  */
 export function evaluateSteps(
 	mm: Metamodel,

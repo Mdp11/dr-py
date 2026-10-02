@@ -8,7 +8,7 @@
  */
 import { DEFAULT_HARNESS_LIMITS } from '../script/guest.ts';
 import type { AbortSignalLike, ScriptBatch } from '../script/host.ts';
-import { cellKey, type CellCache, type CellKey } from '../script/cell-cache.ts';
+import { cellKey, CodeIds, type CellCache, type CellKey } from '../script/cell-cache.ts';
 import {
 	PENDING,
 	parseScriptResult,
@@ -187,6 +187,8 @@ export async function evaluateFilled<T>(
 	const { runner, signal, cache, onProgress } = options;
 	const transitions = options.transitions ?? (() => 0);
 	const stdoutChars = options.stdoutChars ?? DEFAULT_HARNESS_LIMITS.stdoutChars;
+	// Keys name a code by an id: the cache's, so a key is the cache's key, else the fill's own.
+	const codes = cache?.codes ?? new CodeIds();
 	const memo = new Map<CellKey, ScriptResult>();
 	let memoStamp = transitions();
 	let missed = new Map<CellKey, ScriptCall>();
@@ -195,7 +197,13 @@ export async function evaluateFilled<T>(
 
 	const scripts: ScriptReader = {
 		read(call) {
-			const key = cellKey(call.code, call.entry, call.elementIds, call.inputsText, call.docText);
+			const key = cellKey(
+				codes.id(call.code),
+				call.entry,
+				call.elementIds,
+				call.inputsText,
+				call.docText
+			);
 			const held = memo.get(key) ?? cache?.get(key);
 			if (held !== undefined) {
 				memo.set(key, held);

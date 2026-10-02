@@ -1,6 +1,6 @@
 /**
  * The cache of embedded call results: one entry per `(code, entry, element ids,
- * inputs, doc)` call, evicted by what a transition touched. An entry carries
+ * inputs, doc)` call, the code held as an id from `codes`, evicted by what a transition touched. An entry carries
  * the keys its call read; a transition's touched keys evict every entry that
  * read one of them, and every entry that depends on everything. Entries leave
  * least recently used first once the entry or byte bound is passed.
@@ -12,18 +12,45 @@ import type { EmbeddedEntry, ReadKey, ScriptErrorKind, ScriptResult } from './re
 export type CellKey = string;
 
 /**
- * The call's key: the code, the entry, the ids it runs over, and the texts of
- * its resolved inputs and document (`null` for none). The code is the key's
- * own text, so an edited snippet is a different key.
+ * Short ids for snippet codes, so that a key holds a number where it would hold
+ * the code: a table asks for a call per row and a code may be 64 KiB. An id names
+ * one code for as long as the ids live and is never given to another, not even
+ * after `clear`, which only forgets the codes as the cache forgets its entries (a
+ * call asked for after it gets a new id and misses the entries kept under the
+ * old one, which age out).
+ */
+export class CodeIds {
+	private readonly ids = new Map<string, number>();
+	private next = 0;
+
+	id(code: string): number {
+		let id = this.ids.get(code);
+		if (id === undefined) {
+			id = this.next++;
+			this.ids.set(code, id);
+		}
+		return id;
+	}
+
+	clear(): void {
+		this.ids.clear();
+	}
+}
+
+/**
+ * The call's key: the id of its code, the entry, the ids it runs over, and the
+ * texts of its resolved inputs and document (`null` for none). The code is
+ * named by its id, so an edited snippet is a different key and a key does not
+ * grow with the code.
  */
 export function cellKey(
-	code: string,
+	codeId: number,
 	entry: EmbeddedEntry,
 	elementIds: readonly string[],
 	inputsText: string | null,
 	docText: string | null
 ): CellKey {
-	return pyDumps([code, entry, [...elementIds], inputsText, docText]);
+	return pyDumps([codeId, entry, [...elementIds], inputsText, docText]);
 }
 
 /**
@@ -79,6 +106,8 @@ export class CellCache {
 	private readonly byRead = new Map<string, Set<CellKey>>();
 	private readonly everything = new Set<CellKey>();
 	private held = 0;
+	/** The ids the keys of this cache's entries name their codes by. */
+	readonly codes = new CodeIds();
 
 	constructor(limits: CellCacheLimits = CELL_CACHE_LIMITS) {
 		this.limits = limits;
@@ -102,8 +131,8 @@ export class CellCache {
 
 	/**
 	 * Stores `result`, whose wire answer was `text`, unless it is not one that
-	 * reproduces or is too large; a key carries the code and the inputs, so it
-	 * is counted with the text. A read-set above the bound, or none, is stored
+	 * reproduces or is too large; a key carries the inputs, so it is counted with
+	 * the text. A read-set above the bound, or none, is stored
 	 * as "depends on everything".
 	 */
 	put(key: CellKey, result: ScriptResult, text: string): void {
@@ -159,6 +188,7 @@ export class CellCache {
 	}
 
 	clear(): void {
+		this.codes.clear();
 		this.entries.clear();
 		this.byRead.clear();
 		this.everything.clear();

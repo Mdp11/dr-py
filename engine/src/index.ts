@@ -342,6 +342,7 @@ export {
 	CELL_CACHE_LIMITS,
 	CellCache,
 	cellKey,
+	CodeIds,
 	type CellCacheLimits,
 	type CellKey
 } from './script/cell-cache.ts';
