@@ -68,6 +68,8 @@ let _status = $state.raw<ReplicaStatus>(OFF);
 let _sync: ReplicaSync | null = null;
 /** Where the working copy stood at the last `changed` of the current link; null before the first one. */
 let _stamp = $state.raw<WorkingStamp | null>(null);
+/** Moves whenever the status leaves `ready`, a link starts or the replica stops: what a call began on no longer holds. */
+let _linkGeneration = 0;
 /** Unsubscribes the stamp from the sync's `changed` events. */
 let _offStamp: (() => void) | null = null;
 let _deps: Partial<SyncDeps> | undefined;
@@ -192,7 +194,10 @@ function setStatus(status: ReplicaStatus): void {
 	if (status === previous) return;
 	_status = status;
 	// The staged version restarts with each worker: no stamp outlives its link.
-	if (status.phase !== 'ready') _stamp = null;
+	if (status.phase !== 'ready') {
+		_stamp = null;
+		_linkGeneration++;
+	}
 	for (const listener of [..._statusListeners]) {
 		if (!_statusListeners.has(listener)) continue;
 		try {
@@ -223,12 +228,20 @@ export function getWorkingStamp(): WorkingStamp | null {
 	return _stamp;
 }
 
+/** The link generation: read before a call, handed to `adoptWorkingStamp` with its answer. */
+export function getLinkGeneration(): number {
+	return _linkGeneration;
+}
+
 /**
- * Takes a run's stamp as the working stamp when none is known: a replica built
- * again posts no `changed` for what it holds, and a later change moves it.
+ * Takes a run's stamp as the working stamp when none is known and the link the
+ * run began on still stands (`generation`, read before the call): a replica
+ * built again posts no `changed` for what it holds, and a later change moves it.
  */
-export function adoptWorkingStamp(stamp: WorkingStamp): void {
-	if (_stamp === null) _stamp = { rev: stamp.rev, staged: stamp.staged };
+export function adoptWorkingStamp(stamp: WorkingStamp, generation: number = _linkGeneration): void {
+	if (_stamp === null && generation === _linkGeneration) {
+		_stamp = { rev: stamp.rev, staged: stamp.staged };
+	}
 }
 
 /** Whether there is no engine to run scripts on: the replica is off or the server serves. Reactive. */
@@ -245,6 +258,7 @@ export function callEngine<T>(method: string, params?: unknown, options?: CallOp
 function followStamp(sync: ReplicaSync): void {
 	_offStamp?.();
 	_stamp = null;
+	_linkGeneration++;
 	_offStamp = sync.on('changed', (event) => {
 		const current = _stamp;
 		if (current?.rev === event.rev && current.staged === event.staged_version) return;
@@ -618,6 +632,7 @@ export function stopReplica(): void {
 	_offStamp?.();
 	_offStamp = null;
 	_stamp = null;
+	_linkGeneration++;
 	stopFollowingIssues();
 	stopFollowingTables();
 	stopFollowingViews();
@@ -770,6 +785,7 @@ export function resetReplica(): void {
 	_offStamp?.();
 	_offStamp = null;
 	_stamp = null;
+	_linkGeneration++;
 	stopFollowingIssues();
 	stopFollowingTables();
 	stopFollowingViews();

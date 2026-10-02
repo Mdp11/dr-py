@@ -19,7 +19,12 @@
 	let { tabId, onGoToLine }: { tabId: string; onGoToLine: (line: number) => void } = $props();
 
 	const run = $derived(getSnippetRun(tabId));
-	const stale = $derived(run.result ? isResultStale(run.result, getWorkingStamp()) : false);
+	// Staging moves the staged version itself: the staged result is not stale for it.
+	const stale = $derived(
+		run.result && run.stagedResult !== run.result
+			? isResultStale(run.result, getWorkingStamp())
+			: false
+	);
 	const editable = $derived(canEdit());
 
 	let stageError = $state<string | null>(null);

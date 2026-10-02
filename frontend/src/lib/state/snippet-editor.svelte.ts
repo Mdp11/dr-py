@@ -44,7 +44,7 @@ import {
 import { releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
-import { adoptWorkingStamp, scriptsNeedEngine } from './replica.svelte';
+import { adoptWorkingStamp, getLinkGeneration, scriptsNeedEngine } from './replica.svelte';
 import {
 	bindTabToArtifact,
 	closeTab,
@@ -223,6 +223,7 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 	if (!entryAvailable(rs.entry, getSnippetLint(tabId)?.entryPoints)) return;
 	if (scriptsNeedEngine()) return; // scripts run on the engine only
 	const gen = bump(_runGenerations, tabId);
+	const link = getLinkGeneration();
 	const controller = new AbortController();
 	_runControllers.set(tabId, controller);
 	setRun(tabId, { phase: 'running', notice: null });
@@ -237,7 +238,7 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 		);
 		if (_runGenerations.get(tabId) !== gen || !_drafts.has(tabId)) return; // stopped/closed/newer
 		_runControllers.delete(tabId);
-		adoptWorkingStamp(out.stamp);
+		adoptWorkingStamp(out.stamp, link);
 		setRun(tabId, { phase: 'idle', result: out });
 	} catch (err) {
 		if (_runGenerations.get(tabId) !== gen || !_drafts.has(tabId)) return;
@@ -406,11 +407,10 @@ function rekeySnippetTab(oldTab: string, newTab: string): void {
 	const run = _runs.get(oldTab);
 	if (run !== undefined) {
 		_runs.delete(oldTab);
-		// A running/stopping run cannot follow a rekey: runSnippetTab/
-		// stopSnippetTab's in-flight closure is bound to oldTab and its
-		// response is about to be orphaned by the generation bump below, so no
-		// code path will ever flip the moved entry back to idle. Normalize it
-		// here instead of carrying a permanently-stuck phase to the new tab.
+		// A running run cannot follow a rekey: runSnippetTab's in-flight closure
+		// is bound to oldTab and its answer is about to be orphaned (the run is
+		// aborted below), so no code path would flip the moved entry back to
+		// idle. Normalize it here instead of carrying a stuck phase to the new tab.
 		_runs.set(
 			newTab,
 			run.phase === 'idle'

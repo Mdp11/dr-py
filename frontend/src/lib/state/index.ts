@@ -205,6 +205,7 @@ export {
 	forgetViewPlacement,
 	forgetViewPlacements,
 	getReplicaNotice,
+	getLinkGeneration,
 	getReplicaStatus,
 	getWorkingStamp,
 	isReplicaBlocked,

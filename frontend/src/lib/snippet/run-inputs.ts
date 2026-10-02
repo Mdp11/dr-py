@@ -2,7 +2,7 @@
 // so the parsing/wire logic is unit-testable (mirrors entry-stubs.ts).
 //
 // A script column resolves `inputs[name]` from the referenced column's cell
-// for the row being computed. A console run (`POST /snippets/run`) has no row
+// for the row being computed. A console run (`runSnippet`) has no row
 // to resolve from, so the panel binds each declared input by hand and ships
 // it in the same wire shape the server already speaks
 // (`core/script/runner.py`'s `WireInput`).

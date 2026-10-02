@@ -4,6 +4,7 @@ import type { FeedEvent } from '$lib/api/feed';
 import { emit, ensureElement } from '../model.svelte';
 import {
 	adoptWorkingStamp,
+	getLinkGeneration,
 	getWorkingStamp,
 	handReplicaFeed,
 	resetReplica,
@@ -58,6 +59,15 @@ describe('the working stamp', () => {
 		expect(getWorkingStamp()).toEqual({ rev: 4, staged: 2 });
 		adoptWorkingStamp({ rev: 9, staged: 9 });
 		expect(getWorkingStamp()).toEqual({ rev: 4, staged: 2 });
+	});
+
+	it('is not adopted from a run that began on a link since lost', async () => {
+		const s = (store = await engineStore());
+		const began = getLinkGeneration();
+		await forceFailed(s, { waitForReady: false });
+		expect(getLinkGeneration()).not.toBe(began);
+		adoptWorkingStamp({ rev: 4, staged: 2 }, began);
+		expect(getWorkingStamp()).toBeNull();
 	});
 
 	it('is forgotten when the link is lost', async () => {

@@ -174,7 +174,7 @@
 						     outside the `editable` gate on purpose (see the note above
 						     `<ExportDialog` in TableView.svelte), and a viewer authoring an
 						     inline transform for their own export is not an escalation --
-						     they already run arbitrary sandboxed code via `POST /snippets/run`
+						     they already run arbitrary sandboxed code on the engine
 						     and inline `ScriptColumn`s. The one wart: "Add transform" writes
 						     `{}` and dirties the draft, and a viewer has no Save button to
 						     clean it with (`restoreTableExportSettings`'s docstring). -->

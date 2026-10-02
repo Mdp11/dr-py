@@ -12,12 +12,13 @@
 	// or removed), so any keying scheme would silently re-attach one step's
 	// result to another. The cost — collapsing the panel discards the last
 	// result — is accepted: this is a scratch test, not a saved artifact.
-	//
 	import { onDestroy } from 'svelte';
 	import { runSnippet, type SnippetRunBody, type SnippetRunOut } from '$lib/api/snippets';
 	import { ApiError } from '$lib/api/errors';
 	import ScriptsNeedEngine from '$lib/components/ScriptsNeedEngine.svelte';
 	import {
+		adoptWorkingStamp,
+		getLinkGeneration,
 		getWorkingStamp,
 		scriptsNeedEngine,
 		type SnippetBoundElement,
@@ -152,11 +153,13 @@
 				? { code: snippet.definition.code }
 				: { artifact_id: snippet.ref ?? undefined })
 		};
+		const link = getLinkGeneration();
 		controller = new AbortController();
 		try {
 			const out = await runSnippet(body, { signal: controller.signal });
 			if (seq !== runSeq) return; // unmounted, or a newer run started
 			phase = 'idle';
+			adoptWorkingStamp(out.stamp, link);
 			result = out;
 		} catch (err) {
 			if (seq !== runSeq) return;

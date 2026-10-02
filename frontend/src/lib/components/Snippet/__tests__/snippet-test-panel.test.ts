@@ -270,16 +270,35 @@ it('cancels the run in flight when the panel unmounts', async () => {
 	expect(signal.aborted).toBe(true);
 });
 
+it('does not adopt the stamp of an answer that arrives after the link was lost', async () => {
+	let answer!: (r: SnippetRunOut) => void;
+	vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise((r) => (answer = r)));
+	const c = render({ snippet: { ref: 'snip-1' }, entry: 'step', entryPoints: ['step'] });
+	try {
+		expand();
+		await bindElement('a', 'Alpha');
+		click(testid('snippet-test-run'));
+		replica.resetReplica(); // the link the run began on is gone
+		answer(OK_RESULT);
+		await vi.waitFor(() => expect(testid('snippet-result')).not.toBeNull());
+		expect(replica.getWorkingStamp()).toBeNull();
+		expect(testid('snippet-stale')).not.toBeNull();
+	} finally {
+		unmount(c);
+	}
+});
+
 it('marks a result stale once the working copy moved past its stamp', async () => {
 	captureRun();
-	replica.adoptWorkingStamp({ rev: 0, staged: 0 });
+	expect(replica.getWorkingStamp()).toBeNull(); // no `changed` heard yet
 	const c = render({ snippet: { ref: 'snip-1' }, entry: 'step', entryPoints: ['step'] });
 	try {
 		expand();
 		await bindElement('a', 'Alpha');
 		click(testid('snippet-test-run'));
 		await vi.waitFor(() => expect(testid('snippet-result')).not.toBeNull());
-		expect(testid('snippet-stale')).toBeNull();
+		expect(testid('snippet-stale')).toBeNull(); // the run's stamp was adopted
+		expect(replica.getWorkingStamp()).toEqual({ rev: 0, staged: 0 });
 		replica.resetReplica(); // the stamp is unknown again
 		flushSync();
 		expect(testid('snippet-stale')).not.toBeNull();

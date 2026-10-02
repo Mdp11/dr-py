@@ -9,7 +9,7 @@
 
 export type BoundEntry = 'value' | 'step' | 'transform';
 
-/** The subset of `BoundEntry` a console/embedded run (`POST /snippets/run`,
+/** The subset of `BoundEntry` a console/embedded run (`runSnippet`,
  * `SnippetSourceEditor`'s Test panel) can actually execute — mirrors
  * `RunRequest.entry: Literal["script", "value", "step"]`
  * (core/script/runner.py). `transform` has no `RunRequest.entry` member and
