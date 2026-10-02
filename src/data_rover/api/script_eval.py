@@ -5,6 +5,10 @@ error cells / warnings)."""
 
 from __future__ import annotations
 
+from typing import Annotated
+
+from fastapi import Header, HTTPException, status
+
 from data_rover.core.model.model import Model
 from data_rover.core.script.cell_cache import ScriptCellCache
 from data_rover.core.script.embed import ScriptEvalContext
@@ -13,6 +17,21 @@ from data_rover.core.script.runner import ScriptBudget, ScriptRunner
 from .script_runner import run_limits_from_settings
 from .settings import Settings
 from .snippet_concurrency import concurrency_guard
+
+
+ENGINE_ONLY_HEADER = "X-Data-Rover-Scripts"
+
+
+def scripts_engine_only(
+    x_data_rover_scripts: Annotated[str | None, Header()] = None,
+) -> bool:
+    """The app evaluates scripts in its engine and asks the server never to."""
+    return x_data_rover_scripts == "engine-only"
+
+
+def refuse_scripts(engine_only: bool, reaches_script: bool) -> None:
+    if engine_only and reaches_script:
+        raise HTTPException(status.HTTP_409_CONFLICT, "scripts need the engine")
 
 
 def open_script_context(

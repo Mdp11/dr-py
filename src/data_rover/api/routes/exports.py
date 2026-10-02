@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
@@ -52,7 +52,12 @@ from ..schemas import (
     TransformPreviewIn,
     TransformPreviewOut,
 )
-from ..script_eval import close_script_context, open_script_context
+from ..script_eval import (
+    close_script_context,
+    open_script_context,
+    refuse_scripts,
+    scripts_engine_only,
+)
 from ..script_runner import get_runner
 from ..settings import Settings, get_settings
 from ..table_export_engine import (
@@ -150,6 +155,7 @@ def run_export(
     db: DbSession = Depends(get_db),
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
+    engine_only: Annotated[bool, Depends(scripts_engine_only)] = False,
 ) -> Response:
     # Exactly one source for the definition. Checked here, not on
     # the model, so the 422 detail is one plain sentence rather than a
@@ -188,6 +194,7 @@ def run_export(
         db=db,
         runner=runner,
         settings=settings,
+        engine_only=engine_only,
     )
 
 
@@ -226,6 +233,7 @@ def run_export_by_name(
         db=db,
         runner=runner,
         settings=settings,
+        engine_only=False,
     )
 
 
@@ -239,6 +247,7 @@ def _execute_export(
     db: DbSession,
     runner: ScriptRunner | None,
     settings: Settings,
+    engine_only: bool,
 ) -> Response:
     """The whole run pipeline behind BOTH entry points (`POST /exports/run`
     with an id or a draft definition, `GET /exports/run-by-name`), so the
@@ -337,6 +346,30 @@ def _execute_export(
             status_code=422,
             detail="invalid transform for entries: " + "; ".join(bad_transforms),
         )
+
+    if engine_only:
+        # Refused before any entry runs, so a script-free first entry never
+        # ships work for a run that cannot finish.
+        has_transform = any(c is not None for c in transform_codes)
+        try:
+            has_script = any(
+                table_has_script(
+                    _resolve_table(
+                        EvaluateTableIn(artifact_id=t.id, offset=0, limit=100),
+                        project_id,
+                        db,
+                    )
+                )
+                for t in tables
+                if t is not None
+            )
+        except LookupError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"unknown artifact {exc}"
+            ) from exc
+        except (NavigationResolveError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        refuse_scripts(engine_only, has_transform or has_script)
 
     # A run-level host: `TransformHost` shares one warm SnippetSession per
     # DISTINCT code across every entry that uses it, up to its LRU cap
@@ -618,6 +651,7 @@ def preview_transform(
     db: DbSession = Depends(get_db),
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
+    engine_only: Annotated[bool, Depends(scripts_engine_only)] = False,
 ) -> TransformPreviewOut:
     """The exporter entry's Test button: render the entry's table the way
     the export would (never 202 — `/tables/json-preview`'s stance), run its
@@ -656,6 +690,7 @@ def preview_transform(
         raise HTTPException(
             status_code=422, detail=f"missing table(s) for entries: {label}"
         )
+    refuse_scripts(engine_only, True)
     script_ctx = None
     acquired = False
     transform_host = None

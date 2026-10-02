@@ -35,7 +35,7 @@ row until the rehydrate.
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import ValidationError
@@ -72,7 +72,12 @@ from ..schemas import (
     EvaluateNavigationIn,
     ScriptWarningOut,
 )
-from ..script_eval import close_script_context, open_script_context
+from ..script_eval import (
+    close_script_context,
+    open_script_context,
+    refuse_scripts,
+    scripts_engine_only,
+)
 from ..script_runner import get_runner
 from ..settings import Settings, get_settings
 from .read import _tree_item  # shared lite projection
@@ -293,6 +298,7 @@ def evaluate_navigation(
     db: DbSession = Depends(get_db),
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
+    engine_only: Annotated[bool, Depends(scripts_engine_only)] = False,
 ) -> ChainPageOut:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
     Stateless offset paging: the evaluator's deterministic chain order makes
@@ -334,6 +340,7 @@ def evaluate_navigation(
             defn = resolve_refs(
                 payload.definition, _fetch, snippet_fetch=_fetch_snippet
             )
+        refuse_scripts(engine_only, navigation_has_script(defn))
         row_elements = (
             [payload.row_element_id] if payload.row_element_id is not None else None
         )

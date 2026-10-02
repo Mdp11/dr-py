@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import json
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
@@ -71,7 +72,12 @@ from ..schemas import (
     TablePageOut,
     TableRowOut,
 )
-from ..script_eval import close_script_context, open_script_context
+from ..script_eval import (
+    close_script_context,
+    open_script_context,
+    refuse_scripts,
+    scripts_engine_only,
+)
 from ..script_runner import get_runner
 from ..script_sweep import kick_or_join_sweep
 from ..settings import Settings, get_settings
@@ -240,6 +246,7 @@ def evaluate_table(
     db: DbSession = Depends(get_db),
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
+    engine_only: Annotated[bool, Depends(scripts_engine_only)] = False,
 ) -> TablePageOut:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
     Row ORDER is cached per session (`TableOrderCache`) keyed on the
@@ -272,6 +279,7 @@ def evaluate_table(
     metamodel, model = require_model(session)
     try:
         defn = _resolve_table(payload, project_id, db)
+        refuse_scripts(engine_only, table_has_script(defn))
         sort = sort_keys(defn)
         limits = TableLimits()
         # Fingerprint the RESOLVED definition (not the raw request body): two
@@ -549,6 +557,7 @@ def export_table(
     db: DbSession = Depends(get_db),
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
+    engine_only: Annotated[bool, Depends(scripts_engine_only)] = False,
 ) -> Response:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
     Thin route: resolves the table, names the file from the artifact
@@ -573,6 +582,11 @@ def export_table(
     transform_host = None
     try:
         defn = _resolve_table(payload, project_id, db)
+        refuse_scripts(
+            engine_only,
+            table_has_script(defn)
+            or (defn.transform is not None and not defn.transform.is_empty),
+        )
         name = "table"
         if payload.artifact_id is not None:
             row = content.get_artifact(db, payload.artifact_id)
@@ -662,6 +676,7 @@ def json_preview(
     db: DbSession = Depends(get_db),
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
+    engine_only: Annotated[bool, Depends(scripts_engine_only)] = False,
 ) -> JsonPreviewOut:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
 
@@ -693,6 +708,7 @@ def json_preview(
     acquired = False
     try:
         defn = _resolve_table(payload, project_id, db)
+        refuse_scripts(engine_only, table_has_script(defn))
         sort = sort_keys(defn)
         # Same uncapped cell limits as the export: a preview whose navigation
         # arrays were capped at 20 would not be a preview of the export.
@@ -845,6 +861,7 @@ def table_script_errors(
     db: DbSession = Depends(get_db),
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
+    engine_only: Annotated[bool, Depends(scripts_engine_only)] = False,
 ) -> Response:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
 
@@ -895,6 +912,7 @@ def table_script_errors(
     acquired = False
     try:
         defn = _resolve_table(payload, project_id, db)
+        refuse_scripts(engine_only, table_has_script(defn))
         sort = sort_keys(defn)
         limits = TableLimits()
         rev = session.model_rev
