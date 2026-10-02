@@ -123,8 +123,8 @@ describe('TransformTestPanel', () => {
 	);
 
 	it('parses an engine answer without durations and renders no ms', async () => {
-		const { duration_ms: _t, ...body } = OK;
-		const { duration_ms: _f, ...file } = FILE;
+		const body = { ...OK, duration_ms: undefined };
+		const file = { ...FILE, duration_ms: undefined };
 		let method = '';
 		installEngineSeam({
 			side: (surface) => (surface === 'exports' ? 'engine' : 'server'),

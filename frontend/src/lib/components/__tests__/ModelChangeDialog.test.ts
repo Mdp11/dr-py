@@ -243,7 +243,7 @@ describe('ModelChangeDialog — compare mode', () => {
 		byTestId('mcd-replace').click();
 		await settle();
 		expect(propose).toHaveBeenCalledWith([CR_DOC]);
-		expect(stage).toHaveBeenCalledWith([CREATE_OP], 3, {
+		expect(stage).toHaveBeenCalledWith([CREATE_OP], { rev: 3 }, {
 			elements: [EL('a', 'A'), EL('b', 'B')],
 			relationships: []
 		});
@@ -404,7 +404,7 @@ describe('ModelChangeDialog — compare on the engine', () => {
 		pickFiles([modelFile()]);
 		byTestId('mcd-replace').click();
 		await settle();
-		expect(stage).toHaveBeenCalledWith([CREATE_OP], 4, {
+		expect(stage).toHaveBeenCalledWith([CREATE_OP], { rev: 4 }, {
 			elements: [EL('a', 'A'), EL('b', 'B')],
 			relationships: []
 		});
@@ -574,7 +574,7 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 		await settle();
 		byTestId('mcd-stage').click();
 		await settle();
-		expect(stage).toHaveBeenCalledWith([CREATE_OP], 3, {
+		expect(stage).toHaveBeenCalledWith([CREATE_OP], { rev: 3 }, {
 			elements: [EL('a', 'A'), EL('b', 'B')],
 			relationships: []
 		});
