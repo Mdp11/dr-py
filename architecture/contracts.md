@@ -120,7 +120,7 @@ event     {event, …}                     engine → client, unsolicited
   with the server's quote-stripped text (`No element with id 'x`), a `ValueError` 422; a
   snapshot or delta the engine cannot read is 422; an unknown method is 404
   `No method 'x'`; anything else is 500 with its message.
-- Replica methods, answered in any state, in this order: `open {project_id, metamodel, scripts?}` →
+- Replica methods, answered in any state, in this order: `open {project_id, metamodel}` →
   `chunk {bytes}` … (the gzip bytes as received, in transferred buffers) → `end` (answers the
   snapshot header once the replica is read and indexed; the replica stays `opening`) →
   `adoptStaged {batches}` (a re-bootstrap only: the staged batches carried over, under their
@@ -128,11 +128,11 @@ event     {event, …}                     engine → client, unsolicited
   one included. Then `applyDelta {text, own?}` → `applied | duplicate | gap`, a 409 unless
   `ready` (the shell buffers). `close` drops the replica, and any open in flight. A delta and
   a tail cross as the text the shell received (AD-26); a commit response is a delta as it
-  stands, its `model_rev` read as `rev`. `scripts: 'evaluate'` (any other value is a 422, before
-  the replica in hand is discarded; the app does not send it) has an evaluation that reaches a
-  script run it, as CT-6 says; the option lives with the replica, and without it, or where the
-  host gave the engine no script host, every `reaches a script` refusal answers 501 as before.
-  With it `progress {task: 'scripts', done, total}` counts the script calls the evaluations in
+  stands, its `model_rev` read as `rev`. An evaluation that reaches a script runs it, as CT-6
+  says; there is no option, and a service whose host gave it no script host answers `ReadError`
+  503 `no script host`, only when a pass needs a fill. A fill pins the replica its first scan
+  starts on: one replaced between its slices answers 409 `replica closed`, it does not restart on
+  the next replica. `progress {task: 'scripts', done, total}` counts the script calls the evaluations in
   flight have asked for and finished, summed, at each batch result, ending `done === total`
   when the last of them ends; a fill of a replica that was dropped posts nothing as it ends.
 - Staging: `stage {ops}` → `{batch, coalesced, changes, elements, relationships}` — the
@@ -152,6 +152,10 @@ event     {event, …}                     engine → client, unsolicited
   parse), a staged create or update with a payload `RulesParse | 'pending'` (`'pending'` while
   the shell's parse is out: the set stands on the last parse the engine received for that id,
   and a create with none contributes nothing yet).
+- A client that runs scripts itself sends `X-Data-Rover-Scripts: engine-only` on server requests;
+  the server answers 409 `scripts need the engine` to tables evaluate, json-preview, export and
+  script-errors, to exports run and preview-transform, and to navigations evaluate that reach a
+  script. A run by name ignores the header.
 - A result is the HTTP response body of the `lib/api` function the method is named after.
   Evaluations are reads over the working copy: `searchModel {target, criteria, limit,
   offset}`, `evaluateNavigation {definition | artifact_id, row_element_id, limit, offset}`,
@@ -251,9 +255,7 @@ event     {event, …}                     engine → client, unsolicited
   and scan again: it is answered once, from one state and one pair of rule sets. A stage or a
   delta posted while it scans waits for it.
 - An evaluation, an `issues` call or a candidate call the engine must not answer is refused
-  with 501: `reaches a script` (a navigation that reaches a configured script step, a table
-  with a configured script column or such a navigation, and for an export a table's or an
-  exporter entry's `transform`), `reaches an
+  with 501: `reaches an
   unsupported pattern` (a criterion or facet pattern the engine cannot match exactly as
   Python's `re` does, the candidate's included) or `reaches unreadable rules` (an `issues` or
   candidate call while a rule set in either layer arrived without its parse, or with a document
@@ -261,7 +263,7 @@ event     {event, …}                     engine → client, unsolicited
   one), and a rebind preview `reaches ops the candidate refuses` (above). Each is refused
   before any work but one: a pattern the host cannot run on a subject's value is found only
   when a validation reaches that value, so a sweep or a candidate scan can refuse it midway,
-  having answered nothing. The client answers exactly those four from the server — a
+  having answered nothing. The client answers exactly those three from the server — a
   navigation's page marked with the reason (AD-31), an `issues` call's or a rebind preview's
   answer unmarked, exactly as the server always gave it; any other 501 is an error.
 - Scripts: `scriptCalls {code, entry, console?, calls: [{element_ids, inputs_text?, doc_text?}]}` →
@@ -276,7 +278,7 @@ event     {event, …}                     engine → client, unsolicited
   `inputs_text` and `doc_text` are JSON text, read by the exact parser
   (AD-26). Params are read at arrival, else a 422; then a 409 `replica is not ready` unless
   `ready`, and a 501 `scripts are not available` where the host gave the engine no script
-  host. The call is not a scheduler job and is not queued behind the model lane: it runs on
+  host (an evaluation is 503 `no script host`, above). The call is not a scheduler job and is not queued behind the model lane: it runs on
   the state as it stands, staged edits included. The script reaches the model only through
   the bridge, which reads the ready replica's working copy and is answered where the request
   arrives, synchronously, outside the scheduler; with no ready replica — never opened, opening,
@@ -295,7 +297,15 @@ event     {event, …}                     engine → client, unsolicited
   boot or stopped mid-run starts over on the next call, and a failed boot (a 500 for every
   call waiting on it) is not remembered by the engine. A host answer that is not one result
   object per call is a 500.
-- Console runs: `runSnippet {code | artifact_id, entry, element_ids, inputs?}` → `{stdout, result_repr, ops, error, truncated, duration_ms, stamp: {rev, staged}}`, one console run over the working copy (`entry` `script`, `value` or `step`, params as the server's `/snippets/run` read them; 404 `snippet not found`, 422 bad params or a snippet of another kind, 409 and 501 as `scriptCalls`). `ops` holds model ops only; any other kind empties it and answers a `runtime` error. `{cancel: id}` stops it unanswered.
+- Console runs: `runSnippet {code | artifact_id, entry, element_ids, inputs?}` → `{stdout, result_repr, ops,
+  error, truncated, duration_ms, stamp: {rev, staged}}`, one console run over the working copy
+  (`entry` `script`, `value` or `step`, params as the server's `/snippets/run` read them; 404 `snippet
+  not found`, 422 bad params, a snippet of another kind or `transform` with the console, 409 and 501 as
+  `scriptCalls`). `ops` are read as a stage reads them: a non-model or malformed op empties it and
+  answers a `runtime` error. `stamp` names the working-copy state the run read (the replica's `rev` and
+  its staged version); a result is out of date once the current stamp differs. `{cancel: id}` stops it
+  unanswered, and the client rejects locally. The server's `/snippets/run` and `/snippets/cancel` stay for
+  F; the app does not call them.
 - Reads, `stagedDiff`, `stage` and `unstage` that arrive while the replica is not `ready` wait
   for it — nothing is refused for arriving early. The shell holds a read for the revs it has
   been told of (AD-28): it posts it once the replica has reached every `rev` it was handed
@@ -349,8 +359,9 @@ event     {event, …}                     engine → client, unsolicited
    staged entries mirrored from the frontend's buffer, each rule set carrying its parse
    (`rules`) beside its payload; references resolve against it,
    staged artifacts included. View and metamodel staged buffers stay in the frontend
-   (AD-30). A call that reaches a script reads committed state on the server until scripts
-   run in the browser (AD-31).
+   (AD-30). A script reads the working copy: the engine evaluates it over the model and the
+   artifacts as staged (AD-34), and the server's script path reads committed state only for a
+   client that sends no `engine-only` header.
 6. Temp ids (`tmp_` prefix) never leave the client except as an op's `temp_id`. The server
    mints every real id.
 7. `adoptStaged` replays staged batches, under their ids, on a freshly opened replica — what a
@@ -395,8 +406,8 @@ event     {event, …}                     engine → client, unsolicited
   shrink is held while it waits.
 - Prewarm: the service can start the pool when a replica holds a snippet, before any call
   (`ServiceDeps.prewarmScripts`): the first worker, then spares up to `cap` once the image is
-  ready. It is available and off in the sandbox for now; the first call boots the worker until a
-  caller enables it.
+  ready. The sandbox turns it on, and the service scans the artifacts for snippets only when
+  `artifacts.version` has moved.
 - The dispatcher is a port of `src/data_rover/core/script/bridge.py` and keeps trip-collapse.
   One trip carries one op and one reply; a reply piggybacks the projections the collapse
   lets it (far endpoints, hop relationships), and a call's roots travel with the call. Sub-project D MAY
@@ -406,15 +417,17 @@ event     {event, …}                     engine → client, unsolicited
   to `1750000000000` and `Date`'s local getters and `getTimezoneOffset` to UTC,
   `crypto.getRandomValues` filled with `0x42` (and `node:crypto`'s on the Node host),
   `PYTHONHASHSEED=0`, and `random.seed()` after every image restore.
-- Evaluation (the replica opened with `scripts: 'evaluate'`): an evaluation is a loop of passes
+- Evaluation: an evaluation is a loop of passes
   over the model lane and rounds of batches outside it. A pass answers a call from the
   evaluation's memo or the cell cache, else records it and answers it pending; a pass that
   recorded one is discarded, its calls run as one batch per `(code, entry)` through the pool
   and the pass runs again, until a pass records none. A `stage`, `unstage` or delta lands
   between passes, never within one, and a pass is read at the state its scan started in: a
   pass that records no call is answered whatever lands after it, so a `stage` posted behind
-  an evaluation waits for it and the evaluation answers the state it ran on, as without the
-  option, and a stream of stages does not starve one. A transition that changes the model
+  an evaluation waits for it and the evaluation answers the state it ran on, as without scripts,
+  and a stream of stages does not starve one. A round's settle runs in scheduler slices of 256
+  calls, its stamp checked at the start and after every yield, so a transition waits at most one
+  slice. A transition that changes the model
   and lands while a round runs drops that round, results and all, and the pass runs again from
   the state it ends in; one that changes nothing leaves it. The call belongs to the replica its
   first scan starts on, so one that arrives while the replica is diverged or not yet ready waits

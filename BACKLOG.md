@@ -133,7 +133,8 @@ Source: master spec §12; handoffs 2026-08-09 → 2026-08-11; 2026-08-16 metamod
 design. Size: large.
 
 ### R-3 · Client-engine program · `in progress`
-Tracked in `BACKLOG-ENGINE.md`.
+Tracked in `BACKLOG-ENGINE.md`. D (scripts in the browser) is done: its fourth plan removed the
+`scripts: 'evaluate'` option and the pending cells, and runs the console on the engine.
 
 ---
 
@@ -1385,12 +1386,12 @@ against a real backend.
 `table-sort-button` → `sort-toggle-{i}` → `sort-dir-{i}` (▲, flipped to ▼ if the first order
 ties the unsorted one) → `sort-done`, matching the dialog.
 
-### T-9 · `snippet-flow.spec.ts` looks for a sidebar search hit as a button · `open` · *2026-09-24*
+### T-9 · `snippet-flow.spec.ts` looks for a sidebar search hit as a button · `done` · *2026-09-24*
 "stage a snippet edit and commit it" (`frontend/e2e/snippet-flow.spec.ts:70`) expects
 `getByRole('button', {name: /Renamed by snippet/})` at `:121`; the sidebar search
 (`Sidebar/Search.svelte`) renders its hits as `role="option"` in a listbox, so the rename is
-there but the locator never matches. It fails the same way before and after the
-eval-navigation branch. Match the option instead.
+there but the locator never matches. It failed the same way before and after the
+eval-navigation branch. Closed by the console-removal plan, whose e2e task matches the option.
 
 ### T-10 · The live issue store's failure and race paths are untested · `open` · *2026-09-24*
 Paths of the engine's live issues (AD-32) that no test drives, found in the eval-validation

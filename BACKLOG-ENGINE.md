@@ -22,8 +22,8 @@ the route functions are also the 501 fallback's server side (AD-31); `api/artifa
 validates every committed navigation payload against them. The freeze has lifted for FEATURES in
 all of them and in the export writers (`core/table/{csv_export,json_export,export_layout,exporter,naming,split,cell_text}.py`,
 `api/table_export*.py`, `api/export_manifest.py`), a table that reaches a script included since D's third
-plan (a feature there lands in TypeScript behind `scripts: 'evaluate'`; the server fallback stays the
-default until plan 4 removes the option); a bug found in any of them still lands on both sides with a
+plan (a feature there lands in TypeScript only; the server's script path answers 409 to a client that
+sends `X-Data-Rover-Scripts: engine-only`); a bug found in any of them still lands on both sides with a
 fixture until F (MR-1) regardless. `core/table/resolve.py` (ref resolution and script reach) is frozen from C's
 first plan on. `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's
 conformance half (`routes/commits.py::preview_commit`'s model half,
@@ -64,8 +64,9 @@ C (evaluation) is done, its eight plans built (this paragraph tells plans 1–3)
 the committed payloads the shell fetches and follows, the staged entries mirrored from the
 frontend's buffer (AD-30) — and serves navigation and criteria search over the working copy,
 by default (`navigation` and `criteria` surfaces, held to the routes by fixture and by shadow
-comparison); a call that reaches a script, or a pattern the regex translator cannot vouch
-for, is refused with 501 and answered by the server, a navigation's page marked so (AD-31).
+comparison); a call that reaches a pattern the regex translator cannot vouch
+for is refused with 501 and answered by the server, a navigation's page marked so (AD-31); a script was
+the server's too until D's fourth plan (AD-34).
 C's plan 2 adds one live issue store over the working copy (AD-32) — a resumable background
 sweep, incremental revalidation inside every transition, origins by a rewind probe — and
 serves `getModelIssues`, `validateModel` and the model half of `previewCommit` from it, behind
@@ -113,19 +114,21 @@ feature there lands on both sides with a fixture until F. The diff route's model
 `core/view/validation.py` and the `GET /views/{id}` route that serves its warnings, are frozen for
 behaviour from C's plan 6a on; the engine replays them from the `model_download` and
 `view_warnings` fixtures.
-D (scripts in the browser) is in progress, its third plan built: `scriptCalls` runs user Python
-in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; with the
-service option `scripts: 'evaluate'` the engine evaluates navigation script steps, table script
-columns, export transforms and the script-error recap through a cell cache evicted by read-set (AD-34).
+D (scripts in the browser) is done, its fourth plan built: `scriptCalls` runs user Python
+in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; the engine
+evaluates navigation script steps, table script columns, export transforms and the script-error
+recap through a cell cache evicted by read-set (AD-34), with no option, and runs the console's
+snippets (`runSnippet`, CT-4); a client with an engine sends `X-Data-Rover-Scripts: engine-only` and
+the server answers 409 `scripts need the engine` instead of running scripts.
 At M, in Chromium, 10,000 script cells take 2,284 ms prewarmed through `scriptCalls` and 2,765 ms as table
 columns exported as csv, against CN-3's 3 s (`K-100`) *(measured, Chromium 148, Ryzen 9 3900X under WSL2,
 median of 3, 2026-10-01 and 2026-10-02)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`,
-`K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `T-12` to `T-15`.
+`K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `K-115`, `T-12` to `T-15`.
 Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
-`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-74`, `K-75`,
+`K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-75`,
 `K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `K-115`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -621,7 +624,7 @@ open tabs queue N of those behind every pause in the user's typing, delaying eve
 transition behind them. Fix direction: re-page only the visible tabs and mark the others stale,
 as a suspended tab already is (`_suspendedStale`), re-paging a stale tab when it is shown.
 
-### K-74 · The degraded export path is unreachable in the engine · `open` · *2026-09-28*
+### K-74 · The degraded export path is unreachable in the engine · `done` · *2026-09-28*
 The server's export writers have a degraded path: a script cell that is not computed writes a
 notice row, the text `#ERROR: not computed` (xlsx and CSV) or `{"$error": …}` (JSON), and an
 exporter run's manifest says `degraded: true`. The engine refuses a table that reaches a script
@@ -629,9 +632,10 @@ exporter run's manifest says `degraded: true`. The engine refuses a table that r
 uncomputed cell to write. The engine does not port the degraded path itself: it has no notice
 row and no `not computed` text, and `degraded` is fixed at `false` (`engine/src/export/run.ts`);
 only the generic per-cell error text exists (`#ERROR: <message>` in `engine/src/table/cell-text.ts`,
-`$error` in `engine/src/export/json.ts`). Fix direction: with D, port the notice row and the
-`degraded` flag against the degraded fixtures, and add an e2e case for a script table's export on
-the engine.
+`$error` in `engine/src/export/json.ts`). Closed by D's fourth plan without a port: the engine
+evaluates a script table's cells to values or errors before it writes, so it never has an uncomputed
+cell, and the 501 that sent such an export to the server is gone. The server's degraded path serves
+only a run by name with no engine.
 
 ### K-75 · `/tables/export` sends its `Content-Disposition` name as the artifact's own · `open` · *2026-09-28*
 Server only, and older than the engine path. `routes/tables.py::export_table` names a
@@ -999,8 +1003,7 @@ process under Node's `--permission` model (no file writes, no child processes, n
 which is also what CT-6 and CN-20 already say the headless transport ends with.
 
 ### K-107 · The script harness and its trusted copy carry small gaps · `open` · *2026-10-01*
-(1) The console branch drops `call["doc"]`, and a console run with entry `transform` is accepted and
-runs the generic path: document console as `value`/`step` only, or refuse `transform`. (2) A stop that
+(1) Done (the engine refuses `transform` with the console, 422). (2) A stop that
 lands between the harness's `finally` and `session["carry"] = ""` (`harness_src.py:253-254`) leaks
 module-level stdout into the next call: clear `carry` inside the `try`/`finally` (a core harness change, so
 golden fixtures regenerate). (3) The bootstrap's `except KeyboardInterrupt` body (`guest.ts:90-91,116-117`)
@@ -1011,14 +1014,15 @@ irreversibly; `js.Date` shows UTC in user scripts. (5) No WASM-guest test of a c
 raises `SystemExit`; `test_wasm_script_parity_hash_constants` spawns the whole scenario to read code and
 its fixture-vs-constant assertion is tautological. (6) `harness_src.py`'s docstring cites
 `tests/golden/scenarios/script_harness.py`, which is `tests/golden/script_harness.py`; cosmetic re-wraps in
-`trusted_runner.py` and `core/script/README.md`.
+`trusted_runner.py` and `core/script/README.md`. Items (2) to (6) are hardening and test gaps in
+the harness and its fixtures; none changes an answer a user sees, and (2) needs a core harness
+change with regenerated goldens, so none blocks the plan.
 
 ### K-108 · The script pool and its hosts carry small gaps · `open` · *2026-10-01*
-(1) A forged `csp-violation` flood is relayed without limit to the app's main thread, one store
-update each (`sync.ts:576`): a per-worker cap in `script-host.ts:44-56` and `pool.ts:548-558`. (2) The
+(1) Done: the pool relays at most 16 reports per batch per worker, spares counted too. (2) The
 batch-budget checks at call-start receipt and the watchdog ignore a pool-thread stall of at least
-`graceMs` near the budget edge. (3) `prewarmScripts` is O(artifacts) on every move: cache by
-`artifacts.version`; the "< 8 s" timing bounds in tests could flake on slow CI. (4) The maker allocates an
+`graceMs` near the budget edge. (3) Done: the sandbox prewarms, and the service skips the snippet scan while `artifacts.version` has not
+moved; the "< 8 s" timing bounds in tests could still flake on slow CI. (4) The maker allocates an
 unused `ReplyWriter`; `serve-worker`'s `randomFillSync` ignores offset and size; `nodeScriptHost` passes no
 `onWarning`; `batchToWire` throwing wastes a spare. (5) The isolation probe's comment
 (`frontend/bench/scripts.ts:353`) says "after its batch", but the error now fires during it, so the
@@ -1027,8 +1031,8 @@ describe title overclaims on Node (`K-106`). (6) `service.ts:454`'s `one?.text` 
 comment; `DEFAULT_HARNESS_LIMITS` and `Interpreter` are exported without a user; `engines` allows Node
 20.19 where native type stripping needs 22.18. (7) The soft stop can re-interrupt a script's own
 `KeyboardInterrupt` cleanup (documented in `engine/README.md`). (8) A throw from `onViolation` becomes an uncaught error, and a running worker's violations are forgeable.
-Items (1) and (3) are plan 4's: with the option on, the console and the removal of polling make the pool's
-main-thread relay and `prewarmScripts` per-move cost the steady state, not a bench path.
+Items (2) and (4) to (8) are small and off the steady state: none changes an answer or a budget, so none
+blocks the plan.
 
 ### K-109 · The runaway "soft stop on a snapshot worker" test sometimes booted cold · `done` · *2026-10-01*
 `engine/test/script/runaway.test.ts` "ends a runaway loop at the call's deadline on a snapshot worker"
@@ -1063,28 +1067,32 @@ the engine's `does not parse`. (3) A transform that times out, or whose module l
 session, so every later file reports `failed to load`; the engine reports `timeout` for each call. (4) A
 malformed saved snippet payload: the engine's 422 text approximates pydantic's. The fix for (2) is a parser
 or a compile-only harness mode.
+None blocks: each is a difference on a path the app's engine does not exercise through the console, and the goldens avoid them.
 
 ### K-112 · The trusted runner's print capture races on threads · `open` · *2026-10-02*
 The harness swaps `sys.stdout` around each call without a lock, so the sweep threads of a scripted oracle run
 can leave a `_CappedStdout` installed and the child answered nothing; `tests/golden/scripted.py` writes its
 answer through `sys.__stdout__` to get past it. A real fix is a lock or a per-thread stream in
 `core/script/harness_src.py` (frozen: lands on both sides with a fixture).
+It does not block: the engine's own scripts run one call per worker batch and the race needs the oracle's sweep threads.
 
 ### K-113 · The exports' longest slice is 32 ms with the option on, 23 ms with it off · `open` · perf · *2026-10-02*
-`engine-bench-browser` with `scripts: 'evaluate'` and ~10,000 cached script cells ahead of
+`engine-bench-browser` with the engine evaluating scripts and ~10,000 cached script cells ahead of
 `transitions()` shows `longest staged round trip during the exports` at 32 ms [32 23 36], against 23 ms
 [23 22 24] without them (the README's 2026-09-28 figure is 23 ms), and `exportTable: csv` at 407 against
 347 ms. Both are over CN-3's 16 ms either way; the delta suggests the cache's bookkeeping or the filled
-path runs in a slice. Not analysed, nothing tuned.
+path runs in a slice. Not analysed, nothing tuned. Plan 4 slices the settle and `put` (`K-114` (4)); the
+re-measure after it is recorded with the plan's bench run.
 
 ### K-114 · What the scripts evaluation leaves open · `open` · *2026-10-02*
 (1) The fill memo has no byte bound. It lives for one evaluation and is bounded by its scope; a bound that
 stops memoizing is not scheduled. (2) The cell cache's code-id map (`CodeIds`) has no bound until the cache
 clears and is not counted in the 32 MB. (3) `hopScript`'s per-node work in a navigation script step is
-unmetered and never yields (CN-3 risk). (4) A fill round's batching (`batchesOf`) and eviction's key computation (`touchedKeys`, `deletedKeys` in
-`transit`) run synchronously, the first outside the scheduler and the second inside the transition's slice
-(CN-3); nothing meters either. The settle and `CellCache.put` of a round (about 65 ms per 10,000 calls and
-280 ms per 50,000, Node 22) are fixed: they run as a model-lane scan in steps of 256 calls (`SETTLE_STEP`).
+unmetered and never yields (CN-3 risk). (4) Fixed for the settle and `CellCache.put` of a round (about 65 ms per 10,000 calls and
+280 ms per 50,000, Node 22), which run as a model-lane scan in steps of 256 calls (`SETTLE_STEP`). Still
+synchronous: a round's batching (`batchesOf`, one `parseExact` per call, outside the scheduler) and
+eviction's key computation (`touchedKeys`, `deletedKeys` in `transit`, inside the transition's slice, CN-3);
+nothing meters either.
 `window.bench.scriptTable()` is to ping during the export so that the bench sees a slice
 (`longest staged round trip during the script table (slice bound)`); it gated wall time only before that.
 (5) `entryArities` (`src/script/arity.ts`) refuses valid transforms the oracle accepts:
@@ -1099,9 +1107,27 @@ holds the document's text, up to 8 MiB, and the key and the join that builds it 
 (CN-3). (8) A transform that does not parse, over a table that yields no partition or file, answers 200
 where the oracle refuses it with 422: the guest reports a syntax error only when a call runs. (9) The recap
 (`tableScriptErrors`) materializes the whole grid, every row by every column, before it lists the first 200
-errors. (10) An evaluation whose script cells are cold and that a stream of transitions keeps moving is run
+errors. (10) Accepted. An evaluation whose script cells are cold and that a stream of transitions keeps moving is run
 again for every transition that lands within a round: results computed before a transition are dropped, never
-patched, so it answers only once a round fits between two transitions.
+patched, so it answers only once a round fits between two transitions. The visible table re-pages after an
+edit anyway, and exports and long fills wait for edits to pause. Admitting results whose read-set no transition
+touched would change the stamping invariant (AD-34) for a case a user meets only while typing through a cold
+evaluation.
+Items (1) to (3) and (5) to (9) do not block: each is a bound or a cost on a path no budget measures, or a
+refusal that errs toward the oracle's own 422.
+
+### K-115 · Test and comment gaps left by the console-removal plan · `open` · *2026-10-02*
+(1) The exports/run refusal test cannot detect an in-loop regression (its plain first entry never calls the
+runner): spy `run_table_export`. (2) The run-by-name test does not assert that scripts ran; no test covers a
+nested script (navigation column or row source) or a draft run under the header, and the pre-pass resolves
+tables twice under it. (3) The first CSP cap test's "counts again on the next" half runs on a fresh worker, so
+only the second test proves the reset; dropped reports are counted nowhere. (4) The removed "lives with the
+replica" test also pinned the cell cache empty after a reopen, with no replacement; the 503 is pinned only
+for `evaluateTable`; `NO_SCRIPTS` widens the public `index.ts`. (5) `readInputs` (`engine/src/script/console.ts`)
+accepts `null` ids and values that pydantic refuses with a 422. (6) No component test for the stale banner
+suppressed after Stage. (7) `TableView.test`'s 409 path goes through a mocked state barrel; the real 409 to
+`{kind: 'scripts'}` is covered in `table-editor-script-errors.test.ts`. (8) The drop test in
+`script-eval.test.ts` does not isolate the settle's own epoch guard. None changes an answer; none blocks.
 
 ### T-15 · Full-run flakes in e2e and the frontend's download-route test · `open` · *2026-10-01*
 In the full `pixi run frontend-test-e2e` run of the scripts plan's last task, `e2e/eval-exports.spec.ts:176`
@@ -1110,7 +1136,9 @@ navigation column and inline row source") failed beside `T-9` and `T-11`, and bo
 alone (8 of 8). `src/lib/api/__tests__/download-route.test.ts` flaked in Task 8's full run and passed in
 Task 9's (`K-91` is the same test's timeouts). In the full run after the final fixes,
 `e2e/smoke.spec.ts:28` and `e2e/snippet-flow.spec.ts:57` failed instead, and both passed when run alone.
-Load-sensitive, not looked into.
+Load-sensitive, not looked into. The final run of the console-removal plan added `e2e/eval-compare.spec.ts:231`,
+`e2e/replica.spec.ts:64`, `e2e/script-embedding.spec.ts:114`, `e2e/strict-mode.spec.ts:41` and
+`e2e/view.spec.ts:85`, each green alone.
 
 ### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
 Failed 1 run in 3 of the full e2e run during the scripts plan (engine rev 5 against server
@@ -1148,7 +1176,7 @@ Left out of C's plan 5, each on purpose:
 | `K-71` | Installing rules; the owner schedules it |
 | `K-73` | Table-tab perf, unrelated to exports |
 | `K-65`, `K-66`, `K-68`, `K-60`'s server half, `C-23`, `K-58`, `K-62`, `K-63`, `T-10`, R13 | Rules, validation or the sweep: not on the exports path |
-| `T-9` | A `snippet-flow` locator bug in a spec, not on the exports path |
+| `T-9` | A `snippet-flow` locator bug in a spec, not on the exports path (closed by the console-removal plan) |
 
 ---
 

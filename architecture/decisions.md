@@ -268,7 +268,7 @@ working-copy elements the server has never seen. Placeholder cells for script re
 result that is neither side's.
 **Consequences.** The 501 (`reaches a script`, `reaches an unsupported pattern`) and the
 fallback marker (`fallback: 'script' | 'pattern'` on a navigation page, a note in the results
-dock) say that a result reads committed state. D deletes both for scripts; the pattern
+dock) say that a result reads committed state. D deleted both for scripts (AD-34); the pattern
 refusal stays while the engine's regex translator covers a subset of Python's syntax.
 
 ## AD-32 · One live issue store over the working copy; origins by rewind probe
@@ -341,28 +341,40 @@ again. A document the engine's reader refuses, or a rule set that arrives withou
 refused (`reaches unreadable rules`), never guessed at; `rules_status` comes from the working
 compile, which with nothing staged equals the server's.
 
-## AD-34 · Scripts evaluate in the engine by collect, fill, re-run, behind a service option
+## AD-34 · Scripts evaluate in the engine by collect, fill, re-run
 **Decision.** An evaluation that reaches a script runs as a fill in the service loop: a pass scans
 the model lane with the cell cache as its reader and collects the calls it could not answer; the
 fill runs them as batches on the script pool, enters the results in the cache and runs the pass
 again, until a pass asks for nothing. Cells are keyed by the code's id, the entry, the element ids,
 the inputs' text and the document's text, and evicted by the keys a transition touches (the
-read-set). The replica opts in with `open {scripts: 'evaluate'}`; without it an evaluation that
-reaches a script is 501 `reaches a script`, as before, until plan 4 removes the option. This
-narrows AD-31 for scripts: a call that reaches one is the engine's, over the working copy, on a
-replica opened with the option, and the server's, over committed state, on one opened without it.
+read-set). There is no option: a service with a script host always evaluates scripts, and one
+without answers `ReadError(503, 'no script host')` only when a pass needs a fill. A client that
+runs scripts itself sends `X-Data-Rover-Scripts: engine-only`, and the server answers 409 `scripts
+need the engine` where a request reaches a script instead of running it on committed state;
+without the header, and for a run by name, the server still runs scripts (CI exports, until E).
+This ends AD-31's 501 fallback for scripts: a call that reaches one is the engine's, over the
+working copy, and with no engine the app shows the state, not script results.
 **Why.** The oracle's evaluators are synchronous and the script host is not: a pass that records
 what it lacks and an engine that fills between passes keep the evaluators single-sourced with
-the oracle and leave the model lane free of awaits. Rounds run outside the scheduler, so a stage
-or a delta lands between passes and the answer reflects it; a counter of transitions that change
-the model, read when a pass's scan starts, stops a result computed before a transition from
+the oracle and leave the model lane free of awaits. A round's batches run outside the scheduler
+and its settle, which enters the results in the cache, runs in scheduler slices of 256 calls, so a
+stage or a delta lands between passes, or at most one slice into a settle, and the answer reflects
+it; a counter of transitions that change the model, read when a pass's scan starts and checked at
+the start of the settle and after every yield, stops a result computed before a transition from
 entering the cache after that transition's eviction, and a pass is answered as the state its scan
-ran on, as an evaluation without scripts is.
+ran on, as an evaluation without scripts is. The console's snippets run on the same machinery
+(`runSnippet`, CT-4) and read the working copy.
 **Rejected.** Awaiting inside the evaluators: a second, asynchronous copy of each one. Dropping
-the cache at every transition: a keystroke would rerun every script. Gating nothing: the option
-keeps the server's answer until the console and the removal of `pending` cells are built.
-**Consequences.** A call belongs to the replica its first scan starts on: one closed, replaced or
-diverged under it is 409, and one that arrives while no replica is ready waits for the next, as
-any call does. The fill memo and the code-id map are unbounded
-within their lifetimes (`K-114`). The script-cell budget is measured through an engine export
+the cache at every transition: a keystroke would rerun every script. A service option: it kept two
+answers for one call, and the server's could not see the working copy. Admitting a result whose
+read-set no transition touched when other transitions moved the stamp: it changes the stamping
+invariant that keeps a stale result out of the cache.
+**Consequences.** Every evaluation is a pinned fill: a call belongs to the replica its first scan
+starts on, and one whose replica is closed, replaced or diverged under it, between slices
+included, answers 409 `replica closed` instead of restarting on the next replica; one that
+arrives while no replica is ready waits for the next, as any call does. A cold evaluation that a
+steady stream of transitions keeps moving is run again for every transition that lands within a
+round, and answers once a round fits between two transitions: accepted, since the visible table
+re-pages after an edit anyway and exports and long fills wait for edits to pause (`K-114` (10)).
+The fill memo and the code-id map are unbounded within their lifetimes (`K-114`). The script-cell budget is measured through an engine export
 (`K-100`).
