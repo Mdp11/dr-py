@@ -64,6 +64,33 @@ describe('createShadow', () => {
 		expect(serverCall).toHaveBeenCalledOnce();
 	});
 
+	it("the server's scripts-need-engine refusal reports nothing; any other 409 still compares", async () => {
+		const refusal = errorForStatus(409, null, 'scripts need the engine');
+		const report = vi.fn();
+		await run(
+			{
+				engine: { ok: true, value: { a: 1 } },
+				again: () => Promise.resolve({ a: 1 }),
+				server: () => Promise.reject(refusal)
+			},
+			{},
+			report
+		);
+		expect(report).not.toHaveBeenCalled();
+
+		const lines: string[] = [];
+		await run(
+			{
+				engine: { ok: true, value: { a: 1 } },
+				again: () => Promise.resolve({ a: 1 }),
+				server: () => Promise.reject(errorForStatus(409, { detail: 'stale' }, 'x'))
+			},
+			{},
+			(line) => lines.push(line)
+		);
+		expect(lines).toHaveLength(1);
+	});
+
 	it('array order does matter', async () => {
 		const lines: string[] = [];
 		const value = { items: [1, 2, 3] };

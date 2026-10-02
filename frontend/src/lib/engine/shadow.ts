@@ -1,4 +1,4 @@
-import { ApiError } from '$lib/api/errors';
+import { ApiError, isScriptsNeedEngine } from '$lib/api/errors';
 import type { EngineSeam, Outcome, Surface } from '$lib/api/engine-route';
 import { EngineGoneError } from './client';
 
@@ -44,7 +44,8 @@ export type ShadowDeps = {
  * caller can no longer see through is not a mismatch either. A probe that
  * carries a `digest` compares each side's digest of its answer instead of
  * the answer. A probe whose `stale()` says true is treated as one
- * with an edit staged, whatever `whileStaged` says.
+ * with an edit staged, whatever `whileStaged` says. A server answer of
+ * "scripts need the engine" ends the comparison without a report.
  */
 export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']> {
 	return async function shadow(probe): Promise<void> {
@@ -62,7 +63,7 @@ export function createShadow(deps: ShadowDeps): NonNullable<EngineSeam['shadow']
 		} catch {
 			return;
 		}
-		if (moved(serverOutcome)) return;
+		if (moved(serverOutcome) || isScriptsNeedEngineOutcome(serverOutcome)) return;
 		const [engineDigest, serverDigest] = await digested(engine, serverOutcome);
 		if (same(surface, engineDigest, serverDigest)) return;
 
@@ -114,6 +115,11 @@ async function digestOf(
 
 function isTerminal(outcome: Outcome): boolean {
 	return !outcome.ok && isTerminalError(outcome.error);
+}
+
+/** The server does not evaluate scripts, so its refusal is no answer to compare. */
+function isScriptsNeedEngineOutcome(outcome: Outcome): boolean {
+	return !outcome.ok && isScriptsNeedEngine(outcome.error);
 }
 
 function isConflict(outcome: Outcome): boolean {
