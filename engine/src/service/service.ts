@@ -389,9 +389,9 @@ function readScriptBatch(params: ReadParams): ScriptBatch {
 	};
 }
 
-/** What a run watches to be cancelled: the engine's sources have no DOM to name an `AbortController`. */
 type FillCount = { done: number; total: number; epoch: number };
 
+/** What a run watches to be cancelled: the engine's sources have no DOM to name an `AbortController`. */
 type Abortable = {
 	readonly signal: AbortSignalLike & { readonly reason?: unknown };
 	abort(reason?: unknown): void;

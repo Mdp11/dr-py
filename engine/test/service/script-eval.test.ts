@@ -72,7 +72,7 @@ function tracked(limits?: { callMs: number; graceMs: number }) {
 	const ported = instrumented();
 	const batches: { code: string; ids: string[][] }[] = [];
 	const hosts: ScriptHost[] = [];
-	const hook: { after: (() => Promise<void>) | null } = { after: null };
+	const hook: { after: ((index: number) => Promise<void>) | null } = { after: null };
 	const factory: ScriptHostFactory = () => {
 		const host = createPool(ported.spawn, { cap: 2, limits, now: () => performance.now() });
 		hosts.push(host);
@@ -81,9 +81,11 @@ function tracked(limits?: { callMs: number; graceMs: number }) {
 			prewarm: () => host.prewarm(),
 			warmed: (signal) => host.warmed(signal),
 			async run(batch, bridge, signal) {
-				batches.push({ code: batch.code, ids: batch.calls.map((one) => [...one.elementIds]) });
+				const index =
+					batches.push({ code: batch.code, ids: batch.calls.map((one) => [...one.elementIds]) }) -
+					1;
 				const run = await host.run(batch, bridge, signal);
-				await hook.after?.();
+				await hook.after?.(index);
 				return run;
 			},
 			dispose: () => host.dispose()
@@ -469,11 +471,14 @@ describe('progress', () => {
 			limit: 1
 		});
 		sent.catch(() => undefined);
+		// The spinning batch's answer is held back, so the old fill is still in flight when the next starts.
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		tracker.hook.after = async (index) => {
+			if (tracker.batches[index]!.code.includes('spun2')) await gate;
+		};
 		await until(() => scripts(client).some((event) => event.done === 1 && event.total === 2));
-		const ran = tracker.ran();
 		await openReplica(client, bridgeModel(), doc);
-		await until(() => ran.every((one) => one.terminated));
-		await expect(sent).rejects.toMatchObject({ status: 409 });
 		const before = scripts(client).length;
 		await Promise.all([evaluate(client, 'n1', NAME('next')), evaluate(client, 'n2', NAME('next'))]);
 		await settle();
@@ -481,6 +486,9 @@ describe('progress', () => {
 		expect(after.length).toBeGreaterThan(0);
 		expect(after.every((event) => event.total <= 2)).toBe(true);
 		expect(after.at(-1)).toMatchObject({ done: 2, total: 2 });
+		tracker.hook.after = null;
+		release();
+		await expect(sent).rejects.toMatchObject({ status: 409 });
 	}, 60_000);
 
 	it('says nothing for an evaluation that finds every call cached', async () => {
