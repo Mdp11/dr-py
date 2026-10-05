@@ -1,5 +1,5 @@
 /**
- * Reads a one-sheet workbook as `tests/golden/model_steps.py::_grid` reads it
+ * Reads a one-sheet workbook as `tests/golden/test_engine_xlsx.py::_grid` reads it
  * through openpyxl: every cell's value and type over the sheet's used
  * rectangle, the custom column widths, the frozen pane's top-left cell and
  * the autofilter range. It reads what the engine's writer writes and refuses

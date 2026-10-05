@@ -106,7 +106,7 @@ import { untag, type Tagged } from './load.ts';
 import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
 /**
- * What `tests/golden/model_steps.py` records of the model after a step: always
+ * What the fixtures record of the model after a step: always
  * the digest and a fingerprint of lines plus index dump; at a checkpoint the
  * lines and the dump too.
  */
@@ -460,7 +460,7 @@ function allIds(model: Model): string[] {
 	];
 }
 
-/** `tests/golden/tagged.py`'s rendering of a value. */
+/** `tests/golden/reader.py`'s rendering of a value. */
 function tag(value: Value): Tagged {
 	if (value === null) return { t: 'null' };
 	if (typeof value === 'boolean') return { t: 'bool', v: value };

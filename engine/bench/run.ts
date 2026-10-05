@@ -6,8 +6,7 @@
  * issue store's sweep, and the same edits through it, each revalidating; the
  * issue list the panel reads after a keystroke over many staged batches; and
  * the store with custom rules: its sweep, a rescan, a stage widened by the
- * rules' reach and a probe across a staged rule change; and the candidate
- * scan of a metamodel edit over the swept store.
+ * rules' reach and a probe across a staged rule change.
  *
  * `pixi run engine-bench-data` writes the input once, `pixi run engine-bench`
  * measures. Timings drift between sessions: compare only numbers of one run.
@@ -16,10 +15,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import {
 	appliesPopulation,
 	ArtifactSet,
-	candidateDiff,
-	candidateScan,
-	candidateStructureSteps,
-	compareSteps,
 	compileRuleSets,
 	DEFAULT_TABLE_LIMITS,
 	drain,
@@ -36,12 +31,8 @@ import {
 	navigationFetch,
 	openSnapshot,
 	parseExact,
-	prepareCandidate,
-	proposeSteps,
 	READS,
-	readCrs,
 	readTableDefinition,
-	rebindPreviewBody,
 	resolveTableRefs,
 	tableSteps,
 	TableOrderCache,
@@ -72,24 +63,13 @@ const DIR = new URL('../../benchmarks/', import.meta.url);
 const SNAPSHOT = new URL('large.snapshot.v2', DIR);
 const METAMODEL = new URL('large.snapshot.v2.metamodel.json', DIR);
 const DOCUMENT = new URL('large.model.json', DIR);
-const CANDIDATE = new URL('large.candidate.metamodel.json', DIR);
 const BIG_TABLE = new URL('big-table.json', import.meta.url);
-const COMPARE_FILE = new URL('large.compare.model.json', DIR);
-const CR_CREATED_AT = '2026-01-01T00:00:00.000Z';
 
 for (const file of [SNAPSHOT, METAMODEL, DOCUMENT]) {
 	if (!existsSync(file)) {
 		console.error(`Missing ${file.pathname}: run \`pixi run engine-bench-data\` first.`);
 		process.exit(1);
 	}
-}
-if (!existsSync(COMPARE_FILE)) {
-	console.error(`Missing ${COMPARE_FILE.pathname}: run \`pixi run engine-compare-oracle\` first.`);
-	process.exit(1);
-}
-if (!existsSync(CANDIDATE)) {
-	console.error(`Missing ${CANDIDATE.pathname}: run \`pixi run engine-candidate-oracle\` first.`);
-	process.exit(1);
 }
 
 /** What is measured, in the order it is shown. */
@@ -132,12 +112,6 @@ const ROWS = {
 	exportSplitZipLongest: '  its longest step',
 	download: 'download: the committed model file, written in steps',
 	downloadLongest: '  its longest step',
-	compareParse: 'compare: the uploaded file decoded, parsed and shaped (its first step)',
-	compare: 'compare: the working copy against the uploaded file, in steps',
-	compareLongest: '  its longest step after the parse',
-	comparePeakHeapMb: '  peak heap above baseline, the parsed file beside the replica, MB',
-	applyCr: 'apply-CR: the compare’s change request proposed over the working copy, in steps',
-	applyCrLongest: '  its longest step',
 	iterate: 'iterate every entity in state order',
 	stage: 'stage a 1,000-op batch',
 	unstage: 'unstage it: every touched entity back in its place',
@@ -163,14 +137,7 @@ const ROWS = {
 	rulesSweepLongest: '  its longest step after the first',
 	rulesStage: 'stage 1,000 ops + revalidation with reach',
 	rulesProbe: 'origin probe, 100 staged batches + a staged rule change',
-	rulesPopulation: "  the changed rule's population, once",
-	candidateStructure: "candidate scan: the candidate's containment and uniqueness, built in steps",
-	candidate: 'candidate scan: the swept store’s model validated under a metamodel edit',
-	candidateLongest: '  its longest step',
-	candidateDiff: '  the diff against the store, after its last step',
-	candidateRebindBody: '  the rebind preview body instead of the diff',
-	candidateBlock: '  its longest block: a step, or the last step and the diff',
-	candidateHeapMb: '  peak heap above baseline, MB'
+	rulesPopulation: "  the changed rule's population, once"
 };
 type Row = keyof typeof ROWS;
 
@@ -542,7 +509,6 @@ function measureIssues(wc: WorkingCopy): void {
 	if (!stepped('rescan', 'rescanLongest', live.sweepSteps())) {
 		throw new Error('the rescan ended unusable');
 	}
-	measureCandidate(model, live, largestRules);
 
 	// Staged past the store: its dirty sets would sort the growing group once an op.
 	const like = sample(elements, 1, 11, named)[0]!;
@@ -624,59 +590,7 @@ function measureRules(wc: WorkingCopy): void {
 	if (!sound) throw new Error('the bench drove the replica off its digest');
 }
 
-/**
- * The candidate scan over `live`'s settled store, its rule set `rules` (the
- * document `live` holds) recompiled under the candidate as `candidateIssues`
- * does: the build of the candidate's structure alone, then the whole scan
- * (structure and validation), its longest step and the peak `heapUsed` a step
- * reached above the level just before it. The service answers from the last
- * step, so the diff (or the rebind preview's body) runs in the same block as
- * that step: both are timed, and the longest block counts the diff in.
- */
-function measureCandidate(model: Model, live: LiveIssues, rules: string): void {
-	const candidate = prepareCandidate(candidateDoc, (mm) =>
-		compileRuleSets([ruleSource(rules)], mm)
-	);
-	stepped('candidateStructure', null, candidateStructureSteps(model, candidate.metamodel));
-
-	const steps = candidateScan(model, candidate);
-	globalThis.gc?.();
-	globalThis.gc?.();
-	const baseline = process.memoryUsage().heapUsed;
-	let peak = 0;
-	let worst = 0;
-	let last: number;
-	const start = performance.now();
-	let issues;
-	for (;;) {
-		const before = performance.now();
-		const next = steps.next();
-		last = performance.now() - before;
-		worst = Math.max(worst, last);
-		peak = Math.max(peak, process.memoryUsage().heapUsed - baseline);
-		if (next.done === true) {
-			issues = next.value;
-			break;
-		}
-	}
-	record('candidate', performance.now() - start);
-	record('candidateLongest', worst);
-	record('candidateHeapMb', peak / 2 ** 20);
-	const diff = timed('candidateDiff', () => candidateDiff(live.store.iter(), issues));
-	const diffMs = timings.get('candidateDiff')!.at(-1)!;
-	timed('candidateRebindBody', () => rebindPreviewBody(issues));
-	record('candidateBlock', Math.max(worst, last + diffMs));
-	// M holds no issue, so only what the edit adds is expected.
-	if (diff.now_failing.length === 0) throw new Error('the candidate edit changes nothing');
-}
-
 const bytes = readFileSync(SNAPSHOT);
-const compareBytes = readFileSync(COMPARE_FILE);
-const compareFile = compareBytes.buffer.slice(
-	compareBytes.byteOffset,
-	compareBytes.byteOffset + compareBytes.byteLength
-) as ArrayBuffer;
-const candidateDoc: unknown = JSON.parse(readFileSync(CANDIDATE, 'utf-8'));
 const metamodelDoc = JSON.parse(readFileSync(METAMODEL, 'utf-8')) as MetamodelDoc;
 const rawBigTable = JSON.parse(readFileSync(BIG_TABLE, 'utf-8')) as Record<string, unknown>;
 const bigTable = resolveTableRefs(
@@ -819,48 +733,6 @@ function measureDownload(workingCopy: WorkingCopy): void {
 	if (file.parts.length === 0) throw new Error('the download holds no bytes');
 }
 
-/**
- * The compare of the derived file, driven by hand: the first step reads the
- * file (decode, parse, shape), the peak heap is sampled after every step, and
- * the change request it answers is proposed back.
- */
-function measureCompare(workingCopy: WorkingCopy): void {
-	globalThis.gc?.();
-	globalThis.gc?.();
-	const baseline = process.memoryUsage().heapUsed;
-	const steps = compareSteps(workingCopy, { file: compareFile, created_at: CR_CREATED_AT });
-	let peak = 0;
-	let worst = 0;
-	let taken = 0;
-	const start = performance.now();
-	let answer;
-	for (;;) {
-		const before = performance.now();
-		const next = steps.next();
-		const ms = performance.now() - before;
-		if (taken++ === 0) record('compareParse', ms);
-		else worst = Math.max(worst, ms);
-		peak = Math.max(peak, process.memoryUsage().heapUsed - baseline);
-		if (next.done === true) {
-			answer = next.value;
-			break;
-		}
-	}
-	record('compare', performance.now() - start);
-	record('compareLongest', worst);
-	record('comparePeakHeapMb', peak / 2 ** 20);
-	if (answer.other_element_count === 0) throw new Error('the compare read no elements');
-	const crs = readCrs(JSON.parse(JSON.stringify([answer.cr])));
-	const proposed = stepped(
-		'applyCr',
-		'applyCrLongest',
-		proposeSteps(workingCopy, { crs, created_at: CR_CREATED_AT })
-	);
-	if (!('ops' in proposed) || proposed.ops.length === 0) {
-		throw new Error('the compare’s change request proposes nothing');
-	}
-}
-
 async function pass(): Promise<void> {
 	const start = performance.now();
 	let loaded = start;
@@ -888,7 +760,6 @@ async function pass(): Promise<void> {
 	measureTable(workingCopy);
 	measureExport(workingCopy);
 	measureDownload(workingCopy);
-	measureCompare(workingCopy);
 	counts = `${count(header.elements)} elements, ${count(header.relationships)} relationships`;
 	// Weighed before the document is read: the last text a regular expression
 	// ran over stays reachable, and further down that is the whole document.

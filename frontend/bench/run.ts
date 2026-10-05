@@ -38,11 +38,9 @@ const SLICES = [
 	'longest staged round trip during the script table (slice bound)'
 ];
 const TABLE_SLICE = 'longest staged round trip during the table (slice bound)';
-const RESCAN_SLICE = 'longest staged round trip during the rescan (slice bound)';
 const EXPORT_SLICE = 'longest staged round trip during the exports (slice bound)';
 const DOWNLOAD_SLICE = '  longest staged round trip during it (downloadModel)';
 const DOWNLOAD_BYTES = '  its bytes (downloadModel)';
-const CANDIDATE_SLICE = 'longest staged round trip during candidateIssues (slice bound)';
 const SCRIPT_CELLS = '10,000 script cells';
 const SCRIPT_TABLE = 'script table export (10,000 cells)';
 const TRANSITIONS = [
@@ -57,25 +55,6 @@ for (const name of ['large.snapshot.v2.gz', 'large.snapshot.v2.metamodel.json'])
 		process.exit(1);
 	}
 }
-if (!existsSync(new URL('large.rules.json', BENCHMARKS))) {
-	console.error('Missing benchmarks/large.rules.json: run `pixi run engine-parity-oracle` first.');
-	process.exit(1);
-}
-
-if (!existsSync(new URL('large.candidate.metamodel.json', BENCHMARKS))) {
-	console.error(
-		'Missing benchmarks/large.candidate.metamodel.json: run `pixi run engine-candidate-oracle` first.'
-	);
-	process.exit(1);
-}
-
-if (!existsSync(new URL('large.compare.model.json', BENCHMARKS))) {
-	console.error(
-		'Missing benchmarks/large.compare.model.json: run `pixi run engine-compare-oracle` first.'
-	);
-	process.exit(1);
-}
-
 if (!existsSync(new URL('large.download.json', BENCHMARKS))) {
 	console.error(
 		'Missing benchmarks/large.download.json: run `pixi run engine-download-oracle` first.'
@@ -253,7 +232,6 @@ const open = median(rows.get(OPEN)!);
 const heap = median(rows.get(HEAP)!);
 const slice = Math.max(...SLICES.map((label) => median(rows.get(label)!)));
 const tableSlice = median(rows.get(TABLE_SLICE)!);
-const rescanSlice = median(rows.get(RESCAN_SLICE)!);
 const exportSlice = median(rows.get(EXPORT_SLICE)!);
 const downloadSlice = median(rows.get(DOWNLOAD_SLICE)!);
 const downloadBytes = median(rows.get(DOWNLOAD_BYTES)!);
@@ -264,7 +242,6 @@ if (downloadBytes !== oracleBytes) {
 }
 const scriptCells = median(rows.get(SCRIPT_CELLS)!);
 const scriptTable = median(rows.get(SCRIPT_TABLE)!);
-const candidateSlice = median(rows.get(CANDIDATE_SLICE)!);
 const edits = TRANSITIONS.map(
 	(label) => `${label}: ${verdict(median(rows.get(label)!), TRANSITION_BUDGET_MS, 'ms')}`
 );
@@ -272,10 +249,8 @@ console.log(
 	`\ncold open: ${verdict(open, OPEN_BUDGET_MS, 'ms')}; heap: ${verdict(heap, HEAP_BUDGET_MB, 'MB')}; ` +
 		`longest slice, bounded from outside: ${verdict(slice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`table's longest slice: ${verdict(tableSlice, SLICE_BUDGET_MS, 'ms')}; ` +
-		`rescan's longest slice: ${verdict(rescanSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`exports' longest slice: ${verdict(exportSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`download's longest slice: ${verdict(downloadSlice, SLICE_BUDGET_MS, 'ms')}; ` +
-		`candidateIssues' longest slice: ${verdict(candidateSlice, SLICE_BUDGET_MS, 'ms')}; ` +
 		`10,000 script cells: ${verdict(scriptCells, SCRIPT_CELLS_BUDGET_MS, 'ms')}; ` +
 		`script table export: ${verdict(scriptTable, SCRIPT_TABLE_BUDGET_MS, 'ms')}; ` +
 		`${edits.join('; ')}`

@@ -1,13 +1,9 @@
 """Write the Python oracle's model download over model M.
 
-Loads ``benchmarks/large.model.json`` against its metamodel the way
-``scripts/export_large.py`` does and writes ``"".join(iter_model_json(model))``
-(the bytes ``GET /model/download`` streams) to ``benchmarks/large.download.json``.
-``engine/bench/parity-large.ts`` writes the same file with ``modelFileSteps``
-over the pre-violation replica and compares the two, byte for byte.
-
-Run from the repo root (``pixi run engine-parity-large`` does, through the
-``engine-download-oracle`` task):
+Loads ``benchmarks/large.model.json`` against its metamodel and writes
+``"".join(iter_model_json(model))`` (the bytes ``GET /model/download`` streams)
+to ``benchmarks/large.download.json``, whose size ``pixi run engine-bench-browser``
+holds the engine's download to.
 
     pixi run -e core-dev python scripts/download_large.py
 """

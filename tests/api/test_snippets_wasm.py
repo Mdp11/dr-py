@@ -17,6 +17,7 @@ These tests exercise those behaviours end-to-end against the real guest.
 from __future__ import annotations
 
 import glob
+import json
 import os
 import tempfile
 import threading
@@ -665,20 +666,43 @@ def test_wasm_session_value_receives_inputs(wasm_runner: WasmScriptRunner, small
         sess.close()
 
 
-def test_wasm_script_parity_hash_constants(wasm_runner: WasmScriptRunner) -> None:
-    """The committed `script_parity` answers for the hash-dependent cases are
-    what the real (wasm32) guest says."""
-    import json
+#: Expected answers of the two hash-dependent cases. `Py_hash_t` is 32 bits on
+#: wasm32, so the server's guest and Pyodide agree with each other, not with a
+#: 64-bit oracle.
+_WASM32_RESULTS: dict[str, str] = {
+    "determinism_hash": json.dumps(
+        {"stdout": "-1600925533\n", "result_repr": "-1600925533", "truncated": False}
+    ),
+    "determinism_set_repr": json.dumps(
+        {
+            "stdout": "{'a', 'c', 'b'}\n",
+            "result_repr": "\"{'a', 'c', 'b'}\"",
+            "truncated": False,
+        }
+    ),
+}
 
+
+def test_wasm_script_parity_hash_constants(wasm_runner: WasmScriptRunner) -> None:
+    """The frozen `script_parity` answers for the hash-dependent cases are
+    what the real (wasm32) guest says."""
+    from data_rover.api.routes._snapshot import build_model_from_dicts
+    from data_rover.api.serialize import parse_model_json
+    from data_rover.core.metamodel.schema import Metamodel
     from data_rover.core.script.runner import RunLimits, RunRequest
 
-    from tests.golden.scenarios.script_bridge import build_model
-    from tests.golden.scenarios.script_parity import WASM32_RESULTS, script_parity
+    from tests.golden.reader import load_fixture
 
-    cases = {c["name"]: c for c in script_parity()["cases"]}
-    for name, expected in WASM32_RESULTS.items():
+    doc = load_fixture("script_parity")
+    metamodel = Metamodel.model_validate(doc["model"]["metamodel"])
+    raw = {
+        "elements": [parse_model_json(t) for t in doc["model"]["elements"]],
+        "relationships": [parse_model_json(t) for t in doc["model"]["relationships"]],
+    }
+    cases = {c["name"]: c for c in doc["cases"]}
+    for name, expected in _WASM32_RESULTS.items():
         res = wasm_runner.run(
-            build_model(),
+            build_model_from_dicts(metamodel, raw, strict=False),
             RunRequest(code=cases[name]["code"], entry="script"),
             RunLimits(),
             record_ops=True,

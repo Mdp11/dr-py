@@ -54,10 +54,8 @@ pixi run frontend-test-e2e                # playwright; boots backend, dev serve
 pixi run engine-install / sandbox-install # npm install, first time and after dependency changes
 pixi run engine-test / engine-check
 pixi run sandbox-test / sandbox-check / sandbox-build / sandbox-start
-pixi run golden-fixtures                  # regenerate engine/fixtures/golden from the Python core
 pixi run engine-xlsx-sample               # rewrite engine/fixtures/xlsx/sample.xlsx after an xlsx writer change
-pixi run engine-bench / engine-bench-browser   # after `pixi run engine-bench-data` once; they write the candidate oracle's files first
-pixi run engine-parity-large   # engine sweep vs the oracle at M (after engine-bench-data)
+pixi run engine-bench / engine-bench-browser   # after `pixi run engine-bench-data` once
 pixi run engine-scripts-browser # script parity corpus + runaway cases in Chromium through the built sandbox (a test; stop any sandbox preview first)
 ```
 
@@ -74,7 +72,7 @@ Gotchas:
 - **`Metamodel` is frozen after load.** Go through its cached lookups; never re-walk `extends` chains by hand.
 - **The model can be ~80 MB.** A per-request path never copies or scans it: reads are paged, validator hooks are O(entity) over `model.indexes` and metamodel caches, whole-model work runs as background sweeps. Full `POST /model/validate` runs only from an explicit user click.
 - **Validation pipelines carry per-metamodel memos**: build one per request/thread (`api/rules.session_pipeline` when the session's rules apply), never share one.
-- **The Python core is the oracle for the engine.** Golden fixtures come from it (`pixi run golden-fixtures`); on a mismatch fix the engine, never the fixture. `tests/golden/test_fixtures_current.py` fails when a committed fixture is stale.
+- **Golden fixtures are frozen.** A fixture change is a reviewed edit; the Python reader tests (`tests/golden/`) hold the server's kept code to them.
 - **The frontend imports the engine as types only** (`import type` from `$engine` / `$sandbox`; ESLint refuses value imports outside tests). Engine `src/` has no DOM or Node dependency and imports with `.ts` specifiers.
 - **Wire text reaches the engine as received** (AD-26): feed frames, commit responses and tails are never re-serialized, since `JSON.parse` loses `1.0` and integers past 2^53.
 - **Tests run the real engine**, never a mock, and without fake timers; `dispose()` every in-process link or the vitest worker never exits.

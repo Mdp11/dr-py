@@ -113,12 +113,6 @@ description = "Run the pytest suite"
 cmd = "pytest"
 default-environment = "core-dev"
 
-[feature.core-dev.tasks.golden-fixtures]
-description = "Regenerate the engine's golden fixtures from the Python core"
-cmd = "python -m tests.golden"
-env = { PYTHONPATH = "src" }
-default-environment = "core-dev"
-
 [feature.core-dev.tasks.engine-bench-data]
 description = "Write benchmarks/large.model.json as the v2 snapshot that engine-bench opens, and its gzip for engine-bench-browser"
 cmd = "python scripts/snapshot_v2.py --model benchmarks/large.model.json --metamodel examples/smart-city.metamodel.yaml --out benchmarks/large.snapshot.v2 --gzip"
@@ -129,35 +123,9 @@ description = "Write benchmarks/script-corpus.*: the script parity corpus's mode
 cmd = "python scripts/script_corpus_snapshot.py"
 default-environment = "core-dev"
 
-[feature.core-dev.tasks.engine-parity-oracle]
-description = "Write benchmarks/large.issues.json: the Python sweep's issues over model M, which engine-parity-large compares"
-cmd = "python scripts/issues_large.py"
-default-environment = "core-dev"
-
-[feature.core-dev.tasks.engine-table-oracle]
-description = "Write benchmarks/large.table.json: the Python table evaluator's rows over model M, which engine-parity-large compares"
-cmd = "python scripts/table_large.py"
-default-environment = "core-dev"
-
-[feature.core-dev.tasks.engine-export-oracle]
-description = "Write benchmarks/large.export.{csv,json}: the Python export route's bytes over model M, which engine-parity-large compares"
-cmd = "python scripts/export_large.py"
-default-environment = "core-dev"
-
 [feature.core-dev.tasks.engine-download-oracle]
-description = "Write benchmarks/large.download.json: the Python model download's bytes over model M, which engine-parity-large and engine-bench-browser compare"
+description = "Write benchmarks/large.download.json: the Python model download's bytes over model M, which engine-bench-browser compares"
 cmd = "python scripts/download_large.py"
-default-environment = "core-dev"
-
-[feature.core-dev.tasks.engine-candidate-oracle]
-description = "Write benchmarks/large.candidate{,.metamodel}.json: the Python candidate diff over model M, which engine-parity-large and engine-bench-browser use"
-cmd = "python scripts/candidate_large.py"
-default-environment = "core-dev"
-depends-on = ["engine-parity-oracle"]
-
-[feature.core-dev.tasks.engine-compare-oracle]
-description = "Write benchmarks/large.compare{.model,}.json and large.apply-cr.json: a derived other model file and the Python compare and apply-CR answers over model M, which engine-parity-large, engine-bench and engine-bench-browser use"
-cmd = "python scripts/compare_large.py"
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.core-lint]
@@ -324,28 +292,11 @@ cwd = "engine"
 description = "Benchmark the engine at model M (run engine-bench-data once before)"
 cmd = "npm run bench"
 cwd = "engine"
-depends-on = [
-    { task = "engine-candidate-oracle", environment = "core-dev" },
-    { task = "engine-compare-oracle", environment = "core-dev" }
-]
 
 [feature.frontend.tasks.engine-xlsx-sample]
 description = "Rewrite engine/fixtures/xlsx/sample.xlsx, the engine's workbook that tests/golden/test_engine_xlsx.py opens with openpyxl"
 cmd = "npm run xlsx-sample"
 cwd = "engine"
-
-[feature.frontend.tasks.engine-parity-large]
-description = "Compare the engine's table, export, download, compare, apply-CR, sweep and candidate diff at model M with the Python oracle's (run engine-bench-data once before)"
-cmd = "node --disable-warning=ExperimentalWarning bench/parity-large.ts"
-cwd = "engine"
-depends-on = [
-    { task = "engine-parity-oracle", environment = "core-dev" },
-    { task = "engine-table-oracle", environment = "core-dev" },
-    { task = "engine-export-oracle", environment = "core-dev" },
-    { task = "engine-download-oracle", environment = "core-dev" },
-    { task = "engine-candidate-oracle", environment = "core-dev" },
-    { task = "engine-compare-oracle", environment = "core-dev" }
-]
 
 [feature.frontend.tasks.engine-bench-browser]
 description = "Benchmark the replica in the browser at model M: the bench page drives the built sandbox (run engine-bench-data once before)"
@@ -353,10 +304,7 @@ cmd = "npm run bench:browser"
 cwd = "frontend"
 depends-on = [
     "sandbox-build",
-    { task = "engine-parity-oracle", environment = "core-dev" },
-    { task = "engine-download-oracle", environment = "core-dev" },
-    { task = "engine-candidate-oracle", environment = "core-dev" },
-    { task = "engine-compare-oracle", environment = "core-dev" }
+    { task = "engine-download-oracle", environment = "core-dev" }
 ]
 
 [feature.frontend.tasks.engine-scripts-browser]

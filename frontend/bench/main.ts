@@ -108,8 +108,6 @@ function deferred(): { promise: Promise<number>; resolve(at: number): void } {
 	return { promise, resolve };
 }
 
-const CR_CREATED_AT = '2026-01-01T00:00:00.000Z';
-
 let link: EngineLink | null = null;
 let rev = 0;
 let violations = 0;
@@ -348,71 +346,6 @@ async function transitions(): Promise<Measures> {
 	measures['  longest staged round trip during it (downloadModel)'] = longest(
 		await stopDownloadPings()
 	).ms;
-
-	// Custom rules installed: `setArtifacts` queues a rescan the store runs
-	// before answering the next `getModelIssues`, so the pair is timed as ONE
-	// call — the compile and the steps between the two calls are the rescan's
-	// too — with the ping loop already running before `setArtifacts` posts.
-	// The rules are removed again and that removal's own rescan drained, so
-	// nothing after this block (the stage/delta rows below) runs with every
-	// stage and rebase widened by their reach.
-	const rules: unknown = await (await fetch('/data/rules.json')).json();
-	const stopRescanPings = ping(client);
-	await timed('setArtifacts: install the custom rules, until the rescan settles', async () => {
-		await client.call('setArtifacts', { artifacts: rules });
-		await client.call('getModelIssues', {});
-	});
-	measures['longest staged round trip during the rescan (slice bound)'] = longest(
-		await stopRescanPings()
-	).ms;
-	await client.call('setArtifacts', { artifacts: [] });
-	await client.call('getModelIssues', {});
-
-	// The candidate diff over the settled store: the whole model validated
-	// under a metamodel edit and diffed, a ping loop alongside.
-	const candidate: unknown = await (await fetch('/data/candidate.json')).json();
-	const stopCandidatePings = ping(client);
-	const diff = await timed('candidateIssues: the model validated under a metamodel edit', () =>
-		client.call<{ now_failing: unknown[]; now_passing: unknown[] }>('candidateIssues', {
-			metamodel: candidate
-		})
-	);
-	measures['longest staged round trip during candidateIssues (slice bound)'] = longest(
-		await stopCandidatePings()
-	).ms;
-	// M holds no issue, so only what the edit adds is expected.
-	if (diff.now_failing.length === 0) {
-		throw new Error('the candidate edit changes nothing');
-	}
-
-	// Compare and apply-CR: the derived file goes to the worker transferred,
-	// the change request it answers is proposed back, a ping loop alongside each.
-	const compareFile = await (await fetch('/data/compare.json')).arrayBuffer();
-	const stopComparePings = ping(client);
-	const compared = await timed('compareModel: the working copy against an uploaded file', () =>
-		client.call<{ cr: unknown; other_element_count: number }>(
-			'compareModel',
-			{ file: compareFile, created_at: CR_CREATED_AT },
-			{ transfer: [compareFile] }
-		)
-	);
-	measures['  longest staged round trip during it (compareModel)'] = longest(
-		await stopComparePings()
-	).ms;
-	if (compared.other_element_count === 0) throw new Error('the compare read no elements');
-	const stopProposePings = ping(client);
-	const proposed = await timed('proposeCr: the compare’s change request', () =>
-		client.call<{ ops?: unknown[] }>('proposeCr', {
-			crs: [compared.cr],
-			created_at: CR_CREATED_AT
-		})
-	);
-	measures['  longest staged round trip during it (proposeCr)'] = longest(
-		await stopProposePings()
-	).ms;
-	if (proposed.ops === undefined || proposed.ops.length === 0) {
-		throw new Error('the compare’s change request proposes nothing');
-	}
 
 	// Last: the delta's digest is wrong on purpose (the page cannot compute
 	// one), so it ends the replica — after the rewind, the apply and the replay.

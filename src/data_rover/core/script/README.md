@@ -294,8 +294,7 @@ already holds `_transport` and `_read_memo_max`, by the server guest's
 bootstrap (which reads `harness.py` from the preopened scripts directory next
 to `bootstrap.py` and keeps only the stdin/stdout framing) and by
 `tests/script/trusted_runner.py`. The engine carries it as
-`engine/src/script/harness.generated.ts`, which `pixi run golden-fixtures`
-rewrites. It defines three functions; the module docstring of
+`engine/src/script/harness.generated.ts`, a frozen copy no task rewrites. It defines three functions; the module docstring of
 `harness_src.py` holds their exact signatures and return shapes:
 
 - `_dr_run(spec)`: one console run, answering the fields of the `fin` message.

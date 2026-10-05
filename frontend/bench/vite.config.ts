@@ -8,8 +8,8 @@ const ENGINE_BENCH = new URL('../../engine/bench/', import.meta.url);
 const GOLDEN = new URL('../../engine/fixtures/golden/', import.meta.url);
 
 /**
- * What the bench page reads: model M's data, and the gate's table, rules, candidate metamodel and
- * compare file; and the script corpus's model and cases.
+ * What the bench page reads: model M's data and the gate's table; and the script corpus's model
+ * and cases.
  */
 const DATA: Record<string, { file: URL; type: string }> = {
 	'/data/snapshot.gz': {
@@ -24,14 +24,6 @@ const DATA: Record<string, { file: URL; type: string }> = {
 		file: new URL('big-table.json', ENGINE_BENCH),
 		type: 'application/json'
 	},
-	'/data/rules.json': {
-		file: new URL('large.rules.json', BENCHMARKS),
-		type: 'application/json'
-	},
-	'/data/candidate.json': {
-		file: new URL('large.candidate.metamodel.json', BENCHMARKS),
-		type: 'application/json'
-	},
 	'/data/script-snapshot.gz': {
 		file: new URL('script-corpus.snapshot.v2.gz', BENCHMARKS),
 		type: 'application/gzip'
@@ -42,10 +34,6 @@ const DATA: Record<string, { file: URL; type: string }> = {
 	},
 	'/data/script-parity.json': {
 		file: new URL('script_parity.json', GOLDEN),
-		type: 'application/json'
-	},
-	'/data/compare.json': {
-		file: new URL('large.compare.model.json', BENCHMARKS),
 		type: 'application/json'
 	}
 };

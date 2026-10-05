@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { PyFloat, type Value } from '../../src/index.ts';
 
-/** A value as `tests/golden/tagged.py` renders it. */
+/** A value as `tests/golden/reader.py`'s `tag` renders it. */
 export type Tagged =
 	| { t: 'null' }
 	| { t: 'bool'; v: boolean }

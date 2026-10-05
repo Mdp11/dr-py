@@ -72,10 +72,10 @@ period (`Handle infinity parsing for floats`). Reference backlog ids where one a
 need no database service and use the `client` fixture with the helpers in
 `tests/api/conftest.py`.
 
-**RC-13 · Golden fixtures.** The oracle generates them through a pixi task; small ones are
-committed, large-model ones are generated under `benchmarks/`. A fixture is inputs plus
-expected outputs, never a snapshot of engine output. A Python behaviour change during a port
-regenerates its fixtures in the same commit (MR-3).
+**RC-13 · Golden fixtures.** The committed fixtures under `engine/fixtures/golden` are frozen:
+nothing regenerates them, and a change is a reviewed edit. A fixture is inputs plus expected
+outputs, never a snapshot of engine output. The Python reader tests hold the server's kept code
+to them.
 
 **RC-14 · Engine tests run the engine.** Test against a small fixture model in-process, not
 against mocks of the engine.
