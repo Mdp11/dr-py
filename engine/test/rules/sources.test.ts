@@ -166,38 +166,51 @@ describe('ruleSources', () => {
 		expect(ruleSources(set, 'working')).toEqual([]);
 	});
 
-	it('marks a layer unreadable when a rule set arrives with no parse', () => {
+	it('skips a rule set that arrives with no parse, in both layers', () => {
 		const compile = (set: ArtifactSet, layer: 'committed' | 'working') =>
 			compileRuleSets(ruleSources(set, layer), mm);
+		const unread = (id: string, name: string) => ({
+			artifact_id: id,
+			set_name: name,
+			rule: '',
+			reason: 'rule set could not be read'
+		});
 
 		const bare = setOf([rulesArtifact('r1', 'One'), rulesArtifact('r2', 'Two', parsed('two'))]);
 		expect(listed(ruleSources(bare, 'committed'))).toEqual([
 			['r1', 'One', null],
 			['r2', 'Two', parsed('two')]
 		]);
-		expect(compile(bare, 'committed')).toMatchObject({ unreadable: true, total: 1 });
-		expect(compile(bare, 'working').unreadable).toBe(true);
-		expect(compile(setOf([rulesArtifact('r1', 'One', null)]), 'committed').unreadable).toBe(true);
+		expect(compile(bare, 'committed')).toMatchObject({ skipped: [unread('r1', 'One')], total: 1 });
+		expect(compile(bare, 'working')).toMatchObject({ skipped: [unread('r1', 'One')], total: 1 });
+		expect(compile(setOf([rulesArtifact('r1', 'One', null)]), 'committed').skipped).toEqual([
+			unread('r1', 'One')
+		]);
 
 		const staged = setOf(
 			[rulesArtifact('r1', 'One', parsed('one'))],
 			[create('tmp_2', 'Two'), update('r1')]
 		);
-		expect(compile(staged, 'committed')).toMatchObject({ unreadable: false, total: 1 });
+		expect(compile(staged, 'committed')).toMatchObject({ skipped: [], total: 1 });
 		expect(listed(ruleSources(staged, 'working'))).toEqual([
 			['r1', 'One', null],
 			['tmp_2', 'Two', null]
 		]);
-		expect(compile(staged, 'working').unreadable).toBe(true);
+		expect(compile(staged, 'working')).toMatchObject({
+			skipped: [unread('r1', 'One'), unread('tmp_2', 'Two')],
+			total: 0
+		});
 
-		// a document the reader refuses is unreadable too; a failed parse is a skip
+		// a document the reader refuses is skipped in its reader's words; a failed parse in the parse's
 		const refused = setOf([
 			rulesArtifact('r1', 'One', { ok: true, document: '{"rules":[],"x":1}' }),
 			rulesArtifact('r2', 'Two', failed)
 		]);
 		expect(compile(refused, 'committed')).toMatchObject({
-			unreadable: true,
-			skipped: [{ artifact_id: 'r2', set_name: 'Two', rule: '', reason: failed.errors[0]!.message }]
+			skipped: [
+				{ artifact_id: 'r1', set_name: 'One', rule: '', reason: expect.any(String) },
+				{ artifact_id: 'r2', set_name: 'Two', rule: '', reason: failed.errors[0]!.message }
+			]
 		});
 	});
 

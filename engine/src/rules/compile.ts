@@ -32,8 +32,7 @@ export type CompiledRule = {
 /**
  * Rule sets compiled against one metamodel. Read-only once built, but for
  * `evalErrors`, which each validation run merges its counts into. `identities`
- * lists each compiled rule's `identity`, in order. `unreadable` says a source
- * could not be read: its rules are missing, so the compile must not be used.
+ * lists each compiled rule's `identity`, in order.
  */
 export type CompiledRules = {
 	readonly rules: readonly CompiledRule[];
@@ -42,7 +41,6 @@ export type CompiledRules = {
 	readonly evalErrors: Map<string, number>;
 	readonly total: number;
 	readonly identities: readonly string[];
-	readonly unreadable: boolean;
 };
 
 /** No rules. Its `evalErrors` never moves: a run merges nothing without a rule. */
@@ -52,9 +50,11 @@ export const EMPTY_RULES: CompiledRules = {
 	skipped: [],
 	evalErrors: new Map(),
 	total: 0,
-	identities: [],
-	unreadable: false
+	identities: []
 };
+
+/** The skip reason of a rule set without a readable parse. */
+const UNREAD_SET = 'rule set could not be read';
 
 /** The first schema mismatch of the rule, `when` before `then`, or `null`. */
 function driftReason(rule: Rule, mm: Metamodel): string | null {
@@ -94,22 +94,21 @@ function driftReason(rule: Rule, mm: Metamodel): string | null {
 /**
  * `compile_rule_sets`, in the order given: a failed parse is one skip for the
  * whole set; a disabled rule is dropped before the drift check; a drifted
- * rule is skipped whole with its first mismatch. A document the reader
- * refuses, or a source without a parse, marks the compile `unreadable`.
+ * rule is skipped whole with its first mismatch. A source without a parse, or
+ * a document the reader refuses, is one skip for the whole set.
  */
 export function compileRuleSets(sources: readonly RuleSource[], mm: Metamodel): CompiledRules {
 	const rules: CompiledRule[] = [];
 	const skipped: RuleSkip[] = [];
-	let unreadable = false;
 	for (const { artifactId, name, parse } of sources) {
+		const skipSet = (reason: string) =>
+			skipped.push({ artifact_id: artifactId, set_name: name, rule: '', reason });
 		if (parse === null) {
-			unreadable = true;
+			skipSet(UNREAD_SET);
 			continue;
 		}
 		if (!parse.ok) {
-			const reason = parse.errors[0]?.message;
-			if (reason === undefined) unreadable = true;
-			else skipped.push({ artifact_id: artifactId, set_name: name, rule: '', reason });
+			skipSet(parse.errors[0]?.message ?? UNREAD_SET);
 			continue;
 		}
 		let defined: readonly Rule[];
@@ -117,7 +116,7 @@ export function compileRuleSets(sources: readonly RuleSource[], mm: Metamodel): 
 			defined = readRuleSet(parse.document).rules;
 		} catch (error) {
 			if (!(error instanceof RulesUnreadable)) throw error;
-			unreadable = true;
+			skipSet(error.message);
 			continue;
 		}
 		for (const rule of defined) {
@@ -150,8 +149,7 @@ export function compileRuleSets(sources: readonly RuleSource[], mm: Metamodel): 
 		skipped,
 		evalErrors: new Map(),
 		total: rules.length,
-		identities: rules.map((cr) => cr.rule.identity),
-		unreadable
+		identities: rules.map((cr) => cr.rule.identity)
 	};
 }
 

@@ -15,7 +15,6 @@ import {
 	prepareCandidate,
 	PyFloat,
 	rebindPreviewBody,
-	RulesUnreadable,
 	validateScoped,
 	validateSplit,
 	Validators,
@@ -366,11 +365,12 @@ describe('prepareCandidate', () => {
 		);
 	});
 
-	it('throws RulesUnreadable when the rules cannot be read', () => {
+	it('skips a rule set that cannot be read', () => {
 		const unreadable = [{ artifactId: 'r-1', name: 'R', parse: null }];
-		expect(() => prepareCandidate(doc, (mm) => compileRuleSets(unreadable, mm))).toThrow(
-			RulesUnreadable
-		);
+		const candidate = prepareCandidate(doc, (mm) => compileRuleSets(unreadable, mm));
+		expect(candidate.rules!.skipped).toEqual([
+			{ artifact_id: 'r-1', set_name: 'R', rule: '', reason: 'rule set could not be read' }
+		]);
 	});
 
 	it('throws on a malformed document', () => {

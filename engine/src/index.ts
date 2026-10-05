@@ -30,7 +30,6 @@ export {
 	proposeSteps,
 	readCrs,
 	readCrsText,
-	UNREADABLE_CR,
 	type ChangeRequest,
 	type Combined,
 	type CrConflict,
@@ -42,7 +41,6 @@ export {
 	decodeModelFile,
 	parseModelFile,
 	readModelFile,
-	UNREADABLE_FILE,
 	type OtherElement,
 	type OtherModel,
 	type OtherRel
@@ -477,8 +475,9 @@ export {
 	candidateScan,
 	prepareCandidate,
 	rebindPreviewBody,
-	stagedAdmitted,
+	stagedRefusal,
 	type Candidate,
+	type StagedRefusal,
 	type CandidateDiff
 } from './validation/candidate.ts';
 export { addNeighbourhood, DirtyCollector } from './validation/dirty.ts';

@@ -20,7 +20,10 @@ import {
 	type Client
 } from './helpers.ts';
 
-const UNSUPPORTED = { status: 501, detail: 'reaches an unsupported pattern' };
+const UNSUPPORTED = {
+	status: 422,
+	detail: expect.stringMatching(/^pattern .* uses .*, which is not supported$/)
+};
 
 async function ready(model = family()) {
 	const client = connect();
@@ -91,7 +94,7 @@ describe('searchModel', () => {
 		}
 	});
 
-	it('answers an unsupported pattern with 501, and a read posted after it', async () => {
+	it('answers an unsupported pattern with 422, and a read posted after it', async () => {
 		const client = await ready();
 		const refused = refusal(
 			client.call('searchModel', {
@@ -104,7 +107,7 @@ describe('searchModel', () => {
 		expect((await after).id).toBe('b');
 	});
 
-	it('answers 501 when a subject is too long for the pattern mid-scan, and the next call', async () => {
+	it('answers 422 when a subject is too long for the pattern mid-scan, and the next call', async () => {
 		const model = family();
 		model.setProperty(model.getElement('c'), 'name', 'a'.repeat(1_000_000));
 		const client = await ready(model);
@@ -161,7 +164,7 @@ describe('searchModel', () => {
 		expect(answered).toBe(false);
 	});
 
-	it('answers a pattern V8 will not compile with 501, never its source', async () => {
+	it('answers a pattern V8 will not compile with 422', async () => {
 		const client = await ready();
 		for (const pattern of ['k'.repeat(50_000), '(?i)' + 'k'.repeat(40_000)]) {
 			expect(

@@ -470,7 +470,7 @@ describe('evaluateNavigation', () => {
 		expect(viaSetOp.chains.length).toBeGreaterThan(0);
 	}, 60_000);
 
-	it('answers 501 for an unsupported pattern anywhere in the resolved definition, before any step', () => {
+	it('answers 422 for an unsupported pattern anywhere in the resolved definition, before any step', () => {
 		const artifacts = new ArtifactSet();
 		const filtered = {
 			kind: 'path',
@@ -495,8 +495,8 @@ describe('evaluateNavigation', () => {
 		expect(
 			refusal(() => evaluateNavigation(context(family(), artifacts), { definition: through }))
 		).toEqual({
-			status: 501,
-			detail: 'reaches an unsupported pattern'
+			status: 422,
+			detail: expect.stringMatching(/^pattern .* uses .*, which is not supported$/)
 		});
 	});
 

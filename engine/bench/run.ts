@@ -346,7 +346,7 @@ function ruleSource(document: string) {
 function compiledRules(wc: WorkingCopy, document: string): CompiledRules {
 	const source = ruleSource(document);
 	const compiled = compileRuleSets([source], wc.model.metamodel);
-	if (compiled.unreadable || compiled.skipped.length > 0) {
+	if (compiled.skipped.length > 0) {
 		throw new Error('the bench rules do not compile whole');
 	}
 	return compiled;

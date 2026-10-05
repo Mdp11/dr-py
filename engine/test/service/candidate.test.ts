@@ -11,13 +11,7 @@ import {
 	type StageResult
 } from '../../src/index.ts';
 import { loadFixture } from '../golden/load.ts';
-import {
-	loadModelFile,
-	parseOps,
-	REFUSED_OPS,
-	ruleSetDocs,
-	type StepsFixture
-} from '../golden/model-steps.ts';
+import { loadModelFile, parseOps, ruleSetDocs, type StepsFixture } from '../golden/model-steps.ts';
 import { clone, Server } from '../working/helpers.ts';
 import {
 	autoHost,
@@ -252,7 +246,7 @@ describe('candidateIssues', () => {
 		}
 	});
 
-	it('refuses 501 a candidate pattern the host cannot run, and unreadable working rules', async () => {
+	it('refuses 501 a candidate pattern the host cannot run, and skips an unreadable working rule set', async () => {
 		const client = await ready();
 		expect(await refusal(diffOf(client, UNUSABLE))).toEqual({
 			status: 501,
@@ -261,10 +255,7 @@ describe('candidateIssues', () => {
 		await client.call('setStagedArtifacts', {
 			entries: [{ ...STAGED_RULES[0]!, rules: { ok: true, document: '{"rules":[],"x":1}' } }]
 		});
-		expect(await refusal(diffOf(client, DOC))).toEqual({
-			status: 501,
-			detail: 'reaches unreadable rules'
-		});
+		await diffOf(client, DOC);
 	});
 
 	it('scans the staged edits: a staged update the candidate refuses fails, which the committed model alone does not', async () => {
@@ -584,7 +575,7 @@ describe('previewCommit with a rebind', () => {
 		properties: { is_lead: false }
 	};
 
-	it('refuses 501 staged ops naming a property the candidate drops, which the server refuses', async () => {
+	it('refuses 422 staged ops naming a property the candidate drops, as the server does', async () => {
 		const client = await ready();
 		const refused = [
 			// the patch that removes the key, as the one that sets it
@@ -617,28 +608,42 @@ describe('previewCommit with a rebind', () => {
 		] as const;
 		for (const [ops, doc] of refused) {
 			await stageOnly(client, [...ops]);
-			expect(await refusal(previewStaged(client, doc)), JSON.stringify(ops)).toEqual(REFUSED_OPS);
+			expect(await refusal(previewStaged(client, doc)), JSON.stringify(ops)).toEqual({
+				status: 422,
+				detail: expect.stringMatching(/^'\w+' has no property '\w+'$/)
+			});
 		}
+		await stageOnly(client, [dropIndustry]);
+		expect(await refusal(previewStaged(client, NO_INDUSTRY))).toEqual({
+			status: 422,
+			detail: "'Organization' has no property 'industry'"
+		});
 	});
 
-	it('refuses 501 a staged create of a type the candidate removes or makes abstract', async () => {
+	it('refuses 422 a staged create of a type the candidate removes or makes abstract', async () => {
 		const client = await ready();
-		for (const [ops, doc] of [
-			[[newTeam], NO_TEAM],
-			[[newTeam], ABSTRACT_TEAM],
-			[[newMember], NO_MEMBER_OF]
+		for (const [ops, doc, detail] of [
+			[[newTeam], NO_TEAM, "Unknown element type 'Team'"],
+			[[newTeam], ABSTRACT_TEAM, "Cannot instantiate abstract type 'Team'"],
+			[[newMember], NO_MEMBER_OF, "Unknown relationship type 'MemberOf'"]
 		] as const) {
 			await stageOnly(client, [...ops]);
-			expect(await refusal(previewStaged(client, doc)), JSON.stringify(ops)).toEqual(REFUSED_OPS);
+			expect(await refusal(previewStaged(client, doc)), JSON.stringify(ops)).toEqual({
+				status: 422,
+				detail
+			});
 			// The live document admits the same ops.
 			expect((await previewStaged(client, DOC)).would_block).toBe(false);
 		}
 	});
 
-	it('refuses 501 a staged delete while the candidate moves containment, and answers it otherwise', async () => {
+	it('refuses 409 a staged delete while the candidate moves containment, and answers it otherwise', async () => {
 		const client = await ready();
 		await stageOnly(client, [{ kind: 'delete_element', id: 'e_000207' }]);
-		expect(await refusal(previewStaged(client, CONTAINMENT))).toEqual(REFUSED_OPS);
+		expect(await refusal(previewStaged(client, CONTAINMENT))).toEqual({
+			status: 409,
+			detail: 'commit or unstage model edits before changing containment'
+		});
 		const body = await previewStaged(client, REQUIRED);
 		expect(body.issues).toContainEqual(missing('Organization', 'registry_id', 'e_000001'));
 		expect(body.issues.some((i) => i.target_ids.includes('e_000207'))).toBe(false);
@@ -687,7 +692,12 @@ describe('previewCommit with a rebind', () => {
 			});
 			if (step.error === null) {
 				expect(JSON.stringify(await answered), step.case).toBe(JSON.stringify(step.result));
-			} else expect(await refusal(answered), step.case).toEqual(REFUSED_OPS);
+			} else {
+				const refused = await refusal(answered);
+				const recorded = step.error as { status: number; detail: string };
+				expect(refused.status, step.case).toBe(recorded.status);
+				expect(refused.detail, step.case).toContain(recorded.detail);
+			}
 			await client.call('unstage', { what: 'all' });
 		}
 	});

@@ -161,15 +161,19 @@ describe('compareModel', () => {
 		});
 	});
 
-	it('answers a file it cannot read with the 501 the server takes over', async () => {
+	it('answers a file it cannot read with a 422', async () => {
 		const client = connect(autoHost());
 		const { model, doc } = smartCity();
 		await openReplica(client, model, doc);
-		for (const file of [bytesOf('{"elements": ['), bytesOf('{"a": "\u0001"}')]) {
+		for (const file of [bytesOf('{"elements": ['), bytesOf('{"a": "\u0001"}'), bytesOf('{')]) {
 			expect(
 				await refusal(client.call('compareModel', { file, created_at: CREATED_AT }, [file]))
-			).toEqual({ status: 501, detail: 'reaches an unreadable file' });
+			).toEqual({ status: 422, detail: expect.stringMatching(/^invalid JSON: /) });
 		}
+		const latin = new Uint8Array([0x7b, 0x22, 0xff, 0x22, 0x7d]).buffer as ArrayBuffer;
+		expect(
+			await refusal(client.call('compareModel', { file: latin, created_at: CREATED_AT }, [latin]))
+		).toEqual({ status: 422, detail: 'not a UTF-8 JSON model file' });
 		const file = bytesOf('[]');
 		expect(await refusal(client.call('compareModel', { file, created_at: CREATED_AT }))).toEqual({
 			status: 422,
@@ -334,13 +338,20 @@ describe('proposeCr', () => {
 		).toEqual({ status: 422, detail: "Unknown element type 'Nope'" });
 	});
 
-	it('refuses change requests it cannot read with the 501 the server takes over, and a missing created_at, at arrival', async () => {
+	it('refuses change requests it cannot read with a 422, and a missing created_at, at arrival', async () => {
 		// No replica is open: a call that queued would never be answered.
 		const client = connect(autoHost());
-		const unreadable = { status: 501, detail: 'reaches an unreadable change request' };
+		const unreadable = { status: 422, detail: expect.stringMatching(/^invalid change request: /) };
 		expect(await refusal(client.call('proposeCr', { crs: [], created_at: CREATED_AT }))).toEqual(
 			unreadable
 		);
+		const tooMany = Array.from({ length: 21 }, () => crOf());
+		expect(
+			await refusal(client.call('proposeCr', { crs: tooMany, created_at: CREATED_AT }))
+		).toEqual({
+			status: 422,
+			detail: expect.stringMatching(/^invalid change request: .*1 to 20 change requests/)
+		});
 		expect(
 			await refusal(
 				client.call('proposeCr', {

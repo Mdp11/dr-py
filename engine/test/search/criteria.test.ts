@@ -15,6 +15,7 @@ import {
 	ViewPlacements,
 	type Criterion
 } from '../../src/index.ts';
+import { pyRepr } from '../../src/value/repr.ts';
 import { nodeMetamodel } from '../model/fixtures.ts';
 import { NO_SCRIPTS } from '../../src/evaluate/fill.ts';
 
@@ -163,8 +164,10 @@ describe('compileCriteria', () => {
 	const matches = (value: string): Criterion[] =>
 		readCriteria([{ type: 'property', name: 'name', op: 'matches', value }], 'criteria');
 
-	it('refuses an unsupported pattern with 501, in an any_of group too', () => {
-		const unsupported = { status: 501, detail: 'reaches an unsupported pattern' };
+	const UNSUPPORTED = /^pattern .* uses .*, which is not supported$/;
+
+	it('refuses an unsupported pattern with 422, in an any_of group too', () => {
+		const unsupported = { status: 422, detail: expect.stringMatching(UNSUPPORTED) };
 		expect(refusal(() => compileCriteria(matches('(?x)a')))).toEqual(unsupported);
 		const grouped = readCriteria(
 			[
@@ -178,17 +181,32 @@ describe('compileCriteria', () => {
 		expect(refusal(() => compileCriteria(grouped))).toEqual(unsupported);
 	});
 
-	it('refuses a pattern nested too deep to translate with 501', () => {
+	it('names the reason an inline flag is not supported', () => {
+		for (const [pattern, reason] of [
+			['(?i:abc)', 'inline flags other than a leading (?i), (?m) or (?s)'],
+			['a(?i)b', 'inline flags not at the start or scoped']
+		]) {
+			expect(refusal(() => compileCriteria(matches(pattern!)))).toEqual({
+				status: 422,
+				detail: `pattern ${pyRepr(pattern!)} uses ${reason}, which is not supported`
+			});
+		}
+	});
+
+	it('refuses a pattern nested too deep to translate with 422', () => {
 		const deep = '('.repeat(100_000) + 'a' + ')'.repeat(100_000);
 		expect(refusal(() => compileCriteria(matches(deep)))).toEqual({
-			status: 501,
-			detail: 'reaches an unsupported pattern'
+			status: 422,
+			detail: expect.stringMatching(UNSUPPORTED)
 		});
 	});
 
-	it('refuses with 501 a translation V8 will not compile, before any entity is matched', () => {
-		const unsupported = { status: 501, detail: 'reaches an unsupported pattern' };
+	it('refuses with 422 a translation V8 will not compile, before any entity is matched', () => {
 		for (const pattern of ['k'.repeat(50_000), '(?i)' + 'k'.repeat(40_000)]) {
+			const unsupported = {
+				status: 422,
+				detail: `pattern ${pyRepr(pattern)} uses a construct this browser cannot compile, which is not supported`
+			};
 			expect(refusal(() => compileCriteria(matches(pattern)))).toEqual(unsupported);
 			// An empty model refuses too: the answer never depends on the data.
 			const empty = new Model(nodeMetamodel());
@@ -287,15 +305,15 @@ describe('the matchers', () => {
 		expect(gt(element)).toBe(true);
 	});
 
-	it('refuses with 501 a subject too long for the translated pattern to backtrack over', () => {
+	it('refuses with 422 a subject too long for the translated pattern to backtrack over', () => {
 		const model = new Model(nodeMetamodel());
 		const element = model.createElement('Node', 'a');
 		model.setProperty(element, 'name', 'a'.repeat(1_000_000));
 		const nested = '('.repeat(64) + 'a' + ')'.repeat(64) + '*$';
 		const run = check(model, [{ type: 'property', name: 'name', op: 'matches', value: nested }]);
 		expect(refusal(() => run(element))).toEqual({
-			status: 501,
-			detail: 'reaches an unsupported pattern'
+			status: 422,
+			detail: `pattern ${pyRepr(nested)} uses a construct this browser cannot compile, which is not supported`
 		});
 	});
 

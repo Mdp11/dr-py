@@ -56,7 +56,7 @@ import {
 	ruleSources,
 	rulesStatusBody,
 	shuffleAdjacency,
-	stagedAdmitted,
+	stagedRefusal,
 	storeListBody,
 	validateBody,
 	validateScoped,
@@ -637,17 +637,21 @@ function expectSameBytes(actual: Uint8Array, expected: Uint8Array, label: string
 	);
 }
 
-/** What the engine answers a `fallback` step, by kind: a 501 the client takes to the server. */
-const FALLBACKS: { readonly [step: string]: { status: number; detail: string } } = {
-	compare: { status: 501, detail: 'reaches an unreadable file' },
-	apply_cr: { status: 501, detail: 'reaches an unreadable change request' }
+/** What the engine answers a `fallback` step, by kind: a 422 in its own words, whatever Python answered. */
+const FALLBACKS: { readonly [step: string]: RegExp } = {
+	compare: /^(not a UTF-8 JSON model file|invalid JSON: )/,
+	apply_cr: /^invalid change request: /
 };
 
-/** The service's refusal of a rebind preview whose staged ops the candidate does not admit. */
-export const REFUSED_OPS = { status: 501, detail: 'reaches ops the candidate refuses' } as const;
+/** Thrown by a replayed `preview_rebind` the engine refuses, with the refusal it answers. */
+class RefusedOps extends Error {
+	readonly refusal: { status: number; detail: string };
 
-/** Thrown by a replayed `preview_rebind` the engine refuses as `REFUSED_OPS`. */
-class RefusedOps extends Error {}
+	constructor(refusal: { status: number; detail: string }) {
+		super(refusal.detail);
+		this.refusal = refusal;
+	}
+}
 
 /**
  * `mint` stands in for the oracle's `SequentialIdGenerator`. A failed call
@@ -687,7 +691,6 @@ function apply(
 		case 'rules': {
 			const sources = recordedSources(step);
 			const compiled = compileRuleSets(sources, model.metamodel);
-			expect(compiled.unreadable, `step ${index}: a document the engine refuses`).toBe(false);
 			const { session } = carried;
 			if (session !== null) {
 				// As a commit of rule sets alone lands: what the old and the new
@@ -730,7 +733,8 @@ function apply(
 			wc.stage(parseOps(step.ops!));
 			const { sources } = carried;
 			const candidate = prepareCandidate(step.metamodel, (mm) => compileRuleSets(sources, mm));
-			if (!stagedAdmitted(wc, candidate.metamodel)) throw new RefusedOps();
+			const refusal = stagedRefusal(wc, candidate.metamodel);
+			if (refusal !== null) throw new RefusedOps(refusal);
 			return rebindPreviewBody(drain(candidateScan(wc.model, candidate)));
 		}
 		case 'download': {
@@ -977,16 +981,20 @@ export function startReplay(
 			if (caught instanceof ReadError) return { status: caught.status, detail: caught.detail };
 			if (caught instanceof NavKeyError) return { kind: 'key', message: caught.id };
 			if (caught instanceof NavValueError) return { kind: 'value', message: caught.message };
-			if (caught instanceof RefusedOps) return { ...REFUSED_OPS };
+			if (caught instanceof RefusedOps) return { ...caught.refusal };
 			throw caught;
 		},
 		end(step, label, result, error) {
 			const recorded = step.error;
 			if (step.fallback === true) {
-				expect(error, label).toEqual(FALLBACKS[step.do]);
-			} else if (step.do === 'preview_rebind' && recorded !== null) {
-				// The oracle refuses the ops in its own words; the engine leaves them to it.
-				expect(error, label).toEqual(REFUSED_OPS);
+				expect(error !== null && 'status' in error ? error.status : error, label).toBe(422);
+				expect((error as { detail: string }).detail, label).toMatch(FALLBACKS[step.do]!);
+			} else if (step.do === 'preview_rebind' && recorded !== null && 'status' in recorded) {
+				// The oracle's detail is a KeyError's text, which drops the outer quotes.
+				expect(error !== null && 'status' in error ? error.status : error, label).toBe(
+					recorded.status
+				);
+				expect((error as { detail: string }).detail, label).toContain(recorded.detail as string);
 			} else if (recorded !== null && 'status' in recorded && typeof recorded.detail !== 'string') {
 				// FastAPI's refusal of a body: the engine refuses it in its own words.
 				expect(error !== null && 'status' in error ? error.status : error, label).toBe(

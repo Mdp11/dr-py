@@ -20,9 +20,6 @@ import { CR_FORMAT, crDocument } from './document.ts';
 import { opsForChange, type WireOp } from './ops.ts';
 import { CrOverlay } from './overlay.ts';
 
-/** The refusal of change requests the engine does not read: the client takes them to the server. */
-export const UNREADABLE_CR = 'reaches an unreadable change request';
-
 /** A change request's ops, as `readCrs` reads them. */
 export type ChangeRequest = Diff;
 
@@ -60,8 +57,8 @@ const STEP_ENTITIES = 2048;
 
 type Dict = { [key: string]: Value };
 
-const unreadable = (): never => {
-	throw new ReadError(501, UNREADABLE_CR);
+const unreadable = (message: string): never => {
+	throw new ReadError(422, `invalid change request: ${message}`);
 };
 
 const isDict = (value: Value | undefined): value is Dict =>
@@ -76,40 +73,40 @@ const field = (doc: Dict, key: string): Value | undefined =>
 const isInt = (value: Value | undefined): boolean =>
 	typeof value === 'number' || typeof value === 'bigint';
 
-function dict(value: Value | undefined): Dict {
-	return isDict(value) ? value : unreadable();
+function dict(value: Value | undefined, what: string): Dict {
+	return isDict(value) ? value : unreadable(`${what} must be an object`);
 }
 
 /** A dict field pydantic defaults when absent; `null` is refused. */
 const optionalDict = (doc: Dict, key: string): Dict => {
 	const value = field(doc, key);
-	return value === undefined ? {} : dict(value);
+	return value === undefined ? {} : dict(value, `"${key}"`);
 };
 
 function str(doc: Dict, key: string): string {
 	const value = field(doc, key);
-	return typeof value === 'string' ? value : unreadable();
+	return typeof value === 'string' ? value : unreadable(`"${key}" must be a string`);
 }
 
 function list(doc: Dict, key: string): Value[] {
 	const value = field(doc, key);
 	if (value === undefined) return [];
-	return Array.isArray(value) ? value : unreadable();
+	return Array.isArray(value) ? value : unreadable(`"${key}" must be a list`);
 }
 
 function props(doc: Dict): Dict {
 	const value = field(doc, 'properties');
-	return value === undefined ? {} : dict(value);
+	return value === undefined ? {} : dict(value, '"properties"');
 }
 
 function rev(doc: Dict): number | bigint {
 	const value = field(doc, 'rev');
 	if (value === undefined) return 0;
-	return isInt(value) ? (value as number | bigint) : unreadable();
+	return isInt(value) ? (value as number | bigint) : unreadable('"rev" must be an integer');
 }
 
 function readElement(value: Value): CrElement {
-	const doc = dict(value);
+	const doc = dict(value, 'an element');
 	return {
 		id: str(doc, 'id'),
 		type_name: str(doc, 'type_name'),
@@ -119,7 +116,7 @@ function readElement(value: Value): CrElement {
 }
 
 function readRelationship(value: Value): CrRelationship {
-	const doc = dict(value);
+	const doc = dict(value, 'a relationship');
 	return {
 		id: str(doc, 'id'),
 		type_name: str(doc, 'type_name'),
@@ -134,11 +131,11 @@ function readKind<E>(doc: Dict, entity: (value: Value) => E): CrKindOps<E> {
 	return {
 		added: list(doc, 'added').map(entity),
 		modified: list(doc, 'modified').map((value): CrModified<E> => {
-			const modified = dict(value);
+			const modified = dict(value, 'a modified entry');
 			return {
 				id: str(modified, 'id'),
-				before: entity(field(modified, 'before') ?? unreadable()),
-				after: entity(field(modified, 'after') ?? unreadable())
+				before: entity(field(modified, 'before') ?? unreadable('"before" is required')),
+				after: entity(field(modified, 'after') ?? unreadable('"after" is required'))
 			};
 		}),
 		deleted: list(doc, 'deleted').map(entity)
@@ -146,18 +143,20 @@ function readKind<E>(doc: Dict, entity: (value: Value) => E): CrKindOps<E> {
 }
 
 function readBaseline(value: Value): void {
-	const doc = dict(value);
+	const doc = dict(value, '"baseline"');
 	const filename = field(doc, 'filename');
-	if (filename !== undefined && filename !== null && typeof filename !== 'string') unreadable();
+	if (filename !== undefined && filename !== null && typeof filename !== 'string') {
+		unreadable('"filename" must be a string');
+	}
 	for (const key of ['elementCount', 'relationshipCount']) {
 		const count = field(doc, key);
-		if (count !== undefined && !isInt(count)) unreadable();
+		if (count !== undefined && !isInt(count)) unreadable(`"${key}" must be an integer`);
 	}
 }
 
 function readCr(value: Value): ChangeRequest {
-	const doc = dict(value);
-	if (field(doc, 'format') !== CR_FORMAT) unreadable();
+	const doc = dict(value, 'a change request');
+	if (field(doc, 'format') !== CR_FORMAT) unreadable(`"format" must be ${pyRepr(CR_FORMAT)}`);
 	str(doc, 'createdAt');
 	const baseline = field(doc, 'baseline');
 	if (baseline !== undefined) readBaseline(baseline);
@@ -178,15 +177,15 @@ export function readCrs(raw: unknown): ChangeRequest[] {
 		text = JSON.stringify(raw) as string | undefined;
 	} catch {
 		// A `bigint`, or a cycle.
-		return unreadable();
+		return unreadable('not JSON');
 	}
-	return text === undefined ? unreadable() : readCrsText(text);
+	return text === undefined ? unreadable('not JSON') : readCrsText(text);
 }
 
 /**
  * The change requests of a request body's `crs`, as JSON text: parsed
  * exactly, then read strictly. What pydantic would refuse, or coerce (a
- * `rev` of `"3"` or `true`), is 501 `reaches an unreadable change request`;
+ * `rev` of `"3"` or `true`), is a 422 `invalid change request: …`;
  * extra keys are ignored.
  */
 export function readCrsText(text: string): ChangeRequest[] {
@@ -194,9 +193,11 @@ export function readCrsText(text: string): ChangeRequest[] {
 	try {
 		docs = parseJson(text);
 	} catch {
-		return unreadable();
+		return unreadable('not JSON');
 	}
-	if (!Array.isArray(docs) || docs.length < 1 || docs.length > MAX_CRS) unreadable();
+	if (!Array.isArray(docs) || docs.length < 1 || docs.length > MAX_CRS) {
+		unreadable(`"crs" must hold 1 to ${MAX_CRS} change requests`);
+	}
 	return (docs as Value[]).map(readCr);
 }
 

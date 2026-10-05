@@ -5,8 +5,8 @@ import type { Model } from '../model/model.ts';
 import type { Props } from '../model/records.ts';
 import { candidateStructureSteps } from '../model/structure.ts';
 import type { CompiledRules } from '../rules/compile.ts';
-import { RulesUnreadable } from '../rules/document.ts';
 import type { Steps } from '../steps/steps.ts';
+import { pyRepr } from '../value/repr.ts';
 import type { WorkingCopy } from '../working/working-copy.ts';
 import type { PreviewBody } from './bodies.ts';
 import { candidateKey, wireIssue, type Issue, type IssueOut } from './issue.ts';
@@ -26,15 +26,14 @@ export type Candidate = {
 /**
  * The candidate `doc` (a `GET /metamodel` document), its validators, facet
  * patterns and `rules(metamodel)`. Throws what `Metamodel.fromJSON` throws on
- * a malformed document, `PatternUnusable` when a facet pattern is one the host
- * cannot run, and `RulesUnreadable` when the compile is `unreadable`.
+ * a malformed document and `PatternUnusable` when a facet pattern is one the
+ * host cannot run.
  */
 export function prepareCandidate(doc: unknown, rules: (mm: Metamodel) => CompiledRules): Candidate {
 	const metamodel = Metamodel.fromJSON(doc as MetamodelDoc);
 	const patterns = new FacetPatterns(metamodel);
 	if (patterns.unusable) throw new PatternUnusable();
 	const compiled = rules(metamodel);
-	if (compiled.unreadable) throw new RulesUnreadable('a candidate rule set is unreadable');
 	return { metamodel, validators: new Validators(metamodel), patterns, rules: compiled };
 }
 
@@ -154,71 +153,101 @@ function containmentMoved(current: Metamodel, candidate: Metamodel): boolean {
 	return names.some((name) => current.isContainment(name) !== candidate.isContainment(name));
 }
 
+/** A staged op the candidate refuses: the status and detail the server answers with. */
+export type StagedRefusal = { status: 422 | 409; detail: string };
+
 /**
- * Whether the server, applying the staged ops over the committed state under
- * `candidate` as a rebind's commit and its preview do, reaches the working
- * state `wc` holds. A create must name a type the candidate has, an element
- * type not abstract, and a create or an update only properties the candidate
- * gives the entity's type. A delete cascades by containment, so any delete
- * while a relationship type's containment differs is not admitted: the
- * cascade may remove other elements there. The working copy applied the same
- * ops under its own metamodel, so every check that does not read the
- * metamodel held already. `false` whenever it cannot say.
+ * The first refusal, in op order, of the server applying the staged ops over
+ * the committed state under `candidate` as a rebind's commit and its preview
+ * do; `null` when every op is admitted. A create must name a type the
+ * candidate has, an element type not abstract, and a create or an update only
+ * properties the candidate gives the entity's type. A delete cascades by
+ * containment, so any delete while a relationship type's containment differs
+ * is refused with 409: the cascade may remove other elements there. The
+ * working copy applied the same ops under its own metamodel, so every check
+ * that does not read the metamodel held already.
  */
-export function stagedAdmitted(wc: WorkingCopy, candidate: Metamodel): boolean {
+export function stagedRefusal(wc: WorkingCopy, candidate: Metamodel): StagedRefusal | null {
 	const current = wc.model.metamodel;
 	const idMap = new Map<string, string>();
 	const resolve = (id: string) => idMap.get(id) ?? id;
 	// The type each id was last created with, by the ops so far.
 	const createdElements = new Map<string, string>();
 	const createdRelationships = new Map<string, string>();
-	const declared = (names: ReadonlySet<string>, props: Props | undefined) =>
-		props === undefined || Object.keys(props).every((key) => names.has(key));
-	const createdId = (op: { temp_id: string; id?: string | null }) => {
+	const unprocessable = (detail: string): StagedRefusal => ({ status: 422, detail });
+	const undeclared = (typeName: string, names: ReadonlySet<string>, props: Props | undefined) => {
+		const key = props === undefined ? undefined : Object.keys(props).find((k) => !names.has(k));
+		return key === undefined
+			? null
+			: unprocessable(`${pyRepr(typeName)} has no property ${pyRepr(key)}`);
+	};
+	const createdId = (op: { kind: string; temp_id: string; id?: string | null }) => {
 		if (!op.temp_id.startsWith(TEMP_ID_PREFIX)) return null;
 		const id = op.id ?? op.temp_id;
 		idMap.set(op.temp_id, id);
 		return id;
 	};
+	const badTempId = (op: { kind: string; temp_id: string }) =>
+		unprocessable(
+			`${op.kind} temp_id ${pyRepr(op.temp_id)} must start with ${pyRepr(TEMP_ID_PREFIX)}`
+		);
 	for (const { ops } of wc.staged()) {
 		for (const op of ops) {
 			switch (op.kind) {
 				case 'create_element': {
 					const type = candidate.elementType(op.type_name);
-					if (type === undefined || type.abstract) return false;
+					if (type === undefined) {
+						return unprocessable(`Unknown element type ${pyRepr(op.type_name)}`);
+					}
+					if (type.abstract) {
+						return unprocessable(`Cannot instantiate abstract type ${pyRepr(op.type_name)}`);
+					}
 					const names = candidate.effectiveElementPropertyNames(op.type_name);
-					if (!declared(names, op.properties)) return false;
+					const bad = undeclared(op.type_name, names, op.properties);
+					if (bad !== null) return bad;
 					const id = createdId(op);
-					if (id === null) return false;
+					if (id === null) return badTempId(op);
 					createdElements.set(id, op.type_name);
 					break;
 				}
 				case 'update_element': {
 					const id = resolve(op.id);
 					const typeName = createdElements.get(id) ?? wc.committedElement(id)?.typeName;
-					if (typeName === undefined) return false;
+					if (typeName === undefined) return unprocessable(`No element with id ${pyRepr(id)}`);
 					const names = candidate.effectiveElementPropertyNames(typeName);
-					if (!declared(names, op.properties_patch)) return false;
+					const bad = undeclared(typeName, names, op.properties_patch);
+					if (bad !== null) return bad;
 					break;
 				}
 				case 'delete_element':
-					if (containmentMoved(current, candidate)) return false;
+					if (containmentMoved(current, candidate)) {
+						return {
+							status: 409,
+							detail: 'commit or unstage model edits before changing containment'
+						};
+					}
 					break;
 				case 'create_relationship': {
-					if (candidate.relationshipType(op.type_name) === undefined) return false;
+					if (candidate.relationshipType(op.type_name) === undefined) {
+						return unprocessable(`Unknown relationship type ${pyRepr(op.type_name)}`);
+					}
 					const names = candidate.effectiveRelationshipPropertyNames(op.type_name);
-					if (!declared(names, op.properties)) return false;
+					const bad = undeclared(op.type_name, names, op.properties);
+					if (bad !== null) return bad;
 					const id = createdId(op);
-					if (id === null) return false;
+					if (id === null) return badTempId(op);
 					createdRelationships.set(id, op.type_name);
 					break;
 				}
 				case 'update_relationship': {
 					const id = resolve(op.id);
 					const typeName = createdRelationships.get(id) ?? wc.committedRelationship(id)?.typeName;
-					if (typeName === undefined) return false;
+					if (typeName === undefined) {
+						return unprocessable(`No relationship with id ${pyRepr(id)}`);
+					}
 					const names = candidate.effectiveRelationshipPropertyNames(typeName);
-					if (!declared(names, op.properties_patch)) return false;
+					const bad = undeclared(typeName, names, op.properties_patch);
+					if (bad !== null) return bad;
 					break;
 				}
 				case 'delete_relationship':
@@ -226,5 +255,5 @@ export function stagedAdmitted(wc: WorkingCopy, candidate: Metamodel): boolean {
 			}
 		}
 	}
-	return true;
+	return null;
 }

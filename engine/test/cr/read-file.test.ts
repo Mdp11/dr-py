@@ -33,7 +33,7 @@ const BOM = [0xef, 0xbb, 0xbf];
 const unreadable = (fn: () => unknown) => {
 	const error = thrown(fn);
 	expect(error).toBeInstanceOf(ReadError);
-	expect(error).toMatchObject({ status: 501, detail: 'reaches an unreadable file' });
+	expect(error).toMatchObject({ status: 422, detail: 'not a UTF-8 JSON model file' });
 };
 
 describe('decodeModelFile', () => {
@@ -46,7 +46,7 @@ describe('decodeModelFile', () => {
 		expect(decodeModelFile(bytesOf(BOM, BOM, '{}'))).toBe('\ufeff{}');
 	});
 
-	it('refuses invalid UTF-8 as a file for the server', () => {
+	it('refuses invalid UTF-8', () => {
 		unreadable(() => decodeModelFile(bytesOf('{"a": "', [0xff], '"}')));
 		unreadable(() => decodeModelFile(bytesOf('{"a": "', [0xc3], '"}')));
 	});

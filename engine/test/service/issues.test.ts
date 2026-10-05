@@ -533,37 +533,45 @@ describe('rules', () => {
 		});
 	});
 
-	it("answers 501 'reaches unreadable rules' to all three over a document it cannot read, committed or staged", async () => {
-		const client = await swept();
-		const refused = async () => {
-			for (const [method, params] of calls) {
-				expect(await refusal(client.call(method, params))).toEqual({
-					status: 501,
-					detail: 'reaches unreadable rules'
-				});
-			}
-		};
-		const answered = async () => {
-			for (const [method, params] of calls) await client.call(method, params);
-		};
-		await client.call('setArtifacts', { artifacts: [ruleSet('r-1', 'Rules', UNREADABLE)] });
-		await refused();
-		await client.call('setArtifacts', { artifacts: [ruleSet('r-1', 'Rules', parsed(FLAGGED))] });
-		await answered();
+	it('skips a rule set it cannot read, committed or staged, and answers all three with the other sets', async () => {
+		const client = connect();
+		await client.call('setArtifacts', {
+			artifacts: [ruleSet('r-1', 'Rules', parsed(FLAGGED)), ruleSet('r-2', 'Broken', UNREADABLE)]
+		});
+		await swept(seeded(), DOC, client);
+		const skipped = (artifact_id: string, set_name: string) => ({
+			artifact_id,
+			set_name,
+			rule: '',
+			reason: expect.any(String)
+		});
+		const body = await listed(client);
+		expect(body.rules_status).toMatchObject({ total: 1, skipped: [skipped('r-2', 'Broken')] });
+		expect(rulesOf(body.issues)).toHaveLength(2);
+		for (const [method, params] of calls) await client.call(method, params);
 		await client.call('setStagedArtifacts', { entries: [created('tmp_r', 'R', UNREADABLE)] });
-		await refused();
-		await client.call('setStagedArtifacts', { entries: [] });
-		await answered();
-		expect(rulesOf((await listed(client)).issues)).toHaveLength(2);
+		expect((await listed(client)).rules_status.skipped).toEqual([
+			skipped('r-2', 'Broken'),
+			skipped('tmp_r', 'R')
+		]);
+		for (const [method, params] of calls) await client.call(method, params);
 	});
 
-	it("answers 501 'reaches unreadable rules' over a rule set that arrived without its parse", async () => {
-		const client = await swept();
-		await client.call('setArtifacts', { artifacts: [ruleSet('r-1', 'Rules')] });
-		expect(await refusal(listed(client))).toEqual({
-			status: 501,
-			detail: 'reaches unreadable rules'
+	it('skips a rule set that arrived without its parse, and answers with the other sets', async () => {
+		const client = connect();
+		await client.call('setArtifacts', {
+			artifacts: [ruleSet('r-1', 'Rules', parsed(FLAGGED)), ruleSet('r-2', 'Bare')]
 		});
+		await swept(seeded(), DOC, client);
+		const body = await listed(client);
+		expect(body.rules_status).toEqual({
+			total: 1,
+			skipped: [
+				{ artifact_id: 'r-2', set_name: 'Bare', rule: '', reason: 'rule set could not be read' }
+			],
+			eval_errors: {}
+		});
+		expect(rulesOf(body.issues)).toHaveLength(2);
 	});
 
 	it('moves issues_version when the rule sets change, and not when a push leaves them as they were', async () => {

@@ -150,7 +150,6 @@ export function compileSets(mm: Metamodel, ...sets: [string, string, RuleDoc[]][
 		})),
 		mm
 	);
-	expect(compiled.unreadable).toBe(false);
 	expect(compiled.skipped).toEqual([]);
 	return compiled;
 }

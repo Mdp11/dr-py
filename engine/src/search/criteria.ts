@@ -11,6 +11,7 @@ import { jsStr, toNumber } from '../value/coerce.ts';
 import { pyContains } from '../value/compare.ts';
 import { pyLower } from '../value/lower.ts';
 import { beyondHost, translatePyRegex } from '../value/regex.ts';
+import { pyRepr } from '../value/repr.ts';
 import type { Value } from '../value/types.ts';
 
 export type CriterionDirection = 'outgoing' | 'incoming' | 'either';
@@ -212,17 +213,22 @@ export function readCriteria(raw: unknown, path: string): Criterion[] {
 
 // -- patterns ------------------------------------------------------------------
 
-const UNSUPPORTED = 'reaches an unsupported pattern';
+const HOST_REFUSED = 'a construct this browser cannot compile';
+
+/** The 422 for a pattern the engine will not run: `reason` is why. */
+function unsupported(pattern: string, reason: string): ReadError {
+	return new ReadError(422, `pattern ${pyRepr(pattern)} uses ${reason}, which is not supported`);
+}
 
 /** Every `matches` pattern of a call, by its text: a test, or `null` where `re` refuses it. */
 export type CompiledCriteria = ReadonlyMap<string, ((subject: string) => boolean) | null>;
 
-/** Runs `work`, turning what the host cannot run into the 501 that sends the call to the server. */
-function onHost<T>(work: () => T): T {
+/** Runs `work` on `pattern`, turning what the host cannot run into the 422. */
+function onHost<T>(pattern: string, work: () => T): T {
 	try {
 		return work();
 	} catch (error) {
-		if (beyondHost(error)) throw new ReadError(501, UNSUPPORTED);
+		if (beyondHost(error)) throw unsupported(pattern, HOST_REFUSED);
 		throw error;
 	}
 }
@@ -232,18 +238,18 @@ function onHost<T>(work: () => T): T {
  * entity is matched, and runs each once on a one-byte and a two-byte subject
  * so that a translation V8 will not compile refuses here rather than
  * mid-scan. A pattern the translator cannot vouch for refuses the whole call
- * with 501, so that it goes to the server.
+ * with 422.
  */
 export function compileCriteria(criteria: readonly Criterion[]): CompiledCriteria {
 	const patterns = new Map<string, ((subject: string) => boolean) | null>();
 	const compile = (c: LeafCriterion) => {
 		if ((c.type !== 'property' && c.type !== 'name_id') || c.op !== 'matches') return;
 		if (patterns.has(c.value)) return;
-		const regex = onHost(() => translatePyRegex(c.value, 'search'));
-		if (regex.kind === 'unsupported') throw new ReadError(501, UNSUPPORTED);
+		const regex = onHost(c.value, () => translatePyRegex(c.value, 'search'));
+		if (regex.kind === 'unsupported') throw unsupported(c.value, regex.reason);
 		if (regex.kind === 'ok') {
-			onHost(() => regex.test(''));
-			onHost(() => regex.test('\u0100'));
+			onHost(c.value, () => regex.test(''));
+			onHost(c.value, () => regex.test('\u0100'));
 		}
 		patterns.set(c.value, regex.kind === 'ok' ? regex.test : null);
 	};
@@ -259,7 +265,7 @@ function search(compiled: CompiledCriteria, pattern: string, subject: string): b
 	const test = compiled.get(pattern);
 	if (test === undefined) throw new Error(`pattern ${JSON.stringify(pattern)} was not compiled`);
 	if (test === null) return false;
-	return onHost(() => test(subject));
+	return onHost(pattern, () => test(subject));
 }
 
 // -- matching ------------------------------------------------------------------

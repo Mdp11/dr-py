@@ -28,7 +28,6 @@ import {
 	type RuleSource,
 	type RulesParse
 } from '../rules/compile.ts';
-import { RulesUnreadable } from '../rules/document.ts';
 import { ruleSources } from '../rules/sources.ts';
 import { BridgeDispatcher, dumpDefault, projectRoots } from '../script/bridge.ts';
 import {
@@ -56,8 +55,9 @@ import {
 	candidateScan,
 	prepareCandidate,
 	rebindPreviewBody,
-	stagedAdmitted,
-	type Candidate
+	stagedRefusal,
+	type Candidate,
+	type StagedRefusal
 } from '../validation/candidate.ts';
 import type { Issue } from '../validation/issue.ts';
 import { deltaEnds, deltaIds, LiveIssues, type SweepStep } from '../validation/live.ts';
@@ -171,8 +171,6 @@ const STAGE_POST_STATE_MAX = 500;
 
 /** The refusals the client answers from the server (501), and the ones it retries there (409). */
 const UNSUPPORTED_PATTERN = 'reaches an unsupported pattern';
-const UNREADABLE_RULES = 'reaches unreadable rules';
-const REFUSED_OPS = 'reaches ops the candidate refuses';
 const NOT_READY = 'replica is not ready';
 const STALE_BATCHES = 'stale staged batches';
 const STALE_BASE = 'stale base_rev';
@@ -313,7 +311,6 @@ function readRebind(raw: unknown): { metamodel: unknown } | null {
 /** A candidate document's refusal: the 501s the client takes to the server, else a 422 as `open` gives. */
 function candidateRefusal(error: unknown): Refused {
 	if (error instanceof PatternUnusable) return new Refused(501, UNSUPPORTED_PATTERN);
-	if (error instanceof RulesUnreadable) return new Refused(501, UNREADABLE_RULES);
 	return new Refused(422, `metamodel: ${error instanceof Error ? error.message : String(error)}`);
 }
 
@@ -524,7 +521,7 @@ const METHODS: { readonly [method: string]: Method } = {
 				doc: rebind.metamodel,
 				layer: 'committed',
 				check,
-				admits: stagedAdmitted,
+				refuses: stagedRefusal,
 				answer: (_live, issues) => rebindPreviewBody(issues)
 			});
 		}
@@ -630,7 +627,7 @@ type CandidateCall = {
 	readonly doc: unknown;
 	readonly layer: 'working' | 'committed';
 	readonly check: (wc: WorkingCopy) => void;
-	readonly admits?: (wc: WorkingCopy, candidate: Metamodel) => boolean;
+	readonly refuses?: (wc: WorkingCopy, candidate: Metamodel) => StagedRefusal | null;
 	readonly answer: (live: LiveIssues, issues: readonly Issue[]) => unknown;
 };
 
@@ -1276,8 +1273,6 @@ class Service {
 		const live = this.issuesOf?.live;
 		if (live === undefined || live.wc !== wc) throw new Refused(409, NOT_READY);
 		if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
-		const { working, committed } = live.rules;
-		if (working.unreadable || committed.unreadable) throw new Refused(501, UNREADABLE_RULES);
 		return live;
 	}
 
@@ -1447,9 +1442,8 @@ class Service {
 		};
 		prepared.value = this.prepare(spec, prepared.value);
 		const { candidate } = prepared.value;
-		if (spec.admits !== undefined && !spec.admits(live.wc, candidate.metamodel)) {
-			throw new Refused(501, REFUSED_OPS);
-		}
+		const refusal = spec.refuses?.(live.wc, candidate.metamodel) ?? null;
+		if (refusal !== null) throw new Refused(refusal.status, refusal.detail);
 		const issues = yield* candidateScan(live.wc.model, candidate);
 		if (this.movedFrom(stamp)) return MOVED;
 		return spec.answer(live, issues);

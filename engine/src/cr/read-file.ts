@@ -2,8 +2,7 @@
  * An uploaded model file, read as `POST /model/compare` reads its body:
  * decoded, parsed exactly, then checked for the shape
  * `build_model_from_dicts(strict=False)` requires, in its order and words.
- * What the engine cannot decode or parse goes to the server, which answers
- * in its own words and reads encodings the engine does not.
+ * What is not UTF-8, or not JSON, is a 422.
  */
 import type { Metamodel } from '../metamodel/metamodel.ts';
 import { reservedIdText, TEMP_ID_PREFIX } from '../model/load.ts';
@@ -12,9 +11,6 @@ import { utf8Decoder } from '../snapshot/utf8.ts';
 import { parseExact } from '../value/parse.ts';
 import { pyRepr } from '../value/repr.ts';
 import { PyFloat, type Value } from '../value/types.ts';
-
-/** The refusal of a file the engine cannot read: the client takes it to the server. */
-export const UNREADABLE_FILE = 'reaches an unreadable file';
 
 export type OtherElement = {
 	id: string;
@@ -52,7 +48,7 @@ export function decodeModelFile(bytes: ArrayBuffer): string {
 	try {
 		text = utf8Decoder().decode(new Uint8Array(bytes));
 	} catch {
-		throw new ReadError(501, UNREADABLE_FILE);
+		throw new ReadError(422, 'not a UTF-8 JSON model file');
 	}
 	return text.startsWith('\ufeff') ? text.slice(1) : text;
 }
@@ -62,9 +58,9 @@ export function parseModelFile(bytes: ArrayBuffer): Value {
 	const text = decodeModelFile(bytes);
 	try {
 		return parseExact(text, { controlCharacters: false });
-	} catch {
+	} catch (error) {
 		// A syntax error, or a nesting too deep for the parser's stack.
-		throw new ReadError(501, UNREADABLE_FILE);
+		throw new ReadError(422, `invalid JSON: ${error instanceof Error ? error.message : error}`);
 	}
 }
 

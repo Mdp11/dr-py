@@ -96,7 +96,7 @@ function refusal(run: () => unknown): { status: number; detail: string } {
 	throw new Error('expected a refusal');
 }
 
-const UNREADABLE = { status: 501, detail: 'reaches an unreadable change request' };
+const UNREADABLE = { status: 422, detail: expect.stringMatching(/^invalid change request: /) };
 
 /** The staged changes as text: the committed images and the working lines. */
 function stagedText(wc: WorkingCopy): string {

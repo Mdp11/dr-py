@@ -418,11 +418,8 @@ applyBatch(workingCopy.model, ops);
 const artifacts = new ArtifactSet();
 artifacts.setCommitted(readArtifacts(JSON.parse(readFileSync(RULES, 'utf-8'))));
 const rules = compileRuleSets(ruleSources(artifacts, 'committed'), workingCopy.model.metamodel);
-if (rules.unreadable || rules.skipped.length > 0) {
-	console.error(
-		'The rule sets do not compile whole:',
-		rules.unreadable ? 'unreadable' : rules.skipped
-	);
+if (rules.skipped.length > 0) {
+	console.error('The rule sets do not compile whole:', rules.skipped);
 	process.exit(1);
 }
 const live = new LiveIssues(workingCopy, { rules: { working: rules, committed: rules } });
