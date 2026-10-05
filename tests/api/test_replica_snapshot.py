@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, update
 
 from data_rover.api import content, db, replica
-from data_rover.api.db_models import Role, Snapshot, User
+from data_rover.api.db_models import ModelRow, Role, Snapshot, User
+from data_rover.api.snapshot_rows import write_snapshot_from_rows
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry, get_session
@@ -36,7 +37,6 @@ from .conftest import (
     forget_entity_states,
     unjournaled_bump,
 )
-from .test_snapshot_writers import _ProbingStore
 
 _MM = """
 elements:
@@ -306,16 +306,6 @@ def test_a_second_opener_writes_nothing(
     assert store.puts == puts + 1
 
 
-def test_the_head_write_happens_under_the_write_mutex(client: TestClient) -> None:
-    _unjournaled_bump_hole(client, pytest.MonkeyPatch())
-    session = get_session()
-    probing = _ProbingStore(session.write_mutex)
-    set_snapshot_store(probing)
-    _descriptor(client)
-    assert probing.puts == 1
-    assert probing.acquired and not any(probing.acquired)
-
-
 def test_the_slow_path_looks_again_before_it_writes(
     client: TestClient, store: _CountingStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -335,22 +325,6 @@ def test_the_slow_path_looks_again_before_it_writes(
     assert desc["rev"] < _head()
 
 
-def _mutex_is_free() -> bool:
-    mutex = get_session().write_mutex
-    out: list[bool] = []
-
-    def _try() -> None:
-        got = mutex.acquire(blocking=False)
-        if got:
-            mutex.release()
-        out.append(got)
-
-    t = threading.Thread(target=_try)
-    t.start()
-    t.join()
-    return out[0]
-
-
 def test_a_failed_head_write_is_a_503(
     client: TestClient, store: _CountingStore
 ) -> None:
@@ -359,15 +333,11 @@ def test_a_failed_head_write_is_a_503(
     res = client.get(papi("/replica/snapshot"))
     assert res.status_code == 503
     assert res.json()["detail"] == "snapshot store unavailable"
-    assert _mutex_is_free()
 
 
 def test_no_model_no_descriptor(client: TestClient) -> None:
-    res = client.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    assert get_session().model is None
+    with db.db_session() as s:
+        s.execute(delete(ModelRow).where(ModelRow.project_id == DEFAULT_PROJECT_ID))
     res = client.get(papi("/replica/snapshot"))
     assert res.status_code == 404
     assert res.json()["detail"] == "No model loaded"
@@ -448,6 +418,7 @@ def test_no_blob_when_the_store_lost_it(client: TestClient) -> None:
 def test_the_blob_route_hydrates_nothing(client: TestClient) -> None:
     _ops(client, [_node("A")])
     rev = _head()
+    write_snapshot_from_rows(DEFAULT_PROJECT_ID)
     get_registry().evict(DEFAULT_PROJECT_ID)
     assert get_registry().peek(DEFAULT_PROJECT_ID) is None
     res = client.get(papi(f"/replica/snapshots/{rev}"))

@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api import content, db, hydration
+from data_rover.api import content, db, head, hydration
+from data_rover.api.snapshot_rows import write_snapshot_from_rows
 from data_rover.api.db_models import Project
 from data_rover.api.main import create_app
 from data_rover.api.storage import (
@@ -55,7 +56,9 @@ def _persist_baseline(project_id: str, session: Session) -> None:
             ops=[], inverse_ops=[], id_map={},
         )
         content.set_model_rev(s, project_id, rev)
-    hydration.write_snapshot(project_id, session, rev)
+        assert session.model is not None and session.metamodel is not None
+        head.write_baseline(s, project_id, session.metamodel, session.model)
+    write_snapshot_from_rows(project_id)
 
 
 def _seed_baseline() -> Session:

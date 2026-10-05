@@ -9,7 +9,6 @@ emulator locally rather than a bespoke filesystem store.
 
 from __future__ import annotations
 
-import io
 from typing import Any
 from collections.abc import Iterable
 
@@ -36,18 +35,19 @@ class GcsSnapshotStore:
                 pass
         self._bucket = _client.bucket(bucket)
 
+    #: resumable-upload chunk; the blob is streamed, never held whole
+    _CHUNK_SIZE = 8 * 1024 * 1024
+
     def put(self, key: str, chunks: Iterable[bytes]) -> None:
-        # buffer the chunks then upload: the google client's resumable upload
-        # wants a seekable file-like; the buffer is the COMPRESSED blob (~10 MiB
-        # for a 300k-element model), so this is far below the model's own RSS.
-        # upload_from_file with no filename defaults content-type to
-        # application/octet-stream and sets no Content-Encoding — load-bearing:
-        # switching to upload_from_filename, or deriving the type from the key,
-        # would make mimetypes.guess_type("x.json.gz") report
-        # ("application/json", "gzip"), and GCS would transcode on download,
-        # silently erasing the compression win (the decoder still sniffs the
-        # bytes, so correctness survives, but the size win would not).
-        self._bucket.blob(key).upload_from_file(io.BytesIO(b"".join(chunks)))
+        # An explicit application/gzip type and no content_encoding are
+        # load-bearing: deriving the type from the key would make
+        # mimetypes.guess_type("x.json.gz") report ("application/json", "gzip"),
+        # and GCS would transcode on download, erasing the compression win.
+        with self._bucket.blob(key).open(
+            "wb", content_type="application/gzip", chunk_size=self._CHUNK_SIZE
+        ) as out:
+            for chunk in chunks:
+                out.write(chunk)
 
     def get(self, key: str) -> bytes:
         from google.cloud.exceptions import NotFound

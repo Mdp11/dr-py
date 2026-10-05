@@ -1,6 +1,6 @@
 """The periodic snapshot runs off the commit's critical section: a daemon
-thread takes write_mutex itself, snapshots the CURRENT rev, skips sessions
-the registry no longer holds, and logs-and-drops failures. The conftest pins
+thread streams the rows at the CURRENT rev, skips projects without a model
+row, keeps one job per project, and logs-and-drops failures. The conftest pins
 DATA_ROVER_SNAPSHOT_SYNC=true so every other test sees the inline write.
 
 Baseline rev: ``_client()`` installs the model at rev 0, so the baseline
@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api import content, db, snapshot_job
+from data_rover.api.db_models import Project
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID, Session, get_registry
 from data_rover.api.snapshot_job import SnapshotJob, schedule_periodic_snapshot
@@ -69,25 +70,28 @@ def _latest_snapshot_rev() -> int | None:
 
 def test_route_schedules_the_job_asynchronously(monkeypatch: pytest.MonkeyPatch) -> None:
     """The route hands off to the thread rather than writing inline: the
-    sentinel replaces ``write_snapshot`` so the job thread performs no
+    sentinel replaces ``write_snapshot_from_rows`` so the job thread performs no
     database work at all, keeping it from ever overlapping the request's
     own use of the shared in-memory-SQLite connection."""
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_SYNC", "false")
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_EVERY", "1")
-    calls: list[int] = []
+    calls: list[str] = []
 
-    def _sentinel(project_id: str, session: Session, rev: int) -> None:
-        calls.append(rev)
+    def _sentinel(project_id: str) -> int:
+        calls.append(project_id)
+        return 4242
 
-    monkeypatch.setattr("data_rover.api.snapshot_job.write_snapshot", _sentinel)
+    monkeypatch.setattr(
+        "data_rover.api.snapshot_job.write_snapshot_from_rows", _sentinel
+    )
     c = _client()
-    rev = _create_one(c)
-    job = _live_session().snapshot_job
+    _create_one(c)
+    job = snapshot_job.current_job(DEFAULT_PROJECT_ID)
     assert job is not None
     assert job.done.wait(10.0), "snapshot job did not finish"
     assert job.running is False
-    assert job.written_rev == rev
-    assert calls == [rev]
+    assert job.written_rev == 4242
+    assert calls == [DEFAULT_PROJECT_ID]
 
 
 def test_async_job_writes_the_snapshot_row() -> None:
@@ -95,9 +99,8 @@ def test_async_job_writes_the_snapshot_row() -> None:
     only user of the shared in-memory-SQLite connection: this is what
     exercises the genuine daemon thread doing a genuine durable write."""
     _client()
-    session = _live_session()
-    rev = session.model_rev
-    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=False)
+    rev = _live_session().model_rev
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=False)
     assert job is not None
     assert job.done.wait(10.0), "snapshot job did not finish"
     assert job.running is False
@@ -107,11 +110,10 @@ def test_async_job_writes_the_snapshot_row() -> None:
 
 def test_sync_job_writes_inline_under_the_conftest_pin() -> None:
     c = _client()
-    session = _live_session()
     baseline = _latest_snapshot_rev()  # the upload's baseline
     rev = _create_one(c)  # default snapshot_every=200: no trigger
     assert _latest_snapshot_rev() == baseline  # unchanged: no trigger fired
-    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session)  # sync via the pin
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID)  # sync via the pin
     assert job is not None and job.running is False and job.written_rev == rev
     assert _latest_snapshot_rev() == rev
 
@@ -121,34 +123,41 @@ def test_job_writes_the_rev_it_finds() -> None:
     whatever rev the session is at when it runs. Any rev at or past the
     trigger bounds the replay tail equally."""
     c = _client()
-    session = _live_session()
     _create_one(c)
     rev2 = _create_one(c)
-    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=True)
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True)
     assert job is not None and job.written_rev == rev2
     assert _latest_snapshot_rev() == rev2
 
 
-def test_job_skips_a_session_the_registry_no_longer_holds() -> None:
-    c = _client()
-    session = _live_session()
-    baseline = _latest_snapshot_rev()
-    _create_one(c)
-    get_registry().discard(DEFAULT_PROJECT_ID)
-    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=True)
+def test_job_skips_a_project_without_a_model_row() -> None:
+    seed_default_project()
+    with db.db_session() as s:
+        s.add(Project(id="ghost", name="Ghost"))
+    job = schedule_periodic_snapshot("ghost", sync=True)
     assert job is not None and job.running is False and job.written_rev is None
-    assert _latest_snapshot_rev() == baseline  # nothing past the baseline
+    with db.db_session() as s:
+        assert content.latest_snapshot(s, "ghost") is None
 
 
-def test_second_trigger_while_a_job_runs_is_dropped() -> None:
+def test_second_trigger_while_a_job_runs_is_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _client()
-    session = _live_session()
-    baseline_rev = session.model_rev  # no _create_one: still at baseline
-    session.snapshot_job = SnapshotJob()  # running=True by construction
-    assert schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=True) is None
-    session.snapshot_job.running = False
-    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=True)
+    baseline_rev = _live_session().model_rev  # no _create_one: still at baseline
+    running = SnapshotJob()  # running=True by construction
+    monkeypatch.setitem(snapshot_job._jobs, DEFAULT_PROJECT_ID, running)
+    assert schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True) is None
+    running.running = False
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True)
     assert job is not None and job.written_rev == baseline_rev
+
+
+def test_slots_are_per_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    _client()
+    monkeypatch.setitem(snapshot_job._jobs, "other", SnapshotJob())
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True)
+    assert job is not None and job.written_rev is not None
 
 
 def test_job_failure_is_logged_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,19 +169,18 @@ def test_job_failure_is_logged_not_raised(monkeypatch: pytest.MonkeyPatch) -> No
     process (the same order-dependent hazard test_lock_mirror.py documents
     and sidesteps the same way)."""
     _client()
-    session = _live_session()
 
     def _boom(*args: object, **kwargs: object) -> None:
         raise RuntimeError("snapshot store down")
 
     warn_messages: list[str] = []
-    monkeypatch.setattr("data_rover.api.snapshot_job.write_snapshot", _boom)
+    monkeypatch.setattr("data_rover.api.snapshot_job.write_snapshot_from_rows", _boom)
     monkeypatch.setattr(
         snapshot_job.logger,
         "warning",
         lambda msg, *a, **kw: warn_messages.append(str(msg)),
     )
-    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=True)
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True)
     assert job is not None and job.running is False and job.written_rev is None
     assert job.done.is_set()
     assert len(warn_messages) == 1
@@ -192,7 +200,7 @@ def test_ops_route_survives_a_failing_periodic_snapshot(
     def _boom(*args: object, **kwargs: object) -> None:
         raise RuntimeError("snapshot store down")
 
-    monkeypatch.setattr("data_rover.api.snapshot_job.write_snapshot", _boom)
+    monkeypatch.setattr("data_rover.api.snapshot_job.write_snapshot_from_rows", _boom)
     rev = _create_one(c)  # asserts 200 inside
     assert rev == baseline + 1
     assert _latest_snapshot_rev() == baseline

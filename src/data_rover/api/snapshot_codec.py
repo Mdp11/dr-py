@@ -1,7 +1,7 @@
 """Snapshot blob formats: gzip members of the model, as one document or as lines.
 
 The ONE place that knows what bytes the ``SnapshotStore`` holds. Writers
-stream ``encode_snapshot_v2`` into ``store.put``; readers hand whatever
+stream ``encode_snapshot_v2_rows`` (the head rows' lines; ``snapshot_rows``) into ``store.put``; readers hand whatever
 ``store.get`` returned to ``decode_snapshot``. The decoder branches on the
 bytes (the gzip magic, then the header line) — never on the key — so a row
 written before compression (indented JSON under a ``.json`` key) keeps
@@ -107,6 +107,43 @@ def encode_snapshot_v2(
     if state_digest is None:
         state_digest = model_digest(model)
     return _gzip_member(_v2_lines(model, project_id, rev, metamodel_id, state_digest))
+
+
+def encode_snapshot_v2_rows(
+    *,
+    project_id: str,
+    rev: int,
+    metamodel_id: str,
+    state_digest: str,
+    elements: int,
+    relationships: int,
+    element_lines: Iterable[str],
+    relationship_lines: Iterable[str],
+) -> Iterator[bytes]:
+    """The v2 blob of ``encode_snapshot_v2``, from lines already encoded (the
+    head rows'): the header, then the LF-terminated element and relationship
+    lines. The header's counts are the caller's, and true of the lines."""
+    header = {
+        "format": SNAPSHOT_V2_FORMAT,
+        "project_id": project_id,
+        "rev": rev,
+        "metamodel_id": metamodel_id,
+        "elements": elements,
+        "relationships": relationships,
+        "state_digest": state_digest,
+    }
+
+    def lines() -> Iterator[str]:
+        yield (
+            json.dumps(
+                header, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+            )
+            + "\n"
+        )
+        yield from element_lines
+        yield from relationship_lines
+
+    return _gzip_member(lines())
 
 
 def is_gzip(blob: bytes) -> bool:

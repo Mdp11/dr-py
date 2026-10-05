@@ -652,4 +652,4 @@ def _maybe_periodic_snapshot(
     section; ``snapshot_sync`` (tests) runs it inline instead."""
     every = get_settings().snapshot_every
     if every > 0 and rev % every == 0:
-        schedule_periodic_snapshot(project_id, session)
+        schedule_periodic_snapshot(project_id)

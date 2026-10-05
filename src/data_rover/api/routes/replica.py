@@ -11,9 +11,9 @@ from .. import content, replica
 from ..authz import require_membership
 from ..db import get_db
 from ..db_models import Membership, Snapshot
-from ..deps import Session, get_request_session, require_model
-from ..hydration import write_snapshot
+from ..deps import Session, get_request_session
 from ..schemas import ReplicaTailOut, SnapshotDescriptorOut
+from ..snapshot_rows import write_snapshot_from_rows
 from ..storage import get_snapshot_store
 
 logger = logging.getLogger(__name__)
@@ -41,30 +41,34 @@ def _descriptor(snap: Snapshot, request: Request) -> SnapshotDescriptorOut:
 def get_snapshot_descriptor(
     project_id: str,
     request: Request,
-    session: Session = Depends(get_request_session),
+    _membership: Membership = Depends(require_membership),
     db: DbSession = Depends(get_db),
 ) -> SnapshotDescriptorOut:
-    require_model(session)
+    model_row = content.get_model_row(db, project_id)
+    if model_row is None:
+        raise HTTPException(status_code=404, detail="No model loaded")
 
-    snap = replica.pick_snapshot(db, project_id, session.model_rev)
+    snap = replica.pick_snapshot(db, project_id, model_row.model_rev)
     if snap is not None:
         return _descriptor(snap, request)
 
-    with session.write_mutex:
-        # Look again: a second opener finds what the first wrote, and a commit
-        # that was between its rev bump and its db.commit() has landed.
-        head = session.model_rev
-        snap = replica.pick_snapshot(db, project_id, head)
-        if snap is None:
-            try:
-                write_snapshot(project_id, session, head)
-            except Exception as exc:
-                logger.exception("snapshot write at head failed for %s", project_id)
-                raise HTTPException(
-                    status_code=503, detail="snapshot store unavailable"
-                ) from exc
-            snap = content.get_snapshot(db, project_id, head)
-            assert snap is not None
+    # Under the row lock no commit moves the head: look again (a second opener
+    # finds what the first wrote), then write from the rows.
+    locked = content.lock_model_row(db, project_id)
+    if locked is None:
+        raise HTTPException(status_code=404, detail="No model loaded")
+    head = locked.model_rev
+    snap = replica.pick_snapshot(db, project_id, head)
+    if snap is None:
+        try:
+            head = write_snapshot_from_rows(project_id)
+        except Exception as exc:
+            logger.exception("snapshot write at head failed for %s", project_id)
+            raise HTTPException(
+                status_code=503, detail="snapshot store unavailable"
+            ) from exc
+        snap = content.get_snapshot(db, project_id, head)
+        assert snap is not None
 
     return _descriptor(snap, request)
 

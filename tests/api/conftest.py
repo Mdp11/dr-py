@@ -28,7 +28,7 @@ os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD", "")
 
 from data_rover.api import content, db  # noqa: E402
 from data_rover.api.head import read_head  # noqa: E402
-from data_rover.api.hydration import write_snapshot  # noqa: E402
+from data_rover.api.snapshot_rows import write_snapshot_from_rows  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
 from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E402
 from data_rover.api.identity import set_identity_provider  # noqa: E402
@@ -245,7 +245,7 @@ def append_baseline_row(project_id: str = "default") -> int:
             id_map={},
         )
         content.set_model_rev(s, project_id, rev)
-    write_snapshot(project_id, session, rev)
+    write_snapshot_from_rows(project_id)
     return rev
 
 

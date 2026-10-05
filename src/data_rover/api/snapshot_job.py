@@ -1,30 +1,20 @@
-"""Periodic full-model snapshot, off the commit's critical section.
+"""Periodic snapshot, off the commit's critical section.
 
 The journal writers trigger a snapshot every ``settings.snapshot_every``
-commits. Encoding a large model takes seconds, so the trigger schedules
-this job instead of writing inline: a daemon thread takes
-``session.write_mutex`` itself (``write_snapshot`` re-enters it) and
-snapshots the model at whatever rev it finds there — any rev at or past the trigger bounds the replay tail
-equally. Under the mutex it also re-checks that the registry still holds
-this exact session: an evicted session was already snapshotted by the
-evict hook, and a discarded one belongs to a deleted project whose row
-would violate the FK. One job per session at a time; a trigger that finds
-one running is dropped (the next multiple re-triggers). Failure is logged
-and dropped — the commit is durable, and hydration rebuilds the snapshot
-on the next cache-miss.
+commits. Streaming a large head takes seconds, so the trigger schedules this
+job instead of writing inline: a daemon thread runs ``write_snapshot_from_rows``
+for the project, which snapshots the rows at whatever rev it finds committed
+there. Any rev at or past the trigger bounds the replay tail equally, and the
+job needs no session, no model and no write mutex. A project without a model
+row (deleted) is skipped.
 
-The snapshots that are correctness rather than bounding — rebind-forced,
-evict, baseline — stay synchronous in their callers and never come here.
+One job per project at a time, held in a process-wide slot; a trigger that
+finds one running is dropped (the next multiple re-triggers). Failure is
+logged and dropped: the commit is durable, and a replica or hydration
+rebuilds the snapshot on the next cache miss.
 
-The job takes ``write_mutex`` and only then opens a DB session, inverting
-the request path's connection-then-mutex order; this is not a regression
-(the inline path had the same inversion, and the job holds no connection
-while it sits queued for the mutex) but matters when tuning the pool.
-
-A model replacement (``Session.set_model``) bumps ``session.model_rev``
-without journaling a commit, so a job waking after one can record a ``Snapshot`` row at a rev ahead of ``models.model_rev``. That row is
-harmless — ``_hydrate_session`` selects with ``max_rev=model_row.model_rev``,
-so it is never chosen — but it leaves a dead row and an orphan blob behind.
+The snapshots that are correctness rather than bounding (the rebind's, the
+baseline's, the descriptor's miss) are written synchronously by their callers.
 """
 
 from __future__ import annotations
@@ -33,9 +23,8 @@ import logging
 import threading
 from dataclasses import dataclass, field
 
-from .hydration import write_snapshot
-from .session import Session, get_registry
 from .settings import get_settings
+from .snapshot_rows import write_snapshot_from_rows
 
 logger = logging.getLogger(__name__)
 
@@ -50,41 +39,43 @@ class SnapshotJob:
     done: threading.Event = field(default_factory=threading.Event)
 
 
-def schedule_periodic_snapshot(
-    project_id: str, session: Session, *, sync: bool | None = None
-) -> SnapshotJob | None:
-    """Schedule (or, in sync mode, run inline) a snapshot of ``session``.
+_jobs: dict[str, SnapshotJob] = {}
+_jobs_lock = threading.Lock()
 
-    ``sync=None`` reads ``settings.snapshot_sync``. Returns ``None`` when a
-    job is already running for the session. Callers must hold
-    ``session.write_mutex``: that is what serializes the check-then-set of
-    ``session.snapshot_job`` below — it is not otherwise synchronized.
+
+def current_job(project_id: str) -> SnapshotJob | None:
+    """The project's in-flight or last job."""
+    with _jobs_lock:
+        return _jobs.get(project_id)
+
+
+def schedule_periodic_snapshot(
+    project_id: str, *, sync: bool | None = None
+) -> SnapshotJob | None:
+    """Schedule (or, in sync mode, run inline) a snapshot of the project.
+
+    ``sync=None`` reads ``settings.snapshot_sync``. Returns ``None`` when a job
+    is already running for the project.
     """
-    current = session.snapshot_job
-    if current is not None and current.running:
-        return None
-    job = SnapshotJob()
-    session.snapshot_job = job
+    with _jobs_lock:
+        current = _jobs.get(project_id)
+        if current is not None and current.running:
+            return None
+        job = _jobs[project_id] = SnapshotJob()
     if sync if sync is not None else get_settings().snapshot_sync:
-        _run(project_id, session, job)
+        _run(project_id, job)
     else:
         threading.Thread(
-            target=_run,
-            args=(project_id, session, job),
-            name="snapshot-job",
-            daemon=True,
+            target=_run, args=(project_id, job), name="snapshot-job", daemon=True
         ).start()
     return job
 
 
-def _run(project_id: str, session: Session, job: SnapshotJob) -> None:
+def _run(project_id: str, job: SnapshotJob) -> None:
     try:
-        with session.write_mutex:
-            if get_registry().peek(project_id) is not session or session.model is None:
-                return
-            rev = session.model_rev
-            write_snapshot(project_id, session, rev)
-            job.written_rev = rev
+        job.written_rev = write_snapshot_from_rows(project_id)
+    except LookupError:
+        pass  # no model row: the project was deleted
     except Exception:
         logger.warning(
             "periodic snapshot failed for project %s; commit is durable, "

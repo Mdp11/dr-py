@@ -4,7 +4,6 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
@@ -13,9 +12,6 @@ from data_rover.core.view.schema import View
 from .feed import FeedHub, reset_event
 from .locking import LockTable
 from .state_digest import digest_value, format_digest
-
-if TYPE_CHECKING:
-    from .snapshot_job import SnapshotJob
 
 
 @dataclass
@@ -63,11 +59,6 @@ class Session:
     #: owner-gated PATCH /settings route under the write-mutex. Default False
     #: keeps the engine's inspectable behaviour for every untouched project.
     strict_mode: bool = False
-    #: the in-flight (or last) periodic snapshot job
-    #: (snapshot_job.schedule_periodic_snapshot); a trigger that finds one
-    #: still running is dropped. Never blocks eviction: the job checks the
-    #: registry under write_mutex and writes nothing for a dropped session.
-    snapshot_job: SnapshotJob | None = field(default=None, repr=False)
     #: the state digest of ``model`` (``state_digest.py``) as an integer, or
     #: None while it is not known: on a fresh or hydrated session, and after
     #: ``set_model``. A commit sets it to the digest it folded on the rows.
@@ -125,7 +116,7 @@ class SessionRegistry:
     On a cache-miss ``get`` calls the injected ``loader`` (``hydration.
     hydrate_session`` in production) under a per-project init-once lock so
     two concurrent requests for a cold project hydrate exactly once.
-    ``evict`` runs the injected ``evict_hook`` (snapshot-then-drop) before
+    ``evict`` runs the injected ``evict_hook``, when one is set, before
     removing the session. With no loader installed the registry falls back
     to an empty ``Session``, used by unit tests that don't need
     persistence."""
@@ -206,9 +197,9 @@ class SessionRegistry:
 
         For the delete-project path: by the time the registry is asked to
         drop the session, the project's durable rows are already deleted and
-        committed, so the snapshot hook must not run — ``write_snapshot``
-        would insert a ``Snapshot`` row whose project FK no longer exists
-        (IntegrityError -> 500 *after* the delete succeeded). The evict
+        committed, so an evict hook that writes rows must not run: a ``Snapshot``
+        row's project FK no longer exists (IntegrityError -> 500 *after* the
+        delete succeeded). The evict
         guard must not apply either: a live lease or a connected feed client
         would otherwise keep a dead project's session registered forever
         (the guard re-checks on every idle-sweep retry and never gives up).
@@ -297,13 +288,13 @@ def reset_session() -> None:
 
 
 def install_persistent_registry() -> None:
-    """Wire the process-global registry to durable hydration + snapshot-evict.
+    """Wire the process-global registry to durable hydration.
 
     Called at app startup (and by the API test conftest). Kept here — not at
     import time — so importing ``session`` never pulls in the storage/DB stack
     (``hydration`` imports both); unit tests that want the empty-Session
     fallback simply don't call this."""
-    from .hydration import hydrate_session, write_snapshot
+    from .hydration import hydrate_session
     from .lock_mirror import restore_leases
 
     def _load(project_id: str) -> Session:
@@ -313,9 +304,4 @@ def install_persistent_registry() -> None:
         restore_leases(project_id, sess.lock_table)
         return sess
 
-    def _evict(project_id: str, sess: Session) -> None:
-        if sess.model is not None:
-            write_snapshot(project_id, sess, sess.model_rev)
-
     _registry.set_loader(_load)
-    _registry.set_evict_hook(_evict)

@@ -29,7 +29,7 @@ from data_rover.api.session import (
     get_session,
 )
 from data_rover.api.snapshot_codec import decode_snapshot, encode_snapshot
-from data_rover.api.state_digest import model_digest
+from data_rover.api.snapshot_rows import write_snapshot_from_rows
 from data_rover.api.storage import (
     MemorySnapshotStore,
     get_snapshot_store,
@@ -160,14 +160,13 @@ def test_the_periodic_snapshot_is_v2(
     _assert_v2(DEFAULT_PROJECT_ID, session.model_rev, session.model)
 
 
-def test_the_evict_snapshot_is_v2(client: TestClient) -> None:
+def test_eviction_writes_no_snapshot(client: TestClient) -> None:
     _ops(client, [_node("a", "A"), _node("b", "B")])
-    session = get_session()
-    assert session.model is not None
-    rev, model = session.model_rev, session.model
+    rev = get_session().model_rev
     get_registry().evict(DEFAULT_PROJECT_ID)
     assert get_registry().peek(DEFAULT_PROJECT_ID) is None
-    _assert_v2(DEFAULT_PROJECT_ID, rev, model)
+    with db.db_session() as s:
+        assert content.get_snapshot(s, DEFAULT_PROJECT_ID, rev) is None
 
 
 def test_the_rebind_snapshot_is_v2_and_names_the_new_metamodel(
@@ -203,6 +202,41 @@ def test_the_rebind_snapshot_is_v2_and_names_the_new_metamodel(
         assert header["metamodel_id"] == row.to_metamodel_id != before
 
 
+
+def test_the_rebind_snapshot_is_written_when_the_mirror_did_not_follow(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "data_rover.api.routes.commits._follow_commit", lambda *a, **k: False
+    )
+    before = _model_row_metamodel_id(DEFAULT_PROJECT_ID)
+    res = client.post(
+        papi("/locks"),
+        json={
+            "targets": [
+                {"resource_id": "mm", "mode": "exclusive", "type": "metamodel"}
+            ],
+            "intent": "edit",
+        },
+    )
+    assert res.status_code == 200, res.text
+    res = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": get_session().model_rev,
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_V2}],
+            "message": "rebind",
+            "lock_tokens": [res.json()["token"]],
+        },
+    )
+    assert res.status_code == 200, res.text
+    rev = res.json()["model_rev"]
+    header = _header(DEFAULT_PROJECT_ID, rev)
+    with db.db_session() as s:
+        row = s.get(Commit, (DEFAULT_PROJECT_ID, rev))
+        assert row is not None and row.to_metamodel_id
+        assert header["metamodel_id"] == row.to_metamodel_id != before
+
 def test_the_importer_snapshot_is_v2() -> None:
     importer.import_project(
         project_id="proj",
@@ -218,101 +252,26 @@ def test_the_importer_snapshot_is_v2() -> None:
     _assert_v2("proj", 0, hydrated.model)
 
 
-def test_a_project_without_a_model_row_writes_an_empty_metamodel_id() -> None:
+def test_a_project_without_a_model_row_has_no_snapshot() -> None:
     with db.db_session() as s:
         s.add(Project(id="bare", name="Bare"))
-    metamodel = load_metamodel_str(_MM)
-    model = build_model_from_dicts(metamodel, {"elements": [], "relationships": []})
-    session = Session(metamodel=metamodel, model=model)
-    hydration.write_snapshot("bare", session, 0)
-    assert _header("bare", 0)["metamodel_id"] == ""
-    assert _row("bare", 0).metamodel_id == ""
+    with pytest.raises(LookupError):
+        write_snapshot_from_rows("bare")
 
 
-def test_the_header_digest_is_the_sessions(
+def test_the_header_digest_is_the_rows_not_a_model_pass(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     body = _ops(client, [_node("a", "A")])
-    session = get_session()
-    assert session.state_digest_value is not None
-    rev = session.model_rev
+    rev = get_session().model_rev
 
     def _no_full_pass(*_: object) -> None:
         raise AssertionError("a full digest pass")
 
     monkeypatch.setattr("data_rover.api.session.digest_value", _no_full_pass)
     monkeypatch.setattr("data_rover.api.snapshot_codec.model_digest", _no_full_pass)
-    get_registry().evict(DEFAULT_PROJECT_ID)
+    assert write_snapshot_from_rows(DEFAULT_PROJECT_ID) == rev
     assert _header(DEFAULT_PROJECT_ID, rev)["state_digest"] == body["state_digest"]
-
-
-def test_a_fresh_session_pays_one_pass_for_its_first_snapshot(
-    client: TestClient,
-) -> None:
-    _ops(client, [_node("a", "A")])
-    session = get_session()
-    assert session.model is not None
-    session.state_digest_value = None
-    hydration.write_snapshot(DEFAULT_PROJECT_ID, session, session.model_rev)
-    header = _header(DEFAULT_PROJECT_ID, session.model_rev)
-    assert header["state_digest"] == model_digest(session.model)
-    assert session.state_digest_value is not None
-
-
-class _ProbingStore(MemorySnapshotStore):
-    """Asks, from another thread, whether ``mutex`` is free while each chunk
-    of a ``put`` is drained."""
-
-    def __init__(self, mutex: Any) -> None:
-        super().__init__()
-        self.mutex = mutex
-        self.acquired: list[bool] = []
-        self.puts = 0
-
-    def _probe(self) -> None:
-        got = self.mutex.acquire(blocking=False)
-        if got:
-            self.mutex.release()
-        self.acquired.append(got)
-
-    def put(self, key: str, chunks: Iterable[bytes]) -> None:
-        self.puts += 1
-
-        def _probed() -> Iterable[bytes]:
-            for chunk in chunks:
-                t = threading.Thread(target=self._probe)
-                t.start()
-                t.join()
-                yield chunk
-
-        super().put(key, _probed())
-
-
-def _mutex_is_free(mutex: Any) -> bool:
-    out: list[bool] = []
-
-    def _try() -> None:
-        got = mutex.acquire(blocking=False)
-        if got:
-            mutex.release()
-        out.append(got)
-
-    t = threading.Thread(target=_try)
-    t.start()
-    t.join()
-    return out[0]
-
-
-def test_write_snapshot_holds_the_write_mutex_for_the_whole_stream(
-    client: TestClient,
-) -> None:
-    _ops(client, [_node("a", "A")])
-    session = get_session()
-    store = _ProbingStore(session.write_mutex)
-    set_snapshot_store(store)
-    hydration.write_snapshot(DEFAULT_PROJECT_ID, session, session.model_rev)
-    assert store.acquired and not any(store.acquired)
-    assert _mutex_is_free(session.write_mutex)
 
 
 def test_a_v2_snapshot_hydrates_to_the_same_state(client: TestClient) -> None:
@@ -341,6 +300,7 @@ def test_a_v2_snapshot_hydrates_to_the_same_state(client: TestClient) -> None:
     assert session.model is not None
     lines = list(iter_entity_lines(session.model))
     rev = session.model_rev
+    write_snapshot_from_rows(DEFAULT_PROJECT_ID)
     get_registry().evict(DEFAULT_PROJECT_ID)
     again = get_session()
     assert again.model is not None and again.model is not session.model

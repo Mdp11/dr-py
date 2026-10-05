@@ -8,12 +8,27 @@ import pytest
 from data_rover.api.storage_gcs import GcsSnapshotStore
 
 
+class _FakeWriter:
+    def __init__(self, store: dict[str, bytes], name: str) -> None:
+        self._store, self._name, self._data = store, name, b""
+
+    def write(self, data: bytes) -> None:
+        self._data += data
+
+    def __enter__(self) -> _FakeWriter:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._store[self._name] = self._data
+
+
 class _FakeBlob:
     def __init__(self, store: dict[str, bytes], name: str) -> None:
         self._store, self._name = store, name
 
-    def upload_from_file(self, fileobj) -> None:  # noqa: ANN001
-        self._store[self._name] = fileobj.read()
+    def open(self, mode: str, **_: object) -> _FakeWriter:
+        assert mode == "wb"
+        return _FakeWriter(self._store, self._name)
 
     def download_as_bytes(self) -> bytes:
         if self._name not in self._store:

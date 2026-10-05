@@ -56,7 +56,7 @@ from .. import content, head
 from ..db import get_db
 from ..db_models import Commit, Membership, ModelRow, Role, User
 from ..deps import Session, get_request_session, require_metamodel, require_model
-from ..hydration import deserialize_ops, write_snapshot
+from ..hydration import deserialize_ops
 from ..identity import get_current_user
 from ..lock_mirror import mirror_session_leases
 from ..locking import (
@@ -87,6 +87,7 @@ from ..view_ops import (
     validate_view_ops,
     view_touched_resources,
 )
+from ..snapshot_rows import write_snapshot_from_rows
 from ..schemas import (
     ArtifactOpIn,
     CommitDiffOut,
@@ -1195,7 +1196,7 @@ def create_commit(
                 status_code=500, detail="failed to persist commit"
             ) from exc
         # e2. the rows are durable: the session model follows them
-        followed = _follow_commit(
+        _follow_commit(
             session, project_id, res.canonical_ops, rev=new_rev, digest=state_digest
         )
         # f. snapshot — periodic normally (so a hot
@@ -1210,18 +1211,10 @@ def create_commit(
                 if rebound:
                     # FORCED, not periodic: keeps "the replay tail never spans
                     # a rebind boundary" (hydration binds the CURRENT metamodel
-                    # and would otherwise replay pre-rebind ops under it). The
-                    # snapshot is the session model's, so a model that did not
-                    # follow the commit has none to write.
-                    if followed:
-                        write_snapshot(project_id, session, new_rev)
-                    else:
-                        logger.error(
-                            "no snapshot after the rebind at rev %s of project %s: "
-                            "the session model did not follow it",
-                            new_rev,
-                            project_id,
-                        )
+                    # and would otherwise replay pre-rebind ops under it). It is
+                    # written from the rows, whether or not the session mirror
+                    # followed the commit.
+                    write_snapshot_from_rows(project_id)
                 else:
                     _maybe_periodic_snapshot(db, project_id, session, new_rev)
             except Exception:

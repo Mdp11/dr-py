@@ -25,10 +25,10 @@ from .artifact_bundle import ArtifactBundle, BundleArtifact, SkippedEntry
 from .artifact_kinds import get_spec, rewrite_refs
 from .db import db_session, init_engine
 from .db_models import ArtifactKind, Membership, Project, Role
-from .hydration import write_snapshot
 from .routes._snapshot import build_model_from_dicts
 from .serialize import parse_model_json
-from .session import Session, get_registry
+from .session import get_registry
+from .snapshot_rows import write_snapshot_from_rows
 from .settings import get_settings
 
 
@@ -217,9 +217,7 @@ def import_project(
 
     # the rev-0 snapshot (outside the txn above; the commit/model/head rows are
     # already durable and the snapshot row is its own)
-    sess = Session(metamodel=metamodel, model=model)
-    sess.model_rev = 0
-    write_snapshot(project_id, sess, 0)
+    write_snapshot_from_rows(project_id)
     return skipped
 
 
@@ -250,7 +248,7 @@ def install_model(
     content.set_model_rev(db, project_id, 0)
     head.write_baseline(db, project_id, metamodel, model)
     db.commit()
-    write_snapshot(project_id, session, 0)
+    write_snapshot_from_rows(project_id)
     session.announce_reset()
 
 

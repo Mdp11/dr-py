@@ -23,6 +23,7 @@ from .conftest import (
     install,
     EMPTY_MODEL,
     commit_ops,
+    unjournaled_bump,
 )
 
 _MM = """
@@ -231,9 +232,8 @@ def test_a_commit_does_not(client: TestClient) -> None:
 
 def test_the_replica_routes_after_a_reset(client: TestClient) -> None:
     before = get_session().model_rev
-    session = get_session()
-    session.set_model(session.model, announce=False)
-    head = session.model_rev
+    unjournaled_bump()
+    head = get_session().model_rev
     assert head == before + 1
 
     tail = client.get(papi(f"/replica/tail?from_rev={before}"))
