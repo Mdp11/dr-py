@@ -220,7 +220,7 @@ describe('the metamodel half of the commit batch', () => {
 		registerMetamodelDraftProvider(() => ({ dirty: true, blob: 'elements: []\n' }));
 		stageNodeMove('el:A', { x: 1, y: 2 });
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		const req = commit.mock.calls[0][0];
 		expect(req.ops).toEqual([
@@ -254,7 +254,7 @@ describe('the metamodel half of the commit batch', () => {
 		const seen: { rebound: boolean; blob: string | null }[] = [];
 		const off = onMetamodelCommitted((info) => seen.push(info));
 
-		const inflight = commitStaged('m', false);
+		const inflight = commitStaged('m', { conformance_error_count: 0, issues: [] });
 		await request;
 		// A straggler keystroke lands while the request is in flight.
 		buffer = 'typed: after\n';
@@ -273,7 +273,9 @@ describe('the metamodel half of the commit batch', () => {
 		const off = onMetamodelCommitted((info) => seen.push(info));
 		stageNodeMove('el:A', { x: 1, y: 2 });
 
-		await expect(commitStaged('m', false)).rejects.toThrow('boom');
+		await expect(commitStaged('m', { conformance_error_count: 0, issues: [] })).rejects.toThrow(
+			'boom'
+		);
 		off();
 
 		expect(seen).toEqual([]);
@@ -288,7 +290,7 @@ describe('the metamodel half of the commit batch', () => {
 		await acquireMetamodelLease();
 		registerMetamodelDraftProvider(() => ({ dirty: true, blob: 'elements: []\n' }));
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		// toStrictEqual, not toBe: `setMetamodel` parks it in `$state`, which
 		// hands back a reactive proxy rather than the identical object.
@@ -303,7 +305,7 @@ describe('the metamodel half of the commit batch', () => {
 		await acquireMetamodelLease();
 		stageNodeMove('el:A', null);
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		expect(fetchMm).not.toHaveBeenCalled();
 		expect(getActiveMetamodel()).toBeNull();

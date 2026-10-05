@@ -117,6 +117,9 @@ export function commitChanges(
 		message: string;
 		lockTokens: string[];
 		ackErrors: boolean;
+		/** The client's preview of the batch, stored with the commit as reported. */
+		validationErrorCount: number;
+		issues: PreviewResponse['issues'];
 	},
 	cfg?: ClientConfig,
 	onText?: (text: string) => void
@@ -130,7 +133,9 @@ export function commitChanges(
 				ops: req.ops,
 				message: req.message,
 				lock_tokens: req.lockTokens,
-				ack_errors: req.ackErrors
+				ack_errors: req.ackErrors,
+				validation_error_count: req.validationErrorCount,
+				issues: req.issues
 			},
 			schema: CommitResponseSchema,
 			onText

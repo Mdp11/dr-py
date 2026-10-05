@@ -378,6 +378,9 @@ export async function previewStaged(): Promise<PreviewResponse> {
 	);
 }
 
+/** The preview's answer the server stores with the commit; it validates nothing itself. */
+export type ReportedValidation = Pick<PreviewResponse, 'conformance_error_count' | 'issues'>;
+
 /**
  * Commit all staged edits — metamodel ops, model ops, artifact ops, and view
  * ops in ONE batch (metamodel first, view LAST; see {@link previewStaged}). On
@@ -388,11 +391,14 @@ export async function previewStaged(): Promise<PreviewResponse> {
  * until it failed or, once it landed, until the replica has applied its
  * answer and the model store has taken that in.
  */
-export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
+export async function commitStaged(
+	message: string,
+	reported: ReportedValidation
+): Promise<CommitResponse> {
 	_commitsInFlight += 1;
 	let landed = false;
 	try {
-		return await commitNow(message, ackErrors, () => {
+		return await commitNow(message, reported, () => {
 			landed = true;
 		});
 	} finally {
@@ -483,7 +489,7 @@ export class CommitPendingError extends Error {
 
 async function commitNow(
 	message: string,
-	ackErrors: boolean,
+	reported: ReportedValidation,
 	onLanded: () => void
 ): Promise<CommitResponse> {
 	// The model ops are the engine's staged batches, read once every edit has
@@ -553,7 +559,15 @@ async function commitNow(
 	let res: CommitResponse;
 	try {
 		res = await commitChanges(
-			{ baseRev: getModelRev(), ops, message, lockTokens: sent, ackErrors },
+			{
+				baseRev: getModelRev(),
+				ops,
+				message,
+				lockTokens: sent,
+				ackErrors: reported.conformance_error_count > 0,
+				validationErrorCount: reported.conformance_error_count,
+				issues: reported.issues
+			},
 			_clientConfig,
 			(text) => {
 				responseText = text;

@@ -1821,7 +1821,11 @@ describe('the issues', () => {
 						return HttpResponse.json(body);
 					})
 				);
-				return { answers, routes, commit: () => commitStaged('m', false) };
+				return {
+					answers,
+					routes,
+					commit: () => commitStaged('m', { conformance_error_count: 0, issues: [] })
+				};
 			}
 
 			it('each rule issue is listed once, on_server, from the splice on, while the refresh is out and after it lands', async () => {

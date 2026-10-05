@@ -380,8 +380,10 @@
 		committing = true;
 		commitError = null;
 		try {
-			// errorCount > 0 ⇒ ack_errors (the user clicked Commit anyway)
-			await commitStaged(message, errorCount > 0);
+			// The preview's count and issues are what the commit records; a count > 0
+			// is the user's "commit anyway".
+			if (preview === null) throw new Error('no preview to commit');
+			await commitStaged(message, preview);
 			// Still committing, and so still undismissable, until the replica has
 			// applied the answer (see `commitApplied`).
 			await commitApplied();

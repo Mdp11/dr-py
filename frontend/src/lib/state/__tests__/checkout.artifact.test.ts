@@ -147,7 +147,7 @@ describe('mixed model + artifact batches', () => {
 		]);
 
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		expect(commit.mock.calls[0][0].ops).toEqual([
 			expect.objectContaining({ kind: 'update_element', id: 'e_000001' }),
 			expect.objectContaining({ kind: 'update_artifact', id: 'a9', name: 'renamed' })
@@ -156,7 +156,9 @@ describe('mixed model + artifact batches', () => {
 
 	it('commitStaged refuses an empty batch without calling the API', async () => {
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
-		await expect(commitStaged('msg', false)).rejects.toThrow(/nothing staged/i);
+		await expect(commitStaged('msg', { conformance_error_count: 0, issues: [] })).rejects.toThrow(
+			/nothing staged/i
+		);
 		expect(commit).not.toHaveBeenCalled();
 	});
 });
@@ -169,7 +171,7 @@ describe('commit-time token partition', () => {
 		const renew = vi.spyOn(api, 'renewLock').mockResolvedValue({ ok: true });
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		// only the element token is surrendered; the open editor's lease survives
 		expect(commit.mock.calls[0][0].lockTokens).toEqual(['t_el_e_000001']);
@@ -189,7 +191,7 @@ describe('commit-time token partition', () => {
 		const renew = vi.spyOn(api, 'renewLock').mockResolvedValue({ ok: true });
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		expect(commit.mock.calls[0][0].lockTokens).toEqual(['t_art_a9']);
 		expect(getHeldTokens()).toEqual([]);
@@ -234,7 +236,7 @@ describe('commit-time token partition', () => {
 		stageArtifactUpdate('a9', { name: 'renamed' });
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		expect(commit.mock.calls[0][0].lockTokens).toEqual(['tMix']);
 		expect(getHeldTokens()).toEqual([]);
@@ -264,7 +266,7 @@ describe('artifact delta', () => {
 		const seen: ArtifactCommitInfo[] = [];
 		const off = onArtifactCommit((info) => seen.push(info));
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		off();
 
 		expect(getStagedArtifactOps()).toEqual([]);
@@ -286,7 +288,9 @@ describe('artifact delta', () => {
 			throw new Error('listener blew up');
 		});
 
-		await expect(commitStaged('m', false)).rejects.toThrow('listener blew up');
+		await expect(commitStaged('m', { conformance_error_count: 0, issues: [] })).rejects.toThrow(
+			'listener blew up'
+		);
 		off();
 
 		// The commit LANDED; the token it sent is gone server-side, so it must be

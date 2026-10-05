@@ -157,7 +157,7 @@ describe('three-buffer commit ordering', () => {
 		const viewCommitted = vi.fn();
 		const off = onViewCommitted(viewCommitted);
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		off();
 
 		expect(commit.mock.calls[0][0].ops).toEqual([
@@ -178,7 +178,7 @@ describe('three-buffer commit ordering', () => {
 		const viewCommitted = vi.fn();
 		const off = onViewCommitted(viewCommitted);
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		off();
 
 		expect(viewCommitted).not.toHaveBeenCalled();
@@ -194,7 +194,7 @@ describe('commit-time token partition: folder tokens ride the element rule', () 
 		openArtifactTab('table', { artifactId: 'a9', title: 'T' }); // keeps the artifact editor "open"
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		// Folder tokens are not artifact-only, so the token partition's
 		// `artifactOnly && unneeded` keep clause never matches them: they are

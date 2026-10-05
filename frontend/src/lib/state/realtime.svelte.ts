@@ -34,7 +34,7 @@ let _connected = $state(false);
 let _presence = $state<string[]>([]);
 const _lockState = new SvelteMap<string, LeaseLite>();
 let _conn: FeedConnection | null = null;
-let _pendingRebind = $state<{ rev: number; count: number } | null>(null);
+let _pendingRebind = $state<{ rev: number; count: number | null } | null>(null);
 // Terminal feed close (4401/4403/4404, or 4408 after repeated failed retries).
 // Reactive so the workspace can render a context-appropriate banner; the feed
 // transport itself stays pure and only signals via the onTerminal callback.
@@ -141,7 +141,7 @@ export function getLockFor(id: string): LeaseLite | undefined {
 	return _lockState.get(id);
 }
 
-export function getPendingRebind(): { rev: number; count: number } | null {
+export function getPendingRebind(): { rev: number; count: number | null } | null {
 	return _pendingRebind;
 }
 

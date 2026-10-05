@@ -414,7 +414,7 @@ describe('stageProposedOps against the engine', () => {
 			properties_patch: { name }
 		});
 		emit(rename('Quartz'));
-		const committing = checkout.commitStaged('m', false);
+		const committing = checkout.commitStaged('m', { conformance_error_count: 0, issues: [] });
 		await held.reached;
 		const call = vi.spyOn(s.sync, 'call');
 

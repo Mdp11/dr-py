@@ -103,7 +103,7 @@ describe('the issues on the engine across an own commit', () => {
 		await stagedSettled();
 		await vi.waitFor(() => expect(getLiveIssues()).toEqual([issue('uncommitted')]));
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		// The server's delta is spliced in at once: a transient.
 		expect(getLiveIssues()).toEqual([issue('on_server', 'delta')]);
 		await commitApplied();
@@ -135,7 +135,7 @@ describe('the issues on the engine across an own commit', () => {
 				expect(getLiveIssues()).toEqual([issue('uncommitted', 'facets', 'tmp_x')])
 			);
 
-			await commitStaged('m', false);
+			await commitStaged('m', { conformance_error_count: 0, issues: [] });
 			lists.push(getLiveIssues());
 			expect(getLiveIssues()).toEqual([issue('on_server', 'delta', 'srv-1')]);
 			await commitApplied();

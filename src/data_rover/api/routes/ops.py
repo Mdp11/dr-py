@@ -686,7 +686,7 @@ def _persist_commit(
     id_map: dict[str, str],
     _commit_id: str | None = None,
     _message: str = "",
-    _validation_error_count: int = 0,
+    _validation_error_count: int | None = 0,
     _issues: list | None = None,
     _from_metamodel_id: str | None = None,
     _to_metamodel_id: str | None = None,

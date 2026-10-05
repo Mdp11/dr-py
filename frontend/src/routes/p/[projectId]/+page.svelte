@@ -513,8 +513,8 @@
 			in:slide={{ duration: dur(PANEL) }}
 		>
 			<span>
-				The metamodel was changed to rev {pendingRebind.rev} ({pendingRebind.count} conformance issues).
-				Reload to continue.
+				The metamodel was changed to rev {pendingRebind.rev} ({pendingRebind.count ?? '—'} conformance
+				issues). Reload to continue.
 			</span>
 			<Button size="sm" variant="ghost" class="h-6 text-xs" onclick={() => void onReloadRebind()}>
 				Reload

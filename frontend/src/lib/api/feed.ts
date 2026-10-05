@@ -24,7 +24,7 @@ export type FeedEvent =
 			commit_id: string;
 			author_id: string;
 			message: string;
-			validation_error_count: number;
+			validation_error_count: number | null;
 			changed_elements: unknown[];
 			changed_relationships: unknown[];
 			deleted_element_ids: string[];
@@ -47,7 +47,7 @@ export type FeedEvent =
 			rev: number;
 			from_metamodel_id: string | null;
 			to_metamodel_id: string;
-			validation_error_count: number;
+			validation_error_count: number | null;
 	  }
 	| {
 			type: 'artifact';

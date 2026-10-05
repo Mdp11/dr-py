@@ -439,7 +439,7 @@ export type PreviewResponse = z.infer<typeof PreviewResponseSchema>;
 export const CommitResponseSchema = OpsResponseSchema.extend({
 	commit_id: z.string(),
 	message: z.string().default(''),
-	validation_error_count: z.number().int().default(0),
+	validation_error_count: z.number().int().nullable().default(0),
 	// artifact half of the commit delta (headers only — an open editor
 	// refetches nothing: the staged payload it just committed IS the payload).
 	// Defaults keep every pre-artifact fixture parsing.
@@ -858,7 +858,7 @@ export const CommitSummarySchema = z.object({
 	author_id: z.string().nullable(),
 	ts: z.string(),
 	message: z.string(),
-	validation_error_count: z.number(),
+	validation_error_count: z.number().nullable(),
 	op_count: z.number(),
 	is_rebind: z.boolean()
 });

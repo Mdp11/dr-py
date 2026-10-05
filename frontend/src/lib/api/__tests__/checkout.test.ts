@@ -49,7 +49,15 @@ describe('checkout api', () => {
 	it('commitChanges maps camelCase to snake_case body', async () => {
 		const cap: { path?: string; body?: unknown } = {};
 		await commitChanges(
-			{ baseRev: 7, ops: [], message: 'm', lockTokens: ['t1'], ackErrors: true },
+			{
+				baseRev: 7,
+				ops: [],
+				message: 'm',
+				lockTokens: ['t1'],
+				ackErrors: true,
+				validationErrorCount: 2,
+				issues: []
+			},
 			{
 				fetch: jsonFetch(cap, {
 					model_rev: 8,
@@ -71,13 +79,23 @@ describe('checkout api', () => {
 		expect(body.base_rev).toBe(7);
 		expect(body.lock_tokens).toEqual(['t1']);
 		expect(body.ack_errors).toBe(true);
+		expect(body.validation_error_count).toBe(2);
+		expect(body.issues).toEqual([]);
 	});
 
 	it('commitChanges hands onText the raw response body before it is parsed', async () => {
 		const cap: { path?: string; body?: unknown } = {};
 		let seenText: string | undefined;
 		const res = await commitChanges(
-			{ baseRev: 7, ops: [], message: 'm', lockTokens: ['t1'], ackErrors: true },
+			{
+				baseRev: 7,
+				ops: [],
+				message: 'm',
+				lockTokens: ['t1'],
+				ackErrors: true,
+				validationErrorCount: 2,
+				issues: []
+			},
 			{
 				fetch: jsonFetch(cap, {
 					model_rev: 8,
@@ -109,7 +127,15 @@ describe('checkout api', () => {
 	])('commitChanges parses prev_rev: %s', async (sent, expected) => {
 		const cap: { path?: string; body?: unknown } = {};
 		const res = await commitChanges(
-			{ baseRev: 7, ops: [], message: 'm', lockTokens: ['t1'], ackErrors: true },
+			{
+				baseRev: 7,
+				ops: [],
+				message: 'm',
+				lockTokens: ['t1'],
+				ackErrors: true,
+				validationErrorCount: 2,
+				issues: []
+			},
 			{
 				fetch: jsonFetch(cap, {
 					model_rev: 8,
@@ -134,7 +160,15 @@ describe('checkout api', () => {
 	it('commitChanges parses a response with prev_rev absent', async () => {
 		const cap: { path?: string; body?: unknown } = {};
 		const res = await commitChanges(
-			{ baseRev: 7, ops: [], message: 'm', lockTokens: ['t1'], ackErrors: true },
+			{
+				baseRev: 7,
+				ops: [],
+				message: 'm',
+				lockTokens: ['t1'],
+				ackErrors: true,
+				validationErrorCount: 2,
+				issues: []
+			},
 			{
 				fetch: jsonFetch(cap, {
 					model_rev: 8,

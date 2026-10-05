@@ -149,7 +149,7 @@ describe('an own commit that rebinds the metamodel', () => {
 			await vi.waitFor(async () => expect(await reads[reads.length - 1]).toContain('tmp_1'));
 
 			const followed = until((s) => s.phase === 'ready' && s.rev === project.rev);
-			await commitStaged('m', false);
+			await commitStaged('m', { conformance_error_count: 0, issues: [] });
 			await followed;
 
 			await vi.waitFor(async () => {

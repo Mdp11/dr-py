@@ -246,12 +246,12 @@ class Commit(Base):
     #: optional human commit message. Empty for the legacy
     #: /model/ops + /model/undo paths (they pass no message).
     message: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    #: number of CONFORMANCE-tier issues over the dirty set at commit time
-    #: (structural issues are hard-rejected, so this counts only soft ones).
-    validation_error_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0
+    #: the validation error count the client reported at commit; NULL for a
+    #: revert, which has no client preview.
+    validation_error_count: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
     )
-    #: the conformance issue list recorded at commit (IssueOut dicts).
+    #: the issue list the client reported at commit (IssueOut dicts).
     issues: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     #: metamodel rebind: the model's metamodel_id before/after this commit.
     #: Both NULL for ordinary edit commits; set only by a rebind-carrying

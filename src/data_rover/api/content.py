@@ -102,7 +102,7 @@ def append_commit(
     inverse_ops: list[Any],
     id_map: dict[str, str],
     message: str = "",
-    validation_error_count: int = 0,
+    validation_error_count: int | None = 0,
     issues: list[Any] | None = None,
     from_metamodel_id: str | None = None,
     to_metamodel_id: str | None = None,

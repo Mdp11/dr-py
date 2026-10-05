@@ -124,7 +124,7 @@ def commit_event(
     commit_id: str,
     author_id: str,
     message: str,
-    validation_error_count: int,
+    validation_error_count: int | None,
     changed_elements: list[dict[str, Any]],
     changed_relationships: list[dict[str, Any]],
     deleted_element_ids: list[str],
@@ -190,7 +190,7 @@ def rebind_event(
     rev: int,
     from_metamodel_id: str | None,
     to_metamodel_id: str,
-    validation_error_count: int,
+    validation_error_count: int | None,
 ) -> dict[str, Any]:
     """Whole-model metamodel rebind: peers should reload."""
     return {

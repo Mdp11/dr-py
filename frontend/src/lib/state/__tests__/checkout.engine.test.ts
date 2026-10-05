@@ -259,7 +259,7 @@ describe('the commit on the engine side', () => {
 		emit(rename('e_000002', 'Q'));
 		// Coalesces into the second batch.
 		emit(rename('e_000002', 'Quartz'));
-		const res = await commitStaged('m', false);
+		const res = await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		expect(bodies.commits).toHaveLength(1);
 		expect(bodies.commits[0]!.ops).toEqual([CREATE_X, rename('e_000002', 'Quartz')]);
@@ -289,7 +289,7 @@ describe('the commit on the engine side', () => {
 		expect(getReplicaStatus()).toMatchObject({ phase: 'ready', rev: 1 });
 	});
 
-	it('the commit sends every held token and the error acknowledgement', async () => {
+	it('the commit sends every held token, the error acknowledgement and the preview count and issues', async () => {
 		const s = await open();
 		const bodies = routes(s);
 		await ensureElements(['e_000001']);
@@ -297,10 +297,22 @@ describe('the commit on the engine side', () => {
 		emit(rename('e_000001', 'mine'));
 		await stagedSettled();
 
-		await commitStaged('m', true);
+		const issue = {
+			severity: 'error',
+			message: 'name: too long',
+			target_ids: ['e_000001'],
+			category: 'conformance',
+			origin: 'uncommitted'
+		};
+		await commitStaged('m', { conformance_error_count: 1, issues: [issue] });
 
 		expect(bodies.commits).toHaveLength(1);
-		expect(bodies.commits[0]).toMatchObject({ lock_tokens: ['t1'], ack_errors: true });
+		expect(bodies.commits[0]).toMatchObject({
+			lock_tokens: ['t1'],
+			ack_errors: true,
+			validation_error_count: 1,
+			issues: [issue]
+		});
 		expect(getHeldTokens()).toEqual([]);
 	});
 
@@ -324,7 +336,7 @@ describe('the commit on the engine side', () => {
 		emit(rename('e_000001', 'mine'));
 		await stagedSettled();
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		expect(seen.answers).toHaveLength(1);
 		expect(seen.answers[0]!.text).toBe(served);
@@ -349,7 +361,7 @@ describe('the commit on the engine side', () => {
 		emit(rename('e_000001', 'mine'));
 		await stagedSettled();
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		expect(seen.answers.map((answer) => answer.applied)).toEqual([false]);
 	});
@@ -363,7 +375,7 @@ describe('the commit on the engine side', () => {
 
 		emit(CREATE_X);
 		emit(rename('e_000002', 'Quartz'));
-		const committing = commitStaged('m', false);
+		const committing = commitStaged('m', { conformance_error_count: 0, issues: [] });
 		await held.reached;
 		// An update of the element the held commit creates: no batch holds one to merge into.
 		emit(rename('tmp_x', 'later'));
@@ -394,7 +406,7 @@ describe('the commit on the engine side', () => {
 		});
 
 		emit(CREATE_X);
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		vi.mocked(model.stagedSettled).mockRestore();
 		await settled(s);
 
@@ -412,7 +424,9 @@ describe('the commit on the engine side', () => {
 
 		emit(CREATE_X);
 		emit(rename('e_000002', 'Quartz'));
-		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(ValidationError);
+		await expect(
+			commitStaged('m', { conformance_error_count: 0, issues: [] })
+		).rejects.toBeInstanceOf(ValidationError);
 		await settled(s);
 
 		expect(bodies.commits).toHaveLength(1);
@@ -440,7 +454,9 @@ describe('the commit on the engine side', () => {
 
 		emit(CREATE_X);
 		await s.sync.settled();
-		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(StagedUnreadableError);
+		await expect(
+			commitStaged('m', { conformance_error_count: 0, issues: [] })
+		).rejects.toBeInstanceOf(StagedUnreadableError);
 		await expect(previewStaged()).rejects.toBeInstanceOf(StagedUnreadableError);
 		await expect(validateAll()).rejects.toBeInstanceOf(StagedUnreadableError);
 
@@ -459,7 +475,7 @@ describe('the commit on the engine side', () => {
 
 		emit(CREATE_X);
 		emit(rename('e_000002', 'Quartz'));
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		expect(seen.answers[0]).toMatchObject({ rebound: true, batchIds: [1, 2] });
 		expect(getReplicaStatus().phase).toBe('frozen');
 		// The UI adopts the new metamodel and the replica is rebuilt from the server.
@@ -506,7 +522,7 @@ describe('waiting for the replica to apply a commit', () => {
 		const deltas = holdDeltas(s);
 
 		emit(rename('e_000002', 'Quartz'));
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		const applied = commitApplied();
 		expect(applied).not.toBeNull();
 		expect(await pending(applied!)).toBe(true);
@@ -538,7 +554,7 @@ describe('waiting for the replica to apply a commit', () => {
 		s.project.fail('snapshot', 503, 99);
 
 		emit(rename('e_000002', 'Quartz'));
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		const applied = commitApplied()!;
 		expect(await pending(applied)).toBe(true);
 
@@ -802,7 +818,7 @@ describe('a commit whose answer the replica holds', () => {
 		await settled(s);
 		expect(getStagedBatchIds()).toEqual([1, 2, 3]);
 
-		const res = await commitStaged('m', false);
+		const res = await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		await commitApplied();
 		expect(getReplicaStatus().phase).toBe('frozen');
 		expect(bodies.commits[0]!.ops).toEqual(creates);
@@ -820,7 +836,9 @@ describe('a commit whose answer the replica holds', () => {
 		emit(rename('e_000002', 'after'));
 		await settled(s);
 		expect(getStagedOps()).toEqual([rename('e_000002', 'after')]);
-		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);
+		await expect(
+			commitStaged('m', { conformance_error_count: 0, issues: [] })
+		).rejects.toBeInstanceOf(CommitPendingError);
 		expect(bodies.commits).toHaveLength(1);
 		await commitsLanded();
 
@@ -835,7 +853,7 @@ describe('a commit whose answer the replica holds', () => {
 			expect(Object.values(res.id_map)).toContain(ids[0]);
 		}
 
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		expect(bodies.commits).toHaveLength(2);
 		expect(bodies.commits[1]!.ops).toEqual([rename('e_000002', 'after')]);
 	});
@@ -847,7 +865,7 @@ describe('a commit whose answer the replica holds', () => {
 		await peerRebind(s);
 
 		emit(rename('e_000002', 'Quartz'));
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		await commitApplied();
 
 		// Merged into the committed batch, the engine would drop it with the answer.
@@ -874,7 +892,7 @@ describe('a commit whose answer the replica holds', () => {
 		await peerRebind(s);
 
 		emit(rename('e_000002', 'Quartz'));
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 		await commitApplied();
 		emit(rename('e_000002', 'Quartzite'));
 		await ensureCheckout([{ resource_id: 'e_000003', mode: 'exclusive' }], 'edit');
@@ -894,7 +912,9 @@ describe('a commit whose answer the replica holds', () => {
 		expect(bodies.validate).toEqual([]);
 		expect(await prompt(discardElement('e_000003'))).toBeUndefined();
 		expect(getHeldTokens()).toEqual([]);
-		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);
+		await expect(
+			commitStaged('m', { conformance_error_count: 0, issues: [] })
+		).rejects.toBeInstanceOf(CommitPendingError);
 		expect(getStagedOps()).toEqual([rename('e_000002', 'Quartzite')]);
 
 		await adopt(s);
@@ -914,7 +934,7 @@ describe('a commit whose answer the replica holds', () => {
 		await settled(s);
 		expect(getStagedBatchIds()).toEqual([1, 2]);
 
-		const committing = commitStaged('m', false);
+		const committing = commitStaged('m', { conformance_error_count: 0, issues: [] });
 		await held.reached;
 		// While the POST is out, the replica diverges on a peer's delta and cannot be rebuilt.
 		s.project.fail('snapshot', 503, 99);
@@ -933,7 +953,9 @@ describe('a commit whose answer the replica holds', () => {
 		expect(getStagedOps()).toEqual([]);
 		expect(getStagedChangeCount()).toBe(0);
 		// A commit waits for the retry: refused, nothing posted.
-		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);
+		await expect(
+			commitStaged('m', { conformance_error_count: 0, issues: [] })
+		).rejects.toBeInstanceOf(CommitPendingError);
 		expect(bodies.commits).toHaveLength(1);
 
 		s.project.fail('snapshot', 503, 0);
@@ -958,7 +980,7 @@ describe('a commit whose answer the replica holds', () => {
 		await settled(s);
 
 		// The rename is committed; a create is staged while the POST is out.
-		const committing = commitStaged('m', false);
+		const committing = commitStaged('m', { conformance_error_count: 0, issues: [] });
 		await held.reached;
 		emit(organization('tmp_x', 'Kept Org'));
 		await settled(s);
@@ -1010,7 +1032,7 @@ describe('reloading the model on the engine side', () => {
 		await ensureElements(['e_000003']);
 		await ensureCheckout([{ resource_id: 'e_000003', mode: 'exclusive' }], 'edit');
 		emit(rename('e_000003', 'fresh'));
-		await commitStaged('m', false);
+		await commitStaged('m', { conformance_error_count: 0, issues: [] });
 
 		expect(bodies.commits).toHaveLength(1);
 		expect(bodies.commits[0]!.ops).toEqual([rename('e_000003', 'fresh')]);
@@ -1026,15 +1048,19 @@ describe('the count of commits in flight', () => {
 		await settled(s);
 
 		routes(s, { refuse: true });
-		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(ValidationError);
+		await expect(
+			commitStaged('m', { conformance_error_count: 0, issues: [] })
+		).rejects.toBeInstanceOf(ValidationError);
 		await commitsLanded();
 
 		server.use(http.post(`${API}/commits`, () => HttpResponse.error()));
-		await expect(commitStaged('m', false)).rejects.toThrow();
+		await expect(commitStaged('m', { conformance_error_count: 0, issues: [] })).rejects.toThrow();
 		await commitsLanded();
 
 		const flight = s.sync.beginCommit();
-		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);
+		await expect(
+			commitStaged('m', { conformance_error_count: 0, issues: [] })
+		).rejects.toBeInstanceOf(CommitPendingError);
 		flight.abandon();
 		await commitsLanded();
 	});

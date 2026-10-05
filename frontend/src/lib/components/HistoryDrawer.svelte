@@ -246,7 +246,11 @@
 										>rebind</span
 									>
 								{/if}
-								{#if c.validation_error_count > 0}
+								{#if c.validation_error_count === null}
+									<span class="text-[10px] text-muted-foreground/70" title="No validation count"
+										>—</span
+									>
+								{:else if c.validation_error_count > 0}
 									<span
 										class="flex items-center gap-1 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning"
 									>

@@ -1036,12 +1036,15 @@ class CommitRequest(BaseModel):
     lock_tokens: list[str] = Field(default_factory=list)
     #: client acknowledges the surfaced conformance-error count (UI gate).
     ack_errors: bool = False
+    #: the client's own preview of the batch, stored with the commit as given.
+    validation_error_count: int = 0
+    issues: list[IssueOut] = Field(default_factory=list)
 
 
 class CommitResponse(OpsResponse):
     commit_id: str
     message: str = ""
-    validation_error_count: int = 0
+    validation_error_count: int | None = 0
     #: artifact half of the commit delta (created + updated rows, headers
     #: only — the client refetches a payload it actually has open). Empty on
     #: a model-only commit, which is why both fields default rather than
@@ -1078,7 +1081,7 @@ class CommitSummaryOut(BaseModel):
     author_id: str | None = None
     ts: datetime
     message: str
-    validation_error_count: int
+    validation_error_count: int | None
     op_count: int
     is_rebind: bool
 

@@ -206,3 +206,19 @@ def test_migration_0016_adds_snapshot_format_columns(tmp_path: Path) -> None:
     assert not set(new) & set(cols)
     with engine.connect() as conn:
         assert conn.execute(text("SELECT key FROM snapshots")).scalars().all() == ["k3"]
+
+
+def test_migration_0017_makes_commit_count_nullable(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 't8.db'}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "0016")
+    engine = create_engine(url)
+    cols = {c["name"]: c for c in inspect(engine).get_columns("commits")}
+    assert cols["validation_error_count"]["nullable"] is False
+
+    command.upgrade(cfg, "head")
+    cols = {c["name"]: c for c in inspect(engine).get_columns("commits")}
+    assert cols["validation_error_count"]["nullable"] is True

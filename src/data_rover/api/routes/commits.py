@@ -1308,7 +1308,7 @@ def create_commit(
         #    let that exception escape every rollback below with model_rev
         #    already bumped and the batch already in op_log.
         commit_id = uuid.uuid4().hex
-        issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
+        issues_json = [i.model_dump() for i in payload.issues]
         new_view_revs: dict[str, int] = {}
         try:
             for vid, target, vres in view_results:
@@ -1327,7 +1327,7 @@ def create_commit(
                 id_map=merged_id_map,
                 _commit_id=commit_id,
                 _message=payload.message,
-                _validation_error_count=len(conformance),
+                _validation_error_count=payload.validation_error_count,
                 _issues=issues_json,
                 # The FK columns are what MARK this row a rebind for every
                 # downstream reader (staleness guard, is_rebind, diff); they
@@ -1436,7 +1436,7 @@ def create_commit(
                     rev=session.model_rev,
                     from_metamodel_id=mm_res.from_metamodel_id if mm_res else None,
                     to_metamodel_id=(mm_res.to_metamodel_id or "") if mm_res else "",
-                    validation_error_count=len(conformance),
+                    validation_error_count=payload.validation_error_count,
                 )
             )
         else:
@@ -1448,7 +1448,7 @@ def create_commit(
                     commit_id=commit_id,
                     author_id=user.id,
                     message=payload.message,
-                    validation_error_count=len(conformance),
+                    validation_error_count=payload.validation_error_count,
                     scope=scope,
                     changed_elements=changed_elements,
                     changed_relationships=changed_relationships,
@@ -1501,7 +1501,7 @@ def create_commit(
         issue_counts=state.counts(),
         commit_id=commit_id,
         message=payload.message,
-        validation_error_count=len(conformance),
+        validation_error_count=payload.validation_error_count,
         changed_artifacts=changed_artifact_headers,
         deleted_artifact_ids=[d["id"] for d in art_res.deleted],
         view_revs=new_view_revs,
@@ -1679,7 +1679,6 @@ def revert_commit(
                     ],
                 },
             )
-        conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
         delta = state.replace(res.dirty.ids, scoped)
         prev_rev = session.model_rev
         unwind.prior_digest = session.state_digest_value
@@ -1700,7 +1699,7 @@ def revert_commit(
         unwind.rev_bumped = True
         commit_id = uuid.uuid4().hex
         message = payload.message or f"Revert to rev {payload.target_rev}"
-        issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
+        issues_json: list[dict] = []
         unwind.db_staged = True
         try:
             persisted = _persist_commit(
@@ -1713,7 +1712,7 @@ def revert_commit(
                 id_map=dict(res.id_map),
                 _commit_id=commit_id,
                 _message=message,
-                _validation_error_count=len(conformance),
+                _validation_error_count=None,
                 _issues=issues_json,
                 _entity_states=capture_entity_states(model, res),
                 _state_digest=state_digest,
@@ -1755,7 +1754,7 @@ def revert_commit(
                 # revert refuses batches spanning artifact ops (below), so a
                 # revert commit is model-only by construction.
                 scope=["model"],
-                validation_error_count=len(conformance),
+                validation_error_count=None,
                 changed_elements=changed_elements,
                 changed_relationships=changed_relationships,
                 deleted_element_ids=list(res.deleted_element_ids),
@@ -1785,5 +1784,5 @@ def revert_commit(
         issue_counts=state.counts(),
         commit_id=commit_id,
         message=message,
-        validation_error_count=len(conformance),
+        validation_error_count=None,
     )

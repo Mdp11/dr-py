@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import HistoryDrawer from '../HistoryDrawer.svelte';
 
@@ -53,7 +53,7 @@ vi.mock('$lib/api/history', async (orig) => {
 	return { ...actual, revertToCommit: vi.fn(), getCommitDiff: vi.fn(), getCommitsDiff: vi.fn() };
 });
 
-import { loadFirstPage } from '$lib/state/history.svelte';
+import { getCommits, loadFirstPage } from '$lib/state/history.svelte';
 import { getCommitDiff, getCommitsDiff, revertToCommit } from '$lib/api/history';
 import { applyDelta, beginReplicaCommit } from '$lib/state';
 // Left real by the `...actual` spread above so the revert gate is exercised
@@ -101,6 +101,33 @@ describe('HistoryDrawer list', () => {
 		expect(document.body.textContent).toContain('second');
 		expect(document.body.textContent).toContain('first');
 		expect(document.body.textContent?.toLowerCase()).toContain('rebind');
+		unmount(c);
+	});
+});
+
+describe('HistoryDrawer count', () => {
+	it('shows a dash for a commit with no reported count', async () => {
+		const listed = vi.mocked(getCommits).getMockImplementation()!;
+		onTestFinished(() => {
+			vi.mocked(getCommits).mockImplementation(listed);
+		});
+		vi.mocked(getCommits).mockReturnValue([
+			{
+				rev: 3,
+				commit_id: 'c3',
+				author_id: 'u',
+				ts: '2026-01-01T00:00:00Z',
+				message: 'Revert to rev 1',
+				validation_error_count: null,
+				op_count: 1,
+				is_rebind: false
+			}
+		]);
+		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
+		flushSync();
+		await Promise.resolve();
+		flushSync();
+		expect(document.body.textContent).toContain('—');
 		unmount(c);
 	});
 });
