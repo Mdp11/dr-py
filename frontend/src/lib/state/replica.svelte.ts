@@ -87,6 +87,8 @@ const _placedViews = new Set<string>();
 let _noticeDismissed = $state(false);
 /** Set by `retryReplica()`, cleared once the retry lands at `ready`, `failed`, `off` or `server`. */
 let _retrying = $state(false);
+/** A Retry of the artifacts' load is running; apart from `_retrying`, which is a re-bootstrap's. */
+let _loadRetrying = $state(false);
 /** Why the follower's first artifact load failed, retry included; null while it has not, or has landed. */
 let _loadFailure = $state<string | null>(null);
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
@@ -185,6 +187,7 @@ function build(overrides: Partial<SyncDeps> = {}): ReplicaSync {
 			) {
 				_retrying = false;
 			}
+			_releaseUnblocked();
 		}
 	});
 	return made;
@@ -604,16 +607,17 @@ function follow(sync: ReplicaSync, projectId: string): void {
 		// and the workspace blocks, its Retry loading them again.
 		onLoadFailed: (error) => {
 			_loadFailure = error instanceof Error ? error.message : String(error);
-			_retrying = false;
+			_loadRetrying = false;
 			_gate.moved();
 		},
 		// The issues, tables and views gates open here too: the server's list,
 		// pages and warnings, answered until now, hold none of the staged edits.
 		onLoaded: () => {
 			_loadFailure = null;
-			_retrying = false;
+			_loadRetrying = false;
 			_followerEpoch += 1;
 			_gate.moved();
+			_releaseUnblocked();
 			if (issuesOnEngine(_status)) scheduleIssuesRefetch();
 			tablesMoved();
 			viewsMoved();
@@ -634,8 +638,10 @@ function stopFollower(notify = true): void {
 	_follower.removeQuiet();
 	_follower = null;
 	_loadFailure = null;
+	_loadRetrying = false;
 	_followerEpoch += 1;
 	_gate.moved();
+	_releaseUnblocked();
 	if (notify && viewsWereOpen) viewsClosed();
 }
 
@@ -683,6 +689,7 @@ export function stopReplica(): void {
 	stopFollower(false);
 	_sync?.stop();
 	_releaseGate();
+	_releaseUnblocked();
 }
 
 /**
@@ -722,6 +729,26 @@ export function isReplicaBlocked(): boolean {
 	);
 }
 
+/** `whenReplicaUnblocked()` waiters, released once the workspace is no longer blocked. */
+let _unblockWaiters: Array<() => void> = [];
+
+function _releaseUnblocked(): void {
+	if (_unblockWaiters.length === 0 || isReplicaBlocked()) return;
+	const waiters = _unblockWaiters;
+	_unblockWaiters = [];
+	for (const resolve of waiters) resolve();
+}
+
+/**
+ * Resolves once the workspace is not blocked (at once when it is not): a
+ * Retry landed, or the replica stopped. The page uses it to finish the boot
+ * steps a blocked open skipped.
+ */
+export function whenReplicaUnblocked(): Promise<void> {
+	if (!isReplicaBlocked()) return Promise.resolve();
+	return new Promise<void>((resolve) => _unblockWaiters.push(resolve));
+}
+
 /** Why the workspace is blocked, when it is. */
 export function getReplicaBlockReason(): string | null {
 	if (_status.phase === 'failed') return _status.reason;
@@ -729,7 +756,7 @@ export function getReplicaBlockReason(): string | null {
 }
 
 export function isReplicaRetrying(): boolean {
-	return _retrying;
+	return _retrying || _loadRetrying;
 }
 
 /**
@@ -744,7 +771,7 @@ export function retryReplica(): void {
 		return;
 	}
 	if (_loadFailure !== null && _follower !== null) {
-		_retrying = true;
+		_loadRetrying = true;
 		_follower.follower.load();
 		// A load asked again is waited for, not refused, until it fails once more.
 		_gate.moved();
@@ -865,4 +892,5 @@ export function resetReplica(): void {
 	_loadFailure = null;
 	_offSinceReady = false;
 	_releaseGate();
+	_releaseUnblocked();
 }

@@ -75,6 +75,7 @@
 		setProjectOpening,
 		isReplicaBlocked,
 		replicaGate,
+		whenReplicaUnblocked,
 		replicaMetamodelAdopted,
 		startRealtime,
 		startReplica,
@@ -220,30 +221,45 @@
 			// first -> none) BEFORE fetching its content.
 			await loadViews();
 			await refreshView();
-			try {
-				await refreshSummary();
-			} catch {
-				return; // metamodel but no model
-			}
-			// Seed the live issue map immediately so a freshly opened project shows
-			// its committed issues without waiting for a Validate click. Best-effort
-			// like loadArtifacts below: a miss just means the sweep-completion or
-			// next feed event heals it.
-			void refetchIssues();
-			try {
-				await loadProjectInfo(markEditorLockDenied);
-			} catch {
-				// role/ttl best-effort; editing stays gated as viewer until it loads
-			}
-			await loadArtifacts().catch(() => {}); // artifact library is best-effort
-			// The replica's own open, if any surface is on the engine: the overlay
-			// stays up through download/parse/index/tail, not just the server-side
-			// steps above.
-			await replicaGate();
+			await bootContent();
 		} finally {
 			setProjectOpening(false);
 			finishJourney(); // snap to 100% (honoring the min visible duration) and tear down; no-op if already cancelled
 		}
+	}
+
+	// The project's content once its metamodel, views and replica are in: the
+	// summary, the live issues, the role, the artifact library.
+	async function bootContent(): Promise<void> {
+		try {
+			await refreshSummary();
+		} catch {
+			// A replica that is blocked (artifacts that would not load, a replica that
+			// could not be rebuilt) answers nothing until Retry: the boot ends here, so
+			// the failure overlay shows, and these steps run once the block clears.
+			if (isReplicaBlocked()) {
+				const projectId = getActiveProjectId();
+				void whenReplicaUnblocked().then(() => {
+					if (getActiveProjectId() === projectId) return bootContent();
+				});
+			}
+			return; // metamodel but no model, or blocked
+		}
+		// Seed the live issue map immediately so a freshly opened project shows
+		// its committed issues without waiting for a Validate click. Best-effort
+		// like loadArtifacts below: a miss just means the sweep-completion or
+		// next feed event heals it.
+		void refetchIssues();
+		try {
+			await loadProjectInfo(markEditorLockDenied);
+		} catch {
+			// role/ttl best-effort; editing stays gated as viewer until it loads
+		}
+		await loadArtifacts().catch(() => {}); // artifact library is best-effort
+		// The replica's own open, if any surface is on the engine: the overlay
+		// stays up through download/parse/index/tail, not just the server-side
+		// steps above.
+		await replicaGate();
 	}
 
 	// Conflict / flush-error banner. A conflict means the local caches are

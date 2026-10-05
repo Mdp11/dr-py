@@ -203,6 +203,7 @@ export {
 	getWorkingStamp,
 	isReplicaBlocked,
 	getReplicaBlockReason,
+	whenReplicaUnblocked,
 	isReplicaRetrying,
 	metamodelIncludesStaged,
 	registerViewPlacement,

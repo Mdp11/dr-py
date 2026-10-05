@@ -1581,7 +1581,9 @@ sync exists:
   `server` or `off` — its reason the status's, such as `no model` — when the
   follower's first load failed for good (`loadFailed()`, its retry included:
   the workspace then blocks behind the failure overlay, which shows
-  `getReplicaBlockReason()`, and Retry asks for a new load), or without an
+  `getReplicaBlockReason()`, and Retry asks for a new load; `boot()` ends at the
+  first read that rejects while blocked and runs its content steps — summary,
+  issues, role, artifacts — once `whenReplicaUnblocked()` resolves), or without an
   installed replica. `moved()` runs at every status change, every
   follower load and stop and every seam install and uninstall; a waiting
   read therefore resolves the moment the gate opens, and rejects when the

@@ -67,7 +67,8 @@ import {
 	retryReplica,
 	startReplica,
 	stopReplica,
-	subscribeReplicaStatus
+	subscribeReplicaStatus,
+	whenReplicaUnblocked
 } from '../replica.svelte';
 import * as modelEngine from '../model-engine.svelte';
 import {
@@ -542,12 +543,18 @@ describe('the engine seam', () => {
 		expect(getReplicaBlockReason()).toMatch(/^The artifacts could not be loaded/);
 		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
 
+		let unblocked = false;
+		const clear = whenReplicaUnblocked().then(() => (unblocked = true));
+		await macrotask();
+		expect(unblocked).toBe(false);
+
 		healthy = true;
 		retryReplica();
 		expect(isReplicaRetrying()).toBe(true);
 		const afterRetry = getElementsBatch(['e_000001']);
 
 		expect((await afterRetry).map((item) => item.id)).toEqual(['e_000001']);
+		await clear;
 		expect(isReplicaBlocked()).toBe(false);
 		expect(isReplicaRetrying()).toBe(false);
 		expect(getReplicaBlockReason()).toBeNull();
