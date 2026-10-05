@@ -1,19 +1,17 @@
-// The `issues` surface over the real engine: a replica of a fake project,
-// swept, behind a seam whose issues, metamodel, views and compare gates are
-// the replica's `seeded`.
+// The engine's issue, preview, metamodel, view and compare reads over the real
+// engine: a replica of a fake project, swept, behind an installed seam.
 import { http, HttpResponse } from 'msw';
 import type { MetamodelDoc, StageResult } from '$engine';
 import { createEngineSeam } from '$lib/engine/seam';
-import { SURFACE_DEFAULTS } from '$lib/engine/surfaces';
-import type { ReplicaStatus } from '$lib/engine/sync';
 import type { ModelOp } from '$lib/state/ops';
 import {
 	fakeProject,
+	ready,
 	syncOver,
 	type FakeProject
 } from '$lib/engine/__tests__/support/project-server';
 import { setActiveBaseUrl } from '../client';
-import { installEngineSeam, type EngineSeam, type Side, type Surface } from '../engine-route';
+import { installEngineSeam, type EngineSeam } from '../engine-route';
 import { server } from './server';
 
 export type IssuesEngine = Awaited<ReturnType<typeof issuesEngine>>;
@@ -82,34 +80,19 @@ export const STRUCTURAL = {
 	relationship_types: { added: [], removed: [], changed: [] }
 };
 
-/** What `/metamodel/diff` answers: every issue passing, the structural diff as `STRUCTURAL`. */
-export const SERVER_DIFF = {
-	now_failing: [],
-	now_passing: [],
-	unchanged_count: 0,
-	current_error_count: 0,
-	candidate_error_count: 0,
-	structural: STRUCTURAL
-};
-
 /**
- * A ready, swept replica of `project` behind an installed seam with the
- * issues on the engine and every other surface as it defaults, or as
- * `surfaces` sets it; the active base URL is the project's, so the server
- * side of a call reaches MSW. `requests` records the server's issue routes
- * and the candidate routes (`lint`, `structural-diff`, `diff`, their body
- * the text sent); lint answers `lint(text)`, by default ok with
- * `longerNamesDoc` as its document. `seeded`, when given, stands for the
- * replica's own flag in the seam, and the replica is awaited `ready` rather
- * than swept; `shadow` is the seam's.
+ * A ready, swept replica of `project` behind an installed seam; the active
+ * base URL is the project's, so the server calls the reads still make
+ * (`validate`, `preview`, `lint`, `structural-diff`) reach MSW. `requests`
+ * records them, their body the text sent; lint answers `lint(text)`, by
+ * default ok with `longerNamesDoc` as its document. `whenReady` replaces the
+ * seam's gate, open by default.
  */
 export async function issuesEngine(
 	made: { dispose(): void }[],
 	options: {
 		project?: FakeProject;
-		seeded?: () => boolean;
-		shadow?: EngineSeam['shadow'];
-		surfaces?: Partial<Record<Surface, Side>>;
+		whenReady?: EngineSeam['whenReady'];
 		lint?: (text: string) => Record<string, unknown>;
 	} = {}
 ) {
@@ -118,9 +101,7 @@ export async function issuesEngine(
 	const over = syncOver(project);
 	made.push(over);
 	over.sync.open(project.projectId);
-	await (options.seeded === undefined
-		? over.until((status) => status.seeded)
-		: over.until((status) => status.phase === 'ready'));
+	await over.until((status) => status.seeded);
 	const requests: { route: string; body: unknown }[] = [];
 	const record =
 		(route: string) =>
@@ -133,10 +114,6 @@ export async function issuesEngine(
 	const lint =
 		options.lint ?? (() => ({ ok: true, errors: [], document: longerNamesDoc(project.doc) }));
 	server.use(
-		http.get(`${base}/model/issues`, async (info) => {
-			await record('issues')(info);
-			return HttpResponse.json({ model_rev: project.rev, issues: [], counts: {} });
-		}),
 		http.post(`${base}/model/validate`, async (info) => {
 			await record('validate')(info);
 			return HttpResponse.json([]);
@@ -158,30 +135,11 @@ export async function issuesEngine(
 		http.post(`${base}/metamodel/structural-diff`, async ({ request }) => {
 			requests.push({ route: 'structural-diff', body: await request.text() });
 			return HttpResponse.json(STRUCTURAL);
-		}),
-		http.post(`${base}/metamodel/diff`, async ({ request }) => {
-			requests.push({ route: 'diff', body: await request.text() });
-			return HttpResponse.json(SERVER_DIFF);
 		})
 	);
 	setActiveBaseUrl(base);
-	const seeded = options.seeded ?? (() => over.sync.status().seeded);
-	const surfaces: Record<Surface, Side> = {
-		...SURFACE_DEFAULTS,
-		issues: 'engine',
-		...options.surfaces
-	};
-	const sync = {
-		status: (): ReplicaStatus => ({ ...over.sync.status(), seeded: seeded() }),
-		call: over.sync.call.bind(over.sync)
-	};
 	installEngineSeam(
-		createEngineSeam(sync, surfaces, options.shadow, {
-			issues: () => seeded(),
-			metamodel: () => seeded(),
-			views: () => seeded(),
-			compare: () => seeded()
-		})
+		createEngineSeam({ call: over.sync.call.bind(over.sync) }, options.whenReady ?? ready)
 	);
 	return {
 		project,

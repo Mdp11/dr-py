@@ -8,12 +8,7 @@ import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
 import { remapVisitIds } from './inspection-history.svelte';
 import { remapCaches, remapElement, remapRelationship } from './model-caches';
-import {
-	applyDeltaShared,
-	getClientConfig,
-	getModelError,
-	setClientConfig
-} from './model-shared.svelte';
+import { applyDeltaShared, getModelError, setClientConfig } from './model-shared.svelte';
 import { isTempId, type ModelOp } from './ops';
 import { nameProp } from '$lib/util/element-name';
 import { remapProperties } from './remap';
@@ -633,7 +628,7 @@ export async function ensureElement(id: string): Promise<Element | null> {
 	if (pending !== undefined) return pending;
 	const fetchPromise = (async (): Promise<Element | null> => {
 		try {
-			const e = await getElement(id, getClientConfig());
+			const e = await getElement(id);
 			// Deleted locally while the fetch was in flight — same rule as above.
 			if (isStagedDeleted(e.id)) return null;
 			_elements.set(e.id, e);
@@ -695,7 +690,7 @@ export async function ensureElements(ids: readonly string[]): Promise<void> {
 	try {
 		for (let i = 0; i < want.length; i += modelReadApi.READ_PAGE_LIMIT) {
 			const chunk = want.slice(i, i + modelReadApi.READ_PAGE_LIMIT);
-			const fetched = await modelReadApi.getElementsBatch(chunk, getClientConfig());
+			const fetched = await modelReadApi.getElementsBatch(chunk);
 			// The staged-delete re-check covers deletes staged while the chunk
 			// was in flight (same rule as ensureElement's post-await guard).
 			for (const e of fetched) if (!isStagedDeleted(e.id)) _elements.set(e.id, e);
@@ -744,7 +739,7 @@ export async function ensureTreeItems(ids: readonly string[]): Promise<void> {
 	try {
 		for (let i = 0; i < want.length; i += modelReadApi.READ_PAGE_LIMIT) {
 			const chunk = want.slice(i, i + modelReadApi.READ_PAGE_LIMIT);
-			const fetched = await modelReadApi.getTreeItemsBatch(chunk, getClientConfig());
+			const fetched = await modelReadApi.getTreeItemsBatch(chunk);
 			// mid-flight staged deletes re-checked, as in ensureElements
 			seedTreeItems(fetched.filter((t) => !isStagedDeleted(t.id)));
 			// eslint-disable-next-line svelte/prefer-svelte-reactivity

@@ -1,8 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 
-import { server } from '../../api/__tests__/server';
+import { NotFoundError } from '../../api/errors';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '../../api/engine-route';
 import { resetModelStore, seedElements, setModelApiConfig } from '../../state/model.svelte';
 import { resetInspectionHistory } from '../../state/inspection-history.svelte';
 import { clearSelection, getSelection, select } from '../../state/selection.svelte';
@@ -11,25 +12,21 @@ import Inspector from '../Inspector.svelte';
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
-	server.resetHandlers();
+	installEngineSeam(null);
 	clearSelection();
 	vi.useRealTimers();
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
-	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
 	resetInspectionHistory();
 	clearSelection();
-	server.use(
-		http.get(`*/model/elements/:id/relationships`, () => HttpResponse.json({ items: [], total: 0 }))
-	);
+	stubEngine({ listElementRelationships: () => ({ items: [], total: 0 }) });
 	seedElements([
 		{ id: 'e1', type_name: 'Pump', properties: { name: 'P-101' }, rev: 1 },
 		{ id: 'e2', type_name: 'Tank', properties: { name: 'T-200' }, rev: 1 }
@@ -153,10 +150,13 @@ it('back-navigating to a deleted element lands on "Selection not found" (deleted
 	// Design decision under test: the visit stack never prunes deleted ids, so
 	// Back can land on one — the Inspector's existing not-found state is the
 	// mechanism, driven by ensureElement's 404 marking `_missingElementIds`.
-	server.use(
-		http.get(`*/model/elements/:id`, () => HttpResponse.json({ detail: 'nope' }, { status: 404 }))
-	);
-	select({ kind: 'element', id: 'ghost' }); // never seeded; the server 404s it
+	stubEngine({
+		listElementRelationships: () => ({ items: [], total: 0 }),
+		getElement: () => {
+			throw new NotFoundError(404, { detail: 'nope' }, 'nope');
+		}
+	});
+	select({ kind: 'element', id: 'ghost' }); // never seeded; the engine 404s it
 	select({ kind: 'element', id: 'e2' }); // seeded — no fetch needed, entity renders
 	const component = mount(Inspector, { target: document.body });
 	try {

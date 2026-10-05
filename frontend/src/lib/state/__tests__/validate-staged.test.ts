@@ -3,7 +3,6 @@ import { http, HttpResponse } from 'msw';
 
 import { server } from '$lib/api/__tests__/server';
 import * as validationApi from '$lib/api/validation';
-import { engineSide } from '$lib/api/engine-route';
 import { fakeProject, PAGE_ORIGIN } from '$lib/engine/__tests__/support/project-server';
 import {
 	DE_ONLY,
@@ -170,8 +169,8 @@ describe('validateAll on the engine side', () => {
 		return { s: store, bodies };
 	}
 
-	it('names the batches it sends; with the issues on the engine, the engine validates them', async () => {
-		const { s, bodies } = await open({ issues: 'engine' });
+	it('names the batches it sends, and the engine validates them', async () => {
+		const { s, bodies } = await open();
 		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
 		const spy = vi.spyOn(validationApi, 'validateModel');
 		const op = rename('e_000001', 'x'.repeat(201));
@@ -194,7 +193,7 @@ describe('validateAll on the engine side', () => {
 	});
 
 	it('with nothing staged, names no batch', async () => {
-		const { s, bodies } = await open({ issues: 'engine' });
+		const { s, bodies } = await open();
 		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
 		const spy = vi.spyOn(validationApi, 'validateModel');
 
@@ -204,26 +203,14 @@ describe('validateAll on the engine side', () => {
 		expect(bodies).toEqual([]);
 	});
 
-	it('with the issues on the server, the server is sent the ops', async () => {
-		const { bodies } = await open({ issues: 'server' });
-		const op = rename('e_000001', 'x'.repeat(201));
-		emit(op);
-		await stagedSettled();
-
-		await validateAll();
-
-		expect(bodies).toEqual([{ ops: [op], base_rev: 0 }]);
-	});
-
-	it('with a rule set staged, asks for no shadow, and the engine validates the staged rules', async () => {
+	it('with a rule set staged, the engine validates the staged rules', async () => {
 		const project = fakeProject();
 		const A = yamlOf(DE_ONLY);
 		const B = yamlOf(DE_OR_FR);
 		project.artifacts.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
 		project.rulesParses.set(B, parsed(DE_OR_FR));
-		const { s, bodies } = await open({ issues: 'engine' }, project);
+		const { s, bodies } = await open({}, project);
 		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
-		await vi.waitFor(() => expect(engineSide('issues')).toBe('engine'));
 
 		try {
 			stageArtifactUpdate('r1', { payload: rulesPayload(B) });
@@ -236,7 +223,7 @@ describe('validateAll on the engine side', () => {
 			const spy = vi.spyOn(validationApi, 'validateModel');
 			const issues = await validateAll();
 
-			expect(spy).toHaveBeenCalledWith({ batchIds: [], rulesStaged: true }, undefined);
+			expect(spy).toHaveBeenCalledWith({ batchIds: [] }, undefined);
 			expect(issues.filter((issue) => issue.origin === 'uncommitted')).toEqual(
 				ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted')
 			);

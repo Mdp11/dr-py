@@ -1,8 +1,8 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 
-import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '../../api/engine-route';
 import { resetModelStore, seedElements, setModelApiConfig } from '../../state/model.svelte';
 import { seedRelationships } from '../../state/model.svelte';
 import { clearSelection, select } from '../../state/selection.svelte';
@@ -11,23 +11,19 @@ import Inspector from '../Inspector.svelte';
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
-	server.resetHandlers();
+	installEngineSeam(null);
 	clearSelection();
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
-	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
 	clearSelection();
-	server.use(
-		http.get(`*/model/elements/:id/relationships`, () => HttpResponse.json({ items: [], total: 0 }))
-	);
+	stubEngine({ listElementRelationships: () => ({ items: [], total: 0 }) });
 });
 
 it('shows the selected element stereotype (type_name) in the header', () => {
@@ -47,8 +43,8 @@ it('shows the selected element stereotype (type_name) in the header', () => {
 
 it('shows the selected relationship stereotype in the header', () => {
 	// Seed the endpoints too: a relationship selection now renders source/target
-	// navigation buttons, whose cache-or-fetch would otherwise hit the network
-	// (the MSW server runs with onUnhandledRequest: 'error').
+	// navigation buttons, whose cache-or-fetch would otherwise ask the engine
+	// (the stub answers only the relationships panel).
 	seedElements([
 		{ id: 'e1', type_name: 'Pump', properties: { name: 'P-101' }, rev: 1 },
 		{ id: 'e2', type_name: 'Tank', properties: { name: 'T-9' }, rev: 1 }

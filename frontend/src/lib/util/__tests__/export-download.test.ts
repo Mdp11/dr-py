@@ -21,14 +21,13 @@ function downloads(): string[] {
 }
 
 describe('downloadExport', () => {
-	it('calls the export once and downloads the file it returns, marks included', async () => {
+	it('calls the export once and downloads the file it returns', async () => {
 		const names = downloads();
 		const ready: ExportResult = {
 			kind: 'ready',
 			blob: new Blob(['a,b\r\n']),
 			filename: 't.csv',
-			truncated: true,
-			fallback: 'pattern'
+			truncated: true
 		};
 		const run = vi.fn<() => Promise<ExportResult>>().mockResolvedValue(ready);
 

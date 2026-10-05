@@ -7,6 +7,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 
 import type { Element, OpsResponse } from '$lib/api/types';
 import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '../../api/engine-route';
 import {
 	applyDelta,
 	getStagedOps,
@@ -28,6 +30,7 @@ beforeAll(() => {
 });
 afterEach(() => {
 	server.resetHandlers();
+	installEngineSeam(null);
 	clearSelection();
 	vi.restoreAllMocks();
 });
@@ -43,11 +46,7 @@ beforeEach(() => {
 	resetRealtime();
 	clearSelection();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
-	server.use(
-		// The Inspector's relationships panel reads through the component's own
-		// (origin-less) client config, so match any origin.
-		http.get(`*/model/elements/:id/relationships`, () => HttpResponse.json({ items: [], total: 0 }))
-	);
+	stubEngine({ listElementRelationships: () => ({ items: [], total: 0 }) });
 });
 
 function el(id: string, props: Record<string, unknown> = {}, rev = 0): Element {

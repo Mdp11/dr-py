@@ -697,7 +697,7 @@ describe('TableView scripts need the engine', () => {
 	});
 });
 
-describe('TableView fallback marker', () => {
+describe('TableView page states', () => {
 	const PAGE = {
 		columns: [{ kind: 'element', header: '', width_px: null }],
 		rows: [],
@@ -711,30 +711,6 @@ describe('TableView fallback marker', () => {
 	afterEach(() => {
 		h.page = undefined;
 		h.loading = false;
-	});
-
-	it('names a pattern the server evaluates', () => {
-		h.page = { ...PAGE, fallback: 'pattern' };
-		const c = render('tbl:draft:pattern');
-		try {
-			expect(document.querySelector('[data-testid="table-fallback"]')?.textContent?.trim()).toBe(
-				'Reads committed state: a search pattern needs the server'
-			);
-		} finally {
-			unmount(c);
-		}
-	});
-
-	it('shows nothing for a page the engine answered, or no page', () => {
-		for (const page of [PAGE, undefined]) {
-			h.page = page;
-			const c = render('tbl:draft:engine');
-			try {
-				expect(document.querySelector('[data-testid="table-fallback"]')).toBeNull();
-			} finally {
-				unmount(c);
-			}
-		}
 	});
 
 	it('keeps the rows and shows the busy hint while a re-page is in flight', () => {
@@ -1546,31 +1522,6 @@ describe('TableView export format menu', () => {
 		}
 	});
 
-	const fallbackNote = () => document.querySelector('[data-testid="export-fallback"]');
-
-	it('says an export came from committed state once a marked one lands, and not after an unmarked one', async () => {
-		const blob = new Blob(['x']);
-		vi.mocked(downloadTable)
-			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx', fallback: 'pattern' })
-			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx' });
-		const c = render('tbl:draft:1');
-		try {
-			expect(fallbackNote()).toBeNull();
-			await chooseFormat('xlsx');
-			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
-			await waitFor(() => fallbackNote() !== null);
-			expect(fallbackNote()!.textContent?.trim()).toBe(
-				'Exported from committed state: a search pattern needs the server'
-			);
-
-			await chooseFormat('xlsx');
-			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
-			await waitFor(() => fallbackNote() === null);
-		} finally {
-			unmount(c);
-		}
-	});
-
 	it('says a table export includes staged changes only while the store says one would', () => {
 		const note = () => document.querySelector('[data-testid="export-staged-note"]');
 		h.exportsStaged = false;
@@ -1581,51 +1532,6 @@ describe('TableView export format menu', () => {
 		h.exportsStaged = true;
 		c = render('tbl:draft:1');
 		try {
-			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
-		} finally {
-			unmount(c);
-			h.exportsStaged = false;
-		}
-	});
-
-	it('says why a pattern export came from committed state', async () => {
-		vi.mocked(downloadTable).mockResolvedValueOnce({
-			kind: 'ready',
-			blob: new Blob(['x']),
-			filename: 't.xlsx',
-			fallback: 'pattern'
-		});
-		const c = render('tbl:draft:1');
-		try {
-			await chooseFormat('xlsx');
-			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
-			await waitFor(() => fallbackNote() !== null);
-			expect(fallbackNote()!.textContent?.trim()).toBe(
-				'Exported from committed state: a search pattern needs the server'
-			);
-		} finally {
-			unmount(c);
-		}
-	});
-
-	it('drops the staged note while the last export came from committed state', async () => {
-		const note = () => document.querySelector('[data-testid="export-staged-note"]');
-		const blob = new Blob(['x']);
-		vi.mocked(downloadTable)
-			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx', fallback: 'pattern' })
-			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 't.xlsx' });
-		h.exportsStaged = true;
-		const c = render('tbl:draft:1');
-		try {
-			expect(note()).not.toBeNull();
-			await chooseFormat('xlsx');
-			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
-			await waitFor(() => fallbackNote() !== null);
-			expect(note()).toBeNull();
-
-			await chooseFormat('xlsx');
-			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
-			await waitFor(() => fallbackNote() === null);
 			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
 		} finally {
 			unmount(c);

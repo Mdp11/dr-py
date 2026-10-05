@@ -36,11 +36,9 @@
 		suspendTableEvaluation,
 		updateTableDefinition
 	} from '$lib/state';
-	import type { Fallback } from '$lib/api/engine-route';
 	import type { ExportFormat } from '$lib/api/types';
 	import { isScriptsNeedEngine } from '$lib/api/errors';
 	import ScriptsNeedEngine from '../ScriptsNeedEngine.svelte';
-	import { EXPORT_FALLBACK_NOTE } from '$lib/util/export-download';
 	import {
 		AlertTriangle,
 		ArrowDownUp,
@@ -101,11 +99,6 @@
 	const locked = $derived(lockHolder !== null);
 	const page = $derived(getTablePage(tabId));
 	const warnings = $derived(getTableWarnings(tabId));
-	// A table the engine refused is the server's, read from committed state:
-	// staged edits do not show in it, and the tab says why.
-	const FALLBACK_NOTE = {
-		pattern: 'Reads committed state: a search pattern needs the server'
-	} as const;
 	// Whole-table recap of the failing script cells. The grid is virtualized, so
 	// without this a failure a few thousand rows down is unreachable — the badge
 	// is how it is found.
@@ -189,9 +182,6 @@
 	// inside the dialog is remembered for the next opening.
 	let exportOpen = $state(false);
 	let exportFormat = $state<ExportFormat>('xlsx');
-	// Why the last export was the server's, over committed state; null once
-	// one comes from the engine again.
-	let exportFallback = $state<Exclude<Fallback, 'rules'> | null>(null);
 	const exportStaged = $derived(exportsIncludeStaged());
 	$effect(() => () => exportAbort?.abort());
 	// Unmounting with the settings dialog still open would leave the tab
@@ -523,11 +513,10 @@
 		exporting = true;
 		exportAbort = new AbortController();
 		try {
-			const result = await downloadTable(tabId, {
+			await downloadTable(tabId, {
 				format,
 				signal: exportAbort.signal
 			});
-			if (result?.kind === 'ready') exportFallback = result.fallback ?? null;
 		} catch (e) {
 			if (isScriptsNeedEngine(e)) exportNeedsEngine = true;
 			else saveError = e instanceof Error ? e.message : 'Export failed';
@@ -672,7 +661,7 @@
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
-				{#if exportStaged && !exportFallback}
+				{#if exportStaged}
 					<span
 						data-testid="export-staged-note"
 						class="text-[11px] text-muted-foreground/70"
@@ -711,16 +700,6 @@
 				<div class="activity-sweep h-full w-1/4 bg-primary"></div>
 			{/if}
 		</div>
-		{#if page?.fallback}
-			<p data-testid="table-fallback" class="px-3 py-1 text-[11px] text-muted-foreground/70">
-				{FALLBACK_NOTE[page.fallback]}
-			</p>
-		{/if}
-		{#if exportFallback}
-			<p data-testid="export-fallback" class="px-3 py-1 text-[11px] text-muted-foreground/70">
-				{EXPORT_FALLBACK_NOTE[exportFallback]}
-			</p>
-		{/if}
 		{#if lockHolder !== null}
 			<div
 				class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning"

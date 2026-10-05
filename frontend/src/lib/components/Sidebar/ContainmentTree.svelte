@@ -254,7 +254,7 @@
 		const have = roots.length;
 		if (have >= limit || have >= rootsTotal) return;
 		try {
-			const page = await listContainmentRootsPaged(limit - have, undefined, have);
+			const page = await listContainmentRootsPaged(limit - have, have);
 			if (seq !== rootsSeq) return;
 			if (page.items.length > 0) {
 				seedTreeItems(page.items);
@@ -302,7 +302,7 @@
 		viewId: string
 	): Promise<void> {
 		try {
-			const page = await listExcludedRootsPaged(limit, undefined, 0, viewId);
+			const page = await listExcludedRootsPaged(limit, 0, viewId);
 			if (seq !== excludedSeq) return;
 			seedTreeItems(page.items);
 			excludedRoots = page.items;
@@ -320,7 +320,7 @@
 		const have = excludedRoots.length;
 		if (have >= limit || have >= excludedTotal) return;
 		try {
-			const page = await listExcludedRootsPaged(limit - have, undefined, have, viewId);
+			const page = await listExcludedRootsPaged(limit - have, have, viewId);
 			if (seq !== excludedSeq) return;
 			if (page.items.length > 0) {
 				seedTreeItems(page.items);

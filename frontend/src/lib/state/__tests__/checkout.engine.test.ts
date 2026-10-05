@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { http, HttpResponse } from 'msw';
 import type { ModelOp as EngineOp } from '$engine';
 import { server } from '$lib/api/__tests__/server';
-import { ApiError, ValidationError } from '$lib/api/errors';
+import { ApiError, ConflictError, ValidationError } from '$lib/api/errors';
 import type { FeedEvent } from '$lib/api/feed';
 import {
 	hold,
@@ -490,25 +490,47 @@ describe('waiting for the replica to apply a commit', () => {
 });
 
 describe('preview and validate on the engine side', () => {
+	/** What the engine was asked `method`, in order. */
+	function asked(_s: EngineStore, method: string): unknown[] {
+		return calls
+			.filter(([called]) => called === method)
+			.map(([, params]) => params)
+			.slice(0);
+	}
+	let calls: [string, unknown][] = [];
+
+	function record(s: EngineStore): void {
+		calls = [];
+		const call = s.sync.call.bind(s.sync);
+		vi.spyOn(s.sync, 'call').mockImplementation(<T>(method: string, params?: unknown) => {
+			calls.push([method, params]);
+			return call<T>(method, params);
+		});
+	}
+
 	it('preview waits for the engine', async () => {
-		// Issues on the server: this exercises the ops the engine's staging sends over the wire.
-		const s = await open({ issues: 'server' });
+		const s = await open();
 		const bodies = routes(s);
+		record(s);
 		await ensureElement('e_000002');
 
 		emit(rename('e_000002', 'a'));
 		await settled(s);
-		// Merged by the engine into the first batch: what it sends is that batch.
+		// Merged by the engine into the first batch: what it asks about is that batch.
 		emit(rename('e_000002', 'ab'));
 		await previewStaged();
 
-		expect(bodies.preview).toEqual([{ base_rev: 0, ops: [rename('e_000002', 'ab')] }]);
+		expect(getStagedBatchIds()).toHaveLength(1);
+		expect(asked(s, 'previewCommit')).toEqual([
+			{ base_rev: 0, batch_ids: getStagedBatchIds(), strict: false }
+		]);
+		expect(bodies.preview).toEqual([]);
 	});
 
-	it("validateAll sends the engine's ops", async () => {
-		// Issues on the server: this exercises the ops the engine's staging sends over the wire.
-		const s = await open({ issues: 'server' });
+	it("validateAll names the engine's batches", async () => {
+		const s = await open();
 		const bodies = routes(s);
+		record(s);
 		await ensureElement('e_000002');
 
 		emit(CREATE_X);
@@ -517,7 +539,9 @@ describe('preview and validate on the engine side', () => {
 		emit(rename('e_000002', 'ab'));
 		await validateAll();
 
-		expect(bodies.validate).toEqual([{ base_rev: 0, ops: [CREATE_X, rename('e_000002', 'ab')] }]);
+		expect(getStagedBatchIds()).toHaveLength(2);
+		expect(asked(s, 'validateModel')).toEqual([{ batch_ids: getStagedBatchIds() }]);
+		expect(bodies.validate).toEqual([]);
 	});
 });
 
@@ -705,10 +729,13 @@ describe('a commit whose answer the replica holds', () => {
 			Promise.race([work, new Promise<'held'>((r) => setTimeout(() => r('held'), 500))]);
 
 		expect(await prompt(stagedSettled())).toBeUndefined();
-		expect(await prompt(previewStaged())).not.toBe('held');
-		expect(bodies.preview).toEqual([{ base_rev: getModelRev(), ops: [] }]);
-		expect(await prompt(validateAll())).not.toBe('held');
-		expect(bodies.validate).toEqual([null]);
+		// The frozen replica still holds the batch that landed and is behind the
+		// commit: its engine refuses the staged batches and the `base_rev`, twice
+		// each, and the refusal answers promptly all the same.
+		await expect(prompt(previewStaged())).rejects.toBeInstanceOf(ConflictError);
+		await expect(prompt(validateAll())).rejects.toBeInstanceOf(ConflictError);
+		expect(bodies.preview).toEqual([]);
+		expect(bodies.validate).toEqual([]);
 		expect(await prompt(discardElement('e_000003'))).toBeUndefined();
 		expect(getHeldTokens()).toEqual([]);
 		await expect(commitStaged('m', false)).rejects.toBeInstanceOf(CommitPendingError);

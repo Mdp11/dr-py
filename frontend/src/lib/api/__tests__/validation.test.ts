@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
 import type { WireStagedArtifact } from '$engine';
@@ -17,8 +17,8 @@ import {
 	UNREADABLE,
 	yamlOf
 } from '$lib/engine/__tests__/support/rules';
-import { createShadow } from '$lib/engine/shadow';
 import { previewCommit } from '../checkout';
+import { ConflictError } from '../errors';
 import { parseRules } from '../rules';
 import type { ArtifactPayload, RulesParseOut } from '../types';
 import { getModelIssues, validateModel } from '../validation';
@@ -42,7 +42,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-describe('validateModel', () => {
+describe('validateModel on the server', () => {
 	it('POSTs with inline body and parses Issue[]', async () => {
 		let body: unknown;
 		server.use(
@@ -75,24 +75,6 @@ describe('validateModel', () => {
 		expect(result[0].severity).toBe('warning');
 	});
 
-	it('POSTs with no body when no options provided', async () => {
-		let contentLength: string | null = null;
-		let text = '';
-		server.use(
-			http.post(`${BASE}/model/validate`, async ({ request }) => {
-				contentLength = request.headers.get('content-length');
-				text = await request.text();
-				return HttpResponse.json([]);
-			})
-		);
-		const result = await validateModel(undefined, cfg);
-		expect(result).toEqual([]);
-		expect(text).toBe('');
-		if (contentLength !== null) {
-			expect(contentLength).toBe('0');
-		}
-	});
-
 	it('POSTs staged ops with base_rev when ops are present', async () => {
 		let body: unknown;
 		server.use(
@@ -109,13 +91,13 @@ describe('validateModel', () => {
 		expect(result[0].origin).toBe('uncommitted');
 	});
 
-	it('defaults origin to on_server when the server omits it', async () => {
+	it('a server answer defaults origin to on_server when it omits it', async () => {
 		server.use(
 			http.post(`${BASE}/model/validate`, async () =>
 				HttpResponse.json([{ severity: 'warning', message: 'x', target_ids: ['e1'] }])
 			)
 		);
-		const result = await validateModel(undefined, cfg);
+		const result = await validateModel({ scope: ['e1'] }, cfg);
 		expect(result[0].origin).toBe('on_server');
 	});
 });
@@ -136,7 +118,7 @@ describe('the issues on the engine', () => {
 		origin
 	});
 
-	it("getModelIssues answers the engine's list, a staged violation uncommitted; the server is never asked", async () => {
+	it("getModelIssues answers the engine's list, a staged violation uncommitted", async () => {
 		const engine = await issuesEngine(made);
 		await expect(getModelIssues()).resolves.toEqual({
 			model_rev: 0,
@@ -154,12 +136,21 @@ describe('the issues on the engine', () => {
 		expect(engine.requests).toEqual([]);
 	});
 
-	it('getModelIssues goes to the server while the replica is not seeded', async () => {
-		const engine = await issuesEngine(made, { seeded: () => false });
+	it('getModelIssues waits while the gate is closed, and answers from the engine once it opens', async () => {
+		let open!: () => void;
+		const gate = new Promise<void>((resolve) => (open = resolve));
+		const engine = await issuesEngine(made, { whenReady: () => gate });
 		await engine.stage([rename('e_000001', TOO_LONG)]);
+		const calls = () => engine.over.methods().filter((method) => method === 'getModelIssues');
 
-		await expect(getModelIssues()).resolves.toMatchObject({ issues: [] });
-		expect(engine.requests.map((request) => request.route)).toEqual(['issues']);
+		const pending = getModelIssues();
+		for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+		expect(calls()).toHaveLength(0);
+
+		open();
+		await expect(pending).resolves.toMatchObject({ issues: [tooLong('uncommitted')] });
+		expect(calls()).toHaveLength(1);
+		expect(engine.requests).toEqual([]);
 	});
 
 	it("validateModel with the staged batches answers the engine's list, a fixed issue resolved", async () => {
@@ -189,7 +180,7 @@ describe('the issues on the engine', () => {
 		expect(engine.requests).toEqual([]);
 	});
 
-	it('a nothing-staged validateModel over a containment cycle logs no shadow line', async () => {
+	it('a nothing-staged validateModel names every element of a containment cycle, as the engine does', async () => {
 		const project = fakeProject();
 		// e_000001 owns e_000006 already: the reverse closes a cycle.
 		project.commit([
@@ -202,24 +193,11 @@ describe('the issues on the engine', () => {
 				properties: {}
 			}
 		]);
-		const report = vi.fn();
-		const shadow = createShadow({
-			rev: () => project.rev,
-			quiet: () => Promise.resolve(),
-			staged: () => false,
-			report
-		});
-		await issuesEngine(made, { project, shadow });
+		await issuesEngine(made, { project });
 
 		const issues = await validateModel();
-		expect(issues.some((issue) => issue.message.startsWith('Containment cycle'))).toBe(true);
-		await new Promise((resolve) => setTimeout(resolve, 50));
-		expect(report).not.toHaveBeenCalled();
 
-		// The shadow is live: the unstaged list is compared, and differs from MSW's empty one.
-		await getModelIssues();
-		await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
-		expect(report.mock.calls[0]![0]).toMatch(/^\[shadow\] issues getModelIssues /);
+		expect(issues.some((issue) => issue.message.startsWith('Containment cycle'))).toBe(true);
 	});
 
 	it('an inline model or a scope, and ops no batch names, go to the server', async () => {
@@ -238,43 +216,36 @@ describe('the issues on the engine', () => {
 		]);
 	});
 
-	it('a batch the engine does not stage sends validateModel to the server whole', async () => {
+	it('a batch the engine does not stage is its 409, after one more try', async () => {
 		const engine = await issuesEngine(made);
 		const ops = [rename('e_000001', TOO_LONG)];
 		const batch = await engine.stage(ops);
 
-		await validateModel({ ops, baseRev: 0, batchIds: [batch + 1] });
+		const stale = validateModel({ ops, baseRev: 0, batchIds: [batch + 1] });
 
-		expect(engine.requests).toEqual([{ route: 'validate', body: { ops, base_rev: 0 } }]);
+		await expect(stale).rejects.toBeInstanceOf(ConflictError);
+		await expect(stale).rejects.toMatchObject({ status: 409, message: 'stale staged batches' });
+		expect(engine.over.methods().filter((method) => method === 'validateModel')).toHaveLength(2);
+		expect(engine.requests).toEqual([]);
 	});
 
-	it('an engine whose metamodel holds a pattern it cannot vouch for never seeds', async () => {
+	it('a facet pattern the engine cannot translate is an issue per value, and the engine still answers all three', async () => {
 		const project = fakeProject();
 		project.rebind('mm-2', unsupportedPatternDoc(project.doc));
-		const engine = await issuesEngine(made, { project, seeded: () => false });
-		await engine.over.link!.client.call('validateModel', { batch_ids: [] }).catch(() => null);
-
-		expect(engine.over.sync.status()).toMatchObject({ phase: 'ready', seeded: false });
-	});
-
-	it('an engine whose metamodel holds a pattern it cannot vouch for sends all three to the server', async () => {
-		const project = fakeProject();
-		project.rebind('mm-2', unsupportedPatternDoc(project.doc));
-		// The gate held open: the engine's own refusal is what sends them.
-		const engine = await issuesEngine(made, { project, seeded: () => true });
+		const engine = await issuesEngine(made, { project });
 		const ops = [rename('e_000001', 'staged')];
 		const batch = await engine.stage(ops);
 		const local = { strict: false, batchIds: [batch] };
 
-		await getModelIssues();
-		await validateModel({ ops, baseRev: project.rev, batchIds: [batch] });
-		await previewCommit(project.rev, ops, undefined, local);
+		const list = await getModelIssues();
+		const validated = await validateModel({ ops, baseRev: project.rev, batchIds: [batch] });
+		const preview = await previewCommit(project.rev, ops, undefined, local);
 
-		expect(engine.requests).toEqual([
-			{ route: 'issues', body: null },
-			{ route: 'validate', body: { ops, base_rev: project.rev } },
-			{ route: 'preview', body: { base_rev: project.rev, ops } }
-		]);
+		for (const issues of [list.issues, validated, preview.issues]) {
+			expect(issues.some((issue) => issue.message.includes('cannot be checked'))).toBe(true);
+		}
+		expect(engine.over.sync.status()).toMatchObject({ phase: 'ready', seeded: true });
+		expect(engine.requests).toEqual([]);
 	});
 
 	describe('with rule sets', () => {
@@ -378,45 +349,19 @@ describe('the issues on the engine', () => {
 			expect(engine.requests).toEqual([]);
 		});
 
-		it('a document the engine refuses sends all three to MSW, unmarked', async () => {
+		it('a rule set the engine cannot read is skipped with its reason, and the engine answers all three', async () => {
 			const engine = await issuesEngine(made);
 			await followRules(engine, [ruleSet('r1', 'Rules', A, UNREADABLE)]);
 			const ops = [rename('e_000001', 'staged')];
 			const batch = await engine.stage(ops);
 
-			await expect(getModelIssues()).resolves.toEqual({
-				model_rev: 0,
-				issues: [],
-				counts: {},
-				truncated: false,
-				rules_status: null
-			});
+			const list = await getModelIssues();
 			await validateModel({ ops, baseRev: 0, batchIds: [batch] });
 			await previewCommit(0, ops, undefined, { strict: false, batchIds: [batch] });
 
-			expect(engine.requests).toEqual([
-				{ route: 'issues', body: null },
-				{ route: 'validate', body: { ops, base_rev: 0 } },
-				{ route: 'preview', body: { base_rev: 0, ops } }
-			]);
-		});
-
-		it('validateModel with staged ops and a staged rule set is not shadowed; without the rule set it is', async () => {
-			const shadow = vi.fn();
-			const engine = await issuesEngine(made, { shadow });
-			const ops = [rename('e_000001', TOO_LONG)];
-			const batch = await engine.stage(ops);
-
-			await validateModel({ ops, baseRev: 0, batchIds: [batch], rulesStaged: true });
-			await new Promise((resolve) => setTimeout(resolve, 20));
-			expect(shadow).not.toHaveBeenCalled();
-
-			await validateModel({ ops, baseRev: 0, batchIds: [batch] });
-			await vi.waitFor(() => expect(shadow).toHaveBeenCalledOnce());
-			expect(shadow.mock.calls[0]![0]).toMatchObject({
-				method: 'validateModel',
-				whileStaged: true
-			});
+			expect(list.rules_status?.skipped).toMatchObject([{ artifact_id: 'r1', set_name: 'Rules' }]);
+			expect(list.rules_status?.skipped[0]!.reason).not.toBe('');
+			expect(engine.requests).toEqual([]);
 		});
 	});
 });

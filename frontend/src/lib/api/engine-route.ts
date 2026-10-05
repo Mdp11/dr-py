@@ -1,11 +1,11 @@
-import type { ClientConfig } from './client';
 import { ApiError } from './errors';
 
 /**
- * A surface: the reads that move between server and engine together — the
- * five model reads, the navigation evaluation, the criteria search, the
- * validation issues, the table pages, the exports, the metamodel previews,
- * the model download, the view warnings and the compare with apply-CR.
+ * A surface: a group of the engine's reads that `dr.surfaces` switches
+ * together — the five model reads, the navigation evaluation, the criteria
+ * search, the validation issues, the table pages, the exports, the metamodel
+ * previews, the model download, the view warnings and the compare with
+ * apply-CR.
  */
 export type Surface =
 	| 'elements'
@@ -24,40 +24,10 @@ export type Surface =
 	| 'compare';
 export type Side = 'engine' | 'server';
 
-/** Why the server answered a call the engine refused: it reaches a pattern or rules it cannot read. */
-export type Fallback = 'pattern' | 'rules';
-
-/**
- * When the shadow compares an engine answer: only while nothing is staged
- * (the default), also while edits are staged (the call sent them to the
- * server too), or never.
- */
-export type ShadowWhen = 'unstaged' | 'always' | 'never';
-
-export type RouteOptions<T> = {
-	/** Marks the server's answer to a call the engine sent it for a script or a pattern. */
-	mark?: (value: T, reason: Exclude<Fallback, 'rules'>) => T;
-	shadow?: ShadowWhen;
-	/**
-	 * The surface's side is asked again once the engine answers: a side gone
-	 * to the server meanwhile takes the server's answer, since the replica
-	 * that answered may not be the one the call was routed to.
-	 */
-	recheck?: boolean;
-	/** What the shadow compares of an answer in its place. */
-	digest?: (value: T) => Promise<unknown>;
-	/**
-	 * Whether what the call was asked about may no longer be what the server
-	 * holds, such as a document the caller is still refetching: the shadow's
-	 * comparison then ends silently.
-	 */
-	stale?: () => boolean;
-};
-
 /**
  * One read method of the engine, answered with the route's response body.
  * `transfer` moves those buffers of `params` to the engine: detached once
- * posted, so a call that sends them again reads them afresh.
+ * posted.
  */
 export type EngineCall = <T>(
 	method: string,
@@ -66,37 +36,28 @@ export type EngineCall = <T>(
 	transfer?: ArrayBuffer[]
 ) => Promise<T>;
 
-export type Outcome = { ok: true; value: unknown } | { ok: false; error: unknown };
-
-/** What the shadow is handed after the engine answered a read. */
-export type ShadowProbe = {
-	surface: Surface;
-	method: string;
-	params: unknown;
-	/** Compared while edits are staged: the call sent them to the server as well. */
-	whileStaged?: boolean;
-	engine: Outcome;
-	/** The same engine read once more, parsed. */
-	again(): Promise<unknown>;
-	/** The same read from the server, parsed. */
-	server(): Promise<unknown>;
-	/** What to compare of each answer, when not the answer itself. */
-	digest?: (value: unknown) => Promise<unknown>;
-	/** Ends the comparison silently whenever it says true, staged or not. */
-	stale?: () => boolean;
-};
-
 /**
  * What `lib/api` knows of the engine, injected so that it imports nothing of
- * it. `side` is a surface's effective side; `gone` says an error means the
- * engine could not answer at all, so the server answers instead.
+ * it: its calls, and the wait for the replica to hold what a read needs.
  */
 export type EngineSeam = {
-	side(surface: Surface): Side;
 	call: EngineCall;
-	gone(error: unknown): boolean;
-	/** Handed every engine outcome; never awaited, and nothing it does reaches the caller. */
-	shadow?(probe: ShadowProbe): void;
+	/** Resolves once the gate is open; rejects with `EngineUnavailableError` when the replica cannot open it. */
+	whenReady(signal?: AbortSignal): Promise<void>;
+};
+
+/** The engine cannot answer: it failed, is not running or has no model. */
+export class EngineUnavailableError extends Error {
+	constructor(message = 'the engine is not available') {
+		super(message);
+		this.name = 'EngineUnavailableError';
+	}
+}
+
+export type RouteOptions = {
+	signal?: AbortSignal;
+	/** Buffers of `params` moved to the engine: a call that moves some is not retried, as they are detached. */
+	transfer?: ArrayBuffer[];
 };
 
 let installed: EngineSeam | null = null;
@@ -104,37 +65,6 @@ let installed: EngineSeam | null = null;
 /** Installs the seam every routed read consults, or removes it with `null`. */
 export function installEngineSeam(seam: EngineSeam | null): void {
 	installed = seam;
-}
-
-/** The side a surface's reads take now: `server` without a seam. */
-export function engineSide(surface: Surface): Side {
-	return installed === null ? 'server' : installed.side(surface);
-}
-
-/** Why the server answered: a `Fallback`, or input the engine does not read as the server does. */
-type Refusal = Fallback | 'file' | 'change request';
-
-const FALLBACKS: { readonly [detail: string]: Refusal } = {
-	'reaches an unsupported pattern': 'pattern',
-	'reaches unreadable rules': 'rules',
-	'reaches an unreadable file': 'file',
-	'reaches an unreadable change request': 'change request'
-};
-
-/** The engine's refusal that sends a call to the server, if `error` is one. */
-function fallbackOf(error: unknown): Refusal | null {
-	if (!(error instanceof ApiError) || error.status !== 501) return null;
-	return Object.hasOwn(FALLBACKS, error.message) ? FALLBACKS[error.message]! : null;
-}
-
-/**
- * The engine's 501 for a rebind preview whose staged ops the candidate does
- * not admit: the server answers the whole batch, its own refusal included.
- */
-const REFUSED_OPS = 'reaches ops the candidate refuses';
-
-function refusedOps(error: unknown): boolean {
-	return error instanceof ApiError && error.status === 501 && error.message === REFUSED_OPS;
 }
 
 /** The engine's 409s for a call whose staged batches, `base_rev` or replica moved under it. */
@@ -149,102 +79,33 @@ function movedUnder(error: unknown): boolean {
 	return error instanceof ApiError && error.status === 409 && MOVED.has(error.message);
 }
 
-/**
- * The shadow rule for a call that sends staged ops to the server: compared
- * while staged, unless an op creates an entity — the server mints ids for it
- * that the engine never sees.
- */
-export function comparableWhileStaged(ops: readonly { kind: string }[]): ShadowWhen {
-	return ops.some((op) => op.kind === 'create_element' || op.kind === 'create_relationship')
-		? 'never'
-		: 'always';
-}
-
-/** `body` as the server is sent it: plain JSON, which a `$state` proxy is not, `undefined` left out. */
+/** `body` as the engine is sent it: plain JSON, which a `$state` proxy is not, `undefined` left out. */
 export function asSent(body: object): unknown {
 	return JSON.parse(JSON.stringify(body));
 }
 
 /**
- * Answers a read from the engine or the server. A call that names its server
- * (`baseUrl` or `fetch`) goes there. `engineCall` makes exactly one engine
- * call and parses its body with the server's schema. A 501 the engine
- * refuses a script, a pattern, unreadable rules, an unreadable file or an
- * unreadable change request with is answered by the server — for a script
- * or a pattern handed to `options.mark` with its reason — and not shadowed,
- * and so is the 501 for staged ops a rebind's candidate does not admit,
- * unmarked; any other 501 is the caller's. A 409
- * that says the staged batches, the `base_rev` or the replica moved under
- * the call is answered by the server whole.
+ * Answers a read from the engine. It waits for the gate first, so a replica
+ * still opening or not yet swept answers when it can. A 409 that says the
+ * staged batches, the `base_rev` or the replica moved under the call waits for
+ * the gate again and asks once more; a second refusal, and every other
+ * engine error, is the caller's as the engine gave it. No seam installed, or
+ * a replica that cannot open the gate, is an `EngineUnavailableError`.
  */
-export function route<T>(
-	surface: Surface,
-	cfg: ClientConfig | undefined,
-	engineCall: (call: EngineCall) => Promise<T>,
-	serverCall: () => Promise<T>,
-	options: RouteOptions<T> = {}
+export async function route<T>(
+	method: string,
+	params: unknown,
+	options: RouteOptions = {}
 ): Promise<T> {
 	const seam = installed;
-	if (
-		seam === null ||
-		cfg?.baseUrl !== undefined ||
-		cfg?.fetch !== undefined ||
-		seam.side(surface) === 'server'
-	) {
-		return serverCall();
-	}
-	let method = '';
-	let params: unknown = undefined;
-	const recorded: EngineCall = (m, p, signal, transfer) => {
-		method = m;
-		params = p;
-		return seam.call(m, p, signal, transfer);
-	};
-	let answer: Promise<T>;
+	if (seam === null) throw new EngineUnavailableError('the engine is not running');
+	const { signal, transfer } = options;
+	await seam.whenReady(signal);
 	try {
-		answer = engineCall(recorded);
+		return await seam.call<T>(method, params, signal, transfer);
 	} catch (error) {
-		answer = Promise.reject(error);
+		if (!movedUnder(error) || (transfer !== undefined && transfer.length > 0)) throw error;
 	}
-	const when = options.shadow ?? 'unstaged';
-	const { digest, stale } = options;
-	const probe = (engine: Outcome) => {
-		if (seam.shadow === undefined || when === 'never') return;
-		try {
-			const returned: unknown = seam.shadow({
-				surface,
-				method,
-				params,
-				...(when === 'always' ? { whileStaged: true } : {}),
-				engine,
-				again: () => engineCall(seam.call),
-				server: serverCall,
-				...(digest === undefined ? {} : { digest: (value) => digest(value as T) }),
-				...(stale === undefined ? {} : { stale })
-			});
-			// A shadow written as an async function returns a promise despite its type.
-			Promise.resolve(returned).catch(() => undefined);
-		} catch {
-			// Nothing the shadow does reaches the caller.
-		}
-	};
-	return answer.then(
-		(value) => {
-			if (options.recheck === true && seam.side(surface) === 'server') return serverCall();
-			probe({ ok: true, value });
-			return value;
-		},
-		(error: unknown) => {
-			if (seam.gone(error) || movedUnder(error) || refusedOps(error)) return serverCall();
-			const reason = fallbackOf(error);
-			if (reason !== null) {
-				const { mark } = options;
-				return mark !== undefined && reason === 'pattern'
-					? serverCall().then((value) => mark(value, reason))
-					: serverCall();
-			}
-			probe({ ok: false, error });
-			throw error;
-		}
-	);
+	await seam.whenReady(signal);
+	return seam.call<T>(method, params, signal);
 }

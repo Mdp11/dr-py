@@ -688,9 +688,7 @@ export const ChainPageSchema = z.object({
 	chains: z.array(z.array(ChainNodeSchema)).default([]),
 	total: z.number().int().default(0),
 	truncated: z.boolean().default(false),
-	warnings: z.array(ScriptWarningSchema).default([]),
-	/** Set when the engine refused the call and the server answered it, on committed state. */
-	fallback: z.enum(['pattern']).optional()
+	warnings: z.array(ScriptWarningSchema).default([])
 });
 export type ChainPage = z.infer<typeof ChainPageSchema>;
 
@@ -1305,9 +1303,7 @@ export const TablePageSchema = z.object({
 	truncated: z.boolean(),
 	offset: z.number().int(),
 	model_rev: z.number().int(),
-	warnings: z.array(ScriptWarningSchema).default([]),
-	/** Set when the engine refused the call and the server answered it, on committed state. */
-	fallback: z.enum(['pattern']).optional()
+	warnings: z.array(ScriptWarningSchema).default([])
 });
 export type TablePage = z.infer<typeof TablePageSchema>;
 export type TableCell = z.infer<typeof TableCellSchema>;

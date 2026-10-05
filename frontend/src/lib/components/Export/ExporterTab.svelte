@@ -6,10 +6,9 @@
 	// `state/exporter-editor.svelte.ts`'s module docstring for the
 	// draft/lease/staging model this drives.
 	import * as artifactsApi from '$lib/api/artifacts';
-	import type { Fallback } from '$lib/api/engine-route';
 	import { isScriptsNeedEngine } from '$lib/api/errors';
 	import { runExporter, runExporterDraft } from '$lib/api/exports';
-	import { EXPORT_FALLBACK_NOTE, downloadExport } from '$lib/util/export-download';
+	import { downloadExport } from '$lib/util/export-download';
 	import {
 		addExporterEntry,
 		artifactHeaderById,
@@ -186,9 +185,6 @@
 	// The run was refused because an entry reaches a script and the engine is
 	// not answering.
 	let exportNeedsEngine = $state(false);
-	// Why the last run was the server's, over committed state; null once one
-	// comes from the engine again.
-	let exportFallback = $state<Exclude<Fallback, 'rules'> | null>(null);
 	const exportStaged = $derived(exportsIncludeStaged());
 
 	// The Export button is UNGATED on dirty/uncommitted state — a clean
@@ -218,8 +214,7 @@
 		exportNeedsEngine = false;
 		exporting = true;
 		try {
-			const result = await downloadExport(start);
-			exportFallback = result.fallback ?? null;
+			await downloadExport(start);
 		} catch (e) {
 			if (isScriptsNeedEngine(e)) exportNeedsEngine = true;
 			else exportError = e instanceof Error ? e.message : 'Export failed';
@@ -255,7 +250,7 @@
 					Export
 				{/if}
 			</button>
-			{#if exportStaged && !exportFallback}
+			{#if exportStaged}
 				<span
 					data-testid="export-staged-note"
 					class="text-[11px] text-muted-foreground/70"
@@ -334,11 +329,6 @@
 		{/if}
 		{#if exportNeedsEngine}
 			<ScriptsNeedEngine />
-		{/if}
-		{#if exportFallback}
-			<p data-testid="export-fallback" class="px-3 py-1 text-[11px] text-muted-foreground/70">
-				{EXPORT_FALLBACK_NOTE[exportFallback]}
-			</p>
 		{/if}
 		{#if addTableError}
 			<p class="px-3 py-1 text-xs text-destructive">{addTableError}</p>

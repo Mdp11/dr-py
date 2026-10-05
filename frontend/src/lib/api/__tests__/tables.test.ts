@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeAll, describe, it, expect, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
 import {
 	ArtifactSet,
 	drain,
@@ -9,11 +8,10 @@ import {
 	ViewPlacements,
 	type ReadParams
 } from '$engine';
-import { EngineGoneError } from '$lib/engine/client';
 import { createEngineSeam } from '$lib/engine/seam';
-import { SURFACES } from '$lib/engine/surfaces';
 import {
 	fakeProject,
+	ready,
 	syncOver,
 	type FakeProject
 } from '$lib/engine/__tests__/support/project-server';
@@ -23,29 +21,9 @@ import {
 	ChainPageSchema,
 	type TableDefinition
 } from '../types';
-import { setActiveBaseUrl } from '../client';
-import { asSent, installEngineSeam, type Side, type Surface } from '../engine-route';
-import {
-	answeredBy,
-	evaluateTable,
-	exportTable,
-	fetchScriptErrors,
-	previewTableJson
-} from '../tables';
+import { asSent, EngineUnavailableError, installEngineSeam } from '../engine-route';
+import { evaluateTable, fetchScriptErrors } from '../tables';
 import { server } from './server';
-
-const BASE = 'http://api.test/api/v1';
-const cfg = { baseUrl: BASE };
-
-const DEFN = {
-	schema_version: 1,
-	row_source: { kind: 'scope', types: ['Block'], criteria: [] },
-	columns: [
-		{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: 'Block', hidden: false }
-	],
-	default_cell_mode: 'collapse',
-	show_row_numbers: false
-} as unknown as TableDefinition;
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
@@ -210,169 +188,21 @@ describe('ChainPageSchema', () => {
 	});
 });
 
-describe('exportTable', () => {
-	it('returns a ready result with the blob + filename on 200', async () => {
-		server.use(
-			http.post(`${BASE}/tables/export`, () =>
-				HttpResponse.arrayBuffer(new TextEncoder().encode('xlsx-bytes').buffer, {
-					headers: { 'content-disposition': 'attachment; filename="my table.xlsx"' }
-				})
-			)
-		);
-		const result = await exportTable({ artifactId: 'a1' }, cfg);
-		expect(result.kind).toBe('ready');
-		expect(result.kind === 'ready' && result.filename).toBe('my table.xlsx');
-	});
-
-	it('sends the requested format and returns the json filename', async () => {
-		let seen: unknown = null;
-		server.use(
-			http.post(`${BASE}/tables/export`, async ({ request }) => {
-				seen = await request.json();
-				return new HttpResponse('[]', {
-					headers: {
-						'content-type': 'application/json',
-						'content-disposition': 'attachment; filename="table.json"'
-					}
-				});
-			})
-		);
-		const res = await exportTable({ definition: DEFN, format: 'json' }, cfg);
-		expect((seen as { format: string }).format).toBe('json');
-		expect(res).toMatchObject({ kind: 'ready', filename: 'table.json' });
-	});
-
-	it('defaults the format to xlsx', async () => {
-		let seen: unknown = null;
-		server.use(
-			http.post(`${BASE}/tables/export`, async ({ request }) => {
-				seen = await request.json();
-				return new HttpResponse('x', {
-					headers: { 'content-disposition': 'attachment; filename="t.xlsx"' }
-				});
-			})
-		);
-		await exportTable({ definition: DEFN }, cfg);
-		expect((seen as { format: string }).format).toBe('xlsx');
-	});
-
-	it('falls back to a .json filename when content-disposition is missing', async () => {
-		server.use(http.post(`${BASE}/tables/export`, () => new HttpResponse('[]')));
-		const res = await exportTable({ definition: DEFN, format: 'json' }, cfg);
-		expect(res.kind === 'ready' && res.filename).toBe('table.json');
-	});
-
-	it('falls back to a .xlsx filename when content-disposition is missing', async () => {
-		server.use(http.post(`${BASE}/tables/export`, () => new HttpResponse('x')));
-		const res = await exportTable({ definition: DEFN }, cfg);
-		expect(res.kind === 'ready' && res.filename).toBe('table.xlsx');
-	});
-
-	it('fetches a json preview', async () => {
-		server.use(
-			http.post(`${BASE}/tables/json-preview`, () =>
-				HttpResponse.json({ sample: '[]', truncated: true })
-			)
-		);
-		await expect(previewTableJson({ definition: DEFN }, cfg)).resolves.toEqual({
-			sample: '[]',
-			truncated: true
-		});
-	});
-});
-
-describe('fetchScriptErrors', () => {
-	it('returns the recap on a 200', async () => {
-		server.use(
-			http.post(`${BASE}/tables/script-errors`, () =>
-				HttpResponse.json({
-					state: 'ready',
-					errors: [
-						{
-							row_index: 1,
-							row_element_id: 't2',
-							row_label: 't2',
-							column_index: 1,
-							column_label: 'script',
-							message: 'ZeroDivisionError: division by zero'
-						}
-					],
-					total_errors: 2,
-					truncated: false
-				})
-			)
-		);
-		const recap = await fetchScriptErrors({ artifactId: 'a1' }, cfg);
-		expect(recap).toMatchObject({ state: 'ready', total_errors: 2, truncated: false });
-		expect(recap.errors[0]).toMatchObject({
-			row_index: 1,
-			column_index: 1,
-			column_label: 'script',
-			row_label: 't2'
-		});
-	});
-
-	// The recap is always whole-table, and the sort is load-bearing: `row_index` is only a valid grid
-	// address for the (definition, sort, model_rev) the page was rendered with.
-	it('sends the table address only — the definition carries the sort', async () => {
-		let body: Record<string, unknown> = {};
-		server.use(
-			http.post(`${BASE}/tables/script-errors`, async ({ request }) => {
-				body = (await request.json()) as Record<string, unknown>;
-				return HttpResponse.json({ state: 'ready', errors: [], total_errors: 0, truncated: false });
-			})
-		);
-		await fetchScriptErrors({ artifactId: 'a1' }, cfg);
-		expect(body).toMatchObject({ artifact_id: 'a1' });
-		expect('sort' in body).toBe(false);
-	});
-});
-
-describe('evaluateTable on the tables surface', () => {
+describe('the table reads on the engine', () => {
 	const made: ReturnType<typeof syncOver>[] = [];
 
 	afterEach(() => {
 		installEngineSeam(null);
-		setActiveBaseUrl(null);
 		for (const over of made.splice(0)) over.dispose();
 	});
 
-	const SERVED = {
-		columns: [{ kind: 'element', header: '', width_px: null }],
-		rows: [
-			{
-				key: ['srv'],
-				cells: [
-					{
-						kind: 'element',
-						item: { id: 'srv', type_name: 'Building', display_name: 'Served', child_count: 0 }
-					}
-				]
-			}
-		],
-		total: 1,
-		base_total: 1,
-		truncated: false,
-		offset: 0,
-		model_rev: 0,
-		warnings: []
-	};
-
 	/**
-	 * A ready replica of `project` behind a seam with `tables` on `side` and
-	 * every other surface on the server; the server's evaluate route answers
-	 * `SERVED` (after `gate`, when given) and records each body it is sent.
+	 * A ready replica of `project` behind an installed seam, whose `call` is
+	 * spied on. MSW holds the replica's own routes and no table route: a call
+	 * that strays to the server fails the test.
 	 */
-	async function over(project: FakeProject, side: Side, gate?: Promise<void>) {
-		const bodies: unknown[] = [];
-		server.use(
-			...project.handlers(),
-			http.post(`${project.baseUrl}/tables/evaluate`, async ({ request }) => {
-				bodies.push(await request.json());
-				if (gate !== undefined) await gate;
-				return HttpResponse.json(SERVED);
-			})
-		);
+	async function over(project: FakeProject) {
+		server.use(...project.handlers());
 		const replica = syncOver(project);
 		made.push(replica);
 		replica.sync.open(project.projectId);
@@ -382,17 +212,8 @@ describe('evaluateTable on the tables surface', () => {
 			(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<unknown> =>
 				replica.sync.call(method, params, options)
 		);
-		const surfaces = Object.fromEntries(
-			SURFACES.map((surface) => [surface, surface === 'tables' ? side : 'server'])
-		) as Record<Surface, Side>;
-		installEngineSeam(
-			createEngineSeam(
-				{ status: () => replica.sync.status(), call: call as typeof replica.sync.call },
-				surfaces
-			)
-		);
-		setActiveBaseUrl(project.baseUrl);
-		return { replica, call, bodies };
+		installEngineSeam(createEngineSeam({ call: call as typeof replica.sync.call }, ready));
+		return { replica, call };
 	}
 
 	/** The element column and the `name` of every element of `type`. */
@@ -404,15 +225,6 @@ describe('evaluateTable on the tables surface', () => {
 				{ kind: 'property', source: { kind: 'row', chain_index: 0 }, name: 'name' }
 			],
 			sort: [{ column: 1, direction: 'asc' }]
-		});
-
-	const scripted = (): TableDefinition =>
-		TableDefinitionSchema.parse({
-			row_source: { kind: 'scope', types: [], criteria: [] },
-			columns: [
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 } },
-				{ kind: 'script', source: { kind: 'row', chain_index: 0 }, snippet: { ref: 'sn1' } }
-			]
 		});
 
 	/** What the engine's evaluation answers over the fake's own model, with no artifacts. */
@@ -432,9 +244,9 @@ describe('evaluateTable on the tables surface', () => {
 	/** A type with more than one page of elements: `e_000031` is one of the 160 people. */
 	const typeOf = (project: FakeProject) => project.model.getElement('e_000031').typeName;
 
-	it("on the engine, an inline definition is the engine's page and the server is never asked", async () => {
+	it("an inline definition is the engine's page", async () => {
 		const project = fakeProject();
-		const { call, bodies } = await over(project, 'engine');
+		const { call } = await over(project);
 		const definition = namesOf(typeOf(project));
 
 		const page = await evaluateTable({ definition: new Proxy(definition, {}), limit: 5 });
@@ -443,15 +255,12 @@ describe('evaluateTable on the tables surface', () => {
 		expect(page).toEqual(direct(project, sent));
 		expect(page.rows).toHaveLength(5);
 		expect(page.total).toBeGreaterThan(5);
-		expect(page).not.toHaveProperty('fallback');
-		expect(answeredBy(page)).toBe('engine');
 		expect(call).toHaveBeenCalledWith('evaluateTable', sent, {});
-		expect(bodies).toEqual([]);
 	});
 
-	it('on the engine, an artifact id resolves through the artifacts the engine holds', async () => {
+	it('an artifact id resolves through the artifacts the engine holds', async () => {
 		const project = fakeProject();
-		const { replica, bodies } = await over(project, 'engine');
+		const { replica } = await over(project);
 		const definition = namesOf(typeOf(project));
 		replica.sync.setArtifacts([
 			{ id: 't1', kind: 'table', name: 'T', artifact_rev: 1, payload: asSent(definition) as never }
@@ -461,86 +270,72 @@ describe('evaluateTable on the tables surface', () => {
 
 		const inline = JSON.parse(JSON.stringify({ definition, offset: 2, limit: 3 })) as ReadParams;
 		expect(page).toEqual(direct(project, inline));
-		expect(bodies).toEqual([]);
 	});
 
-	it('on the engine, the script-error recap is the engine answer and the server is never asked', async () => {
+	it('the script-error recap is the engine answer', async () => {
 		const project = fakeProject();
-		const { call } = await over(project, 'engine');
+		const { call } = await over(project);
 		const definition = namesOf(typeOf(project));
-		let asked = 0;
-		server.use(
-			http.post(`${project.baseUrl}/tables/script-errors`, () => {
-				asked += 1;
-				return HttpResponse.json({});
-			})
-		);
 
 		const recap = await fetchScriptErrors({ definition });
 
+		// The recap is always whole-table: the definition carries the sort, and nothing else is sent.
 		expect(call).toHaveBeenCalledWith(
 			'tableScriptErrors',
 			JSON.parse(JSON.stringify({ definition })),
 			{}
 		);
 		expect(recap).toMatchObject({ state: 'ready', errors: [], total_errors: 0 });
-		expect(asked).toBe(0);
 	});
 
-	it('on the server, both reach the server alone, unmarked', async () => {
+	it('a call the engine cannot answer at all is unavailable', async () => {
 		const project = fakeProject();
-		const { call, bodies } = await over(project, 'server');
-		const definition = namesOf(typeOf(project));
+		const { replica } = await over(project);
+		replica.link!.dispose();
 
-		const page = await evaluateTable({ definition });
-		expect(page).toEqual(TablePageSchema.parse(SERVED));
-		expect(answeredBy(page)).toBe('server');
-		expect(await evaluateTable({ definition: scripted(), offset: 100 })).toEqual(
-			TablePageSchema.parse(SERVED)
+		await expect(evaluateTable({ definition: namesOf(typeOf(project)) })).rejects.toBeInstanceOf(
+			EngineUnavailableError
 		);
-
-		expect(call).not.toHaveBeenCalled();
-		expect(bodies).toEqual([
-			asSent({ definition, offset: 0, limit: 100 }),
-			asSent({ definition: scripted(), offset: 100, limit: 100 })
-		]);
+		await replica.sync.settled();
 	});
 
-	it("on the engine, a call the engine cannot answer is the server's page, unmarked", async () => {
+	it('an aborted signal rejects with an AbortError', async () => {
 		const project = fakeProject();
-		const { call, bodies } = await over(project, 'engine');
-		const definition = namesOf(typeOf(project));
-		call.mockRejectedValueOnce(new EngineGoneError());
+		const { replica, call } = await over(project);
+		const controller = new AbortController();
+		// The call waits for the gate first: abort once the engine has it.
+		const posted = new Promise<void>((resolve) => {
+			call.mockImplementationOnce((method, params, options) => {
+				resolve();
+				return replica.sync.call(method, params, options);
+			});
+		});
 
-		const page = await evaluateTable({ definition, limit: 10 });
+		const page = evaluateTable({
+			definition: namesOf(typeOf(project)),
+			signal: controller.signal
+		});
+		await posted;
+		controller.abort();
 
-		expect(page).toEqual(TablePageSchema.parse(SERVED));
-		expect(answeredBy(page)).toBe('server');
-		expect(bodies).toEqual([asSent({ definition, offset: 0, limit: 10 })]);
+		await expect(page).rejects.toMatchObject({ name: 'AbortError' });
 	});
 
-	it('an aborted signal rejects with an AbortError on either side', async () => {
-		let release!: () => void;
-		const gate = new Promise<void>((resolve) => (release = resolve));
-		try {
-			for (const side of ['engine', 'server'] as const) {
-				const project = fakeProject();
-				const { bodies } = await over(project, side, gate);
-				const controller = new AbortController();
+	it('a table with a pattern the engine cannot translate is a 422', async () => {
+		const project = fakeProject();
+		await over(project);
+		const definition = TableDefinitionSchema.parse({
+			row_source: {
+				kind: 'scope',
+				types: [typeOf(project)],
+				criteria: [{ type: 'property', name: 'name', op: 'matches', value: '(?x)a' }]
+			},
+			columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 } }]
+		});
 
-				const page = evaluateTable({
-					definition: namesOf(typeOf(project)),
-					signal: controller.signal
-				});
-				if (side === 'server') await vi.waitFor(() => expect(bodies).toHaveLength(1));
-				controller.abort();
+		const refused = evaluateTable({ definition });
 
-				await expect(page).rejects.toMatchObject({ name: 'AbortError' });
-				expect(bodies).toHaveLength(side === 'server' ? 1 : 0);
-				installEngineSeam(null);
-			}
-		} finally {
-			release();
-		}
+		await expect(refused).rejects.toMatchObject({ status: 422 });
+		await expect(refused).rejects.toThrow(/inline flags/);
 	});
 });

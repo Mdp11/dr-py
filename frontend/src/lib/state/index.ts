@@ -111,13 +111,6 @@ export {
 	type StagedConflict
 } from './model.svelte';
 export {
-	changesDocToDiff,
-	clearChangesBadge,
-	getChangesBadge,
-	getChangesBadgeTotal,
-	refreshChangesBadge
-} from './changes.svelte';
-export {
 	clearSelection,
 	getMultiSelectedIds,
 	getSelection,

@@ -7,8 +7,7 @@ import * as legacy from './model-legacy.svelte';
 import { getClientConfig, getModelRev, resetSharedStore } from './model-shared.svelte';
 import type { StagedConflict } from './model-engine.svelte';
 import type { ModelOp } from './ops';
-import { hasStagedRules } from './artifact-edits.svelte';
-import { artifactKindOf, getStagingSide } from './replica.svelte';
+import { getStagingSide } from './replica.svelte';
 
 /**
  * Staged-commit model store — the facade. `model-shared.svelte.ts` (re-
@@ -236,8 +235,7 @@ export async function validateAll(): Promise<Issue[]> {
 	await engine.stagedSettled();
 	const { ops, batchIds } = captureStaged();
 	const options = ops.length > 0 ? { ops, baseRev: getModelRev(), batchIds } : { batchIds };
-	const rules = hasStagedRules(artifactKindOf) ? { rulesStaged: true } : {};
-	return validateModel({ ...options, ...rules }, getClientConfig());
+	return validateModel(options, getClientConfig());
 }
 
 /**

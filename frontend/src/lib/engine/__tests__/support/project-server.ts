@@ -406,6 +406,9 @@ export type RecordedCall = {
 	result?: unknown;
 };
 
+/** The seam's `whenReady` over a replica the test has already awaited: its gate is open. */
+export const ready = (): Promise<void> => Promise.resolve();
+
 export type SyncOverrides = {
 	connect?: () => Promise<EngineLink>;
 	api?: Partial<SyncApi>;

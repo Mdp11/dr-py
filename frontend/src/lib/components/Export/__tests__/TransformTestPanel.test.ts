@@ -1,16 +1,16 @@
-// The exporter entry's Test panel: the whole ENTRY goes to
-// POST /exports/preview-transform, the result renders prints + before/after
-// per file (flat for the single unsplit file, one collapsible per file for a
-// split run), a snippet failure is data (error block, no after-pane), an
-// entry problem is the 422's own sentence. Same MSW + mount/flushSync
-// scaffolding as Snippet/__tests__/snippet-test-panel.test.ts.
+// The exporter entry's Test panel: the whole ENTRY goes to the engine's
+// `previewTransform`, the result renders prints + before/after per file (flat
+// for the single unsplit file, one collapsible per file for a split run), a
+// snippet failure is data (error block, no after-pane), an entry problem is
+// the 422's own sentence. The engine seam is a stand-in that answers
+// `capture`'s response; the replica itself is covered with the engine's own
+// tests.
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { server } from '../../../api/__tests__/server';
 import type { ExporterEntry } from '$lib/api/types';
 import { installEngineSeam } from '$lib/api/engine-route';
+import { errorForStatus } from '$lib/api/errors';
 import TransformTestPanel from '../TransformTestPanel.svelte';
 
 const replica = vi.hoisted(() => ({ phase: 'ready' as string }));
@@ -18,14 +18,11 @@ vi.mock('$lib/state/replica.svelte', () => ({
 	getReplicaStatus: () => ({ phase: replica.phase })
 }));
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
 	replica.phase = 'ready';
 	installEngineSeam(null);
-	server.resetHandlers();
 	document.body.innerHTML = '';
 });
-afterAll(() => server.close());
 
 const FILE = {
 	filename: 'doc.json',
@@ -65,15 +62,18 @@ function entry(overrides: Partial<ExporterEntry> = {}): ExporterEntry {
 	};
 }
 
+/** Installs a seam answering `previewTransform` with `response`, or its `detail` as the `status` error. */
 function capture(response: Record<string, unknown> = OK, status = 200) {
-	let seen: Record<string, unknown> | null = null;
-	server.use(
-		http.post('*/exports/preview-transform', async ({ request }) => {
-			seen = (await request.json()) as Record<string, unknown>;
-			return HttpResponse.json(response, { status });
-		})
-	);
-	return { body: () => seen };
+	let seen: { method: string; params: Record<string, unknown> } | null = null;
+	installEngineSeam({
+		call: <T>(method: string, params: unknown) => {
+			seen = { method, params: params as Record<string, unknown> };
+			if (status === 200) return Promise.resolve(response as T);
+			return Promise.reject(errorForStatus(status, response, String(response['detail'])));
+		},
+		whenReady: () => Promise.resolve()
+	});
+	return { body: () => seen?.params ?? null, method: () => seen?.method ?? null };
 }
 
 function render(props: { entry: ExporterEntry; onGoToLine?: (l: number) => void }) {
@@ -105,12 +105,13 @@ describe('TransformTestPanel', () => {
 		async (phase) => {
 			replica.phase = phase;
 			let called = false;
-			server.use(
-				http.post('*/exports/preview-transform', () => {
+			installEngineSeam({
+				call: <T>() => {
 					called = true;
-					return HttpResponse.json(OK);
-				})
-			);
+					return Promise.resolve(OK as T);
+				},
+				whenReady: () => Promise.resolve()
+			});
 			const c = render({ entry: entry() });
 			click(testid('transform-test-toggle'));
 			expect(testid('scripts-need-engine')).not.toBeNull();
@@ -123,28 +124,19 @@ describe('TransformTestPanel', () => {
 	);
 
 	it('parses an engine answer without durations and renders no ms', async () => {
-		const body = { ...OK, duration_ms: undefined };
-		const file = { ...FILE, duration_ms: undefined };
-		let method = '';
-		installEngineSeam({
-			side: (surface) => (surface === 'exports' ? 'engine' : 'server'),
-			call: <T>(m: string) => {
-				method = m;
-				return Promise.resolve({ ...body, files: [file] } as T);
-			},
-			gone: () => false
-		});
+		const body = { ...OK, duration_ms: undefined, files: [{ ...FILE, duration_ms: undefined }] };
+		const seen = capture(body);
 		const c = render({ entry: entry() });
 		click(testid('transform-test-toggle'));
 		click(testid('transform-test-run'));
 		await vi.waitFor(() => expect(document.body.textContent).toContain('rows: 1'));
-		expect(method).toBe('previewTransform');
+		expect(seen.method()).toBe('previewTransform');
 		expect(testid('transform-test-notice')).toBeNull();
 		expect(document.body.textContent).not.toMatch(/\d+ ms/);
 		unmount(c);
 	});
 
-	it('a server 409 renders the state', async () => {
+	it('a 409 from the engine renders the state', async () => {
 		capture({ detail: 'scripts need the engine' }, 409);
 		const c = render({ entry: entry() });
 		click(testid('transform-test-toggle'));
@@ -170,7 +162,7 @@ describe('TransformTestPanel', () => {
 		const c = render({ entry: e });
 		click(testid('transform-test-toggle'));
 		await runAndSettle();
-		expect(seen.body()).toEqual({ entry: e });
+		expect(seen.body()).toMatchObject({ entry: e });
 		expect(testid('transform-test-stdout')?.textContent).toBe('rows: 1\n');
 		expect(testid('transform-test-input')?.textContent).toBe(FILE.input);
 		expect(testid('transform-test-output')?.textContent).toBe(FILE.output);
@@ -270,7 +262,7 @@ describe('TransformTestPanel', () => {
 		unmount(c);
 	});
 
-	it("a 422 shows the server's own sentence", async () => {
+	it("a 422 shows the engine's own sentence", async () => {
 		capture({ detail: 'doc: transform is only supported for JSON-family formats' }, 422);
 		const c = render({ entry: entry({ format: 'csv' }) });
 		click(testid('transform-test-toggle'));

@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
 import {
 	drain,
 	isSteps,
@@ -11,15 +10,14 @@ import {
 } from '$engine';
 import { FrameError } from '$lib/engine/frame';
 import { createEngineSeam } from '$lib/engine/seam';
-import { SURFACES } from '$lib/engine/surfaces';
 import {
 	fakeProject,
+	ready,
 	syncOver,
 	type FakeProject
 } from '$lib/engine/__tests__/support/project-server';
-import { setActiveBaseUrl } from '../client';
 import { getElement } from '../elements';
-import { installEngineSeam, type Side, type Surface } from '../engine-route';
+import { EngineUnavailableError, installEngineSeam } from '../engine-route';
 import { NotFoundError, ValidationError } from '../errors';
 import {
 	getElementsBatch,
@@ -51,25 +49,16 @@ const made: ReturnType<typeof syncOver>[] = [];
 
 afterEach(() => {
 	installEngineSeam(null);
-	setActiveBaseUrl(null);
 	for (const over of made.splice(0)) over.dispose();
 	server.resetHandlers();
 });
 
-const sides = (side: Side, only?: Surface) =>
-	Object.fromEntries(
-		SURFACES.map((surface) => [surface, only === undefined || surface === only ? side : 'server'])
-	) as Record<Surface, Side>;
-
-const allEngine = sides('engine');
-
 /**
- * A ready replica of `project` behind an installed seam whose surfaces are
- * `surfaces`; `call` is the seam's view of `sync.call`, spied on. MSW holds
- * the replica's own routes and no read route: a read that strays to the
- * server fails the test.
+ * A ready replica of `project` behind an installed seam; `call` is the seam's
+ * view of `sync.call`, spied on. MSW holds the replica's own routes and no
+ * read route: a read that strays to the server fails the test.
  */
-async function engineOver(project: FakeProject, surfaces = allEngine) {
+async function engineOver(project: FakeProject) {
 	server.use(...project.handlers());
 	const over = syncOver(project);
 	made.push(over);
@@ -80,8 +69,7 @@ async function engineOver(project: FakeProject, surfaces = allEngine) {
 		(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<unknown> =>
 			over.sync.call(method, params, options)
 	);
-	const sync = { status: () => over.sync.status(), call: call as typeof over.sync.call };
-	installEngineSeam(createEngineSeam(sync, surfaces));
+	installEngineSeam(createEngineSeam({ call: call as typeof over.sync.call }, ready));
 	return { over, call };
 }
 
@@ -344,7 +332,7 @@ describe('the model reads on the engine', () => {
 			}))
 		);
 
-		const excluded = await listExcludedRootsPaged(3, undefined, 2, 'v-none');
+		const excluded = await listExcludedRootsPaged(3, 2, 'v-none');
 		expect(ids(excluded.items)).toEqual(ids(rootsPage.items.slice(2, 5)));
 		expect(call).toHaveBeenLastCalledWith(
 			'listExcludedRoots',
@@ -354,43 +342,21 @@ describe('the model reads on the engine', () => {
 	});
 });
 
-describe('the surfaces', () => {
-	it('a query that is not blank goes to search, anything else to elements', async () => {
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const onSearch = await engineOver(project, sides('engine', 'search'));
-		const routes: string[] = [];
-		server.use(
-			http.get(`${project.baseUrl}/model/elements`, ({ request }) => {
-				routes.push(new URL(request.url).search);
-				return HttpResponse.json({ items: [], total: 0 });
-			})
-		);
-		setActiveBaseUrl(project.baseUrl);
-
-		await listElementsPage({ q: 'sta' });
-		expect(onSearch.call).toHaveBeenCalledTimes(1);
-		await listElementsPage({ q: '  ' });
-		await listElementsPage({ type: 'Person' });
-		expect(onSearch.call).toHaveBeenCalledTimes(1);
-		expect(routes).toEqual(['?q=++', '?type=Person']);
-
-		const onElements = await engineOver(project, sides('engine', 'elements'));
-		routes.length = 0;
-		await listElementsPage({ q: '  ' });
-		await listElementsPage();
-		expect(onElements.call).toHaveBeenCalledTimes(2);
-		await listElementsPage({ q: 'sta' });
-		expect(onElements.call).toHaveBeenCalledTimes(2);
-		expect(routes).toEqual(['?q=sta']);
-	});
-
+describe('the engine reads', () => {
 	it('a signal reaches the engine: a search aborted mid-scan rejects with an AbortError', async () => {
 		const project = fakeProject();
 		const { over, call } = await engineOver(project);
 		const controller = new AbortController();
+		// The read waits for the gate first: abort once the engine has the call.
+		const posted = new Promise<void>((resolve) => {
+			call.mockImplementationOnce((method, params, options) => {
+				resolve();
+				return over.sync.call(method, params, options);
+			});
+		});
 
 		const search = listElementsPage({ q: 'a', limit: 500, signal: controller.signal });
+		await posted;
 		controller.abort();
 		await expect(search).rejects.toMatchObject({ name: 'AbortError' });
 		expect(call).toHaveBeenLastCalledWith(
@@ -409,37 +375,25 @@ describe('the surfaces', () => {
 		});
 	});
 
-	it("on the server a signal is the fetch's, never a query parameter", async () => {
-		const inits: { url: string; signal: AbortSignal | null | undefined }[] = [];
-		const fetchSpy = ((url: string, init: RequestInit) => {
-			inits.push({ url, signal: init.signal });
-			return Promise.resolve(
-				new Response(JSON.stringify({ items: [], total: 0 }), {
-					headers: { 'Content-Type': 'application/json' }
-				})
-			);
-		}) as unknown as typeof fetch;
-		const cfg = { baseUrl: 'http://api.test/api/v1/projects/p', fetch: fetchSpy };
-		const signal = new AbortController().signal;
+	it('a signal is the call of every paged read', async () => {
+		const project = fakeProject();
+		const { call } = await engineOver(project);
+		const { signal } = new AbortController();
 
-		await listElementsPage({ q: 'sta', signal }, cfg);
-		await listElementRelationships('e_1', { direction: 'in', signal }, cfg);
-		await listContainmentRoots({ limit: 5, signal }, cfg);
-		await listExcludedRoots({ viewId: 'v', signal }, cfg);
-		await listContainmentChildren('e_1', { offset: 1, signal }, cfg);
+		await listElementRelationships('e_000001', { direction: 'in', signal });
+		await listContainmentRoots({ limit: 5, signal });
+		await listExcludedRoots({ viewId: 'v', signal });
+		await listContainmentChildren('e_000001', { offset: 1, signal });
 
-		expect(inits.map((init) => init.signal)).toEqual([signal, signal, signal, signal, signal]);
-		for (const init of inits) expect(init.url).not.toContain('signal');
-		expect(inits.map((init) => new URL(init.url).search)).toEqual([
-			'?q=sta',
-			'?direction=in',
-			'?limit=5',
-			'?view_id=v',
-			'?offset=1'
+		expect(call.mock.calls.map(([method, params, options]) => [method, params, options])).toEqual([
+			['listElementRelationships', { id: 'e_000001', direction: 'in' }, { signal }],
+			['listContainmentRoots', { limit: 5 }, { signal }],
+			['listExcludedRoots', { view_id: 'v' }, { signal }],
+			['listContainmentChildren', { id: 'e_000001', offset: 1 }, { signal }]
 		]);
 	});
 
-	it('with the replica on the server side every read goes to the server', async () => {
+	it('with the replica on the server side every read is unavailable and the server is never asked', async () => {
 		const project = fakeProject();
 		const over = syncOver(project, {
 			connect: () => Promise.reject(new FrameError('same-host', 'no frame here'))
@@ -453,80 +407,22 @@ describe('the surfaces', () => {
 			(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<unknown> =>
 				over.sync.call(method, params, options)
 		);
-		installEngineSeam(
-			createEngineSeam(
-				{ status: () => over.sync.status(), call: call as typeof over.sync.call },
-				allEngine
-			)
-		);
+		installEngineSeam(createEngineSeam({ call: call as typeof over.sync.call }, ready));
 
-		const hit: string[] = [];
-		const base = project.baseUrl;
-		const element = { id: 'e_000001', type_name: 'Organization', properties: {}, rev: 0 };
-		const tree = { items: [], total: 0 };
-		server.use(
-			http.get(`${base}/model/elements/:id/relationships`, () => {
-				hit.push('relationships');
-				return HttpResponse.json({ items: [], total: 0 });
-			}),
-			http.get(`${base}/model/elements/:id/children`, () => {
-				hit.push('children');
-				return HttpResponse.json(tree);
-			}),
-			http.post(`${base}/model/elements/batch`, () => {
-				hit.push('batch');
-				return HttpResponse.json({ items: [element] });
-			}),
-			http.post(`${base}/model/elements/tree-items`, () => {
-				hit.push('tree-items');
-				return HttpResponse.json({ items: [] });
-			}),
-			http.get(`${base}/model/elements/:id`, () => {
-				hit.push('element');
-				return HttpResponse.json(element);
-			}),
-			http.get(`${base}/model/elements`, () => {
-				hit.push('page');
-				return HttpResponse.json({ items: [], total: 0 });
-			}),
-			http.get(`${base}/model/summary`, () => {
-				hit.push('summary');
-				return HttpResponse.json({ model_rev: 9, element_count: 0, relationship_count: 0 });
-			}),
-			http.get(`${base}/model/containment/roots/excluded`, () => {
-				hit.push('excluded');
-				return HttpResponse.json(tree);
-			}),
-			http.get(`${base}/model/containment/roots`, () => {
-				hit.push('roots');
-				return HttpResponse.json(tree);
-			})
-		);
-		setActiveBaseUrl(base);
-
-		await getElement('e_000001');
-		await getElementsBatch(['e_000001']);
-		await getTreeItemsBatch(['e_000001']);
-		await listElementsPage();
-		await listElementsPage({ q: 'sta' });
-		await listElementRelationships('e_000001');
-		await expect(getModelSummary()).resolves.toMatchObject({ model_rev: 9 });
-		await listContainmentRoots();
-		await listExcludedRoots({ viewId: 'v-1' });
-		await listContainmentChildren('e_000001');
-
-		expect(hit).toEqual([
-			'element',
-			'batch',
-			'tree-items',
-			'page',
-			'page',
-			'relationships',
-			'summary',
-			'roots',
-			'excluded',
-			'children'
-		]);
-		expect(call).not.toHaveBeenCalled();
+		// MSW has no read route and refuses an unhandled request: a read that
+		// reached the server would fail differently.
+		const reads = [
+			() => getElement('e_000001'),
+			() => getElementsBatch(['e_000001']),
+			() => getTreeItemsBatch(['e_000001']),
+			() => listElementsPage(),
+			() => listElementsPage({ q: 'sta' }),
+			() => listElementRelationships('e_000001'),
+			() => getModelSummary(),
+			() => listContainmentRoots(),
+			() => listExcludedRoots({ viewId: 'v-1' }),
+			() => listContainmentChildren('e_000001')
+		];
+		for (const read of reads) await expect(read()).rejects.toBeInstanceOf(EngineUnavailableError);
 	});
 });

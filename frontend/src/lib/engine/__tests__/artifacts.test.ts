@@ -888,7 +888,7 @@ describe('the artifact follower and rule sets', () => {
 		expect(f.parsesAsked).toEqual([]);
 	});
 
-	it('a committed rule set that came without its parse reaches the engine without one, which refuses', async () => {
+	it('a committed rule set that came without its parse reaches the engine without one, which skips it with a reason', async () => {
 		const over = await swept();
 		const f = follow(over.sync);
 		f.committed.set('r1', ruleSet('r1', 'Rules', A, null));
@@ -910,7 +910,14 @@ describe('the artifact follower and rule sets', () => {
 				]
 			}
 		]);
-		await expect(over.sync.call('getModelIssues', {})).rejects.toThrow('reaches unreadable rules');
+		await expect(over.sync.call('getModelIssues', {})).resolves.toMatchObject({
+			rules_status: {
+				total: 0,
+				skipped: [
+					{ artifact_id: 'r1', set_name: 'Rules', rule: '', reason: 'rule set could not be read' }
+				]
+			}
+		});
 	});
 
 	it("a staged rules update is pushed 'pending', then again with its parse", async () => {

@@ -439,18 +439,11 @@ engine store":
      inline as a `definition` via `runExporterDraft`
      (`lib/api/exports.ts`), which the backend validates and runs exactly
      like a committed payload (`RunExportIn.definition`).
-     On the server, referenced tables evaluate from their own COMMITTED
-     definitions either way — only the exporter's own presentation travels
-     as a draft; with the `exports` surface on the engine the run reads the
-     working copy, staged tables included, and `export-staged-note`
-     ("Includes staged changes") shows beside the button while anything is
-     staged (`exportsIncludeStaged()`, `state/replica.svelte.ts`). A run the
-     engine sent to the server (it reaches a pattern) shows
-     `export-fallback` ("Exported from committed state: a search pattern needs the server";
-     the texts are `EXPORT_FALLBACK_NOTE` in `util/export-download.ts`,
-     shared with `TableView`) until the next run lands unmarked, and the
-     staged note hides meanwhile: `downloadExport` resolves to the result
-     it downloaded.
+     The engine runs it over the working copy, staged tables included, and
+     `export-staged-note` ("Includes staged changes") shows beside the button
+     while anything is staged (`exportsIncludeStaged()`,
+     `state/replica.svelte.ts`). `downloadExport` resolves to the result it
+     downloaded.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
      refuse the open, it renders that tab **unsaveable and read-only** behind
@@ -555,8 +548,7 @@ engine store":
 8. **Export** streams the last committed session state to a file: a picked
    file goes up as a raw `fetch` body (`POST /model/upload`, no JS-side parse)
    or by server path (`POST /model/load`); export saves `downloadModel()`'s
-   Blob — `GET /model/download`'s body, or with the `download` surface on the
-   engine the replica's own file of committed state — into a File System
+   Blob — the replica's own file of committed state — into a File System
    Access writable (or writes server-side via `POST /model/save`), so the
    browser never materializes the serialized model as a string. TopBar opens
    the save picker within the click, before the Blob has arrived (the picker
@@ -763,7 +755,7 @@ could not be read: …`, the readers keep showing the answered edits over
   The staged probe (`lib/engine/staged-probe.ts`) asks whether the replica
   holds anything staged — committed batches it still holds included — while
   the engine half is attached (`attachEngine` sets it, `detachEngine` clears
-  it); the dev shadow reads it (see "Shadow comparison").
+  it); `exportsIncludeStaged()` and `metamodelIncludesStaged()` read it.
 
 #### Validation issues: one live map, one optional overlay
 
@@ -812,8 +804,7 @@ delta, because reconnect needs the refetch path anyway. The debounced triggers
 share ONE 300 ms timer, `scheduleIssuesRefetch()` in `model-shared.svelte.ts`
 (`stopRealtime()` disarms it through `cancelIssuesRefetch()`).
 
-**With the issues on the engine** (the `issues` surface, `lib/engine/README.md`
-"Surfaces"), `getModelIssues` answers the replica's live issue store: the
+**On the engine** (`lib/engine/README.md` "Reads"), `getModelIssues` answers the replica's live issue store: the
 WORKING copy's issues, a staged edit's own tagged `uncommitted`, every other
 one `on_server`, never `resolved` — so the live map shows what the staged
 edits break before any Validate, and a fixed issue simply leaves it. Every
@@ -830,7 +821,7 @@ server held issues for, and the engine's list may hold its own copies for
 others, so no issue shows twice beside its server copy. Until the replica's first
 sweep has ended and the artifact follower has loaded the artifacts once (and
 again after every new replica — a re-bootstrap, a dead worker, a rebind
-adoption), the server answers, exactly as with the surface on `server`.
+adoption), a read waits for the gate (`whenReady`) and answers once it opens.
 `validateAll` sends the engine's staged batch ids with the ops, and the
 engine validates those batches itself.
 
@@ -869,9 +860,10 @@ explicit user click. `GET /model/issues` is the cheap read used everywhere else.
 The TypeScript engine (`../engine`) runs a full replica of the model in a
 worker of the sandbox site (`../sandbox`); `lib/engine/` is the app's side of
 it and `lib/state/replica.svelte.ts` wires it into the workspace (see
-"Wiring" below). The model reads, navigations and criteria searches can be
-answered by it, one switch per surface (see "Surfaces"), every one on
-`engine` by default; a status-bar indicator shows its state.
+"Wiring" below). The model reads, the evaluations, the issues, the tables,
+the exports, the metamodel previews, the download, the view warnings and the
+compare are answered by it alone, once its gate is open (see "Reads"); a
+status-bar indicator shows its state.
 
 **Aliases and the types-only rule.** `$engine` points at
 `../engine/src/index.ts` and `$sandbox` at `../sandbox/src`, in `kit.alias`
@@ -1103,9 +1095,8 @@ report after `parse` had begun would pull the bar back; a stray
 also reported while `ready`) is ignored outright — it is never a phase this
 journey has a slice for.
 
-`startReplica()` opens the replica whatever `dr.surfaces` says (shadow needs
-it even with every switch on `server`), so a `replica: false` journey (no
-surface on the engine) can still be handed a stray `journeyReplica` call
+`startReplica()` opens the replica whatever `dr.surfaces` says, so a
+`replica: false` journey (no surface on the engine) can still be handed a stray `journeyReplica` call
 from that background open — and `download` outranks `validate` in the phase
 order, so an unguarded call would hijack the bar from the real
 `/model/status` polls before the model has even finished hydrating.
@@ -1361,41 +1352,64 @@ order, unfiltered, artifacts ignored — the server's
 `read._placed_element_ids`. Its view type is structural (`FolderLike`), so
 `lib/engine` needs no `lib/api/types` value.
 
-**Surfaces** (`lib/api/engine-route.ts`, `lib/engine/surfaces.ts`,
-`lib/engine/seam.ts`). The nine model reads of `lib/api`, its two
-evaluations and its three issue calls keep their signatures and schemas and
-are answered by the engine or the server, one switch per surface:
+**Reads** (`lib/api/engine-route.ts`, `lib/engine/gate.ts`,
+`lib/engine/seam.ts`, `lib/engine/surfaces.ts`). Every read of `lib/api` the
+replica can answer keeps its signature and schema and is answered by the
+engine alone, from the working copy — staged edits and staged artifacts
+included:
 
-| surface         | functions                                                                                           |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| `elements`      | `getElement`, `getElementsBatch`, `listElementsPage` without a `q` that is not blank after `trim()` |
-| `search`        | `listElementsPage` with one                                                                         |
-| `relationships` | `listElementRelationships`                                                                          |
-| `tree`          | `getTreeItemsBatch`, `listContainmentRoots`, `listExcludedRoots`, `listContainmentChildren`         |
-| `summary`       | `getModelSummary`                                                                                   |
-| `navigation`    | `evaluateNavigation`                                                                                |
-| `criteria`      | `searchModel`                                                                                       |
-| `issues`        | `getModelIssues`, `validateModel`, the model half of `previewCommit`                                |
-| `tables`        | `evaluateTable`                                                                                     |
-| `exports`       | `exportTable`, `previewTableJson`, `runExporter`, `runExporterDraft`                                |
+| area        | functions                                                                                                                                                                                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| model reads | `getElement`, `getElementsBatch`, `listElementsPage` (a `q` that is not blank after `trim()` is a search), `listElementRelationships`, `getTreeItemsBatch`, `listContainmentRoots`, `listExcludedRoots`, `listContainmentChildren`, `getModelSummary` |
+| evaluations | `evaluateNavigation`, `searchModel`, `evaluateTable`, `fetchScriptErrors`                                                                                                                                                                             |
+| issues      | `getModelIssues`, `validateModel`, the model half of `previewCommit`                                                                                                                                                                                  |
+| exports     | `exportTable`, `previewTableJson`, `runExporter`, `runExporterDraft`, `previewTransform`                                                                                                                                                              |
+| metamodel   | `diffMetamodel`, the model half of the rebind `previewCommit`                                                                                                                                                                                         |
+| download    | `downloadModel`                                                                                                                                                                                                                                       |
+| views       | `viewWarnings`                                                                                                                                                                                                                                        |
+| compare     | `compareModel`, `proposeCr`                                                                                                                                                                                                                           |
 
 - `lib/api` imports nothing of `lib/engine`: the engine is an injected seam
   (`installEngineSeam(seam | null)`), like the 401 handler. Each function
-  calls `route(surface, cfg, engineCall, serverCall)`: no seam, the
-  surface's side `server`, or a call with an explicit `baseUrl` or `fetch`
-  goes to the server — a call that names its server keeps it, so every MSW
-  test of the server path is untouched. Otherwise the engine answers,
-  through the same zod schema as the server's body; a rejection the seam
-  calls `gone` (the link was disposed while the read waited) is answered by
-  the server instead, any other reaches the caller. `engineSide(surface)`
-  is the side now, `server` without a seam.
-- The engine refuses an evaluation it must not answer with a 501 —
-  `reaches an unsupported pattern` (a criterion pattern its regex
-  translator cannot vouch for). `route`'s optional fifth argument,
-  `{mark?(value, reason)}`, is for it: an `ApiError` of status 501 with that
-  message is answered by the server, the value handed to `mark` with
-  `'pattern'`, and no shadow probe runs; any other 501 reaches the caller.
-  Scripts have no fallback: they run in the engine, and every request carries
+  calls `route<T>(method, params, {signal?, transfer?})` and parses what it
+  answers with its zod schema. An `EngineSeam` is `call(method, params,
+signal?, transfer?)` and `whenReady(signal?)`. `route` awaits
+  `whenReady`, makes the call and returns the engine's body, so a call made
+  while the replica opens, re-bootstraps or is not yet swept waits and
+  answers once the gate is open; its `signal` is `whenReady`'s and the
+  call's. No seam installed is an `EngineUnavailableError` (`the engine is
+not running`). There is no server answer behind a read.
+- A 409 whose detail is `stale staged batches`, `stale base_rev`, `replica
+is not ready` or `replica closed` — the staged batches, the `base_rev` or
+  the replica moved under the call — awaits `whenReady` again and asks the
+  engine once more with the same params; a second refusal reaches the caller
+  as the `ApiError` of the engine's answer (a `ConflictError`). So does every
+  other engine error, unchanged: a 404, a 409 of another detail, and a 422
+  for what the engine will not answer — a search, navigation, table or
+  facet pattern its regex translator cannot take (the message names the
+  construct), a model file that is not UTF-8 JSON, a change request its strict
+  reader refuses, a rebind preview whose staged ops the candidate does not
+  admit (the server's own wording). A rule set it cannot read is not an
+  error: it is skipped with its reason in `getModelIssues`' `rules_status`.
+  A call that moves buffers in `transfer` (`compareModel`'s file) is not
+  asked again: they are detached once posted.
+- The gate (`createGate(read)`, `lib/engine/gate.ts`). `read()` says `open`,
+  `closed` or `unavailable` with a reason. An open gate resolves
+  `whenReady` at once and an unavailable one rejects it at once with
+  `EngineUnavailableError(reason)`; a closed one holds every caller on ONE
+  promise per epoch — from the first caller to a closed gate until the gate
+  leaves `closed` — which `moved()` (called whenever something `read` reads
+  moved) resolves, or rejects when the gate became unavailable. A caller's
+  `signal` rejects that caller alone with an `AbortError`. The replica store
+  supplies `read` (see "Wiring"): open at `ready` or `frozen` with the
+  replica swept and the artifacts loaded, closed while it opens or
+  re-bootstraps, unavailable at `failed`, `server`, `off` or without a replica.
+- `createEngineSeam(sync, whenReady)` (`seam.ts`) makes the seam of a
+  `ReplicaSync`: `call` is `sync.call` (so the read barrier holds) with the
+  signal and the transfer list as its options, and an `EngineGoneError` from
+  it — no replica to ask, a worker gone under the call — is an
+  `EngineUnavailableError`.
+- Scripts run in the engine, and every request carries
   `X-Data-Rover-Scripts: engine-only` (`SCRIPTS_HEADER` in `api/client.ts`,
   set by `apiFetchRaw` and `apiUpload`), which asks the server never to
   evaluate one. A server that is asked to answer a script table anyway says
@@ -1432,80 +1446,57 @@ are answered by the engine or the server, one switch per surface:
   working copy's, and checks it again after the pre-state fetches, the locks
   and `commitsLanded()`; a rev-only stamp (`{rev}`, change-request proposals)
   checks the committed rev once. `stagedResult` is the result object whose ops
-  were staged. `evaluateNavigation` marks its
-  page `fallback: 'pattern'`, which the navigation editor's
-  preview keeps from its first page and `Navigation/ResultsDock.svelte`
-  shows above the chains as a muted note (`data-testid="nav-fallback"`,
-  "Reads committed state: …"); `evaluateTable` marks its page the same way
-  (`TablePageSchema.fallback`), which the table store keeps on its
-  `TableData` and `Table/TableView.svelte` shows in the tab's fixed chrome
-  (`data-testid="table-fallback"`, "Reads committed state: a search pattern
-  needs the server"); `searchModel`
-  passes no mark. A third 501,
-  `reaches unreadable rules` (an issue call over a rule set the engine
-  cannot read, or that reached it without the server's parse — the
-  follower sends every parse, so only a document the engine's reader
-  refuses, or a payload item with no parse, gets here), is answered
-  by the server the same way, never marked, and so is a rebind preview's
-  `reaches ops the candidate refuses` (a staged op the candidate does not
-  admit, which the server refuses with its own 422). So is a 409 the engine answers when the staged batches, the
-  `base_rev` or the replica moved under the call (`stale staged batches`,
-  `stale base_rev`, `replica is not ready`, `replica closed`): the server answers the whole
-  request. `route`'s options also take `shadow` (`'unstaged'`, the default;
-  `'always'`, compared with edits staged, for a call that sends them to the
-  server too; `'never'`), `recheck` (the side is asked again once the
-  engine answers, and a side gone to the server meanwhile takes the
-  server's answer) and `digest` (carried on the shadow's probe: what it
-  compares of each answer in the answer's place).
-- The `exports` surface, `engine` by default like the rest: `exportTable`,
-  `runExporter` and `runExporterDraft` send the engine the server's body
-  plus `date` (`utcDate()`, `lib/util/utc-date.ts`: the UTC day as
-  `YYYYMMDD`, which the server reads off its own clock) and `project` (the
-  active project's id, `api/client.ts`' `activeProjectId()`, which
-  `state/active-project.svelte.ts` pushes beside the base URL), and turn the
-  engine's `{parts, filename, content_type, truncated}` into the
-  `ExportResult` the server's response gives (`engineExport`: a `Blob` of
-  the parts with `content_type` as its type). The server's side reads the
-  file name from `Content-Disposition`, its `filename*=UTF-8''…`
-  percent-decoded before its `filename="…"`, and `truncated` from
-  `X-Table-Truncated`. `previewTableJson` sends the
-  body alone, both sides parsed by `JsonPreviewSchema`. An export that
-  reaches a pattern is the server's file over committed state, marked
-  `fallback: 'pattern'` (`markExport`).
-  The shadow compares a download by `exportDigest` (see "Shadow
-  comparison").
-- The `issues` surface: `getModelIssues` is the engine's `getModelIssues {}`
-  (`recheck`: an answer from a replica whose sweep has not ended is not
-  adopted), `validateModel` with no inline model or scope — and, when it
-  sends ops, the engine batch ids they are (`batchIds`) — is
-  `validateModel {batch_ids}`, and `previewCommit(baseRev, ops, cfg?,
-local?)` with `local` (`{strict, batchIds}`) and no `metamodel.rebind`
-  op is `previewCommit {base_rev, batch_ids, strict}`: the engine previews
-  the model ops from its own staged batches and, when any op is not a model
-  op, the server previews those alone, the halves summed (counts added,
-  lists concatenated engine first, `would_block` or-ed). Anything else is
-  the server's whole request. `validateModel` and `previewCommit` compare
-  while staged (`comparableWhileStaged`), unless an op creates an entity,
-  whose id the server mints and the engine never sees. A `validateModel`
-  with nothing staged is never compared: the server's full run names one
-  member of a containment cycle where the engine names every element on
-  it, and `getModelIssues` compares the unstaged state already.
+  were staged.
+- Exports: `exportTable`, `runExporter`, `runExporterDraft` and
+  `previewTransform` send the engine their request body plus `date`
+  (`utcDate()`, `lib/util/utc-date.ts`: the UTC day as `YYYYMMDD`) and
+  `project` (the active project's id, `api/client.ts`' `activeProjectId()`,
+  which `state/active-project.svelte.ts` pushes beside the base URL), and
+  `engineExport` turns the engine's `{parts, filename, content_type,
+truncated}` into the `ExportResult`: a `Blob` of the parts with
+  `content_type` as its type, `filename`, `truncated`. `previewTableJson`
+  sends the body alone, its answer parsed by `JsonPreviewSchema`. An export
+  is one call: `downloadExport` (`util/export-download.ts`) runs it and
+  downloads its file; there is no 202 and no `preparing` result.
+  `downloadModel {}` answers `{parts, filename, content_type}`
+  (`EngineModelFileSchema`), a `Blob` of the committed model written as
+  `GET /model/download` wrote it, byte for byte, whatever is staged.
+- Issues: `getModelIssues` is the engine's `getModelIssues {}`;
+  `validateModel` with no inline model or scope — and, when it sends ops, the
+  engine batch ids they are (`batchIds`) — is `validateModel {batch_ids}`;
+  `previewCommit(baseRev, ops, cfg?, local?)` with `local` (`{strict,
+batchIds}`) and no `metamodel.rebind` op is `previewCommit {base_rev,
+batch_ids, strict}`: the engine previews the model ops from its own staged
+  batches and, when any op is not a model op, the server previews those
+  alone, the halves summed (counts added, lists concatenated engine first,
+  `would_block` or-ed). An inline model, a scope, ops no batch ids name and a
+  `previewCommit` without `local` are `POST /model/validate` and `POST
+/commits/preview`, the server's whole request. With a `metamodel.rebind`
+  op the blob is linted first (`POST /metamodel/lint`): a blob the lint
+  refuses is the server's whole request, which answers its own 422, and else
+  `previewCommit {base_rev, batch_ids, strict, rebind: {metamodel: document}}`
+  is the working copy under the candidate with the committed rules, the
+  other non-model ops previewed by the server and merged. `diffMetamodel`
+  lints the candidate, throws a `ValidationError` 422 `Invalid metamodel` when
+  the lint refuses it, and answers `candidateIssues {metamodel: document}`
+  joined with `structuralDiff` (`POST /metamodel/structural-diff`, the
+  document half alone) as `structural`. `viewWarnings(view)` is
+  `validateView {view}`, the view as staged, sent as plain JSON.
+  `compareModel(file)` is `compareModel {file, created_at}`, `file` the
+  upload's `arrayBuffer()` in the call's transfer list and `created_at` the
+  client's clock, and `proposeCr(crs)` is `proposeCr {crs, created_at}`: a
+  proposal's conflict is `{ok: false, …}`, an answer and not an error.
 - The engine's params are flat and snake_case — `{id}`, `{ids}`,
   `{type, q, limit, offset}`, `{id, direction, limit, offset}`, `{}`,
   `{limit, offset}`, `{limit, offset, view_id}`, `{id, limit, offset}` —
   and an option the caller omitted is not sent. The evaluations' params
-  are the server's body as plain JSON (`asSent`, since a `$state` proxy
+  are the request body as plain JSON (`asSent`, since a `$state` proxy
   cannot cross a `MessagePort`): `evaluateNavigation`'s `{definition |
 artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   `{target, criteria, limit, offset}`, `evaluateTable`'s
   `{definition | artifact_id, offset, limit}`. The option bags (and
-  `evaluateTable`'s args) take a `signal`: the engine gets it with the call (an abort cancels
-  a search's or a table's scan), the server as `init.signal`; it never
-  reaches the query string or the body.
-- A seam may carry a `shadow`, handed after every engine outcome the
-  surface, the method, the params, the outcome, `again()` (the same engine
-  read once more) and `server()` (the same read from the server). It is not
-  awaited, and nothing it throws or rejects reaches the caller.
+  `evaluateTable`'s args) take a `signal`: the engine gets it with the call,
+  and an abort cancels a search's or a table's scan.
 - The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
   `SURFACE_DEFAULTS` — `engine` for every surface — and
   `STAGING_DEFAULT`, `engine`,
@@ -1520,120 +1511,25 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
   alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
   take effect. `navigation`, `criteria`, `tables`, `exports`, `issues`, `download`, `views` and `compare` are never
-  forced by `staging`: `navigation`, `criteria`, `tables` and `exports` because the
-  server never evaluated staged edits in either mode, `issues` because its calls send the server the
-  staged edits and — on the engine — because a gate (below) can hold it back
-  to `server` whatever the switch says, `download` because it reads committed
-  state on either side, `views` because the server warns over the committed
-  view and, on the engine, the `issues` gate holds it back too, `compare` because the server diffs
-  and applies change requests over committed state, gated as `views` is. The switches are read once, with the
+  forced by `staging`. They route nothing — every read is the engine's, once
+  the gate is open — and decide only what `engineSide(surface)`
+  (`state/replica.svelte.ts`: the switch, the surface's gate and a phase that is neither `off`
+  nor `server`) says to the stores that follow the replica: whether the open
+  tables re-page and the view warnings recompute when the replica moves, and
+  whether the summary, the compare dialog and the notices count the engine's
+  answer as theirs. The switches are read once, with the
   rest, and honoured in a build too. `readSurfaces(storage?)` is
   `readSwitches(storage).surfaces`; `anyEngineSurface(switches)` says whether
   any surface is on the engine, `issues`, `metamodel`, `views` and `compare` counting only with `staging:
 engine` — on legacy their gate never opens, so an opt-out stored before the
   `issues` switch existed (seven surfaces on `server`, staging on legacy)
   waits for, and is blocked by, nothing.
-- `createEngineSeam(sync, surfaces, shadow?, gates?)` makes the seam of a
-  `ReplicaSync`: a surface's EFFECTIVE side is `engine` iff its switch says
-  so, its gate (when given) answers true, and the phase is neither `off`
-  nor `server`; `call` is `sync.call`
-  (so the read barrier holds); `gone` is `EngineGoneError`. The replica
-  store installs it (see "Wiring"), with four gates: `navigation`,
-  `tables` and `exports` (the artifact follower has loaded: a table may
-  name itself or its navigations by id, an export its tables or its
-  exporter) and `issues` — staging on the engine (the
-  legacy buffer's edits are not in the working copy), the status's
-  `seeded`, which closes it the moment the engine's replica leaves `ready`
-  (diverged or closed), and the artifact follower having loaded (until
-  then the engine holds none of the rule sets its list must carry). A `frozen` replica keeps `seeded`: its list matches
-  the old-metamodel UI until the adoption re-bootstraps it.
-
-**Shadow comparison** (`lib/engine/shadow.ts`, `lib/engine/quiet.ts`). Holds
-the engine's answer to a switched-on read to the server's own, in dev only.
-
-- `shadowEnabled(storage?)` is true only under `import.meta.env.DEV` (absent
-  from a build — dead code past that check is never bundled) and only when
-  `localStorage['dr.shadow'] === '1'`; no storage, a throwing one or any
-  other value are off.
-- `createShadow({rev, quiet, staged, report})` builds the seam's `shadow`: it runs
-  `server()` beside the engine's own outcome and compares them — deep
-  equality of the parsed values (object key order ignored, array order not),
-  or the same KIND of failure (the same `status` for two `ApiError`s, else
-  the same error name); a `summary` comparison drops `issue_counts` and
-  `undo_depth` first, since the engine always answers those `null` / `0` and
-  the store keeps the server's own (see "Surfaces" — `getModelSummary`). A
-  probe that carries a `digest` compares each side's digest instead of its
-  answer (a digest that throws is a failure of its own); staging is checked
-  again after a re-test's digest. An export's is
-  `exportDigest` (`api/tables.ts`): `{filename, content_type, truncated,
-body}`, the media type without its parameters (a fetched body's
-  `res.blob()` keeps only the media type), `body` the decoded text of a JSON, JSONL or CSV file
-  (a byte-order mark kept), a zip's members in order as `[path, text]`
-  (unzipped with `fflate`, imported dynamically; an `.xlsx` member
-  `[path, 'xlsx']`), and absent for an xlsx — the engine's workbooks and
-  zips are not the server's bytes, so only what they hold compares.
-  Equal: nothing happens. Different: it awaits `quiet()`, notes the
-  replica's `rev`, runs `again()` and `server()` once more, and notes `rev`
-  again — a `rev` that moved during that round makes the round's answers
-  worthless (a live model raced the comparison, not a real mismatch), and
-  the whole thing repeats, three rounds at most; past that it gives up
-  silently, since a replica that never rests cannot be held to a fixed
-  answer. A round whose `rev` held still decides it: still equal, nothing;
-  still different, ONE line — `[shadow] <surface> <method> <params>: engine
-<short> ≠ server <short>`, each `short` (the value or the error, JSON-ish)
-  cut at 300 characters, so even a huge difference stays a short line. An
-  `AbortError` from either side — the engine's own outcome, `server()`, or a
-  re-test's `again()` / `server()` — ends the comparison at once, without a
-  report: the caller aborted, not the two sides disagreeing. So does an
-  `EngineGoneError` from the ENGINE side (the engine's own outcome, or a
-  re-test's `again()`) — a `stop()` mid-re-test can drop the replica's `rev`
-  to `null` right as the worker goes, and `null === null` must never be read
-  as a round whose `rev` held still.
-- An `issues` comparison sorts the issue lists first — a list body's
-  `issues`, a bare list, a preview's `structural_blockers` and `issues` — by
-  `[severity, category, check, message, target_ids, origin]`, so the two
-  sides agree as multisets whatever order each store keeps; and
-  `rules_status.skipped` by `[artifact_id, rule, reason, set_name]`, since
-  the engine orders rule sets by code point and the server by its
-  collation. A `validateModel` while a rule set is staged (`rulesStaged`,
-  from `validateAll`'s `hasStagedRules`) is never compared: the engine
-  validates with it, the server knows none. A list body
-  that is `truncated` compares without its `issues` (its `counts` still
-  count): each side keeps a different subset under the cap.
-- Nothing is compared while `staged()` is true: the replica's answers then
-  hold edits the server has not seen — unless the probe says `whileStaged`
-  (`route`'s `shadow: 'always'`), when the call sent the staged edits to
-  the server too; then a 409 on either side ends the comparison silently
-  instead (the staged batches or the `rev` moved since the call). It is asked before `server()` is
-  called, after each `quiet()` and after each re-test round, so a
-  comparison under way when an edit is staged ends silently. The replica
-  store hands it
-  `anyStaged() || getStagedArtifactDepth() > 0 || getStagedViewDepth() > 0 || hasOverlay()`:
-  `anyStaged` of `lib/engine/staged-probe.ts` asks the model store's engine
-  half `hasStagedOps()` while it is attached (with staging on
-  legacy nothing is staged in the replica, and it is false); an entry in the
-  staged artifact buffer is mirrored into the engine's artifact set, which
-  the server has not seen either; a staged view op is in the view the
-  `views` surface sends the engine and not in the server's; and the artifact follower's `hasOverlay()`
-  holds from a commit's announcement until its payload refresh lands (or,
-  for a failed refresh, until newer committed news): the buffer is empty
-  then, but the engine still reads the commit's entries over the committed
-  artifacts.
-- `quiet.ts` is the tiny registry the re-test's `quiet()` is built from:
-  `addQuietProbe(probe)` registers a `() => Promise<void>` and returns the
-  function that drops it again; `quiet()` awaits every registered probe (none
-  registered: resolves at once). A store adds a probe for whatever could
-  still change what a read sees right after a difference was first seen —
-  the sync's own `settled()` (the replica store) and "no `refreshView()` in
-  flight" (the view store: after a commit of view ops the server's excluded
-  pool is ahead of the registered placements until the refetch lands).
-- The replica store reaches `shadow.ts` only through a dynamic
-  `import('../engine/shadow')` behind `import.meta.env.DEV`, and only when
-  some surface is on the engine; it asks `shadowEnabled()` there, and
-  reports through `console.error`. A build holds neither the module nor its
-  `[shadow]` string — checked by building and grepping `build/` and
-  `.svelte-kit/output/client`. To turn it on in dev:
-  `localStorage.setItem('dr.shadow', '1')`, a surface on the engine, reload.
+- A `quiet()` registry (`lib/engine/quiet.ts`): `addQuietProbe(probe)`
+  registers a `() => Promise<void>` and returns the function that drops it
+  again; `quiet()` awaits every registered probe (none registered: resolves
+  at once). A store adds a probe for whatever could still change what a read
+  sees — the sync's own `settled()` and the artifact follower's (the replica
+  store) and "no `refreshView()` in flight" (the view store).
 
 **Status**. One `ReplicaStatus` object, replaced on every change and
 handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
@@ -1649,9 +1545,10 @@ engine reports after it called the replica `ready`, cleared by every new
 replica — each open or re-bootstrap attempt, a new worker — and by the
 engine's replica leaving `ready`; a sweep started again, by `validateModel`,
 keeps it, its `done: 0` included; `sweep` is never `progress`, since the
-workspace opens at `ready`). `server` is the boot fallback: the
+workspace opens at `ready`). `server` is the boot failure: the
 frame did not connect, or three opens failed, before the first `ready`. In
-`server` (and `off`) every surface's effective side is the server's.
+`server` and `off` a read is an `EngineUnavailableError` (the gate is
+unavailable) and every surface's effective side is the server's.
 
 **Wiring** (`lib/state/replica.svelte.ts`). The one `ReplicaSync` of the
 tab lives in a thin store, built on the first `startReplica()` from
@@ -1668,16 +1565,26 @@ sync exists:
   `getActiveProjectId()`'s replica, nothing without one; a project switch is a
   new mount, so `stop` then `open`, and the frame (and its worker) go with the
   old page.
-- **The seam.** `startReplica()` installs `createEngineSeam(sync, surfaces)`
-  into `lib/api` (`installEngineSeam`) and registers `sync.settled()` as a
+- **The seam and its gate.** `startReplica()` installs
+  `createEngineSeam(sync, whenReady)` into `lib/api` (`installEngineSeam`),
+  `whenReady` being the store's gate, and registers `sync.settled()` as a
   quiet probe; `stopReplica()` and `resetReplica()` uninstall both, so every
-  read goes to the server again. The switches are read ONCE, at the first
-  start (`readSurfaces()`); `resetReplica()` forgets them, so the next start
-  reads `dr.surfaces` again. In dev, with `dr.shadow` set and some surface on
-  the engine, the seam is installed a second time with a shadow once
-  `shadow.ts` has loaded (see "Shadow comparison"); reads in flight before
-  that are not compared. A seam replaced or uninstalled meanwhile is not
-  overwritten by a late load.
+  read is an `EngineUnavailableError` again and one waiting on the gate
+  rejects. The gate is `createGate(gateState)` (`lib/engine/gate.ts`):
+  `gateState()` is `open` when the phase is `ready` or `frozen`, the
+  status's `seeded` is true and the current follower's `loaded()` is true,
+  `closed` while the phase is `opening` or `resyncing` or until those two
+  hold (a `frozen` replica keeps `seeded`: its list matches the old-metamodel
+  UI until the adoption re-bootstraps it), and `unavailable` at `failed`,
+  `server` or `off` — its reason the status's, such as `no model` — or without
+  an installed replica. `moved()` runs at every status change, every
+  follower load and stop and every seam install and uninstall; a waiting
+  read therefore resolves the moment the gate opens, and rejects when the
+  replica fails, stops or finds no model. The switches are read ONCE, at the
+  first start (`readSurfaces()`); `resetReplica()` forgets them, so the next
+  start reads `dr.surfaces` again. They route no read: `engineSide(surface)`,
+  exported by the store, reports their effect to the stores that follow the
+  replica.
 - **The status and the engine half.** `subscribeReplicaStatus(listener)`
   hands `listener` every status change with the status before it, and
   returns the unsubscribe. With staging on the engine, `startReplica()`
@@ -1786,13 +1693,11 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   `not cross-origin isolated` when the frame is not, and the violation count
   when it is not zero.
 - **The summary keeps its issue counts.** The engine's summary answers
-  `issue_counts: null`. With `summary` on the engine (`engineSide`, asked
-  before the call), `refreshSummary()` (`model.svelte.ts`) adopts the rev and
-  the counts of elements but keeps the store's own issue counts, and asks
-  `refetchIssues()` for fresh ones; on the server's side it adopts the body's
-  counts, `null` included, as it always did. `_modelRev` is the answer's on
-  both sides: an engine read waits for every `rev` the replica was told of,
-  so it is never older than the store's.
+  `issue_counts: null`. `refreshSummary()` (`model.svelte.ts`) adopts the rev
+  and the counts of elements but keeps the store's own issue counts, and asks
+  `refetchIssues()` for fresh ones. `_modelRev` is the answer's: an engine
+  read waits for every `rev` the replica was told of, so it is never older
+  than the store's.
 - **View placements.** `registerViewPlacement(viewId, ids)`,
   `forgetViewPlacement(viewId)` and `forgetViewPlacements()` hand the sync
   what a view places (the sync keeps the lists and sends them to every new
@@ -1940,8 +1845,8 @@ a button. Both requests go through the `compare` surface (`engine` by default;
   surface's side, tracked with the follower's load) holds, staged edits do not
   gate the buttons, because the engine proposes over the working copy. The
   dialog then decides from the ANSWER: `compareModel` / `proposeCr` results carry
-  `workingCopy`, true only when the engine answered. A server answer (engine
-  gone, a fallback) over staged edits stages nothing and shows the same hint —
+  `workingCopy`, true when the engine answered, as it always does now. An
+  answer without it over staged edits stages nothing and shows the same hint —
   in compare mode the diff's answer counts too, checked at Replace time, so a
   cached server diff followed by newly staged edits is refused;
   `mcd-staged-note` ("Includes staged changes") shows only for a `workingCopy`
@@ -2024,12 +1929,9 @@ a project's view through `POST /views` after deleting whatever views exist.)
   deletes a placed element, a staged model edit, a staged artifact delete.
   One computation runs at a time, without timers: a request made while one
   runs makes it run once more after, and an answer is applied only if the
-  active view and `_view` are still the ones it was asked for. Its shadow
-  comparison stands down (`viewWarnings`' `stale`) while `_view` may lag the
-  server's document: a `refreshView()` or a view event's reconciliation is
-  in flight (both counted in `_refreshing`), or the view moved since the
-  call — a peer's view commit or a discard's refetch would otherwise be
-  reported as a difference.
+  active view and `_view` are still the ones it was asked for. A quiet probe
+  (`quiet()`) is pending while a `refreshView()` or a view event's
+  reconciliation is in flight (both counted in `_refreshing`).
 - **Every `stage*` mutator in `view.svelte.ts` follows the same three-phase
   shape**: GUARD (client-side precondition checks — name clash, cycle,
   no-op — mirroring `applyViewOp`'s own checks, so a doomed gesture never
@@ -2191,8 +2093,7 @@ per tab:
 
 ### Tables on the engine
 
-With the `tables` surface on the engine (the default), `evaluateTable` reads
-the replica's working copy: a staged model edit or a staged artifact shows in
+`evaluateTable` reads the replica's working copy: a staged model edit or a staged artifact shows in
 the grid at once, and moves neither the page's `model_rev` nor its `total`.
 So the table store (`state/table-editor.svelte.ts`) follows the replica rather
 than the commit feed:
@@ -2240,16 +2141,14 @@ than the commit feed:
   retried, or failed and shows its error in place of the grid), and a chunk
   that lands after the epoch moved is dropped. No stamp travels with the
   page: the engine posts `changed` after applying a change, and a request
-  posted later sees it. A page also records the side that answered it
-  (`answeredBy`, `api/tables.ts`): `route()` hands a call the engine cannot
-  answer (its worker gone, its replica not ready) to the server, whose page
-  is committed state, so a chunk of the other side is installed fresh, never
-  spliced; the re-page the rebuilt replica asks replaces it.
-- **Script tables.** A script table is the engine's: scripts never fall back
-  to the server (see "Surfaces"). A table the engine refuses for a pattern is
-  the server's page, over committed state, marked `fallback`; against a server
-  that answers 409 `scripts need the engine` the tab shows the "Scripts need
-  the engine" state.
+  posted later sees it. A call the engine cannot answer (its worker gone, its replica not ready)
+  is an `EngineUnavailableError`, which the tab shows as its error until the
+  re-page the rebuilt replica asks replaces it.
+- **Script tables.** A script table is the engine's: scripts run only there
+  (see "Reads"). A table whose pattern the engine cannot translate is the
+  engine's 422, shown as the tab's error; against a server that answers 409
+  `scripts need the engine` the tab shows the "Scripts need the engine"
+  state.
 
 ### Script columns & steps
 
@@ -2524,13 +2423,10 @@ on the chrome's Export button, not behind a modal overlay. A server that holds
 script columns answers 409 `scripts need the engine`, which the tab shows as
 `ScriptsNeedEngine`.
 
-`downloadTable` resolves to the export result: `TableView` keeps its `fallback` and shows
-`export-fallback` ("Exported from committed state: a search pattern needs the server") until an
-unmarked export lands. Beside the Export ▾ trigger, `export-staged-note`
-("Includes staged changes") shows while `exportsIncludeStaged()` — the
-`exports` surface on the engine and a staged model edit or staged artifact in
-the replica — and no `export-fallback` shows; the server's exports read
-committed state only.
+`downloadTable` resolves to the export result. Beside the Export ▾ trigger,
+`export-staged-note` ("Includes staged changes") shows while
+`exportsIncludeStaged()` — a staged model edit or staged artifact in the
+replica; an export reads the working copy.
 
 Everything the dialog edits is an **export override**: it changes the file and
 never the grid. Include/exclude, output order and the row-number entry are
@@ -3139,7 +3035,7 @@ src/
   lib/
     api/                Typed REST client (client.ts: cookie creds + CSRF
                         header, dynamic project base URL), zod schemas, errors;
-                        model-ops / model-read wrap the delta endpoints;
+                        model-read wraps the engine's model reads;
                         auth.ts (login/logout/me/changePassword), projects.ts
                         (list/create), admin.ts (user + member CRUD),
                         identity.ts (current-user-id seam);
@@ -3268,16 +3164,16 @@ src/
                         folds), per project in localStorage, same try/catch
                         stance as the diagram's own view/collapse keys;
                         replica.svelte.ts — the tab's one ReplicaSync and its
-                        status as state, the engine seam it installs (and,
-                        in dev, the shadow), the reset hand-over and the
+                        status as state, the engine seam it installs and its
+                        gate, the reset hand-over and the
                         view placements (see "Replica (engine shell)" →
                         "Wiring")
     api/replica.ts      The replica routes' client: snapshot descriptor,
                         snapshot bytes as a raw Response, tail text + its
                         envelope, the metamodel document + X-Metamodel-Id
     api/engine-route.ts The injected engine seam: Surface, Side,
-                        installEngineSeam, engineSide, route (see "Replica
-                        (engine shell)" → "Surfaces")
+                        installEngineSeam, route, EngineUnavailableError
+                        (see "Replica (engine shell)" → "Reads")
     engine/             The replica shell — plain TypeScript, no runes, no
                         lib/state import: frame.ts (the sandbox iframe and
                         its handshake), client.ts (the engine's message
@@ -3287,9 +3183,9 @@ src/
                         barrier, view placements), placements.ts (the ids
                         a view places), surfaces.ts (the per-surface
                         switches), seam.ts (the seam over a sync),
-                        shadow.ts (shadowEnabled, createShadow — see
-                        "Replica (engine shell)" → "Shadow comparison"),
-                        quiet.ts (its addQuietProbe/quiet registry),
+                        gate.ts (the wait for the replica to hold what a
+                        read needs), quiet.ts (the addQuietProbe/quiet
+                        registry),
                         staged-probe.ts (anyStaged: whether the model
                         store's engine half has anything staged),
                         origins.ts, testing.ts

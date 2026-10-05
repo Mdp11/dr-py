@@ -3,7 +3,6 @@ import { http, HttpResponse } from 'msw';
 
 import {
 	clearMetamodel,
-	diffMetamodel,
 	getMetamodel,
 	getMetamodelRaw,
 	lintMetamodel,
@@ -139,45 +138,5 @@ describe('metamodel client', () => {
 		const res = await lintMetamodel('elements: [ {', cfg);
 		expect(res.ok).toBe(false);
 		expect(res.errors[0].line).toBe(1);
-	});
-});
-
-const diffPayload = {
-	now_failing: [
-		{
-			severity: 'error',
-			message: 'x is an instance of unknown type',
-			target_ids: ['x'],
-			category: 'conformance'
-		}
-	],
-	now_passing: [],
-	unchanged_count: 3,
-	current_error_count: 3,
-	candidate_error_count: 4,
-	structural: {
-		enums: { added: [], removed: [], changed: [] },
-		element_types: { added: [], removed: [], changed: [] },
-		relationship_types: { added: [], removed: [], changed: [] }
-	}
-};
-
-describe('metamodel swap client', () => {
-	it('diffMetamodel posts the blob as YAML and parses the diff', async () => {
-		let ct: string | null = null;
-		let text = '';
-		server.use(
-			http.post(`${BASE}/metamodel/diff`, async ({ request }) => {
-				ct = request.headers.get('content-type');
-				text = await request.text();
-				return HttpResponse.json(diffPayload);
-			})
-		);
-		const result = await diffMetamodel('elements: []\n', cfg);
-		expect(ct).toContain('yaml');
-		expect(text).toBe('elements: []\n');
-		expect(result.now_failing[0].target_ids).toEqual(['x']);
-		expect(result.unchanged_count).toBe(3);
-		expect(result.candidate_error_count).toBe(4);
 	});
 });

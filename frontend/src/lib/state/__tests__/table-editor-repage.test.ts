@@ -5,7 +5,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
-import { engineSide } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
 import { errorForStatus } from '$lib/api/errors';
 import * as tablesApi from '$lib/api/tables';
@@ -19,7 +18,7 @@ import {
 } from '../artifact-edits.svelte';
 import { cancelIssuesRefetch, emit, ensureElements } from '../model.svelte';
 import { handleFeedEvent } from '../realtime.svelte';
-import { getReplicaStatus, handReplicaFeed, onTablesMoved } from '../replica.svelte';
+import { engineSide, getReplicaStatus, handReplicaFeed, onTablesMoved } from '../replica.svelte';
 import {
 	ensureTableDraft,
 	ensureTableRange,
@@ -75,24 +74,10 @@ const PEOPLE: TableDefinition = TableDefinitionSchema.parse({
 	]
 });
 
-/** The server's answer to a table read: one row, whatever it was asked. */
-const SERVED = {
-	columns: [{ kind: 'element', header: '', width_px: null }],
-	rows: [{ key: ['srv'], cells: [{ kind: 'error', message: 'served', traceback: null }] }],
-	total: 1,
-	base_total: 1,
-	truncated: false,
-	offset: 0,
-	model_rev: 0,
-	warnings: []
-};
-
 type Started = {
 	s: EngineStore;
 	/** Every `changed` the sync heard since the start, with when it came. */
 	changes: { event: ChangedEvent; at: number }[];
-	/** Every body the server's table route was sent. */
-	served: unknown[];
 };
 
 /**
@@ -103,8 +88,6 @@ async function start(
 	options: {
 		surfaces?: { [surface: string]: string };
 		artifacts?: [string, object][];
-		/** The server's answer to its `n`th table read (from 1); `SERVED` by default. */
-		serve?: (n: number) => unknown;
 		/** The follower's artifact load is answered only once this resolves; the start does not wait for it. */
 		holdPayloads?: Promise<void>;
 	} = {}
@@ -123,15 +106,8 @@ async function start(
 			...handlers(handlerOptions)
 		];
 	}
-	const served: unknown[] = [];
 	server.use(
-		http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] })),
-		http.post(`${API}/tables/evaluate`, async ({ request }) => {
-			served.push(await request.json());
-			return HttpResponse.json(
-				(await (options.serve?.(served.length) ?? SERVED)) as Record<string, unknown>
-			);
-		})
+		http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] }))
 	);
 	store = await engineStore({ project, surfaces: options.surfaces });
 	const s = store;
@@ -142,7 +118,7 @@ async function start(
 		await vi.waitFor(() => expect(engineSide('tables')).toBe('engine'));
 	}
 	await sleep(350);
-	return { s, changes, served };
+	return { s, changes };
 }
 
 /** Opens `tab` over `definition` and waits for its first page. */
@@ -520,7 +496,6 @@ describe('a staged navigation re-pages a table that reads it', () => {
 		const { s, changes } = await start({ artifacts: [['n1', nav('Organization')]] });
 		await open('tbl:draft:1', READS_N1);
 		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 5 });
-		expect(getTablePage('tbl:draft:1')!.fallback).toBeUndefined();
 		const from = changes.length;
 
 		stageArtifactUpdate('n1', { payload: scope('Project') });
@@ -546,27 +521,21 @@ describe('one re-page path per side', () => {
 	}
 
 	it('with the tables on the server, a changed re-pages nothing and the commit feed does', async () => {
-		const { s, served } = await start({ surfaces: { tables: 'server' } });
+		const { s } = await start({ surfaces: { tables: 'server' } });
 		expect(engineSide('tables')).toBe('server');
 		await open('tbl:draft:1');
-		expect(served).toHaveLength(1);
 		const first = 'e_000031';
 		const spy = spyEvaluate();
 
 		await stageRename(s, first, 'staged');
 		// A staged change moves no table on the server side: no debounce to await.
-		// `spy` is asserted synchronously, right where `evaluateTable` is called —
-		// `served` only grows once MSW has parsed the request body, which can lag
-		// a resolved `flushTablesRepage()` by a tick or more.
 		await flushTablesRepage();
 		expect(spy).not.toHaveBeenCalled();
-		expect(served).toHaveLength(1);
 
 		peerCommit(s, first);
-		await vi.waitFor(() => expect(served).toHaveLength(2));
+		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
 		await flushTablesRepage();
 		expect(spy).toHaveBeenCalledOnce();
-		expect(served).toHaveLength(2);
 	});
 
 	it('with the tables on the engine, a peer commit re-pages once, through changed, not the feed', async () => {
@@ -596,21 +565,8 @@ describe('the open tables re-page when the engine takes the tables over', () => 
 	});
 	afterEach(() => unhear?.());
 
-	/** The server's answer to a chunk at offset 100 of a 160-row table: rows of its own. */
-	const servedChunk = (modelRev: number) => ({
-		...SERVED,
-		rows: Array.from({ length: 60 }, (_, i) => ({
-			key: [`srv-${i}`],
-			cells: [{ kind: 'error', message: 'served', traceback: null }]
-		})),
-		total: 160,
-		base_total: 160,
-		offset: 100,
-		model_rev: modelRev
-	});
-
-	it('after a dead worker is replaced, a page the server answered meanwhile', async () => {
-		const { s, served } = await start();
+	it('after a dead worker is replaced', async () => {
+		const { s } = await start();
 		await open('tbl:draft:1');
 		const first = await idAt(0);
 		await stageRename(s, first, 'staged');
@@ -619,21 +575,22 @@ describe('the open tables re-page when the engine takes the tables over', () => 
 		moves = 0;
 		s.link.dispose();
 		const back = s.until((status) => status.phase === 'ready');
+		// The read finds the worker gone: unavailable, and the replica is rebuilt on a new one.
 		await loadTablePage('tbl:draft:1', 0);
-		// The engine could not answer: the server did, over committed state.
-		expect(served).toHaveLength(1);
-		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 1 });
+		expect(getTableError('tbl:draft:1')).toMatchObject({
+			kind: 'error',
+			message: 'the engine is gone'
+		});
 		await back;
 		// Told as the replica is ready, before it posts any `changed`.
 		expect(moves).toBe(1);
 
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('staged'));
 		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 160 });
-		expect(served).toHaveLength(1);
 	});
 
 	it('after a model reload re-bootstraps the replica', async () => {
-		const { s, served } = await start();
+		const { s } = await start();
 		await open('tbl:draft:1');
 		const first = await idAt(0);
 		// A reload: the model moves with no journal row the tail could cross.
@@ -652,7 +609,6 @@ describe('the open tables re-page when the engine takes the tables over', () => 
 
 		await vi.waitFor(() => expect(nameAt('tbl:draft:1', 0)).toBe('reloaded'));
 		expect(getReplicaStatus().rev).toBe(s.project.rev);
-		expect(served).toEqual([]);
 	});
 
 	it('after a replica that found no model opens again', async () => {
@@ -668,8 +624,9 @@ describe('the open tables re-page when the engine takes the tables over', () => 
 		await s.link.client.call('applyDelta', { text: withWrongDigest(peer) });
 		await off;
 		expect(engineSide('tables')).toBe('server');
+		// With no replica to ask the page is an error, not another side's rows.
 		await loadTablePage('tbl:draft:1', 0);
-		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 1 });
+		expect(getTableError('tbl:draft:1')).toMatchObject({ kind: 'error', message: 'no model' });
 
 		s.project.opaqueBump();
 		const opening = s.until((status) => status.phase === 'opening');
@@ -684,48 +641,20 @@ describe('the open tables re-page when the engine takes the tables over', () => 
 		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 160 });
 	});
 
-	it('once the artifacts land, a page the server answered before them', async () => {
+	it('a table asked before the artifacts land waits for them and answers from the engine', async () => {
 		let release!: () => void;
 		const held = new Promise<void>((resolve) => (release = resolve));
-		const { served } = await start({ holdPayloads: held });
+		await start({ holdPayloads: held });
 		expect(getReplicaStatus()).toMatchObject({ phase: 'ready', seeded: true });
 		expect(engineSide('tables')).toBe('server');
-		await open('tbl:draft:1');
-		expect(served).toHaveLength(1);
-		expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 1 });
+		await ensureTableDraft('tbl:draft:1');
+		updateTableDefinition('tbl:draft:1', PEOPLE);
+		await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(true));
+		expect(getTablePage('tbl:draft:1')).toBeUndefined();
 
 		release();
-		await vi.waitFor(() => expect(engineSide('tables')).toBe('engine'));
 
 		await vi.waitFor(() => expect(getTablePage('tbl:draft:1')).toMatchObject({ total: 160 }));
-		expect(getTablePage('tbl:draft:1')!.fallback).toBeUndefined();
-		expect(served).toHaveLength(1);
-	});
-
-	it("never splices the server's chunk into the engine's page, though its rev and total are equal", async () => {
-		let modelRev = 0;
-		const { s, served } = await start({ serve: () => servedChunk(modelRev) });
-		modelRev = s.project.rev;
-		await open('tbl:draft:1');
-		const page = getTablePage('tbl:draft:1')!;
-		expect([page.total, page.model_rev]).toEqual([160, modelRev]);
-		expect(page.rows[0]).toBeDefined();
-		const hundredth = await idAt(100);
-
-		s.link.dispose();
-		const back = s.until((status) => status.phase === 'ready');
-		ensureTableRange('tbl:draft:1', 100, 150);
-		await vi.waitFor(() => expect(served).toHaveLength(1));
-		await vi.waitFor(() => expect(getTablePage('tbl:draft:1')!.rows[100]?.key).toEqual(['srv-0']));
-
-		// Installed fresh: the engine's rows are gone, not beside the server's.
-		expect(getTablePage('tbl:draft:1')!.rows[0]).toBeUndefined();
-
-		// The rebuilt replica re-pages the range in view from the engine.
-		await back;
-		await vi.waitFor(() =>
-			expect(getTablePage('tbl:draft:1')!.rows[100]?.key).toEqual([hundredth])
-		);
-		expect(served).toHaveLength(1);
+		expect(getTableError('tbl:draft:1')).toBeNull();
 	});
 });

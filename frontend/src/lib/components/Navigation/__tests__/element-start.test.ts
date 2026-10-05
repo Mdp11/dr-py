@@ -1,9 +1,8 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { server } from '../../../api/__tests__/server';
-import { setActiveBaseUrl } from '$lib/api/client';
+import { stubEngine } from '../../../api/__tests__/engine-stub';
+import { installEngineSeam } from '$lib/api/engine-route';
 import { elementStartScope, readElementStart } from '$lib/navigation/tree';
 import type { PathNavigation } from '$lib/api/types';
 import {
@@ -18,21 +17,11 @@ import * as modelRead from '$lib/api/model-read';
 import NavigationNode from '../NavigationNode.svelte';
 import ElementStartPicker from '../ElementStartPicker.svelte';
 
-const BASE = 'http://api.test/api/v1';
-
-beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
-	setActiveBaseUrl(BASE);
-});
 afterEach(() => {
-	server.resetHandlers();
+	installEngineSeam(null);
 	resetNavigationEditors();
 	resetArtifacts();
 	resetCheckout();
-});
-afterAll(() => {
-	setActiveBaseUrl(null);
-	server.close();
 });
 beforeEach(() => {
 	resetNavigationEditors();
@@ -65,21 +54,20 @@ function selectByLabel(label: string): HTMLSelectElement {
 const SENSOR = { id: 'el-7', type_name: 'Sensor', properties: { name: 'Sensor Seven' }, rev: 1 };
 
 // The picker's search debounces 250ms on a real timer; wait it out rather
-// than mocking fake timers (this test exercises the real MSW round trip).
+// than mocking fake timers (this test exercises the real debounced round trip).
 function waitForDebounce(): Promise<void> {
 	return new Promise((r) => setTimeout(r, 350));
 }
 
 it('switching to Element mode and picking a result writes elementStartScope(id)', async () => {
-	server.use(
-		http.get(`${BASE}/model/elements`, ({ request }) => {
-			const url = new URL(request.url);
-			expect(url.searchParams.get('q')).toBe('sen');
-			return HttpResponse.json({ items: [SENSOR], total: 1 });
-		}),
+	stubEngine({
+		listElementsPage: (params) => {
+			expect(params.q).toBe('sen');
+			return { items: [SENSOR], total: 1 };
+		},
 		// The chip resolve fetch, fired once an id is picked.
-		http.post(`${BASE}/model/elements/batch`, () => HttpResponse.json({ items: [SENSOR] }))
-	);
+		getElementsBatch: () => ({ items: [SENSOR] })
+	});
 
 	const tabId = 'nav:draft:element-start';
 	await ensureDraft(tabId);

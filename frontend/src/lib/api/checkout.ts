@@ -1,5 +1,5 @@
 import { apiFetch, type ClientConfig } from './client';
-import { comparableWhileStaged, route, type EngineCall } from './engine-route';
+import { route } from './engine-route';
 import { lintMetamodel } from './metamodel';
 import type { Op } from '$lib/state/ops';
 import {
@@ -55,16 +55,15 @@ const MODEL_OP_KINDS = new Set<string>([
  * stale base_rev (409).
  *
  * With `local` — the engine's staged batches the model ops are, and the
- * strict mode — and the `issues` surface on the engine, the engine previews
- * the model half; the server previews the other ops alone, and the two
- * halves are summed. A rebind revalidates the whole model under the new
- * metamodel: with `local` and the `metamodel` surface on the engine, its
- * blob is linted, the engine previews the working copy under the parsed
- * document, and the server previews the ops that are neither model ops nor
- * the rebind; a blob the lint refuses is the server's whole request, which
- * answers its 422.
+ * strict mode — the engine previews the model half; the server previews the
+ * other ops alone, and the two halves are summed. A rebind revalidates the
+ * whole model under the new metamodel: with `local`, its blob is linted, the
+ * engine previews the working copy under the parsed document, and the server
+ * previews the ops that are neither model ops nor the rebind; a blob the lint
+ * refuses is the server's whole request, which answers its 422. Without
+ * `local` the server previews the whole request.
  */
-export function previewCommit(
+export async function previewCommit(
 	baseRev: number,
 	ops: readonly Op[],
 	cfg?: ClientConfig,
@@ -81,39 +80,21 @@ export function previewCommit(
 		(op): op is Extract<Op, { kind: 'metamodel.rebind' }> => op.kind === 'metamodel.rebind'
 	);
 	const rest = ops.filter((op) => !MODEL_OP_KINDS.has(op.kind) && op !== rebind);
-	const localPreview = async (call: EngineCall, params: object) => {
-		const model = PreviewResponseSchema.parse(
-			await call<unknown>('previewCommit', {
-				base_rev: baseRev,
-				batch_ids: [...local.batchIds],
-				strict: local.strict,
-				...params
-			})
-		);
-		return rest.length === 0 ? model : mergePreviews(model, await serverPreview(rest));
-	};
+	let params: object = {};
 	if (rebind !== undefined) {
-		return route(
-			'metamodel',
-			cfg,
-			async (call) => {
-				const lint = await lintMetamodel(rebind.blob, cfg);
-				if (!lint.ok || lint.document == null) return serverPreview(ops);
-				return localPreview(call, { rebind: { metamodel: lint.document } });
-			},
-			() => serverPreview(ops),
-			{ shadow: comparableWhileStaged(ops) }
-		);
+		const lint = await lintMetamodel(rebind.blob, cfg);
+		if (!lint.ok || lint.document == null) return serverPreview(ops);
+		params = { rebind: { metamodel: lint.document } };
 	}
-	return route(
-		'issues',
-		cfg,
-		(call) => localPreview(call, {}),
-		() => serverPreview(ops),
-		{
-			shadow: comparableWhileStaged(ops)
-		}
+	const model = PreviewResponseSchema.parse(
+		await route<unknown>('previewCommit', {
+			base_rev: baseRev,
+			batch_ids: [...local.batchIds],
+			strict: local.strict,
+			...params
+		})
 	);
+	return rest.length === 0 ? model : mergePreviews(model, await serverPreview(rest));
 }
 
 /** The engine's model half, then the server's half of the other ops. */

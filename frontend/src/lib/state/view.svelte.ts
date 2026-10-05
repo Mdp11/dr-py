@@ -26,7 +26,6 @@
  * and every move of the replica.
  */
 import * as viewsApi from '$lib/api/views';
-import { engineSide } from '$lib/api/engine-route';
 import { NotFoundError } from '$lib/api/errors';
 import type { ArtifactRef, Folder, Issue, View, ViewSummary } from '$lib/api/types';
 import {
@@ -65,6 +64,7 @@ import { elementDisplayName } from '$lib/util/element-name';
 import { placedElementIds } from '$lib/engine/placements';
 import { addQuietProbe } from '$lib/engine/quiet';
 import {
+	engineSide,
 	forgetViewPlacement,
 	forgetViewPlacements,
 	onViewsClosed,
@@ -148,18 +148,13 @@ function recomputeWarnings(): void {
 				_computeAgain = false;
 				const viewId = getActiveViewId();
 				const view = _view;
-				// The shadow stands down while `view` may not be the server's
-				// document plus the journal: a refetch runs, or `_view` moved on.
-				const stale = () => _refreshing > 0 || viewId !== getActiveViewId() || view !== _view;
 				const warnings =
 					viewId === null || view === null
 						? []
-						: await viewsApi
-								.viewWarnings(viewId, view, undefined, stale)
-								.catch((error: unknown) => {
-									console.error('View warnings failed', error);
-									return null;
-								});
+						: await viewsApi.viewWarnings(view).catch((error: unknown) => {
+								console.error('View warnings failed', error);
+								return null;
+							});
 				current = !_computeAgain && viewId === getActiveViewId() && view === _view;
 				if (current && warnings !== null) _warnings = warnings;
 			}
@@ -214,7 +209,7 @@ function refreshEnded(): void {
 
 // After a commit of view ops the server's excluded pool is ahead of the
 // registered placements until the refetch lands, and a view event's
-// reconciliation lags the same way: a shadow re-test waits for both.
+// reconciliation lags the same way: `quiet()` waits for both.
 addQuietProbe(() =>
 	_refreshing === 0
 		? Promise.resolve()

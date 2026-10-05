@@ -2,7 +2,6 @@ import { SvelteMap } from 'svelte/reactivity';
 
 import type { ClientConfig } from '$lib/api/client';
 import type { Issue, IssueCounts, ModelSummary, OpsResponse } from '$lib/api/types';
-import { engineSide } from '../api/engine-route';
 import * as modelReadApi from '../api/model-read';
 import { getModelIssues, type RulesStatus } from '../api/validation';
 import { clearOverlay } from './validation.svelte';
@@ -228,24 +227,18 @@ export function applyDeltaShared(
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch GET /model/summary and adopt rev / issue counts. The engine's summary
- * carries no issue counts: answered there, the store keeps its own and asks
- * GET /model/issues for fresh ones. Its `rev` is never older than the store's,
- * as an engine read waits for every `rev` the replica was told of.
+ * Fetch the model summary from the replica and adopt its rev. It carries no
+ * issue counts: the store keeps its own and asks `refetchIssues()` for fresh
+ * ones. Its `rev` is never older than the store's, as an engine read waits for
+ * every `rev` the replica was told of.
  */
 export async function refreshSummary(): Promise<ModelSummary> {
-	const fromEngine = engineSide('summary') === 'engine';
-	const s = await modelReadApi.getModelSummary(_clientConfig);
+	const s = await modelReadApi.getModelSummary();
 	_modelRev = s.model_rev;
-	if (fromEngine) {
-		const adopted = { ...s, issue_counts: _issueCounts };
-		_summary = adopted;
-		void refetchIssues();
-		return adopted;
-	}
-	_summary = s;
-	_issueCounts = s.issue_counts;
-	return s;
+	const adopted = { ...s, issue_counts: _issueCounts };
+	_summary = adopted;
+	void refetchIssues();
+	return adopted;
 }
 
 /** Like {@link refreshSummary} but a no-op when a summary is already loaded. */
@@ -288,8 +281,7 @@ export function adoptIssues(
 	clearOverlay();
 }
 
-/** Fetch GET /model/issues — the engine's list, with the issues on it — and
- * adopt it. Best-effort by contract: every caller is a background refresh
+/** Fetch the replica's issue list and adopt it. Best-effort by contract: every caller is a background refresh
  * (boot, peer commit, sweep completion, feed reconnect, the replica's issue
  * store moving) where a miss just means the next event heals. */
 export async function refetchIssues(): Promise<void> {
@@ -300,7 +292,7 @@ export async function refetchIssues(): Promise<void> {
 	// passes it.
 	const gen = _generation;
 	try {
-		const res = await getModelIssues(_clientConfig);
+		const res = await getModelIssues();
 		if (gen !== _generation) return; // a different model was installed mid-flight
 		adoptIssues(res.issues, res.counts, res.model_rev, res.truncated);
 		_rulesStatus = res.rules_status;

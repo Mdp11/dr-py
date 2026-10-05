@@ -4,10 +4,10 @@
 // on a relationship from an issue row needs a way to reach either endpoint.
 // These tests pin the two endpoint buttons and the selection they hand off.
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 
-import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '../../api/engine-route';
 import {
 	resetModelStore,
 	seedElements,
@@ -20,23 +20,19 @@ import Inspector from '../Inspector.svelte';
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
-	server.resetHandlers();
+	installEngineSeam(null);
 	clearSelection();
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
-	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
 	clearSelection();
-	server.use(
-		http.get(`*/model/elements/:id/relationships`, () => HttpResponse.json({ items: [], total: 0 }))
-	);
+	stubEngine({ listElementRelationships: () => ({ items: [], total: 0 }) });
 });
 
 function button(testid: string): HTMLButtonElement {

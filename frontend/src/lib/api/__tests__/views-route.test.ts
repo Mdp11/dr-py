@@ -1,11 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { http, HttpResponse } from 'msw';
-import { createShadow } from '$lib/engine/shadow';
-import { getStagedViewDepth, resetViewEdits, stageViewOp } from '$lib/state/view-edits.svelte';
-import type { EngineSeam } from '../engine-route';
+import { resetViewEdits } from '$lib/state/view-edits.svelte';
 import type { Issue, View } from '../types';
 import { viewWarnings } from '../views';
-import { issuesEngine, uninstallIssuesEngine, type IssuesEngine } from './issues-engine';
+import { issuesEngine, uninstallIssuesEngine } from './issues-engine';
 import { server } from './server';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -38,103 +35,35 @@ const CONTAINED: Issue = {
 	origin: 'on_server'
 };
 
-const SENTINEL: Issue = {
-	severity: 'warning',
-	message: 'the server said so',
-	target_ids: [],
-	check: 'view',
-	origin: 'on_server'
-};
+describe('the view warnings on the engine', () => {
+	it("answer the engine's issues over the document as staged", async () => {
+		const engine = await issuesEngine(made);
 
-/** `GET /views/v1` answers `VIEW` with `warnings()`; `gets` counts its requests. */
-function serveView(engine: IssuesEngine, warnings: () => Issue[]) {
-	const gets: string[] = [];
-	server.use(
-		http.get(`${engine.project.baseUrl}/views/:id`, ({ params }) => {
-			gets.push(String(params['id']));
-			return HttpResponse.json({ view: VIEW, warnings: warnings(), view_rev: 3 });
-		})
-	);
-	return gets;
-}
+		await expect(viewWarnings(VIEW)).resolves.toEqual([CONTAINED]);
 
-/** A shadow over the replica whose staged rule is the staged view ops; `done()` awaits the last probe. */
-function recording(rev: () => number | null) {
-	const lines: string[] = [];
-	let last: Promise<void> = Promise.resolve();
-	const shadow: NonNullable<EngineSeam['shadow']> = (probe) => {
-		last = Promise.resolve(
-			createShadow({
-				rev,
-				quiet: () => Promise.resolve(),
-				staged: () => getStagedViewDepth() > 0,
-				report: (line) => lines.push(line)
-			})(probe)
-		);
-		return last;
-	};
-	return { lines, shadow, done: () => last };
-}
-
-describe('the views surface', () => {
-	it("on the engine answers the engine's issues and asks the server nothing", async () => {
-		const engine = await issuesEngine(made, { surfaces: { views: 'engine' } });
-		const gets = serveView(engine, () => [SENTINEL]);
-
-		await expect(viewWarnings('v1', VIEW)).resolves.toEqual([CONTAINED]);
-		expect(gets).toEqual([]);
+		expect(engine.over.methods()).toContain('validateView');
+		expect(engine.requests).toEqual([]);
 	});
 
-	it('on the server answers the warnings of GET /views/{id}', async () => {
-		const engine = await issuesEngine(made, { surfaces: { views: 'server' } });
-		const gets = serveView(engine, () => [SENTINEL]);
+	it('hold a document held in a proxy as the plain JSON the engine is sent', async () => {
+		const engine = await issuesEngine(made);
 
-		await expect(viewWarnings('v1', VIEW)).resolves.toEqual([SENTINEL]);
-		expect(gets).toEqual(['v1']);
+		await expect(viewWarnings(new Proxy(VIEW, {}))).resolves.toEqual([CONTAINED]);
+
+		const call = engine.over.calls.find((entry) => entry.method === 'validateView')!;
+		expect(call.params).toEqual({ view: VIEW });
 	});
 
-	it('the shadow reports a one-message difference while nothing is staged, and nothing once the sides agree', async () => {
-		const { lines, shadow, done } = recording(() => engine.over.sync.status().rev);
-		const engine = await issuesEngine(made, { surfaces: { views: 'engine' }, shadow });
-		let served: Issue[] = [CONTAINED];
-		serveView(engine, () => served);
+	it('wait for the gate', async () => {
+		let open!: () => void;
+		const gate = new Promise<void>((resolve) => (open = resolve));
+		const engine = await issuesEngine(made, { whenReady: () => gate });
 
-		await viewWarnings('v1', VIEW);
-		await done();
-		expect(lines).toEqual([]);
+		const pending = viewWarnings(VIEW);
+		for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+		expect(engine.over.methods()).not.toContain('validateView');
 
-		served = [{ ...CONTAINED, message: `${CONTAINED.message}!` }];
-		await viewWarnings('v1', VIEW);
-		await done();
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toMatch(/^\[shadow\] views validateView \{"view":\{"name":"Smart",/);
-	});
-
-	it('with a view op staged, no comparison runs', async () => {
-		const { lines, shadow, done } = recording(() => engine.over.sync.status().rev);
-		const engine = await issuesEngine(made, { surfaces: { views: 'engine' }, shadow });
-		const gets = serveView(engine, () => [SENTINEL]);
-		stageViewOp(
-			{ kind: 'place_element', view_id: 'v1', element_id: 'e_000002', folder_id: 'f1' },
-			'Placed e_000002'
-		);
-
-		await expect(viewWarnings('v1', VIEW)).resolves.toEqual([CONTAINED]);
-		await done();
-
-		expect(gets).toEqual([]);
-		expect(lines).toEqual([]);
-	});
-
-	it('while the caller says its document is stale, no comparison runs', async () => {
-		const { lines, shadow, done } = recording(() => engine.over.sync.status().rev);
-		const engine = await issuesEngine(made, { surfaces: { views: 'engine' }, shadow });
-		const gets = serveView(engine, () => [SENTINEL]);
-
-		await expect(viewWarnings('v1', VIEW, undefined, () => true)).resolves.toEqual([CONTAINED]);
-		await done();
-
-		expect(gets).toEqual([]);
-		expect(lines).toEqual([]);
+		open();
+		await expect(pending).resolves.toEqual([CONTAINED]);
 	});
 });

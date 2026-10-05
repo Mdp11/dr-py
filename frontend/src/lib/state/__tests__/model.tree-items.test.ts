@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { http, HttpResponse } from 'msw';
 
 import type { OpsResponse } from '$lib/api/types';
-import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '$lib/api/engine-route';
 import {
 	applyDelta,
 	dropTreeItems,
@@ -38,15 +38,13 @@ function delta(partial: Partial<OpsResponse>): OpsResponse {
 }
 
 beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
-	server.resetHandlers();
+	installEngineSeam(null);
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
-	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
@@ -60,18 +58,17 @@ describe('tree-items cache', () => {
 
 	it('ensureTreeItems fetches uncached ids and records omitted as missing', async () => {
 		const bodies: string[][] = [];
-		server.use(
-			http.post(`${BASE}/model/elements/tree-items`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
+		stubEngine({
+			getTreeItemsBatch: ({ ids }: { ids: string[] }) => {
 				bodies.push(ids);
-				// omit 'gone' -> server drops it (does not exist)
-				return HttpResponse.json({
+				// omit 'gone' -> the engine drops it (does not exist)
+				return {
 					items: ids
 						.filter((id) => id !== 'gone')
 						.map((id) => ({ id, type_name: 'T', display_name: id.toUpperCase(), child_count: 0 }))
-				});
-			})
-		);
+				};
+			}
+		});
 
 		await ensureTreeItems(['a', 'gone']);
 
@@ -86,15 +83,14 @@ describe('tree-items cache', () => {
 
 	it('skips ids already in the full _elements cache', async () => {
 		let requested: string[] = [];
-		server.use(
-			http.post(`${BASE}/model/elements/tree-items`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
+		stubEngine({
+			getTreeItemsBatch: ({ ids }: { ids: string[] }) => {
 				requested = ids;
-				return HttpResponse.json({
+				return {
 					items: ids.map((id) => ({ id, type_name: 'T', display_name: id, child_count: 0 }))
-				});
-			})
-		);
+				};
+			}
+		});
 
 		seedElements([{ id: 'full', type_name: 'U', properties: {}, rev: 1 }]);
 
@@ -108,17 +104,14 @@ describe('tree-items cache', () => {
 		seedTreeItems([{ id: 'a', type_name: 'T', display_name: 'A', child_count: 0 }]);
 		expect(getCachedTreeItems().has('a')).toBe(true);
 
-		server.use(
-			http.post(`${BASE}/model/elements/tree-items`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
-				// omit 'gone' -> server drops it (does not exist), marking it missing
-				return HttpResponse.json({
-					items: ids
-						.filter((id) => id !== 'gone')
-						.map((id) => ({ id, type_name: 'T', display_name: id, child_count: 0 }))
-				});
+		stubEngine({
+			getTreeItemsBatch: ({ ids }: { ids: string[] }) => ({
+				// omit 'gone' -> the engine drops it (does not exist), marking it missing
+				items: ids
+					.filter((id) => id !== 'gone')
+					.map((id) => ({ id, type_name: 'T', display_name: id, child_count: 0 }))
 			})
-		);
+		});
 		await ensureTreeItems(['gone']);
 		expect(getMissingElementIds().has('gone')).toBe(true);
 

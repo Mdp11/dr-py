@@ -1,9 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 
 import type { Element, OpsResponse } from '$lib/api/types';
-import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '../../api/engine-route';
 import { applyDelta, emit, resetModelStore, setModelApiConfig } from '../../state/model.svelte';
 import { clearSelection, select } from '../../state/selection.svelte';
 import Inspector from '../Inspector.svelte';
@@ -11,17 +11,15 @@ import Inspector from '../Inspector.svelte';
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
 	vi.useRealTimers();
-	server.resetHandlers();
+	installEngineSeam(null);
 	clearSelection();
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
-	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
@@ -47,19 +45,17 @@ function delta(partial: Partial<OpsResponse>): OpsResponse {
 	};
 }
 
-// Let any synchronously-dispatched fetch reach the MSW handler.
+// Let any synchronously-dispatched fetch reach the engine stub.
 const settle = () => new Promise((r) => setTimeout(r, 10));
 
 it('does not refetch the selected element relationships on every property keystroke', async () => {
 	let relFetches = 0;
-	server.use(
-		// component-issued reads don't thread the test ClientConfig, so they hit
-		// the default origin rather than BASE — match any origin with `*`.
-		http.get(`*/model/elements/:id/relationships`, () => {
+	stubEngine({
+		listElementRelationships: () => {
 			relFetches += 1;
-			return HttpResponse.json({ items: [], total: 0 });
-		})
-	);
+			return { items: [], total: 0 };
+		}
+	});
 
 	// a selected, cached element (the inspector renders its property form +
 	// relationships panel against this)

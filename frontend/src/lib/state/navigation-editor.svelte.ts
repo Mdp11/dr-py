@@ -129,8 +129,6 @@ export interface NavPreview {
 	 * policy as the table's `mergePage` — rather than overwriting with a later
 	 * page's (possibly empty) warnings. */
 	warnings: ScriptWarning[];
-	/** Why the server answered the first page instead of the replica, if it did. */
-	fallback: 'pattern' | null;
 }
 
 /** Why a node's last evaluate failed: the server refused scripts without the engine, or anything else. */
@@ -928,8 +926,7 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 		total: 0,
 		truncated: false,
 		loading: true,
-		warnings: [],
-		fallback: null
+		warnings: []
 	});
 	try {
 		const page = await api.evaluateNavigation({
@@ -945,8 +942,7 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 			total: page.total,
 			truncated: page.truncated,
 			loading: false,
-			warnings: page.warnings,
-			fallback: page.fallback ?? null
+			warnings: page.warnings
 		});
 	} catch (err) {
 		if (isCurrent(tabId, key, gen)) {

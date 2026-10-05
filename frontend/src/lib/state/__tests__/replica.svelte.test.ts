@@ -3,7 +3,7 @@ import { flushSync } from 'svelte';
 import { IDBFactory } from 'fake-indexeddb';
 import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
-import { engineSide } from '$lib/api/engine-route';
+import { EngineUnavailableError } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
 import { evaluateNavigation } from '$lib/api/artifacts';
 import { getElementsBatch } from '$lib/api/model-read';
@@ -11,6 +11,7 @@ import * as validationApi from '$lib/api/validation';
 import { createSnapshotCache } from '$lib/engine/cache';
 import { SURFACES } from '$lib/engine/surfaces';
 import type { EngineLink } from '$lib/engine/client';
+import { FrameError } from '$lib/engine/frame';
 import {
 	OFF,
 	replicaApi,
@@ -46,6 +47,7 @@ import {
 	beginReplicaCommit,
 	configureReplica,
 	dismissReplicaNotice,
+	engineSide,
 	exportsIncludeStaged,
 	compareOnEngine,
 	metamodelIncludesStaged,
@@ -66,7 +68,6 @@ import {
 	stopReplica,
 	subscribeReplicaStatus
 } from '../replica.svelte';
-import { getStagedViewDepth, resetViewEdits, stageViewOp } from '../view-edits.svelte';
 import * as modelEngine from '../model-engine.svelte';
 import {
 	applyDelta,
@@ -105,7 +106,6 @@ afterEach(() => {
 	clearActiveProject();
 	server.resetHandlers();
 	localStorage.removeItem('dr.surfaces');
-	localStorage.removeItem('dr.shadow');
 	vi.restoreAllMocks();
 });
 
@@ -450,62 +450,100 @@ describe('the engine seam', () => {
 		const items = await getElementsBatch(['e_000001', 'missing']);
 
 		expect(items.map((item) => item.id)).toEqual(['e_000001']);
-		expect(getReplicaStatus().phase).toBe('ready');
+		// Asked while the replica opened, it answered only once the gate was open.
+		expect(getReplicaStatus()).toMatchObject({ phase: 'ready', seeded: true });
 	});
 
-	it('with dr.shadow, a server answer that differs is reported once', async () => {
-		onEngine({ elements: 'engine' });
-		localStorage.setItem('dr.shadow', '1');
+	it('a read waiting on the gate rejects when the replica cannot start, and so does one made after', async () => {
 		const project = fakeProject();
-		let served = 0;
-		server.use(
-			...project.handlers(),
-			http.post('*/model/elements/batch', () => {
-				served += 1;
-				return HttpResponse.json({ items: [] });
-			})
-		);
-		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+		server.use(...project.handlers());
+		realReplica({ connect: () => Promise.reject(new FrameError('same-host', 'no frame here')) });
+		setActiveProject('p');
+		startReplica();
+
+		const waiting = getElementsBatch(['e_000001']);
+
+		await expect(waiting).rejects.toBeInstanceOf(EngineUnavailableError);
+		await expect(waiting).rejects.toThrow('no frame here');
+		expect(getReplicaStatus().phase).toBe('server');
+		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
+	});
+
+	it('a read in a project with no model is unavailable, saying so', async () => {
+		const project = fakeProject();
+		project.fail('descriptor', 404, 1);
+		server.use(...project.handlers());
+		realReplica();
+		setActiveProject('p');
+		startReplica();
+
+		const read = getElementsBatch(['e_000001']);
+
+		await expect(read).rejects.toBeInstanceOf(EngineUnavailableError);
+		await expect(read).rejects.toThrow('no model');
+		expect(getReplicaStatus().phase).toBe('off');
+	});
+
+	it('a failed replica refuses reads; once a retry reopens the gate a read waiting for it answers', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
 		const replica = realReplica();
 		setActiveProject('p');
 		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-		await macrotask();
+		await failReplica(project, replica);
 
-		const items = await getElementsBatch(['e_000001']);
-		await vi.waitFor(() => expect(errors).toHaveBeenCalledOnce());
-		await macrotask();
+		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
 
-		expect(items.map((item) => item.id)).toEqual(['e_000001']);
-		expect(served).toBe(2);
-		expect(errors).toHaveBeenCalledOnce();
-		expect(String(errors.mock.calls[0][0])).toMatch(
-			/^\[shadow\] elements getElementsBatch \{"ids":\["e_000001"\]\}: engine /
-		);
+		project.fail('snapshot', 503, 0);
+		const ready = replica.until((s) => s.phase === 'ready' && s.seeded);
+		retryReplica();
+		expect(getReplicaStatus().phase).toBe('resyncing');
+		const waiting = getElementsBatch(['e_000001']);
+		await ready;
+
+		expect((await waiting).map((item) => item.id)).toEqual(['e_000001']);
 	});
 
-	it('without dr.shadow, the server is never asked', async () => {
-		onEngine({ elements: 'engine' });
+	it('a read waiting on the gate rejects when the replica stops, and the next one is unavailable at once', async () => {
 		const project = fakeProject();
-		let served = 0;
+		server.use(...project.handlers());
+		realReplica();
+		setActiveProject('p');
+		startReplica();
+		const waiting = getElementsBatch(['e_000001']);
+
+		stopReplica();
+
+		await expect(waiting).rejects.toBeInstanceOf(EngineUnavailableError);
+		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
+	});
+
+	it('a read waits for the artifacts too: none is answered before the follower has loaded', async () => {
+		const project = fakeProject();
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
 		server.use(
-			...project.handlers(),
-			http.post('*/model/elements/batch', () => {
-				served += 1;
+			http.get(`${PAGE_ORIGIN}/api/v1/projects/p/artifacts/payloads`, async () => {
+				await held;
 				return HttpResponse.json({ items: [] });
-			})
+			}),
+			...project.handlers()
 		);
 		const replica = realReplica();
 		setActiveProject('p');
 		startReplica();
-		await replica.until((s) => s.phase === 'ready');
+		await replica.until((s) => s.phase === 'ready' && s.seeded);
+		let answered = false;
+		const read = getElementsBatch(['e_000001']).then((items) => {
+			answered = true;
+			return items;
+		});
 		await macrotask();
+		expect(answered).toBe(false);
 
-		await getElementsBatch(['e_000001']);
-		await macrotask();
-		await macrotask();
+		release();
 
-		expect(served).toBe(0);
+		expect((await read).map((item) => item.id)).toEqual(['e_000001']);
 	});
 });
 
@@ -684,130 +722,6 @@ describe('the status listeners and the engine handle', () => {
 		stopReplica();
 		expect(detach).toHaveBeenCalled();
 		expect(handle.status()).toBe(OFF);
-	});
-
-	it('the shadow compares nothing while the engine half has an edit staged', async () => {
-		onStaging('engine');
-		localStorage.setItem('dr.shadow', '1');
-		const project = fakeProject();
-		let served = 0;
-		server.use(
-			...project.handlers(),
-			http.post('*/model/elements/batch', () => {
-				served += 1;
-				return HttpResponse.json({ items: [] });
-			})
-		);
-		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-		await macrotask();
-		const shadowLines = () =>
-			errors.mock.calls.filter(([line]) =>
-				String(line).startsWith('[shadow] elements getElementsBatch {"ids":["e_000001"]}')
-			);
-
-		emit({ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'staged' } });
-		await stagedSettled();
-		await getElementsBatch(['e_000001']);
-		await macrotask();
-		await macrotask();
-		expect(served).toBe(0);
-		expect(shadowLines()).toEqual([]);
-
-		revertAllStaged();
-		await stagedSettled();
-		await getElementsBatch(['e_000001']);
-		await vi.waitFor(() => expect(shadowLines()).toHaveLength(1));
-		expect(served).toBe(2);
-	});
-
-	it('the shadow compares nothing while an artifact entry is staged', async () => {
-		onStaging('engine');
-		localStorage.setItem('dr.shadow', '1');
-		const project = fakeProject();
-		let served = 0;
-		server.use(
-			...project.handlers(),
-			http.post('*/model/elements/batch', () => {
-				served += 1;
-				return HttpResponse.json({ items: [] });
-			})
-		);
-		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-		await macrotask();
-		const shadowLines = () =>
-			errors.mock.calls.filter(([line]) =>
-				String(line).startsWith('[shadow] elements getElementsBatch {"ids":["e_000001"]}')
-			);
-
-		try {
-			stageArtifactCreate('navigation', 'Staged', { kind: 'path' }, null);
-			expect(getStagedArtifactDepth()).toBe(1);
-			await getElementsBatch(['e_000001']);
-			await macrotask();
-			await macrotask();
-			expect(served).toBe(0);
-			expect(shadowLines()).toEqual([]);
-
-			clearStagedArtifacts();
-			await getElementsBatch(['e_000001']);
-			await vi.waitFor(() => expect(shadowLines()).toHaveLength(1));
-			expect(served).toBe(2);
-		} finally {
-			resetArtifactEdits();
-		}
-	});
-
-	it('the shadow compares nothing while only a view op is staged', async () => {
-		onStaging('engine');
-		localStorage.setItem('dr.shadow', '1');
-		const project = fakeProject();
-		let served = 0;
-		server.use(
-			...project.handlers(),
-			http.post('*/model/elements/batch', () => {
-				served += 1;
-				return HttpResponse.json({ items: [] });
-			})
-		);
-		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-		await macrotask();
-		const shadowLines = () =>
-			errors.mock.calls.filter(([line]) =>
-				String(line).startsWith('[shadow] elements getElementsBatch {"ids":["e_000001"]}')
-			);
-
-		try {
-			stageViewOp(
-				{ kind: 'place_element', view_id: 'v1', element_id: 'e_000001', folder_id: 'f1' },
-				'Placed e_000001'
-			);
-			expect(getStagedViewDepth()).toBe(1);
-			expect(getStagedArtifactDepth()).toBe(0);
-			await getElementsBatch(['e_000001']);
-			await macrotask();
-			await macrotask();
-			expect(served).toBe(0);
-			expect(shadowLines()).toEqual([]);
-
-			resetViewEdits();
-			await getElementsBatch(['e_000001']);
-			await vi.waitFor(() => expect(shadowLines()).toHaveLength(1));
-			expect(served).toBe(2);
-		} finally {
-			resetViewEdits();
-		}
 	});
 
 	it('with staging on legacy, the engine half is never attached', async () => {
@@ -1646,78 +1560,6 @@ describe('the artifact follower', () => {
 		expect(sync.setStagedArtifacts).not.toHaveBeenCalled();
 	});
 
-	it("the shadow compares nothing while a commit's refresh is out, and again once it lands", async () => {
-		localStorage.setItem('dr.shadow', '1');
-		const project = fakeProject();
-		let served = 0;
-		let release!: () => void;
-		const refresh = new Promise<void>((resolve) => (release = resolve));
-		server.use(
-			// Ahead of the project's own: the first handler that matches answers.
-			http.get(`${PAGE_ORIGIN}/api/v1/projects/p/artifacts/payloads`, async ({ request }) => {
-				const ids = new URL(request.url).searchParams.getAll('id');
-				if (ids.length > 0) await refresh;
-				const items = [...project.artifacts.values()].filter(
-					(artifact) => ids.length === 0 || ids.includes(artifact.id)
-				);
-				return HttpResponse.json({ items });
-			}),
-			...project.handlers(),
-			http.post('*/model/elements/batch', () => {
-				served += 1;
-				return HttpResponse.json({ items: [] });
-			})
-		);
-		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-		await macrotask();
-		const shadowLines = () =>
-			errors.mock.calls.filter(([line]) =>
-				String(line).startsWith('[shadow] elements getElementsBatch {"ids":["e_000001"]}')
-			);
-		const client = links[0]!.client;
-
-		try {
-			const tempId = stageArtifactCreate('navigation', 'b', scope('Project'), null);
-			await vi.waitFor(async () =>
-				expect(
-					(await client.call<{ total: number }>('evaluateNavigation', { artifact_id: tempId }))
-						.total
-				).toBeGreaterThan(0)
-			);
-
-			// The commit clears the buffer and is announced in one run; its payloads are held.
-			project.artifacts.set('n2', nav('n2', 1, 'Project'));
-			clearStagedArtifacts();
-			notifyArtifactCommit({
-				idMap: { [tempId]: 'n2' },
-				changed: [header(project.artifacts.get('n2') as ReturnType<typeof nav>)],
-				deletedIds: []
-			});
-			expect(getStagedArtifactDepth()).toBe(0);
-			await getElementsBatch(['e_000001']);
-			await macrotask();
-			await macrotask();
-			expect(served).toBe(0);
-			expect(shadowLines()).toEqual([]);
-
-			release();
-			await vi.waitFor(() =>
-				expect(client.call('evaluateNavigation', { artifact_id: tempId })).rejects.toThrow(
-					`unknown navigation artifact ${tempId}`
-				)
-			);
-			await getElementsBatch(['e_000001']);
-			await vi.waitFor(() => expect(shadowLines()).toHaveLength(1));
-			expect(served).toBe(2);
-		} finally {
-			release();
-		}
-	});
-
 	describe('the navigation surface waits for the artifacts', () => {
 		const refUnion = (id: string) => ({
 			kind: 'set_op',
@@ -1766,18 +1608,12 @@ describe('the artifact follower', () => {
 			return state;
 		}
 
-		it("is the server's until the first load lands, then the engine's; criteria never wait", async () => {
+		it('a navigation evaluated before the first load waits for the artifacts and answers from the engine', async () => {
 			const project = fakeProject();
 			project.artifacts.set('n1', nav('n1', 1, 'Organization'));
 			let release!: () => void;
 			const first = new Promise<void>((resolve) => (release = resolve));
-			const served = serve(project, [first], async () => ({
-				step_types: [],
-				chains: [],
-				total: 999,
-				truncated: false,
-				warnings: []
-			}));
+			const served = serve(project, [first], () => Promise.reject(new Error('not asked')));
 			const replica = realReplica();
 			setActiveProject('p');
 			startReplica();
@@ -1789,28 +1625,28 @@ describe('the artifact follower', () => {
 				})
 			).total;
 
+			let answered = false;
+			let pending: Promise<{ total: number }>;
 			try {
 				expect(engineSide('navigation')).toBe('server');
-				expect(engineSide('criteria')).toBe('engine');
-				const early = await evaluateNavigation({ definition: refUnion('n1') as never });
-				expect(early.total).toBe(999);
-				expect(served.served).toBe(1);
+				pending = evaluateNavigation({ definition: refUnion('n1') as never }).then((page) => {
+					answered = true;
+					return page;
+				});
+				await macrotask();
+				// The artifacts are not held yet: the engine does not know the reference.
+				expect(answered).toBe(false);
 			} finally {
 				release();
 			}
 
-			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
-			const late = await evaluateNavigation({ definition: refUnion('n1') as never });
-			expect(late.total).toBe(organizations);
-			expect(served.served).toBe(1);
+			expect((await pending).total).toBe(organizations);
+			expect(served.served).toBe(0);
 		});
 
-		it("the exports are the server's until the first load lands; the staged note follows them and what is staged", async () => {
-			localStorage.setItem('dr.surfaces', JSON.stringify({ exports: 'engine' }));
+		it('the exports staged note follows what is staged, until the replica stops', async () => {
 			const project = fakeProject();
-			let release!: () => void;
-			const first = new Promise<void>((resolve) => (release = resolve));
-			serve(project, [first], () => Promise.reject(new Error('not asked')));
+			serve(project, [], () => Promise.reject(new Error('not asked')));
 			const replica = realReplica();
 			let note: (() => boolean) | undefined;
 			const dispose = $effect.root(() => {
@@ -1820,17 +1656,10 @@ describe('the artifact follower', () => {
 			setActiveProject('p');
 			startReplica();
 			await replica.until((s) => s.phase === 'ready');
+			flushSync();
+			expect(note!()).toBe(false);
+
 			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
-
-			try {
-				flushSync();
-				expect(engineSide('exports')).toBe('server');
-				expect(note!()).toBe(false);
-			} finally {
-				release();
-			}
-
-			await vi.waitFor(() => expect(engineSide('exports')).toBe('engine'));
 			flushSync();
 			expect(note!()).toBe(true);
 			clearStagedArtifacts();
@@ -1842,11 +1671,6 @@ describe('the artifact follower', () => {
 			expect(note!()).toBe(true);
 			revertAllStaged();
 			await stagedSettled();
-			flushSync();
-			expect(note!()).toBe(false);
-
-			stopReplica();
-			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
 			flushSync();
 			expect(note!()).toBe(false);
 			dispose();
@@ -1884,30 +1708,9 @@ describe('the artifact follower', () => {
 			dispose();
 		});
 
-		it('with the exports on the server, the staged note never shows', async () => {
-			localStorage.setItem('dr.surfaces', JSON.stringify({ exports: 'server' }));
+		it("the metamodel's staged note follows what is staged", async () => {
 			const project = fakeProject();
 			serve(project, [], () => Promise.reject(new Error('not asked')));
-			const replica = realReplica();
-			setActiveProject('p');
-			startReplica();
-			await replica.until((s) => s.phase === 'ready');
-			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
-
-			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
-			emit(rename('e_000001', 'staged name'));
-			await stagedSettled();
-
-			expect(engineSide('exports')).toBe('server');
-			expect(exportsIncludeStaged()).toBe(false);
-		});
-
-		it("the metamodel's staged note follows the issues' gate and what is staged", async () => {
-			localStorage.setItem('dr.surfaces', JSON.stringify({ metamodel: 'engine' }));
-			const project = fakeProject();
-			let release!: () => void;
-			const first = new Promise<void>((resolve) => (release = resolve));
-			serve(project, [first], () => Promise.reject(new Error('not asked')));
 			const replica = realReplica();
 			let note: (() => boolean) | undefined;
 			const dispose = $effect.root(() => {
@@ -1917,17 +1720,10 @@ describe('the artifact follower', () => {
 			setActiveProject('p');
 			startReplica();
 			await replica.until((s) => s.seeded);
+			flushSync();
+			expect(note!()).toBe(false);
+
 			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
-
-			try {
-				flushSync();
-				expect(engineSide('metamodel')).toBe('server');
-				expect(note!()).toBe(false);
-			} finally {
-				release();
-			}
-
-			await vi.waitFor(() => expect(engineSide('metamodel')).toBe('engine'));
 			flushSync();
 			expect(note!()).toBe(true);
 			clearStagedArtifacts();
@@ -1941,33 +1737,8 @@ describe('the artifact follower', () => {
 			await stagedSettled();
 			flushSync();
 			expect(note!()).toBe(false);
-
-			stopReplica();
-			stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
-			flushSync();
-			expect(note!()).toBe(false);
 			dispose();
 		});
-
-		it.each([{ metamodel: 'server' }, { metamodel: 'engine', staging: 'legacy' }])(
-			'with %o the staged note of the metamodel never shows',
-			async (switches) => {
-				localStorage.setItem('dr.surfaces', JSON.stringify(switches));
-				const project = fakeProject();
-				serve(project, [], () => Promise.reject(new Error('not asked')));
-				const replica = realReplica();
-				setActiveProject('p');
-				startReplica();
-				await replica.until((s) => s.seeded);
-				await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
-
-				stageArtifactCreate('navigation', 'Staged', scope('Project'), null);
-
-				expect(engineSide('metamodel')).toBe('server');
-				expect(metamodelIncludesStaged()).toBe(false);
-				clearStagedArtifacts();
-			}
-		);
 
 		it('the compare is gated as the issues are, and never with staging on legacy', async () => {
 			localStorage.setItem('dr.surfaces', JSON.stringify({ compare: 'engine' }));
@@ -2040,53 +1811,6 @@ describe('the artifact follower', () => {
 			}
 			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
 		});
-
-		it('a shadow re-test waits for a payload fetch in flight', async () => {
-			localStorage.setItem('dr.shadow', '1');
-			const project = fakeProject();
-			// The server holds n2 all along: it answers as the inlined definition does.
-			const served = serve(project, [], () =>
-				links[0]!.client.call<object>('evaluateNavigation', { definition: inlineUnion('Project') })
-			);
-			const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-			const replica = realReplica();
-			setActiveProject('p');
-			startReplica();
-			await replica.until((s) => s.phase === 'ready');
-			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
-			await macrotask();
-
-			// A peer's navigation is announced; its payload is held on the way.
-			let release!: () => void;
-			served.named = new Promise<void>((resolve) => (release = resolve));
-			project.artifacts.set('n2', nav('n2', 1, 'Project'));
-			handReplicaFeed(
-				{
-					type: 'artifact',
-					action: 'created',
-					artifact: header(project.artifacts.get('n2') as ReturnType<typeof nav>)
-				},
-				'{}'
-			);
-
-			try {
-				// The engine does not hold n2 yet; the server does.
-				await expect(evaluateNavigation({ definition: refUnion('n2') as never })).rejects.toThrow(
-					"unknown navigation artifact 'n2'"
-				);
-				await vi.waitFor(() => expect(served.served).toBe(1));
-				await macrotask();
-				await macrotask();
-				expect(served.served).toBe(1);
-			} finally {
-				release();
-			}
-
-			await vi.waitFor(() => expect(served.served).toBe(2));
-			await macrotask();
-			await macrotask();
-			expect(errors.mock.calls.filter(([line]) => String(line).startsWith('[shadow]'))).toEqual([]);
-		});
 	});
 
 	it('a staged payload held in $state reaches the engine as a plain copy', async () => {
@@ -2117,13 +1841,6 @@ describe('the artifact follower', () => {
 describe('the issues on the engine', () => {
 	const API = `${PAGE_ORIGIN}/api/v1/projects/p`;
 	const TOO_LONG = 'x'.repeat(201);
-	const FROM_SERVER = {
-		severity: 'error',
-		message: 'from server',
-		target_ids: ['e_000009'],
-		check: 'facets',
-		origin: 'on_server'
-	};
 	const tooLong = {
 		severity: 'error',
 		message: 'name: length 201 exceeds max_length 200',
@@ -2140,28 +1857,15 @@ describe('the issues on the engine', () => {
 	});
 
 	/**
-	 * The engine store with the issues on the engine; the server's issue route
-	 * answers FROM_SERVER. Every `getModelIssues` answer is recorded with the
-	 * replica's `seeded` when it came and whether the server answered it.
+	 * The engine store with the issues on the engine. Every `getModelIssues`
+	 * answer is recorded with the replica's `seeded` when it came.
 	 */
 	async function issuesStore(project = fakeProject()) {
-		let serverHits = 0;
-		server.use(
-			http.get(`${API}/model/issues`, () => {
-				serverHits += 1;
-				return HttpResponse.json({ model_rev: 0, issues: [FROM_SERVER], counts: { error: 1 } });
-			})
-		);
 		const real = validationApi.getModelIssues;
-		const answers: { seeded: boolean; server: boolean; issues: unknown[] }[] = [];
-		const spy = vi.spyOn(validationApi, 'getModelIssues').mockImplementation(async (cfg) => {
-			const before = serverHits;
-			const list = await real(cfg);
-			answers.push({
-				seeded: getReplicaStatus().seeded,
-				server: serverHits > before,
-				issues: list.issues
-			});
+		const answers: { seeded: boolean; issues: unknown[] }[] = [];
+		const spy = vi.spyOn(validationApi, 'getModelIssues').mockImplementation(async () => {
+			const list = await real();
+			answers.push({ seeded: getReplicaStatus().seeded, issues: list.issues });
 			return list;
 		});
 		store = await engineStore({ project, surfaces: { issues: 'engine' } });
@@ -2179,7 +1883,7 @@ describe('the issues on the engine', () => {
 		await sleep(350);
 		expect(spy).toHaveBeenCalledOnce();
 		await vi.waitFor(() => expect(answers).toHaveLength(1));
-		expect(answers[0]).toEqual({ seeded: true, server: false, issues: [] });
+		expect(answers[0]).toEqual({ seeded: true, issues: [] });
 	});
 
 	it('a changed with a new issues_version schedules ONE refetch after 300 ms; one with the same version none', async () => {
@@ -2192,9 +1896,9 @@ describe('the issues on the engine', () => {
 
 		const moved: number[] = [];
 		const off = s.sync.on('changed', () => void moved.push(Date.now()));
-		spy.mockImplementation((cfg) => {
+		spy.mockImplementation(() => {
 			moved.push(-Date.now());
-			return real(cfg);
+			return real();
 		});
 		emit(rename('e_000001', TOO_LONG));
 		await settled(s);
@@ -2216,9 +1920,6 @@ describe('the issues on the engine', () => {
 	});
 
 	it('with the issues on the server, a changed schedules nothing', async () => {
-		server.use(
-			http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] }))
-		);
 		const spy = vi.spyOn(validationApi, 'getModelIssues');
 		store = await engineStore({ surfaces: { issues: 'server' } });
 		const s = store;
@@ -2233,7 +1934,7 @@ describe('the issues on the engine', () => {
 		expect(spy).not.toHaveBeenCalled();
 	});
 
-	it('a worker that dies closes the gate: the server answers until the new replica is swept, then the engine, and no unswept list is adopted', async () => {
+	it('a worker that dies closes the gate: a refetch waits for the new replica to be swept, and no unswept list is adopted', async () => {
 		const { s, answers } = await issuesStore();
 		if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
 		await ensureElements(['e_000001']);
@@ -2244,20 +1945,22 @@ describe('the issues on the engine', () => {
 
 		s.link.dispose();
 		const reseeded = s.until((status) => status.phase === 'ready' && status.seeded);
-		// The engine is found gone under this call: the server answers it.
+		// The engine is found gone under this call: the list is kept as it was.
 		await refetchIssues();
 		expect(getReplicaStatus()).toMatchObject({ phase: 'resyncing', seeded: false });
-		expect(getLiveIssues()).toEqual([FROM_SERVER]);
-		// While the new replica opens, its gate is closed.
-		await refetchIssues();
-		expect(getLiveIssues()).toEqual([FROM_SERVER]);
+		expect(getLiveIssues()).toEqual([tooLong]);
+		// While the new replica opens, its gate is closed: a refetch waits.
+		let adopted = false;
+		const waiting = refetchIssues().then(() => (adopted = true));
+		await macrotask();
+		expect(adopted).toBe(false);
+		expect(answers).toHaveLength(from);
 
 		await reseeded;
-		await vi.waitFor(() => expect(getLiveIssues()).toEqual([tooLong]));
-		const later = answers.slice(from);
-		expect(later.filter((answer) => !answer.seeded).every((answer) => answer.server)).toBe(true);
-		expect(later.filter((answer) => answer.server)).toHaveLength(2);
-		expect(later.at(-1)).toEqual({ seeded: true, server: false, issues: [tooLong] });
+		await waiting;
+		expect(getLiveIssues()).toEqual([tooLong]);
+		expect(answers.slice(from).every((answer) => answer.seeded)).toBe(true);
+		expect(answers.at(-1)).toEqual({ seeded: true, issues: [tooLong] });
 	});
 
 	describe('and the artifact follower', () => {
@@ -2300,7 +2003,7 @@ describe('the issues on the engine', () => {
 			return project;
 		}
 
-		it('a rules artifact whose load is slow: the gate stays closed until the follower has loaded, then the engine answers with its rule issues after one refetch', async () => {
+		it('a rules artifact whose load is slow: the gate stays closed until the follower has loaded, then the engine answers with its rule issues', async () => {
 			const load = hold();
 			const project = holdPayloads({ whole: load.arrive() });
 			project.artifacts.set('r1', rules);
@@ -2310,37 +2013,36 @@ describe('the issues on the engine', () => {
 
 			// Swept, but the engine does not yet hold the rule set its list must carry.
 			expect(engineSide('issues')).toBe('server');
-			await vi.waitFor(() => expect(answers).toHaveLength(1));
-			await refetchIssues();
-			expect(answers.map((answer) => answer.server)).toEqual([true, true]);
-			expect(getLiveIssues()).toEqual([FROM_SERVER]);
+			let adopted = false;
+			const waiting = refetchIssues().then(() => (adopted = true));
+			await macrotask();
+			expect(adopted).toBe(false);
+			expect(answers).toEqual([]);
 
 			load.release();
-			await vi.waitFor(() => expect(engineSide('issues')).toBe('engine'));
+			await waiting;
 			const listed = ruleIssues('de-only', NOT_DE, 'on_server');
-			await vi.waitFor(() => expect(getLiveIssues()).toEqual(listed));
-			await sleep(350);
-			// The load and the rules it brings share one refetch, answered after the rescan.
-			expect(answers.slice(2)).toEqual([{ seeded: true, server: false, issues: listed }]);
+			expect(getLiveIssues()).toEqual(listed);
+			// No list was answered without the rules it must carry.
+			expect(answers.every((answer) => answer.seeded)).toBe(true);
+			expect(answers[0]).toEqual({ seeded: true, issues: listed });
 			expect(s.project.rulesParsed).toEqual([]);
 		});
 
-		it("no rules artifact, a slow load: the server's list until it lands, then the engine's", async () => {
+		it('no rules artifact, a slow load: a refetch waits for it, then the engine answers', async () => {
 			const load = hold();
 			const { s, answers } = await issuesStore(holdPayloads({ whole: load.arrive() }));
 			if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
 			await load.reached;
-			await vi.waitFor(() => expect(answers).toHaveLength(1));
-			await ensureElements(['e_000001']);
-			emit(rename('e_000001', TOO_LONG));
-			await settled(s);
-			await vi.waitFor(() => expect(answers).toHaveLength(2));
-			expect(answers.every((answer) => answer.server)).toBe(true);
-			expect(getLiveIssues()).toEqual([FROM_SERVER]);
+			let adopted = false;
+			const waiting = refetchIssues().then(() => (adopted = true));
+			await macrotask();
+			expect(adopted).toBe(false);
+			expect(answers).toEqual([]);
 
 			load.release();
-			await vi.waitFor(() => expect(getLiveIssues()).toEqual([tooLong]));
-			expect(answers.at(-1)).toMatchObject({ seeded: true, server: false });
+			await waiting;
+			expect(answers[0]).toEqual({ seeded: true, issues: [] });
 		});
 
 		it("a rules artifact a peer commits while the engine's list is shown: the engine's list takes its rules", async () => {
@@ -2348,7 +2050,7 @@ describe('the issues on the engine', () => {
 			const { s, answers } = await issuesStore(holdPayloads(held));
 			if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
 			await vi.waitFor(() => expect(answers).toHaveLength(1));
-			expect(answers[0]).toMatchObject({ server: false });
+			expect(answers[0]).toMatchObject({ seeded: true });
 			await ensureElements(['e_000001']);
 
 			const fetched = hold();
@@ -2360,12 +2062,11 @@ describe('the issues on the engine', () => {
 			emit(rename('e_000001', TOO_LONG));
 			await settled(s);
 			await vi.waitFor(() => expect(getLiveIssues()).toEqual([tooLong]));
-			expect(answers.at(-1)).toMatchObject({ server: false });
+			expect(answers.at(-1)).toMatchObject({ seeded: true });
 
 			fetched.release();
 			const listed = [tooLong, ...ruleIssues('de-only', NOT_DE, 'on_server')];
 			await vi.waitFor(() => expect(byKey(getLiveIssues())).toEqual(byKey(listed)));
-			expect(answers.every((answer) => !answer.server)).toBe(true);
 		});
 
 		describe('and the user commits a staged rules create', () => {
@@ -2459,7 +2160,6 @@ describe('the issues on the engine', () => {
 				await refetchIssues();
 				expect(getLiveIssues()).toEqual(listed);
 				const after = answers.slice(from);
-				expect(after.every((answer) => !answer.server)).toBe(true);
 				expect(after.every((answer) => byKey(answer.issues).join() === byKey(listed).join())).toBe(
 					true
 				);
@@ -2487,7 +2187,6 @@ describe('the issues on the engine', () => {
 				await refetchIssues();
 				expect(getLiveIssues()).toEqual(listed);
 				const after = answers.slice(from);
-				expect(after.every((answer) => !answer.server)).toBe(true);
 				expect(after.every((answer) => byKey(answer.issues).join() === byKey(listed).join())).toBe(
 					true
 				);

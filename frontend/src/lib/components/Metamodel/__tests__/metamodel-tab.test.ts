@@ -16,7 +16,6 @@ import {
 } from '../../../state/metamodel-stage.svelte';
 import { setActiveProject } from '../../../state/active-project.svelte';
 import { resetArtifactEdits, stageArtifactCreate } from '../../../state/artifact-edits.svelte';
-import { installEngineSeam } from '$lib/api/engine-route';
 import * as mmApi from '$lib/api/metamodel';
 import * as lockApi from '$lib/api/checkout';
 import type { LockResponse, MetamodelDiff } from '$lib/api/types';
@@ -264,17 +263,10 @@ describe('MetamodelTab', () => {
 
 describe('the staged note over the preview', () => {
 	afterEach(() => {
-		installEngineSeam(null);
 		resetArtifactEdits();
 	});
 
 	const note = () => document.querySelector('[data-testid="metamodel-staged-note"]');
-	const seamOn = (side: 'engine' | 'server') =>
-		installEngineSeam({
-			side: (surface) => (surface === 'metamodel' ? side : 'server'),
-			call: () => Promise.reject(new Error('not called')),
-			gone: () => false
-		});
 
 	async function previewed(): Promise<ReturnType<typeof mount>> {
 		setProjectInfo({ role: 'owner', lockTtlSeconds: 300 });
@@ -291,8 +283,7 @@ describe('the staged note over the preview', () => {
 	}
 
 	it('shows while the preview on screen included staged changes when it was answered', async () => {
-		seamOn('engine');
-		let c = await previewed();
+		const c = await previewed();
 		try {
 			expect(getMetamodelEditor().preview).toEqual(DIFF);
 			expect(note()).toBeNull();
@@ -312,16 +303,6 @@ describe('the staged note over the preview', () => {
 			expect(note()?.textContent?.trim()).toBe('Includes staged changes');
 			await previewMetamodelChanges();
 			await settle();
-			expect(note()).toBeNull();
-		} finally {
-			unmount(c);
-		}
-
-		seamOn('server');
-		stageArtifactCreate('navigation', 'Staged', { kind: 'path' }, null);
-		c = await previewed();
-		try {
-			expect(getMetamodelEditor().preview).toEqual(DIFF);
 			expect(note()).toBeNull();
 		} finally {
 			unmount(c);

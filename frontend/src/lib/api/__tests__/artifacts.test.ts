@@ -9,16 +9,15 @@ import {
 	type ReadParams
 } from '$engine';
 import { createEngineSeam } from '$lib/engine/seam';
-import { SURFACES } from '$lib/engine/surfaces';
 import {
 	fakeProject,
+	ready,
 	syncOver,
 	type FakeProject
 } from '$lib/engine/__tests__/support/project-server';
 import { server } from './server';
 import { evaluateNavigation, getArtifact, listArtifactPayloads, listArtifacts } from '../artifacts';
-import { setActiveBaseUrl } from '../client';
-import { installEngineSeam, type Side, type Surface } from '../engine-route';
+import { installEngineSeam } from '../engine-route';
 import { ChainPageSchema, type PathNavigation } from '../types';
 
 const BASE = 'http://api.test/api/v1/projects/p1';
@@ -80,53 +79,23 @@ describe('artifacts api', () => {
 		expect(await listArtifactPayloads([], CFG)).toEqual([]);
 		expect(asked).toEqual([[], ['a1', 'a&b']]);
 	});
-
-	it('evaluates and parses a chain page', async () => {
-		server.use(
-			http.post(`${BASE}/navigations/evaluate`, () =>
-				HttpResponse.json({
-					step_types: ['Owns'],
-					chains: [
-						[
-							{ id: 'b1', type_name: 'Building', display_name: 'Plant', child_count: 0 },
-							{ id: 's1', type_name: 'Sensor', display_name: 'T-1', child_count: 0 }
-						]
-					],
-					total: 1,
-					truncated: false
-				})
-			)
-		);
-		const page = await evaluateNavigation({ artifact_id: 'a1' }, CFG);
-		const node = page.chains[0][1];
-		expect('kind' in node ? undefined : node.display_name).toBe('T-1');
-		expect(page.total).toBe(1);
-	});
 });
 
-describe('evaluateNavigation on the navigation surface', () => {
+describe('evaluateNavigation on the engine', () => {
 	const made: ReturnType<typeof syncOver>[] = [];
 
 	afterEach(() => {
 		installEngineSeam(null);
-		setActiveBaseUrl(null);
 		for (const over of made.splice(0)) over.dispose();
 	});
 
 	/**
-	 * A ready replica of `project` behind a seam with `navigation` on `side`
-	 * and every other surface on the server; the server's evaluate route
-	 * answers `SERVED` and records each body it is sent.
+	 * A ready replica of `project` behind an installed seam, whose `call` is
+	 * spied on. MSW holds the replica's own routes and no evaluate route: a
+	 * call that strays to the server fails the test.
 	 */
-	async function over(project: FakeProject, side: Side) {
-		const bodies: unknown[] = [];
-		server.use(
-			...project.handlers(),
-			http.post(`${project.baseUrl}/navigations/evaluate`, async ({ request }) => {
-				bodies.push(await request.json());
-				return HttpResponse.json(SERVED);
-			})
-		);
+	async function over(project: FakeProject) {
+		server.use(...project.handlers());
 		const replica = syncOver(project);
 		made.push(replica);
 		replica.sync.open(project.projectId);
@@ -136,26 +105,9 @@ describe('evaluateNavigation on the navigation surface', () => {
 			(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<unknown> =>
 				replica.sync.call(method, params, options)
 		);
-		const surfaces = Object.fromEntries(
-			SURFACES.map((surface) => [surface, surface === 'navigation' ? side : 'server'])
-		) as Record<Surface, Side>;
-		installEngineSeam(
-			createEngineSeam(
-				{ status: () => replica.sync.status(), call: call as typeof replica.sync.call },
-				surfaces
-			)
-		);
-		setActiveBaseUrl(project.baseUrl);
-		return { replica, call, bodies };
+		installEngineSeam(createEngineSeam({ call: call as typeof replica.sync.call }, ready));
+		return { replica, call };
 	}
-
-	const SERVED = {
-		step_types: [],
-		chains: [[{ id: 'srv', type_name: 'Building', display_name: 'Served', child_count: 0 }]],
-		total: 1,
-		truncated: false,
-		warnings: []
-	};
 
 	const scopeOf = (types: string[]): PathNavigation => ({
 		kind: 'path',
@@ -178,9 +130,9 @@ describe('evaluateNavigation on the navigation surface', () => {
 		);
 	}
 
-	it("on the engine, an inline definition is the engine's page and the server is never asked", async () => {
+	it("an inline definition is the engine's page", async () => {
 		const project = fakeProject();
-		const { call, bodies } = await over(project, 'engine');
+		const { call } = await over(project);
 		const definition = scopeOf([project.model.getElement('e_000001').typeName]);
 
 		const page = await evaluateNavigation({ definition, limit: 5, row_element_id: undefined });
@@ -189,12 +141,11 @@ describe('evaluateNavigation on the navigation surface', () => {
 		expect(page.chains).toHaveLength(5);
 		expect(page).not.toHaveProperty('fallback');
 		expect(call).toHaveBeenCalledWith('evaluateNavigation', { definition, limit: 5 }, {});
-		expect(bodies).toEqual([]);
 	});
 
-	it('on the engine, a definition held in a proxy is sent as the plain JSON the server is sent', async () => {
+	it('a definition held in a proxy is sent as plain JSON', async () => {
 		const project = fakeProject();
-		const { call, bodies } = await over(project, 'engine');
+		const { call } = await over(project);
 		const definition = scopeOf([project.model.getElement('e_000001').typeName]);
 
 		const page = await evaluateNavigation({
@@ -209,12 +160,11 @@ describe('evaluateNavigation on the navigation surface', () => {
 			{ definition, offset: 2, row_element_id: null },
 			{}
 		);
-		expect(bodies).toEqual([]);
 	});
 
-	it('on the engine, an artifact id resolves through the artifacts the engine holds', async () => {
+	it('an artifact id resolves through the artifacts the engine holds', async () => {
 		const project = fakeProject();
-		const { replica, bodies } = await over(project, 'engine');
+		const { replica } = await over(project);
 		const definition = scopeOf([project.model.getElement('e_000001').typeName]);
 		replica.sync.setArtifacts([
 			{ id: 'n1', kind: 'navigation', name: 'N', artifact_rev: 1, payload: { ...definition } }
@@ -223,24 +173,23 @@ describe('evaluateNavigation on the navigation surface', () => {
 		const page = await evaluateNavigation({ artifact_id: 'n1', limit: 3 });
 
 		expect(page).toEqual(direct(project, { definition, limit: 3 }));
-		expect(bodies).toEqual([]);
 	});
 
-	it('on the server, both reach the server alone, unmarked', async () => {
+	it('a pattern the engine cannot translate is a 422, not a page', async () => {
 		const project = fakeProject();
-		const { call, bodies } = await over(project, 'server');
-		const definition = scopeOf([]);
-		const scripted: PathNavigation = {
-			...definition,
-			steps: [{ kind: 'script', snippet: { ref: 'sn1' } }]
+		await over(project);
+		const definition: PathNavigation = {
+			...scopeOf([]),
+			start: {
+				kind: 'scope',
+				types: [],
+				criteria: [{ type: 'property', name: 'name', op: 'matches', value: '(?x)a' }]
+			}
 		};
 
-		expect(await evaluateNavigation({ definition })).toEqual(ChainPageSchema.parse(SERVED));
-		expect(await evaluateNavigation({ definition: scripted })).toEqual(
-			ChainPageSchema.parse(SERVED)
-		);
+		const refused = evaluateNavigation({ definition });
 
-		expect(call).not.toHaveBeenCalled();
-		expect(bodies).toEqual([{ definition }, { definition: scripted }]);
+		await expect(refused).rejects.toMatchObject({ status: 422 });
+		await expect(refused).rejects.toThrow(/inline flags/);
 	});
 });

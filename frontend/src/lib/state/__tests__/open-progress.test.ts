@@ -1,6 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '$lib/api/engine-route';
 import { setActiveBaseUrl } from '$lib/api/client';
 import { getActiveProgress, resetProgress } from '../progress.svelte';
 import { beginJourney, resetJourney } from '../open-journey';
@@ -9,7 +11,10 @@ import { MAX_COLD_POLLS, trackOpenProgress } from '../open-progress.svelte';
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+	server.resetHandlers();
+	installEngineSeam(null);
+});
 afterAll(() => server.close());
 
 describe('trackOpenProgress feeds the journey', () => {
@@ -37,27 +42,28 @@ describe('trackOpenProgress feeds the journey', () => {
 					});
 				await gate;
 				return HttpResponse.json({ state: 'ready', model_rev: 1 });
-			}),
-			http.get(`${BASE}/model/summary`, () => {
+			})
+		);
+		stubEngine({
+			getModelSummary: () => {
 				summaryFetched = true;
-				return HttpResponse.json({
+				return {
 					model_rev: 1,
 					element_count: 0,
 					relationship_count: 0,
 					elements_by_type: {},
-					issue_counts: {},
+					issue_counts: null,
 					undo_depth: 0
-				});
-			}),
+				};
+			},
 			// sawWork => the post-sweep block also refetches the live issue map (a
-			// background sweep grows the server's issue store WITHOUT bumping
-			// model_rev, so the summary refresh alone would not surface newly
-			// landed issues).
-			http.get(`${BASE}/model/issues`, () => {
+			// background sweep grows the issue store WITHOUT bumping model_rev, so
+			// the summary refresh alone would not surface newly landed issues).
+			getModelIssues: () => {
 				issuesFetched = true;
-				return HttpResponse.json({ model_rev: 1, issues: [], counts: {}, truncated: false });
-			})
-		);
+				return { model_rev: 1, issues: [], counts: {}, truncated: false };
+			}
+		});
 		beginJourney('open'); // boot() owns beginJourney in production; the loop only feeds it
 		const done = trackOpenProgress(1);
 		// validate slice is [72,95]; 5/10 → 72 + 0.5*(95-72) = 83.5 → the bar should be past 72

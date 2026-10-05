@@ -1,18 +1,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
 import { drain, modelDigest, modelFileSteps, WorkingCopy, type StageResult } from '$engine';
-import { EngineGoneError } from '$lib/engine/client';
 import { createEngineSeam } from '$lib/engine/seam';
-import { createShadow } from '$lib/engine/shadow';
-import { SURFACES } from '$lib/engine/surfaces';
 import {
 	fakeProject,
+	ready,
 	syncOver,
 	type FakeProject
 } from '$lib/engine/__tests__/support/project-server';
-import { setActiveBaseUrl, setActiveProjectId } from '../client';
-import { installEngineSeam, type EngineSeam, type Side, type Surface } from '../engine-route';
-import { downloadDigest, downloadModel } from '../model-read';
+import { setActiveProjectId } from '../client';
+import { EngineUnavailableError, installEngineSeam } from '../engine-route';
+import { downloadModel } from '../model-read';
 import { server } from './server';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -23,12 +20,11 @@ const made: ReturnType<typeof syncOver>[] = [];
 
 afterEach(() => {
 	installEngineSeam(null);
-	setActiveBaseUrl(null);
 	setActiveProjectId(null);
 	for (const over of made.splice(0)) over.dispose();
 });
 
-/** The bytes `GET /model/download` gives for the fake's own model, rendered by the engine directly. */
+/** The bytes the download gives for the fake's own model, rendered by the engine directly. */
 function direct(project: FakeProject): Uint8Array {
 	const wc = new WorkingCopy(project.model, {
 		rev: project.rev,
@@ -37,30 +33,25 @@ function direct(project: FakeProject): Uint8Array {
 	return bytesOf(drain(modelFileSteps(wc)).parts);
 }
 
-const bytesOf = (parts: readonly ArrayBuffer[]) =>
-	new Uint8Array(parts.flatMap((part) => [...new Uint8Array(part)]));
+function bytesOf(parts: readonly ArrayBuffer[]): Uint8Array {
+	const bytes = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
+	let at = 0;
+	for (const part of parts) {
+		bytes.set(new Uint8Array(part), at);
+		at += part.byteLength;
+	}
+	return bytes;
+}
 
 const blobBytes = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
 
 /**
- * A ready replica of `project` behind a seam with `download` on `side` and
- * every other surface on the server; `GET /model/download` answers what
- * `body` gives (the direct bytes by default) and counts its requests.
+ * A ready replica of `project` behind an installed seam; `call` is the seam's
+ * view of `sync.call`, spied on. MSW holds the replica's own routes and no
+ * download route: a download that strays to the server fails the test.
  */
-async function over(
-	project: FakeProject,
-	side: Side,
-	shadow?: EngineSeam['shadow'],
-	body: () => Response = () => served(direct(project))
-) {
-	const downloads: Request[] = [];
-	server.use(
-		...project.handlers(),
-		http.get(`${project.baseUrl}/model/download`, ({ request }) => {
-			downloads.push(request);
-			return body();
-		})
-	);
+async function over(project: FakeProject) {
+	server.use(...project.handlers());
 	const replica = syncOver(project);
 	made.push(replica);
 	replica.sync.open(project.projectId);
@@ -70,46 +61,9 @@ async function over(
 		(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<unknown> =>
 			replica.sync.call(method, params, options)
 	);
-	const surfaces = Object.fromEntries(
-		SURFACES.map((surface) => [surface, surface === 'download' ? side : 'server'])
-	) as Record<Surface, Side>;
-	installEngineSeam(
-		createEngineSeam(
-			{ status: () => replica.sync.status(), call: call as typeof replica.sync.call },
-			surfaces,
-			shadow
-		)
-	);
-	setActiveBaseUrl(project.baseUrl);
+	installEngineSeam(createEngineSeam({ call: call as typeof replica.sync.call }, ready));
 	setActiveProjectId(project.projectId);
-	return { replica, call, downloads };
-}
-
-/** The server's answer carrying `bytes`, with the route's headers. */
-const served = (bytes: Uint8Array) =>
-	new HttpResponse(bytes, {
-		headers: {
-			'content-type': 'application/json',
-			'content-disposition': 'attachment; filename="model.json"'
-		}
-	});
-
-/** A shadow that reports into `lines`, with an edit staged as far as it can tell; `done()` awaits the last probe. */
-function recording(project: FakeProject) {
-	const lines: string[] = [];
-	let last: Promise<void> = Promise.resolve();
-	const shadow: NonNullable<EngineSeam['shadow']> = (probe) => {
-		last = Promise.resolve(
-			createShadow({
-				rev: () => project.rev,
-				quiet: () => Promise.resolve(),
-				staged: () => true,
-				report: (line) => lines.push(line)
-			})(probe)
-		);
-		return last;
-	};
-	return { lines, shadow, done: () => last };
+	return { replica, call };
 }
 
 /** Stages a rename in the replica: its working copy then differs from the committed model. */
@@ -119,101 +73,27 @@ async function stageRename(replica: ReturnType<typeof syncOver>) {
 	});
 }
 
-describe('the download surface on the engine', () => {
-	it('answers the engine’s committed bytes as an application/json Blob and asks the server nothing', async () => {
+describe('the model download on the engine', () => {
+	it('answers the engine’s committed bytes as an application/json Blob, staged edits left out', async () => {
 		const project = fakeProject();
-		const { replica, call, downloads } = await over(project, 'engine');
+		const { replica, call } = await over(project);
 		await stageRename(replica);
 
 		const blob = await downloadModel();
 
 		expect(call).toHaveBeenCalledOnce();
 		expect(call.mock.calls[0]!.slice(0, 2)).toEqual(['downloadModel', {}]);
-		expect(await blobBytes(blob)).toEqual(direct(project));
+		// Compared as buffers: an element-wise diff of a whole model file is slow.
+		expect(Buffer.from(await blobBytes(blob)).equals(Buffer.from(direct(project)))).toBe(true);
 		expect(blob.type).toBe('application/json');
-		expect(downloads).toEqual([]);
 	});
 
-	it('an engine that is gone is answered by the server', async () => {
+	it('an engine that is gone is unavailable, and the server is not asked', async () => {
 		const project = fakeProject();
-		const { call, downloads } = await over(project, 'engine', undefined, () =>
-			served(new TextEncoder().encode('{"served": true}'))
-		);
-		call.mockRejectedValueOnce(new EngineGoneError());
+		const { replica } = await over(project);
+		replica.link!.dispose();
 
-		const blob = await downloadModel();
-
-		expect(call).toHaveBeenCalledOnce();
-		expect(new TextDecoder().decode(await blobBytes(blob))).toBe('{"served": true}');
-		expect(downloads).toHaveLength(1);
-	});
-
-	it('the shadow compares while an edit is staged: the same bytes are not reported', async () => {
-		const project = fakeProject();
-		const { lines, shadow, done } = recording(project);
-		const { replica, downloads } = await over(project, 'engine', shadow);
-		await stageRename(replica);
-
-		await downloadModel();
-		await done();
-
-		expect(downloads).toHaveLength(1);
-		expect(lines).toEqual([]);
-	});
-
-	it('the shadow reports one line for a single byte off', async () => {
-		const project = fakeProject();
-		const { lines, shadow, done } = recording(project);
-		const { replica } = await over(project, 'engine', shadow, () => {
-			const bytes = direct(project);
-			bytes[bytes.length - 1] = '!'.charCodeAt(0);
-			return served(bytes);
-		});
-		await stageRename(replica);
-
-		await downloadModel();
-		await done();
-
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toMatch(/^\[shadow\] download downloadModel \{\}: /);
-	});
-
-	it('a 409 on the server ends the comparison silently', async () => {
-		const project = fakeProject();
-		const { lines, shadow, done } = recording(project);
-		const { downloads } = await over(project, 'engine', shadow, () =>
-			HttpResponse.json({ detail: 'stale' }, { status: 409 })
-		);
-
-		await downloadModel();
-		await done();
-
-		expect(downloads).toHaveLength(1);
-		expect(lines).toEqual([]);
-	});
-});
-
-describe('the download surface on the server', () => {
-	it('only the server is asked, and its body is the Blob', async () => {
-		const project = fakeProject();
-		const { call, downloads } = await over(project, 'server');
-
-		const blob = await downloadModel();
-
-		expect(call).not.toHaveBeenCalled();
-		expect(downloads).toHaveLength(1);
-		expect(await blobBytes(blob)).toEqual(direct(project));
-	});
-});
-
-describe('downloadDigest', () => {
-	it('is the media type without parameters, the size and the SHA-256 in hex', async () => {
-		const blob = new Blob(['abc'], { type: 'application/json; charset=utf-8' });
-
-		expect(await downloadDigest(blob)).toEqual({
-			type: 'application/json',
-			size: 3,
-			sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
-		});
+		await expect(downloadModel()).rejects.toBeInstanceOf(EngineUnavailableError);
+		await replica.sync.settled();
 	});
 });

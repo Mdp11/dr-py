@@ -1,10 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
 
 import type { Element, OpsResponse, Relationship } from '$lib/api/types';
-import { server } from '../../api/__tests__/server';
-import { setActiveBaseUrl } from '$lib/api/client';
-import { installEngineSeam, type EngineSeam } from '$lib/api/engine-route';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '$lib/api/engine-route';
+import { NotFoundError } from '$lib/api/errors';
 import { getVisitStack, resetInspectionHistory } from '../inspection-history.svelte';
 import { select } from '../selection.svelte';
 import {
@@ -40,16 +39,14 @@ import {
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
 	vi.useRealTimers();
-	server.resetHandlers();
+	installEngineSeam(null);
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
-	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
@@ -441,15 +438,13 @@ describe('emit', () => {
 describe('reads and lifecycle', () => {
 	it('ensureElement: cache hit does not fetch; miss fetches and caches; 404 -> null', async () => {
 		let fetches = 0;
-		server.use(
-			http.get(`${BASE}/model/elements/:id`, ({ params }) => {
+		stubEngine({
+			getElement: ({ id }: { id: string }) => {
 				fetches += 1;
-				if (params.id === 'missing') {
-					return HttpResponse.json({ error: 'No element' }, { status: 404 });
-				}
-				return HttpResponse.json(el(String(params.id), { name: 'fetched' }, 1));
-			})
-		);
+				if (id === 'missing') throw new NotFoundError(404, { error: 'No element' }, 'No element');
+				return el(id, { name: 'fetched' }, 1);
+			}
+		});
 		applyDelta(delta({ changed_elements: [el('e1', { name: 'cached' })] }));
 
 		expect((await ensureElement('e1'))?.properties.name).toBe('cached');
@@ -469,13 +464,13 @@ describe('reads and lifecycle', () => {
 	it('ensureElement dedups concurrent fetches of the same id onto one request', async () => {
 		let fetches = 0;
 		const gates: Array<() => void> = [];
-		server.use(
-			http.get(`${BASE}/model/elements/:id`, async ({ params }) => {
+		stubEngine({
+			getElement: async ({ id }: { id: string }) => {
 				fetches += 1;
 				await new Promise<void>((resolve) => gates.push(resolve));
-				return HttpResponse.json(el(String(params.id), { name: 'fetched' }, 1));
-			})
-		);
+				return el(id, { name: 'fetched' }, 1);
+			}
+		});
 		const p1 = ensureElement('e1');
 		const p2 = ensureElement('e1');
 		await vi.waitFor(() => expect(gates).toHaveLength(1));
@@ -500,22 +495,21 @@ describe('reads and lifecycle', () => {
 		expect(await ensureRelationship('nope')).toBeNull();
 	});
 
-	it('refreshSummary adopts rev and issue counts; loadSummary memoizes', async () => {
+	it('refreshSummary adopts the rev; loadSummary memoizes', async () => {
 		let fetches = 0;
-		server.use(
-			http.get(`${BASE}/model/summary`, () => {
+		stubEngine({
+			getModelSummary: () => {
 				fetches += 1;
-				return HttpResponse.json(summary);
-			})
-		);
+				return { ...summary, issue_counts: null };
+			},
+			getModelIssues: () => ({ model_rev: 4, issues: [], counts: {}, truncated: false })
+		});
 		expect(getModelSummary()).toBeNull();
 		await loadSummary();
 		expect(getModelSummary()?.element_count).toBe(10);
 		expect(getModelRev()).toBe(4);
-		// The staged buffer (not the server's undo_depth) drives Undo; no edits
-		// staged here.
+		// The staged buffer drives Undo; no edits staged here.
 		expect(getStagedDepth()).toBe(0);
-		expect(getIssueCounts()).toEqual({ warning: 2 });
 		await loadSummary(); // already loaded
 		expect(fetches).toBe(1);
 		await refreshSummary();
@@ -543,15 +537,13 @@ describe('reads and lifecycle', () => {
 	});
 
 	it('validateAll is a pure fetch — the live issuesByOwner/counts are untouched', async () => {
-		server.use(
-			http.post(`${BASE}/model/validate`, () =>
-				HttpResponse.json([
-					{ severity: 'error', message: 'a', target_ids: ['e1'] },
-					{ severity: 'warning', message: 'b', target_ids: ['e1'] },
-					{ severity: 'warning', message: 'c', target_ids: ['e2'] }
-				])
-			)
-		);
+		stubEngine({
+			validateModel: () => [
+				{ severity: 'error', message: 'a', target_ids: ['e1'] },
+				{ severity: 'warning', message: 'b', target_ids: ['e1'] },
+				{ severity: 'warning', message: 'c', target_ids: ['e2'] }
+			]
+		});
 		applyDelta(
 			delta({
 				issues_added: [
@@ -613,13 +605,12 @@ describe('ensureElements (batched)', () => {
 	it('fetches only uncached ids in one batch and seeds the cache', async () => {
 		seedElements([el('a', { name: 'cached' })]);
 		const bodies: string[][] = [];
-		server.use(
-			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
+		stubEngine({
+			getElementsBatch: ({ ids }: { ids: string[] }) => {
 				bodies.push(ids);
-				return HttpResponse.json({ items: ids.map((id) => el(id, { name: id })) });
-			})
-		);
+				return { items: ids.map((id) => el(id, { name: id })) };
+			}
+		});
 
 		await ensureElements(['a', 'b', 'c']);
 
@@ -636,14 +627,13 @@ describe('ensureElements (batched)', () => {
 		const bodies: string[][] = [];
 		let resolveFirst: (() => void) | undefined;
 		const gate = new Promise<void>((r) => (resolveFirst = r));
-		server.use(
-			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
+		stubEngine({
+			getElementsBatch: async ({ ids }: { ids: string[] }) => {
 				bodies.push(ids);
 				await gate; // hold both requests open until released
-				return HttpResponse.json({ items: ids.map((id) => el(id, { name: id })) });
-			})
-		);
+				return { items: ids.map((id) => el(id, { name: id })) };
+			}
+		});
 
 		// B starts while A is still in flight and shares b,c — B should only fetch d.
 		const a = ensureElements(['b', 'c']);
@@ -656,24 +646,23 @@ describe('ensureElements (batched)', () => {
 
 	it('is a no-op when every id is cached or a temp id', async () => {
 		seedElements([el('a')]);
-		server.use(
-			http.post(`${BASE}/model/elements/batch`, () => {
+		stubEngine({
+			getElementsBatch: () => {
 				throw new Error('should not fetch');
-			})
-		);
+			}
+		});
 		await expect(ensureElements(['a', 'tmp_1'])).resolves.toBeUndefined();
 	});
 
-	it('records ids the server omits as confirmed-missing and never re-requests them', async () => {
+	it('records ids the engine omits as confirmed-missing and never re-requests them', async () => {
 		const bodies: string[][] = [];
-		server.use(
-			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
+		stubEngine({
+			getElementsBatch: ({ ids }: { ids: string[] }) => {
 				bodies.push(ids);
-				// 'gone' does not exist -> server omits it from the response.
-				return HttpResponse.json({ items: ids.filter((id) => id !== 'gone').map((id) => el(id)) });
-			})
-		);
+				// 'gone' does not exist -> the engine omits it from the answer.
+				return { items: ids.filter((id) => id !== 'gone').map((id) => el(id)) };
+			}
+		});
 
 		await ensureElements(['a', 'gone']);
 		expect([...getMissingElementIds()]).toEqual(['gone']);
@@ -686,12 +675,11 @@ describe('ensureElements (batched)', () => {
 	});
 
 	it('un-marks a missing id once it reappears via a delta (restore/create)', async () => {
-		server.use(
-			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
-				return HttpResponse.json({ items: ids.filter((id) => id !== 'gone').map((id) => el(id)) });
+		stubEngine({
+			getElementsBatch: ({ ids }: { ids: string[] }) => ({
+				items: ids.filter((id) => id !== 'gone').map((id) => el(id))
 			})
-		);
+		});
 		await ensureElements(['gone']);
 		expect(getMissingElementIds().has('gone')).toBe(true);
 
@@ -700,54 +688,33 @@ describe('ensureElements (batched)', () => {
 	});
 });
 
-describe('the summary on the engine', () => {
+describe('the summary from the engine', () => {
 	const engineSummary = { ...summary, model_rev: 6, issue_counts: null, undo_depth: 0 };
-
-	/** A seam that puts the summary on `side`, its engine answering without issue counts. */
-	function seam(side: 'engine' | 'server'): EngineSeam {
-		return {
-			side: (surface) => (surface === 'summary' ? side : 'server'),
-			call: <T>(method: string) => {
-				expect(method).toBe('getModelSummary');
-				return Promise.resolve(engineSummary as T);
-			},
-			gone: () => false
-		};
-	}
 
 	let issueRequests = 0;
 	/** Holds the issues answer until released, so what the refresh itself left is seen first. */
 	let release: () => void = () => {};
 
 	beforeEach(() => {
-		// A config naming its server is always answered there, so the store reads through the active base URL here.
-		setModelApiConfig(undefined);
-		setActiveBaseUrl(BASE);
 		issueRequests = 0;
 		const held = new Promise<void>((resolve) => (release = resolve));
-		server.use(
-			http.get(`${BASE}/model/issues`, async () => {
+		stubEngine({
+			getModelSummary: () => engineSummary,
+			getModelIssues: async () => {
 				issueRequests += 1;
 				await held;
-				return HttpResponse.json({
+				return {
 					model_rev: 6,
 					issues: [],
 					counts: { error: 1 },
 					truncated: false,
 					rules_status: null
-				});
-			}),
-			http.get(`${BASE}/model/summary`, () => HttpResponse.json(summary))
-		);
-	});
-	afterEach(() => {
-		installEngineSeam(null);
-		setActiveBaseUrl(null);
-		setModelApiConfig({ baseUrl: BASE });
+				};
+			}
+		});
 	});
 
-	it('with the summary on the engine, the issue counts survive a refresh', async () => {
-		installEngineSeam(seam('engine'));
+	it('the issue counts survive a refresh, and the issues are asked for', async () => {
 		adoptIssues([], { warning: 3 }, 0);
 
 		await refreshSummary();
@@ -765,25 +732,7 @@ describe('the summary on the engine', () => {
 		await vi.waitFor(() => expect(getIssueCounts()).toEqual({ error: 1 }));
 	});
 
-	it("on the server's side the body's counts are adopted", async () => {
-		installEngineSeam(seam('server'));
-		adoptIssues([], { warning: 3 }, 0);
-
-		await refreshSummary();
-
-		expect(getIssueCounts()).toEqual({ warning: 2 });
-		expect(getModelSummary()?.issue_counts).toEqual({ warning: 2 });
-		expect(getModelRev()).toBe(4);
-		expect(issueRequests).toBe(0);
-	});
-
-	it("on the server's side a null count is adopted too", async () => {
-		installEngineSeam(seam('server'));
-		server.use(
-			http.get(`${BASE}/model/summary`, () => HttpResponse.json({ ...summary, issue_counts: null }))
-		);
-		adoptIssues([], { warning: 3 }, 0);
-
+	it('a summary without counts leaves the store with none', async () => {
 		await refreshSummary();
 
 		expect(getIssueCounts()).toBeNull();

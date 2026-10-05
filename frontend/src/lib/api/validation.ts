@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { apiFetch, type ClientConfig } from './client';
-import { comparableWhileStaged, route } from './engine-route';
+import { route } from './engine-route';
 import type { ModelOp } from '$lib/state/ops';
 import {
 	IssueCountsSchema,
@@ -21,14 +21,11 @@ export interface ValidateOptions {
 	baseRev?: number;
 	/** The engine's staged batches `ops` are, in order: the engine validates those. */
 	batchIds?: readonly number[];
-	/** A rule set is staged: the engine validates with it, the server knows none. */
-	rulesStaged?: boolean;
 }
 
 /**
- * POST /model/validate, or the engine over its staged batches (`batchIds`)
- * when the `issues` surface is on it. An inline model or a scope, and ops
- * no batch ids name, are the server's.
+ * The engine over its staged batches (`batchIds`); an inline model or a
+ * scope, and ops no batch ids name, are `POST /model/validate`.
  */
 export function validateModel(options?: ValidateOptions, cfg?: ClientConfig): Promise<Issue[]> {
 	const ops = options?.ops ?? [];
@@ -38,25 +35,16 @@ export function validateModel(options?: ValidateOptions, cfg?: ClientConfig): Pr
 	} else if (options && (options.inline !== undefined || options.scope !== undefined)) {
 		body = { inline: options.inline, scope: options.scope };
 	}
-	const server = () =>
-		apiFetch<Issue[]>('/model/validate', { method: 'POST', body, schema: IssueListSchema }, cfg);
 	const batchIds = options?.batchIds;
-	if (ops.length > 0 ? batchIds === undefined : body !== undefined) return server();
-	return route(
-		'issues',
-		cfg,
-		(call) =>
-			call<unknown>('validateModel', { batch_ids: [...(batchIds ?? [])] }).then((answer) =>
-				IssueListSchema.parse(answer)
-			),
-		server,
-		// With nothing staged the server makes a full run, which names one
-		// member of a containment cycle where the engine names every element
-		// on it; `getModelIssues` compares the unstaged state instead.
-		{
-			shadow:
-				ops.length === 0 || options?.rulesStaged === true ? 'never' : comparableWhileStaged(ops)
-		}
+	if (ops.length > 0 ? batchIds === undefined : body !== undefined) {
+		return apiFetch<Issue[]>(
+			'/model/validate',
+			{ method: 'POST', body, schema: IssueListSchema },
+			cfg
+		);
+	}
+	return route<unknown>('validateModel', { batch_ids: [...(batchIds ?? [])] }).then((answer) =>
+		IssueListSchema.parse(answer)
 	);
 }
 
@@ -81,9 +69,8 @@ export const RulesStatusSchema = z.object({
 });
 export type RulesStatus = z.infer<typeof RulesStatusSchema>;
 
-/** GET /model/issues — snapshot of the server's maintained issue store.
- * Cheap by contract (never a pipeline run); `counts` is exact even when
- * `issues` is truncated at the server-side cap. */
+/** A snapshot of the issue store. Cheap by contract (never a sweep);
+ * `counts` is exact even when `issues` is truncated at the cap. */
 export const IssueListOutSchema = z.object({
 	model_rev: z.number().int(),
 	issues: z.array(IssueSchema).default([]),
@@ -93,18 +80,7 @@ export const IssueListOutSchema = z.object({
 });
 export type IssueList = z.infer<typeof IssueListOutSchema>;
 
-/**
- * On the engine, the working copy's issues: a staged edit's own are
- * `uncommitted`. An answer from a replica the surface no longer routes to —
- * one whose store may not be swept whole yet — is replaced by the server's.
- */
-export function getModelIssues(cfg?: ClientConfig): Promise<IssueList> {
-	return route(
-		'issues',
-		cfg,
-		(call) =>
-			call<unknown>('getModelIssues', {}).then((answer) => IssueListOutSchema.parse(answer)),
-		() => apiFetch<IssueList>('/model/issues', { method: 'GET', schema: IssueListOutSchema }, cfg),
-		{ recheck: true }
-	);
+/** The working copy's issues: a staged edit's own are `uncommitted`. */
+export function getModelIssues(): Promise<IssueList> {
+	return route<unknown>('getModelIssues', {}).then((answer) => IssueListOutSchema.parse(answer));
 }

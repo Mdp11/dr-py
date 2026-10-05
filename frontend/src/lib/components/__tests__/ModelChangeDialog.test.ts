@@ -3,8 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import * as crApi from '$lib/api/changeRequest';
 import * as stageProposed from '$lib/state/stage-proposed';
 import * as fileSave from '$lib/util/fileSave';
-import { canEdit, hasStagedOps } from '$lib/state';
-import { installEngineSeam } from '$lib/api/engine-route';
+import { canEdit, compareOnEngine, hasStagedOps } from '$lib/state';
 import ModelChangeDialog from '../ModelChangeDialog.svelte';
 
 vi.mock('$lib/state', async (orig) => {
@@ -13,6 +12,7 @@ vi.mock('$lib/state', async (orig) => {
 		...actual,
 		canEdit: vi.fn(() => true),
 		hasStagedOps: vi.fn(() => false),
+		compareOnEngine: vi.fn(() => false),
 		getFilename: vi.fn(() => 'city.model.json'),
 		getModelRev: vi.fn(() => 3),
 		getModelSummary: vi.fn(() => ({
@@ -70,10 +70,10 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	vi.mocked(canEdit).mockReturnValue(true);
 	vi.mocked(hasStagedOps).mockReturnValue(false);
+	vi.mocked(compareOnEngine).mockReturnValue(false);
 });
 
 afterEach(() => {
-	installEngineSeam(null);
 	if (app) unmount(app);
 	app = null;
 	host.remove();
@@ -243,10 +243,14 @@ describe('ModelChangeDialog — compare mode', () => {
 		byTestId('mcd-replace').click();
 		await settle();
 		expect(propose).toHaveBeenCalledWith([CR_DOC]);
-		expect(stage).toHaveBeenCalledWith([CREATE_OP], { rev: 3 }, {
-			elements: [EL('a', 'A'), EL('b', 'B')],
-			relationships: []
-		});
+		expect(stage).toHaveBeenCalledWith(
+			[CREATE_OP],
+			{ rev: 3 },
+			{
+				elements: [EL('a', 'A'), EL('b', 'B')],
+				relationships: []
+			}
+		);
 		// staged → the dialog closed itself
 		expect(document.body.querySelector('[data-testid="mcd-replace"]')).toBeNull();
 	});
@@ -291,12 +295,7 @@ describe('ModelChangeDialog — compare mode', () => {
 });
 
 describe('ModelChangeDialog — compare on the engine', () => {
-	const engineOn = () =>
-		installEngineSeam({
-			side: (surface) => (surface === 'compare' ? 'engine' : 'server'),
-			call: () => Promise.reject(new Error('the routed functions are spied')),
-			gone: () => false
-		});
+	const engineOn = () => vi.mocked(compareOnEngine).mockReturnValue(true);
 	const ENGINE_COMPARE = { ...COMPARE_OUT, workingCopy: true };
 	const SERVER_COMPARE = COMPARE_OUT;
 	const proposal = (workingCopy: boolean, modelRev = 3): crApi.ProposeCrResult => ({
@@ -404,10 +403,14 @@ describe('ModelChangeDialog — compare on the engine', () => {
 		pickFiles([modelFile()]);
 		byTestId('mcd-replace').click();
 		await settle();
-		expect(stage).toHaveBeenCalledWith([CREATE_OP], { rev: 4 }, {
-			elements: [EL('a', 'A'), EL('b', 'B')],
-			relationships: []
-		});
+		expect(stage).toHaveBeenCalledWith(
+			[CREATE_OP],
+			{ rev: 4 },
+			{
+				elements: [EL('a', 'A'), EL('b', 'B')],
+				relationships: []
+			}
+		);
 	});
 
 	it('Replace refuses an engine proposal built from a server compare answer over staged edits', async () => {
@@ -574,10 +577,14 @@ describe('ModelChangeDialog — apply-cr mode', () => {
 		await settle();
 		byTestId('mcd-stage').click();
 		await settle();
-		expect(stage).toHaveBeenCalledWith([CREATE_OP], { rev: 3 }, {
-			elements: [EL('a', 'A'), EL('b', 'B')],
-			relationships: []
-		});
+		expect(stage).toHaveBeenCalledWith(
+			[CREATE_OP],
+			{ rev: 3 },
+			{
+				elements: [EL('a', 'A'), EL('b', 'B')],
+				relationships: []
+			}
+		);
 		expect(document.body.querySelector('[data-testid="mcd-stage"]')).toBeNull();
 	});
 

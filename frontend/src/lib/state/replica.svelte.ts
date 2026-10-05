@@ -4,10 +4,10 @@
  * rebind, snapshot and reset events, the two commit paths bracket their POST
  * with a flight, the two metamodel-adoption paths tell it the UI moved on,
  * and the view store registers what the committed view places. While it
- * runs, the engine seam is installed: each read surface is answered by the
- * replica or the server, as `dr.surfaces` says (read once per page load);
- * with staging on the engine, the model store's engine half follows it
- * through a handle (`attachEngine`). An artifact follower keeps the project's
+ * runs, the engine seam is installed: every read is answered by the replica,
+ * once its gate is open (`whenReady`); with staging on the engine, the model
+ * store's engine half follows it through a handle (`attachEngine`). An
+ * artifact follower keeps the project's
  * artifacts, committed and staged, in the sync's context, each staged rule
  * set with the server's parse of its YAML. With the issues on
  * the engine, the live issue list is refetched whenever the replica's issue
@@ -18,15 +18,16 @@
 
 import type { WireBatch } from '$engine';
 import { listArtifactPayloads } from '$lib/api/artifacts';
-import { engineSide, installEngineSeam } from '$lib/api/engine-route';
+import { installEngineSeam, type Side, type Surface } from '$lib/api/engine-route';
 import type { FeedEvent } from '$lib/api/feed';
 import { parseRules } from '$lib/api/rules';
 import { createArtifactFollower, type ArtifactFollower } from '$lib/engine/artifacts';
 import { createSnapshotCache } from '$lib/engine/cache';
 import { connectFrame } from '$lib/engine/frame';
-import { addQuietProbe, quiet } from '$lib/engine/quiet';
+import { createGate, type GateState } from '$lib/engine/gate';
+import { addQuietProbe } from '$lib/engine/quiet';
 import { createRulesParser } from '$lib/engine/rules-parse';
-import { createEngineSeam, type SurfaceGates } from '$lib/engine/seam';
+import { createEngineSeam } from '$lib/engine/seam';
 import { anyStaged } from '$lib/engine/staged-probe';
 import {
 	anyEngineSurface,
@@ -62,7 +63,6 @@ import {
 } from './model-engine.svelte';
 import { markStructureChanged, scheduleIssuesRefetch } from './model-shared.svelte';
 import { journeyReplica } from './open-journey';
-import { getStagedViewDepth } from './view-edits.svelte';
 
 let _status = $state.raw<ReplicaStatus>(OFF);
 let _sync: ReplicaSync | null = null;
@@ -75,8 +75,8 @@ let _offStamp: (() => void) | null = null;
 let _deps: Partial<SyncDeps> | undefined;
 /** The switches, read at the first start and kept until `resetReplica()`; tracked so a `$derived` reading it stays live. */
 let _switches = $state.raw<Switches | null>(null);
-/** Moves at every install and uninstall: a shadow that loads late lands only on its own seam. */
-let _seamToken = 0;
+/** The sync the installed seam reads from; null while none is installed. */
+let _seamSync: ReplicaSync | null = null;
 let _removeQuietProbe: (() => void) | null = null;
 /** `replicaGate()` waiters, released once the phase leaves `opening`. */
 let _gateWaiters: Array<() => void> = [];
@@ -198,6 +198,7 @@ function setStatus(status: ReplicaStatus): void {
 		_stamp = null;
 		_linkGeneration++;
 	}
+	_gate.moved();
 	for (const listener of [..._statusListeners]) {
 		if (!_statusListeners.has(listener)) continue;
 		try {
@@ -320,66 +321,99 @@ function _anyEngine(): boolean {
 }
 
 /**
- * Routes the read surfaces through `sync`; navigations, tables, issues, view
- * warnings and compares only once the follower has loaded the artifacts. In dev, with
- * `dr.shadow` set, the seam is installed again with a shadow once that module
- * has loaded, idle while the model store's engine half has an edit staged, an
- * artifact entry or a view op is staged, or the follower still lays a
- * commit's entries over the committed artifacts; a build holds none of it.
+ * Routes every read through `sync`, which answers once the gate is open: the
+ * replica is ready, its issue store swept whole and the artifacts loaded
+ * (until then the engine holds none of the rule sets and tables a read may
+ * name). The `dr.surfaces` switches only decide what `engineSide` reports to
+ * the stores that follow the replica.
  */
 function installSeam(sync: ReplicaSync): void {
 	uninstallSeam();
-	const switches = (_switches ??= readSwitches());
-	const surfaces = switches.surfaces;
-	const token = _seamToken;
-	// A store swept part-way is not the model's list, and until the artifacts
-	// are held the engine knows none of the rule sets its list must carry.
-	const issues = () =>
-		getStagingSide() === 'engine' &&
-		sync.status().seeded &&
-		(_follower?.follower.loaded() ?? false);
-	const gates: SurfaceGates = {
-		// A navigation may name artifacts: the engine answers once it holds them.
-		navigation: () => _follower?.follower.loaded() ?? false,
-		// So may a table, by its own id or through its navigations.
-		tables: () => _follower?.follower.loaded() ?? false,
-		// And an export, through its tables or its exporter.
-		exports: () => _follower?.follower.loaded() ?? false,
-		issues,
-		// A candidate is diffed against that list.
-		metamodel: issues,
-		// A view's warnings name the artifacts it places.
-		views: issues,
-		// A compare diffs the working copy, which only staging on the engine holds.
-		compare: issues
-	};
-	installEngineSeam(createEngineSeam(sync, surfaces, undefined, gates));
+	_switches ??= readSwitches();
+	_seamSync = sync;
+	installEngineSeam(createEngineSeam(sync, (signal) => _gate.whenReady(signal)));
 	_removeQuietProbe = addQuietProbe(() => sync.settled());
-	if (import.meta.env.DEV && anyEngineSurface(switches)) {
-		void import('../engine/shadow')
-			.then(({ createShadow, shadowEnabled }) => {
-				if (token !== _seamToken || !shadowEnabled()) return;
-				const shadow = createShadow({
-					rev: () => sync.status().rev,
-					quiet,
-					staged: () =>
-						anyStaged() ||
-						getStagedArtifactDepth() > 0 ||
-						getStagedViewDepth() > 0 ||
-						(_follower?.follower.hasOverlay() ?? false),
-					report: (line) => console.error(line)
-				});
-				installEngineSeam(createEngineSeam(sync, surfaces, shadow, gates));
-			})
-			.catch(() => {});
-	}
+	_gate.moved();
 }
 
 function uninstallSeam(): void {
-	_seamToken += 1;
+	_seamSync = null;
 	installEngineSeam(null);
 	_removeQuietProbe?.();
 	_removeQuietProbe = null;
+	_gate.moved();
+}
+
+/**
+ * Whether a read can be answered now: a replica is installed, ready or
+ * frozen, its issue store swept whole and the artifacts loaded. `closed`
+ * while it opens or re-bootstraps; `unavailable` once it has failed, has no
+ * model, could not start, or is not installed. A `frozen` replica keeps
+ * `seeded`: its list matches the old-metamodel UI until the adoption
+ * re-bootstraps it.
+ */
+function gateState(): GateState {
+	if (_seamSync === null) return { state: 'unavailable', reason: 'the engine is not running' };
+	const { phase, seeded, reason } = _seamSync.status();
+	switch (phase) {
+		case 'opening':
+		case 'resyncing':
+			return { state: 'closed' };
+		case 'ready':
+		case 'frozen':
+			return seeded && (_follower?.follower.loaded() ?? false)
+				? { state: 'open' }
+				: { state: 'closed' };
+		case 'off':
+			return { state: 'unavailable', reason: reason ?? 'the engine has no replica' };
+		case 'failed':
+		case 'server':
+			return { state: 'unavailable', reason: reason ?? 'the replica cannot be rebuilt' };
+	}
+}
+
+const _gate = createGate(gateState);
+
+/**
+ * The side a surface's stores follow: the engine when its switch says so, its
+ * gate (if any) is open and a replica is neither `off` nor `server`. Reads
+ * answer from the engine whatever this says; it decides who re-pages and
+ * recomputes when the replica moves.
+ */
+export function engineSide(surface: Surface): Side {
+	if (_seamSync === null || _switches === null) return 'server';
+	if (_switches.surfaces[surface] !== 'engine') return 'server';
+	if (surfaceGate(_seamSync, surface) === false) return 'server';
+	const { phase } = _seamSync.status();
+	return phase === 'off' || phase === 'server' ? 'server' : 'engine';
+}
+
+/** Surfaces whose reads may name artifacts: a navigation, a table by its own id or through its navigations, an export through its tables or its exporter. */
+const NAMES_ARTIFACTS: ReadonlySet<Surface> = new Set(['navigation', 'tables', 'exports']);
+
+/**
+ * Surfaces answered from the issue store or the working copy: a candidate
+ * metamodel is diffed against the issues' list, a view's warnings name the
+ * artifacts it places, and a compare diffs the working copy, which only
+ * staging on the engine holds.
+ */
+const NEEDS_SWEPT_STORE: ReadonlySet<Surface> = new Set([
+	'issues',
+	'metamodel',
+	'views',
+	'compare'
+]);
+
+/** The extra gate of `surface`, if it has one: what its reads need the replica to hold. */
+function surfaceGate(sync: ReplicaSync, surface: Surface): boolean | undefined {
+	const loaded = _follower?.follower.loaded() ?? false;
+	if (NAMES_ARTIFACTS.has(surface)) return loaded;
+	// A store swept part-way is not the model's list, and until the artifacts
+	// are held the engine knows none of the rule sets its list must carry.
+	if (NEEDS_SWEPT_STORE.has(surface)) {
+		return getStagingSide() === 'engine' && sync.status().seeded && loaded;
+	}
+	return undefined;
 }
 
 /** The replica's status; reactive. */
@@ -562,21 +596,17 @@ function follow(sync: ReplicaSync, projectId: string): void {
 		// pages and warnings, answered until now, hold none of the staged edits.
 		onLoaded: () => {
 			_followerEpoch += 1;
+			_gate.moved();
 			if (issuesOnEngine(_status)) scheduleIssuesRefetch();
 			tablesMoved();
 			viewsMoved();
 		}
 	});
-	// A shadow re-test waits out a payload fetch or a rules parse in flight, which may change what it reads.
+	// `quiet()` waits out a payload fetch or a rules parse in flight, which may change what a read sees.
 	_follower = { projectId, follower, removeQuiet: addQuietProbe(() => follower.settled()) };
 	follower.load();
 	// The sync forgot the buffer at its last stop; the project's own, kept since, goes again.
 	if (getStagedArtifactDepth() > 0) follower.stagedChanged();
-}
-
-/** The kind of the committed artifact `id` as the current follower knows it; none without one. */
-export function artifactKindOf(id: string): string | undefined {
-	return _follower?.follower.kindOf(id);
 }
 
 /** A payload answer after this is dropped: it speaks for a replica no longer followed. */
@@ -587,6 +617,7 @@ function stopFollower(notify = true): void {
 	_follower.removeQuiet();
 	_follower = null;
 	_followerEpoch += 1;
+	_gate.moved();
 	if (notify && viewsWereOpen) viewsClosed();
 }
 
@@ -601,32 +632,24 @@ export function compareOnEngine(): boolean {
 }
 
 /**
- * Whether an export now would hold staged edits: the exports are on the
- * engine and the replica holds staged model edits or staged artifacts. The
- * server's exports read committed state only. Reactive.
+ * Whether an export now would hold staged edits: the replica holds staged
+ * model edits or staged artifacts, and an export reads the working copy. The
+ * manifest's `model_rev` stays the committed rev. Reactive.
  */
 export function exportsIncludeStaged(): boolean {
-	// What the seam's side reads, tracked: the phase and the follower's load.
-	void _status;
-	void _followerEpoch;
-	if (engineSide('exports') !== 'engine') return false;
 	return anyStaged() || getStagedArtifactDepth() > 0;
 }
 
 /**
- * Whether a metamodel preview now would hold staged edits: the metamodel
- * previews are on the engine and the replica holds staged model edits or
- * staged artifacts. The server's diff reads committed state only. Reactive.
+ * Whether a metamodel preview now would hold staged edits: the replica holds
+ * staged model edits or staged artifacts, and a preview reads the working
+ * copy. Reactive.
  */
 export function metamodelIncludesStaged(): boolean {
-	// What the seam's side reads, tracked: the status and the follower's load.
-	void _status;
-	void _followerEpoch;
-	if (engineSide('metamodel') !== 'engine') return false;
 	return anyStaged() || getStagedArtifactDepth() > 0;
 }
 
-/** Every read goes to the server again; the sync forgets the placements, the engine half everything. */
+/** Every read is unavailable again; the sync forgets the placements, the engine half everything. */
 export function stopReplica(): void {
 	uninstallSeam();
 	_offStamp?.();

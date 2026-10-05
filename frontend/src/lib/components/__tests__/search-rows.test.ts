@@ -1,20 +1,18 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as modelRead from '../../api/model-read';
-import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '../../api/engine-route';
 import { resetModelStore } from '../../state/model.svelte';
 import { setSearchText } from '../../state/filters.svelte';
 import { clearSelection, getSelection } from '../../state/selection.svelte';
 import Search from '../Sidebar/Search.svelte';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
-	server.resetHandlers();
+	installEngineSeam(null);
 	setSearchText('');
 });
-afterAll(() => server.close());
 beforeEach(() => resetModelStore());
 
 /** Wait past the 250ms search debounce + the mocked fetch. */
@@ -45,17 +43,15 @@ function options(): HTMLElement[] {
 
 /** Two results, so an arrow step has somewhere to go. */
 function serveTwo(): void {
-	server.use(
-		http.get(`*/model/elements`, () =>
-			HttpResponse.json({
-				items: [
-					{ id: 'e_001', type_name: 'Pump', properties: { name: 'P-101' }, rev: 1 },
-					{ id: 'e_002', type_name: 'Pump', properties: { name: 'P-102' }, rev: 1 }
-				],
-				total: 2
-			})
-		)
-	);
+	stubEngine({
+		listElementsPage: () => ({
+			items: [
+				{ id: 'e_001', type_name: 'Pump', properties: { name: 'P-101' }, rev: 1 },
+				{ id: 'e_002', type_name: 'Pump', properties: { name: 'P-102' }, rev: 1 }
+			],
+			total: 2
+		})
+	});
 }
 
 /** Mount, type, and wait past the debounce + mocked fetch. */
@@ -70,14 +66,12 @@ async function mountWithResults(): Promise<ReturnType<typeof mount>> {
 }
 
 it('renders "<name> <stereotype>" rows, id only in the tooltip', async () => {
-	server.use(
-		http.get(`*/model/elements`, () =>
-			HttpResponse.json({
-				items: [{ id: 'e_001', type_name: 'Pump', properties: { name: 'P-101' }, rev: 1 }],
-				total: 1
-			})
-		)
-	);
+	stubEngine({
+		listElementsPage: () => ({
+			items: [{ id: 'e_001', type_name: 'Pump', properties: { name: 'P-101' }, rev: 1 }],
+			total: 1
+		})
+	});
 	const component = mount(Search, { target: document.body });
 	try {
 		typeQuery('P-1');
@@ -96,14 +90,12 @@ it('renders "<name> <stereotype>" rows, id only in the tooltip', async () => {
 });
 
 it('resolves a capital-N `Name` property as the display name', async () => {
-	server.use(
-		http.get(`*/model/elements`, () =>
-			HttpResponse.json({
-				items: [{ id: 'e_003', type_name: 'Tank', properties: { Name: 'T-201' }, rev: 1 }],
-				total: 1
-			})
-		)
-	);
+	stubEngine({
+		listElementsPage: () => ({
+			items: [{ id: 'e_003', type_name: 'Tank', properties: { Name: 'T-201' }, rev: 1 }],
+			total: 1
+		})
+	});
 	const component = mount(Search, { target: document.body });
 	try {
 		typeQuery('T-2');
@@ -119,14 +111,12 @@ it('resolves a capital-N `Name` property as the display name', async () => {
 });
 
 it('falls back to "<id> <stereotype>" when the element has no name (id shown once)', async () => {
-	server.use(
-		http.get(`*/model/elements`, () =>
-			HttpResponse.json({
-				items: [{ id: 'e_002', type_name: 'Valve', properties: {}, rev: 1 }],
-				total: 1
-			})
-		)
-	);
+	stubEngine({
+		listElementsPage: () => ({
+			items: [{ id: 'e_002', type_name: 'Valve', properties: {}, rev: 1 }],
+			total: 1
+		})
+	});
 	const component = mount(Search, { target: document.body });
 	try {
 		typeQuery('e_0');

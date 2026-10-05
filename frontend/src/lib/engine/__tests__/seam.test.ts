@@ -1,45 +1,21 @@
 import { describe, expect, it } from 'vitest';
+import { EngineUnavailableError } from '$lib/api/engine-route';
+import { ConflictError } from '$lib/api/errors';
+import { EngineGoneError } from '../client';
 import { createEngineSeam } from '../seam';
-import { SURFACE_DEFAULTS } from '../surfaces';
-import { OFF, type ReplicaStatus } from '../sync';
 
-/** A sync whose status is `status.current`; the seam's `side` never calls it. */
-function statusOnly(status: { current: ReplicaStatus }) {
-	return {
-		status: () => status.current,
-		call: <T>(): Promise<T> => Promise.reject(new Error('not called'))
-	};
-}
+const ready = () => Promise.resolve();
 
 describe('the engine seam', () => {
-	it('a closed gate puts its surface on the server, and only that one', () => {
-		const status = { current: { ...OFF, phase: 'ready', rev: 0 } as ReplicaStatus };
-		let open = false;
-		const seam = createEngineSeam(statusOnly(status), SURFACE_DEFAULTS, undefined, {
-			navigation: () => open
-		});
-
-		expect(seam.side('navigation')).toBe('server');
-		expect(seam.side('criteria')).toBe('engine');
-		expect(seam.side('elements')).toBe('engine');
-
-		open = true;
-		expect(seam.side('navigation')).toBe('engine');
-
-		status.current = OFF;
-		expect(seam.side('navigation')).toBe('server');
-	});
-
 	it("call hands the sync the read's signal and the buffers it transfers", async () => {
 		const seen: unknown[][] = [];
 		const sync = {
-			status: () => OFF,
 			call: <T>(method: string, params?: unknown, options?: unknown): Promise<T> => {
 				seen.push([method, params, options]);
 				return Promise.resolve(null as T);
 			}
 		};
-		const seam = createEngineSeam(sync, SURFACE_DEFAULTS);
+		const seam = createEngineSeam(sync, ready);
 		const file = new ArrayBuffer(4);
 		const { signal } = new AbortController();
 
@@ -54,15 +30,31 @@ describe('the engine seam', () => {
 		]);
 	});
 
-	it('an open gate does not override a surface switched to the server', () => {
-		const status = { current: { ...OFF, phase: 'ready', rev: 0 } as ReplicaStatus };
+	it('whenReady is the one it was given', async () => {
+		const seen: (AbortSignal | undefined)[] = [];
 		const seam = createEngineSeam(
-			statusOnly(status),
-			{ ...SURFACE_DEFAULTS, navigation: 'server' },
-			undefined,
-			{ navigation: () => true }
+			{ call: () => Promise.reject(new Error('not called')) },
+			(signal) => {
+				seen.push(signal);
+				return Promise.resolve();
+			}
 		);
+		const { signal } = new AbortController();
 
-		expect(seam.side('navigation')).toBe('server');
+		await seam.whenReady(signal);
+
+		expect(seen).toEqual([signal]);
+	});
+
+	it('an engine that is gone is unavailable, and any other error is as it was', async () => {
+		const conflict = new ConflictError(409, { detail: 'stale base_rev' }, 'stale base_rev');
+		let failure: Error = new EngineGoneError();
+		const seam = createEngineSeam({ call: () => Promise.reject(failure) }, ready);
+
+		await expect(seam.call('getModelSummary', {})).rejects.toBeInstanceOf(EngineUnavailableError);
+		await expect(seam.call('getModelSummary', {})).rejects.toThrow('the engine is gone');
+
+		failure = conflict;
+		await expect(seam.call('getModelSummary', {})).rejects.toBe(conflict);
 	});
 });

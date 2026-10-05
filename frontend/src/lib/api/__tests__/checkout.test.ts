@@ -4,8 +4,7 @@ import { fakeProject } from '$lib/engine/__tests__/support/project-server';
 import type { ModelOp, Op } from '$lib/state/ops';
 import { acquireLocks, previewCommit, commitChanges, openProject } from '../checkout';
 import { getCurrentUserId } from '../client';
-import type { ShadowProbe } from '../engine-route';
-import { ValidationError } from '../errors';
+import { ConflictError, ValidationError } from '../errors';
 import {
 	issuesEngine,
 	rename,
@@ -281,7 +280,6 @@ describe('previewCommit on the engine', () => {
 			const project = fakeProject();
 			const engine = await issuesEngine(made, {
 				project,
-				surfaces: { metamodel: 'engine' },
 				lint: () => ({ ok: true, errors: [], document: project.doc })
 			});
 			const { ops, batchIds } = await staged(engine);
@@ -319,7 +317,7 @@ describe('previewCommit on the engine', () => {
 		});
 
 		it("the candidate is the lint's document", async () => {
-			const engine = await issuesEngine(made, { surfaces: { metamodel: 'engine' } });
+			const engine = await issuesEngine(made);
 			const { ops, batchIds } = await staged(engine);
 
 			const preview = await previewCommit(0, [rebind, ...ops], undefined, {
@@ -333,7 +331,7 @@ describe('previewCommit on the engine', () => {
 		});
 
 		it("without the staged batches named it is the server's whole", async () => {
-			const engine = await issuesEngine(made, { surfaces: { metamodel: 'engine' } });
+			const engine = await issuesEngine(made);
 			const { ops } = await staged(engine);
 			const all = [rebind, ...ops, moveNode];
 
@@ -343,20 +341,8 @@ describe('previewCommit on the engine', () => {
 			expect(engine.over.methods()).not.toContain('previewCommit');
 		});
 
-		it("with the switch on the server it is the server's whole", async () => {
-			const engine = await issuesEngine(made, { surfaces: { metamodel: 'server' } });
-			const { ops, batchIds } = await staged(engine);
-			const all = [rebind, ...ops, artifactOp];
-
-			await previewCommit(0, all, undefined, { strict: false, batchIds });
-
-			expect(engine.requests).toEqual([{ route: 'preview', body: { base_rev: 0, ops: all } }]);
-			expect(engine.over.methods()).not.toContain('previewCommit');
-		});
-
 		it("an invalid blob answers the server's 422", async () => {
 			const engine = await issuesEngine(made, {
-				surfaces: { metamodel: 'engine' },
 				lint: () => ({ ok: false, errors: [{ message: 'bad', line: 1, column: 1 }] })
 			});
 			const { ops, batchIds } = await staged(engine);
@@ -376,7 +362,7 @@ describe('previewCommit on the engine', () => {
 			expect(engine.over.methods()).not.toContain('previewCommit');
 		});
 
-		it("staged ops the candidate refuses are the server's whole, which answers its 422", async () => {
+		it("staged ops the candidate refuses are the engine's 422, and the server is not asked", async () => {
 			const project = fakeProject();
 			// The candidate drops `name`, which the staged rename sets.
 			const candidate = JSON.parse(JSON.stringify(project.doc)) as {
@@ -384,49 +370,29 @@ describe('previewCommit on the engine', () => {
 			};
 			const named = candidate.elements.find((element) => element.name === 'NamedElement')!;
 			named.properties = named.properties.filter((property) => property.name !== 'name');
-			const probes: ShadowProbe[] = [];
 			const engine = await issuesEngine(made, {
 				project,
-				surfaces: { metamodel: 'engine' },
-				lint: () => ({ ok: true, errors: [], document: candidate }),
-				shadow: (probe) => void probes.push(probe)
+				lint: () => ({ ok: true, errors: [], document: candidate })
 			});
 			const { ops, batchIds } = await staged(engine);
 			const all = [rebind, ...ops, moveNode];
-			const bodies: unknown[] = [];
-			server.use(
-				http.post(`${project.baseUrl}/commits/preview`, async ({ request }) => {
-					bodies.push(await request.json());
-					return HttpResponse.json(
-						{ detail: "Organization' has no property 'name" },
-						{ status: 422 }
-					);
-				})
-			);
 
 			const failure = await previewCommit(0, all, undefined, { strict: false, batchIds }).catch(
 				(error: unknown) => error
 			);
 
-			expect(engine.over.methods()).toContain('previewCommit');
-			expect(bodies).toEqual([{ base_rev: 0, ops: all }]);
 			expect(failure).toBeInstanceOf(ValidationError);
-			expect(failure).toMatchObject({
-				status: 422,
-				message: "Organization' has no property 'name"
-			});
-			await new Promise((resolve) => setTimeout(resolve, 0));
-			expect(probes).toEqual([]);
+			expect(failure).toMatchObject({ status: 422 });
+			expect((failure as ValidationError).message).toContain("has no property 'name'");
+			expect(engine.over.methods().filter((method) => method === 'previewCommit')).toHaveLength(1);
+			expect(engine.requests.map((request) => request.route)).toEqual(['lint']);
 		});
 
-		it('a staged create beside it is previewed locally, its temp id named, and never shadowed', async () => {
+		it('a staged create beside it is previewed locally, its temp id named', async () => {
 			const project = fakeProject();
-			const probes: ShadowProbe[] = [];
 			const engine = await issuesEngine(made, {
 				project,
-				surfaces: { metamodel: 'engine' },
-				lint: () => ({ ok: true, errors: [], document: project.doc }),
-				shadow: (probe) => void probes.push(probe)
+				lint: () => ({ ok: true, errors: [], document: project.doc })
 			});
 			const create: ModelOp = {
 				kind: 'create_element',
@@ -447,26 +413,6 @@ describe('previewCommit on the engine', () => {
 			expect(
 				preview.issues.find((issue) => issue.message === TOO_LONG_MESSAGE)!.target_ids[0]
 			).toMatch(/^tmp_/);
-			await new Promise((resolve) => setTimeout(resolve, 0));
-			expect(probes).toEqual([]);
-		});
-
-		it('without a create it is shadowed while staged', async () => {
-			const probes: ShadowProbe[] = [];
-			const engine = await issuesEngine(made, {
-				surfaces: { metamodel: 'engine' },
-				shadow: (probe) => void probes.push(probe)
-			});
-			const { ops, batchIds } = await staged(engine);
-
-			await previewCommit(0, [rebind, ...ops], undefined, { strict: false, batchIds });
-
-			expect(probes).toHaveLength(1);
-			expect(probes[0]).toMatchObject({
-				surface: 'metamodel',
-				method: 'previewCommit',
-				whileStaged: true
-			});
 		});
 	});
 
@@ -479,17 +425,22 @@ describe('previewCommit on the engine', () => {
 		expect(engine.requests).toEqual([{ route: 'preview', body: { base_rev: 0, ops } }]);
 	});
 
-	it('stale staged batches, or a stale base_rev, send every op to the server', async () => {
+	it("stale staged batches, or a stale base_rev, are the engine's 409 after one more try", async () => {
 		const engine = await issuesEngine(made);
 		const { ops, batchIds } = await staged(engine);
 		const all = [...ops, artifactOp];
 
-		await previewCommit(0, all, undefined, { strict: false, batchIds: [batchIds[0]! + 1] });
-		await previewCommit(1, all, undefined, { strict: false, batchIds });
+		const batches = previewCommit(0, all, undefined, {
+			strict: false,
+			batchIds: [batchIds[0]! + 1]
+		});
+		await expect(batches).rejects.toBeInstanceOf(ConflictError);
+		await expect(batches).rejects.toMatchObject({ status: 409, message: 'stale staged batches' });
+		expect(engine.over.methods().filter((method) => method === 'previewCommit')).toHaveLength(2);
 
-		expect(engine.requests).toEqual([
-			{ route: 'preview', body: { base_rev: 0, ops: all } },
-			{ route: 'preview', body: { base_rev: 1, ops: all } }
-		]);
+		const base = previewCommit(1, all, undefined, { strict: false, batchIds });
+		await expect(base).rejects.toMatchObject({ status: 409, message: 'stale base_rev' });
+		expect(engine.over.methods().filter((method) => method === 'previewCommit')).toHaveLength(4);
+		expect(engine.requests).toEqual([]);
 	});
 });

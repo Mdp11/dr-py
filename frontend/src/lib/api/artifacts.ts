@@ -55,26 +55,16 @@ export async function listArtifactPayloads(
  * DiffDrawer, no `Commit` row would carry it, and undo could not replay it.
  */
 
-/**
- * POST /navigations/evaluate, the `navigation` surface. A page the server
- * answers because the engine refused the call carries `fallback`.
- */
-export function evaluateNavigation(
-	body: {
-		definition?: NavigationDefinition;
-		artifact_id?: string;
-		limit?: number;
-		offset?: number;
-		/** Binds any RowStart in `definition` (embedded column previews). */
-		row_element_id?: string | null;
-	},
-	cfg?: ClientConfig
-): Promise<ChainPage> {
-	return route(
-		'navigation',
-		cfg,
-		(call) => call('evaluateNavigation', asSent(body)).then((page) => ChainPageSchema.parse(page)),
-		() => apiFetch('/navigations/evaluate', { method: 'POST', body, schema: ChainPageSchema }, cfg),
-		{ mark: (page, reason) => ({ ...page, fallback: reason }) }
+/** Evaluates a navigation over the replica's working copy, staged edits and artifacts included. */
+export function evaluateNavigation(body: {
+	definition?: NavigationDefinition;
+	artifact_id?: string;
+	limit?: number;
+	offset?: number;
+	/** Binds any RowStart in `definition` (embedded column previews). */
+	row_element_id?: string | null;
+}): Promise<ChainPage> {
+	return route<unknown>('evaluateNavigation', asSent(body)).then((page) =>
+		ChainPageSchema.parse(page)
 	);
 }

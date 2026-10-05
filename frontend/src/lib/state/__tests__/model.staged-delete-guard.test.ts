@@ -7,10 +7,10 @@
 // tests for that exact bug (delete -> validate -> click referencing element).
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { http, HttpResponse } from 'msw';
 
 import type { Element, OpsResponse, Relationship } from '$lib/api/types';
-import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '$lib/api/engine-route';
 import {
 	applyDelta,
 	emit,
@@ -33,15 +33,13 @@ import {
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
-	server.resetHandlers();
+	installEngineSeam(null);
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
-	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
@@ -84,12 +82,12 @@ function stageDeleteWithCascade(): void {
 describe('ensureElement vs staged delete', () => {
 	it('resolves null without fetching, leaving the staged diff intact', async () => {
 		let fetches = 0;
-		server.use(
-			http.get(`${BASE}/model/elements/:id`, ({ params }) => {
+		stubEngine({
+			getElement: ({ id }: { id: string }) => {
 				fetches++;
-				return HttpResponse.json(el(params.id as string));
-			})
-		);
+				return el(id);
+			}
+		});
 		stageDeleteWithCascade();
 
 		// The bug's trigger: any read of the deleted id (Inspector selection,
@@ -110,12 +108,12 @@ describe('ensureElement vs staged delete', () => {
 	it('does not cache the response when the delete is staged mid-flight', async () => {
 		let release: (() => void) | undefined;
 		const gate = new Promise<void>((r) => (release = r));
-		server.use(
-			http.get(`${BASE}/model/elements/:id`, async ({ params }) => {
+		stubEngine({
+			getElement: async ({ id }: { id: string }) => {
 				await gate;
-				return HttpResponse.json(el(params.id as string));
-			})
-		);
+				return el(id);
+			}
+		});
 
 		const p = ensureElement('e1'); // uncached -> fetch goes out
 		emit({ kind: 'delete_element', id: 'e1' }); // staged while in flight
@@ -129,13 +127,12 @@ describe('ensureElement vs staged delete', () => {
 describe('ensureElements / ensureTreeItems vs staged delete', () => {
 	it('ensureElements never requests or caches a staged-deleted id', async () => {
 		const bodies: string[][] = [];
-		server.use(
-			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
+		stubEngine({
+			getElementsBatch: ({ ids }: { ids: string[] }) => {
 				bodies.push(ids);
-				return HttpResponse.json({ items: ids.map((id) => el(id)) });
-			})
-		);
+				return { items: ids.map((id) => el(id)) };
+			}
+		});
 		stageDeleteWithCascade();
 
 		await ensureElements(['e1', 'b']);
@@ -148,15 +145,14 @@ describe('ensureElements / ensureTreeItems vs staged delete', () => {
 
 	it('ensureTreeItems never requests or caches a staged-deleted id', async () => {
 		const bodies: string[][] = [];
-		server.use(
-			http.post(`${BASE}/model/elements/tree-items`, async ({ request }) => {
-				const { ids } = (await request.json()) as { ids: string[] };
+		stubEngine({
+			getTreeItemsBatch: ({ ids }: { ids: string[] }) => {
 				bodies.push(ids);
-				return HttpResponse.json({
+				return {
 					items: ids.map((id) => ({ id, type_name: 'T', display_name: id, child_count: 0 }))
-				});
-			})
-		);
+				};
+			}
+		});
 		stageDeleteWithCascade();
 
 		await ensureTreeItems(['e1', 'b']);

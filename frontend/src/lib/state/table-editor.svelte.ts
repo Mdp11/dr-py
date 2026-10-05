@@ -50,15 +50,8 @@
  */
 import { SvelteMap } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
-import { engineSide, type Side } from '$lib/api/engine-route';
 import { ApiError, isScriptsNeedEngine } from '$lib/api/errors';
-import {
-	answeredBy,
-	evaluateTable,
-	exportTable,
-	fetchScriptErrors,
-	type ExportResult
-} from '$lib/api/tables';
+import { evaluateTable, exportTable, fetchScriptErrors, type ExportResult } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
 	type ExportFormat,
@@ -83,7 +76,7 @@ import { releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
 import { onCommitEvent } from './realtime.svelte';
-import { onTablesMoved } from './replica.svelte';
+import { engineSide, onTablesMoved } from './replica.svelte';
 import { downloadExport } from '$lib/util/export-download';
 import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
 
@@ -143,8 +136,6 @@ export interface TableData {
 	 * ScriptColumn raising on some rows) — see TablePageSchema.warnings.
 	 * Structured and aggregated; render via `formatScriptWarning`. */
 	warnings: ScriptWarning[];
-	/** Set when the server answered a table the engine refused, on committed state. */
-	fallback?: 'pattern';
 }
 
 const _drafts = new SvelteMap<string, TableDraft>();
@@ -251,14 +242,9 @@ const _controllers = new Map<string, AbortController>();
  * neither. On the server side it never moves.
  */
 let _repageEpoch = 0;
-/**
- * tabId -> the epoch the installed page was asked at and the side that
- * answered it: a chunk the other side answered (the engine gone, or back) is
- * of another state, staged or committed, and is installed fresh rather than
- * spliced. Control state, never read from templates.
- */
+/** tabId -> the epoch the installed page was asked at. Control state, never read from templates. */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
-const _pageOrigins = new Map<string, { epoch: number; side: Side }>();
+const _pageOrigins = new Map<string, { epoch: number }>();
 /** The pending re-page of `scheduleTablesRepage`, if any. */
 let _repageTimer: ReturnType<typeof setTimeout> | null = null;
 /** Waiters of `flushTablesRepage`, resolved when the pending re-page fires or the editors reset. */
@@ -1005,28 +991,22 @@ function installPage(tabId: string, page: TablePage, epoch: number): void {
 		truncated: page.truncated,
 		offset: page.offset,
 		model_rev: page.model_rev,
-		warnings: page.warnings,
-		...(page.fallback === undefined ? {} : { fallback: page.fallback })
+		warnings: page.warnings
 	});
-	_pageOrigins.set(tabId, { epoch, side: answeredBy(page) });
+	_pageOrigins.set(tabId, { epoch });
 	handleScriptErrorRecap(tabId, page);
 }
 
 /**
  * Splice `page`'s rows into the existing sparse cache. A response from a
  * different model rev (or a changed row count — same rev but a different
- * definition landed a reset in between), or one the other side answered,
- * cannot be spliced into the current cache; install it fresh instead and let
- * the grid re-request whatever else its window needs.
+ * definition landed a reset in between) cannot be spliced into the current
+ * cache; install it fresh instead and let the grid re-request whatever else
+ * its window needs.
  */
 function mergePage(tabId: string, page: TablePage, epoch: number): void {
 	const data = _pages.get(tabId);
-	if (
-		!data ||
-		data.model_rev !== page.model_rev ||
-		data.total !== page.total ||
-		_pageOrigins.get(tabId)?.side !== answeredBy(page)
-	) {
+	if (!data || data.model_rev !== page.model_rev || data.total !== page.total) {
 		installPage(tabId, page, epoch);
 		return;
 	}
@@ -1453,10 +1433,7 @@ export function closeTableDraft(tabId: string): void {
 /**
  * Export the current definition (or saved artifact) in any `ExportFormat`
  * and trigger a browser download via a synthetic anchor click. Resolves to
- * the result (its `fallback` says the server exported committed state),
- * `null` for a tab with no draft. `signal` aborts the call. A table with a
- * script is refused by the server with a 409 `scripts need the engine`, which
- * rejects.
+ * the result, `null` for a tab with no draft. `signal` aborts the call.
  */
 export async function downloadTable(
 	tabId: string,

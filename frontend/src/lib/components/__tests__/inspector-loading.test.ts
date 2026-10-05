@@ -1,9 +1,10 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { http, HttpResponse, delay } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 
 import type { Element } from '$lib/api/types';
-import { server } from '../../api/__tests__/server';
+import { stubEngine } from '../../api/__tests__/engine-stub';
+import { installEngineSeam } from '../../api/engine-route';
+import { NotFoundError } from '../../api/errors';
 import {
 	emit,
 	getCachedElements,
@@ -17,16 +18,14 @@ import Inspector from '../Inspector.svelte';
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => {
-	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
-	server.resetHandlers();
+	installEngineSeam(null);
 	clearSelection();
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
-	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
@@ -40,13 +39,15 @@ function el(id: string): Element {
 const settle = () => new Promise((r) => setTimeout(r, 30));
 
 it('shows a loading skeleton (not "Selection not found") while the element fetch is in flight', async () => {
-	server.use(
-		http.get(`*/model/elements/:id`, async () => {
-			await delay(15);
-			return HttpResponse.json(el('e1'));
-		}),
-		http.get(`*/model/elements/:id/relationships`, () => HttpResponse.json({ items: [], total: 0 }))
-	);
+	let answer!: () => void;
+	const held = new Promise<void>((resolve) => (answer = resolve));
+	stubEngine({
+		getElement: async () => {
+			await held;
+			return el('e1');
+		},
+		listElementRelationships: () => ({ items: [], total: 0 })
+	});
 
 	select({ kind: 'element', id: 'e1' });
 	const component = mount(Inspector, { target: document.body });
@@ -56,6 +57,7 @@ it('shows a loading skeleton (not "Selection not found") while the element fetch
 		expect(document.querySelector('[data-testid="inspector-loading"]')).not.toBeNull();
 		expect(document.body.textContent).not.toContain('Selection not found');
 
+		answer();
 		await settle();
 		flushSync();
 		expect(document.querySelector('[data-testid="inspector-loading"]')).toBeNull();
@@ -65,10 +67,13 @@ it('shows a loading skeleton (not "Selection not found") while the element fetch
 	}
 });
 
-it('shows "Selection not found" once the server confirms the id is missing', async () => {
-	server.use(
-		http.get(`*/model/elements/:id`, () => HttpResponse.json({ detail: 'nope' }, { status: 404 }))
-	);
+it('shows "Selection not found" once the engine confirms the id is missing', async () => {
+	stubEngine({
+		getElement: () => {
+			throw new NotFoundError(404, { detail: 'nope' }, 'nope');
+		},
+		listElementRelationships: () => ({ items: [], total: 0 })
+	});
 
 	select({ kind: 'element', id: 'ghost' });
 	const component = mount(Inspector, { target: document.body });
@@ -86,13 +91,13 @@ it('shows "Selection not found" once the server confirms the id is missing', asy
 });
 
 it('renders "Selection not found" for a staged-deleted element instead of refetching it', async () => {
-	// The server still has the element (the delete is only staged); the
-	// Inspector must neither resurrect it into the cache nor sit on the
+	// The engine still has the committed element (the delete is only staged);
+	// the Inspector must neither resurrect it into the cache nor sit on the
 	// loading skeleton forever.
-	server.use(
-		http.get(`*/model/elements/:id`, () => HttpResponse.json(el('e1'))),
-		http.get(`*/model/elements/:id/relationships`, () => HttpResponse.json({ items: [], total: 0 }))
-	);
+	stubEngine({
+		getElement: () => el('e1'),
+		listElementRelationships: () => ({ items: [], total: 0 })
+	});
 	seedElements([el('e1')]);
 	emit({ kind: 'delete_element', id: 'e1' });
 
