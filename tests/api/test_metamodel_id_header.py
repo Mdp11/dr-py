@@ -16,7 +16,7 @@ from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 from data_rover.api.settings import DEFAULT_CORS_ORIGINS
 from data_rover.core.metamodel.loader import load_metamodel_str
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
 
 _MM = """
 elements:
@@ -43,12 +43,7 @@ def _app() -> TestClient:
 @pytest.fixture
 def client() -> TestClient:
     c = _app()
-    res = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model/upload"), content=b'{"elements":[],"relationships":[]}')
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 

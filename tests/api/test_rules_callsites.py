@@ -9,10 +9,17 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from data_rover.api.session import get_session
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
+    commit_ops,
+)
 
 # Both properties are optional, so every issue below comes from the rules.
 _MM = """
@@ -78,17 +85,12 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(c: TestClient) -> int:
-    rev: int = c.get(papi("/model/summary")).json()["model_rev"]
+    rev: int = head().rev
     return rev
 
 
@@ -153,54 +155,21 @@ def _reach_setup(c: TestClient) -> tuple[str, str, int]:
     return body["id_map"]["tmp_b"], body["id_map"]["tmp_z"], body["model_rev"]
 
 
-def test_legacy_ops_path_keeps_rule_issues_live(client: TestClient) -> None:
-    """POST /model/ops runs the session's rules and widens its dirty set: an
-    edit to the FAR element flips the verdict of the element that owns the
-    rule, in the ops response itself."""
+def test_ops_path_keeps_rule_issues_live(client: TestClient) -> None:
+    """A commit runs the session's rules and widens its dirty set: an edit to
+    the FAR element flips the verdict of the element that owns the rule, in the
+    commit response itself."""
     building_id, zone_id, rev = _reach_setup(client)
 
-    r = client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": rev,
-            "ops": [
-                {
-                    "kind": "update_element",
-                    "id": zone_id,
-                    "properties_patch": {"label": None},
-                }
-            ],
-        },
+    body = commit_ops(
+        client,
+        [{"kind": "update_element", "id": zone_id, "properties_patch": {"label": None}}],
+        base_rev=rev,
     )
-    assert r.status_code == 200, r.text
-    added = _rule_issues(r.json()["issues_added"])
+    added = _rule_issues(body["issues_added"])
     assert [i["check"] for i in added] == ["rule:owns-labeled-zone"]
     assert added[0]["target_ids"] == [building_id]  # the hop was crossed
     assert _stored_rule_checks(client) == {"rule:owns-labeled-zone"}
-
-
-def test_undo_of_rules_artifact_commit_restores_rules(client: TestClient) -> None:
-    """Undoing the commit that created a rules artifact recompiles the rule
-    sets and drops the issues the artifact minted."""
-    first = _commit(
-        client, [{"kind": "create_element", "temp_id": "tmp_b", "type_name": "Building"}]
-    )
-    assert first.status_code == 200, first.text
-    building_id = first.json()["id_map"]["tmp_b"]
-
-    second = _commit(client, [_rules_op(NAMED_YAML)], base_rev=first.json()["model_rev"])
-    assert second.status_code == 200, second.text
-    assert [i["target_ids"] for i in _rule_issues(second.json()["issues_added"])] == [
-        [building_id]
-    ]
-    assert _stored_rule_checks(client) == {"rule:has-name"}
-
-    undone = client.post(papi("/model/undo"))
-    assert undone.status_code == 200, undone.text
-    assert building_id in undone.json()["issues_removed_owner_ids"]
-    assert not _rule_issues(undone.json()["issues_added"])
-    assert _stored_rule_checks(client) == set()
-    assert get_session().compiled_rules.total == 0
 
 
 def test_validate_full_includes_rules(client: TestClient) -> None:

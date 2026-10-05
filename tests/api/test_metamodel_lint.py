@@ -9,7 +9,14 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    head,
+    install,
+    EMPTY_MODEL,
+)
 from .test_commits_metamodel_ops import _acquire_mm
 
 _YAML = {"content-type": "application/x-yaml"}
@@ -63,12 +70,8 @@ def test_lint_document_is_what_a_rebind_to_the_same_blob_serves() -> None:
     would answer after committing that candidate."""
     candidate = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
     c = _client()
-    assert c.post(papi("/metamodel"), content=_VALID, headers=_YAML).status_code == 200
-    assert (
-        c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code
-        == 200
-    )
-    rev = c.get(papi("/model/summary")).json()["model_rev"]
+    install(metamodel=_VALID, model=EMPTY_MODEL)
+    rev = head().rev
     r = c.post(
         papi("/commits"),
         json={

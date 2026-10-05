@@ -20,7 +20,15 @@ from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 from pydantic import TypeAdapter
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    commit_ops,
+    post_commit,
+)
 
 _MM = """
 elements:
@@ -68,12 +76,7 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -85,41 +88,32 @@ def _live() -> Model:
 
 def _seed(client: TestClient) -> dict[str, str]:
     """a contains b contains c, a links c; then revs moved apart."""
-    res = client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": get_session().model_rev,
-            "ops": [
-                _node("tmp_a", "a"),
-                _node("tmp_b", "b"),
-                _node("tmp_c", "c"),
-                _rel("tmp_ab", "Contains", "tmp_a", "tmp_b"),
-                _rel("tmp_bc", "Contains", "tmp_b", "tmp_c"),
-                _rel("tmp_ac", "Link", "tmp_a", "tmp_c"),
-            ],
-        },
+    ids: dict[str, str] = commit_ops(
+        client,
+        [
+            _node("tmp_a", "a"),
+            _node("tmp_b", "b"),
+            _node("tmp_c", "c"),
+            _rel("tmp_ab", "Contains", "tmp_a", "tmp_b"),
+            _rel("tmp_bc", "Contains", "tmp_b", "tmp_c"),
+            _rel("tmp_ac", "Link", "tmp_a", "tmp_c"),
+        ],
+    )["id_map"]
+    commit_ops(
+        client,
+        [
+            {
+                "kind": "update_element",
+                "id": ids["tmp_b"],
+                "properties_patch": {"note": "n"},
+            },
+            {
+                "kind": "update_relationship",
+                "id": ids["tmp_ac"],
+                "properties_patch": {"label": "x"},
+            },
+        ],
     )
-    assert res.status_code == 200, res.text
-    ids: dict[str, str] = res.json()["id_map"]
-    res = client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": get_session().model_rev,
-            "ops": [
-                {
-                    "kind": "update_element",
-                    "id": ids["tmp_b"],
-                    "properties_patch": {"note": "n"},
-                },
-                {
-                    "kind": "update_relationship",
-                    "id": ids["tmp_ac"],
-                    "properties_patch": {"label": "x"},
-                },
-            ],
-        },
-    )
-    assert res.status_code == 200, res.text
     return ids
 
 
@@ -154,9 +148,7 @@ def test_a_refused_batch_leaves_no_trace(client: TestClient) -> None:
     before = _observed(_live())
     rev = get_session().model_rev
     ghost = {"kind": "update_element", "id": "ghost", "properties_patch": {}}
-    res = client.post(
-        papi("/model/ops"), json={"base_rev": rev, "ops": [*_touching(ids), ghost]}
-    )
+    res = post_commit(client, [*_touching(ids), ghost])
     assert res.status_code == 422, res.text
     assert _observed(_live()) == before
     assert get_session().model_rev == rev
@@ -233,8 +225,8 @@ def test_a_batch_that_could_not_be_persisted_leaves_no_trace(
     def _boom(*args: Any, **kwargs: Any) -> bool:
         raise RuntimeError("no database")
 
-    monkeypatch.setattr("data_rover.api.routes.ops._persist_commit", _boom)
-    res = client.post(papi("/model/ops"), json={"base_rev": rev, "ops": _touching(ids)})
+    monkeypatch.setattr("data_rover.api.content.append_commit", _boom)
+    res = post_commit(client, _touching(ids))
     assert res.status_code == 500, res.text
     assert _observed(_live()) == before
     assert get_session().model_rev == rev

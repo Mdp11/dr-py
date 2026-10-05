@@ -9,7 +9,14 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    head,
+    install,
+    EMPTY_MODEL,
+)
 from .test_artifacts_routes import _bootstrap_model
 
 
@@ -382,7 +389,7 @@ def test_preview_rollback_invalidates_table_order_cache(client: TestClient) -> N
     assert preview.status_code == 200, preview.text
     # preview rolls back in place; model_rev is unchanged
     assert (
-        client.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+        head().rev
         == rev
     )
 
@@ -446,12 +453,7 @@ relationships: []
 
 
 def test_element_typed_property_cell_carries_owner_and_target_type(client: TestClient) -> None:
-    client.post(
-        papi("/metamodel"),
-        content=_REF_METAMODEL,
-        headers={"content-type": "application/x-yaml", **AUTH_HEADERS},
-    )
-    client.post(papi("/model"), json={"elements": [], "relationships": []}, headers=AUTH_HEADERS)
+    install(metamodel=_REF_METAMODEL, model=EMPTY_MODEL)
     a = client.post(
         papi("/model/elements"),
         json={"type": "Block", "properties": {"name": "a"}},

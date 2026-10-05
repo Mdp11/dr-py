@@ -8,12 +8,19 @@ server-side engine (a port of frontend/src/lib/search/evaluate.ts).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 from data_rover.api.routes.read import MAX_PAGE_LIMIT
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+)
 
 API = "/api/v1/projects/default"
 
@@ -45,20 +52,15 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        f"{API}/metamodel",
-        content=SEARCH_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert res.status_code == 200, res.text
+    install(metamodel=SEARCH_MM, model=EMPTY_MODEL)
     return c
 
 
 def _load(client: TestClient, elements: list[dict], relationships: list[dict]) -> None:
-    res = client.post(
-        f"{API}/model", json={"elements": elements, "relationships": relationships}
+    install(
+        metamodel=SEARCH_MM,
+        model=json.dumps({"elements": elements, "relationships": relationships}),
     )
-    assert res.status_code == 200, res.text
 
 
 def _person(eid: str, name: str | None = None, **props) -> dict:

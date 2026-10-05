@@ -16,7 +16,7 @@ from httpx import Response
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install, head
 
 # `code` is MANDATORY: a Building without it carries a built-in multiplicity
 # issue that no commit elsewhere in the model can have caused.
@@ -69,17 +69,12 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(c: TestClient) -> int:
-    rev: int = c.get(papi("/model/summary")).json()["model_rev"]
+    rev: int = head().rev
     return rev
 
 

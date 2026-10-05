@@ -10,7 +10,13 @@ from data_rover.api.routes.validation import classify_issue_origins
 from data_rover.api.session import get_session
 from data_rover.core.validation.issue import Issue, Severity
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+    commit_ops,
+)
 
 API = "/api/v1/projects/default"
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
@@ -30,12 +36,7 @@ def client() -> TestClient:
 
 def _seed(client: TestClient) -> dict:
     """Example metamodel + a Block, a valid Requirement (priority 3), Satisfies."""
-    client.post(
-        f"{API}/metamodel",
-        content=EXAMPLE.read_text(encoding="utf-8"),
-        headers={"content-type": "application/x-yaml"},
-    )
-    client.post(f"{API}/model", json={"elements": [], "relationships": []})
+    install(metamodel=EXAMPLE.read_text(encoding="utf-8"), model=EMPTY_MODEL)
     client.post(
         f"{API}/model/elements",
         json={"type": "Block", "properties": {"name": "Wing", "mass": 12.5}},
@@ -88,11 +89,11 @@ def test_staged_validate_stale_base_rev_returns_409(client: TestClient) -> None:
 def test_staged_validate_resolved_and_on_server(client: TestClient) -> None:
     seeded = _seed(client)
     # Commit a violation onto the server so it becomes pre-existing.
-    client.post(
-        f"{API}/model/ops",
-        json={"base_rev": seeded["rev"],
-              "ops": [{"kind": "update_element", "id": seeded["req_id"],
-                       "properties_patch": {"priority": 99}}]},
+    commit_ops(
+        client,
+        [{"kind": "update_element", "id": seeded["req_id"],
+          "properties_patch": {"priority": 99}}],
+        base_rev=seeded["rev"],
     )
     rev = get_session().model_rev
     # Stage an op that fixes it.

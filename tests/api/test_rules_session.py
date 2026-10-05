@@ -39,7 +39,14 @@ from data_rover.core.validation.dirty import DirtyCollector
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import IssuesDelta, ValidationState
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    commit_ops,
+)
 
 # `code` is required, so an element created bare carries a built-in
 # multiplicity error alongside whatever the rules say — the pipeline
@@ -126,32 +133,24 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _create_building(c: TestClient) -> str:
-    r = c.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": get_session().model_rev,
-            "ops": [
-                {
-                    "kind": "create_element",
-                    "temp_id": "tmp_1",
-                    "type_name": "Building",
-                    "properties": {"code": "B1"},
-                }
-            ],
-        },
+    body = commit_ops(
+        c,
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_1",
+                "type_name": "Building",
+                "properties": {"code": "B1"},
+            }
+        ],
     )
-    assert r.status_code == 200, r.text
-    return r.json()["id_map"]["tmp_1"]
+    bid: str = body["id_map"]["tmp_1"]
+    return bid
 
 
 def _save_rules(c: TestClient) -> str:
@@ -259,15 +258,7 @@ def test_metamodel_upload_recompiles_the_rules(client: TestClient) -> None:
     status = client.get(papi("/model/issues")).json()["rules_status"]
     assert (status["total"], status["skipped"]) == (1, [])
 
-    res = client.post(
-        papi("/metamodel"),
-        content=_MM_RENAMED_PROP,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert res.status_code == 200, res.text
-    # a metamodel upload clears the model with it (core semantics)
-    res = client.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM_RENAMED_PROP, model=EMPTY_MODEL)
 
     status = client.get(papi("/model/issues")).json()["rules_status"]
     assert status["total"] == 0

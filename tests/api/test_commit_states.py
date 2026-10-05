@@ -29,7 +29,15 @@ from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
+    commit_ops,
+)
 
 _MM = """
 elements:
@@ -302,15 +310,12 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"})
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(c: TestClient) -> int:
-    rev: int = c.get(papi("/model/summary")).json()["model_rev"]
+    rev: int = head().rev
     return rev
 
 
@@ -390,34 +395,20 @@ def test_artifact_only_commit_persists_empty_states(client: TestClient) -> None:
     }
 
 
-def test_legacy_ops_and_undo_persist_states(client: TestClient) -> None:
-    r = client.post(
-        papi("/model/ops"),
-        json={"base_rev": _rev(client), "ops": [
-            {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
-             "properties": {"label": "v1"}}]},
-    )
-    assert r.status_code == 200, r.text
-    eid = r.json()["id_map"]["tmp_e"]
-    r = client.post(
-        papi("/model/ops"),
-        json={"base_rev": _rev(client), "ops": [
-            {"kind": "update_element", "id": eid, "properties_patch": {"label": "v2"}}]},
-    )
-    assert r.status_code == 200, r.text
-    rev_update = r.json()["model_rev"]
+def test_ops_persist_states(client: TestClient) -> None:
+    eid = commit_ops(
+        client,
+        [{"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
+          "properties": {"label": "v1"}}],
+    )["id_map"]["tmp_e"]
+    rev_update = commit_ops(
+        client,
+        [{"kind": "update_element", "id": eid, "properties_patch": {"label": "v2"}}],
+    )["model_rev"]
     states = _states_at(rev_update)
     assert states is not None
     assert states["elements"][eid]["before"]["properties"] == {"label": "v1"}
     assert states["elements"][eid]["after"]["properties"] == {"label": "v2"}
-
-    r = client.post(papi("/model/undo"))
-    assert r.status_code == 200, r.text
-    rev_undo = r.json()["model_rev"]
-    states = _states_at(rev_undo)
-    assert states is not None  # the compensating commit is journal-diffable too
-    assert states["elements"][eid]["before"]["properties"] == {"label": "v2"}
-    assert states["elements"][eid]["after"]["properties"] == {"label": "v1"}
 
 
 def test_revert_persists_states(client: TestClient) -> None:

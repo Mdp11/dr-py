@@ -9,7 +9,13 @@ from data_rover.api import content
 from data_rover.api.main import create_app
 from data_rover.api.session import get_session
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+)
 
 MM_V1 = """
 elements:
@@ -45,20 +51,7 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"),
-        content=MM_V1,
-        headers={"Content-Type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    # ``set_metamodel`` clears ``session.model`` to None (session.py), so an
-    # empty-model POST is needed too — every sibling commit-flow test
-    # fixture (test_commits_artifact_ops.py, test_commits_view_ops.py, ...)
-    # follows the metamodel upload with one for exactly that reason: without
-    # it, ``require_model`` 404s "No model loaded" before any op-family
-    # check ever runs.
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=MM_V1, model=EMPTY_MODEL)
     return c
 
 
@@ -86,18 +79,6 @@ def test_split_ops_separates_metamodel_family() -> None:
         "MoveMetamodelNodeOp",
     ]
     assert len(model) == 1 and not art and not view
-
-
-def test_model_ops_route_rejects_metamodel_ops(client: TestClient) -> None:
-    r = client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": _rev(client),
-            "ops": [{"kind": "metamodel.move_node", "node": "el:Node", "pos": None}],
-        },
-    )
-    assert r.status_code == 422
-    assert "commits" in r.json()["detail"]
 
 
 def test_validate_route_rejects_metamodel_ops(client: TestClient) -> None:
@@ -849,46 +830,26 @@ def test_preview_restores_schema_when_model_ops_fail_mid_preview(
 
 
 # ---------------------------------------------------------------------------
-# POST /model/undo — layout ops replay; rebind batches refuse cleanly
+# POST /commits/revert — rebind batches refuse cleanly
 # ---------------------------------------------------------------------------
 
 
-def test_undo_restores_layout_positions(client: TestClient) -> None:
+def test_revert_refuses_rebind_batches(client: TestClient) -> None:
     token = _acquire_mm(client)
+    base = _rev(client)
     r = client.post(
         papi("/commits"),
         json={
-            "base_rev": _rev(client),
-            "ops": [
-                {"kind": "metamodel.move_node", "node": "el:Node", "pos": {"x": 5, "y": 6}}
-            ],
-            "message": "",
-            "lock_tokens": [token],
-        },
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(papi("/model/undo"))
-    assert r.status_code == 200, r.text
-    layout = client.get(papi("/metamodel/layout")).json()
-    assert "el:Node" not in layout["positions"]  # prior state: key absent
-
-
-def test_undo_refuses_rebind_batches_and_keeps_history(client: TestClient) -> None:
-    token = _acquire_mm(client)
-    r = client.post(
-        papi("/commits"),
-        json={
-            "base_rev": _rev(client),
+            "base_rev": base,
             "ops": [{"kind": "metamodel.rebind", "blob": MM_V2}],
             "message": "",
             "lock_tokens": [token],
         },
     )
     assert r.status_code == 200, r.text
-    r = client.post(papi("/model/undo"))
-    assert r.status_code == 409
-    # push-back: a second undo attempt hits the same refusal, not "Nothing to undo"
-    r = client.post(papi("/model/undo"))
+    r = client.post(
+        papi("/commits/revert"), json={"target_rev": base, "base_rev": _rev(client)}
+    )
     assert r.status_code == 409
     assert "metamodel" in r.json()["detail"]
 

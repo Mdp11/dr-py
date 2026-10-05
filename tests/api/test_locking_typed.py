@@ -19,7 +19,7 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install, head
 from .test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
@@ -56,12 +56,7 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -133,7 +128,7 @@ def test_rebind_ignores_artifact_leases(client: TestClient) -> None:
         },
     )
     assert r.status_code == 200
-    rev = client.get(papi("/model/summary")).json()["model_rev"]
+    rev = head().rev
     token = _acquire_mm(client)
     r = client.post(
         papi("/commits"),

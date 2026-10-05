@@ -3,7 +3,7 @@ their equality.
 
 The fold reads each commit's captured ``entity_states``; the reconstruction
 path rebuilds the model at both ends. Every history here is built through
-``/model/ops`` and ``/model/undo`` (no locks, states journalled like
+``/commits`` and ``/commits/revert`` (no locks, states journalled like
 ``POST /commits``), and the randomized test holds the two paths equal over
 generated histories, values compared as canonical JSON so ``1`` and ``1.0``
 stay distinct.
@@ -37,7 +37,16 @@ from data_rover.api.schemas import RangeDiffOut
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, TEST_USER_ID, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    TEST_USER_ID,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
+    commit_ops,
+)
 from .test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
@@ -70,29 +79,23 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(c: TestClient) -> int:
-    rev: int = c.get(papi("/model/summary")).json()["model_rev"]
+    rev: int = head().rev
     return rev
 
 
 def _ops(c: TestClient, ops: list[dict[str, Any]]) -> dict[str, Any]:
-    r = c.post(papi("/model/ops"), json={"base_rev": _rev(c), "ops": ops})
-    assert r.status_code == 200, r.text
-    body: dict[str, Any] = r.json()
-    return body
+    return commit_ops(c, ops)
 
 
 def _undo(c: TestClient) -> dict[str, Any]:
-    r = c.post(papi("/model/undo"))
+    """Revert the newest commit: restore the state one rev back."""
+    rev = _rev(c)
+    r = c.post(papi("/commits/revert"), json={"target_rev": rev - 1, "base_rev": rev})
     assert r.status_code == 200, r.text
     body: dict[str, Any] = r.json()
     return body
@@ -541,11 +544,15 @@ def test_diff_range_reconstructs_over_the_cap(
 
 
 def test_diff_range_reconstructs_across_a_journal_hole(client: TestClient) -> None:
-    """The fixture's setup revs have no rows, so a range reaching down into
-    them is not contiguous."""
+    """A range with a missing journal row is not contiguous."""
     b, head = _h_update_chain(client)
     with _db() as s:
-        out = diff_range(s, DEFAULT_PROJECT_ID, 0, head)
+        row = content.get_commit(s, DEFAULT_PROJECT_ID, b + 2)
+        assert row is not None
+        s.delete(row)
+        s.commit()
+    with _db() as s:
+        out = diff_range(s, DEFAULT_PROJECT_ID, b, head)
     assert out.source == "reconstruction"
     assert _ids(out.elements.added) == ["a"]
 
@@ -603,12 +610,8 @@ def test_route_shares_the_fold_with_diff_range(client: TestClient) -> None:
 @pytest.fixture
 def loaded(client: TestClient) -> tuple[TestClient, int]:
     """A project whose journal starts with a baseline row (no states) at the
-    rev a model load lands on; every later row is a ``/model/ops`` batch."""
-    r = client.post(
-        papi("/model/upload"),
-        content=json.dumps({"elements": [], "relationships": []}),
-    )
-    assert r.status_code == 200, r.text
+    rev a model load lands on; every later row is an ops batch."""
+    install(metamodel=_MM, model=EMPTY_MODEL)
     base = _rev(client)
     with _db() as s:
         row = content.get_commit(s, DEFAULT_PROJECT_ID, base)
@@ -619,7 +622,7 @@ def loaded(client: TestClient) -> tuple[TestClient, int]:
 @pytest.fixture
 def imported() -> TestClient:
     """A project imported at rev 0: its baseline row holds no states and every
-    later row is a ``/model/ops`` batch journalled from rev 1."""
+    later row is an ops batch journalled from rev 1."""
     c = TestClient(create_app())  # installs the snapshot store the import writes to
     c.headers.update(AUTH_HEADERS)
     importer.import_project(
@@ -663,22 +666,6 @@ def test_route_range_after_a_loaded_baseline_row_folds(
     assert out.source == "journal"
     assert _ids(out.elements.added) == ["a"]
     assert out.elements.added[0].properties == {"label": "two"}
-
-
-def test_route_range_including_a_baseline_row_reconstructs(
-    loaded: tuple[TestClient, int],
-) -> None:
-    client, base = loaded
-    _ops(client, [_create("a", label="one")])
-    head = _rev(client)
-    with _db() as s:
-        marks = content.commit_range_marks(
-            s, DEFAULT_PROJECT_ID, after_rev=base - 1, max_rev=head
-        )
-    assert marks[0] == (base, False, False)
-    out = _served(client, base - 1, head)
-    assert out.source == "reconstruction"
-    assert _canon(out) == _expected_reconstruction(base - 1, head)
 
 
 def test_route_reconstructs_when_a_row_lacks_states(client: TestClient) -> None:

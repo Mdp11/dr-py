@@ -12,7 +12,7 @@ from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 
-from .conftest import AUTH_HEADERS, feed_url, papi, seed_default_project
+from .conftest import AUTH_HEADERS, feed_url, papi, seed_default_project, EMPTY_MODEL, install, head
 
 SNIP = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return el.name\n"}
 
@@ -32,12 +32,7 @@ def client() -> TestClient:
     # loaded metamodel + model (require_model) and a durable model row to
     # journal against — so the fixture seeds both, mirroring
     # tests/api/test_commits_artifact_ops.py. Export/plan tests don't care.
-    r = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -268,7 +263,7 @@ def test_import_plan_is_a_write_for_viewers(client: TestClient) -> None:
 
 
 def _rev(client: TestClient) -> int:
-    rev: int = client.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    rev: int = head().rev
     return rev
 
 
@@ -303,12 +298,9 @@ def test_import_confirm_lands_one_commit(client: TestClient) -> None:
     hist = client.get(papi("/commits"), headers=AUTH_HEADERS).json()["commits"]
     assert hist[0]["rev"] == out["rev"]
     assert hist[0]["message"] == "Imported 1 artifact from Source"
-    # diff renders and undo reverts (journal-only artifact commit)
+    # diff renders (journal-only artifact commit)
     assert client.get(papi(f"/commits/{out['rev']}/diff"), headers=AUTH_HEADERS).status_code == 200
-    undo = client.post(papi("/model/undo"), headers=AUTH_HEADERS)
-    assert undo.status_code == 200, undo.text
-    assert client.get(papi(f"/artifacts/{c['id']}"), headers=AUTH_HEADERS).status_code == 404
-    # the REUSED row is untouched by the undo — it was never this import's
+    # the REUSED row is untouched — it was never this import's
     assert client.get(papi(f"/artifacts/{ex_snip['id']}"), headers=AUTH_HEADERS).status_code == 200
 
 

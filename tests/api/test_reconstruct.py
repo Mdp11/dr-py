@@ -9,7 +9,9 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 from tests.api.conftest import (
     AUTH_HEADERS,
+    EMPTY_MODEL,
     commit_create,
+    install,
     model_rev,
     papi,
     seed_default_project,
@@ -34,9 +36,7 @@ def _client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert c.post(papi("/metamodel"), content=_MM,
-                  headers={"content-type": "application/x-yaml"}).status_code == 200
-    assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 

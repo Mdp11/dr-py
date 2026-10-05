@@ -15,7 +15,7 @@ from data_rover.api.storage import (
     snapshot_key,
 )
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install, head
 from .test_commits_metamodel_ops import _acquire_mm
 
 
@@ -120,17 +120,9 @@ CLEAN_OPS = [
 def _make_owner_with_model(client) -> None:
     """Upload the strict metamodel + an empty model (creates the ModelRow).
     The conftest `client` is already an owner of the default project."""
-    r = client.post(
-        papi("/metamodel"), content=_MM_STRICT,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
-
-
+    install(metamodel=_MM_STRICT, model=EMPTY_MODEL)
 def _rev(client) -> int:
-    return client.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    return head().rev
 
 
 def test_settings_get_defaults_false(client) -> None:

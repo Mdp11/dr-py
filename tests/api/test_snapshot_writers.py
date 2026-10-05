@@ -40,7 +40,14 @@ from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 from data_rover.api.routes._snapshot import build_model_from_dicts
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    commit_ops,
+)
 
 _MM = """
 elements:
@@ -71,12 +78,7 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model/upload"), content=b'{"elements":[],"relationships":[]}')
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -90,11 +92,7 @@ def _node(temp_id: str, label: str) -> dict[str, Any]:
 
 
 def _ops(client: TestClient, ops: list[dict[str, Any]]) -> dict[str, Any]:
-    res = client.post(
-        papi("/model/ops"), json={"base_rev": get_session().model_rev, "ops": ops}
-    )
-    assert res.status_code == 200, res.text
-    return res.json()
+    return commit_ops(client, ops)
 
 
 def _row(project_id: str, rev: int) -> Any:

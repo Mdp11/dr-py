@@ -16,6 +16,8 @@ from .conftest import (
     feed_url,
     papi,
     seed_default_project,
+    install,
+    EMPTY_MODEL,
 )
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
@@ -51,12 +53,7 @@ def client() -> TestClient:
 
 def _bootstrap(client: TestClient) -> tuple[str, str]:
     """Upload metamodel + a tiny model with two Blocks; return their ids."""
-    client.post(
-        f"{API}/metamodel",
-        content=EXAMPLE.read_text(encoding="utf-8"),
-        headers={"content-type": "application/x-yaml"},
-    )
-    client.post(f"{API}/model", json={"elements": [], "relationships": []})
+    install(metamodel=EXAMPLE.read_text(encoding="utf-8"), model=EMPTY_MODEL)
     a = client.post(
         f"{API}/model/elements",
         json={"type": "Block", "properties": {"name": "A", "mass": 1.0}},

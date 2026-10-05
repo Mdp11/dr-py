@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
 from .test_artifacts_routes import _bootstrap_model
 
 
@@ -352,12 +352,7 @@ def _bootstrap_parts(client, parts: int) -> None:
     `_bootstrap_model` (which hard-wires two parts on root)."""
     from .test_artifacts_routes import EXAMPLE
 
-    client.post(
-        papi("/metamodel"),
-        content=EXAMPLE.read_text(encoding="utf-8"),
-        headers={"content-type": "application/x-yaml"},
-    )
-    client.post(papi("/model"), json={"elements": [], "relationships": []})
+    install(metamodel=EXAMPLE.read_text(encoding="utf-8"), model=EMPTY_MODEL)
     root = client.post(
         papi("/model/elements"),
         json={"type": "Block", "properties": {"name": "root", "mass": 1.0}},

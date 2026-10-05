@@ -20,7 +20,16 @@ from data_rover.api.db_models import Commit
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 
-from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    create_folder_via_commit,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
+    commit_ops,
+)
 from .test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
@@ -109,17 +118,12 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(c: TestClient) -> int:
-    rev: int = c.get(papi("/model/summary")).json()["model_rev"]
+    rev: int = head().rev
     return rev
 
 
@@ -742,7 +746,7 @@ elements:
 
 
 def _model_rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary")).json()["model_rev"]
+    return head().rev
 
 
 def test_rebind_commit_diff_carries_structural_metamodel_diff(
@@ -774,17 +778,9 @@ def test_rebind_commit_diff_carries_structural_metamodel_diff(
 
 def test_non_rebind_commit_diff_has_null_metamodel(client: TestClient) -> None:
     # any ordinary ops commit will do — land one element create
-    ops_r = client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": _model_rev(client),
-            "ops": [
-                {"kind": "create_element", "temp_id": "tmp_x", "type_name": "Node"}
-            ],
-        },
-    )
-    assert ops_r.status_code == 200, ops_r.text
-    rev = ops_r.json()["model_rev"]
+    rev = commit_ops(
+        client, [{"kind": "create_element", "temp_id": "tmp_x", "type_name": "Node"}]
+    )["model_rev"]
     d = client.get(papi(f"/commits/{rev}/diff"))
     assert d.status_code == 200, d.text
     assert d.json()["is_rebind"] is False
@@ -1033,32 +1029,31 @@ def test_over_cap_commit_diff_still_renders(
     assert len(d.json()["elements"]["added"]) == 2  # reconstruction fallback
 
 
-def test_undo_commit_diff_is_journal_only(
+def test_revert_commit_diff_is_journal_only(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    created = commit_ops(
+        client,
+        [{"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
+          "properties": {"label": "v1"}}],
+    )
+    eid = created["id_map"]["tmp_e"]
+    updated = commit_ops(
+        client,
+        [{"kind": "update_element", "id": eid, "properties_patch": {"label": "v2"}}],
+    )
     r = client.post(
-        papi("/model/ops"),
-        json={"base_rev": _rev(client), "ops": [
-            {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
-             "properties": {"label": "v1"}}]},
+        papi("/commits/revert"),
+        json={"target_rev": created["model_rev"], "base_rev": updated["model_rev"]},
     )
     assert r.status_code == 200, r.text
-    eid = r.json()["id_map"]["tmp_e"]
-    r = client.post(
-        papi("/model/ops"),
-        json={"base_rev": _rev(client), "ops": [
-            {"kind": "update_element", "id": eid, "properties_patch": {"label": "v2"}}]},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(papi("/model/undo"))
-    assert r.status_code == 200, r.text
-    rev_undo = r.json()["model_rev"]
+    rev_revert = r.json()["model_rev"]
 
     def boom(*_a: object, **_k: object) -> None:
         raise AssertionError("reconstruct_model_at must not run on the journal path")
 
     monkeypatch.setattr(commit_diff, "reconstruct_model_at", boom)
-    d = client.get(papi(f"/commits/{rev_undo}/diff"))
+    d = client.get(papi(f"/commits/{rev_revert}/diff"))
     assert d.status_code == 200, d.text
     mod = d.json()["elements"]["modified"][0]
     assert mod["before"]["properties"] == {"label": "v2"}

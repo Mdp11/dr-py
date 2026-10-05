@@ -21,6 +21,8 @@ from .conftest import (
     feed_url,
     papi,
     seed_default_project,
+    EMPTY_MODEL,
+    install,
 )
 
 OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
@@ -101,12 +103,7 @@ def client() -> TestClient:
     reset_loop()  # each TestClient creates its own event loop; clear the cached one
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -309,8 +306,7 @@ def test_mixed_batch_atomicity_view_rolls_back_with_model(client: TestClient) ->
     # two containment-parent elements + a child, so the relationship pair
     # below is a STRUCTURAL "two containment parents" blocker (not a mutation-
     # boundary 422), which is what actually exercises the rollback.
-    r = client.post(papi("/model"), json=_TWO_PARENTS_MODEL)
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=json.dumps(_TWO_PARENTS_MODEL))
     token = _lease(
         client,
         [{"resource_id": fid, "mode": "exclusive", "type": "folder"}, *_TWO_PARENTS_TARGETS],
@@ -336,8 +332,7 @@ def test_failed_commit_leaves_every_view_untouched(client: TestClient) -> None:
     applied group, newest first."""
     a = create_view(client, "A")
     b = create_view(client, "B")
-    r = client.post(papi("/model"), json=_TWO_PARENTS_MODEL)
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=json.dumps(_TWO_PARENTS_MODEL))
     token = _lease(
         client,
         [
@@ -514,7 +509,7 @@ def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
     (release is step g, strictly after a durable commit). Mirrors
     test_apply_ops_rolls_back_in_memory_on_persist_failure
     (tests/api/test_ops_persistence.py), which pins the same seam for
-    /model/ops."""
+    the ops applier."""
     from data_rover.api import content as _content
 
     vid = create_view(client, "V")

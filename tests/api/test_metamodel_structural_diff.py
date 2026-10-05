@@ -9,7 +9,15 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    head,
+    install,
+    EMPTY_MODEL,
+    commit_ops,
+)
 
 _YAML = {"content-type": "application/x-yaml"}
 
@@ -47,22 +55,8 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert c.post(papi("/metamodel"), content=_MM, headers=_YAML).status_code == 200
-    assert (
-        c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code
-        == 200
-    )
-    rev = c.get(papi("/model/summary")).json()["model_rev"]
-    r = c.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": rev,
-            "ops": [
-                {"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}
-            ],
-        },
-    )
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
+    commit_ops(c, [{"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}])
     return c
 
 
@@ -151,7 +145,7 @@ def test_a_viewer_is_refused_and_an_editor_is_not(client: TestClient) -> None:
 
 
 def test_the_model_and_the_issue_store_are_untouched(client: TestClient) -> None:
-    before = client.get(papi("/model/summary")).json()["model_rev"]
+    before = head().rev
     issues = client.get(papi("/model/issues")).json()
     session = get_session()
     model, store = session.model, session.validation
@@ -160,6 +154,6 @@ def test_the_model_and_the_issue_store_are_untouched(client: TestClient) -> None
         papi("/metamodel/structural-diff"), content=_MM_STRUCT_RENAMED, headers=_YAML
     )
     assert r.status_code == 200, r.text
-    assert client.get(papi("/model/summary")).json()["model_rev"] == before
+    assert head().rev == before
     assert client.get(papi("/model/issues")).json() == issues
     assert session.model is model and session.validation is store

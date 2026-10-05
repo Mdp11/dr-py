@@ -19,7 +19,12 @@ from data_rover.api.schemas import (
 )
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+)
 
 MM_V1 = "elements:\n  - name: Node\n    properties:\n      - name: label\n        datatype: string\n"
 MM_V2 = "elements:\n  - name: Node\n"
@@ -30,18 +35,7 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"),
-        content=MM_V1,
-        headers={"Content-Type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    # ``set_metamodel`` clears ``session.model`` to None (session.py), so an
-    # empty-model POST is needed too, matching the fixture in
-    # test_commits_metamodel_ops.py: without it ``require_model`` 404s "No
-    # model loaded" before any op-family check ever runs.
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=MM_V1, model=EMPTY_MODEL)
     return c
 
 

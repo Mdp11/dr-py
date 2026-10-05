@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install, head
 
 _MM = """
 elements:
@@ -37,15 +37,12 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"})
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(client: TestClient) -> int:
-    return client.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    return head().rev
 
 
 def test_create_and_roundtrip(client: TestClient) -> None:

@@ -8,7 +8,14 @@ from fastapi.testclient import TestClient
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    commit_ops,
+)
 
 _MM = """
 elements:
@@ -27,10 +34,7 @@ def client() -> TestClient:
     reset_loop()  # each TestClient creates its own event loop; clear the cached one
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    ).status_code == 200
-    assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -43,7 +47,7 @@ def test_connect_receives_snapshot(client: TestClient) -> None:
     with client.websocket_connect(_feed_url()) as ws:
         snap = ws.receive_json()
         assert snap["type"] == "snapshot"
-        assert snap["model_rev"] == 2  # metamodel upload (+1) then model upload (+1)
+        assert snap["model_rev"] == 0  # the fresh baseline
         assert snap["connected"] == ["test-user"]
         assert snap["locks"] == []
 
@@ -136,17 +140,12 @@ def _lock(client: TestClient, rid: str) -> str:
 
 
 def test_lock_acquire_broadcasts(client: TestClient) -> None:
-    create = client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": client.get(papi("/open")).json()["model_rev"],
-            "ops": [
+    eid = commit_ops(
+        client,
+        [
                 {"kind": "create_element", "temp_id": "tmp_1", "type_name": "Node", "properties": {}}
             ],
-        },
-    )
-    assert create.status_code == 200, create.text
-    eid = create.json()["id_map"]["tmp_1"]
+    )["id_map"]["tmp_1"]
     with client.websocket_connect(_feed_url()) as ws:
         ws.receive_json()  # snapshot
         token = _lock(client, eid)
@@ -164,17 +163,12 @@ def test_lock_acquire_broadcasts(client: TestClient) -> None:
 
 def test_commit_broadcasts_delta_to_feed(client: TestClient) -> None:
     # seed one element so we have something to lock+update
-    create = client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": client.get(papi("/open")).json()["model_rev"],
-            "ops": [
+    eid = commit_ops(
+        client,
+        [
                 {"kind": "create_element", "temp_id": "tmp_1", "type_name": "Node", "properties": {}}
             ],
-        },
-    )
-    assert create.status_code == 200, create.text
-    eid = create.json()["id_map"]["tmp_1"]
+    )["id_map"]["tmp_1"]
 
     with client.websocket_connect(_feed_url()) as ws:
         ws.receive_json()  # snapshot

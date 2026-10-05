@@ -17,7 +17,7 @@ from data_rover.api.schemas import (
     CreateArtifactOp,
 )
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
 
 _MM = """
 elements:
@@ -61,12 +61,7 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -96,19 +91,6 @@ def test_split_ops_three_ways() -> None:
     assert isinstance(model_ops[0], CreateElementOp)
     assert isinstance(artifact_ops[0], CreateArtifactOp)
     assert len(view_ops) == 1 and view_ops[0].kind == "create_folder"
-
-
-def test_model_ops_route_rejects_view_ops(client: TestClient) -> None:
-    # base_rev must match the session's current model_rev (the fixture's
-    # metamodel + model uploads each bump it via session.set_model), or the
-    # staleness check would 409 before the view-op guard ever runs.
-    rev = client.get(papi("/model/summary")).json()["model_rev"]
-    r = client.post(
-        papi("/model/ops"),
-        json={"base_rev": rev, "ops": [RAW_VIEW_OPS[0]]},
-    )
-    assert r.status_code == 422
-    assert "view ops" in r.json()["detail"]
 
 
 def test_validate_route_rejects_view_ops(client: TestClient) -> None:

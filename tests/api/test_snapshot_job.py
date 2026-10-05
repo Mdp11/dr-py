@@ -3,13 +3,8 @@ thread takes write_mutex itself, snapshots the CURRENT rev, skips sessions
 the registry no longer holds, and logs-and-drops failures. The conftest pins
 DATA_ROVER_SNAPSHOT_SYNC=true so every other test sees the inline write.
 
-Baseline rev: ``_client()``'s two uploads each bump ``session.model_rev``
-once (``POST /metamodel`` via ``set_metamodel`` -> ``set_model(None)``, then
-``POST /model/upload`` via ``set_model(model)``), landing the baseline
-snapshot at rev 2, not 0 — the same reason ``test_ops_persistence.py``'s
-analogous test compares against the observed baseline instead of a
-hardcoded rev. Tests below read the baseline dynamically for the same
-reason."""
+Baseline rev: ``_client()`` installs the model at rev 0, so the baseline
+snapshot sits at rev 0. Tests below read the baseline dynamically.."""
 
 from __future__ import annotations
 
@@ -22,24 +17,23 @@ from data_rover.api import content, db, snapshot_job
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID, Session, get_registry
 from data_rover.api.snapshot_job import SnapshotJob, schedule_periodic_snapshot
-from tests.api.conftest import AUTH_HEADERS, papi, seed_default_project
+from tests.api.conftest import (
+    AUTH_HEADERS,
+    EMPTY_MODEL,
+    commit_ops,
+    install,
+    papi,
+    seed_default_project,
+)
 
 MM = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 
 
 def _client() -> TestClient:
-    """Live session + durable model row via the upload routes (the
-    test_ops_persistence.py harness), so commits are actually journaled."""
+    """Live session + durable model row, so commits are actually journaled."""
     seed_default_project()
     c = TestClient(create_app())
-    r = c.post(papi("/metamodel"), content=MM, headers=AUTH_HEADERS)
-    assert r.status_code == 200, r.text
-    r = c.post(
-        papi("/model/upload"),
-        content=b'{"elements":[],"relationships":[]}',
-        headers=AUTH_HEADERS,
-    )
-    assert r.status_code == 200, r.text
+    install(metamodel=MM, model=EMPTY_MODEL)
     return c
 
 
@@ -52,16 +46,13 @@ def _concrete_type(c: TestClient) -> str:
 
 
 def _create_one(c: TestClient) -> int:
-    base = c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
-    r = c.post(
-        papi("/model/ops"),
-        json={"base_rev": base, "ops": [
-            {"kind": "create_element", "temp_id": "tmp_1",
-             "type_name": _concrete_type(c), "properties": {}}]},
-        headers=AUTH_HEADERS,
+    body = commit_ops(
+        c,
+        [{"kind": "create_element", "temp_id": "tmp_1",
+          "type_name": _concrete_type(c), "properties": {}}],
     )
-    assert r.status_code == 200, r.text
-    return r.json()["model_rev"]
+    rev: int = body["model_rev"]
+    return rev
 
 
 def _live_session() -> Session:

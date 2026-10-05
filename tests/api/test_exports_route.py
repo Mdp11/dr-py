@@ -14,7 +14,14 @@ from data_rover.api.main import create_app
 from data_rover.api.routes.exports import _aggregate_pending
 from data_rover.api.schemas import ScriptStatusOut
 
-from .conftest import AUTH_HEADERS, TEST_USER_ID, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    TEST_USER_ID,
+    papi,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+)
 from .test_artifacts_routes import EXAMPLE, _bootstrap_model
 
 
@@ -1118,12 +1125,11 @@ def _other_papi(path: str) -> str:
 def _bootstrap_other_model(client) -> None:
     """Same metamodel/model bootstrap as `_bootstrap_model`, scoped to
     OTHER_PROJECT_ID instead of the default project."""
-    client.post(
-        _other_papi("/metamodel"),
-        content=EXAMPLE.read_text(encoding="utf-8"),
-        headers={"content-type": "application/x-yaml"},
+    install(
+        OTHER_PROJECT_ID,
+        metamodel=EXAMPLE.read_text(encoding="utf-8"),
+        model=EMPTY_MODEL,
     )
-    client.post(_other_papi("/model"), json={"elements": [], "relationships": []})
 
 
 def _mk_table_other(client, name):

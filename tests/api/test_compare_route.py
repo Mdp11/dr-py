@@ -13,7 +13,12 @@ from data_rover.api.db import db_session
 from data_rover.api.db_models import Role
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+    head,
+)
 
 API = "/api/v1/projects/default"
 
@@ -42,14 +47,15 @@ def client() -> TestClient:
 
 @pytest.fixture
 def seeded(client: TestClient) -> TestClient:
-    res = client.post(
-        f"{API}/model",
-        json={
-            "elements": [_el("a", "A"), _el("b", "B")],
-            "relationships": [_rel("r-ab", "a", "b")],
-        },
+    install(
+        metamodel=MM,
+        model=json.dumps(
+            {
+                "elements": [_el("a", "A"), _el("b", "B")],
+                "relationships": [_rel("r-ab", "a", "b")],
+            }
+        ),
     )
-    assert res.status_code == 200, res.text
     return client
 
 
@@ -87,7 +93,7 @@ def test_compare_is_session_to_other(seeded: TestClient) -> None:
     assert [r["id"] for r in ops["relationships"]["deleted"]] == ["r-ab"]
     assert body["cr"]["baseline"] == {"filename": None, "elementCount": 2, "relationshipCount": 1}
     assert (body["other_element_count"], body["other_relationship_count"]) == (2, 0)
-    assert body["model_rev"] == seeded.get(f"{API}/model/summary").json()["model_rev"]
+    assert body["model_rev"] == head().rev
 
 
 def test_compare_identical_is_empty(seeded: TestClient) -> None:

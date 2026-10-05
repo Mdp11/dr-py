@@ -14,7 +14,7 @@ from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.table.cells import ValueCell
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
 
 _METAMODEL = """
 elements:
@@ -34,13 +34,7 @@ def client() -> TestClient:
 
 
 def _bootstrap(client: TestClient) -> None:
-    r = client.post(
-        papi("/metamodel"),
-        content=_METAMODEL,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    client.post(papi("/model"), json={"elements": [], "relationships": []})
+    install(metamodel=_METAMODEL, model=EMPTY_MODEL)
     r = client.post(
         papi("/model/elements"),
         json={"type": "Item", "properties": {"name": "one", "tags": ["a", "b"]}},

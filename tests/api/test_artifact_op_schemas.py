@@ -1,7 +1,6 @@
 """The op-union split: artifact ops parse through OPS_ADAPTER (journal
 round-trip), split_ops separates families, required_locks derives art:
-leases, the legacy /model/ops endpoint still rejects artifact ops
-permanently, and the commit endpoints route them into the artifact flow."""
+leases, and the commit endpoints route them into the artifact flow."""
 
 from __future__ import annotations
 
@@ -10,11 +9,11 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.artifact_ops import split_ops
 from data_rover.api.locking import LockIntent, LockMode, artifact_resource, required_locks
-from data_rover.api.schemas import OPS_ADAPTER, CreateArtifactOp, UpdateArtifactOp
+from data_rover.api.schemas import OPS_ADAPTER, CreateArtifactOp
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install, head
 from data_rover.api.main import create_app
 
 _MM = """
@@ -86,25 +85,16 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"})
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _artifact_op_batch(c: TestClient) -> dict:
-    rev = c.get(papi("/model/summary")).json()["model_rev"]
+    rev = head().rev
     return {
         "base_rev": rev,
         "ops": [{"kind": "update_artifact", "id": "a1", "payload": {"code": "y"}}],
     }
-
-
-def test_legacy_model_ops_endpoint_rejects_artifact_ops(client: TestClient) -> None:
-    r = client.post(papi("/model/ops"), json=_artifact_op_batch(client))
-    assert r.status_code == 422
-    assert "artifact ops" in r.text
 
 
 def test_commit_endpoints_route_artifact_ops_to_the_artifact_flow(

@@ -2,7 +2,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
+    commit_ops,
+)
 
 _MM = """
 elements:
@@ -23,7 +31,7 @@ def client() -> TestClient:
 
 
 def _rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    return head().rev
 
 
 def test_initial_bind_on_empty_project_ok(client: TestClient) -> None:
@@ -33,12 +41,8 @@ def test_initial_bind_on_empty_project_ok(client: TestClient) -> None:
 
 
 def test_upload_on_nonempty_model_409(client: TestClient) -> None:
-    assert client.post(papi("/metamodel"), content=_MM,
-                       headers={"content-type": "application/x-yaml"}).status_code == 200
-    assert client.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
-    r_op = client.post(papi("/model/ops"), json={"base_rev": _rev(client), "ops": [
-        {"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}]})
-    assert r_op.status_code == 200, r_op.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
+    commit_ops(client, [{"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}])
     r = client.post(papi("/metamodel"), content=_MM,
                     headers={"content-type": "application/x-yaml"})
     assert r.status_code == 409
@@ -86,9 +90,7 @@ def _acquire_mm(c: TestClient, headers: dict[str, str]) -> None:
 
 
 def test_upload_409_when_peer_holds_mm_lease(client: TestClient) -> None:
-    assert client.post(papi("/metamodel"), content=_MM,
-                       headers={"content-type": "application/x-yaml"}).status_code == 200
-    assert client.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    install(metamodel=_MM, model=EMPTY_MODEL)
     _add_editor("peer", "peer@example.com")
     _acquire_mm(client, _PEER)
     r = client.post(
@@ -101,9 +103,7 @@ def test_upload_409_when_peer_holds_mm_lease(client: TestClient) -> None:
 
 
 def test_clear_409_when_peer_holds_mm_lease(client: TestClient) -> None:
-    assert client.post(papi("/metamodel"), content=_MM,
-                       headers={"content-type": "application/x-yaml"}).status_code == 200
-    assert client.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    install(metamodel=_MM, model=EMPTY_MODEL)
     _add_editor("peer", "peer@example.com")
     _acquire_mm(client, _PEER)
     r = client.delete(papi("/metamodel"), headers=AUTH_HEADERS)

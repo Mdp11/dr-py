@@ -26,7 +26,15 @@ from data_rover.api.main import create_app
 from data_rover.api.session import reset_session
 from data_rover.api.settings import Settings
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
+    commit_ops,
+)
 
 
 def _lease(rid: str = "e1", *, expires_at: float, token: str = "tok1") -> Lease:
@@ -208,31 +216,22 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(
-        papi("/metamodel"), content=_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary")).json()["model_rev"]
+    return head().rev
 
 
 def _create_element(c: TestClient) -> str:
-    r = c.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": _rev(c),
-            "ops": [{"kind": "create_element", "temp_id": "tmp_n",
-                     "type_name": "Node", "properties": {}}],
-        },
+    body = commit_ops(
+        c,
+        [{"kind": "create_element", "temp_id": "tmp_n",
+          "type_name": "Node", "properties": {}}],
     )
-    assert r.status_code == 200, r.text
-    return r.json()["id_map"]["tmp_n"]
+    nid: str = body["id_map"]["tmp_n"]
+    return nid
 
 
 def _acquire(c: TestClient, eid: str) -> str:

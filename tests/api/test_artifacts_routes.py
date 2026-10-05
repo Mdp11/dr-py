@@ -14,7 +14,13 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+)
 
 API = "/api/v1/projects/default"
 
@@ -179,14 +185,7 @@ def _seed_second_member(user_id: str, email: str) -> None:
 def _seed_empty_model(client: TestClient) -> None:
     """POST /locks goes through ``require_model``, so a lease test needs a
     loaded (if empty) model even though artifacts are not model content."""
-    r = client.post(
-        f"{API}/metamodel",
-        content="elements:\n  - name: Node\n",
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(f"{API}/model", json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel="elements:\n  - name: Node\n", model=EMPTY_MODEL)
 
 
 def _lock_artifact(client: TestClient, artifact_id: str, **kw: object) -> str:
@@ -274,12 +273,7 @@ EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.
 def _bootstrap_model(client: TestClient) -> dict[str, str]:
     """example.metamodel.yaml: Block (mass), BlockHasPart (containment,
     Block->Block), Satisfies (Block->Requirement). Build: root -has-> p1, p2."""
-    client.post(
-        f"{API}/metamodel",
-        content=EXAMPLE.read_text(encoding="utf-8"),
-        headers={"content-type": "application/x-yaml"},
-    )
-    client.post(f"{API}/model", json={"elements": [], "relationships": []})
+    install(metamodel=EXAMPLE.read_text(encoding="utf-8"), model=EMPTY_MODEL)
     ids: dict[str, str] = {}
     for name in ["root", "p1", "p2"]:
         res = client.post(

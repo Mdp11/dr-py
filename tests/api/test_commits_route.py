@@ -10,7 +10,15 @@ from fastapi.testclient import TestClient
 from data_rover.api import content, db
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
+    commit_ops,
+)
 
 # Minimal metamodel: one concrete element type.
 _MM = """
@@ -29,20 +37,13 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        papi("/metamodel"),
-        content=_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(client: TestClient) -> int:
-    """Current model_rev from GET /model/summary."""
-    return client.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    """Current head rev."""
+    return head().rev
 
 
 def _etype(client: TestClient) -> str:
@@ -118,14 +119,10 @@ def _lock(client: TestClient, rid: str, mode: str = "exclusive", intent: str = "
 
 
 def test_commit_requires_held_lock_409(client: TestClient) -> None:
-    # create an element to edit (via ops, which is the unlocked legacy path)
-    rev = _rev(client)
-    cr = client.post(
-        papi("/model/ops"),
-        headers=AUTH_HEADERS,
-        json={
-            "base_rev": rev,
-            "ops": [
+    # create an element to edit
+    eid = commit_ops(
+        client,
+        [
                 {
                     "kind": "create_element",
                     "temp_id": "tmp_e",
@@ -133,10 +130,7 @@ def test_commit_requires_held_lock_409(client: TestClient) -> None:
                     "properties": {},
                 }
             ],
-        },
-    )
-    assert cr.status_code == 200, cr.text
-    eid = cr.json()["id_map"]["tmp_e"]
+    )["id_map"]["tmp_e"]
     # commit an edit to eid WITHOUT holding its lock -> 409
     r = client.post(
         papi("/commits"),
@@ -152,13 +146,9 @@ def test_commit_requires_held_lock_409(client: TestClient) -> None:
 
 
 def test_commit_with_lock_succeeds_and_records_message(client: TestClient) -> None:
-    rev = _rev(client)
-    cr = client.post(
-        papi("/model/ops"),
-        headers=AUTH_HEADERS,
-        json={
-            "base_rev": rev,
-            "ops": [
+    eid = commit_ops(
+        client,
+        [
                 {
                     "kind": "create_element",
                     "temp_id": "tmp_e",
@@ -166,10 +156,7 @@ def test_commit_with_lock_succeeds_and_records_message(client: TestClient) -> No
                     "properties": {},
                 }
             ],
-        },
-    )
-    assert cr.status_code == 200, cr.text
-    eid = cr.json()["id_map"]["tmp_e"]
+    )["id_map"]["tmp_e"]
     token = _lock(client, eid)
     r = client.post(
         papi("/commits"),
@@ -222,17 +209,10 @@ _MM_SNAP = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8"
 
 def _client_with_model() -> TestClient:
     """Build a test client with a live in-memory session AND a DB model row via
-    the HTTP upload routes, matching the pattern in test_ops_persistence.py."""
+    ``install``."""
     seed_default_project()
     c = TestClient(create_app())
-    r = c.post(papi("/metamodel"), content=_MM_SNAP, headers=AUTH_HEADERS)
-    assert r.status_code == 200, r.text
-    r = c.post(
-        papi("/model/upload"),
-        content=b'{"elements":[],"relationships":[]}',
-        headers=AUTH_HEADERS,
-    )
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM_SNAP, model=EMPTY_MODEL)
     return c
 
 
@@ -249,11 +229,11 @@ def test_commit_writes_periodic_snapshot_when_snapshot_every_1(
 ) -> None:
     """With snapshot_every=1 every accepted commit triggers a snapshot — this
     verifies the commit path (POST /commits) calls _maybe_periodic_snapshot,
-    mirroring the equivalent behaviour in POST /model/ops."""
+    journaling the commit like any other write."""
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_EVERY", "1")
     c = _client_with_model()
     t = _concrete_type_snap(c)
-    base = c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    base = head().rev
     r = c.post(
         papi("/commits"),
         headers=AUTH_HEADERS,

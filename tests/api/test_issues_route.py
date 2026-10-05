@@ -18,7 +18,13 @@ from data_rover.api.routes import validation as validation_routes
 from data_rover.api.schemas import IssueOut
 from data_rover.api.session import get_session
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+    commit_ops,
+)
 
 API = "/api/v1/projects/default"
 
@@ -41,20 +47,12 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        f"{API}/metamodel", content=MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(f"{API}/model", json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=MM, model=EMPTY_MODEL)
     return c
 
 
-def _post_ops(client: TestClient, ops: list[dict]):
-    return client.post(
-        f"{API}/model/ops",
-        json={"base_rev": get_session().model_rev, "ops": ops},
-    )
+def _post_ops(client: TestClient, ops: list[dict]) -> dict:
+    return commit_ops(client, ops)
 
 
 def test_empty_model_returns_empty_list(client: TestClient) -> None:
@@ -75,8 +73,7 @@ def test_reflects_committed_issue_store_after_ops(client: TestClient) -> None:
         [{"kind": "create_element", "temp_id": "tmp_1", "type_name": "Item",
           "properties": {}}],
     )
-    assert res.status_code == 200, res.text
-    new_id = res.json()["id_map"]["tmp_1"]
+    new_id = res["id_map"]["tmp_1"]
 
     body = client.get(f"{API}/model/issues").json()
     assert body["counts"] == {"error": 1}
@@ -94,13 +91,12 @@ def test_fixing_the_entity_empties_the_store(client: TestClient) -> None:
         [{"kind": "create_element", "temp_id": "tmp_1", "type_name": "Item",
           "properties": {}}],
     )
-    new_id = res.json()["id_map"]["tmp_1"]
+    new_id = res["id_map"]["tmp_1"]
     res = _post_ops(
         client,
         [{"kind": "update_element", "id": new_id,
           "properties_patch": {"name": "A"}}],
     )
-    assert res.status_code == 200, res.text
     body = client.get(f"{API}/model/issues").json()
     assert body["issues"] == []
     assert body["counts"] == {}
@@ -115,7 +111,7 @@ def test_truncation_caps_issues_but_not_counts(
          "properties": {"tag": f"t{i}"}}
         for i in range(3)
     ]
-    assert _post_ops(client, ops).status_code == 200
+    _post_ops(client, ops)
     body = client.get(f"{API}/model/issues").json()
     assert body["truncated"] is True
     assert len(body["issues"]) == 2
@@ -135,7 +131,6 @@ def test_reseeds_a_nulled_store_under_the_mutex(client: TestClient) -> None:
         [{"kind": "create_element", "temp_id": "tmp_1", "type_name": "Item",
           "properties": {}}],
     )
-    assert res.status_code == 200, res.text
     get_session().validation = None
 
     body = client.get(f"{API}/model/issues").json()
@@ -159,7 +154,7 @@ def test_truncation_never_materializes_more_than_the_cap(
          "properties": {"tag": f"t{i}"}}
         for i in range(10)
     ]
-    assert _post_ops(client, ops).status_code == 200
+    _post_ops(client, ops)
 
     state = get_session().validation
     assert state is not None
@@ -202,7 +197,6 @@ def test_issue_carries_producing_validator_check_name(client: TestClient) -> Non
         [{"kind": "create_element", "temp_id": "tmp_1", "type_name": "Item",
           "properties": {}}],
     )
-    assert res.status_code == 200, res.text
 
     body = client.get(f"{API}/model/issues").json()
     issue = body["issues"][0]

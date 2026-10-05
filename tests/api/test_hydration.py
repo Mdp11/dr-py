@@ -25,6 +25,8 @@ from .conftest import (
     create_view,
     papi,
     seed_default_project,
+    EMPTY_MODEL,
+    install,
 )
 
 MM_YAML = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
@@ -110,12 +112,7 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    c.post(
-        papi("/metamodel"),
-        content=MM_YAML,
-        headers={"content-type": "application/x-yaml"},
-    )
-    c.post(papi("/model"), json={"elements": [], "relationships": []})
+    install(metamodel=MM_YAML, model=EMPTY_MODEL)
     return c
 
 

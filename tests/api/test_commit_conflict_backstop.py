@@ -22,6 +22,9 @@ from .conftest import (
     create_view,
     papi,
     seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
 )
 
 #: the view every view op in this module edits — set by ``_seed_view``
@@ -54,15 +57,12 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    r = c.post(papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"})
-    assert r.status_code == 200, r.text
-    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert r.status_code == 200, r.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary")).json()["model_rev"]
+    return head().rev
 
 
 def _commit(c: TestClient, ops: list[dict], base_rev: int):
@@ -298,29 +298,6 @@ def test_short_tail_from_unjournaled_mutation_409(client: TestClient) -> None:
     assert r2.json()["detail"] == "stale base_rev"
 
 
-def test_baseline_reset_after_upload_always_conflicts(client: TestClient) -> None:
-    """``POST /model/upload`` replaces the whole model and calls
-    ``persist_baseline``: history is cleared and ONE marker commit with
-    EMPTY ops is written at the new rev. The tail fully accounts for the rev
-    gap (one row, one rev, so the short-tail check does NOT catch it), but
-    names no resources at all — the dedicated empty-ops-in-tail branch must
-    catch it, or a stale batch would silently land against a
-    wholesale-replaced model."""
-    r = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",
-                          "type_name": "Node", "properties": {}}], _rev(client))
-    assert r.status_code == 200, r.text
-    base = _rev(client)
-
-    r_up = client.post(papi("/model/upload"),
-                        content=b'{"elements":[],"relationships":[]}')
-    assert r_up.status_code == 200, r_up.text
-
-    r2 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_z",
-                           "type_name": "Node", "properties": {}}], base)
-    assert r2.status_code == 409
-    assert r2.json()["detail"] == "stale base_rev"
-
-
 def test_rebind_in_tail_always_conflicts(client: TestClient) -> None:
     """A rebind fully accounts for the rev gap (one row) and is not
     empty-ops (it carries the retype), so neither of the other two
@@ -392,7 +369,8 @@ def test_empty_commit_is_a_no_op_and_never_poisons_the_tail(
     assert r.status_code == 200, r.text
     assert r.json()["model_rev"] == base
     assert _rev(client) == base
-    assert client.get(papi("/commits")).json()["commits"] == []  # no journal row
+    # no journal row beyond the baseline
+    assert [c["rev"] for c in client.get(papi("/commits")).json()["commits"]] == [0]
 
     # the overlap rule still works afterwards: a stale, DISJOINT batch lands
     r1 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",

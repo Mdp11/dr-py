@@ -39,6 +39,7 @@ absorb — only enough headroom to not flap on an incidental extra call.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Iterator
@@ -55,7 +56,11 @@ from data_rover.api.session import Session, get_session
 from data_rover.api.settings import Settings, get_settings
 from data_rover.core.table.schema import TABLE_ADAPTER
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+)
 
 if TYPE_CHECKING:
     from data_rover.api.script_runner import WasmScriptRunner
@@ -144,15 +149,7 @@ def client(app: FastAPI, wasm_runner: WasmScriptRunner) -> TestClient:
 
 
 def _seed(client: TestClient, rows: int) -> Session:
-    r = client.post(
-        papi("/metamodel"),
-        content=THING_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/model"),
-        json={
+    model = {
             "elements": [
                 {
                     "id": _eid(i),
@@ -171,9 +168,8 @@ def _seed(client: TestClient, rows: int) -> Session:
                 }
                 for i in range(rows)
             ],
-        },
-    )
-    assert r.status_code == 200, r.text
+        }
+    install(metamodel=THING_MM, model=json.dumps(model))
     return get_session()
 
 

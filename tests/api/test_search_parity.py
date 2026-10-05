@@ -5,6 +5,8 @@ reference below is the pre-index ``list_elements`` query loop, verbatim."""
 
 from __future__ import annotations
 
+import json
+
 import random
 
 import pytest
@@ -15,7 +17,11 @@ from data_rover.api.routes.read import _search_score
 from data_rover.api.session import get_session
 from data_rover.core.model.naming import name_of
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+)
 
 API = "/api/v1/projects/default"
 
@@ -62,10 +68,6 @@ def _client_with_random_model(seed: int, n: int = 200) -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        f"{API}/metamodel", content=MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
     elements = []
     for i in range(n):
         type_name = rng.choice(["Pump", "Pipe"])
@@ -93,8 +95,7 @@ def _client_with_random_model(seed: int, n: int = 200) -> TestClient:
                 "properties": props,
             }
         )
-    res = c.post(f"{API}/model", json={"elements": elements, "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=MM, model=json.dumps({"elements": elements, "relationships": []}))
     return c
 
 

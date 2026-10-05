@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 from data_rover.api import db as _db, tenancy
 from data_rover.api.db_models import Project, Role
 from data_rover.api.main import create_app
+from .conftest import (
+    head,
+)
 
 pytestmark = pytest.mark.usefixtures("cookie_provider")
 
@@ -39,9 +42,7 @@ def test_wizard_creates_project_with_empty_model() -> None:
         )
     assert r.status_code == 201, r.text
     pid = r.json()["id"]
-    summary = c.get(f"/api/v1/projects/{pid}/model/summary")
-    assert summary.status_code == 200
-    assert summary.json()["element_count"] == 0
+    assert len(head(pid).elements) == 0
 
 
 def test_wizard_rejects_bad_metamodel_422_no_orphan() -> None:

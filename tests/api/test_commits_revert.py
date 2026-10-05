@@ -18,6 +18,8 @@ from tests.api.conftest import (
     model_rev,
     papi,
     seed_default_project,
+    EMPTY_MODEL,
+    install,
 )
 from tests.api.test_commits_metamodel_ops import _acquire_mm
 
@@ -41,11 +43,7 @@ def client() -> TestClient:
     reset_loop()  # each TestClient creates its own event loop; clear the cached one
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert c.post(
-        papi("/metamodel"), content=_MM,
-        headers={"content-type": "application/x-yaml"},
-    ).status_code == 200
-    assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 

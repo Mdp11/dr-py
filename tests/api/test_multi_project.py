@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api import db
 from data_rover.api.db_models import Membership, Project, Role, User
 from data_rover.api.main import create_app
+from data_rover.api.session import get_registry
+from .conftest import (
+    install,
+    head,
+)
 
 SIMPLE_MM = """
 elements:
@@ -65,28 +72,24 @@ def test_non_member_cannot_touch_project(client: TestClient) -> None:
 def test_models_in_two_projects_do_not_share_state(client: TestClient) -> None:
     _seed("alpha", "u1")
     _seed("beta", "u1")
-    for pid in ("alpha", "beta"):
-        assert (
-            client.post(
-                f"/api/v1/projects/{pid}/metamodel",
-                content=SIMPLE_MM,
-                headers={"content-type": "application/x-yaml", **_h("u1")},
-            ).status_code
-            == 200
-        )
-    res = client.post(
-        "/api/v1/projects/alpha/model",
-        json={
-            "elements": [{"id": "b1", "type_name": "Block", "properties": {}}],
-            "relationships": [],
-        },
-        headers=_h("u1"),
+    install(
+        "alpha",
+        metamodel=SIMPLE_MM,
+        model=json.dumps(
+            {
+                "elements": [{"id": "b1", "type_name": "Block", "properties": {}}],
+                "relationships": [],
+            }
+        ),
     )
-    assert res.status_code == 200, res.text
-    a = client.get("/api/v1/projects/alpha/model/summary", headers=_h("u1"))
-    assert a.status_code == 200
-    assert a.json()["element_count"] == 1
-    # beta has its own metamodel but no model: alpha's load did NOT leak in, so
-    # beta still reports "no model loaded" (404) rather than alpha's element.
-    b = client.get("/api/v1/projects/beta/model/summary", headers=_h("u1"))
-    assert b.status_code == 404
+    assert (
+        client.post(
+            "/api/v1/projects/beta/metamodel",
+            content=SIMPLE_MM,
+            headers={"content-type": "application/x-yaml", **_h("u1")},
+        ).status_code
+        == 200
+    )
+    assert len(head("alpha").elements) == 1
+    # beta has its own metamodel but no model: alpha's load did NOT leak in
+    assert get_registry().get("beta").model is None

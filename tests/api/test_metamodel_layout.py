@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install, head
 from .test_commits_metamodel_ops import _acquire_mm
 
 STRANGER_HEADERS = {"x-user-id": "stranger", "x-user-email": "stranger@example.com"}
@@ -57,9 +57,7 @@ def _bound_client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert c.post(papi("/metamodel"), content=_MM,
-                  headers={"content-type": "application/x-yaml"}).status_code == 200
-    assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -85,7 +83,7 @@ def test_get_layout_reflects_a_commit_flow_move() -> None:
     r = c.post(
         papi("/commits"),
         json={
-            "base_rev": c.get(papi("/model/summary")).json()["model_rev"],
+            "base_rev": head().rev,
             "ops": [
                 {
                     "kind": "metamodel.move_node",

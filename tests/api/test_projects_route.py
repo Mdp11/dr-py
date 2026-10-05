@@ -21,6 +21,9 @@ from fastapi.testclient import TestClient
 from data_rover.api import db, tenancy
 from data_rover.api.db_models import User
 from data_rover.api.main import create_app
+from .conftest import (
+    install,
+)
 
 
 @pytest.fixture
@@ -107,16 +110,9 @@ def test_delete_hydrated_project_discards_session_without_snapshot(
 
     pid = _seed_project("P", "u1")
     mm = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
-    model = Path("examples/smart-city.model.json").read_bytes()
+    model = Path("examples/smart-city.model.json").read_text(encoding="utf-8")
     base = f"/api/v1/projects/{pid}"
-    assert (
-        client.post(f"{base}/metamodel", content=mm, headers=_h("u1")).status_code
-        == 200
-    )
-    assert (
-        client.post(f"{base}/model/upload", content=model, headers=_h("u1")).status_code
-        == 200
-    )
+    install(pid, metamodel=mm, model=model)
     assert pid in get_registry().project_ids()
 
     _seed_user("boss", is_admin=True)

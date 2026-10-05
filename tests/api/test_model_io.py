@@ -1,9 +1,9 @@
-"""Tests for the streaming load/save endpoints.
+"""Tests for the model save/download endpoints and the model load guards.
 
-POST /model/load, POST /model/upload, POST /model/save, GET /model/download
-(routes/model.py) — file-path loads, raw-body uploads, chunked save/download,
-guard parity with the snapshot routes, validation seeding, and save-file
-byte-shape compatibility with the frontend writer.
+POST /model/save and GET /model/download (routes/model.py) — chunked
+save/download and save-file byte-shape compatibility with the frontend writer
+— plus the shape and entity guards a model document passes on its way in
+(``install``).
 """
 
 from __future__ import annotations
@@ -12,11 +12,12 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import AUTH_HEADERS, commit_ops, head, install, seed_default_project
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 EXAMPLE_MM = EXAMPLES / "example.metamodel.yaml"
@@ -42,87 +43,38 @@ def _upload_metamodel(client: TestClient, path: Path = SMART_CITY_MM) -> None:
     assert res.status_code == 200, res.text
 
 
+def _current_metamodel(client: TestClient) -> str:
+    blob: str = client.get(f"{API}/metamodel/raw").json()["blob"]
+    return blob
+
+
 def _load(client: TestClient, path: Path) -> dict:
-    res = client.post(f"{API}/model/load", json={"path": str(path)})
-    assert res.status_code == 200, res.text
-    return res.json()
-
-
-# ---------------------------------------------------------------------------
-# POST /model/load
-# ---------------------------------------------------------------------------
-
-
-def test_load_happy_path(client: TestClient, tmp_path: Path) -> None:
-    _upload_metamodel(client)
-    model_file = tmp_path / "city.model.json"
-    model_file.write_text(SMART_CITY_MODEL.read_text(encoding="utf-8"), encoding="utf-8")
-    source = json.loads(SMART_CITY_MODEL.read_text(encoding="utf-8"))
-
-    summary = _load(client, model_file)
-
-    # summary shape == GET /model/summary
-    assert summary["element_count"] == len(source["elements"])
-    assert summary["relationship_count"] == len(source["relationships"])
-    assert sum(summary["elements_by_type"].values()) == summary["element_count"]
-    assert summary["model_rev"] >= 1
-    # set_model cleared the op log
-    assert summary["undo_depth"] == 0
-    # ONE full validation seeded the session issue store at load time
-    assert summary["issue_counts"] is not None
-
-    # the load response IS the current summary
-    res = client.get(f"{API}/model/summary")
-    assert res.status_code == 200
-    assert res.json() == summary
-
-    # spot-check entities landed in the session model
-    first = source["elements"][0]
-    res = client.get(f"{API}/model/elements/{first['id']}")
-    assert res.status_code == 200
-    got = res.json()
-    assert got["type_name"] == first["type_name"]
-    assert got["properties"] == first["properties"]
-
-
-def test_load_missing_file_yields_422(client: TestClient, tmp_path: Path) -> None:
-    _upload_metamodel(client)
-    res = client.post(
-        f"{API}/model/load", json={"path": str(tmp_path / "nope.json")}
+    """Install the file's model under the project's current metamodel."""
+    install(
+        metamodel=_current_metamodel(client), model=path.read_text(encoding="utf-8")
     )
-    assert res.status_code == 422, res.text
-    # a directory is not a file either
-    res = client.post(f"{API}/model/load", json={"path": str(tmp_path)})
-    assert res.status_code == 422, res.text
+    state = head()
+    return {
+        "element_count": len(state.elements),
+        "relationship_count": len(state.relationships),
+        "model_rev": state.rev,
+    }
 
 
-def test_load_non_json_yields_422(client: TestClient, tmp_path: Path) -> None:
-    _upload_metamodel(client)
-    bad = tmp_path / "bad.model.json"
-    bad.write_text("this is not json {", encoding="utf-8")
-    res = client.post(f"{API}/model/load", json={"path": str(bad)})
-    assert res.status_code == 422, res.text
-    assert "Invalid JSON" in res.json()["detail"]
-
-
-def test_load_without_metamodel_yields_404(
-    client: TestClient, tmp_path: Path
-) -> None:
-    f = tmp_path / "m.json"
-    f.write_text('{"elements": [], "relationships": []}', encoding="utf-8")
-    res = client.post(f"{API}/model/load", json={"path": str(f)})
-    assert res.status_code == 404
+# ---------------------------------------------------------------------------
+# Model load guards
+# ---------------------------------------------------------------------------
 
 
 def _load_payload_expecting_422(
     client: TestClient, tmp_path: Path, payload: object
 ) -> str:
-    """Write *payload*, load it, assert 422, return the error detail."""
-    f = tmp_path / "guard.model.json"
-    f.write_text(json.dumps(payload), encoding="utf-8")
-    res = client.post(f"{API}/model/load", json={"path": str(f)})
-    assert res.status_code == 422, res.text
-    return res.json()["detail"]
+    """Install *payload*, assert the 422 refusal, return the error detail."""
+    with pytest.raises(HTTPException) as err:
+        install(metamodel=_current_metamodel(client), model=json.dumps(payload))
+    assert err.value.status_code == 422
+    detail: str = err.value.detail
+    return detail
 
 
 @pytest.mark.parametrize(
@@ -172,7 +124,7 @@ def _load_payload_expecting_422(
         ),
     ],
 )
-def test_load_shape_errors_yield_422(
+def test_install_shape_errors_yield_422(
     client: TestClient, tmp_path: Path, payload: object, detail_substring: str
 ) -> None:
     """The _shape_error layer of build_model_from_dicts: every malformed
@@ -182,7 +134,7 @@ def test_load_shape_errors_yield_422(
     assert detail_substring in detail
 
 
-def test_load_guard_duplicate_element_id(
+def test_install_guard_duplicate_element_id(
     client: TestClient, tmp_path: Path
 ) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
@@ -193,7 +145,7 @@ def test_load_guard_duplicate_element_id(
     assert "Duplicate element id" in detail
 
 
-def test_load_guard_dangling_endpoint(client: TestClient, tmp_path: Path) -> None:
+def test_install_guard_dangling_endpoint(client: TestClient, tmp_path: Path) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
     payload = {
         "elements": [
@@ -214,7 +166,7 @@ def test_load_guard_dangling_endpoint(client: TestClient, tmp_path: Path) -> Non
     assert "unknown target 'ghost'" in detail
 
 
-def test_load_guard_abstract_type(client: TestClient, tmp_path: Path) -> None:
+def test_install_guard_abstract_type(client: TestClient, tmp_path: Path) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
     payload = {
         "elements": [
@@ -226,7 +178,7 @@ def test_load_guard_abstract_type(client: TestClient, tmp_path: Path) -> None:
     assert "abstract" in detail
 
 
-def test_load_guard_unknown_type(client: TestClient, tmp_path: Path) -> None:
+def test_install_guard_unknown_type(client: TestClient, tmp_path: Path) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
     payload = {
         "elements": [{"id": "e1", "type_name": "Nope", "properties": {}, "rev": 0}],
@@ -236,7 +188,7 @@ def test_load_guard_unknown_type(client: TestClient, tmp_path: Path) -> None:
     assert "Unknown element type" in detail
 
 
-def test_load_guard_reserved_tmp_id(client: TestClient, tmp_path: Path) -> None:
+def test_install_guard_reserved_tmp_id(client: TestClient, tmp_path: Path) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
     payload = {
         "elements": [
@@ -248,7 +200,7 @@ def test_load_guard_reserved_tmp_id(client: TestClient, tmp_path: Path) -> None:
     assert "reserved" in detail
 
 
-def test_load_tolerates_extra_top_level_keys(
+def test_install_tolerates_extra_top_level_keys(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Benchmark fixtures carry a top-level ``rev``; loaders must accept it
@@ -262,13 +214,11 @@ def test_load_tolerates_extra_top_level_keys(
         ],
         "relationships": [],
     }
-    f = tmp_path / "extra.model.json"
-    f.write_text(json.dumps(payload), encoding="utf-8")
-    summary = _load(client, f)
-    assert summary["element_count"] == 1
+    install(metamodel=_current_metamodel(client), model=json.dumps(payload))
+    assert len(head().elements) == 1
 
 
-def test_load_defaults_missing_properties_and_rev(
+def test_install_defaults_missing_properties_and_rev(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Entities without ``properties``/``rev`` get the same defaults the
@@ -282,9 +232,7 @@ def test_load_defaults_missing_properties_and_rev(
         encoding="utf-8",
     )
     _load(client, f)
-    res = client.get(f"{API}/model/elements/b1")
-    assert res.status_code == 200
-    assert res.json() == {
+    assert head().elements["b1"] == {
         "id": "b1",
         "type_name": "Block",
         "properties": {},
@@ -292,86 +240,12 @@ def test_load_defaults_missing_properties_and_rev(
     }
 
 
-def test_load_resets_undo_history(client: TestClient, tmp_path: Path) -> None:
-    _upload_metamodel(client, EXAMPLE_MM)
-    f = tmp_path / "m.model.json"
-    f.write_text(
-        json.dumps(
-            {
-                "elements": [
-                    {
-                        "id": "b1",
-                        "type_name": "Block",
-                        "properties": {"name": "A"},
-                        "rev": 0,
-                    }
-                ],
-                "relationships": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-    summary = _load(client, f)
-
-    # build some undo history through the ops protocol
-    res = client.post(
-        f"{API}/model/ops",
-        json={
-            "base_rev": summary["model_rev"],
-            "ops": [
-                {
-                    "kind": "create_element",
-                    "temp_id": "tmp_1",
-                    "type_name": "Block",
-                    "properties": {"name": "B"},
-                }
-            ],
-        },
-    )
-    assert res.status_code == 200, res.text
-    assert client.get(f"{API}/model/summary").json()["undo_depth"] == 1
-
-    reloaded = _load(client, f)
-    assert reloaded["undo_depth"] == 0
-    assert reloaded["model_rev"] > summary["model_rev"]
-    assert reloaded["element_count"] == 1
-
-
 # ---------------------------------------------------------------------------
-# POST /model/upload
+# Non-finite literals
 # ---------------------------------------------------------------------------
 
 
-def test_upload_happy_path_octet_stream(client: TestClient) -> None:
-    """Raw-body upload with the content type browsers use for streamed Files."""
-    _upload_metamodel(client)
-    body = SMART_CITY_MODEL.read_bytes()
-    res = client.post(
-        f"{API}/model/upload",
-        content=body,
-        headers={"content-type": "application/octet-stream"},
-    )
-    assert res.status_code == 200, res.text
-    source = json.loads(body)
-    summary = res.json()
-    assert summary["element_count"] == len(source["elements"])
-    assert summary["relationship_count"] == len(source["relationships"])
-    assert summary["issue_counts"] is not None
-    assert summary["undo_depth"] == 0
-    assert client.get(f"{API}/model/summary").json() == summary
-
-
-def test_upload_invalid_json_yields_422(client: TestClient) -> None:
-    _upload_metamodel(client, EXAMPLE_MM)
-    res = client.post(
-        f"{API}/model/upload",
-        content=b"\x00\x01 not json",
-        headers={"content-type": "application/json"},
-    )
-    assert res.status_code == 422, res.text
-
-
-def test_upload_bare_infinity_literals_become_float_tokens(
+def test_bare_infinity_literals_become_float_tokens(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A file carrying Python's bare ``Infinity``/``-Infinity`` literals loads
@@ -384,8 +258,7 @@ def test_upload_bare_infinity_literals_become_float_tokens(
         b'"target_value": Infinity, "latency_p99_ms": -Infinity, '
         b'"throughput_rps": 1.5}}], "relationships": []}'
     )
-    res = client.post(f"{API}/model/upload", content=body)
-    assert res.status_code == 200, res.text
+    install(metamodel=_current_metamodel(client), model=body)
     got = client.get(f"{API}/model/elements/p1").json()["properties"]
     assert got["target_value"] == "Infinity"
     assert got["latency_p99_ms"] == "-Infinity"
@@ -563,7 +436,7 @@ def test_download_without_model_yields_404(client: TestClient) -> None:
 def test_serializer_snapshots_entities_at_stream_start(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A concurrent ops batch mid-download must not break the stream.
+    """A concurrent commit mid-download must not break the stream.
 
     StreamingResponse consumes the chunk generator after the handler
     returns, so the session model can be mutated between chunks.
@@ -595,22 +468,19 @@ def test_serializer_snapshots_entities_at_stream_start(
     gen = iter_model_json(model)
     first = next(gen)  # stream started: entity sets are now snapshotted
 
-    # concurrent mutation: an ops batch adds an element mid-stream
-    res = client.post(
-        f"{API}/model/ops",
-        json={
-            "base_rev": summary["model_rev"],
-            "ops": [
-                {
-                    "kind": "create_element",
-                    "temp_id": "tmp_1",
-                    "type_name": "Block",
-                    "properties": {"name": "C"},
-                }
-            ],
-        },
+    # concurrent mutation: a commit adds an element mid-stream
+    commit_ops(
+        client,
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_1",
+                "type_name": "Block",
+                "properties": {"name": "C"},
+            }
+        ],
+        base_rev=summary["model_rev"],
     )
-    assert res.status_code == 200, res.text
 
     text = first + "".join(gen)  # must not raise RuntimeError
     streamed = json.loads(text)
@@ -638,18 +508,10 @@ def test_origin_guard_allows_requests_without_origin(
     The guard is a browser-CSRF defense only; it must not break local
     tooling that never sends an Origin header.
     """
-    f = _load_simple_model(client, tmp_path)
+    _load_simple_model(client, tmp_path)
     out = tmp_path / "out.model.json"
-    assert client.post(f"{API}/model/load", json={"path": str(f)}).status_code == 200
     assert client.post(f"{API}/model/save", json={"path": str(out)}).status_code == 200
     assert client.get(f"{API}/model/download").status_code == 200
-    assert (
-        client.post(
-            f"{API}/model/upload",
-            content=b'{"elements": [], "relationships": []}',
-        ).status_code
-        == 200
-    )
 
 
 def test_origin_guard_allows_allowed_origin(
@@ -657,12 +519,8 @@ def test_origin_guard_allows_allowed_origin(
 ) -> None:
     """An Origin in the CORS allowlist (default: the Vite dev/preview
     origins) passes through to the handler."""
-    f = _load_simple_model(client, tmp_path)
+    _load_simple_model(client, tmp_path)
     headers = {"origin": "http://localhost:5173"}
-    res = client.post(
-        f"{API}/model/load", json={"path": str(f)}, headers=headers
-    )
-    assert res.status_code == 200, res.text
     out = tmp_path / "out.model.json"
     res = client.post(
         f"{API}/model/save", json={"path": str(out)}, headers=headers
@@ -676,43 +534,35 @@ def test_origin_guard_rejects_foreign_origin(
 ) -> None:
     """A browser-attached foreign Origin gets 403 on every path/file endpoint
     and the handler never runs (no file is written)."""
-    f = _load_simple_model(client, tmp_path)
+    _load_simple_model(client, tmp_path)
     headers = {"origin": "https://evil.example"}
     out = tmp_path / "out.model.json"
 
-    res = client.post(
-        f"{API}/model/load", json={"path": str(f)}, headers=headers
-    )
-    assert res.status_code == 403, res.text
     res = client.post(
         f"{API}/model/save", json={"path": str(out)}, headers=headers
     )
     assert res.status_code == 403, res.text
     assert not out.exists()  # handler never ran
     assert client.get(f"{API}/model/download", headers=headers).status_code == 403
-    res = client.post(
-        f"{API}/model/upload",
-        content=b'{"elements": [], "relationships": []}',
-        headers=headers,
-    )
-    assert res.status_code == 403, res.text
 
 
 def test_origin_guard_respects_env_override(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """DATA_ROVER_CORS_ORIGINS overrides the allowlist the guard checks."""
-    f = _load_simple_model(client, tmp_path)
+    _load_simple_model(client, tmp_path)
+    out = tmp_path / "out.model.json"
     monkeypatch.setenv("DATA_ROVER_CORS_ORIGINS", '["https://other.example"]')
-    headers = {"origin": "https://other.example"}
     res = client.post(
-        f"{API}/model/load", json={"path": str(f)}, headers=headers
+        f"{API}/model/save",
+        json={"path": str(out)},
+        headers={"origin": "https://other.example"},
     )
     assert res.status_code == 200, res.text
     # ...and the defaults are gone once overridden
     res = client.post(
-        f"{API}/model/load",
-        json={"path": str(f)},
+        f"{API}/model/save",
+        json={"path": str(out)},
         headers={"origin": "http://localhost:5173"},
     )
     assert res.status_code == 403, res.text

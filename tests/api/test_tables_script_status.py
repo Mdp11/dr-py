@@ -18,6 +18,8 @@ case parks the sweep thread on an Event instead.
 
 from __future__ import annotations
 
+import json
+
 import hashlib
 import io
 import threading
@@ -39,7 +41,12 @@ from data_rover.core.script.runner import CallResult
 from data_rover.core.table.schema import TABLE_ADAPTER
 
 from ._script_fakes import CountingRunner, ScriptedRunner, ok, timeout
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+)
 
 THING_MM = """
 elements:
@@ -76,23 +83,16 @@ def seed_thing_model(client: TestClient) -> None:
     """`Thing` metamodel + five `Thing` elements, loaded through the HTTP
     routes so the table below has real rows in a deterministic build order
     (`t1`..`t5`, the scope's insertion order)."""
-    r = client.post(
-        papi("/metamodel"),
-        content=THING_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/model"),
-        json={
+    install(
+        metamodel=THING_MM,
+        model=json.dumps({
             "elements": [
                 {"id": tid, "type_name": "Thing", "properties": {"name": f"N{i}"}}
                 for i, tid in enumerate(THING_IDS)
             ],
             "relationships": [],
-        },
+        }),
     )
-    assert r.status_code == 200, r.text
 
 
 @pytest.fixture
@@ -624,7 +624,7 @@ def test_ops_persist_failure_restores_the_cell_cache_stamp(
 ) -> None:
     """A backward rev move must not leave the cell cache stamped AHEAD.
 
-    `/model/ops` mutates in place, bumps `model_rev`, and — if the durable
+    `POST /commits` mutates in place, bumps `model_rev`, and — if the durable
     persist fails — rolls the mutation back and does `model_rev -= 1`. Table
     routes take NO `write_mutex`, so a concurrent `/tables/evaluate` can sample
     the BUMPED rev and `put` a cell computed against the about-to-be-discarded
@@ -651,9 +651,9 @@ def test_ops_persist_failure_restores_the_cell_cache_stamp(
         session.script_cell_cache.put(raced_key, ok(99), session.model_rev)
         raise RuntimeError("db down")
 
-    monkeypatch.setattr("data_rover.api.routes.ops._persist_commit", _boom)
+    monkeypatch.setattr("data_rover.api.content.append_commit", _boom)
     r = client.post(
-        papi("/model/ops"),
+        papi("/commits"),
         json={
             "base_rev": base_rev,
             "ops": [

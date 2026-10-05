@@ -3,6 +3,8 @@ helper plus `POST /tables/evaluate` script-column wiring."""
 
 from __future__ import annotations
 
+import json
+
 import io
 from collections.abc import Iterator
 
@@ -21,7 +23,12 @@ from data_rover.core.metamodel.schema import ElementType, Metamodel
 from data_rover.core.model.model import Model
 from tests.script.trusted_runner import TrustedRunner
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+)
 
 
 def _settings(**kw) -> Settings:
@@ -134,24 +141,17 @@ def seed_thing_model(client: TestClient) -> None:
     a `name == "B"` element so tests exercising a conditional-raise snippet
     (`if els[0].name == 'B': raise ...`) get both an erroring row and clean
     rows in the same table."""
-    r = client.post(
-        papi("/metamodel"),
-        content=THING_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/model"),
-        json={
+    install(
+        metamodel=THING_MM,
+        model=json.dumps({
             "elements": [
                 {"id": "t1", "type_name": "Thing", "properties": {"name": "Alpha"}},
                 {"id": "t2", "type_name": "Thing", "properties": {"name": "Beta"}},
                 {"id": "t3", "type_name": "Thing", "properties": {"name": "B"}},
             ],
             "relationships": [],
-        },
+        }),
     )
-    assert r.status_code == 200, r.text
 
 
 @pytest.fixture

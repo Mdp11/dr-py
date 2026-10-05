@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 from data_rover.api.session import get_registry, get_session
 from data_rover.api.validation_sweep import SweepProgress
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+)
 
 API = "/api/v1/projects/default"
 
@@ -41,11 +47,7 @@ def test_status_empty_then_ready() -> None:
     res = c.post(f"{API}/metamodel", content=MM, headers={"content-type": "application/x-yaml"})
     assert res.status_code == 200
     assert c.get(f"{API}/model/status").json()["state"] == "empty"
-    res = c.post(
-        f"{API}/model/upload",
-        json={"elements": [{"id": "e1", "type_name": "Item", "properties": {}}], "relationships": []},
-    )
-    assert res.status_code == 200
+    install(metamodel=MM, model=json.dumps({"elements": [{"id": "e1", "type_name": "Item", "properties": {}}], "relationships": []}))
     body = c.get(f"{API}/model/status").json()
     # conftest pins the sweep sync, so the model is ready immediately
     assert body["state"] == "ready"
@@ -56,11 +58,7 @@ def test_status_reports_running_sweep() -> None:
     c = _client()
     res = c.post(f"{API}/metamodel", content=MM, headers={"content-type": "application/x-yaml"})
     assert res.status_code == 200
-    res = c.post(
-        f"{API}/model/upload",
-        json={"elements": [{"id": "e1", "type_name": "Item", "properties": {}}], "relationships": []},
-    )
-    assert res.status_code == 200
+    install(metamodel=MM, model=json.dumps({"elements": [{"id": "e1", "type_name": "Item", "properties": {}}], "relationships": []}))
     session = get_session()
     session.validation_sweep = SweepProgress(total=10, done=4, running=True)
     body = c.get(f"{API}/model/status").json()

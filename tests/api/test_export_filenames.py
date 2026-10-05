@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
 
 _METAMODEL = """
 elements:
@@ -37,13 +37,7 @@ def client() -> TestClient:
 
 
 def _bootstrap(client: TestClient) -> None:
-    r = client.post(
-        papi("/metamodel"),
-        content=_METAMODEL,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    client.post(papi("/model"), json={"elements": [], "relationships": []})
+    install(metamodel=_METAMODEL, model=EMPTY_MODEL)
     client.post(
         papi("/model/elements"), json={"type": "Item", "properties": {"name": "one"}}
     )

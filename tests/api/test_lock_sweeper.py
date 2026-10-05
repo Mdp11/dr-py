@@ -10,7 +10,14 @@ from data_rover.api.locking import LockIntent, LockMode, RequiredLock
 from data_rover.api.main import create_app
 from data_rover.api.session import get_registry
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    commit_ops,
+)
 
 
 _MM = """
@@ -40,10 +47,7 @@ def feed_client() -> TestClient:
     reset_loop()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    ).status_code == 200
-    assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -130,17 +134,11 @@ def test_sweep_expiry_broadcasts_lock_expired(feed_client: TestClient) -> None:
     from data_rover.api.main import _sweep_expired_locks
 
     # Create an element so we have a real resource id to lock.
-    create = feed_client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": feed_client.get(papi("/open")).json()["model_rev"],
-            "ops": [
-                {"kind": "create_element", "temp_id": "tmp_1", "type_name": "Node", "properties": {}}
-            ],
-        },
+    create = commit_ops(
+        feed_client,
+        [{"kind": "create_element", "temp_id": "tmp_1", "type_name": "Node", "properties": {}}],
     )
-    assert create.status_code == 200, create.text
-    eid = create.json()["id_map"]["tmp_1"]
+    eid = create["id_map"]["tmp_1"]
 
     with feed_client.websocket_connect(_feed_url()) as ws:
         ws.receive_json()  # snapshot

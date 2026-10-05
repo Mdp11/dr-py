@@ -1,11 +1,13 @@
 """Tests for the paged/on-demand read endpoints:
 
-GET /model/summary, /model/elements (paged + search), /model/elements/{id}/
+/model/elements (paged + search), /model/elements/{id}/
 neighborhood, /model/elements/{id}/relationships, /model/containment/roots,
 /model/elements/{id}/children, /model/changes, /model/changes/summary.
 """
 
 from __future__ import annotations
+
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +28,8 @@ from .conftest import (
     container_lock_target,
     create_view,
     seed_default_project,
+    install,
+    commit_ops,
 )
 
 READ_MM = """
@@ -68,12 +72,10 @@ def client() -> TestClient:
     return c
 
 
-def _load_model(client: TestClient, elements: list[dict], relationships: list[dict]):
-    res = client.post(
-        f"{API}/model", json={"elements": elements, "relationships": relationships}
-    )
-    assert res.status_code == 200, res.text
-    return res.json()
+def _load_model(client: TestClient, elements: list[dict], relationships: list[dict]) -> dict:
+    doc = {"elements": elements, "relationships": relationships}
+    install(metamodel=READ_MM, model=json.dumps(doc))
+    return doc
 
 
 def _item(eid: str, name: str | None = None, **props) -> dict:
@@ -94,12 +96,7 @@ def _rel(rid: str, type_name: str, source: str, target: str, **props) -> dict:
 
 
 def _post_ops(client: TestClient, ops: list[dict]) -> dict:
-    res = client.post(
-        f"{API}/model/ops",
-        json={"base_rev": get_session().model_rev, "ops": ops},
-    )
-    assert res.status_code == 200, res.text
-    return res.json()
+    return commit_ops(client, ops)
 
 
 def _entity_state(model_json: dict) -> tuple[dict, dict]:
@@ -114,76 +111,10 @@ def _entity_state(model_json: dict) -> tuple[dict, dict]:
     return elements, relationships
 
 
-# ---------------------------------------------------------------------------
-# GET /model/summary
-# ---------------------------------------------------------------------------
-
-
-def test_summary_404_without_model() -> None:
-    seed_default_project()
-    c = TestClient(create_app())
-    c.headers.update(AUTH_HEADERS)
-    assert c.get(f"{API}/model/summary").status_code == 404  # no metamodel
-    res = c.post(
-        f"{API}/metamodel",
-        content=READ_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert res.status_code == 200
-    assert c.get(f"{API}/model/summary").status_code == 404  # no model
-
-
-def test_summary_counts_and_not_validated(client: TestClient) -> None:
-    _load_model(
-        client,
-        [
-            _item("a", "A"),
-            _item("b", "B"),
-            {"id": "t1", "type_name": "Tag", "properties": {"name": "T"}},
-        ],
-        [_rel("r-ab", "Links", "a", "b", weight=2)],
-    )
-    res = client.get(f"{API}/model/summary")
-    assert res.status_code == 200
-    body = res.json()
-    assert body["element_count"] == 3
-    assert body["relationship_count"] == 1
-    assert body["elements_by_type"] == {"Item": 2, "Tag": 1}
-    # null (not {}): the model has not been validated yet
-    assert body["issue_counts"] is None
-    assert body["undo_depth"] == 0
-    assert body["model_rev"] == get_session().model_rev
-
-
-def test_summary_after_validate_and_ops(client: TestClient) -> None:
-    _load_model(client, [_item("a", "A")], [])
-    res = client.post(f"{API}/model/validate")
-    assert res.status_code == 200 and res.json() == []
-    body = client.get(f"{API}/model/summary").json()
-    assert body["issue_counts"] == {}  # validated, zero issues — not null
-
-    _post_ops(
-        client,
-        [
-            {
-                "kind": "create_element",
-                "temp_id": "tmp_1",
-                "type_name": "Item",
-                "properties": {},  # missing required name -> an issue
-            }
-        ],
-    )
-    body = client.get(f"{API}/model/summary").json()
-    assert body["element_count"] == 2
-    assert body["undo_depth"] == 1
-    assert body["issue_counts"] == {"error": 1}
-
-
 def test_read_endpoints_do_not_mutate_session(client: TestClient) -> None:
     _load_model(client, [_item("a", "A")], [])
     rev = get_session().model_rev
     for path in (
-        "/model/summary",
         "/model/elements",
         "/model/elements/a/neighborhood",
         "/model/elements/a/relationships",
@@ -980,19 +911,6 @@ def test_changes_relationship_modified_shape(client: TestClient) -> None:
     ]
     summary = client.get(f"{API}/model/changes/summary").json()
     assert (summary["ops"], summary["modifies"]) == (1, 1)
-
-
-def test_changes_empty_after_undo(client: TestClient) -> None:
-    _load_model(client, [_item("a", "A")], [])
-    _post_ops(
-        client,
-        [{"kind": "update_element", "id": "a", "properties_patch": {"note": "n"}}],
-    )
-    assert client.post(f"{API}/model/undo").status_code == 200
-    body = client.get(f"{API}/model/changes").json()
-    assert body["ops"]["elements"] == {"added": [], "modified": [], "deleted": []}
-    assert body["complete"] is True
-    assert client.get(f"{API}/model/summary").json()["undo_depth"] == 0
 
 
 def test_changes_incomplete_after_op_log_cap(

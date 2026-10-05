@@ -21,7 +21,15 @@ from fastapi.testclient import TestClient
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    head,
+    commit_ops,
+)
 from .test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
@@ -47,16 +55,13 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert c.post(papi("/metamodel"), content=_MM,
-                  headers={"content-type": "application/x-yaml"}).status_code == 200
-    assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
-    c.post(papi("/model/ops"), json={"base_rev": _rev(c), "ops": [
-        {"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}]})
+    install(metamodel=_MM, model=EMPTY_MODEL)
+    commit_ops(c, [{"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}])
     return c
 
 
 def _rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    return head().rev
 
 
 def test_rebind_route_is_gone(client: TestClient) -> None:

@@ -3,6 +3,8 @@ CR list against the session model (never applied server-side)."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -13,7 +15,11 @@ from data_rover.api.main import create_app
 from data_rover.api.schemas import MAX_CRS_PER_REQUEST
 from data_rover.api.session import get_session
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+)
 
 API = "/api/v1/projects/default"
 
@@ -56,14 +62,15 @@ def client() -> TestClient:
 @pytest.fixture
 def seeded(client: TestClient) -> TestClient:
     """a Contains b via r-ab."""
-    res = client.post(
-        f"{API}/model",
-        json={
-            "elements": [_el("a", "A"), _el("b", "B")],
-            "relationships": [_rel("r-ab", "Contains", "a", "b")],
-        },
+    install(
+        metamodel=MM,
+        model=json.dumps(
+            {
+                "elements": [_el("a", "A"), _el("b", "B")],
+                "relationships": [_rel("r-ab", "Contains", "a", "b")],
+            }
+        ),
     )
-    assert res.status_code == 200, res.text
     return client
 
 

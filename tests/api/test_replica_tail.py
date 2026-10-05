@@ -25,6 +25,9 @@ from .conftest import (
     feed_url,
     papi,
     seed_default_project,
+    EMPTY_MODEL,
+    install,
+    commit_ops,
 )
 
 # --- the completeness rule --------------------------------------------------
@@ -132,12 +135,7 @@ def client() -> TestClient:
     reset_loop()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model/upload"), content=b'{"elements":[],"relationships":[]}')
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -209,10 +207,7 @@ def _commit(
 
 
 def _ops(client: TestClient, ops: list[dict[str, Any]]) -> dict[str, Any]:
-    res = client.post(papi("/model/ops"), json={"base_rev": _head(), "ops": ops})
-    assert res.status_code == 200, res.text
-    body: dict[str, Any] = res.json()
-    return body
+    return commit_ops(client, ops)
 
 
 def _rebind(client: TestClient) -> None:
@@ -337,7 +332,7 @@ def test_a_tail_delta_is_the_feed_event_of_its_commit(client: TestClient) -> Non
     assert body["deltas"] == events
 
 
-def test_ops_and_undo_rows_are_in_the_tail(client: TestClient) -> None:
+def test_ops_and_revert_rows_are_in_the_tail(client: TestClient) -> None:
     r0 = _head()
     first = _ops(client, [_node("tmp_a", "A"), _node("tmp_b", "B")])
     a = first["id_map"]["tmp_a"]
@@ -348,7 +343,10 @@ def test_ops_and_undo_rows_are_in_the_tail(client: TestClient) -> None:
             {**_node("tmp_a2", "A2"), "id": a},
         ],
     )
-    res = client.post(papi("/model/undo"))
+    res = client.post(
+        papi("/commits/revert"),
+        json={"target_rev": first["model_rev"], "base_rev": _head()},
+    )
     assert res.status_code == 200, res.text
     undo = res.json()
     body = _assert_complete(client, r0)
@@ -381,19 +379,6 @@ def test_a_tail_from_the_middle_starts_there(client: TestClient) -> None:
     body = _assert_complete(client, _head() - 1)
     (delta,) = body["deltas"]
     assert delta["prev_rev"] == _head() - 1
-
-
-def test_a_tail_is_incomplete_across_a_baseline(client: TestClient) -> None:
-    _ops(client, [_node("tmp_a", "A")])
-    r1 = _head()
-    res = client.post(
-        papi("/model/upload"), content=b'{"elements":[],"relationships":[]}'
-    )
-    assert res.status_code == 200, res.text
-    _assert_incomplete(client, r1)
-    _ops(client, [_node("tmp_b", "B")])
-    _assert_incomplete(client, r1)
-    _assert_complete(client, _head() - 1)
 
 
 def test_a_tail_is_incomplete_across_a_commit_over_the_entity_states_cap(

@@ -112,6 +112,8 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
 - **`importer.py`** (`python -m data_rover.api.importer`) turns
   `(metamodel.yaml + model.json + view.json)` into a project's rev-0 baseline;
   the importer CLI / New Project wizard load `examples/smart-city.*` on demand (no autoload).
+  `install_model(db, project_id, metamodel_yaml=, model_json=)` replaces an existing project's metamodel and model
+  at a fresh rev-0 baseline (no history) and refreshes the live session; API tests seed through it.
 
 ## Check-out/commit + locking
 

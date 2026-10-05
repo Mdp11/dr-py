@@ -14,11 +14,14 @@ import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from sqlalchemy.orm import Session as DbSession
+
 from data_rover.core.metamodel.loader import load_metamodel_str
+from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import Folder, View
 
-from . import content, tenancy
+from . import content, rules, tenancy
 from .artifact_bundle import ArtifactBundle, BundleArtifact, SkippedEntry
 from .artifact_kinds import get_spec, rewrite_refs
 from .db import db_session, init_engine
@@ -26,8 +29,10 @@ from .db_models import ArtifactKind, Membership, Project, Role
 from .hydration import write_snapshot
 from .routes._snapshot import build_model_from_dicts
 from .serialize import parse_model_json
-from .session import Session
+from .search_index_build import start_search_index_build
+from .session import Session, get_registry
 from .settings import get_settings
+from .validation_sweep import start_validation_sweep
 
 
 def _remap_view_artifact_refs(view: View, id_map: Mapping[str, str]) -> None:
@@ -216,6 +221,40 @@ def import_project(
     sess.model_rev = 0
     write_snapshot(project_id, sess, 0)
     return skipped
+
+
+def install_model(
+    db: DbSession, project_id: str, *, metamodel_yaml: str, model_json: str | bytes
+) -> None:
+    """Replace the project's metamodel and model with these documents at a fresh baseline (rev 0, no history)."""
+    metamodel = load_metamodel_str(metamodel_yaml)
+    model = build_model_from_dicts(metamodel, parse_model_json(model_json))
+    session = get_registry().get(project_id)
+    session.set_metamodel(metamodel, announce=False)
+    session.compiled_rules = rules.load_compiled_rules(db, project_id, metamodel)
+    # set_model bumps the rev, so start one below the baseline; its cache
+    # invalidation then stamps rev 0
+    session.model_rev = -1
+    session.set_model(model, validation=ValidationState(), announce=False)
+    mm_row = content.create_metamodel(db, name="", version=1, blob=metamodel_yaml)
+    content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
+    content.clear_history(db, project_id)
+    content.append_commit(
+        db,
+        project_id,
+        rev=0,
+        commit_id="import",
+        author_id=None,
+        ops=[],
+        inverse_ops=[],
+        id_map={},
+    )
+    content.set_model_rev(db, project_id, 0)
+    db.commit()
+    write_snapshot(project_id, session, 0)
+    session.announce_reset()
+    start_validation_sweep(session)
+    start_search_index_build(session)
 
 
 def main(argv: list[str] | None = None) -> int:

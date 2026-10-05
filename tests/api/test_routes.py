@@ -7,7 +7,12 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+)
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
 API = "/api/v1/projects/default"
@@ -38,11 +43,7 @@ def _upload_example_metamodel(client: TestClient) -> None:
 
 
 def _empty_model(client: TestClient) -> None:
-    res = client.post(
-        f"{API}/model",
-        json={"elements": [], "relationships": []},
-    )
-    assert res.status_code == 200, res.text
+    install(metamodel=EXAMPLE.read_text(encoding="utf-8"), model=EMPTY_MODEL)
 
 
 MULTI_MAPPING_MM = """
@@ -164,11 +165,6 @@ def test_404_when_no_metamodel_loaded(client: TestClient) -> None:
 def test_404_when_no_model_loaded(client: TestClient) -> None:
     _upload_example_metamodel(client)
     res = client.get(f"{API}/model")
-    assert res.status_code == 404
-
-
-def test_upload_model_requires_metamodel(client: TestClient) -> None:
-    res = client.post(f"{API}/model", json={"elements": [], "relationships": []})
     assert res.status_code == 404
 
 
@@ -429,17 +425,6 @@ def test_validate_full_session_run_populates_validation_state(
         (i["severity"], i["message"], tuple(i["target_ids"])) for i in res.json()
     )
     assert got == expected
-
-    # replacing the model invalidates the baseline
-    res = client.post(
-        f"{API}/model",
-        json={
-            "elements": snapshot["elements"],
-            "relationships": snapshot["relationships"],
-        },
-    )
-    assert res.status_code == 200
-    assert get_session().validation is None
 
 
 def test_delete_metamodel_clears_model(client: TestClient) -> None:

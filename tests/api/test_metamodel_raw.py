@@ -4,7 +4,14 @@ from data_rover.api.main import create_app
 from data_rover.api.session import get_session
 from data_rover.core.metamodel.loader import load_metamodel_str
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    head,
+    install,
+    EMPTY_MODEL,
+)
 from .test_commits_metamodel_ops import _acquire_mm
 
 # Leading comment + odd spacing are the point: raw must be byte-identical.
@@ -40,7 +47,7 @@ def _client() -> TestClient:
 
 
 def _rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary")).json()["model_rev"]
+    return head().rev
 
 
 def test_raw_404_when_no_metamodel_bound() -> None:
@@ -61,8 +68,7 @@ def test_raw_returns_stored_blob_verbatim_after_upload() -> None:
 
 def test_raw_returns_rebound_blob_verbatim() -> None:
     c = _client()
-    assert c.post(papi("/metamodel"), content=_MM, headers=_YAML).status_code == 200
-    assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    install(metamodel=_MM, model=EMPTY_MODEL)
     token = _acquire_mm(c)
     r = c.post(
         papi("/commits"),

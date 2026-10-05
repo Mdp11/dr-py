@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,6 +9,10 @@ from data_rover.api import content, db
 from data_rover.api.db_models import ArtifactKind, Membership, Project, Role, User
 from data_rover.api.main import create_app
 from data_rover.api.session import get_registry
+from .conftest import (
+    install,
+    head,
+)
 
 SIMPLE_MM = "elements:\n  - name: Block\n"
 
@@ -35,19 +41,16 @@ def _h(uid: str) -> dict[str, str]:
 
 
 def _load_content(client: TestClient, pid: str, uid: str) -> None:
-    assert client.post(
-        f"/api/v1/projects/{pid}/metamodel",
-        content=SIMPLE_MM,
-        headers={"content-type": "application/x-yaml", **_h(uid)},
-    ).status_code == 200
-    assert client.post(
-        f"/api/v1/projects/{pid}/model",
-        json={
-            "elements": [{"id": "b1", "type_name": "Block", "properties": {}}],
-            "relationships": [],
-        },
-        headers=_h(uid),
-    ).status_code == 200
+    install(
+        pid,
+        metamodel=SIMPLE_MM,
+        model=json.dumps(
+            {
+                "elements": [{"id": "b1", "type_name": "Block", "properties": {}}],
+                "relationships": [],
+            }
+        ),
+    )
 
 
 def test_member_can_clone_and_becomes_owner(client: TestClient) -> None:
@@ -63,13 +66,10 @@ def test_member_can_clone_and_becomes_owner(client: TestClient) -> None:
     assert body["name"] == "src (copy)"
 
     # clone carries the source's current model state...
-    summ = client.get(
-        f"/api/v1/projects/{new_id}/model/summary", headers=_h("owner1")
-    )
-    assert summ.status_code == 200
-    assert summ.json()["element_count"] == 1
+    cloned = head(new_id)
+    assert len(cloned.elements) == 1
     # ...and starts at a fresh rev-0 (no history copied)
-    assert summ.json()["model_rev"] == 0
+    assert cloned.rev == 0
 
 
 def _create_artifact(

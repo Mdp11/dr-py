@@ -26,7 +26,14 @@ from data_rover.api.storage import (
 )
 from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    EMPTY_MODEL,
+    install,
+    commit_ops,
+)
 from .test_snapshot_writers import _ProbingStore
 
 _MM = """
@@ -78,12 +85,7 @@ def client(store: _CountingStore) -> TestClient:
     c = TestClient(create_app())
     set_snapshot_store(store)  # after create_app, which installs its own
     c.headers.update(AUTH_HEADERS)
-    res = c.post(
-        papi("/metamodel"), content=_MM, headers={"content-type": "application/x-yaml"}
-    )
-    assert res.status_code == 200, res.text
-    res = c.post(papi("/model/upload"), content=b'{"elements":[],"relationships":[]}')
-    assert res.status_code == 200, res.text
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -146,8 +148,7 @@ def _node(label: str) -> dict[str, Any]:
 
 
 def _ops(client: TestClient, ops: list[dict[str, Any]]) -> None:
-    res = client.post(papi("/model/ops"), json={"base_rev": _head(), "ops": ops})
-    assert res.status_code == 200, res.text
+    commit_ops(client, ops)
 
 
 def _rebind(client: TestClient) -> None:
@@ -187,11 +188,9 @@ def _only_v1(client: TestClient, mp: pytest.MonkeyPatch) -> None:
         s.execute(update(Snapshot).values(format=None))
 
 
-def _deprecated_post_model(client: TestClient, mp: pytest.MonkeyPatch) -> None:
+def _no_snapshot_rows(client: TestClient, mp: pytest.MonkeyPatch) -> None:
     with db.db_session() as s:
         s.execute(delete(Snapshot))
-    res = client.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
 
 
 def _over_the_cap(client: TestClient, mp: pytest.MonkeyPatch) -> None:
@@ -221,7 +220,7 @@ def _touch_model_hole(client: TestClient, mp: pytest.MonkeyPatch) -> None:
 
 _NONE_QUALIFIES: dict[str, Callable[[TestClient, pytest.MonkeyPatch], None]] = {
     "only-v1": _only_v1,
-    "deprecated-post-model": _deprecated_post_model,
+    "no-snapshot-rows": _no_snapshot_rows,
     "over-the-entity-states-cap": _over_the_cap,
     "rebind-without-its-snapshot": _rebind_without_its_snapshot,
     "past-the-revision-cap": _past_the_revision_cap,

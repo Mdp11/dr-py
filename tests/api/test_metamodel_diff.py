@@ -10,7 +10,15 @@ from data_rover.api.db_models import Role
 from data_rover.api.metamodel_candidate import issue_key, model_half
 from data_rover.api.schemas import IssueOut
 from data_rover.core.validation.issue import Issue, Severity
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    head,
+    install,
+    EMPTY_MODEL,
+    commit_ops,
+)
 
 _MM = """
 elements:
@@ -40,34 +48,14 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert (
-        c.post(
-            papi("/metamodel"),
-            content=_MM,
-            headers={"content-type": "application/x-yaml"},
-        ).status_code
-        == 200
-    )
-    assert (
-        c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code
-        == 200
-    )
+    install(metamodel=_MM, model=EMPTY_MODEL)
     # one Node with no label
-    ops_r = c.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": _rev(c),
-            "ops": [
-                {"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}
-            ],
-        },
-    )
-    assert ops_r.status_code == 200, ops_r.text
+    commit_ops(c, [{"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}])
     return c
 
 
 def _rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    return head().rev
 
 
 def test_diff_identical_metamodel_is_empty(client: TestClient) -> None:

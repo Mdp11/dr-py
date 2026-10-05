@@ -3,6 +3,8 @@ touches; the legacy flag and the no-delta paths still clear everything."""
 
 from __future__ import annotations
 
+import json
+
 import hashlib
 import random
 from typing import Literal, cast
@@ -29,7 +31,13 @@ from data_rover.core.script.runner import CallResult, RunLimits, ScriptBudget
 
 from tests.script.trusted_runner import TrustedRunner
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+    commit_ops,
+)
 
 THING_MM = """
 elements:
@@ -62,23 +70,16 @@ def client() -> TestClient:
 
 
 def _seed(client: TestClient) -> None:
-    r = client.post(
-        papi("/metamodel"),
-        content=THING_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/model"),
-        json={
+    install(
+        metamodel=THING_MM,
+        model=json.dumps({
             "elements": [
                 {"id": "t1", "type_name": "Thing", "properties": {"name": "One"}},
                 {"id": "t2", "type_name": "Thing", "properties": {"name": "Two"}},
             ],
             "relationships": [],
-        },
+        }),
     )
-    assert r.status_code == 200, r.text
 
 
 def _res(v: str) -> CallResult:
@@ -102,21 +103,13 @@ def _prime_cells(session: Session) -> int:
 
 
 def _update_t1(client: TestClient, rev: int) -> int:
-    r = client.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": rev,
-            "ops": [
-                {
-                    "kind": "update_element",
-                    "id": "t1",
-                    "properties_patch": {"name": "One!"},
-                }
-            ],
-        },
+    body = commit_ops(
+        client,
+        [{"kind": "update_element", "id": "t1", "properties_patch": {"name": "One!"}}],
+        base_rev=rev,
     )
-    assert r.status_code == 200, r.text
-    return r.json()["model_rev"]
+    new_rev: int = body["model_rev"]
+    return new_rev
 
 
 def _lock(client: TestClient, targets: list[tuple[str, str]]) -> str:
@@ -140,18 +133,6 @@ def test_ops_commit_evicts_only_touched_cells(client: TestClient) -> None:
     assert session.script_cell_cache.get(KEY_T1, new_rev) is None
     hit = session.script_cell_cache.get(KEY_T2, new_rev)
     assert hit is not None and hit.value == {"kind": "scalar", "value": "Two"}
-
-
-def test_undo_also_evicts_selectively(client: TestClient) -> None:
-    _seed(client)
-    session = get_session()
-    _update_t1(client, session.model_rev)  # something to undo
-    rev = _prime_cells(session)
-    r = client.post(papi("/model/undo"))
-    assert r.status_code == 200, r.text
-    new_rev = r.json()["model_rev"]
-    assert session.script_cell_cache.get(KEY_T1, new_rev) is None  # undo touched t1
-    assert session.script_cell_cache.get(KEY_T2, new_rev) is not None
 
 
 def test_flag_off_restores_clear_all(
@@ -178,7 +159,7 @@ def test_commit_evicts_only_touched_cells_and_preserves_others(
     client: TestClient,
 ) -> None:
     """POST /commits (the durable, lock-verified path) must apply the same
-    selective eviction as /model/ops — an untouched cell must SURVIVE at the
+    selective eviction as the unlocked path did — an untouched cell must SURVIVE at the
     new rev, not merely be absent from the touched set."""
     _seed(client)
     session = get_session()
@@ -213,24 +194,17 @@ def test_commit_structural_reject_leaves_cache_fully_cleared(
     """A structural-reject 422 sits on its own rollback branch (distinct from
     the accepted-commit branch above) and must keep using clear-all rather
     than drifting onto the selective call."""
-    r = client.post(
-        papi("/metamodel"),
-        content=CONTAINMENT_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/model"),
-        json={
+    install(
+        metamodel=CONTAINMENT_MM,
+        model=json.dumps({
             "elements": [
                 {"id": "p1", "type_name": "Node", "properties": {}},
                 {"id": "p2", "type_name": "Node", "properties": {}},
                 {"id": "child", "type_name": "Node", "properties": {}},
             ],
             "relationships": [],
-        },
+        }),
     )
-    assert r.status_code == 200, r.text
     session = get_session()
     rev = _prime_cells(session)
     token = _lock(

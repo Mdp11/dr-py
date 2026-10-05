@@ -44,6 +44,8 @@ through `dependency_overrides`.
 
 from __future__ import annotations
 
+import json
+
 import hashlib
 from collections.abc import Iterator
 
@@ -57,7 +59,12 @@ from data_rover.api.session import get_session
 from data_rover.api.settings import Settings, get_settings
 from tests.script.trusted_runner import TrustedRunner
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+)
 
 THING_MM = """
 elements:
@@ -101,23 +108,16 @@ def client(app: FastAPI) -> TestClient:
 def seed_things(client: TestClient) -> list[str]:
     """`Thing` metamodel + three `Thing` elements with pinned ids, loaded
     through the HTTP routes so the session the requests hit is the seeded one."""
-    r = client.post(
-        papi("/metamodel"),
-        content=THING_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/model"),
-        json={
+    install(
+        metamodel=THING_MM,
+        model=json.dumps({
             "elements": [
                 {"id": tid, "type_name": "Thing", "properties": {"name": tid.upper()}}
                 for tid in THING_IDS
             ],
             "relationships": [],
-        },
+        }),
     )
-    assert r.status_code == 200, r.text
     return list(THING_IDS)
 
 

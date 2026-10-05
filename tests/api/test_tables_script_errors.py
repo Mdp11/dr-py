@@ -13,6 +13,8 @@ rather than an opaque `N1`.
 
 from __future__ import annotations
 
+import json
+
 import threading
 from collections.abc import Iterator
 
@@ -27,7 +29,12 @@ from data_rover.api.settings import Settings, get_settings
 from data_rover.core.script.runner import CallResult, ScriptError
 
 from ._script_fakes import BlockingRunner, ScriptedRunner, ok, timeout
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+)
 
 THING_MM = """
 elements:
@@ -102,23 +109,16 @@ def viewer_headers(client: TestClient) -> dict[str, str]:
 def seed_thing_model(client: TestClient) -> None:
     """`Thing` metamodel + five `Thing` elements whose `name` IS their id, so
     `display_name` (and therefore `row_label`) reads `t1`..`t5`."""
-    r = client.post(
-        papi("/metamodel"),
-        content=THING_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/model"),
-        json={
+    install(
+        metamodel=THING_MM,
+        model=json.dumps({
             "elements": [
                 {"id": tid, "type_name": "Thing", "properties": {"name": tid}}
                 for tid in THING_IDS
             ],
             "relationships": [],
-        },
+        }),
     )
-    assert r.status_code == 200, r.text
 
 
 @pytest.fixture

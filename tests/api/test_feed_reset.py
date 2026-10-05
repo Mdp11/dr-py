@@ -16,7 +16,14 @@ from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+    EMPTY_MODEL,
+    commit_ops,
+)
 
 _MM = """
 elements:
@@ -40,18 +47,7 @@ def client() -> TestClient:
     reset_loop()  # each TestClient creates its own event loop; clear the cached one
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    assert (
-        c.post(
-            papi("/metamodel"),
-            content=_MM,
-            headers={"content-type": "application/x-yaml"},
-        ).status_code
-        == 200
-    )
-    assert (
-        c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code
-        == 200
-    )
+    install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 
 
@@ -89,12 +85,7 @@ def _resets(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _ops(client: TestClient, ops: list[dict[str, Any]]) -> dict[str, Any]:
-    res = client.post(
-        papi("/model/ops"),
-        json={"base_rev": get_session().model_rev, "ops": ops},
-    )
-    assert res.status_code == 200, res.text
-    return res.json()
+    return commit_ops(client, ops)
 
 
 def _seed(client: TestClient) -> dict[str, str]:
@@ -184,7 +175,7 @@ def _spy_on_resets(
     return seen
 
 
-def test_an_upload_announces_after_its_baseline(
+def test_an_install_announces_after_its_baseline(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def snapshot_rev() -> int | None:
@@ -199,34 +190,12 @@ def test_an_upload_announces_after_its_baseline(
             b'{"elements":[{"id":"n1","type_name":"Node","properties":{}}],'
             b'"relationships":[]}'
         )
-        res = client.post(papi("/model/upload"), content=body)
-        assert res.status_code == 200, res.text
+        install(metamodel=_MM, model=body)
         rev = get_session().model_rev
         assert _resets(_frames_before_join(client, ws)) == [
             {"type": "reset", "model_rev": rev}
         ]
     assert seen == [rev]
-
-
-def test_an_upload_whose_baseline_fails_still_announces(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from data_rover.api.routes import model as model_routes
-
-    def fail(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("store down")
-
-    monkeypatch.setattr(model_routes, "persist_baseline", fail)
-    with client.websocket_connect(_feed_url()) as ws:
-        _settle(ws)
-        with pytest.raises(RuntimeError, match="store down"):
-            client.post(
-                papi("/model/upload"), content=b'{"elements":[],"relationships":[]}'
-            )
-        rev = get_session().model_rev
-        assert _resets(_frames_before_join(client, ws)) == [
-            {"type": "reset", "model_rev": rev}
-        ]
 
 
 def test_post_metamodel_announces_after_its_rows(
@@ -299,23 +268,6 @@ def test_a_commit_does_not(client: TestClient) -> None:
         frames = _frames_before_join(client, ws)
         assert _resets(frames) == []
         assert [f["type"] for f in frames if f["type"] == "commit"] == ["commit"]
-
-
-def test_model_ops_stays_silent(client: TestClient) -> None:
-    ids = _seed(client)
-    with client.websocket_connect(_feed_url()) as ws:
-        _settle(ws)
-        _ops(
-            client,
-            [
-                {
-                    "kind": "update_element",
-                    "id": ids["a"],
-                    "properties_patch": {"label": "o"},
-                }
-            ],
-        )
-        assert _frames_before_join(client, ws) == []
 
 
 def test_the_replica_routes_after_a_reset(client: TestClient) -> None:

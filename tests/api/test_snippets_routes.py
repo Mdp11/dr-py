@@ -14,6 +14,8 @@ unexercised here.
 
 from __future__ import annotations
 
+import json
+
 from collections.abc import Iterator
 
 import pytest
@@ -36,7 +38,14 @@ from data_rover.api.main import create_app
 from data_rover.api.script_runner import get_runner
 from tests.script.trusted_runner import TrustedRunner
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+    head,
+    Head,
+)
 
 #: One concrete element type with a `name` property, and a containment
 #: relationship — mirrors tests/script/conftest.py::tiny_model()'s shape so
@@ -79,42 +88,29 @@ def client(app: FastAPI) -> TestClient:
 
 
 def _seed_model(client: TestClient) -> None:
-    """Upload a tiny metamodel + a 3-element model with fixed ids `b1`/`b2`/
-    `b3` (mirrors tests/script/conftest.py::tiny_model()), via the same
-    house-pattern HTTP upload other route tests use (see
-    tests/api/test_commits_route.py, tests/api/test_locks_route.py)."""
-    res = client.post(
-        papi("/metamodel"),
-        content=_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert res.status_code == 200, res.text
-    res = client.post(
-        papi("/model"),
-        json={
-            "elements": [
-                {"id": "b1", "type_name": "Building", "properties": {"name": "Building One"}},
-                {"id": "b2", "type_name": "Building", "properties": {"name": "Building Two"}},
-                {"id": "b3", "type_name": "Building", "properties": {"name": "Building Three"}},
-            ],
-            "relationships": [
-                {
-                    "id": "rel1",
-                    "type_name": "Owns",
-                    "source_id": "b1",
-                    "target_id": "b2",
-                    "properties": {},
-                },
-            ],
-        },
-    )
-    assert res.status_code == 200, res.text
+    """Install a tiny metamodel + a 3-element model with fixed ids `b1`/`b2`/
+    `b3` (mirrors tests/script/conftest.py::tiny_model())."""
+    model = {
+        "elements": [
+            {"id": "b1", "type_name": "Building", "properties": {"name": "Building One"}},
+            {"id": "b2", "type_name": "Building", "properties": {"name": "Building Two"}},
+            {"id": "b3", "type_name": "Building", "properties": {"name": "Building Three"}},
+        ],
+        "relationships": [
+            {
+                "id": "rel1",
+                "type_name": "Owns",
+                "source_id": "b1",
+                "target_id": "b2",
+                "properties": {},
+            },
+        ],
+    }
+    install(metamodel=_MM, model=json.dumps(model))
 
 
-def _model_summary(client: TestClient) -> dict:
-    r = client.get(papi("/model/summary"))
-    assert r.status_code == 200, r.text
-    return r.json()
+def _model_summary(client: TestClient) -> Head:
+    return head()
 
 
 @pytest.fixture
@@ -261,7 +257,7 @@ def test_run_stale_false_on_quiet_run(client: TestClient) -> None:
     )
     assert r.status_code == 200, r.text
     assert r.json()["stale"] is False
-    assert r.json()["model_rev"] == _model_summary(client)["model_rev"]
+    assert r.json()["model_rev"] == _model_summary(client).rev
 
 
 def test_run_runtime_error_maps_to_error_out(client: TestClient) -> None:

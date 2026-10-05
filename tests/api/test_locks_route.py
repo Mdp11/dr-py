@@ -14,7 +14,16 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    create_folder_via_commit,
+    papi,
+    seed_default_project,
+    head,
+    install,
+    EMPTY_MODEL,
+    commit_ops,
+)
 
 OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
 
@@ -37,22 +46,13 @@ def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    # Upload metamodel
-    res = c.post(
-        papi("/metamodel"),
-        content=_LOCK_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert res.status_code == 200, res.text
-    # Upload an empty model so GET /model/summary and POST /model/ops work
-    res = c.post(papi("/model"), json={"elements": [], "relationships": []})
-    assert res.status_code == 200, res.text
+    install(metamodel=_LOCK_MM, model=EMPTY_MODEL)
     return c
 
 
 def _rev(client: TestClient) -> int:
-    """Current model_rev from GET /model/summary."""
-    return client.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    """Current head rev."""
+    return head().rev
 
 
 def _etype(client: TestClient) -> str:
@@ -64,19 +64,13 @@ def _etype(client: TestClient) -> str:
 def _seed_two_elements(client: TestClient) -> tuple[str, str]:
     """Create two elements and return their generated ids."""
     etype = _etype(client)
-    r = client.post(
-        papi("/model/ops"),
-        headers=AUTH_HEADERS,
-        json={
-            "base_rev": _rev(client),
-            "ops": [
-                {"kind": "create_element", "temp_id": "tmp_a", "type_name": etype, "properties": {}},
-                {"kind": "create_element", "temp_id": "tmp_b", "type_name": etype, "properties": {}},
-            ],
-        },
-    )
-    assert r.status_code == 200, r.text
-    idmap = r.json()["id_map"]
+    idmap = commit_ops(
+        client,
+        [
+            {"kind": "create_element", "temp_id": "tmp_a", "type_name": etype, "properties": {}},
+            {"kind": "create_element", "temp_id": "tmp_b", "type_name": etype, "properties": {}},
+        ],
+    )["id_map"]
     return idmap["tmp_a"], idmap["tmp_b"]
 
 

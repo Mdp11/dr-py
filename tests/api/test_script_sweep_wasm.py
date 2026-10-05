@@ -34,7 +34,12 @@ from data_rover.api.script_sweep import reset_global_slots
 from data_rover.api.session import Session, get_session
 from data_rover.api.settings import get_settings
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    papi,
+    seed_default_project,
+    install,
+)
 
 if TYPE_CHECKING:
     from data_rover.api.script_runner import WasmScriptRunner
@@ -110,15 +115,9 @@ def client(app: FastAPI, wasm_runner: WasmScriptRunner) -> TestClient:
 def big_session(client: TestClient) -> Session:
     """`Thing` metamodel + `ROWS` elements, loaded through the HTTP routes so
     the table has real rows in a deterministic build order."""
-    r = client.post(
-        papi("/metamodel"),
-        content=THING_MM,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        papi("/model"),
-        json={
+    install(
+        metamodel=THING_MM,
+        model=json.dumps({
             "elements": [
                 {
                     "id": _eid(i),
@@ -128,9 +127,8 @@ def big_session(client: TestClient) -> Session:
                 for i in range(ROWS)
             ],
             "relationships": [],
-        },
+        }),
     )
-    assert r.status_code == 200, r.text
     return get_session()
 
 
