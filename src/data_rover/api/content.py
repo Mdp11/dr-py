@@ -11,6 +11,8 @@ from collections.abc import Collection, Iterator
 from typing import Any
 
 from sqlalchemy import String, and_, cast, delete, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .db_models import (
@@ -305,19 +307,37 @@ def record_snapshot(
     relationships: int | None = None,
 ) -> Snapshot:
     """Upsert a snapshot row. Every field is set, so the row says what the
-    last writer at this ``rev`` wrote."""
-    row = db.get(Snapshot, (project_id, rev))
-    if row is None:
-        row = Snapshot(project_id=project_id, rev=rev)
-        db.add(row)
-    row.key = key
-    row.format = format
-    row.metamodel_id = metamodel_id
-    row.state_digest = state_digest
-    row.elements = elements
-    row.relationships = relationships
-    db.flush()
+    last writer at this ``rev`` wrote.
+
+    One ``INSERT ... ON CONFLICT DO UPDATE`` statement, so two writers of the
+    same ``(project_id, rev)`` (the snapshot job and a replica's open, in this
+    process or another) both succeed whatever order their statements land in:
+    a get-then-insert would let the loser raise a unique violation."""
+    values = {
+        "key": key,
+        "ts": _utcnow(),
+        "format": format,
+        "metamodel_id": metamodel_id,
+        "state_digest": state_digest,
+        "elements": elements,
+        "relationships": relationships,
+    }
+    db.flush()  # a project or metamodel added in this unit of work comes first
+    insert_ = _dialect_insert(db)
+    stmt = insert_(Snapshot).values(project_id=project_id, rev=rev, **values)
+    db.execute(
+        stmt.on_conflict_do_update(index_elements=["project_id", "rev"], set_=values)
+    )
+    row = db.get(Snapshot, (project_id, rev), populate_existing=True)
+    assert row is not None
     return row
+
+
+def _dialect_insert(db: Session) -> Any:
+    """The dialect's ``insert`` construct, which has ``on_conflict_do_update``."""
+    if db.get_bind().dialect.name == "postgresql":
+        return pg_insert
+    return sqlite_insert
 
 
 def latest_snapshot(

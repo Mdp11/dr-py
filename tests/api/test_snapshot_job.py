@@ -289,3 +289,90 @@ def test_an_open_after_an_import_whose_job_has_not_written_gets_a_snapshot(
     assert r.status_code == 200, r.text
     assert r.json()["rev"] == 0
     assert _rev0_snapshot_exists(DEFAULT_PROJECT_ID)
+
+
+# --- two writers of one (project, rev) ----------------------------------------
+
+
+def _inject_competing_snapshot_row(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Make the next ``record_snapshot`` calls run as the loser of a race: the
+    other writer's row is already in the table, and a read before the write
+    saw none. The returned list counts the calls."""
+    from sqlalchemy import insert
+    from sqlalchemy.orm import Session as OrmSession
+
+    from data_rover.api.db_models import Snapshot
+
+    real = content.record_snapshot
+    real_get = OrmSession.get
+    calls: list[int] = []
+
+    def racing(db: OrmSession, project_id: str, *, rev: int, **kw: object) -> Snapshot:
+        calls.append(rev)
+        if len(calls) == 1:
+            db.execute(
+                insert(Snapshot).values(
+                    project_id=project_id, rev=rev, key="competitor", format="v2"
+                )
+            )
+
+            def stale_get(self: OrmSession, entity: object, ident: object, **k: object):
+                if entity is Snapshot and not k.get("populate_existing"):
+                    return None  # what a get before the competitor's insert saw
+                return real_get(self, entity, ident, **k)  # type: ignore[arg-type]
+
+            monkeypatch.setattr(OrmSession, "get", stale_get)
+        try:
+            return real(db, project_id, rev=rev, **kw)  # type: ignore[arg-type]
+        finally:
+            monkeypatch.setattr(OrmSession, "get", real_get)
+
+    monkeypatch.setattr(content, "record_snapshot", racing)
+    return calls
+
+
+def _snapshot_rows(project_id: str) -> list[tuple[int, str]]:
+    from data_rover.api.db_models import Snapshot
+
+    with db.db_session() as s:
+        rows = s.query(Snapshot).filter_by(project_id=project_id).all()
+        return sorted((r.rev, r.key) for r in rows)
+
+
+def test_a_job_that_loses_the_race_for_a_snapshot_row_still_writes_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _client()
+    with db.db_session() as s:
+        from sqlalchemy import delete
+
+        from data_rover.api.db_models import Snapshot
+
+        s.execute(delete(Snapshot))
+    calls = _inject_competing_snapshot_row(monkeypatch)
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True)
+    assert job is not None and job.written_rev == 0 and calls == [0]
+    rows = _snapshot_rows(DEFAULT_PROJECT_ID)
+    assert len(rows) == 1 and rows[0][0] == 0
+    assert rows[0][1] != "competitor"  # the last writer's fields stand
+
+
+def test_an_open_that_loses_the_race_for_a_snapshot_row_answers_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    c = _client()
+    with db.db_session() as s:
+        from sqlalchemy import delete
+
+        from data_rover.api.db_models import Snapshot
+
+        s.execute(delete(Snapshot))
+    calls = _inject_competing_snapshot_row(monkeypatch)
+    r = c.get(papi("/replica/snapshot"), headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    assert r.json()["rev"] == 0 and calls == [0]
+    assert len(_snapshot_rows(DEFAULT_PROJECT_ID)) == 1
+    # and a second writer afterwards is no error either
+    job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True)
+    assert job is not None and job.written_rev == 0
+    assert len(_snapshot_rows(DEFAULT_PROJECT_ID)) == 1
