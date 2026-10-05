@@ -299,11 +299,9 @@ def test_revert_forbidden_for_viewer(client: TestClient) -> None:
     assert r.status_code == 403
 
 
-def test_revert_records_conformance_count(client: TestClient) -> None:
-    # Create a relationship with a bad endpoint type so reverting to the
-    # state that contains it lands a conformance issue. Simpler: rely on a
-    # revert that reconstructs a clean state -> count 0; assert the field is
-    # present and an int on the new commit row.
+def test_revert_reports_no_validation_count(client: TestClient) -> None:
+    # A revert is not validated by the server and no client reported a count,
+    # so the commit row and the response carry none.
     commit_create(client, "A")
     target = model_rev(client)
     commit_create(client, "B")
@@ -312,9 +310,9 @@ def test_revert_records_conformance_count(client: TestClient) -> None:
         json={"target_rev": target, "base_rev": model_rev(client)},
     )
     assert r.status_code == 200, r.text
-    assert isinstance(r.json()["validation_error_count"], int)
+    assert r.json()["validation_error_count"] is None
     top = client.get(papi("/commits"), headers=AUTH_HEADERS).json()["commits"][0]
-    assert top["validation_error_count"] == r.json()["validation_error_count"]
+    assert top["validation_error_count"] is None
 
 
 def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:

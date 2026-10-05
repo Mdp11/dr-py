@@ -248,9 +248,7 @@ class Commit(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False, default="")
     #: the validation error count the client reported at commit; NULL for a
     #: revert, which has no client preview.
-    validation_error_count: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )
+    validation_error_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     #: the issue list the client reported at commit (IssueOut dicts).
     issues: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     #: metamodel rebind: the model's metamodel_id before/after this commit.

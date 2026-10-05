@@ -125,16 +125,6 @@ def _lock(client: TestClient, targets: list[tuple[str, str]]) -> str:
     return r.json()["token"]
 
 
-def test_ops_commit_evicts_only_touched_cells(client: TestClient) -> None:
-    _seed(client)
-    session = get_session()
-    rev = _prime_cells(session)
-    new_rev = _update_t1(client, rev)
-    assert session.script_cell_cache.get(KEY_T1, new_rev) is None
-    hit = session.script_cell_cache.get(KEY_T2, new_rev)
-    assert hit is not None and hit.value == {"kind": "scalar", "value": "Two"}
-
-
 def test_flag_off_restores_clear_all(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -153,39 +143,6 @@ def test_legacy_touch_model_still_clears_all(client: TestClient) -> None:
     _prime_cells(session)
     session.touch_model()
     assert session.script_cell_cache.size == 0
-
-
-def test_commit_evicts_only_touched_cells_and_preserves_others(
-    client: TestClient,
-) -> None:
-    """POST /commits (the durable, lock-verified path) must apply the same
-    selective eviction as the unlocked path did — an untouched cell must SURVIVE at the
-    new rev, not merely be absent from the touched set."""
-    _seed(client)
-    session = get_session()
-    rev = _prime_cells(session)
-    token = _lock(client, [("t1", "exclusive")])
-    r = client.post(
-        papi("/commits"),
-        json={
-            "base_rev": rev,
-            "ops": [
-                {
-                    "kind": "update_element",
-                    "id": "t1",
-                    "properties_patch": {"name": "One!"},
-                }
-            ],
-            "lock_tokens": [token],
-            "message": "touch t1",
-        },
-    )
-    assert r.status_code == 200, r.text
-    new_rev = r.json()["model_rev"]
-    assert new_rev == rev + 1
-    assert session.script_cell_cache.get(KEY_T1, new_rev) is None
-    hit = session.script_cell_cache.get(KEY_T2, new_rev)
-    assert hit is not None and hit.value == {"kind": "scalar", "value": "Two"}
 
 
 def test_commit_structural_reject_leaves_cache_fully_cleared(

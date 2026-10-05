@@ -2,10 +2,10 @@
 
 Reuses the delta machinery from ``routes/ops.py`` — ``_apply_batch`` (atomic
 apply with inverse collection; raises 422 on a mutation-boundary error),
-``_rollback`` (undo a previewed batch), and ``_ensure_validation_seeded``
-(full-run baseline). Preview runs apply → validate dirty set → roll back,
-all under ``session.write_mutex``. This module deliberately imports those
-module-private helpers — they are part of the ops package's internal
+and ``_rollback`` (undo a previewed batch). Preview runs apply → roll back,
+all under ``session.write_mutex``; it checks the non-model ops and the model
+batch's applier, and reports no issues (validation is the engine's). This
+module deliberately imports those module-private helpers — they are part of the ops package's internal
 surface, shared with this sibling. The artifact delta is likewise not built
 here: ``artifact_ops.artifact_delta_headers`` /
 ``artifact_ops.broadcast_artifact_events`` are shared with POST /model/undo,
@@ -34,9 +34,6 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
-from data_rover.core.validation.issue import IssueCategory
-from data_rover.core.validation.rules.compile import CompiledRules
-from data_rover.core.validation.scope import Scope
 from data_rover.core.view.schema import View
 
 from ..artifact_ops import (
@@ -58,7 +55,6 @@ from ..db_models import Commit, Membership, Role, User
 from ..deps import Session, get_request_session, require_model
 from ..hydration import deserialize_ops, reconstruct_model_at, write_snapshot
 from ..identity import get_current_user
-from ..invalidation import touched_keys
 from ..lock_mirror import mirror_session_leases
 from ..locking import (
     ARTIFACT_PREFIX,
@@ -72,16 +68,8 @@ from ..metamodel_ops import (
     load_candidate,
     split_rebind,
 )
-from ..rules import (
-    applies_population,
-    attributable_issues,
-    candidate_pipeline,
-    expand_dirty,
-    load_compiled_rules,
-    rules_touched,
-    session_pipeline,
-)
 from ..settings import get_settings
+from ..structural import structural_blockers
 from ..view_ops import (
     ViewBatchResult,
     apply_view_ops_atomic,
@@ -139,7 +127,6 @@ from .ops import (
     TEMP_ID_PREFIX,
     _apply_batch,
     _BatchResult,
-    _ensure_validation_seeded,
     _maybe_periodic_snapshot,
     _persist_commit,
     _rollback,
@@ -397,29 +384,20 @@ class _CommitUnwind:
     - ``prior_metamodel`` unwinds AFTER ``model_res``,
       reversing apply order: the rebind is HOISTED to apply first (so the
       batch's model ops validate against the candidate schema), therefore it
-      unwinds last among the in-memory halves. It restores the same four
-      pieces the swap touched — ``session.metamodel``, ``model.metamodel``,
-      ``model.indexes`` (containment flags + key groups are metamodel-derived)
-      and ``session.validation`` — plus derived-cache invalidation, which it
-      shares with the ``model_res`` step rather than doing itself precisely
-      BECAUSE of the rev-decrement ordering above. It nulls
-      ``session.validation`` rather than restoring it: a rebind-carrying batch
-      may already have called ``ValidationState.set_full`` by the time a
-      failure lands, so the only safe state is "force a re-seed on next read".
-    - ``prior_compiled`` restores the rule sets a batch recompiled (it
-      changed a rules artifact, or swapped the schema they compiled
-      against). Order-free — a single reassignment — but it sits beside the
-      metamodel step, whose swap is one of the two things that triggers the
-      recompile.
+      unwinds last among the in-memory halves. It restores the three
+      pieces the swap touched — ``session.metamodel``, ``model.metamodel`` and
+      ``model.indexes`` (containment flags + key groups are
+      metamodel-derived) — plus derived-cache invalidation, which it shares
+      with the ``model_res`` step rather than doing itself precisely BECAUSE
+      of the rev-decrement ordering above.
     - ``view_results`` roll back newest group first; each entry pairs the
       live ``View`` object with its batch result, so the unwind never has
       to re-resolve a view id.
-    - ``op_log.pop()`` and the ``session.validation`` null only when
-      ``rev_bumped``: the batch enters the op log — and the issue store gets
-      its irreversible splice — at the same instant the rev bumps (step d),
-      never earlier. The state digest advances at that instant too, so the
-      same flag puts ``prior_digest`` back; before it, the exact model
-      rollback leaves the digest true as it stands.
+    - ``op_log.pop()`` only when ``rev_bumped``: the batch enters the op
+      log at the same instant the rev bumps (step d), never earlier. The
+      state digest advances at that instant too, so the same flag puts
+      ``prior_digest`` back; before it, the exact model rollback leaves the
+      digest true as it stands.
     - ``db.rollback()`` last, and only once ``db_staged`` — the paths
       before any staging (missing-lock 409, model-apply failure) never
       rolled the request transaction back and still must not.
@@ -443,10 +421,6 @@ class _CommitUnwind:
     #: state at all (``db.rollback()`` alone discards the staged
     #: ``metamodel_layouts`` row).
     prior_metamodel: Metamodel | None = None
-    #: the compiled rule sets this request swapped OUT. Registered at the
-    #: instant of the swap, like ``prior_metamodel``; None whenever the batch
-    #: left ``session.compiled_rules`` alone (the common case).
-    prior_compiled: CompiledRules | None = None
     #: ``session.state_digest_value`` from before the batch was folded into
     #: it (None = it was not known then either). Meaningful once ``rev_bumped``.
     prior_digest: int | None = None
@@ -459,26 +433,12 @@ class _CommitUnwind:
         if self.prior_metamodel is not None:
             # Reverse of apply order: the swap went in first, so it unwinds
             # after the model ops that were applied on top of it. See the
-            # class docstring for why validation is NULLED (not restored) and
-            # why cache invalidation is deferred to the shared step below.
+            # class docstring for why cache invalidation is deferred to the
+            # shared step below.
             self.session.metamodel = self.prior_metamodel
             self.model.metamodel = self.prior_metamodel
             self.model.indexes.rebuild(keep_search=True)
-            self.session.validation = None
-        if self.prior_compiled is not None:
-            # One reassignment, exactly as the forward path swaps it — a
-            # CompiledRules is never mutated in place (see ``api/rules``).
-            self.session.compiled_rules = self.prior_compiled
         if self.rev_bumped:
-            # rev_bumped registers after step d, whose issue-store splice has
-            # no inverse: the pre-batch issues for the spliced owners are
-            # already gone, and once ``prior_compiled`` restores the rule sets
-            # the store would hold verdicts from rules the session no longer
-            # has — with no read path able to tell. Null it and let the next
-            # read pay one O(model) re-seed. Every rejection BEFORE step d
-            # (structural, strict-mode) leaves the store untouched and pays
-            # nothing.
-            self.session.validation = None
             self.session.model_rev -= 1
             self.session.state_digest_value = self.prior_digest
         if self.model_res is not None or self.prior_metamodel is not None:
@@ -497,19 +457,36 @@ class _CommitUnwind:
             self.db.rollback()
 
 
+def _structural_ids(model: Model, res: _BatchResult) -> list[str]:
+    """The entities whose structure a batch can have changed: the ones it
+    touched, the ends of the relationships it touched (a containment parent
+    or cycle is judged on the elements), and the referencers of the elements
+    it deleted (their references now dangle)."""
+    ids = [
+        *res.changed_element_ids,
+        *res.changed_relationship_ids,
+        *res.recreated_element_ids,
+        *res.recreated_relationship_ids,
+    ]
+    for rel_id in res.changed_relationship_ids:
+        rel = model.relationships[rel_id]
+        ids.extend((rel.source_id, rel.target_id))
+    for element_id in res.deleted_element_ids:
+        ids.extend(model.indexes.referencers_of(element_id))
+    return ids
+
+
 @router.get("/open", response_model=None)
 def open_project(
     session: Session = Depends(get_request_session),
     membership: Membership = Depends(require_membership),
 ) -> OpenResponse:
     _, model = require_model(session)
-    state = _ensure_validation_seeded(session, model)
     return OpenResponse(
         model_rev=session.model_rev,
         role=membership.role.value,
         element_count=len(model.elements),
         relationship_count=len(model.relationships),
-        issue_counts=state.counts(),
         lock_ttl_seconds=get_settings().lock_ttl_seconds,
         strict_mode=session.strict_mode,
     )
@@ -538,17 +515,12 @@ def preview_commit(
     # ARTIFACT ops take a few lines down).
     rebind_op, _mm_moves = split_rebind(metamodel_ops)
     if rebind_op is not None and membership.role is not Role.owner:
-        # The SAME owner gate ``create_commit`` puts on the rebind op, and for a
-        # reason preview does not share with any other arm of this route: a
-        # rebind preview is the only batch here that costs O(model). It swaps
-        # the candidate in, rebuilds the whole index twice, and runs a full
-        # ``Scope.all()`` validation — all under ``session.write_mutex``, i.e.
-        # every commit in the project is blocked for the duration. Because
-        # ``/commits/preview`` is a read-only POST (``authz``'s allowlist), a
-        # VIEWER reaches it, so without this gate any member could stall an
-        # ~80 MB project at will. Scoped to the rebind arm ONLY: previewing
-        # model/artifact/view batches stays open to every member, which is the
-        # whole point of the allowlist entry.
+        # The same owner gate ``create_commit`` puts on the rebind op: a
+        # rebind preview swaps the candidate in and rebuilds the whole index
+        # twice under ``session.write_mutex``, so every commit in the project
+        # is blocked for the duration. ``/commits/preview`` is a read-only
+        # POST (``authz``'s allowlist), so a VIEWER reaches it; without this
+        # gate any member could stall an ~80 MB project at will.
         raise HTTPException(
             status_code=403, detail="metamodel changes require the owner role"
         )
@@ -578,49 +550,17 @@ def preview_commit(
             model.indexes.rebuild(keep_search=True)
         try:
             # _apply_batch raises 422 on a mutation-boundary structural error
-            # (unknown type, missing endpoint, unknown property) — the safety
-            # net. It self-rolls-back anything it already applied before
-            # raising, so a raise here leaves the MODEL clean; only the
-            # metamodel swap above still needs undoing, which the outer
-            # `finally` below does unconditionally.
-            res = _apply_batch(model, model_ops, restore=False)
-            # The ops' OWN touched entities, snapshotted BEFORE the widening
-            # below: ``res.dirty.ids`` is a live view, so a reference would
-            # widen underneath the ``would_block`` gate.
-            base_dirty = set(res.dirty.ids)
-            try:
-                # A rebind batch validates the FULL model, like create_commit
-                # does: a schema swap can mint issues on elements the batch's
-                # own ops never touched, which the dirty-scope shortcut a
-                # non-rebind batch uses would miss entirely.
-                #
-                # Rules are read-only here: preview NEVER assigns
-                # session.compiled_rules, so a previewed rules-artifact edit
-                # is dry-validated and every preview reflects the COMMITTED
-                # rule sets.
-                if candidate is not None:
-                    scoped = candidate_pipeline(session, candidate).validate(
-                        model, Scope.all()
-                    )
-                else:
-                    expand_dirty(session, model, res.dirty)
-                    scoped = session_pipeline(session).validate(
-                        model, res.dirty.to_scope()
-                    )
-            finally:
-                _rollback(model, res)  # always restore the model
+            # (unknown type, missing endpoint, unknown property): the batch
+            # does not apply. It self-rolls-back anything it already applied
+            # before raising, so a raise here leaves the MODEL clean; only the
+            # metamodel swap above still needs undoing, which the `finally`
+            # below does unconditionally.
+            _rollback(model, _apply_batch(model, model_ops, restore=False))
         finally:
-            # Unconditional across every exit from the try above — the happy
-            # path, a validation-pipeline exception, and an `_apply_batch`
-            # mutation-boundary 422 alike — because a preview that leaves the
-            # session on the candidate schema is a correctness bug, not a
-            # degraded-but-safe state: preview is supposed to be the SAFE,
-            # read-only path.
+            # A preview that leaves the session on the candidate schema is a
+            # correctness bug, not a degraded-but-safe state: preview is
+            # supposed to be the SAFE, read-only path.
             if candidate is not None:
-                # candidate is only ever set once the pre-swap `assert
-                # prior_mm is not None` above already held, but mypy cannot
-                # carry that narrowing across the `try` boundary into this
-                # `finally` — re-assert rather than silence the checker.
                 assert prior_mm is not None
                 session.metamodel = prior_mm
                 model.metamodel = prior_mm
@@ -630,26 +570,7 @@ def preview_commit(
             # script cell values computed mid-preview at this rev. Invalidate
             # both caches and the sweeps behind them.
             session.invalidate_derived_caches()
-    structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
-    conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
-    return PreviewResponse(
-        conformance_error_count=len(conformance),
-        structural_blockers=[IssueOut.from_core(i) for i in structural],
-        issues=[IssueOut.from_core(i) for i in scoped],
-        # ``attributable_issues`` mirrors create_commit's strict gate exactly:
-        # a preview that promises a landing followed by a 422 is worse than
-        # either answer alone. ``conformance_error_count`` and ``issues`` stay
-        # the UNFILTERED truth — the gate narrows, the report does not.
-        #
-        # Rebind batches are strict-exempt, mirroring create_commit: the
-        # engine must stay inspectable across a migration even under strict
-        # mode, so a rebind preview never reports would_block.
-        would_block=(
-            session.strict_mode
-            and rebind_op is None
-            and bool(attributable_issues(conformance, base_dirty))
-        ),
-    )
+    return PreviewResponse()
 
 
 @router.get("/commits", response_model=None)
@@ -814,8 +735,7 @@ def create_commit(
            all, so the overlap check alone would find nothing and let a
            stale batch land against a wholesale-replaced model.
        Only once none of these apply does the overlap check itself run.
-    2. Seed the validation baseline.
-    3. Under the write mutex:
+    2. Under the write mutex:
        a. Verify the caller still holds every required lock (409 if any gone).
        a2. Quiet-peers guard for rebind-carrying batches (409 while a PEER
           holds a model-scope lease).
@@ -828,17 +748,11 @@ def create_commit(
           transaction).
        b3. Apply the view half (all-or-nothing via apply_view_ops_atomic) —
           auto-creating an empty view for a project that never had one.
-       b4. Recompile the user rule sets if this batch changed a rules
-          artifact or the schema they compiled against.
-       c. Hard-reject structural blockers (422; rolls back every half). A
-          rebind-carrying batch validates the FULL model (Scope.all()) here
-          instead of the dirty scope — a schema change invalidates the
-          dirty-scope premise for the whole model. Otherwise the dirty scope
-          is widened to what user rules can reach back from it (and, when the
-          rule sets changed, to everything the old and new ones apply to).
-       d. Splice conformance issues into the issue store (a rebind REPLACES it
-          wholesale via set_full), bump rev, record batch. Rebind batches are
-          exempt from the strict-mode conformance reject.
+       c. Hard-reject structural blockers (422; rolls back every half),
+          checked over the batch's touched entities and the referencers of
+          the elements it deleted. Conformance is never rejected: the client
+          reports its validation count and issues, stored as given.
+       d. Bump rev, record batch.
        e. Persist to the durable journal (500 + full rollback on failure); the
           view blob (if touched) and the layout blob (ditto) are staged on the
           SAME DB transaction as the Commit row, so all land or none do. A
@@ -851,7 +765,7 @@ def create_commit(
           A rebind broadcasts ``rebind_event`` INSTEAD of ``commit_event``:
           peers cannot apply a delta across a schema swap, so they get the
           reload banner.
-    4. Return CommitResponse with full delta + commit metadata.
+    3. Return CommitResponse with full delta + commit metadata.
 
     Mixed-batch atomicity
     ---------------------------------------------------------------------
@@ -964,7 +878,6 @@ def create_commit(
             return _conflict_response(
                 session.model_rev, "conflicting concurrent commits"
             )
-    state = _ensure_validation_seeded(session, model)
     if not payload.ops:
         # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
         # no-op early returns — current state, no rev bump, no undo slot. It
@@ -983,9 +896,6 @@ def create_commit(
             changed_relationships=[],
             deleted_element_ids=[],
             deleted_relationship_ids=[],
-            issues_removed_owner_ids=[],
-            issues_added=[],
-            issue_counts=state.counts(),
             commit_id="",
             message="",
             validation_error_count=0,
@@ -1128,55 +1038,13 @@ def create_commit(
             view_results.append((vid, target, vres))
             view_id_map.update(vres.id_map)
         all_view_res = [vres for _vid, _view, vres in view_results]
-        # b4. recompile the user rule sets when this batch invalidated them:
-        #     it created/changed/deleted a rules artifact (read back off the
-        #     rows b2 staged on this transaction), or it swapped the schema
-        #     they were compiled against. ``rebound`` is hoisted here from
-        #     step c, which branches on the same flag. Both calls read the
-        #     DB, so the try/except mirrors b2's: an infra failure here must
-        #     not be the one path that leaves the model half-mutated.
         rebound = mm_res is not None and mm_res.rebound
-        prior_compiled = session.compiled_rules
-        try:
-            touched_rules = rules_touched(db, artifact_ops, art_res)
-            if rebound or touched_rules:
-                unwind.prior_compiled = prior_compiled
-                session.compiled_rules = load_compiled_rules(
-                    db, project_id, model.metamodel
-                )
-        except Exception:
-            unwind.unwind()  # undo every live half — see _CommitUnwind
-            raise
         # c. hard-reject structural blockers. Model content only: an artifact
         #    op's own validity was settled at apply time (b2), and an artifact
-        #    row can never make the MODEL structurally invalid.
-        # This batch's OWN touched entities, snapshotted BEFORE either arm
-        # below widens ``res.dirty`` — its ``ids`` is a live view, so a
-        # reference would widen underneath the strict-mode gate at step d.
-        base_dirty = set(res.dirty.ids)
-        if rebound:
-            # A schema change invalidates the dirty-scope premise for the
-            # WHOLE model, not just this batch's touched entities: an element
-            # nobody edited can start (or stop) conforming purely because the
-            # type it instantiates changed. So re-validate everything — an
-            # O(model) cost — and REPLACE the issue store below rather than
-            # splicing into it.
-            scoped = session_pipeline(session).validate(model, Scope.all())
-        else:
-            # A rule reports on the element it applies to, but reads across
-            # relationship hops — so an edit to a FAR element can flip an
-            # issue the batch never touched. Widen the dirty set to every
-            # element the compiled rules can reach back to.
-            expand_dirty(session, model, res.dirty)
-            if touched_rules:
-                # The rule sets THEMSELVES changed: revalidate everything the
-                # old and the new ones apply to, so issues minted by a
-                # removed or renamed rule are dropped as well as added.
-                res.dirty.update(
-                    applies_population(model, prior_compiled, session.compiled_rules)
-                )
-            scoped = session_pipeline(session).validate(model, res.dirty.to_scope())
-        structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
+        #    row can never make the MODEL structurally invalid. The check is
+        #    over what the batch touched and the referencers of what it
+        #    deleted: structure elsewhere is not the batch's doing.
+        structural = structural_blockers(model, _structural_ids(model, res))
         if structural:
             unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
@@ -1188,70 +1056,11 @@ def create_commit(
                     ],
                 },
             )
-        # d. commit accepted: splice issues, bump rev, record batch
-        conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
-        # strict-mode gate: an owner-enabled project promotes THIS BATCH'S
-        # conformance issues to a hard reject. ``scoped`` is computed over the
-        # WIDENED res.dirty, so it also carries built-in verdicts on elements
-        # only the reach expansion (or a rules-artifact edit's applies_to
-        # population) pulled in; those pre-date the batch and never block it —
-        # pre-existing issues elsewhere stay reported, not fatal.
-        # ``attributable_issues`` keeps exactly what the batch can have caused:
-        # anything on a touched entity, plus rule verdicts anywhere, since a
-        # rule reads across hops and that is what the widening exists for. Only
-        # the strict gate reads ``conformance``; the commit row stores what
-        # the client reported.
-        #
-        # Rebind batches are exempt BY DECISION — the engine must stay
-        # inspectable through a migration: a schema migration must not be
-        # impossible on a strict project, and the rebind's own sweep above
-        # is whole-model, so gating on it would let ANY pre-existing
-        # conformance issue anywhere veto every future schema change. The
-        # count is still reported on the commit and the issue store still
-        # gets the full truth — the batch simply lands.
-        strict_blockers = (
-            attributable_issues(conformance, base_dirty)
-            if session.strict_mode and not rebound
-            else []
-        )
-        if strict_blockers:
-            unwind.unwind()  # undo every live half — see _CommitUnwind
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "detail": "strict-mode conformance blocker",
-                    "conformance_blockers": [
-                        IssueOut.from_core(i).model_dump() for i in strict_blockers
-                    ],
-                },
-            )
-        if rebound:
-            # Whole-store REPLACE, matching the whole-model sweep above: a
-            # dirty-scope splice would leave issues minted under the OLD
-            # schema behind for every entity this batch did not touch.
-            state.set_full(scoped)
-            issues_removed: list[str] = []
-            issues_added = [IssueOut.from_core(i) for i in scoped]
-        else:
-            delta = state.replace(res.dirty.ids, scoped)
-            issues_removed = delta.removed_owner_ids
-            issues_added = [IssueOut.from_core(i) for i in delta.added]
+        # d. commit accepted: bump rev, record batch
         prev_rev = session.model_rev
         unwind.prior_digest = session.state_digest_value
         session.model_rev += 1
         state_digest = session.advance_state_digest(res)
-        if rebound:
-            # Mirrors the standalone rebind route: EVERY derived row order and
-            # script cell value was computed against the old schema, so
-            # selective eviction has nothing to preserve — clear the lot and
-            # re-stamp the cell cache to the new rev.
-            session.invalidate_derived_caches()
-        elif get_settings().snippet_incremental_invalidation:
-            # Selective eviction: cells this commit provably did not touch
-            # stay warm at the new rev.
-            session.evict_touched_caches(touched_keys(model, model.metamodel, res))
-        else:
-            session.invalidate_derived_caches()  # legacy clear-all
         # ONE journal entry per commit, spanning all four families: model
         # ops first, then artifact ops, then view ops, then metamodel ops.
         # The first three are mutually independent (see split_ops), so their
@@ -1496,9 +1305,6 @@ def create_commit(
         recreated_relationship_ids=list(res.recreated_relationship_ids),
         prev_rev=prev_rev,
         state_digest=state_digest,
-        issues_removed_owner_ids=issues_removed,
-        issues_added=issues_added,
-        issue_counts=state.counts(),
         commit_id=commit_id,
         message=payload.message,
         validation_error_count=payload.validation_error_count,
@@ -1532,7 +1338,6 @@ def revert_commit(
             status_code=409,
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
-    state = _ensure_validation_seeded(session, model)
     if payload.target_rev < 0 or payload.target_rev > session.model_rev:
         return JSONResponse(
             status_code=422,
@@ -1551,9 +1356,6 @@ def revert_commit(
             changed_relationships=[],
             deleted_element_ids=[],
             deleted_relationship_ids=[],
-            issues_removed_owner_ids=[],
-            issues_added=[],
-            issue_counts=state.counts(),
             commit_id="",
             message="",
             validation_error_count=0,
@@ -1662,12 +1464,7 @@ def revert_commit(
         # model-only subset: revert refuses artifact/view batches above, so
         # view_results stays empty and is never touched.
         unwind = _CommitUnwind(session, db, model, model_res=res)
-        # Model-only by construction (artifact/view/metamodel ops 409 above),
-        # so the compiled rules cannot have changed — widen the dirty scope
-        # for reach, but never recompile.
-        expand_dirty(session, model, res.dirty)
-        scoped = session_pipeline(session).validate(model, res.dirty.to_scope())
-        structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
+        structural = structural_blockers(model, _structural_ids(model, res))
         if structural:
             unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
@@ -1679,12 +1476,10 @@ def revert_commit(
                     ],
                 },
             )
-        delta = state.replace(res.dirty.ids, scoped)
         prev_rev = session.model_rev
         unwind.prior_digest = session.state_digest_value
         session.model_rev += 1
         state_digest = session.advance_state_digest(res)
-        session.invalidate_derived_caches()  # mirrors touch_model
         session.record_batch(
             AppliedBatch(
                 # list displays, not the raw lists: AppliedBatch is typed over
@@ -1779,9 +1574,6 @@ def revert_commit(
         recreated_relationship_ids=list(res.recreated_relationship_ids),
         prev_rev=prev_rev,
         state_digest=state_digest,
-        issues_removed_owner_ids=delta.removed_owner_ids,
-        issues_added=[IssueOut.from_core(i) for i in delta.added],
-        issue_counts=state.counts(),
         commit_id=commit_id,
         message=message,
         validation_error_count=None,

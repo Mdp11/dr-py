@@ -491,47 +491,9 @@ def test_stale_batch_below_a_rebind_conflicts_unconditionally(
     assert r.json()["detail"] == "stale base_rev"
 
 
-def test_strict_mode_exempts_rebind_batches(client: TestClient) -> None:
-    """A rebind that mints conformance issues still lands under strict mode
-    — the engine stays inspectable."""
-    _create_node(client)  # no label -> violates the mandatory-label candidate
-    from data_rover.api import db as _db
-    from data_rover.api.session import DEFAULT_PROJECT_ID
-
-    gen = _db.get_db()
-    s = next(gen)
-    try:
-        content.set_strict_mode(s, DEFAULT_PROJECT_ID, True)
-    finally:
-        gen.close()
-    get_session().strict_mode = True
-    token = _acquire_mm(client)
-    # V3 makes `label` mandatory -> the existing element without it is a
-    # conformance (multiplicity) issue under the new schema.
-    mm_v3 = (
-        "elements:\n  - name: Node\n    properties:\n"
-        "      - name: label\n        datatype: string\n        multiplicity: '1'\n"
-    )
-    r = client.post(
-        papi("/commits"),
-        json={
-            "base_rev": _rev(client),
-            "ops": [{"kind": "metamodel.rebind", "blob": mm_v3}],
-            "message": "",
-            "lock_tokens": [token],
-        },
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["validation_error_count"] >= 1
-
-
 def test_layout_only_batch_lands_under_strict_mode(client: TestClient) -> None:
-    """A layout-only batch has an empty dirty scope, so it mints no
-    conformance issue and the strict gate is unreachable for it — it simply
-    lands. Named for what it actually pins: the gate's SCOPING (exempt when
-    ``rebound``, not when ``metamodel_ops``) is proved by
-    ``test_strict_mode_blocks_a_mixed_layout_batch_with_issues`` below, which
-    is the case where the two conditions differ observably."""
+    """Strict mode is the client's to enforce: the server lands a layout-only
+    batch regardless."""
     get_session().strict_mode = True
     token = _acquire_mm(client)
     base = _rev(client)
@@ -546,49 +508,6 @@ def test_layout_only_batch_lands_under_strict_mode(client: TestClient) -> None:
     )
     assert r.status_code == 200, r.text
     assert r.json()["model_rev"] == base + 1
-
-
-def test_strict_mode_blocks_a_mixed_layout_batch_with_issues(
-    client: TestClient,
-) -> None:
-    """The strict-mode exemption is `not rebound`, NOT `not metamodel_ops`:
-    a batch carrying layout moves but no rebind keeps the ordinary gate.
-
-    This is the case where the two candidate conditions differ observably —
-    the layout-only test above stays green under either spelling because a
-    pure layout batch never mints a conformance issue at all.
-    """
-    eid = _create_node(client, "x")
-    get_session().strict_mode = True
-    mm_token = _acquire_mm(client)
-    el_token = _acquire_element(client, eid)
-    base = _rev(client)
-    r = client.post(
-        papi("/commits"),
-        json={
-            "base_rev": base,
-            "ops": [
-                # `label` is a string in V1; 123 is a type-conformance issue
-                {
-                    "kind": "update_element",
-                    "id": eid,
-                    "properties_patch": {"label": 123},
-                },
-                {
-                    "kind": "metamodel.move_node",
-                    "node": "el:Node",
-                    "pos": {"x": 9, "y": 9},
-                },
-            ],
-            "message": "",
-            "lock_tokens": [mm_token, el_token],
-        },
-    )
-    assert r.status_code == 422, r.text
-    assert r.json()["detail"] == "strict-mode conformance blocker"
-    # full unwind: no rev, and the staged layout row was rolled back too
-    assert _rev(client) == base
-    assert client.get(papi("/metamodel/layout")).json()["positions"] == {}
 
 
 def test_swap_is_unwound_when_post_swap_persistence_raises(
@@ -631,7 +550,6 @@ def test_swap_is_unwound_when_post_swap_persistence_raises(
     assert session.model.metamodel is before
     assert before.effective_element_properties("Node")  # V1, not the candidate
     assert session.model_rev == base
-    assert session.validation is None  # nulled -> next read re-seeds
     monkeypatch.undo()
     assert client.get(papi("/metamodel/raw")).json()["blob"] == MM_V1
 

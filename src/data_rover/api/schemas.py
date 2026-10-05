@@ -1005,7 +1005,6 @@ class OpenResponse(BaseModel):
     role: str
     element_count: int
     relationship_count: int
-    issue_counts: dict[str, int] = Field(default_factory=dict)
     #: per-lease TTL (seconds). The client heartbeat renews at ttl/2. Sourced
     #: from settings.lock_ttl_seconds; lease expires_at is a server monotonic
     #: value, meaningless to the client clock, so the client needs the TTL.
@@ -1020,12 +1019,13 @@ class PreviewRequest(BaseModel):
 
 
 class PreviewResponse(BaseModel):
-    conformance_error_count: int
+    """The server's half of a preview: it applies the batch and reports no
+    issues. The engine answers every validation question; the fields stay so
+    the two halves merge."""
+
+    conformance_error_count: int = 0
     structural_blockers: list[IssueOut] = Field(default_factory=list)
     issues: list[IssueOut] = Field(default_factory=list)
-    #: true when strict mode is on AND there are conformance errors — i.e. this
-    #: batch would be hard-rejected by the commit strict gate. Lets the client
-    #: gate the commit button without re-deriving policy.
     would_block: bool = False
 
 

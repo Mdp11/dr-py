@@ -232,42 +232,6 @@ def test_rule_sources_tolerates_a_malformed_payload(
     assert compile_rule_sets(got, mm).total == 0
 
 
-def test_metamodel_upload_recompiles_the_rules(client: TestClient) -> None:
-    """A metamodel upload leaves the project's rule artifacts in place, so the
-    compiled set must be rebuilt against the NEW schema: every applies-to
-    closure, relationship-type closure and drift diagnostic in it was resolved
-    against the outgoing one. Absent verdicts beat stale ones."""
-    r = client.post(
-        papi("/commits"),
-        json={
-            "base_rev": get_session().model_rev,
-            "ops": [
-                {
-                    "kind": "create_artifact",
-                    "temp_id": "tmp_rules",
-                    "artifact_kind": "validation_rules",
-                    "name": "house-rules",
-                    "payload": _rules_payload(),
-                }
-            ],
-            "lock_tokens": [],
-        },
-    )
-    assert r.status_code == 200, r.text
-    artifact_id = r.json()["id_map"]["tmp_rules"]
-    status = client.get(papi("/model/issues")).json()["rules_status"]
-    assert (status["total"], status["skipped"]) == (1, [])
-
-    install(metamodel=_MM_RENAMED_PROP, model=EMPTY_MODEL)
-
-    status = client.get(papi("/model/issues")).json()["rules_status"]
-    assert status["total"] == 0
-    (skip,) = status["skipped"]
-    assert skip["artifact_id"] == artifact_id
-    assert skip["rule"] == "has-name"
-    assert "'name'" in skip["reason"]
-
-
 def test_clearing_the_metamodel_empties_the_compiled_rules(
     client: TestClient,
 ) -> None:
