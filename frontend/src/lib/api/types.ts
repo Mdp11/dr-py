@@ -358,6 +358,7 @@ export const IssueOutSchema = z.object({
 	message: z.string(),
 	target_ids: z.array(z.string()).default([]),
 	category: z.string().default('conformance'),
+	check: z.string().default(''),
 	origin: z.string().default('on_server')
 });
 export type IssueOut = z.infer<typeof IssueOutSchema>;

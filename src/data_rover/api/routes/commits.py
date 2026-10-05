@@ -1198,9 +1198,9 @@ def create_commit(
         # pre-existing issues elsewhere stay reported, not fatal.
         # ``attributable_issues`` keeps exactly what the batch can have caused:
         # anything on a touched entity, plus rule verdicts anywhere, since a
-        # rule reads across hops and that is what the widening exists for. The
-        # commit row and the response still record the full ``conformance``
-        # list.
+        # rule reads across hops and that is what the widening exists for. Only
+        # the strict gate reads ``conformance``; the commit row stores what
+        # the client reported.
         #
         # Rebind batches are exempt BY DECISION — the engine must stay
         # inspectable through a migration: a schema migration must not be

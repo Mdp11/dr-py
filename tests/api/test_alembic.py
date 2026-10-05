@@ -222,3 +222,32 @@ def test_migration_0017_makes_commit_count_nullable(tmp_path: Path) -> None:
     command.upgrade(cfg, "head")
     cols = {c["name"]: c for c in inspect(engine).get_columns("commits")}
     assert cols["validation_error_count"]["nullable"] is True
+
+
+def test_migration_0017_downgrade_backfills_null_counts(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 't9.db'}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO projects (id, name) VALUES ('p1', 'P1')"))
+        conn.execute(
+            text(
+                "INSERT INTO commits (project_id, rev, commit_id, ts, ops, inverse_ops, "
+                "id_map, message, validation_error_count, issues) "
+                "VALUES ('p1', 1, 'c1', '2026-09-19 00:00:00', '[]', '[]', '{}', '', "
+                "NULL, '[]')"
+            )
+        )
+
+    command.downgrade(cfg, "0016")
+    cols = {c["name"]: c for c in inspect(engine).get_columns("commits")}
+    assert cols["validation_error_count"]["nullable"] is False
+    with engine.connect() as conn:
+        count = conn.execute(
+            text("SELECT validation_error_count FROM commits WHERE rev = 1")
+        ).scalar_one()
+    assert count == 0

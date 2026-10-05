@@ -55,6 +55,7 @@ describe('MetamodelPreviewPanel', () => {
 							message: 'missing required label',
 							target_ids: ['el-1'],
 							category: 'conformance',
+							check: '',
 							origin: 'on_server'
 						}
 					]
@@ -78,6 +79,7 @@ describe('MetamodelPreviewPanel', () => {
 			message: 'missing required label',
 			target_ids: ['el-1', 'el-1'],
 			category: 'conformance' as const,
+			check: '' as const,
 			origin: 'on_server' as const
 		};
 		const c = mount(MetamodelPreviewPanel, {

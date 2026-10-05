@@ -1037,7 +1037,7 @@ class CommitRequest(BaseModel):
     #: client acknowledges the surfaced conformance-error count (UI gate).
     ack_errors: bool = False
     #: the client's own preview of the batch, stored with the commit as given.
-    validation_error_count: int = 0
+    validation_error_count: int = Field(default=0, ge=0)
     issues: list[IssueOut] = Field(default_factory=list)
 
 

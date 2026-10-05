@@ -302,6 +302,7 @@ describe('the commit on the engine side', () => {
 			message: 'name: too long',
 			target_ids: ['e_000001'],
 			category: 'conformance',
+			check: 'facets',
 			origin: 'uncommitted'
 		};
 		await commitStaged('m', { conformance_error_count: 1, issues: [issue] });

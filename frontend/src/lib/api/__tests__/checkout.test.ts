@@ -46,6 +46,47 @@ describe('checkout api', () => {
 		expect((cap.body as { base_rev: number }).base_rev).toBe(7);
 	});
 
+	it('a previewed issue keeps its check into the commit body', async () => {
+		const issue = {
+			severity: 'error',
+			message: 'm',
+			target_ids: ['e1'],
+			category: 'conformance',
+			check: 'multiplicity',
+			origin: 'uncommitted'
+		};
+		const preview = await previewCommit(7, [], {
+			fetch: jsonFetch({}, { conformance_error_count: 1, structural_blockers: [], issues: [issue] })
+		});
+		const cap: { path?: string; body?: unknown } = {};
+		await commitChanges(
+			{
+				baseRev: 7,
+				ops: [],
+				message: 'm',
+				lockTokens: [],
+				ackErrors: true,
+				validationErrorCount: preview.conformance_error_count,
+				issues: preview.issues
+			},
+			{
+				fetch: jsonFetch(cap, {
+					model_rev: 8,
+					id_map: {},
+					changed_elements: [],
+					changed_relationships: [],
+					deleted_element_ids: [],
+					deleted_relationship_ids: [],
+					issues_removed_owner_ids: [],
+					issues_added: [],
+					issue_counts: {},
+					commit_id: 'c1'
+				})
+			}
+		);
+		expect((cap.body as { issues: unknown[] }).issues).toEqual([issue]);
+	});
+
 	it('commitChanges maps camelCase to snake_case body', async () => {
 		const cap: { path?: string; body?: unknown } = {};
 		await commitChanges(
@@ -227,6 +268,7 @@ describe('previewCommit on the engine', () => {
 		message: 'Element e_000003 has 2 containment parents (must have at most one)',
 		target_ids: ['e_000003'],
 		category: 'structural',
+		check: '',
 		origin: 'on_server'
 	};
 	const tooLong = {
@@ -234,6 +276,7 @@ describe('previewCommit on the engine', () => {
 		message: TOO_LONG_MESSAGE,
 		target_ids: ['e_000001'],
 		category: 'conformance',
+		check: 'facets',
 		origin: 'on_server'
 	};
 	const artifactOp: Op = {
