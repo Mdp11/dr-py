@@ -113,8 +113,8 @@ function withProperty(
 const REQUIRED = withProperty('Organization', 'registry_id', (p) => (p.multiplicity = '1'));
 /** Organization's `industry`, which every one of them has, becomes required. */
 const INDUSTRY = withProperty('Organization', 'industry', (p) => (p.multiplicity = '1'));
-/** A pattern the host cannot run exactly as Python's `re` does. */
-const UNUSABLE = withProperty('Organization', 'country', (p) => (p.pattern = '(?x)a'));
+/** A pattern the engine cannot check. */
+const UNUSABLE = withProperty('Organization', 'country', (p) => (p.pattern = '(?<=a+)b'));
 /** `Refines` contains its target. */
 const CONTAINMENT = (() => {
 	const doc = structuredClone(DOC);
@@ -246,12 +246,12 @@ describe('candidateIssues', () => {
 		}
 	});
 
-	it('refuses 501 a candidate pattern the host cannot run, and skips an unreadable working rule set', async () => {
+	it('refuses 422 a candidate pattern the engine cannot check, and skips an unreadable working rule set', async () => {
 		const client = await ready();
-		expect(await refusal(diffOf(client, UNUSABLE))).toEqual({
-			status: 501,
-			detail: 'reaches an unsupported pattern'
-		});
+		const refused = await refusal(diffOf(client, UNUSABLE));
+		expect(refused.status).toBe(422);
+		expect(refused.detail).toContain('Organization.country');
+		expect(refused.detail).toContain('cannot be checked');
 		await client.call('setStagedArtifacts', {
 			entries: [{ ...STAGED_RULES[0]!, rules: { ok: true, document: '{"rules":[],"x":1}' } }]
 		});
@@ -516,10 +516,10 @@ describe('previewCommit with a rebind', () => {
 		const refused = await refusal(preview(client, { elements: 7 }));
 		expect(refused.status).toBe(422);
 		expect(refused.detail).toMatch(/^metamodel: /);
-		expect(await refusal(preview(client, UNUSABLE))).toEqual({
-			status: 501,
-			detail: 'reaches an unsupported pattern'
-		});
+		const unchecked = await refusal(preview(client, UNUSABLE));
+		expect(unchecked.status).toBe(422);
+		expect(unchecked.detail).toContain('Organization.country');
+		expect(unchecked.detail).toContain('cannot be checked');
 	});
 
 	it('refuses stale batches when a stage lands between its check and its scan', async () => {

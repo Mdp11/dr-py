@@ -4,7 +4,7 @@ import type { ElementRec, RelRec } from '../model/records.ts';
 import { liveStructure, type Structure } from '../model/structure.ts';
 import type { CompiledRules } from '../rules/compile.ts';
 import { RulesValidator } from '../rules/evaluate.ts';
-import { beyondHost, translatePyRegex } from '../value/regex.ts';
+import { beyondHost, HOST_REFUSED, translatePyRegex } from '../value/regex.ts';
 import type { Issue } from './issue.ts';
 import { Containment } from './validators/containment.ts';
 import { EndpointTyping } from './validators/endpoint-typing.ts';
@@ -71,27 +71,21 @@ export class Validators {
 	}
 }
 
-/** A facet pattern the host cannot run although Python can. */
-export class PatternUnusable extends Error {
-	constructor() {
-		super('reaches an unsupported pattern');
-		this.name = 'PatternUnusable';
-	}
-}
-
 type Test = (subject: string) => boolean;
+
+/** A pattern that cannot be checked here, and why. */
+type Unchecked = { readonly reason: string };
 
 /**
  * `re.fullmatch` for every distinct facet pattern of one metamodel, each
  * translated once and run on a one-byte and a two-byte subject, so that a
  * translation V8 will not compile shows here. A pattern the translator does
- * not take, or one the host fails to run, makes the set `unusable`; a test of
- * such a pattern throws `PatternUnusable`.
+ * not take, or one the host fails to run, answers with its reason instead of
+ * a verdict, for good.
  */
 export class FacetPatterns {
 	readonly metamodel: Metamodel;
-	private readonly tests = new Map<string, Test | null>();
-	private broken = false;
+	private readonly tests = new Map<string, Test | Unchecked>();
 
 	constructor(mm: Metamodel) {
 		this.metamodel = mm;
@@ -104,38 +98,42 @@ export class FacetPatterns {
 		}
 	}
 
-	get unusable(): boolean {
-		return this.broken;
-	}
-
-	private compile(pattern: string): Test | null {
+	private compile(pattern: string): Test | Unchecked {
 		try {
 			const regex = translatePyRegex(pattern, 'fullmatch');
-			if (regex.kind === 'ok') {
-				regex.test('');
-				regex.test('\u0100');
-				return regex.test;
-			}
+			if (regex.kind === 'invalid') return { reason: 'not a valid regular expression' };
+			if (regex.kind === 'unsupported') return { reason: regex.reason };
+			regex.test('');
+			regex.test('\u0100');
+			return regex.test;
 		} catch (error) {
 			if (!beyondHost(error)) throw error;
+			return { reason: HOST_REFUSED };
 		}
-		this.broken = true;
-		return null;
 	}
 
-	/** `re.fullmatch(pattern, subject)` for a pattern of this metamodel. */
-	fullmatch(pattern: string, subject: string): boolean {
+	/** `re.fullmatch(pattern, subject)` for a pattern of this metamodel, or why it cannot be checked. */
+	test(pattern: string, subject: string): boolean | Unchecked {
 		const test = this.tests.get(pattern);
 		if (test === undefined) throw new Error(`pattern ${JSON.stringify(pattern)} was not compiled`);
-		if (test === null) throw new PatternUnusable();
+		if (typeof test === 'object') return test;
 		try {
 			return test(subject);
 		} catch (error) {
 			if (!beyondHost(error)) throw error;
-			this.tests.set(pattern, null);
-			this.broken = true;
-			throw new PatternUnusable();
+			const unchecked = { reason: HOST_REFUSED };
+			this.tests.set(pattern, unchecked);
+			return unchecked;
 		}
+	}
+
+	/** The patterns of this metamodel that cannot be checked. */
+	unusable(): Array<{ pattern: string; reason: string }> {
+		const out: Array<{ pattern: string; reason: string }> = [];
+		for (const [pattern, test] of this.tests) {
+			if (typeof test === 'object') out.push({ pattern, reason: test.reason });
+		}
+		return out;
 	}
 }
 

@@ -3,7 +3,6 @@ import {
 	FacetPatterns,
 	Metamodel,
 	Model,
-	PatternUnusable,
 	PyFloat,
 	pyIsoDate,
 	pyReprFrozen,
@@ -87,7 +86,7 @@ describe('the renderings', () => {
 	});
 });
 
-function metamodel(pattern: string): Metamodel {
+function metamodel(pattern: string, sibling: string | null = null): Metamodel {
 	const doc: MetamodelDoc = {
 		enums: { Color: ['red'] },
 		elements: [
@@ -105,7 +104,20 @@ function metamodel(pattern: string): Metamodel {
 						max: null,
 						pattern,
 						max_length: null
-					}
+					},
+					...(sibling === null
+						? []
+						: [
+								{
+									name: 'tag',
+									datatype: 'string' as const,
+									multiplicity: '0..1' as const,
+									min: null,
+									max: null,
+									pattern: sibling,
+									max_length: null
+								}
+							])
 				]
 			}
 		],
@@ -139,34 +151,55 @@ describe('valueConforms', () => {
 });
 
 describe('FacetPatterns', () => {
-	it('is unusable when a pattern is outside the translator', () => {
-		expect(new FacetPatterns(metamodel('(?x)a')).unusable).toBe(true);
+	it('lists a pattern outside the translator with its reason', () => {
+		const patterns = new FacetPatterns(metamodel('(?i:x)'));
+		expect(patterns.unusable()).toEqual([
+			{ pattern: '(?i:x)', reason: 'inline flags other than a leading (?i), (?m) or (?s)' }
+		]);
+		expect(patterns.test('(?i:x)', 'x')).toEqual({
+			reason: 'inline flags other than a leading (?i), (?m) or (?s)'
+		});
 	});
 
 	it('is usable over patterns the translator takes', () => {
 		const patterns = new FacetPatterns(metamodel('[A-Z]+'));
-		expect(patterns.unusable).toBe(false);
-		expect(patterns.fullmatch('[A-Z]+', 'AB')).toBe(true);
-		expect(patterns.fullmatch('[A-Z]+', 'ABc')).toBe(false);
+		expect(patterns.unusable()).toEqual([]);
+		expect(patterns.test('[A-Z]+', 'AB')).toBe(true);
+		expect(patterns.test('[A-Z]+', 'ABc')).toBe(false);
 	});
 });
 
 describe('validateScoped', () => {
-	function model(pattern: string, code: string | null): Model {
-		const m = new Model(metamodel(pattern));
-		m.insertElement('a-1', 'A', code === null ? {} : { code }, 1);
+	function model(pattern: string, code: string | null, tag: string | null = null): Model {
+		const m = new Model(metamodel(pattern, tag === null ? null : '[a-z]+'));
+		const props: Record<string, string> = {};
+		if (code !== null) props['code'] = code;
+		if (tag !== null) props['tag'] = tag;
+		m.insertElement('a-1', 'A', props, 1);
 		return m;
 	}
 
-	it('throws PatternUnusable when a value meets a pattern it cannot run', () => {
-		const m = model('(?x)a', 'x');
-		const run = () =>
-			validateScoped(m, ['a-1'], new Validators(m.metamodel), new FacetPatterns(m.metamodel));
-		expect(run).toThrow(PatternUnusable);
+	it('reports each value of an uncheckable pattern as one error, and checks its siblings', () => {
+		const m = model('(?i:x)', 'x', 'AB');
+		const issues = validateScoped(
+			m,
+			['a-1'],
+			new Validators(m.metamodel),
+			new FacetPatterns(m.metamodel)
+		);
+		expect(issues.map((i) => [i.message, i.severity, i.category, i.targetIds])).toEqual([
+			[
+				"code: pattern '(?i:x)' cannot be checked: inline flags other than a leading (?i), (?m) or (?s)",
+				'error',
+				'conformance',
+				['a-1']
+			],
+			["tag: 'AB' does not match pattern '[a-z]+'", 'error', 'conformance', ['a-1']]
+		]);
 	});
 
-	it('runs while no value meets such a pattern', () => {
-		const m = model('(?x)a', null);
+	it('reports nothing while no value meets such a pattern', () => {
+		const m = model('(?i:x)', null);
 		expect(
 			validateScoped(m, ['a-1'], new Validators(m.metamodel), new FacetPatterns(m.metamodel))
 		).toEqual([]);

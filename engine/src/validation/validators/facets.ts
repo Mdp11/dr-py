@@ -90,12 +90,22 @@ export class Facets implements Validator {
 			}
 		}
 		if (typeof item === 'string') {
-			if (def.pattern !== null && !run.patterns.fullmatch(def.pattern, item)) {
-				run.out.push(
-					errorIssue(`${name}: ${pyRepr(item)} does not match pattern ${pyRepr(def.pattern)}`, [
-						ownerId
-					])
-				);
+			if (def.pattern !== null) {
+				const verdict = run.patterns.test(def.pattern, item);
+				if (typeof verdict === 'object') {
+					run.out.push(
+						errorIssue(
+							`${name}: pattern ${pyRepr(def.pattern)} cannot be checked: ${verdict.reason}`,
+							[ownerId]
+						)
+					);
+				} else if (!verdict) {
+					run.out.push(
+						errorIssue(`${name}: ${pyRepr(item)} does not match pattern ${pyRepr(def.pattern)}`, [
+							ownerId
+						])
+					);
+				}
 			}
 			if (def.max_length !== null) {
 				const length = pyLen(item);

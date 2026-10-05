@@ -10,7 +10,7 @@ import { ReadError } from '../read/errors.ts';
 import { jsStr, toNumber } from '../value/coerce.ts';
 import { pyContains } from '../value/compare.ts';
 import { pyLower } from '../value/lower.ts';
-import { beyondHost, translatePyRegex } from '../value/regex.ts';
+import { beyondHost, HOST_REFUSED, translatePyRegex } from '../value/regex.ts';
 import { pyRepr } from '../value/repr.ts';
 import type { Value } from '../value/types.ts';
 
@@ -212,8 +212,6 @@ export function readCriteria(raw: unknown, path: string): Criterion[] {
 }
 
 // -- patterns ------------------------------------------------------------------
-
-const HOST_REFUSED = 'a construct this browser cannot compile';
 
 /** The 422 for a pattern the engine will not run: `reason` is why. */
 function unsupported(pattern: string, reason: string): ReadError {

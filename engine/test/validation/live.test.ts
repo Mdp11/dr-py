@@ -10,9 +10,9 @@ import {
 	Metamodel,
 	Model,
 	OpError,
-	PatternUnusable,
 	previewBody,
 	PyFloat,
+	pyRepr,
 	RESCAN_STEP,
 	RulesValidator,
 	shuffleAdjacency,
@@ -876,33 +876,6 @@ describe('rules in the store', () => {
 		expect(live.rulesVersion).toBe(rulesVersion + 1);
 		expect([...live.sweepSteps()]).toEqual([]);
 	});
-
-	it('settles when the store becomes unusable mid-rescan', async () => {
-		const mm = withPattern('('.repeat(64) + 'a' + ')'.repeat(64) + '*');
-		const model = new Model(mm);
-		for (let i = 0; i < 20; i++) {
-			const element = model.createElement('Other', `o-${i}`);
-			model.setProperty(element, 'name', `o${i}`);
-		}
-		const owned = compileSets(mm, ['rs-1', 'Owned', [OWNED]]);
-		const live = new LiveIssues(workingCopy(model), { sweepStep: 5 });
-		drain(live.sweepSteps());
-		live.setRules(both(owned));
-		const waiting = live.whenSettled();
-		live.sweepSteps().next();
-		expect(live.settled).toBe(false);
-		live.stage([
-			{
-				kind: 'create_element',
-				temp_id: 'tmp_b',
-				type_name: 'Blk',
-				properties: { name: 'b', req: 'r', code: 'a'.repeat(1_000_000) }
-			}
-		]);
-		expect(live.unusable).toBe('pattern');
-		await waiting;
-		expect(live.settled).toBe(true);
-	});
 });
 
 /**
@@ -1106,16 +1079,18 @@ describe('a pattern the host cannot run', () => {
 	const deep = '('.repeat(64) + 'a' + ')'.repeat(64) + '*';
 	const long = 'a'.repeat(1_000_000);
 
-	it('makes the patterns unusable for good once one throws mid-run', () => {
+	const refused = { reason: 'a construct this browser cannot compile' };
+
+	it('answers the reason for good once one throws mid-run', () => {
 		const patterns = new FacetPatterns(withPattern(deep));
-		expect(patterns.unusable).toBe(false);
-		expect(patterns.fullmatch(deep, 'aaa')).toBe(true);
-		expect(() => patterns.fullmatch(deep, long)).toThrow(PatternUnusable);
-		expect(patterns.unusable).toBe(true);
-		expect(() => patterns.fullmatch(deep, 'aaa')).toThrow(PatternUnusable);
+		expect(patterns.unusable()).toEqual([]);
+		expect(patterns.test(deep, 'aaa')).toBe(true);
+		expect(patterns.test(deep, long)).toEqual(refused);
+		expect(patterns.unusable()).toEqual([{ pattern: deep, ...refused }]);
+		expect(patterns.test(deep, 'aaa')).toEqual(refused);
 	});
 
-	it('sets unusable mid-stage, and the stage still answers', () => {
+	it('reports the value mid-stage, and the store keeps answering', () => {
 		const mm = withPattern(deep);
 		const model = new Model(mm);
 		applyBatch(model, [
@@ -1129,27 +1104,49 @@ describe('a pattern the host cannot run', () => {
 		]);
 		const live = new LiveIssues(workingCopy(model));
 		drain(live.sweepSteps());
-		expect(live.unusable).toBe(null);
 		expect(live.store.size).toBe(1);
-		const version = live.version;
 		const answer = live.stage([update('b-1', { code: long })]);
 		expect(answer.changes.elementIds).toEqual(['b-1']);
-		expect(live.unusable).toBe('pattern');
-		expect(live.store.size).toBe(0);
-		expect(live.version).toBe(version + 1);
-		// Sticky: a later stage of a short subject answers too, and nothing is validated.
+		const found = [...live.store.iter()].map((issue) => issue.message);
+		expect(found.filter((m) => m.includes('cannot be checked'))).toEqual([
+			`code: pattern ${pyRepr(deep)} cannot be checked: ${refused.reason}`
+		]);
+		// A later stage of a short subject answers with the same reason, and every body answers.
 		live.stage([update('b-1', { code: 'aa', n: 10 })]);
-		expect(live.store.size).toBe(0);
-		expect(() => issueListBody(live)).toThrow(PatternUnusable);
-		expect(() => validateBody(live)).toThrow(PatternUnusable);
-		expect(() => previewBody(live, false)).toThrow(PatternUnusable);
-		expect(drain(live.sweepSteps())).toBe(false);
+		expect(() => issueListBody(live)).not.toThrow();
+		expect(() => validateBody(live)).not.toThrow();
+		expect(() => previewBody(live, false)).not.toThrow();
+		expect(drain(live.sweepSteps())).toBe(true);
 	});
 
-	it('is unusable from the start when the translator refuses a pattern', () => {
-		const live = new LiveIssues(workingCopy(new Model(withPattern('(?x)a'))));
-		expect(live.unusable).toBe('pattern');
-		expect(drain(live.sweepSteps())).toBe(false);
-		expect(live.seeded).toBe(false);
+	it('answers over an untranslatable pattern and updates for an unrelated edit', () => {
+		const mm = withPattern('(?i:x)');
+		const model = new Model(mm);
+		applyBatch(model, [
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_1',
+				id: 'b-1',
+				type_name: 'Blk',
+				properties: { name: 'b1', n: 9, req: 'x', code: 'x' }
+			},
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_2',
+				id: 'b-2',
+				type_name: 'Blk',
+				properties: { name: 'b2', n: 9, req: 'x' }
+			}
+		]);
+		const live = new LiveIssues(workingCopy(model));
+		expect(drain(live.sweepSteps())).toBe(true);
+		expect(live.seeded).toBe(true);
+		const uncheckable = () =>
+			[...live.store.iter()].filter((issue) => issue.message.includes('cannot be checked'));
+		expect(uncheckable()).toHaveLength(1);
+		expect(() => issueListBody(live)).not.toThrow();
+		live.stage([update('b-2', { n: 99 })]);
+		expect([...live.store.iter()].some((i) => i.message.startsWith('n: 99 above max'))).toBe(true);
+		expect(uncheckable()).toHaveLength(1);
 	});
 });

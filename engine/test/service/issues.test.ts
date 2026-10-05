@@ -277,26 +277,27 @@ describe('previewCommit', () => {
 	});
 });
 
-describe('what the engine refuses', () => {
-	const calls = [
-		['getModelIssues', {}],
-		['validateModel', { batch_ids: [] }],
-		['previewCommit', { base_rev: 0, batch_ids: [], strict: true }]
-	] as const;
-
-	it('answers 501 to all three over a facet pattern it cannot run', async () => {
+describe('a facet pattern the engine cannot check', () => {
+	it('answers 200, one issue per value', async () => {
 		const doc = structuredClone(DOC);
 		const blk = doc.elements.find((type) => type.name === 'Blk')!;
-		blk.properties.find((property) => property.name === 'code')!.pattern = '(?x)a';
+		blk.properties.find((property) => property.name === 'code')!.pattern = '(?i:x)';
+		const model = blocks(3, doc);
+		for (const element of model.elements()) model.setProperty(element, 'code', 'x');
 		const client = connect();
-		await openReplica(client, blocks(3, doc), doc);
-		for (const [method, params] of calls) {
-			expect(await refusal(client.call(method, params))).toEqual({
-				status: 501,
-				detail: 'reaches an unsupported pattern'
-			});
-		}
-		expect(client.events.filter(isSweep)).toEqual([]);
+		await openReplica(client, model, doc);
+		const listed = await client.call<IssueListBody>('getModelIssues');
+		const unchecked = listed.issues.filter((i) => i.message.includes('cannot be checked'));
+		expect(unchecked.map((i) => [i.severity, i.category, i.target_ids])).toEqual([
+			['error', 'conformance', ['k-0']],
+			['error', 'conformance', ['k-1']],
+			['error', 'conformance', ['k-2']]
+		]);
+		expect(unchecked[0]!.message).toBe(
+			"code: pattern '(?i:x)' cannot be checked: inline flags other than a leading (?i), (?m) or (?s)"
+		);
+		const validated = await client.call<IssueOut[]>('validateModel', { batch_ids: [] });
+		expect(validated.filter((i) => i.message.includes('cannot be checked'))).toHaveLength(3);
 	});
 });
 

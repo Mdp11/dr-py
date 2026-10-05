@@ -32,7 +32,7 @@ const SCAN_STEP = 512;
  * `POST /model/search` in steps: every entity of the target in state order,
  * matched against every criterion in order, a step every 512; the page is cut
  * after matching. The params are read and every pattern translated before
- * the first step, so a refusal (422, 501) happens before any work.
+ * the first step, so a refusal (422) happens before any work.
  */
 export function searchModel(ctx: EvalContext, params: ReadParams): Steps<SearchResultPage> {
 	const target = params['target'];

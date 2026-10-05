@@ -10,7 +10,7 @@ import { pyRepr } from '../value/repr.ts';
 import type { WorkingCopy } from '../working/working-copy.ts';
 import type { PreviewBody } from './bodies.ts';
 import { candidateKey, wireIssue, type Issue, type IssueOut } from './issue.ts';
-import { FacetPatterns, PatternUnusable, Validators, WholeRun } from './pipeline.ts';
+import { FacetPatterns, Validators, WholeRun } from './pipeline.ts';
 
 /** Entities validated per step of a candidate scan. */
 const SCAN_STEP = 512;
@@ -23,16 +23,36 @@ export type Candidate = {
 	readonly rules: CompiledRules | null;
 };
 
+/** A candidate metamodel with a facet pattern that cannot be checked here. */
+export class UncheckablePattern extends Error {
+	constructor(
+		type: string,
+		property: string,
+		{ pattern, reason }: { pattern: string; reason: string }
+	) {
+		super(`${type}.${property}: pattern ${pyRepr(pattern)} cannot be checked: ${reason}`);
+		this.name = 'UncheckablePattern';
+	}
+}
+
 /**
  * The candidate `doc` (a `GET /metamodel` document), its validators, facet
  * patterns and `rules(metamodel)`. Throws what `Metamodel.fromJSON` throws on
- * a malformed document and `PatternUnusable` when a facet pattern is one the
- * host cannot run.
+ * a malformed document and `UncheckablePattern` naming the first facet pattern
+ * that cannot be checked.
  */
 export function prepareCandidate(doc: unknown, rules: (mm: Metamodel) => CompiledRules): Candidate {
 	const metamodel = Metamodel.fromJSON(doc as MetamodelDoc);
 	const patterns = new FacetPatterns(metamodel);
-	if (patterns.unusable) throw new PatternUnusable();
+	const first = patterns.unusable()[0];
+	if (first !== undefined) {
+		for (const type of [...metamodel.elements, ...metamodel.relationships]) {
+			for (const prop of type.properties) {
+				if (prop.pattern === first.pattern)
+					throw new UncheckablePattern(type.name, prop.name, first);
+			}
+		}
+	}
 	const compiled = rules(metamodel);
 	return { metamodel, validators: new Validators(metamodel), patterns, rules: compiled };
 }
@@ -41,8 +61,7 @@ export function prepareCandidate(doc: unknown, rules: (mm: Metamodel) => Compile
  * Every issue of `model` under the candidate, as one run over the whole
  * model answers them (`WholeRun`): the structure is built in steps, then the
  * elements and the relationships are validated `step` at a time, in state
- * order. Throws `PatternUnusable` when a subject makes a pattern fail on the
- * host. Nothing may write the model between two steps.
+ * order. Nothing may write the model between two steps.
  */
 export function* candidateScan(
 	model: Model,

@@ -20,7 +20,7 @@ import type {
 } from '../working/working-copy.ts';
 import { addNeighbourhood, DirtyCollector } from './dirty.ts';
 import { issueOwner, type Issue } from './issue.ts';
-import { FacetPatterns, PatternUnusable, validateScoped, Validators } from './pipeline.ts';
+import { FacetPatterns, validateScoped, Validators } from './pipeline.ts';
 import { IssueStore } from './store.ts';
 
 /** Ids a sweep step validates and splices. */
@@ -225,8 +225,7 @@ type Tags = {
  * of every relationship among them; a merged edit both, since it replays the
  * batches from the one it lands in. A background
  * sweep fills the store in steps and resumes across any transition; once it
- * has run to its end the store is `seeded`. A facet pattern the host cannot
- * run makes it `unusable` for good: the store empties and stays empty.
+ * has run to its end the store is `seeded`.
  *
  * The store holds the working rules' issues. Every dirty set is widened by
  * their reach on the state after the transition: an owner whose verdict
@@ -250,7 +249,6 @@ export class LiveIssues {
 	private issues: IssueStore;
 	private moves = 0;
 	private swept: boolean;
-	private broken: 'pattern' | null = null;
 	/** The sweep due; `null` when none is. */
 	private sweep: Sweep | null;
 	private waiters: (() => void)[] = [];
@@ -295,11 +293,6 @@ export class LiveIssues {
 		this.issues = options.seed ?? new IssueStore();
 		this.swept = options.seed !== undefined;
 		this.sweep = options.seed === undefined ? newSweep() : null;
-		if (this.patterns.unusable) {
-			this.broken = 'pattern';
-			this.issues = new IssueStore();
-			this.sweep = null;
-		}
 	}
 
 	get store(): IssueStore {
@@ -308,7 +301,7 @@ export class LiveIssues {
 
 	/**
 	 * Moves when the store's content moves, when a delta moves the committed
-	 * rev, when the rule sets change, and when it becomes unusable.
+	 * rev, and when the rule sets change.
 	 */
 	get version(): number {
 		return this.moves;
@@ -333,10 +326,6 @@ export class LiveIssues {
 		return this.swept;
 	}
 
-	get unusable(): 'pattern' | null {
-		return this.broken;
-	}
-
 	/** Moves whenever `origins()` finds the origins afresh. */
 	get probes(): number {
 		return this.probeRuns;
@@ -348,7 +337,6 @@ export class LiveIssues {
 		ops: readonly ModelOp[],
 		options: { coalesce?: boolean } = {}
 	): { batch: StagedBatch; coalesced: boolean; changes: ChangeSet } {
-		if (this.broken !== null) return this.wc.stage(ops, options);
 		const dirty = new DirtyCollector();
 		// A merge replays the batches from the one it lands in, which later ones
 		// may overwrite in part and which may park: its trial run on top cannot
@@ -365,7 +353,6 @@ export class LiveIssues {
 	}
 
 	unstage(what: Unstage): ChangeSet {
-		if (this.broken !== null) return this.wc.unstage(what);
 		const dirty = new DirtyCollector();
 		const touched = this.beforeRebase(this.wc.touchedIds(), dirty);
 		const changes = this.wc.unstage(what);
@@ -377,7 +364,7 @@ export class LiveIssues {
 	applyDelta(delta: Delta, own?: OwnCommit): { status: DeltaStatus; changes: ChangeSet } {
 		// Out of turn and not the user's own, a delta moves nothing.
 		const still = delta.prev_rev !== this.wc.rev && own === undefined;
-		if (this.broken !== null || still) {
+		if (still) {
 			const out = this.wc.applyDelta(delta, own);
 			if (out.status === 'applied') this.moves++;
 			return out;
@@ -401,7 +388,7 @@ export class LiveIssues {
 	setRules(rules: LiveRules): void {
 		const before = this.compiled.working;
 		this.compiled = rules;
-		if (this.broken === null && !sameList(before.identities, rules.working.identities)) {
+		if (!sameList(before.identities, rules.working.identities)) {
 			const queued = this.rescan === null ? [] : this.rescan.ids.slice(this.rescan.at);
 			const seen = new Set(queued);
 			for (const id of appliesPopulation(this.wc.model, before, rules.working)) {
@@ -450,33 +437,15 @@ export class LiveIssues {
 	/** Validates `ids` with the working rules and splices them into the store. */
 	private revalidate(ids: readonly string[], revMoved: boolean): void {
 		let moved = revMoved;
-		if (this.broken === null && ids.length > 0) {
-			try {
-				const found = this.validate(ids, this.compiled.working);
-				moved = this.issues.replace(ids, found) || moved;
-			} catch (caught) {
-				if (!(caught instanceof PatternUnusable)) throw caught;
-				this.markUnusable();
-				return;
-			}
+		if (ids.length > 0) {
+			const found = this.validate(ids, this.compiled.working);
+			moved = this.issues.replace(ids, found) || moved;
 		}
 		if (moved) this.moves++;
 	}
 
 	private validate(ids: readonly string[], rules: CompiledRules): Issue[] {
 		return validateScoped(this.wc.model, ids, this.validators, this.patterns, rules);
-	}
-
-	private markUnusable(): void {
-		this.broken = 'pattern';
-		this.issues = new IssueStore();
-		this.sweep = null;
-		this.rescan = null;
-		this.cached = null;
-		this.deltaOf.clear();
-		this.tags = null;
-		this.moves++;
-		this.release();
 	}
 
 	// -- the sweep -----------------------------------------------------------
@@ -490,14 +459,12 @@ export class LiveIssues {
 	 * due: `sweepStep` of its ids a step, each step yielding `RESCAN_STEP`.
 	 * Every step validates with the rules as they are then. Its state is this
 	 * object's, never the generator's, so any generator resumes it where it
-	 * stands. The value is `true` when both ran to their end, `false` when the
-	 * store is unusable. A step that throws leaves its ids due, for the next
+	 * stands. The value is `true` when both ran to their end. A step that throws leaves its ids due, for the next
 	 * generator's first step, and releases what waits: nothing drives the
 	 * steps until a caller sets them going again.
 	 */
 	*sweepSteps(): Generator<SweepStep, boolean, void> {
 		for (;;) {
-			if (this.broken !== null) return false;
 			const sweep = this.sweep;
 			if (sweep === null) {
 				const rescan = this.rescan;
@@ -505,7 +472,6 @@ export class LiveIssues {
 				const next = rescan.ids.slice(rescan.at, rescan.at + this.sweepStep);
 				this.stepOver(next);
 				rescan.at += next.length;
-				if (this.broken !== null) return false;
 				if (this.rescan === rescan && rescan.at >= rescan.ids.length) {
 					this.rescan = null;
 					this.release();
@@ -533,7 +499,6 @@ export class LiveIssues {
 				throw caught;
 			}
 			sweep.done += next.length;
-			if (this.broken !== null) return false;
 			const total = sweep.total;
 			if (!sweep.relationships.ended) {
 				// Entities made since the start are validated too: the count may pass the total.
@@ -585,8 +550,8 @@ export class LiveIssues {
 	}
 
 	/**
-	 * A sweep or rescan step's `revalidate`. A throw other than a pattern's is a
-	 * bug: what waits for the steps is released, so that its caller can refuse it.
+	 * A sweep or rescan step's `revalidate`. A throw is a bug: what
+	 * waits for the steps is released, so that its caller can refuse it.
 	 */
 	private stepOver(ids: readonly string[]): void {
 		try {
@@ -600,16 +565,16 @@ export class LiveIssues {
 
 	/** Sweeps again from the start, in place: the store keeps what it holds meanwhile. */
 	restartSweep(): void {
-		if (this.broken === null) this.sweep = newSweep();
+		this.sweep = newSweep();
 	}
 
-	/** Resolves once no sweep and no rescan is due, the store is unusable, or a step threw. */
+	/** Resolves once no sweep and no rescan is due, or a step threw. */
 	whenSwept(): Promise<void> {
 		if (this.sweep === null && this.rescan === null) return Promise.resolve();
 		return new Promise((resolve) => this.waiters.push(resolve));
 	}
 
-	/** Resolves once no rescan is due, the store is unusable, or a step threw. */
+	/** Resolves once no rescan is due, or a step threw. */
 	whenSettled(): Promise<void> {
 		if (this.rescan === null) return Promise.resolve();
 		return new Promise((resolve) => this.settleWaiters.push(resolve));
@@ -627,11 +592,9 @@ export class LiveIssues {
 	/**
 	 * The staged changes' dirty sets and their issues on both states, by a
 	 * probe of the working copy: probed once per committed rev, staged version
-	 * and rules version. Throws `PatternUnusable` when the store is unusable,
-	 * or becomes so.
+	 * and rules version.
 	 */
 	origins(): Origins {
-		if (this.broken !== null) throw new PatternUnusable();
 		const wc = this.wc;
 		const cached = this.cached;
 		if (
@@ -642,14 +605,8 @@ export class LiveIssues {
 		) {
 			return cached.origins;
 		}
-		let origins: Origins;
 		this.probeRuns++;
-		try {
-			origins = this.probe();
-		} catch (caught) {
-			if (caught instanceof PatternUnusable) this.markUnusable();
-			throw caught;
-		}
+		const origins = this.probe();
 		this.cached = {
 			rev: wc.rev,
 			stagedVersion: wc.stagedVersion,
@@ -734,11 +691,9 @@ export class LiveIssues {
 	 * and the rule sets hold and the working rules are the committed ones, each
 	 * transition adds the ids it dirties, with the store's issues from just
 	 * before it: no transition had dirtied them since the probe, so those were
-	 * their committed issues. Otherwise every call reads `origins()`. Throws
-	 * `PatternUnusable` when the store is unusable, or becomes so.
+	 * their committed issues. Otherwise every call reads `origins()`..
 	 */
 	tagScope(): ReadonlyMap<string, readonly Issue[]> {
-		if (this.broken !== null) throw new PatternUnusable();
 		const kept = this.tags;
 		if (kept !== null && this.tagsHold(kept)) return kept.committedOf;
 		this.tags = null;

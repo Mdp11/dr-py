@@ -11,8 +11,8 @@ import {
 	liveStructure,
 	Metamodel,
 	Model,
-	PatternUnusable,
 	prepareCandidate,
+	UncheckablePattern,
 	PyFloat,
 	rebindPreviewBody,
 	validateScoped,
@@ -354,14 +354,23 @@ describe('prepareCandidate', () => {
 		expect(c.rules?.total).toBe(0);
 	});
 
-	it('throws PatternUnusable on a pattern the host cannot run', () => {
+	it('throws UncheckablePattern naming the type, property and pattern the host cannot run', () => {
 		const unusable = structuredClone(doc);
 		const withPattern = unusable.elements.find((type) =>
 			type.properties.some((prop) => prop.pattern !== null)
 		)!;
-		withPattern.properties.find((prop) => prop.pattern !== null)!.pattern = '(?x)a';
-		expect(() => prepareCandidate(unusable, (mm) => compileRuleSets([], mm))).toThrow(
-			PatternUnusable
+		const prop = withPattern.properties.find((prop) => prop.pattern !== null)!;
+		prop.pattern = '(?i:x)';
+		const thrown = (() => {
+			try {
+				prepareCandidate(unusable, (mm) => compileRuleSets([], mm));
+			} catch (error) {
+				return error;
+			}
+		})();
+		expect(thrown).toBeInstanceOf(UncheckablePattern);
+		expect((thrown as Error).message).toBe(
+			`${withPattern.name}.${prop.name}: pattern '(?i:x)' cannot be checked: inline flags other than a leading (?i), (?m) or (?s)`
 		);
 	});
 

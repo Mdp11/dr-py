@@ -56,12 +56,12 @@ import {
 	prepareCandidate,
 	rebindPreviewBody,
 	stagedRefusal,
+	UncheckablePattern,
 	type Candidate,
 	type StagedRefusal
 } from '../validation/candidate.ts';
 import type { Issue } from '../validation/issue.ts';
 import { deltaEnds, deltaIds, LiveIssues, type SweepStep } from '../validation/live.ts';
-import { PatternUnusable } from '../validation/pipeline.ts';
 import { parseExact } from '../value/parse.ts';
 import { pyRepr } from '../value/repr.ts';
 import type { Value } from '../value/types.ts';
@@ -170,7 +170,6 @@ function stagedDiff(wc: WorkingCopy): StagedDiffResult {
 const STAGE_POST_STATE_MAX = 500;
 
 /** The refusals the client answers from the server (501), and the ones it retries there (409). */
-const UNSUPPORTED_PATTERN = 'reaches an unsupported pattern';
 const NOT_READY = 'replica is not ready';
 const STALE_BATCHES = 'stale staged batches';
 const STALE_BASE = 'stale base_rev';
@@ -308,9 +307,9 @@ function readRebind(raw: unknown): { metamodel: unknown } | null {
 	return { metamodel: raw['metamodel'] };
 }
 
-/** A candidate document's refusal: the 501s the client takes to the server, else a 422 as `open` gives. */
+/** A candidate document's 422, as `open` gives. */
 function candidateRefusal(error: unknown): Refused {
-	if (error instanceof PatternUnusable) return new Refused(501, UNSUPPORTED_PATTERN);
+	if (error instanceof UncheckablePattern) return new Refused(422, error.message);
 	return new Refused(422, `metamodel: ${error instanceof Error ? error.message : String(error)}`);
 }
 
@@ -1266,13 +1265,12 @@ class Service {
 
 	/**
 	 * The ready replica's issue store, or the refusal of a call that would
-	 * read it: 501 where the engine must not answer, so the server does.
+	 * read it.
 	 */
 	private live(): LiveIssues {
 		const wc = this.ready();
 		const live = this.issuesOf?.live;
 		if (live === undefined || live.wc !== wc) throw new Refused(409, NOT_READY);
-		if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
 		return live;
 	}
 
@@ -1294,7 +1292,6 @@ class Service {
 				throw new Refused(409, NOT_READY);
 			}
 			if (probing) this.scheduler.restartBackground();
-			if (live.unusable !== null) throw new Refused(501, UNSUPPORTED_PATTERN);
 			throw caught;
 		}
 		if (probing && live.probes !== probes) this.scheduler.restartBackground();
@@ -1415,7 +1412,7 @@ class Service {
 				(outcome) => {
 					if (!outcome.ok) {
 						const { error } = outcome;
-						call.refuse(error instanceof PatternUnusable ? candidateRefusal(error) : error);
+						call.refuse(error);
 					} else if (outcome.value === MOVED) this.settled(call, scan);
 					else call.answer(outcome.value);
 				}
@@ -1498,7 +1495,7 @@ class Service {
 			},
 			done: (ok) => {
 				// A step that threw is a bug: what waits is refused, for the server to answer.
-				if (!ok && live.unusable === null && this.issuesOf?.live === live) {
+				if (!ok && this.issuesOf?.live === live) {
 					this.issuesOf.stalled = true;
 					this.refuseWaiting(new Refused(409, NOT_READY));
 				}

@@ -476,6 +476,7 @@ export {
 	prepareCandidate,
 	rebindPreviewBody,
 	stagedRefusal,
+	UncheckablePattern,
 	type Candidate,
 	type StagedRefusal,
 	type CandidateDiff
@@ -510,7 +511,6 @@ export {
 } from './validation/live.ts';
 export {
 	FacetPatterns,
-	PatternUnusable,
 	validateScoped,
 	validateSplit,
 	Validators,

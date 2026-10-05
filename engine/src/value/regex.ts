@@ -728,6 +728,9 @@ function translate(pattern: string, mode: 'search' | 'fullmatch'): PyRegex {
 
 const memo = new Map<string, PyRegex>();
 
+/** Why a pattern the host cannot compile is refused. */
+export const HOST_REFUSED = 'a construct this browser cannot compile';
+
 /**
  * What the host cannot run although Python can: a pattern nested past the
  * translator's stack or a subject past the translated `RegExp`'s backtracking

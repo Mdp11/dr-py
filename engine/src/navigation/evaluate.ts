@@ -576,7 +576,7 @@ const checked = new WeakSet<object>();
  * A ref-free definition (see `resolveRefs`) evaluated in steps. `rowElements`
  * binds every row start, nested ones included; a row start with none throws
  * `NavValueError`. Every pattern of the definition is translated before the
- * generator exists, so an unsupported one refuses (501) before any step.
+ * generator exists, so an unsupported one refuses (422) before any step.
  * `meter` counts the units of the whole call when the caller shares it. With
  * `scripts`, a script step runs its snippet through it, and one whose inline
  * snippet the core's `SnippetDefinition` refuses refuses with 422; without, it
