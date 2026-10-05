@@ -21,6 +21,8 @@ from data_rover.api.db_models import Commit, ElementRow, EntityRefRow, Relations
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
 from data_rover.core.metamodel.loader import load_metamodel_str
+from data_rover.core.model import model as model_mod
+from data_rover.core.model.ids import SequentialIdGenerator
 
 from .commit_oracle import MM, Oracle, assert_rows, model_ops, session
 from .conftest import (
@@ -714,8 +716,9 @@ def test_a_miss_on_a_judged_referencer_loads_all_its_targets_at_once(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
     """A planner that cannot tell what the batch detaches misses on the
-    referencer's targets; the next round judges everything it loads, so the
-    rounds do not grow with the number of references."""
+    referencer's targets; the next round judges the referencers inside the
+    deleted subtree too, so the rounds do not grow with the number of
+    references."""
     real = commit_load._scan
 
     def blind(*args: Any, **kwargs: Any) -> Any:
@@ -931,6 +934,70 @@ def test_the_two_names_of_a_hinted_create_are_one_element_to_the_plan(
     r = post_commit(client, ops)
     assert (r.status_code, rounds.n) == (200, 1), case
     assert_rows(oracle, DEFAULT_PROJECT_ID, case)
+
+
+@pytest.mark.parametrize("k", [50, 100])
+def test_the_scan_is_linear_when_temp_ids_and_hints_are_reused(k: int) -> None:
+    """k creates share ``tmp_a`` (each with its own hint), k share ``tmp_b``, and
+    k containment creates join ``tmp_a`` to ``tmp_b``: the applier lets a later
+    create overwrite a temp id's meaning, so every name pools. The scan records
+    one attachment per op and each name once, not every pairing of names."""
+    ops = [
+        _hinted(temp, f"{temp[-1].upper()}{i}")
+        for temp in ("tmp_a", "tmp_b")
+        for i in range(k)
+    ] + [_contains("tmp_a", "tmp_b", f"tmp_r{i}") for i in range(k)]
+    named = commit_load._scan(load_metamodel_str(MM), model_ops(ops))
+    assert len(named.attachments) == k
+    assert len(named.ids) == 2 * k + 2  # the 2k hints and the two temp ids
+    # and a reuse of hints after deletes (delete-and-recreate) is no worse
+    again = [
+        op
+        for i in range(k)
+        for op in (
+            _delete("H"),
+            _hinted(f"tmp_h{i}", "H"),
+            _contains("H", "H", f"tmp_c{i}"),
+        )
+    ]
+    named = commit_load._scan(load_metamodel_str(MM), model_ops(again))
+    assert len(named.attachments) == k
+    assert len(named.ids) <= 2 * k + 1
+
+
+@pytest.mark.parametrize("k", [3, 12])
+def test_a_reused_temp_id_still_reaches_every_element_it_named(
+    k: int, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``tmp_p`` is created k times with k hints, each once attached below the
+    deleted X by whichever name: the answer is the full model's."""
+    # one id counter per Model, so the server's partial model and the oracle's
+    # full one mint the same ids
+    monkeypatch.setattr(model_mod, "Uuid7Generator", lambda: SequentialIdGenerator("g"))
+    model = json.dumps(
+        {
+            "elements": [_el("X"), *(_el(f"c{i}") for i in range(k))],
+            "relationships": [],
+        }
+    )
+    install(metamodel=MM, model=model)
+    ops = (
+        [_hinted("tmp_p", f"P{i}") for i in range(k)]
+        + [_contains("X", "tmp_p", "tmp_xp")]
+        + [_contains("P0", f"c{i}", f"tmp_{i}") for i in range(k)]
+        + [_delete("X")]
+    )
+    oracle = Oracle(model)
+    want = oracle.run(model_ops(ops))
+    rounds = _Rounds(monkeypatch)
+    r = post_commit(client, ops)
+    assert (r.status_code, r.json() if r.status_code != 200 else None) == (
+        want.status,
+        want.body if want.status != 200 else None,
+    )
+    assert rounds.n <= 2
+    if want.status == 200:
+        assert_rows(oracle, DEFAULT_PROJECT_ID, "reused temp id")
 
 
 def test_the_plan_names_a_hinted_create_once() -> None:

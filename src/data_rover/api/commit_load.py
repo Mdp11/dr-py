@@ -173,9 +173,11 @@ class _Named:
     deleted_relationships: set[str] = field(default_factory=set)
     #: ids a create reinstates: an id hint, or the canonical id of a restore
     hinted: set[str] = field(default_factory=set)
-    #: (source, target) of each containment relationship the batch creates: a
+    #: (source, target) of each containment relationship the batch creates, one
+    #: pair per op, each end the representative of its names (``names``): a
     #: target attached below an element a later delete removes goes with it
     attachments: list[tuple[str, str]] = field(default_factory=list)
+    names: _Names = field(default_factory=lambda: _Names())
 
 
 def _reinstated_id(op: CreateElementOp | CreateRelationshipOp) -> str | None:
@@ -186,20 +188,34 @@ def _reinstated_id(op: CreateElementOp | CreateRelationshipOp) -> str | None:
     return op.temp_id
 
 
-def _aliases(ops: Sequence[ModelOpIn]) -> dict[str, frozenset[str]]:
-    """For each name a hinted create has (its ``temp_id`` and its hint), every
-    name of that element: later ops resolve either one to the same entity."""
-    names: dict[str, set[str]] = {}
-    for op in ops:
-        if (
-            isinstance(op, CreateElementOp | CreateRelationshipOp)
-            and op.temp_id.startswith(TEMP_ID_PREFIX)
-            and op.id is not None
-        ):
-            both = {op.temp_id, op.id}
-            for name in both:
-                names.setdefault(name, set()).update(both)
-    return {name: frozenset(group) for name, group in names.items()}
+class _Names:
+    """The names a hinted create answers to, its ``temp_id`` and its hint, which
+    later ops use interchangeably. Names are grouped (union-find), so an op
+    costs one lookup however many names a reused temp id or hint has taken."""
+
+    def __init__(self) -> None:
+        self._parent: dict[str, str] = {}
+
+    def rep(self, name: str) -> str:
+        """The one name every name of the same element maps to."""
+        root = name
+        while (up := self._parent.get(root, root)) != root:
+            root = up
+        while name != root:  # path compression
+            self._parent[name], name = root, self._parent[name]
+        return root
+
+    def join(self, a: str, b: str) -> None:
+        a, b = self.rep(a), self.rep(b)
+        self._parent.setdefault(b, b)
+        self._parent[a] = b
+
+    def groups(self) -> dict[str, set[str]]:
+        """Every group, by representative, of the names that have been joined."""
+        out: dict[str, set[str]] = {}
+        for name in list(self._parent):
+            out.setdefault(self.rep(name), set()).add(name)
+        return out
 
 
 def _scan(metamodel: Metamodel, ops: Sequence[ModelOpIn]) -> _Named:
@@ -209,47 +225,59 @@ def _scan(metamodel: Metamodel, ops: Sequence[ModelOpIn]) -> _Named:
     names = sorted(
         {n for by in (rp.element, rp.relationship) for ns in by.values() for n in ns}
     )
-    aliases = _aliases(ops)
     named = _Named()
+    for op in ops:
+        if (
+            isinstance(op, CreateElementOp | CreateRelationshipOp)
+            and op.temp_id.startswith(TEMP_ID_PREFIX)
+            and op.id is not None
+        ):
+            named.names.join(op.temp_id, op.id)
+    rep = named.names.rep
 
-    def every_name(entity_id: str) -> frozenset[str]:
-        return aliases.get(entity_id, frozenset((entity_id,)))
-
+    # Each set below holds representatives while the ops are read and every
+    # name of each group once they are done (see the end), so the work is
+    # linear in the batch whatever names a reused temp id or hint has taken.
     def refs(properties: dict[str, Any]) -> None:
-        for ref in refs_of(properties, names):
-            named.ids |= every_name(ref)
+        named.ids.update(rep(ref) for ref in refs_of(properties, names))
 
     for op in ops:
         if isinstance(op, CreateElementOp):
             if (hinted := _reinstated_id(op)) is not None:
                 named.hinted.add(hinted)
-                named.touched.add(hinted)
+                named.touched.add(rep(hinted))
             refs(op.properties)
         elif isinstance(op, UpdateElementOp):
-            named.touched |= every_name(op.id)
+            named.touched.add(rep(op.id))
             refs(op.properties_patch)
         elif isinstance(op, DeleteElementOp):
-            named.delete_roots |= every_name(op.id)
+            named.delete_roots.add(rep(op.id))
         elif isinstance(op, CreateRelationshipOp):
             if (hinted := _reinstated_id(op)) is not None:
                 named.hinted.add(hinted)
-            ends = every_name(op.source_id) | every_name(op.target_id)
-            named.touched |= ends
+            source, target = rep(op.source_id), rep(op.target_id)
+            named.touched.update((source, target))
             if metamodel.is_containment(op.type_name):
-                named.attachments.extend(
-                    (source, target)
-                    for source in every_name(op.source_id)
-                    for target in every_name(op.target_id)
-                )
+                named.attachments.append((source, target))
             refs(op.properties)
         elif isinstance(op, UpdateRelationshipOp):
-            named.relationships |= every_name(op.id)
+            named.relationships.add(rep(op.id))
             refs(op.properties_patch)
         elif isinstance(op, DeleteRelationshipOp):
-            named.relationships |= every_name(op.id)
-            named.deleted_relationships |= every_name(op.id)
+            named.relationships.add(rep(op.id))
+            named.deleted_relationships.add(rep(op.id))
         else:
             assert_never(op)
+    groups = named.names.groups()
+    for found in (
+        named.ids,
+        named.touched,
+        named.delete_roots,
+        named.relationships,
+        named.deleted_relationships,
+    ):
+        for name in [n for n in found if n in groups]:
+            found |= groups[name]
     named.ids |= named.touched | named.delete_roots | named.relationships | named.hinted
     return named
 
@@ -426,13 +454,21 @@ def plan_load(
     # deleted subtree, is deleted itself, or was attached into one) makes its
     # target a root too: the rounds then do not grow with their number, and
     # moving a subtree that nothing deletes loads nothing of it.
-    doomed = subtree | named.delete_roots | extra
-    while fresh := {t for s_, t in named.attachments if s_ in doomed} - doomed:
+    rep = named.names.rep
+    groups = named.names.groups()
+    attached_to: dict[str, list[str]] = {}
+    for source, target in named.attachments:
+        attached_to.setdefault(source, []).append(target)
+    doomed = {rep(i) for i in subtree | named.delete_roots | extra}
+    frontier = set(doomed)
+    while frontier:
+        fresh = {t for s_ in frontier for t in attached_to.get(s_, ())} - doomed
         doomed |= fresh
-        attached = {t for t in fresh if t in rows.elements}
-        below = subtree_ids(db, project_id, attached, types)
+        attached = {m for t in fresh for m in groups.get(t, (t,)) if m in rows.elements}
+        below = subtree_ids(db, project_id, attached, types) if attached else set()
         subtree |= below
-        doomed |= below
+        frontier = fresh | ({rep(i) for i in below} - doomed)
+        doomed |= frontier
     rows.load_elements(subtree)
     deleted_relationships = rows.incident(subtree) | {
         r for r in named.deleted_relationships if r in rows.relationships
@@ -497,8 +533,9 @@ def load_and_apply(
     missed: frozenset[str] = frozenset()
     rounds = 0
     for rounds in range(1, MAX_ROUNDS + 1):
-        # After a miss the plan judges every element it loads, so a batch whose
-        # elements hold many references does not miss on them one per round.
+        # After a miss the plan also judges the referencers inside the deleted
+        # subtree, so a batch whose elements hold many references does not miss
+        # on them one per round.
         rows = plan_load(db, project_id, metamodel, ops, extra, thorough=bool(missed))
         model = build_partial_model(metamodel, rows)
         try:
