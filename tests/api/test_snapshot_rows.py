@@ -231,3 +231,15 @@ def test_gcs_put_sets_gzip_type() -> None:
     assert kwargs["content_type"] == "application/gzip"
     assert kwargs["chunk_size"] == 8 * 1024 * 1024
     assert "content_encoding" not in kwargs
+
+
+def test_descriptor_of_a_project_without_head_rows_is_409(client: TestClient) -> None:
+    with db.db_session() as s:
+        row = content.get_model_row(s, DEFAULT_PROJECT_ID)
+        assert row is not None
+        row.state_digest = None
+        row.next_seq = None
+        s.execute(delete(Snapshot))
+    res = client.get(papi("/replica/snapshot"))
+    assert res.status_code == 409
+    assert res.json()["detail"] == "project has no head rows: re-import it"

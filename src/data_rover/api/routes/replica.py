@@ -60,6 +60,10 @@ def get_snapshot_descriptor(
     head = locked.model_rev
     snap = replica.pick_snapshot(db, project_id, head)
     if snap is None:
+        if locked.state_digest is None or locked.next_seq is None:
+            raise HTTPException(
+                status_code=409, detail="project has no head rows: re-import it"
+            )
         try:
             head = write_snapshot_from_rows(project_id)
         except Exception as exc:
