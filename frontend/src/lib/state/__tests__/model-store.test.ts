@@ -81,13 +81,13 @@ const summary = {
 };
 
 describe('applyDelta', () => {
-	it('upserts changed entities, drops deleted ids, adopts rev + counts', () => {
+	it('upserts changed entities, drops deleted ids, adopts rev, keeps the engine counts', () => {
+		adoptIssues([], { error: 1 }, 0);
 		applyDelta(
 			delta({
 				model_rev: 3,
 				changed_elements: [el('e1', { name: 'A' }, 1), el('e2')],
-				changed_relationships: [rel('r1', 'e1', 'e2')],
-				issue_counts: { error: 1 }
+				changed_relationships: [rel('r1', 'e1', 'e2')]
 			})
 		);
 		expect(getCachedElements().get('e1')?.properties.name).toBe('A');
@@ -99,8 +99,7 @@ describe('applyDelta', () => {
 			delta({
 				model_rev: 4,
 				deleted_element_ids: ['e2'],
-				deleted_relationship_ids: ['r1'],
-				issue_counts: {}
+				deleted_relationship_ids: ['r1']
 			})
 		);
 		expect(getCachedElements().has('e2')).toBe(false);
@@ -183,6 +182,7 @@ describe('applyDelta', () => {
 	});
 
 	it('applies the issue-store delta keyed by owner (target_ids[0])', () => {
+		adoptIssues([], { error: 1, warning: 1 }, 0);
 		applyDelta(
 			delta({
 				issues_added: [
@@ -207,8 +207,7 @@ describe('applyDelta', () => {
 						check: '',
 						origin: 'on_server'
 					}
-				],
-				issue_counts: { error: 1, warning: 2 }
+				]
 			})
 		);
 		expect(getIssuesByOwner().get('e1')).toHaveLength(2);
@@ -225,8 +224,7 @@ describe('applyDelta', () => {
 						check: '',
 						origin: 'on_server'
 					}
-				],
-				issue_counts: { error: 1, warning: 1 }
+				]
 			})
 		);
 		expect(getIssuesByOwner().get('e1')).toHaveLength(1);
@@ -324,6 +322,7 @@ describe('reads and lifecycle', () => {
 				{ severity: 'warning', message: 'c', target_ids: ['e2'] }
 			]
 		});
+		adoptIssues([], { error: 1 }, 0);
 		applyDelta(
 			delta({
 				issues_added: [
@@ -334,8 +333,7 @@ describe('reads and lifecycle', () => {
 						check: '',
 						origin: 'on_server'
 					}
-				],
-				issue_counts: { error: 1 }
+				]
 			})
 		);
 		const issues = await validateAll();

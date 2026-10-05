@@ -197,7 +197,7 @@ describe('the engine store follows the replica', () => {
 			element_count: 0,
 			relationship_count: 0,
 			elements_by_type: {},
-			issue_counts: {},
+			issue_counts: { error: 1 },
 			undo_depth: 0
 		});
 
@@ -211,8 +211,7 @@ describe('the engine store follows the replica', () => {
 		};
 		applyDelta({
 			...peerDelta(second),
-			issues_added: [issue],
-			issue_counts: { error: 1 }
+			issues_added: [issue]
 		});
 
 		expect(getModelRev()).toBe(3);

@@ -750,7 +750,7 @@ def create_commit(
           auto-creating an empty view for a project that never had one.
        c. Hard-reject structural blockers (422; rolls back every half),
           checked over the batch's touched entities and the referencers of
-          the elements it deleted. Conformance is never rejected: the client
+          the elements it deleted (the whole model for a rebind). Conformance is never rejected: the client
           reports its validation count and issues, stored as given.
        d. Bump rev, record batch.
        e. Persist to the durable journal (500 + full rollback on failure); the
@@ -1044,7 +1044,15 @@ def create_commit(
         #    row can never make the MODEL structurally invalid. The check is
         #    over what the batch touched and the referencers of what it
         #    deleted: structure elsewhere is not the batch's doing.
-        structural = structural_blockers(model, _structural_ids(model, res))
+        #    A schema swap can break entities the batch never touched (a type
+        #    turned containment, a property turned element-valued), so a
+        #    rebind checks the whole model.
+        structural = structural_blockers(
+            model,
+            [*model.elements, *model.relationships]
+            if rebound
+            else _structural_ids(model, res),
+        )
         if structural:
             unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(

@@ -50,7 +50,7 @@ describe('applyDeltaShared', () => {
 			element_count: 0,
 			relationship_count: 0,
 			elements_by_type: {},
-			issue_counts: {},
+			issue_counts: { error: 2 },
 			undo_depth: 0
 		});
 		setOverlay([
@@ -60,7 +60,6 @@ describe('applyDeltaShared', () => {
 		applyDeltaShared(
 			delta({
 				model_rev: 5,
-				issue_counts: { error: 1 },
 				issues_added: [
 					{ severity: 'error', message: 'm', target_ids: ['a'], check: '', origin: 'on_server' }
 				]
@@ -69,10 +68,11 @@ describe('applyDeltaShared', () => {
 		);
 
 		expect(getModelRev()).toBe(5);
-		expect(getModelSummary()).toMatchObject({ model_rev: 5, issue_counts: { error: 1 } });
+		expect(getModelSummary()).toMatchObject({ model_rev: 5, issue_counts: { error: 2 } });
 		expect(getIssuesByOwner().get('a')).toHaveLength(1);
 		expect(getLiveIssues()).toHaveLength(1);
-		expect(getIssueCounts()).toEqual({ error: 1 });
+		// the engine's counts stay; the delta's (empty, from a server that no longer validates) are not taken
+		expect(getIssueCounts()).toEqual({ error: 2 });
 		expect(getOverlay()).toBeNull();
 	});
 

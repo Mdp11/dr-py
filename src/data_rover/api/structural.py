@@ -24,5 +24,5 @@ def structural_blockers(model: Model, ids: Iterable[str]) -> list[Issue]:
     parent, containment cycle) over these ids."""
     issues = ValidationPipeline(
         [TypeConformanceValidator(), ContainmentValidator()]
-    ).validate(model, Scope(set(ids)))
+    ).validate(model, Scope(ids))
     return [i for i in issues if i.category is IssueCategory.STRUCTURAL]

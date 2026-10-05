@@ -213,9 +213,11 @@ export function applyDeltaShared(
 	const moveRev = options.rev !== false;
 	if (moveRev) setModelRev(d.model_rev);
 	if (structural && options.structure !== false) bumpStructureRev();
-	_issueCounts = d.issue_counts;
-	if (moveRev) patchSummary(d.model_rev, d.issue_counts);
-	else if (_summary !== null) _summary = { ..._summary, issue_counts: d.issue_counts };
+	// The delta's counts are the server's, which no longer validates: the store's own
+	// (the engine's) stay, and `refetchIssues()` refreshes them.
+	const counts = _issueCounts ?? {};
+	if (moveRev) patchSummary(d.model_rev, counts);
+	else if (_summary !== null) _summary = { ..._summary, issue_counts: counts };
 
 	return structural;
 }

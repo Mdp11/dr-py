@@ -7,7 +7,10 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 
+from data_rover.api.db import db_session
+from data_rover.api.db_models import Commit
 from data_rover.api.main import create_app
 
 from .conftest import (
@@ -179,3 +182,94 @@ def test_preview_answers_no_issues(client) -> None:
     assert r.json()["structural_blockers"] == []
     assert r.json()["would_block"] is False
     assert head().elements == {}
+
+
+_MM_LINKS = """
+elements:
+  - name: Node
+    properties:
+      - {name: ref, datatype: %s, multiplicity: "0..1"}
+relationships:
+  - name: Link
+    containment: %s
+    source: Node
+    target: Node
+"""
+
+
+def _rebind(client: TestClient, blob: str) -> Response:
+    lock = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": "mm", "mode": "exclusive", "type": "metamodel"}],
+            "intent": "edit",
+        },
+    )
+    assert lock.status_code == 200, lock.text
+    return client.post(
+        papi("/commits"),
+        json={
+            "base_rev": head().rev,
+            "ops": [{"kind": "metamodel.rebind", "blob": blob}],
+            "lock_tokens": [lock.json()["token"]],
+        },
+    )
+
+
+def test_rebind_that_gives_an_untouched_element_two_parents_is_blocked(
+    client,
+) -> None:
+    install(
+        metamodel=_MM_LINKS % ("string", "false"),
+        model=json.dumps(
+            {
+                "elements": [
+                    {"id": i, "type_name": "Node", "properties": {}}
+                    for i in ("p1", "p2", "c")
+                ],
+                "relationships": [
+                    {**_contains("r1", "p1", "c"), "type_name": "Link"},
+                    {**_contains("r2", "p2", "c"), "type_name": "Link"},
+                ],
+            }
+        ),
+    )
+    r = _rebind(client, _MM_LINKS % ("string", "true"))
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "structural validation blocker"
+    assert head().rev == 0
+
+
+def test_rebind_that_makes_a_value_a_dangling_reference_is_blocked(client) -> None:
+    install(
+        metamodel=_MM_LINKS % ("string", "false"),
+        model=json.dumps(
+            {
+                "elements": [
+                    {"id": "a", "type_name": "Node", "properties": {"ref": "ghost"}}
+                ],
+                "relationships": [],
+            }
+        ),
+    )
+    r = _rebind(client, _MM_LINKS % ("Node", "false"))
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "structural validation blocker"
+    assert head().rev == 0
+
+
+def test_revert_blocks_on_a_structural_blocker(client) -> None:
+    _install([_node("a")])
+    commit_ops(client, [_update("a", name="renamed")])
+    # a journal whose inverse restores a reference to an element that is gone
+    with db_session() as s:
+        row = s.query(Commit).filter_by(rev=1).one()
+        row.inverse_ops = [_update("a", link="ghost")]
+        s.commit()
+    r = client.post(
+        papi("/commits/revert"), json={"target_rev": 0, "base_rev": head().rev}
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "structural validation blocker"
+    assert head().rev == 1
+    assert head().elements["a"]["properties"]["name"] == "renamed"
