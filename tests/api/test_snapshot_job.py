@@ -295,16 +295,15 @@ def test_an_open_after_an_import_whose_job_has_not_written_gets_a_snapshot(
 
 
 def _inject_competing_snapshot_row(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """Make the next ``record_snapshot`` calls run as the loser of a race: the
-    other writer's row is already in the table, and a read before the write
-    saw none. The returned list counts the calls."""
+    """Make the first ``record_snapshot`` call run as the loser of a race: the
+    other writer's row for the same rev is already in the table when its upsert
+    executes. The returned list counts the calls."""
     from sqlalchemy import insert
     from sqlalchemy.orm import Session as OrmSession
 
     from data_rover.api.db_models import Snapshot
 
     real = content.record_snapshot
-    real_get = OrmSession.get
     calls: list[int] = []
 
     def racing(db: OrmSession, project_id: str, *, rev: int, **kw: object) -> Snapshot:
@@ -315,17 +314,7 @@ def _inject_competing_snapshot_row(monkeypatch: pytest.MonkeyPatch) -> list[int]
                     project_id=project_id, rev=rev, key="competitor", format="v2"
                 )
             )
-
-            def stale_get(self: OrmSession, entity: object, ident: object, **k: object):
-                if entity is Snapshot and not k.get("populate_existing"):
-                    return None  # what a get before the competitor's insert saw
-                return real_get(self, entity, ident, **k)  # type: ignore[arg-type]
-
-            monkeypatch.setattr(OrmSession, "get", stale_get)
-        try:
-            return real(db, project_id, rev=rev, **kw)  # type: ignore[arg-type]
-        finally:
-            monkeypatch.setattr(OrmSession, "get", real_get)
+        return real(db, project_id, rev=rev, **kw)  # type: ignore[arg-type]
 
     monkeypatch.setattr(content, "record_snapshot", racing)
     return calls
@@ -376,3 +365,42 @@ def test_an_open_that_loses_the_race_for_a_snapshot_row_answers_200(
     job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True)
     assert job is not None and job.written_rev == 0
     assert len(_snapshot_rows(DEFAULT_PROJECT_ID)) == 1
+
+
+def test_the_snapshot_row_is_recorded_after_the_read_transaction_has_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The head is streamed in a REPEATABLE READ transaction whose snapshot is
+    taken at its first read. The upsert of the row must not run in it: Postgres
+    fails an ``ON CONFLICT DO UPDATE`` there with a serialization error when a
+    racing writer of the same rev committed after that point. So it runs on a
+    session of its own, entered after the first one has exited."""
+    from contextlib import contextmanager
+
+    from data_rover.api import snapshot_rows
+
+    _client()
+    events: list[tuple[str, int]] = []
+    real_db_session = snapshot_rows.db_session
+    real_record = content.record_snapshot
+
+    @contextmanager
+    def spying_db_session():  # type: ignore[no-untyped-def]
+        with real_db_session() as s:
+            events.append(("enter", id(s)))
+            try:
+                yield s
+            finally:
+                events.append(("exit", id(s)))
+
+    def spying_record(db, project_id, **kw):  # type: ignore[no-untyped-def]
+        events.append(("record", id(db)))
+        return real_record(db, project_id, **kw)
+
+    monkeypatch.setattr(snapshot_rows, "db_session", spying_db_session)
+    monkeypatch.setattr(content, "record_snapshot", spying_record)
+    assert snapshot_rows.write_snapshot_from_rows(DEFAULT_PROJECT_ID) == 0
+
+    kinds = [kind for kind, _ in events]
+    assert kinds == ["enter", "exit", "enter", "record", "exit"], events
+    assert events[3][1] == events[2][1]  # recorded on the second session

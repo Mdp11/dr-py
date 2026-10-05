@@ -46,7 +46,9 @@ def write_snapshot_from_rows(project_id: str) -> int:
     the rev written.
 
     Reads in one transaction (``REPEATABLE READ`` on Postgres), so the header,
-    the counts and the lines are one rev. Raises ``LookupError`` when the
+    the counts and the lines are one rev; the row is recorded afterwards in a
+    transaction of its own, since it is an upsert that a racing writer of the
+    same rev may have beaten. Raises ``LookupError`` when the
     project has no model row and ``RuntimeError`` when its head rows are not
     written yet."""
     with db_session() as s:
@@ -96,6 +98,11 @@ def write_snapshot_from_rows(project_id: str) -> int:
                 relationship_lines=relationship_lines(),
             ),
         )
+    # In a transaction of its own, after the read-only one has closed: under
+    # REPEATABLE READ the upsert would fail with a serialization error whenever
+    # a racing writer of the same rev committed after the snapshot was taken at
+    # the first read, which is seconds before this point on a large head.
+    with db_session() as s:
         content.record_snapshot(
             s,
             project_id,
