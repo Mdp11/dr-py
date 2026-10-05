@@ -307,25 +307,3 @@ def test_hydrate_loads_a_legacy_plain_json_snapshot_row() -> None:
     h = hydration.hydrate_session("p1")
     assert h.model is not None
     assert h.model.elements["old1"].properties == {"name": "v"}
-
-
-def test_reconstruct_model_at_reads_the_compressed_snapshot() -> None:
-    from data_rover.core.model.element import Element
-
-    sess = _seed_baseline()
-    assert sess.model is not None
-    et = _first_concrete_element_type(sess)
-    sess.model.elements["base"] = Element(id="base", type_name=et, properties={})
-    sess.model.indexes.rebuild()
-    _persist_baseline("p1", sess)
-    create = {"kind": "create_element", "temp_id": "e1", "type_name": et, "properties": {}}
-    with db.db_session() as s:
-        content.append_commit(
-            s, "p1", rev=1, commit_id="c1", author_id=None,
-            ops=[create], inverse_ops=[], id_map={},
-        )
-        content.set_model_rev(s, "p1", 1)
-    at0 = hydration.reconstruct_model_at("p1", 0)
-    at1 = hydration.reconstruct_model_at("p1", 1)
-    assert at0 is not None and sorted(at0.elements) == ["base"]
-    assert at1 is not None and sorted(at1.elements) == ["base", "e1"]

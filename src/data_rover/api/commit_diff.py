@@ -1,14 +1,12 @@
 """Per-commit diff rendering.
 
-Model entities: journal-only when the commit row carries ``entity_states``
-— the full before/after state of every entity the batch touched, captured
-at commit time (``commit_states``) because the inverse ops alone cannot
-render a ``modified`` entry: an update's inverse patch carries only the
-touched keys, never the whole entity. A row without it (written before the
-column existed) falls back to
-reconstructing the model at rev-1 and rev (``reconstruct_model_at``) and
-comparing only the ids the commit's ops name.
-Both paths feed the same renderer, so the output is identical.
+Model entities: journal-only — the commit row's ``entity_states`` hold the
+full before/after state of every entity the batch touched, captured at commit
+time (``commit_states``) because the inverse ops alone cannot render a
+``modified`` entry: an update's inverse patch carries only the touched keys,
+never the whole entity. A row without them (written before the column
+existed) has no model diff: ``diff_commit`` raises ``DiffUnavailable``, since
+the server holds no model to rebuild one from.
 
 Artifacts: journal-only. Canonical artifact ops carry full AFTER state and
 their inverses full BEFORE state (the applier's invariant — see
@@ -57,18 +55,16 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.diff import MetamodelStructuralDiff, diff_metamodels
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
-from data_rover.core.model.model import Model
-
 from . import content
 from .artifact_ops import ARTIFACT_OP_KINDS, split_ops
 from .commit_states import (
+    DiffUnavailable,
     ElementPair,
-    EntityStates,
     RelationshipPair,
     load_entity_states,
 )
 from .db_models import Commit
-from .hydration import deserialize_ops, reconstruct_model_at
+from .hydration import deserialize_ops
 from .schemas import (
     METAMODEL_OP_KINDS,
     VIEW_OP_KINDS,
@@ -83,7 +79,6 @@ from .schemas import (
     CrRelationshipOps,
     DeleteArtifactOp,
     DeleteFolderOp,
-    ElementOut,
     JsonChangeOut,
     LayoutMoveOut,
     ModifiedElementOut,
@@ -94,18 +89,11 @@ from .schemas import (
     MoveMetamodelNodeOp,
     PlaceArtifactOp,
     PlaceElementOp,
-    RelationshipOut,
     RemoveArtifactOp,
     RemoveElementOp,
     RenameFolderOp,
     UpdateArtifactOp,
     ViewDiffEntryOut,
-)
-
-#: raw journal ``kind`` tags per model-entity family (see ``_entity_ids``)
-_EL_KINDS = frozenset({"create_element", "update_element", "delete_element"})
-_REL_KINDS = frozenset(
-    {"create_relationship", "update_relationship", "delete_relationship"}
 )
 
 #: one artifact's state at a point in time: ``{"name": str, "payload": dict}``,
@@ -133,27 +121,6 @@ def json_structural_diff(
             out.extend(json_structural_diff(before.get(key), after.get(key), sub))
         return out
     return [JsonChangeOut(path=path or "$", before=before, after=after)]
-
-
-def _entity_ids(raw_ops: list[Any], kinds: frozenset[str]) -> set[str]:
-    """Ids named by ops of the given family, across forward AND inverse ops.
-
-    The inverse half is not redundant: a containment ``delete_element``
-    cascades, and its forward op names only the root — the cascade victims
-    appear exclusively as ``create_element``/``create_relationship`` ops on the
-    inverse side (same reason ``routes/commits._affected_ids`` reads both).
-    ``temp_id`` is read alongside ``id`` because canonical stored create ops
-    carry the ASSIGNED id there.
-    """
-    ids: set[str] = set()
-    for op in raw_ops:
-        if op.get("kind") not in kinds:
-            continue
-        for key in ("id", "temp_id"):
-            v = op.get(key)
-            if isinstance(v, str):
-                ids.add(v)
-    return ids
 
 
 def _artifact_states(
@@ -252,35 +219,6 @@ def _relationship_diffs(states: Mapping[str, RelationshipPair]) -> CrRelationshi
         elif bo is not None and ao is not None and bo != ao:
             out.modified.append(ModifiedRelationshipOut(id=rid, before=bo, after=ao))
     return out
-
-
-def _states_from_models(
-    el_ids: set[str],
-    rel_ids: set[str],
-    before: Model | None,
-    after: Model | None,
-) -> EntityStates:
-    """The reconstruction fallback's input: pairs for exactly the ids the
-    commit's ops name, read off two throwaway models (None = contentless)."""
-    b_el = before.elements if before is not None else {}
-    a_el = after.elements if after is not None else {}
-    b_rel = before.relationships if before is not None else {}
-    a_rel = after.relationships if after is not None else {}
-    elements: dict[str, ElementPair] = {}
-    for eid in el_ids:
-        b, a = b_el.get(eid), a_el.get(eid)
-        elements[eid] = (
-            ElementOut.from_core(b) if b is not None else None,
-            ElementOut.from_core(a) if a is not None else None,
-        )
-    relationships: dict[str, RelationshipPair] = {}
-    for rid in rel_ids:
-        rb, ra = b_rel.get(rid), a_rel.get(rid)
-        relationships[rid] = (
-            RelationshipOut.from_core(rb) if rb is not None else None,
-            RelationshipOut.from_core(ra) if ra is not None else None,
-        )
-    return EntityStates(elements=elements, relationships=relationships)
 
 
 def _artifact_diffs(
@@ -477,33 +415,18 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
     """Render one commit's changes across content families.
 
     Four mechanisms on purpose (see the module docstring): model entities are
-    read from the row's captured ``entity_states`` when present and
-    reconstructed at rev-1 and rev only for rows without them (pre-column
-    rows, over-cap batches), artifacts are read straight out of the journal
-    (state simulated from the inverse-derived base), view ops are rendered
-    as-is — the ops ARE the diff, no reconstruction at all — and the
-    metamodel/layout half is its own pair: the rebind's structural diff is
-    recomputed from the two immutable metamodel rows the commit names, while
-    layout moves are read journal-only off the forward ops.
+    read from the row's captured ``entity_states``, artifacts are read straight
+    out of the journal (state simulated from the inverse-derived base), view
+    ops are rendered as-is — the ops ARE the diff — and the metamodel/layout
+    half is its own pair: the rebind's structural diff is recomputed from the
+    two immutable metamodel rows the commit names, while layout moves are read
+    journal-only off the forward ops.
 
-    A fallback commit that names no model entity at all (a pure-artifact
-    commit, an empty batch, a rebind) skips reconstruction entirely: the
-    entity halves iterate over the named ids only, so both sides would be
-    discarded anyway, and the model can be ~80 MB — paying two
-    reconstructions to render an unavoidably empty model diff is the one cost
-    worth short-circuiting here.
+    Raises ``DiffUnavailable`` for a row without ``entity_states``.
     """
-    if commit.entity_states is not None:
-        states = load_entity_states(commit.entity_states)
-    else:
-        raw = [*commit.ops, *commit.inverse_ops]
-        el_ids = _entity_ids(raw, _EL_KINDS)
-        rel_ids = _entity_ids(raw, _REL_KINDS)
-        m_before = m_after = None
-        if el_ids or rel_ids:
-            m_before = reconstruct_model_at(project_id, commit.rev - 1)
-            m_after = reconstruct_model_at(project_id, commit.rev)
-        states = _states_from_models(el_ids, rel_ids, m_before, m_after)
+    if commit.entity_states is None:
+        raise DiffUnavailable("diff unavailable for this commit")
+    states = load_entity_states(commit.entity_states)
 
     # A rebind commit carries no ops at all but changes how the model reads, so
     # it still counts as touching the model scope; an empty batch reports

@@ -1,12 +1,11 @@
-"""The history range diff: the journal fold, the reconstruction path, and
-their equality.
+"""The history range diff: the journal fold and its refusals.
 
-The fold reads each commit's captured ``entity_states``; the reconstruction
-path rebuilds the model at both ends. Every history here is built through
-``/commits`` and ``/commits/revert`` (no locks, states journalled like
-``POST /commits``), and the randomized test holds the two paths equal over
-generated histories, values compared as canonical JSON so ``1`` and ``1.0``
-stay distinct.
+The fold reads each commit's captured ``entity_states``. Every history here is
+built through ``/commits`` and ``/commits/revert`` (no locks, states
+journalled like ``POST /commits``). The oracle is the head rows read after each
+commit (``_RECORD``): the fold must equal the diff of the recorded states at
+the two ends, over named and randomized histories, values compared as
+canonical JSON so ``1`` and ``1.0`` stay distinct.
 """
 
 from __future__ import annotations
@@ -21,8 +20,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session as DbSession
 
-from data_rover.api import content, db, importer, range_diff
-from data_rover.api.commit_states import EntityStates
+from data_rover.api import content, db, importer
+from data_rover.api.commit_states import DiffUnavailable, EntityStates
 from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
 from data_rover.api.range_diff import (
@@ -30,11 +29,10 @@ from data_rover.api.range_diff import (
     can_fold,
     diff_range,
     fold_range,
-    reconstruct_range,
     render_range,
 )
-from data_rover.api.schemas import RangeDiffOut
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.schemas import ElementOut, RangeDiffOut, RelationshipOut
+from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
 from .conftest import (
@@ -46,8 +44,10 @@ from .conftest import (
     install,
     head,
     commit_ops,
+    Head,
     append_baseline_row,
     unjournaled_bump,
+    without_session_model,
 )
 from .test_commits_metamodel_ops import _acquire_mm
 
@@ -76,12 +76,18 @@ relationships:
 """
 
 
+#: the head rows after each commit the helpers below made, by rev: the oracle
+_RECORD: dict[int, Head] = {}
+
+
 @pytest.fixture
 def client() -> TestClient:
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
     install(metamodel=_MM, model=EMPTY_MODEL)
+    _RECORD.clear()
+    _RECORD[_rev(c)] = head()
     return c
 
 
@@ -91,7 +97,9 @@ def _rev(c: TestClient) -> int:
 
 
 def _ops(c: TestClient, ops: list[dict[str, Any]]) -> dict[str, Any]:
-    return commit_ops(c, ops)
+    body = commit_ops(c, ops)
+    _RECORD[body["model_rev"]] = head()
+    return body
 
 
 def _undo(c: TestClient) -> dict[str, Any]:
@@ -100,6 +108,7 @@ def _undo(c: TestClient) -> dict[str, Any]:
     r = c.post(papi("/commits/revert"), json={"target_rev": rev - 1, "base_rev": rev})
     assert r.status_code == 200, r.text
     body: dict[str, Any] = r.json()
+    _RECORD[body["model_rev"]] = head()
     return body
 
 
@@ -141,12 +150,34 @@ def _db() -> Iterator[DbSession]:
 def _fold(lo: int, hi: int) -> RangeDiffOut:
     with _db() as s:
         states = fold_range(s, DEFAULT_PROJECT_ID, lo, hi)
-    return render_range(states, lo, hi, "journal")
+    return render_range(states, lo, hi)
 
 
-def _recon(lo: int, hi: int) -> RangeDiffOut:
-    states = reconstruct_range(DEFAULT_PROJECT_ID, lo, hi)
-    return render_range(states, lo, hi, "reconstruction")
+def _recorded(lo: int, hi: int) -> RangeDiffOut:
+    """The diff of the head rows recorded at ``lo`` and ``hi``: the entities that
+    exist on one side only or differ, compared as the rows hold them."""
+    old, new = _RECORD[lo], _RECORD[hi]
+    elements: dict[str, Any] = {}
+    for eid in old.elements.keys() | new.elements.keys():
+        b, a = old.elements.get(eid), new.elements.get(eid)
+        if b is None or a is None or (b["type_name"], b["properties"]) != (
+            a["type_name"],
+            a["properties"],
+        ):
+            elements[eid] = (
+                ElementOut.model_validate(b) if b else None,
+                ElementOut.model_validate(a) if a else None,
+            )
+    relationships: dict[str, Any] = {}
+    for rid in old.relationships.keys() | new.relationships.keys():
+        rb, ra = old.relationships.get(rid), new.relationships.get(rid)
+        key = ("type_name", "source_id", "target_id", "properties")
+        if rb is None or ra is None or [rb[k] for k in key] != [ra[k] for k in key]:
+            relationships[rid] = (
+                RelationshipOut.model_validate(rb) if rb else None,
+                RelationshipOut.model_validate(ra) if ra else None,
+            )
+    return render_range(EntityStates(elements, relationships), lo, hi)
 
 
 def _null_states(rev: int) -> None:
@@ -400,7 +431,7 @@ def test_from_equal_to_is_empty_and_reads_no_row(
 def test_added_ids_answer_in_id_order(client: TestClient) -> None:
     b, head = _h_order(client)
     assert _ids(_fold(b, head).elements.added) == ["e-a", "e-b", "e-c"]
-    assert _ids(_recon(b, head).elements.added) == ["e-a", "e-b", "e-c"]
+    assert _ids(_recorded(b, head).elements.added) == ["e-a", "e-b", "e-c"]
 
 
 def test_fold_keeps_the_first_before_and_the_last_after(client: TestClient) -> None:
@@ -431,14 +462,24 @@ def test_can_fold_accepts_a_contiguous_range_of_states() -> None:
 @pytest.mark.parametrize(
     "marks",
     [
+        [(4, True, False), (5, True, True), (6, True, False)],  # a rebind with states
+        [(4, True, False), (5, False, True), (6, True, False)],  # a rebind without
+    ],
+)
+def test_can_fold_accepts_a_rebind_row(marks: list[tuple[int, bool, bool]]) -> None:
+    assert can_fold(marks, 3, 6)
+
+
+@pytest.mark.parametrize(
+    "marks",
+    [
         [(4, True, False), (6, True, False), (7, True, False)],  # gap
         [(4, True, False), (5, False, False), (6, True, False)],  # no states
-        [(4, True, False), (5, True, True), (6, True, False)],  # rebind
         [(4, True, False), (5, True, False)],  # short
         [(4, True, False), (6, True, False), (5, True, False)],  # unordered
     ],
 )
-def test_can_fold_refuses_a_gap_a_stateless_row_or_a_rebind(
+def test_can_fold_refuses_a_gap_or_a_stateless_row(
     marks: list[tuple[int, bool, bool]],
 ) -> None:
     assert not can_fold(marks, 3, 6)
@@ -474,78 +515,46 @@ def test_range_marks_read_states_and_rebind_as_scalars(client: TestClient) -> No
             (b + 2, False, True),
             (b + 3, True, False),
         ]
-        assert not can_fold(marks, b, head)
+        assert can_fold(marks, b, head)  # the rebind row has nothing to give
         assert content.commit_range_marks(
             s, DEFAULT_PROJECT_ID, after_rev=head, max_rev=head
         ) == []
 
 
-# --- the reconstruction path ---------------------------------------------
+# --- the recorded oracle -------------------------------------------------
 
 
 @pytest.mark.parametrize("name", sorted(_HISTORIES))
-def test_reconstruction_equals_the_fold_on_every_pair(
+def test_fold_equals_the_recorded_states_on_every_pair(
     client: TestClient, name: str
 ) -> None:
     b, head = _HISTORIES[name](client)
     for lo in range(b, head + 1):
         for hi in range(lo, head + 1):
-            assert _canon(_recon(lo, hi)) == _canon(_fold(lo, hi)), (name, lo, hi)
-
-
-def test_reconstruction_marks_its_source(client: TestClient) -> None:
-    b, head = _h_update_chain(client)
-    assert _recon(b, head).source == "reconstruction"
-    assert _fold(b, head).source == "journal"
-
-
-def test_reconstruction_of_a_project_without_a_model_is_empty(
-    client: TestClient,
-) -> None:
-    states = reconstruct_range("no-such-project", 0, 0)
-    assert states == EntityStates(elements={}, relationships={})
+            assert _canon(_recorded(lo, hi)) == _canon(_fold(lo, hi)), (name, lo, hi)
 
 
 # --- diff_range -----------------------------------------------------------
 
 
-def test_diff_range_folds_without_reconstructing(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_diff_range_folds_the_journal(client: TestClient) -> None:
     b, head = _h_delete_undo_update(client)
-
-    def boom(*_a: object, **_k: object) -> None:
-        raise AssertionError("reconstruct_model_at must not run on the journal path")
-
-    monkeypatch.setattr(range_diff, "reconstruct_model_at", boom)
     with _db() as s:
         out = diff_range(s, DEFAULT_PROJECT_ID, b + 1, head)
     assert out.source == "journal"
     assert _ids(out.elements.modified) == ["a"]
 
 
-def test_diff_range_reconstructs_when_a_row_lacks_states(client: TestClient) -> None:
-    b, head = _h_update_chain(client)
-    folded = _fold(b, head)
-    _null_states(b + 2)
-    with _db() as s:
-        out = diff_range(s, DEFAULT_PROJECT_ID, b, head)
-    assert out.source == "reconstruction"
-    assert _canon(out) == _canon(folded)
-
-
-def test_diff_range_reconstructs_over_the_cap(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_diff_range_is_unavailable_when_a_row_lacks_states(
+    client: TestClient,
 ) -> None:
     b, head = _h_update_chain(client)
-    monkeypatch.setattr(range_diff, "RANGE_DIFF_MAX_REVS", 2)
-    with _db() as s:
-        out = diff_range(s, DEFAULT_PROJECT_ID, b, head)
-    assert out.source == "reconstruction"
-    assert _ids(out.elements.added) == ["a"]
+    _null_states(b + 2)
+    with _db() as s, pytest.raises(DiffUnavailable, match="this range"):
+        diff_range(s, DEFAULT_PROJECT_ID, b, head)
 
 
-def test_diff_range_reconstructs_across_a_journal_hole(client: TestClient) -> None:
+def test_diff_range_is_unavailable_across_a_journal_hole(client: TestClient) -> None:
     """A range with a missing journal row is not contiguous."""
     b, head = _h_update_chain(client)
     with _db() as s:
@@ -553,10 +562,8 @@ def test_diff_range_reconstructs_across_a_journal_hole(client: TestClient) -> No
         assert row is not None
         s.delete(row)
         s.commit()
-    with _db() as s:
-        out = diff_range(s, DEFAULT_PROJECT_ID, b, head)
-    assert out.source == "reconstruction"
-    assert _ids(out.elements.added) == ["a"]
+    with _db() as s, pytest.raises(DiffUnavailable):
+        diff_range(s, DEFAULT_PROJECT_ID, b, head)
 
 
 def test_diff_range_from_equal_to_is_an_empty_journal_answer(
@@ -581,27 +588,22 @@ def _served(c: TestClient, lo: int, hi: int) -> RangeDiffOut:
     return RangeDiffOut.model_validate(r.json())
 
 
-def _expected_reconstruction(lo: int, hi: int) -> str:
-    return _canon(_recon(lo, hi))
-
-
-def _no_reconstruction(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(*_a: object, **_k: object) -> None:
-        raise AssertionError("reconstruct_model_at must not run on the journal path")
-
-    monkeypatch.setattr(range_diff, "reconstruct_model_at", boom)
-
-
-def test_route_folds_a_range_from_the_journal(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_route_folds_a_range_from_the_journal(client: TestClient) -> None:
     b, head = _h_delete_undo_update(client)
-    _no_reconstruction(monkeypatch)
     out = _served(client, b + 1, head)
     assert out.source == "journal" and (out.from_rev, out.to_rev) == (b + 1, head)
     assert _ids(out.elements.modified) == ["a"]
     assert out.elements.modified[0].after.properties == {"label": "four"}
     assert not out.elements.added and not out.elements.deleted
+
+
+def test_route_reads_the_journal_without_a_session_model(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    b, head = _h_rewire(client)
+    expected = _canon(_fold(b + 1, head))
+    without_session_model(monkeypatch)
+    assert _canon(_served(client, b + 1, head)) == expected
 
 
 def test_route_shares_the_fold_with_diff_range(client: TestClient) -> None:
@@ -641,14 +643,13 @@ def imported() -> TestClient:
 
 
 def test_route_range_from_rev_zero_folds_past_a_stateless_baseline_row(
-    imported: TestClient, monkeypatch: pytest.MonkeyPatch
+    imported: TestClient,
 ) -> None:
     client = imported
     _ops(client, [_create("a", label="one")])
     _ops(client, [_update("a", label="two")])
     head = _rev(client)
     assert head == 2
-    _no_reconstruction(monkeypatch)
     out = _served(client, 0, head)
     assert out.source == "journal"
     assert _ids(out.elements.added) == ["a"]
@@ -656,20 +657,25 @@ def test_route_range_from_rev_zero_folds_past_a_stateless_baseline_row(
 
 
 def test_route_range_after_a_loaded_baseline_row_folds(
-    loaded: tuple[TestClient, int], monkeypatch: pytest.MonkeyPatch
+    loaded: tuple[TestClient, int],
 ) -> None:
     client, base = loaded
     _ops(client, [_create("a", label="one")])
     _ops(client, [_update("a", label="two")])
     head = _rev(client)
-    _no_reconstruction(monkeypatch)
     out = _served(client, base, head)
     assert out.source == "journal"
     assert _ids(out.elements.added) == ["a"]
     assert out.elements.added[0].properties == {"label": "two"}
 
 
-def test_route_range_including_a_baseline_row_reconstructs(
+def _unavailable(c: TestClient, lo: int, hi: int) -> None:
+    r = _get(c, lo, hi)
+    assert r.status_code == 409, r.text
+    assert r.json() == {"detail": "diff unavailable for this range"}
+
+
+def test_route_range_including_a_baseline_row_is_unavailable(
     loaded: tuple[TestClient, int],
 ) -> None:
     client, base = loaded
@@ -680,32 +686,18 @@ def test_route_range_including_a_baseline_row_reconstructs(
             s, DEFAULT_PROJECT_ID, after_rev=base - 1, max_rev=head
         )
     assert marks[0] == (base, False, False)
-    out = _served(client, base - 1, head)
-    assert out.source == "reconstruction"
-    assert _canon(out) == _expected_reconstruction(base - 1, head)
+    _unavailable(client, base - 1, head)
 
 
-def test_route_reconstructs_when_a_row_lacks_states(client: TestClient) -> None:
+def test_route_is_unavailable_when_a_row_lacks_states(client: TestClient) -> None:
     b, head = _h_update_chain(client)
     _null_states(b + 2)
-    out = _served(client, b, head)
-    assert out.source == "reconstruction"
-    assert _canon(out) == _expected_reconstruction(b, head)
-    assert _ids(out.elements.added) == ["a"]
+    _unavailable(client, b, head)
+    # the rows after it still fold
+    assert _served(client, b + 2, head).source == "journal"
 
 
-def test_route_reconstructs_a_batch_without_states(client: TestClient) -> None:
-    b = _rev(client)
-    _ops(client, [_create("a"), _create("b")])
-    head = _rev(client)
-    _null_states(head)
-    out = _served(client, b, head)
-    assert out.source == "reconstruction"
-    assert _ids(out.elements.added) == ["a", "b"]
-    assert _canon(out) == _expected_reconstruction(b, head)
-
-
-def test_route_reconstructs_across_a_hole(client: TestClient) -> None:
+def test_route_is_unavailable_across_a_hole(client: TestClient) -> None:
     b = _rev(client)
     _ops(client, [_create("a", label="one")])
     unjournaled_bump()
@@ -717,12 +709,10 @@ def test_route_reconstructs_across_a_hole(client: TestClient) -> None:
         )
     assert [m[0] for m in marks] == [b + 1, b + 3]
     assert head == b + 3
-    out = _served(client, b, head)
-    assert out.source == "reconstruction"
-    assert _canon(out) == _expected_reconstruction(b, head)
+    _unavailable(client, b, head)
 
 
-def test_route_reconstructs_a_range_with_a_rebind(client: TestClient) -> None:
+def test_route_folds_a_range_with_a_rebind(client: TestClient) -> None:
     b = _rev(client)
     _ops(client, [_create("a", label="one")])
     token = _acquire_mm(client)
@@ -742,34 +732,52 @@ def test_route_reconstructs_a_range_with_a_rebind(client: TestClient) -> None:
         },
     )
     assert r.status_code == 200, r.text
+    _RECORD[r.json()["model_rev"]] = head()
     _ops(client, [_update("a", label="two")])
-    head = _rev(client)
+    head_rev = _rev(client)
     with _db() as s:
         marks = content.commit_range_marks(
-            s, DEFAULT_PROJECT_ID, after_rev=b, max_rev=head
+            s, DEFAULT_PROJECT_ID, after_rev=b, max_rev=head_rev
         )
     assert [m[2] for m in marks] == [False, True, False]
-    out = _served(client, b, head)
-    assert out.source == "reconstruction"
-    assert _canon(out) == _expected_reconstruction(b, head)
+    out = _served(client, b, head_rev)
+    assert out.source == "journal"
+    assert _ids(out.elements.added) == ["a"]
+    assert _canon(out) == _canon(_recorded(b, head_rev))
 
 
-def test_route_reconstructs_a_range_over_the_cap(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    b, head = _h_update_chain(client)
-    monkeypatch.setattr(range_diff, "RANGE_DIFF_MAX_REVS", 2)
-    out = _served(client, b, head)
-    assert out.source == "reconstruction"
-    assert _canon(out) == _expected_reconstruction(b, head)
-    assert _served(client, b + 1, head).source == "journal"
+def test_route_folds_a_rebind_row_that_carries_no_states(client: TestClient) -> None:
+    """A rebind row with NULL states contributes nothing and does not stop the
+    fold."""
+    b, head_rev = _h_update_chain(client)
+    with _db() as s:
+        row = content.get_commit(s, DEFAULT_PROJECT_ID, b + 2)
+        model_row = content.get_model_row(s, DEFAULT_PROJECT_ID)
+        assert row is not None and model_row is not None
+        row.entity_states = None
+        row.to_metamodel_id = model_row.metamodel_id
+        s.commit()
+    out = _served(client, b, head_rev)
+    assert _ids(out.elements.added) == ["a"]
+    # the null row's own change is not in the fold
+    assert out.elements.added[0].properties == {"label": "three"}
+    assert _ids(_served(client, b + 1, b + 2).elements.modified) == []
 
 
-def test_route_from_equal_to_is_an_empty_journal_answer(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_route_refuses_a_range_past_the_cap(client: TestClient) -> None:
+    _h_update_chain(client)
+    with _db() as s:
+        content.set_model_rev(s, DEFAULT_PROJECT_ID, RANGE_DIFF_MAX_REVS + 5)
+        s.commit()
+    r = _get(client, 0, RANGE_DIFF_MAX_REVS + 1)
+    assert r.status_code == 422
+    assert r.json() == {"detail": "range too wide: at most 1000 revisions"}
+    # exactly the cap is read (and has no journal for most of it)
+    assert _get(client, 1, RANGE_DIFF_MAX_REVS + 1).status_code == 409
+
+
+def test_route_from_equal_to_is_an_empty_journal_answer(client: TestClient) -> None:
     _, head = _h_update_chain(client)
-    _no_reconstruction(monkeypatch)
     for rev in (0, head):
         out = _served(client, rev, rev)
         assert out.source == "journal" and _empty(out)
@@ -855,8 +863,7 @@ def _random_batch(
 ) -> list[dict[str, Any]]:
     """One to four ops over the live model, never touching an id twice in
     conflicting ways within the batch."""
-    model = get_session().model
-    assert model is not None
+    model = head()
     live_els = sorted(model.elements)
     live_rels = sorted(model.relationships)
     dead_els: set[str] = set()
@@ -880,8 +887,8 @@ def _random_batch(
             r
             for r in live_rels
             if r not in dead_rels
-            and model.relationships[r].source_id not in dead_els
-            and model.relationships[r].target_id not in dead_els
+            and model.relationships[r]["source_id"] not in dead_els
+            and model.relationships[r]["target_id"] not in dead_els
         ]
         if kind == "create" or not els:
             fresh += 1
@@ -892,7 +899,7 @@ def _random_batch(
                 earlier.setdefault(f"{eid}.{name}", []).append(v)
         elif kind == "update":
             eid = rng.choice(els)
-            existing = model.elements[eid].properties if eid in model.elements else {}
+            existing = model.elements[eid]["properties"] if eid in model.elements else {}
             patch: dict[str, Any] = {}
             for name in rng.sample(sorted(_POOLS), rng.randint(1, 3)):
                 roll = rng.random()
@@ -935,7 +942,7 @@ def _random_batch(
 
 
 @pytest.mark.parametrize("seed", range(20))
-def test_fold_equals_reconstruction_over_random_histories(
+def test_fold_equals_the_recorded_states_over_random_histories(
     client: TestClient, seed: int
 ) -> None:
     rng = random.Random(seed)
@@ -960,7 +967,7 @@ def test_fold_equals_reconstruction_over_random_histories(
 
     for lo, hi in pairs:
         folded = _fold(lo, hi)
-        rebuilt = _recon(lo, hi)
+        rebuilt = _recorded(lo, hi)
         for out in (folded, rebuilt):
             dumped = out.model_dump(mode="json")
             for family in ("elements", "relationships"):
@@ -972,6 +979,6 @@ def test_fold_equals_reconstruction_over_random_histories(
         if a != b:
             only_rev = _without_rev(json.loads(a)) == _without_rev(json.loads(b))
             pytest.fail(
-                f"seed {seed} pair ({lo}, {hi}): fold and reconstruction differ"
-                f"{' in rev only' if only_rev else ''}\nfold: {a}\nrecon: {b}"
+                f"seed {seed} pair ({lo}, {hi}): fold and recorded states differ"
+                f"{' in rev only' if only_rev else ''}\nfold: {a}\nrecorded: {b}"
             )

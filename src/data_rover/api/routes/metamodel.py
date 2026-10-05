@@ -65,7 +65,8 @@ async def upload_metamodel(
     # content, a metamodel change must go through the non-destructive,
     # journaled `metamodel.rebind` op via POST /commits (this route clears
     # the model + history).
-    if session.model is not None and session.model.elements:
+    model_row = content.get_model_row(db, project_id)
+    if model_row is not None and (model_row.element_count or 0) > 0:
         raise HTTPException(
             status_code=409,
             detail="model not empty; stage a metamodel.rebind op and commit it via POST /commits",

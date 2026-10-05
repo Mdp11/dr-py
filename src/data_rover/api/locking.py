@@ -27,7 +27,7 @@ target shared pin); they live with the table because they share its types.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from enum import Enum
 
@@ -379,7 +379,7 @@ def owning_view(views: Mapping[str, View], folder_id: str) -> View | None:
 
 
 def expand_targets(
-    model: Model,
+    contained_in: Callable[[str], Collection[str]],
     views: Mapping[str, View],
     targets: list[tuple[str, LockMode]],
     intent: LockIntent,
@@ -387,13 +387,16 @@ def expand_targets(
     """A lock request -> concrete RequiredLocks.
 
     A DELETE-intent exclusive target additionally locks its whole subtree:
-    containment descendants for a model resource (via `containment_subtree`),
-    or nested folders for a `folder:` resource (via `folder_subtree` on the
-    view that owns the folder) — so the cascade can't delete/reparent
-    something another editor holds. `views` is consulted ONLY for the folder
-    arm; a model-resource or artifact/metamodel/view target ignores it
-    entirely (and a folder delete no view knows degrades to a
-    single-resource lock — `folder_subtree` is total, never raises)."""
+    containment descendants for a model resource (``contained_in(root)`` names
+    the elements under ``root``, ``root`` itself included or not; it is locked
+    either way, first), or nested folders for a `folder:` resource (via
+    `folder_subtree` on the view that owns the folder) — so the cascade can't
+    delete/reparent something another editor holds. The model is never read
+    here: the caller answers ``contained_in`` from the head rows. `views` is
+    consulted ONLY for the folder arm; a model-resource or
+    artifact/metamodel/view target ignores it entirely (and a folder delete no
+    view knows degrades to a single-resource lock — `folder_subtree` is total,
+    never raises)."""
     reqs: list[RequiredLock] = []
     seen: set[tuple[str, LockMode]] = set()
 
@@ -405,7 +408,8 @@ def expand_targets(
     for rid, mode in targets:
         if intent is LockIntent.DELETE and mode is LockMode.EXCLUSIVE:
             if is_model_resource(rid):
-                for member in containment_subtree(model, rid):
+                add(rid, LockMode.EXCLUSIVE)
+                for member in sorted(contained_in(rid)):
                     add(member, LockMode.EXCLUSIVE)
             elif rid.startswith(FOLDER_PREFIX):
                 bare = rid.removeprefix(FOLDER_PREFIX)

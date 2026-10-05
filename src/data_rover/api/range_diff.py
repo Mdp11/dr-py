@@ -6,15 +6,12 @@ row's ``after``: an entity created in the range has a null first ``before``
 whatever later rows say, and one deleted and created again keeps its original
 ``before``. It loads no model and touches no live ``Session``; its cost is the
 rows' JSON, so it applies only when the range is at most
-``RANGE_DIFF_MAX_REVS`` commits, contiguous, every row carries states and none
-is a rebind (``can_fold``).
-
-Any other range is answered by rebuilding the model at both ends
-(``reconstruct_model_at``, O(model) twice) and comparing entity by entity, so
-the cost of a range the journal cannot express is that of
-``reconstruct_model_at`` twice. Both paths feed ``render_range``, whose
-equality ignores ``id`` and ``rev``: an entity that returns to its earlier
-state, with a newer ``rev``, is no change.
+``RANGE_DIFF_MAX_REVS`` commits and the rows are contiguous and carry states
+(``can_fold``). A rebind row changes no entity, so it contributes nothing and
+does not stop the fold. A range the journal cannot answer has no answer
+(``diff_range`` raises ``DiffUnavailable``): the server holds no model to rebuild one
+from. ``render_range``'s equality ignores ``id`` and ``rev``: an entity that
+returns to its earlier state, with a newer ``rev``, is no change.
 
 This module is deliberately route-free: nothing here depends on FastAPI, a
 request, or a live ``Session``.
@@ -23,16 +20,12 @@ request, or a live ``Session``.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Any
 
 from sqlalchemy.orm import Session as DbSession
 
-from data_rover.core.model.element import Element
-from data_rover.core.model.relationship import Relationship
-
 from . import content
-from .commit_states import ElementPair, EntityStates, RelationshipPair
-from .hydration import reconstruct_model_at
+from .commit_states import DiffUnavailable, ElementPair, EntityStates, RelationshipPair
 from .schemas import (
     CrElementOps,
     CrRelationshipOps,
@@ -43,11 +36,8 @@ from .schemas import (
     RelationshipOut,
 )
 
-#: longest span (``to - from``) the journal fold answers; a longer one is
-#: reconstructed
+#: longest span (``to - from``) the journal fold answers
 RANGE_DIFF_MAX_REVS = 1000
-
-RangeSource = Literal["journal", "reconstruction"]
 
 
 def can_fold(
@@ -55,14 +45,15 @@ def can_fold(
 ) -> bool:
     """Whether the journal answers ``(from_rev, to_rev]``. ``marks`` are
     ``content.commit_range_marks`` for it: the span is within the cap, the
-    revs are exactly ``from_rev + 1 … to_rev`` in order, every row carries
-    states and none is a rebind. An empty range is foldable."""
+    revs are exactly ``from_rev + 1 … to_rev`` in order, and every row carries
+    states or is a rebind (which has none to give). An empty range is
+    foldable."""
     if to_rev - from_rev > RANGE_DIFF_MAX_REVS:
         return False
     if len(marks) != to_rev - from_rev:
         return False
     return all(
-        rev == from_rev + 1 + i and has_states and not is_rebind
+        rev == from_rev + 1 + i and (has_states or is_rebind)
         for i, (rev, has_states, is_rebind) in enumerate(marks)
     )
 
@@ -89,6 +80,8 @@ def fold_range(
     for raw in content.commit_states_between(
         db, project_id, after_rev=from_rev, max_rev=to_rev
     ):
+        if raw is None:  # a rebind row without states
+            continue
         for family in ("elements", "relationships"):
             for eid, entry in raw.get(family, {}).items():
                 first_before[family].setdefault(eid, entry["before"])
@@ -107,56 +100,17 @@ def fold_range(
     return EntityStates(elements=elements, relationships=relationships)
 
 
-def _same_element(before: ElementOut | Element, after: ElementOut | Element) -> bool:
+def _same_element(before: ElementOut, after: ElementOut) -> bool:
     return before.type_name == after.type_name and before.properties == after.properties
 
 
-def _same_relationship(
-    before: RelationshipOut | Relationship, after: RelationshipOut | Relationship
-) -> bool:
+def _same_relationship(before: RelationshipOut, after: RelationshipOut) -> bool:
     return (
         before.type_name == after.type_name
         and before.source_id == after.source_id
         and before.target_id == after.target_id
         and before.properties == after.properties
     )
-
-
-def reconstruct_range(project_id: str, from_rev: int, to_rev: int) -> EntityStates:
-    """(before, after) per id that exists on one side only or differs between
-    the models rebuilt at ``from_rev`` and ``to_rev``. Entities are compared as
-    core objects, so a large model with few changes builds few typed bodies."""
-    old = reconstruct_model_at(project_id, from_rev)
-    new = reconstruct_model_at(project_id, to_rev)
-    old_els = old.elements if old is not None else {}
-    new_els = new.elements if new is not None else {}
-    old_rels = old.relationships if old is not None else {}
-    new_rels = new.relationships if new is not None else {}
-
-    elements: dict[str, ElementPair] = {}
-    for eid, b in old_els.items():
-        a = new_els.get(eid)
-        if a is None or not _same_element(b, a):
-            elements[eid] = (
-                ElementOut.from_core(b),
-                ElementOut.from_core(a) if a is not None else None,
-            )
-    for eid, a in new_els.items():
-        if eid not in old_els:
-            elements[eid] = (None, ElementOut.from_core(a))
-
-    relationships: dict[str, RelationshipPair] = {}
-    for rid, rb in old_rels.items():
-        ra = new_rels.get(rid)
-        if ra is None or not _same_relationship(rb, ra):
-            relationships[rid] = (
-                RelationshipOut.from_core(rb),
-                RelationshipOut.from_core(ra) if ra is not None else None,
-            )
-    for rid, ra in new_rels.items():
-        if rid not in old_rels:
-            relationships[rid] = (None, RelationshipOut.from_core(ra))
-    return EntityStates(elements=elements, relationships=relationships)
 
 
 def _element_ops(states: Mapping[str, ElementPair]) -> CrElementOps:
@@ -191,16 +145,14 @@ def _relationship_ops(states: Mapping[str, RelationshipPair]) -> CrRelationshipO
     return out
 
 
-def render_range(
-    states: EntityStates, from_rev: int, to_rev: int, source: RangeSource
-) -> RangeDiffOut:
+def render_range(states: EntityStates, from_rev: int, to_rev: int) -> RangeDiffOut:
     """The change-request shaped answer for ``states``, ids in sorted order.
     A pair whose sides are equal in type, properties and (for a relationship)
     endpoints renders nothing."""
     return RangeDiffOut(
         from_rev=from_rev,
         to_rev=to_rev,
-        source=source,
+        source="journal",
         elements=_element_ops(states.elements),
         relationships=_relationship_ops(states.relationships),
     )
@@ -209,21 +161,13 @@ def render_range(
 def diff_range(
     db: DbSession, project_id: str, from_rev: int, to_rev: int
 ) -> RangeDiffOut:
-    """The diff of ``(from_rev, to_rev]``: folded from the journal when
-    ``can_fold`` allows, else reconstructed. Assumes
-    ``0 <= from_rev <= to_rev <= head``."""
-    marks = (
-        content.commit_range_marks(db, project_id, after_rev=from_rev, max_rev=to_rev)
-        if to_rev - from_rev <= RANGE_DIFF_MAX_REVS
-        else []
+    """The diff of ``(from_rev, to_rev]`` folded from the journal. Raises
+    ``DiffUnavailable`` when ``can_fold`` refuses the range (a gap in the
+    journal, or a row without states). Assumes ``0 <= from_rev <= to_rev <=
+    head`` and a span of at most ``RANGE_DIFF_MAX_REVS``."""
+    marks = content.commit_range_marks(
+        db, project_id, after_rev=from_rev, max_rev=to_rev
     )
-    if can_fold(marks, from_rev, to_rev):
-        return render_range(
-            fold_range(db, project_id, from_rev, to_rev), from_rev, to_rev, "journal"
-        )
-    return render_range(
-        reconstruct_range(project_id, from_rev, to_rev),
-        from_rev,
-        to_rev,
-        "reconstruction",
-    )
+    if not can_fold(marks, from_rev, to_rev):
+        raise DiffUnavailable("diff unavailable for this range")
+    return render_range(fold_range(db, project_id, from_rev, to_rev), from_rev, to_rev)

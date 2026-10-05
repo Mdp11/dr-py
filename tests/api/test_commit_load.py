@@ -534,6 +534,13 @@ def test_a_commit_never_checks_against_a_rebind_that_is_refused(
     from .test_commits_metamodel_ops import _acquire_mm
 
     candidate = MM.replace("relationships:", "  - name: Ghosty\nrelationships:", 1)
+    # a rebind over rows that hold a dangling reference is refused before it
+    # swaps anything, so the rows of this one hold none
+    tree = _tree()
+    for e in tree["elements"]:
+        if e["id"] == "Y":
+            e["properties"]["refs"] = ["B1"]
+    install(metamodel=MM, model=json.dumps(tree))
     other = TestClient(create_app())
     other.headers.update(AUTH_HEADERS)
     token = _acquire_mm(client)

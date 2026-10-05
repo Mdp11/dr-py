@@ -883,7 +883,7 @@ class RangeDiffOut(BaseModel):
     """The model-entity changes between two revisions of the history.
 
     ``source`` says how it was produced: ``"journal"`` folded the commits'
-    captured entity states, ``"reconstruction"`` compared two rebuilt models.
+    captured entity states, the only way the server answers.
     The two halves reuse the change-request shapes, like ``CommitDiffOut``.
     """
 

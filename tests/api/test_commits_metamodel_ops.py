@@ -317,7 +317,7 @@ def test_rebind_allowed_while_the_CALLER_holds_a_model_lease(
 ) -> None:
     """The quiet-peers guard is scoped to PEERS: a migration batch is expected
     to hold leases on the very elements it is fixing."""
-    eid = _create_node(client, "x")
+    eid = _create_node(client)
     mm_token = _acquire_mm(client)
     _acquire_element(client, eid)
     r = client.post(
@@ -444,7 +444,7 @@ def test_layout_only_commit_is_cheap_and_journalled(client: TestClient) -> None:
 def test_stale_batch_below_a_rebind_conflicts_unconditionally(
     client: TestClient,
 ) -> None:
-    eid = _create_node(client, "x")
+    eid = _create_node(client)
     stale_base = _rev(client)
     token = _acquire_mm(client)
     r = client.post(

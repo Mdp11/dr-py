@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api import commit_diff, content, db
+from data_rover.api import db
 from data_rover.api.commit_diff import _artifact_states, diff_commit, json_structural_diff
 from data_rover.api.db_models import Commit
 from data_rover.api.main import create_app
@@ -30,6 +30,7 @@ from .conftest import (
     head,
     commit_ops,
     forget_entity_states,
+    without_session_model,
 )
 from .test_commits_metamodel_ops import _acquire_mm
 
@@ -244,7 +245,7 @@ def test_diff_of_artifact_update_has_path_changes(client: TestClient) -> None:
     body = d.json()
     assert body["scope"] == ["artifact"]
     # a pure-artifact commit names no model entity, so both entity halves are
-    # empty — which is exactly what lets diff_commit skip reconstruction
+    # empty
     assert body["elements"] == {"added": [], "modified": [], "deleted": []}
     assert body["relationships"] == {"added": [], "modified": [], "deleted": []}
     mod = body["artifacts"]["modified"][0]
@@ -819,6 +820,7 @@ def test_rebind_commit_diff_degrades_to_null_on_missing_blob(
         inverse_ops=[],
         from_metamodel_id="missing-a",
         to_metamodel_id="missing-b",
+        entity_states={"elements": {}, "relationships": {}},
     )
     gen = db.get_db()
     s = next(gen)
@@ -898,20 +900,6 @@ def test_diff_of_mixed_layout_and_rebind_renders_both_halves(
     ]
 
 
-def _null_states(rev: int) -> None:
-    """Simulate a pre-column journal row: drop the captured states so the
-    reader must reconstruct."""
-    gen = db.get_db()
-    s = next(gen)
-    try:
-        row = content.get_commit(s, DEFAULT_PROJECT_ID, rev)
-        assert row is not None and row.entity_states is not None
-        row.entity_states = None
-        s.commit()
-    finally:
-        gen.close()
-
-
 def _three_commits(client: TestClient) -> tuple[int, int, int, str, str]:
     """create parent+child+containment; update child; delete parent (cascade).
     Returns (rev_create, rev_update, rev_delete, parent_id, child_id)."""
@@ -959,16 +947,9 @@ def _three_commits(client: TestClient) -> tuple[int, int, int, str, str]:
     return rev_create, rev_update, r.json()["model_rev"], p, c
 
 
-def test_diff_is_journal_only_when_states_are_present(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A commit row carrying entity_states never reconstructs the model."""
+def test_diff_renders_the_journal_states(client: TestClient) -> None:
+    """A commit row's entity_states are the whole model half of its diff."""
     rev_create, rev_update, rev_delete, p, c = _three_commits(client)
-
-    def boom(*_a: object, **_k: object) -> None:
-        raise AssertionError("reconstruct_model_at must not run on the journal path")
-
-    monkeypatch.setattr(commit_diff, "reconstruct_model_at", boom)
 
     d = client.get(papi(f"/commits/{rev_update}/diff"))
     assert d.status_code == 200, d.text
@@ -989,24 +970,7 @@ def test_diff_is_journal_only_when_states_are_present(
     assert len(d.json()["relationships"]["added"]) == 1
 
 
-def test_null_states_fall_back_to_reconstruction_byte_identically(
-    client: TestClient,
-) -> None:
-    """The two paths render the same model half: capture the journal-path
-    output, null the column, and re-render through reconstruction."""
-    revs = _three_commits(client)[:3]
-    journal = {rev: client.get(papi(f"/commits/{rev}/diff")).json() for rev in revs}
-    for rev in revs:
-        _null_states(rev)
-    for rev in revs:
-        d = client.get(papi(f"/commits/{rev}/diff"))
-        assert d.status_code == 200, d.text
-        assert d.json()["elements"] == journal[rev]["elements"]
-        assert d.json()["relationships"] == journal[rev]["relationships"]
-        assert d.json()["scope"] == journal[rev]["scope"]
-
-
-def test_a_commit_row_without_states_still_renders(client: TestClient) -> None:
+def test_a_commit_row_without_states_has_no_diff(client: TestClient) -> None:
     r = client.post(
         papi("/commits"),
         json={
@@ -1022,13 +986,21 @@ def test_a_commit_row_without_states_still_renders(client: TestClient) -> None:
     rev = r.json()["model_rev"]
     forget_entity_states(rev)
     d = client.get(papi(f"/commits/{rev}/diff"))
-    assert d.status_code == 200, d.text
-    assert len(d.json()["elements"]["added"]) == 2  # reconstruction fallback
+    assert d.status_code == 409, d.text
+    assert d.json() == {"detail": "diff unavailable for this commit"}
 
 
-def test_revert_commit_diff_is_journal_only(
+def test_commit_diff_needs_membership_not_a_session(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The endpoint reads rows only: it answers with no model in the session."""
+    rev_create, *_ = _three_commits(client)
+    without_session_model(monkeypatch)
+    d = client.get(papi(f"/commits/{rev_create}/diff"))
+    assert d.status_code == 200, d.text
+
+
+def test_revert_commit_diff_renders_the_journal_states(client: TestClient) -> None:
     created = commit_ops(
         client,
         [{"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
@@ -1045,11 +1017,6 @@ def test_revert_commit_diff_is_journal_only(
     )
     assert r.status_code == 200, r.text
     rev_revert = r.json()["model_rev"]
-
-    def boom(*_a: object, **_k: object) -> None:
-        raise AssertionError("reconstruct_model_at must not run on the journal path")
-
-    monkeypatch.setattr(commit_diff, "reconstruct_model_at", boom)
     d = client.get(papi(f"/commits/{rev_revert}/diff"))
     assert d.status_code == 200, d.text
     mod = d.json()["elements"]["modified"][0]

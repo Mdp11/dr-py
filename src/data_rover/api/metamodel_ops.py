@@ -6,12 +6,16 @@ The metamodel and the diagram layout are MATERIALIZED HEADS
 This module is their applier — the fourth sibling of ``routes/ops.py``'s
 model applier, ``artifact_ops`` and ``view_ops``:
 
-- ``metamodel.rebind`` swaps the IN-MEMORY metamodel (``session.metamodel``,
-  ``model.metamodel``, ``model.indexes.rebuild()`` to re-derive the per-type
-  caches — the search index is kept, since the indexed text does not depend
-  on the metamodel) and stages the durable rows (new ``MetamodelRow`` at
-  ``prior_version + 1`` carrying the author's verbatim blob, ``ModelRow``
-  repointed) on the caller's DB transaction. The caller (``create_commit``)
+- ``metamodel.rebind`` first checks the head rows against the candidate
+  (``rebind_check``: an entity it cannot hold, a containment second parent or
+  cycle, a reference that points to no element once the refs are rebuilt)
+  and answers a 422 naming the first ids; then it swaps the IN-MEMORY
+  metamodel (``session.metamodel``, ``model.metamodel``,
+  ``model.indexes.rebuild()`` to re-derive the per-type caches — the search
+  index is kept, since the indexed text does not depend on the metamodel) and
+  stages the durable rows (new ``MetamodelRow`` at ``prior_version + 1``
+  carrying the author's verbatim blob, ``ModelRow`` repointed, ``entity_refs``
+  rebuilt) on the caller's DB transaction. The caller (``create_commit``)
   applies this module FIRST so the batch's model ops validate against the
   candidate schema — the whole point of a migration batch.
 - ``metamodel.move_node`` ops rewrite the layout blob; ``pos: None`` removes
@@ -50,8 +54,14 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 from data_rover.core.metamodel.schema import Metamodel
 
-from . import content
+from . import content, head
 from .deps import Session
+from .rebind_check import (
+    containment_types,
+    containment_violations,
+    dangling_references,
+    rebind_refusals,
+)
 from .schemas import (
     MetamodelNodePos,
     MetamodelOpIn,
@@ -115,6 +125,44 @@ def load_candidate(blob: str) -> Metamodel:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def check_rows_hold(db: DbSession, project_id: str, candidate: Metamodel) -> None:
+    """422 unless every head row conforms to ``candidate``: no entity it cannot
+    hold, no containment second parent or cycle."""
+    refused, refused_ids = rebind_refusals(db, project_id, candidate)
+    if refused:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"rebind leaves {refused} entities the new metamodel cannot "
+                f"hold: {', '.join(refused_ids)}"
+            ),
+        )
+    violations = containment_violations(db, project_id, containment_types(candidate))
+    if violations:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "rebind leaves containment the new metamodel forbids (an "
+                f"element with two parents, or a cycle): {', '.join(violations)}"
+            ),
+        )
+
+
+def check_refs_dangle_not(db: DbSession, project_id: str) -> None:
+    """422 when an element-valued reference points to no element. Run after
+    ``head.rebuild_refs`` for the new metamodel, which can make a property
+    element-valued."""
+    dangling = dangling_references(db, project_id)
+    if dangling:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "rebind leaves element references that point to no element, "
+                f"held by: {', '.join(dangling)}"
+            ),
+        )
+
+
 def serialize_metamodel_blob(metamodel: Metamodel) -> str:
     """Re-serialize an in-memory metamodel to YAML — the degraded fallback
     used when no durable ``MetamodelRow`` blob is available (a session whose
@@ -169,6 +217,9 @@ def apply_metamodel_ops(
         model = session.model
         assert model is not None and session.metamodel is not None
         candidate = load_candidate(rebind.blob)
+        # The rows must conform to the candidate before anything swaps: the
+        # applier the batch's model ops run on understands no other row.
+        check_rows_hold(db, project_id, candidate)
         prior_blob = current_blob(db, project_id, session)
         model_row = content.get_model_row(db, project_id)
         from_id = model_row.metamodel_id if model_row is not None else None
@@ -195,6 +246,9 @@ def apply_metamodel_ops(
             db, name="", version=prior_version + 1, blob=rebind.blob
         )
         content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
+        # which properties are references depends on the metamodel
+        head.rebuild_refs(db, project_id, candidate)
+        check_refs_dangle_not(db, project_id)
         res.from_metamodel_id = from_id
         res.to_metamodel_id = mm_row.id
         res.rebound = True

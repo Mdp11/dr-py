@@ -18,7 +18,7 @@ not exist after it. ``recreated`` names the ids the commit deleted and then
 created again — new entities at the end of their dict, which a before/after
 pair cannot say — and is absent from rows older than the key. Every commit
 stores its states, however many entities it touched; a NULL column is a row
-from before the key.
+from before the key, whose diff is unavailable (``DiffUnavailable``).
 """
 
 from __future__ import annotations
@@ -34,6 +34,12 @@ from .schemas import ElementOut, RelationshipOut
 if TYPE_CHECKING:
     from .routes.ops import _BatchResult
 
+
+class DiffUnavailable(Exception):
+    """The journal cannot answer a history diff, and the server holds no model
+    to rebuild one from. The message is the answer's detail."""
+
+
 ElementPair = tuple[ElementOut | None, ElementOut | None]
 RelationshipPair = tuple[RelationshipOut | None, RelationshipOut | None]
 
@@ -41,7 +47,7 @@ RelationshipPair = tuple[RelationshipOut | None, RelationshipOut | None]
 @dataclass(frozen=True, slots=True)
 class EntityStates:
     """(before, after) per touched id — the diff renderer's single input
-    shape, whether it came from the journal row or from reconstruction."""
+    shape, read from the journal row."""
 
     elements: dict[str, ElementPair]
     relationships: dict[str, RelationshipPair]

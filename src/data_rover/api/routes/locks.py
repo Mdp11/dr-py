@@ -12,11 +12,16 @@ import time
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from ..deps import Session, get_request_session, require_model
+from sqlalchemy.orm import Session as DbSession
+
+from ..commit_load import subtree_ids
+from ..db import get_db
+from ..deps import Session, get_request_session, require_metamodel
 from ..feed import lock_event
 from ..identity import get_current_user
 from ..db_models import User
 from ..lock_mirror import mirror_session_leases
+from ..rebind_check import containment_types
 from ..locking import (
     METAMODEL_RESOURCE,
     Lease,
@@ -70,9 +75,10 @@ def acquire_locks(
     project_id: str,
     payload: LockRequest,
     session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> LockResponse | JSONResponse:
-    _, model = require_model(session)
+    metamodel = require_metamodel(session)
 
     def _canonical(t: LockTargetIn) -> str:
         if t.type == "artifact":
@@ -86,7 +92,14 @@ def acquire_locks(
         return t.resource_id
 
     targets = [(_canonical(t), LockMode(t.mode)) for t in payload.targets]
-    reqs = expand_targets(model, session.views, targets, LockIntent(payload.intent))
+    containment = containment_types(metamodel)
+    # a delete's cascade is read from the head rows, never the session's model
+    reqs = expand_targets(
+        lambda root: subtree_ids(db, project_id, [root], containment),
+        session.views,
+        targets,
+        LockIntent(payload.intent),
+    )
     now = time.monotonic()
     ttl = float(get_settings().lock_ttl_seconds)
     with session.write_mutex:

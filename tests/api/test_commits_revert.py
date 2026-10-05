@@ -199,14 +199,18 @@ def test_revert_noop_at_head_records_no_commit(client: TestClient) -> None:
     assert hist["commits"][0]["rev"] == head
 
 
-_MM_RENAMED = """
+_MM_WIDENED = """
 elements:
+  - name: Node
+    properties:
+      - name: label
+        datatype: string
   - name: Widget
 relationships:
   - name: Contains
     containment: true
-    source: Widget
-    target: Widget
+    source: Node
+    target: Node
 """
 
 
@@ -218,7 +222,7 @@ def test_revert_across_rebind_409(client: TestClient) -> None:
         papi("/commits"),
         json={
             "base_rev": model_rev(client),
-            "ops": [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_WIDENED}],
             "message": "swap",
             "lock_tokens": [token],
         },

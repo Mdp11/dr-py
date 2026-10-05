@@ -267,6 +267,25 @@ def forget_entity_states(rev: int, project_id: str = "default") -> None:
         row.entity_states = None
 
 
+def without_session_model(
+    monkeypatch: pytest.MonkeyPatch, project_id: str = "default"
+) -> None:
+    """Take the project's session model away and make every way of building one
+    fail. A request that still answers read rows alone: evicting the session
+    would prove nothing, since the registry hydrates it again."""
+    from data_rover.api import hydration
+    from data_rover.api.routes import _snapshot
+
+    session = get_registry().get(project_id)
+
+    def refuse(*_a: object, **_k: object) -> None:
+        raise AssertionError("a model was built")
+
+    monkeypatch.setattr(hydration, "hydrate_session", refuse)
+    monkeypatch.setattr(_snapshot, "build_model_from_dicts", refuse)
+    session.model = None
+
+
 def model_rev(c: TestClient) -> int:
     """Current head rev."""
     return head().rev

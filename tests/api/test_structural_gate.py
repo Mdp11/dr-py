@@ -236,7 +236,9 @@ def test_rebind_that_gives_an_untouched_element_two_parents_is_blocked(
     )
     r = _rebind(client, _MM_LINKS % ("string", "true"))
     assert r.status_code == 422, r.text
-    assert r.json()["detail"] == "structural validation blocker"
+    # refused over the rows, before the batch runs: it names the element
+    assert r.json()["detail"].startswith("rebind leaves containment")
+    assert r.json()["detail"].endswith(": c")
     assert head().rev == 0
 
 
@@ -254,7 +256,9 @@ def test_rebind_that_makes_a_value_a_dangling_reference_is_blocked(client) -> No
     )
     r = _rebind(client, _MM_LINKS % ("Node", "false"))
     assert r.status_code == 422, r.text
-    assert r.json()["detail"] == "structural validation blocker"
+    assert r.json()["detail"] == (
+        "rebind leaves element references that point to no element, held by: a"
+    )
     assert head().rev == 0
 
 

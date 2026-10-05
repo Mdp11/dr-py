@@ -66,14 +66,15 @@ def test_history_pagination_has_more(client: TestClient) -> None:
     assert all(c["rev"] < cursor for c in page2["commits"])
 
 
-_MM_RENAMED = """
+_MM_WIDENED = """
 elements:
+  - name: Node
   - name: Widget
 relationships:
   - name: Contains
     containment: true
-    source: Widget
-    target: Widget
+    source: Node
+    target: Node
 """
 
 
@@ -84,7 +85,7 @@ def test_history_marks_rebind_commit(client: TestClient) -> None:
         papi("/commits"),
         json={
             "base_rev": model_rev(client),
-            "ops": [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_WIDENED}],
             "message": "swap",
             "lock_tokens": [token],
         },

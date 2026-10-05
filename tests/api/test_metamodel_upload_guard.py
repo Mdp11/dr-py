@@ -49,6 +49,19 @@ def test_upload_on_nonempty_model_409(client: TestClient) -> None:
     assert "rebind" in r.json()["detail"]
 
 
+def test_upload_guard_reads_the_model_row_not_the_session_model(
+    client: TestClient,
+) -> None:
+    from data_rover.api.session import get_registry
+
+    install(metamodel=_MM, model=EMPTY_MODEL)
+    commit_ops(client, [{"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}])
+    get_registry().get("default").model = None
+    r = client.post(papi("/metamodel"), content=_MM,
+                    headers={"content-type": "application/x-yaml"})
+    assert r.status_code == 409
+
+
 # ---------------------------------------------------------------------------
 # `_peer_mm_conflict` honor rule (routes/metamodel.py): exercises POST
 # /metamodel (upload) and DELETE /metamodel (clear), the only two callers

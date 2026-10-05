@@ -62,6 +62,7 @@ from data_rover.core.model.partial import NotLoaded, PartialRows, build_partial_
 
 from .db_models import ElementRow, EntityRefRow, RelationshipRow
 from .head import CHUNK, ref_props, refs_of
+from .rebind_check import containment_types
 from .routes.ops import _apply_batch, _BatchResult
 from .schemas import (
     CreateElementOp,
@@ -412,12 +413,6 @@ class _Rows:
         self.probe(found)
 
 
-def _containment_types(metamodel: Metamodel) -> list[str]:
-    return sorted(
-        t.name for t in metamodel.relationships if metamodel.is_containment(t.name)
-    )
-
-
 def plan_load(
     db: DbSession,
     project_id: str,
@@ -433,7 +428,7 @@ def plan_load(
     already missed once, also judges the referencers inside the deleted subtree
     (the others are judged either way), never the rest of what it loads."""
     named = _scan(metamodel, ops)
-    types = _containment_types(metamodel)
+    types = containment_types(metamodel)
     rows = _Rows(db, project_id)
     rows.probe(named.ids | extra)
 

@@ -8,9 +8,9 @@ keeps two things:
    sibling on the same ``/metamodel`` prefix answering 200 — so a wholesale
    router-mounting mistake can't hide behind the tombstone.
 2. ``test_rebind_commit_survives_eviction``: a rebound project re-hydrating
-   after eviction, with a pre-existing element whose type the candidate
-   metamodel no longer declares surviving via ``strict=False`` decode
-   instead of being dropped.
+   after eviction under the new metamodel, with its pre-existing element
+   intact. A rebind that drops a type still in use is refused before it lands
+   (``test_rebind_rows.py``).
 """
 
 from __future__ import annotations
@@ -40,13 +40,14 @@ relationships:
     source: Node
     target: Node
 """
-_MM_RENAMED = """
+_MM_WIDENED = """
 elements:
+  - name: Node
   - name: Widget
 relationships:
   - name: Link
-    source: Widget
-    target: Widget
+    source: Node
+    target: Node
 """
 
 
@@ -80,11 +81,8 @@ def test_rebind_route_is_gone(client: TestClient) -> None:
 
 
 def test_rebind_commit_survives_eviction(client: TestClient) -> None:
-    # The fixture creates a Node element under _MM.  _MM_RENAMED defines Widget
-    # (no Node).  We rebind WITHOUT clearing the model so a Node instance is
-    # present in the snapshot: strict=False hydration lets it through, and the
-    # element survives, reported as a CONFORMANCE issue instead of being
-    # dropped.
+    # The fixture creates a Node element under _MM.  _MM_WIDENED adds Widget and
+    # keeps Node, so the rebind lands with the Node instance in place.
     elements_before = list(head().elements)
     assert elements_before, "fixture must have created a Node element"
     node_id = elements_before[0]
@@ -95,7 +93,7 @@ def test_rebind_commit_survives_eviction(client: TestClient) -> None:
         papi("/commits"),
         json={
             "base_rev": before,
-            "ops": [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_WIDENED}],
             "message": "",
             "lock_tokens": [token],
         },
@@ -110,7 +108,7 @@ def test_rebind_commit_survives_eviction(client: TestClient) -> None:
     assert mm_resp.status_code == 200, f"expected 200, got {mm_resp.status_code}: {mm_resp.text}"
     mm = mm_resp.json()
     assert any(e["name"] == "Widget" for e in mm["elements"])
-    assert not any(e["name"] == "Node" for e in mm["elements"])
+    assert any(e["name"] == "Node" for e in mm["elements"])
 
     # (b) the pre-existing Node element survived re-hydration
     ids_after = set(head().elements)

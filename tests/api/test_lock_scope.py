@@ -112,8 +112,35 @@ def test_expand_targets_delete_intent_walks_subtree() -> None:
     root = m.create_element("Node")
     child = m.create_element("Node")
     m.connect("Contains", root.id, child.id)
-    reqs = expand_targets(m, {}, [(root.id, LockMode.EXCLUSIVE)], LockIntent.DELETE)
-    assert {r.resource_id for r in reqs} == {root.id, child.id}
+    asked: list[str] = []
+
+    def contained_in(rid: str) -> set[str]:
+        asked.append(rid)
+        return {child.id}
+
+    reqs = expand_targets(
+        contained_in, {}, [(root.id, LockMode.EXCLUSIVE)], LockIntent.DELETE
+    )
+    assert asked == [root.id]
+    # the root first, then what it contains
+    assert [r.resource_id for r in reqs] == [root.id, child.id]
+    assert all(r.mode is LockMode.EXCLUSIVE for r in reqs)
+
+
+def test_expand_targets_locks_the_root_even_when_nothing_is_contained() -> None:
+    reqs = expand_targets(
+        lambda _rid: set(), {}, [("ghost", LockMode.EXCLUSIVE)], LockIntent.DELETE
+    )
+    assert [r.resource_id for r in reqs] == ["ghost"]
+
+
+def test_expand_targets_does_not_expand_a_shared_or_non_delete_target() -> None:
+    def boom(_rid: str) -> set[str]:
+        raise AssertionError("no subtree is read")
+
+    shared = expand_targets(boom, {}, [("a", LockMode.SHARED)], LockIntent.DELETE)
+    edit = expand_targets(boom, {}, [("a", LockMode.EXCLUSIVE)], LockIntent.EDIT)
+    assert [r.resource_id for r in shared] == ["a"] == [r.resource_id for r in edit]
 
 
 def _v() -> View:
@@ -230,12 +257,11 @@ def test_required_locks_element_and_artifact_placement_ops() -> None:
 
 
 def test_expand_targets_folder_delete_subtree() -> None:
-    m = _model()
     v = _v()
     a = v.folders[0]
     # two views: the subtree is expanded against the one OWNING the folder
     reqs = expand_targets(
-        m,
+        lambda _rid: set(),
         {"other": View(name="o", folders=[Folder(id="zz", name="Z")]), "v1": v},
         [(f"folder:{a.id}", LockMode.EXCLUSIVE)],
         LockIntent.DELETE,
