@@ -27,7 +27,7 @@ from typing import Any, BinaryIO
 import ijson  # type: ignore[import-untyped]  # no stubs
 from fastapi import HTTPException
 from ijson.common import ObjectBuilder  # type: ignore[import-untyped]
-from sqlalchemy import exists, func, insert, select
+from sqlalchemy import exists, func, insert, select, text
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.schema import Metamodel
@@ -259,6 +259,8 @@ class _Ingest:
         self.element_count = 0
         self.relationship_count = 0
         self.digest = 0
+        #: the ids written so far, per label
+        self._seen: dict[str, set[str]] = {"element": set(), "relationship": set()}
 
     def run(self, source: BinaryIO) -> None:
         try:
@@ -408,14 +410,14 @@ class _Ingest:
         self, table: type[ElementRow] | type[RelationshipRow], rows: list, label: str
     ) -> None:
         ids = [r["id"] for r in rows]
+        # The project's rows are this import's alone (``ingest_model`` clears
+        # them first), so an earlier batch is the only other place a duplicate
+        # can be. A database probe per batch is planned, for rows the planner
+        # has no statistics on, as a scan of the project's whole range.
+        seen = self._seen[label]
         taken = {i for i, n in Counter(ids).items() if n > 1}
-        taken.update(
-            self.db.execute(
-                select(table.id).where(
-                    table.project_id == self.project_id, table.id.in_(ids)
-                )
-            ).scalars()
-        )
+        taken.update(seen.intersection(ids))
+        seen.update(ids)
         if taken:
             for entity_id in dict.fromkeys(ids):
                 if entity_id in taken:
@@ -515,6 +517,12 @@ def ingest_model(
     ingest = _Ingest(db, project_id, metamodel)
     ingest.run(source)
     db.flush()
+    if db.get_bind().dialect.name == "postgresql":
+        # The rows are uncommitted, so autovacuum has not seen them and the
+        # planner knows nothing of the project: it plans the checks' joins as
+        # nested loops over the whole project. ANALYZE samples the
+        # transaction's own rows.
+        db.execute(text("ANALYZE elements, relationships, entity_refs"))
     check_rows(db, project_id, metamodel)
     row.element_count = ingest.element_count
     row.relationship_count = ingest.relationship_count

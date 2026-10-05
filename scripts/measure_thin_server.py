@@ -217,16 +217,15 @@ def main() -> None:
             {"p": pid},
         ).one()
 
-    # Autovacuum analyzes a freshly loaded project within about a minute. Until it
-    # does, the planner has no statistics for the project and a lookup of ids
-    # scans the project's whole seq range, so the commit phases start from the
-    # state a running server is in.
-    with (
-        db.get_engine()
-        .connect()
-        .execution_options(isolation_level="AUTOCOMMIT") as conn
-    ):
-        conn.execute(text("ANALYZE"))
+    if args.load == "baseline":
+        # a baseline write is no import: its rows have no statistics until
+        # autovacuum analyzes them, which an import does itself
+        with (
+            db.get_engine()
+            .connect()
+            .execution_options(isolation_level="AUTOCOMMIT") as conn
+        ):
+            conn.execute(text("ANALYZE"))
 
     client = TestClient(app)
 

@@ -162,8 +162,12 @@ written from the head rows.
     file order, exactly what `head.write_baseline` writes, and `next_seq` is the larger table's
     size), with its `entity_refs`, and its `(id, rev)` folded into the digest. Refusals are
     collected by check (the first five ids, then a count) and raised after the parse; once one is
-    recorded nothing more is written. Duplicate ids within a table are caught per insert chunk
-    (a primary-key probe), not with a set of every id. Then SQL checks over the rows, each naming
+    recorded nothing more is written. Duplicate ids within a table are caught against an in-memory set of the ids written so
+    far (the rows are the import's alone: `ingest_model` clears them first), not a per-chunk
+    database probe, which Postgres plans as a scan of the project's whole range while it has no
+    statistics for the project. On Postgres the import runs `ANALYZE` on the head tables before
+    the checks (it samples the transaction's own uncommitted rows), so the checks' joins and
+    the first commits after the import plan by statistics. Then SQL checks over the rows, each naming
     its check and the first ids: an id on both an element and a relationship (K-29), a
     relationship end that is no element, a reference to no element
     (`rebind_check.dangling_references`), an element with two containment parents or on a cycle

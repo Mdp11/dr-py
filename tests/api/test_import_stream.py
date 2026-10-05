@@ -477,6 +477,20 @@ CASES = [
         "duplicate relationship id: 1 entity, first r",
     ),
     (
+        "duplicate-element-id-across-batches",
+        _doc([_node("a"), *[_node(f"n{i}") for i in range(1200)], _node("a")]),
+        "duplicate element id: 1 entity, first a",
+    ),
+    (
+        "duplicate-relationship-id-across-batches",
+        _doc(
+            [_node("a")],
+            [_rel("r", "a", "a"), *[_rel(f"l{i}", "a", "a") for i in range(1200)]]
+            + [_rel("r", "a", "a")],
+        ),
+        "duplicate relationship id: 1 entity, first r",
+    ),
+    (
         "reserved-id",
         _doc([_node("tmp_a")]),
         "reserved id: 1 entity, first tmp_a",
