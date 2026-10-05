@@ -448,12 +448,26 @@ def test_a_commit_on_head_rows_equals_the_full_model(
         rounds.clear()  # the helper retries a request that lacked locks
         return real_lock(*a, **k)
 
+    # every third seed runs with a planner that does not foresee what a batch
+    # attaches below a deleted element, so the re-run loop answers real batches
+    blind = [False]
+    real_scan = commit_load._scan
+
+    def scan(*a: Any, **k: Any) -> Any:
+        named = real_scan(*a, **k)
+        if blind[0]:
+            named.attachments.clear()
+        return named
+
     monkeypatch.setattr(commit_load, "plan_load", counting)
+    monkeypatch.setattr(commit_load, "_scan", scan)
     monkeypatch.setattr(content, "lock_model_row", new_request)
     most = 0
     accepted = rejected = reverted = multi_round = 0
+    multi_accepted = multi_rejected = 0
     for seed in SEEDS:
         why = f"seed {seed}"
+        blind[0] = seed % 3 == 0
         rng = random.Random(seed)
         text, facts = make_model(rng, seed)
         install(metamodel=MM, model=text)
@@ -465,6 +479,10 @@ def test_a_commit_on_head_rows_equals_the_full_model(
         most = max(most, len(rounds))
         if len(rounds) > 1:
             multi_round += 1
+            if want.status == 200:
+                multi_accepted += 1
+            else:
+                multi_rejected += 1
         assert r.status_code == want.status, f"{why}: {r.status_code} {r.text}"
         if want.status != 200:
             rejected += 1
@@ -527,10 +545,11 @@ def test_a_commit_on_head_rows_equals_the_full_model(
             assert head_refs(s, DEFAULT_PROJECT_ID) == oracle.refs()
     print(
         f"differential: {accepted} accepted, {rejected} rejected, {reverted} reverted, "
-        f"{multi_round} needed a second round, at most {most} rounds"
+        f"{multi_round} needed a second round ({multi_accepted} accepted, "
+        f"{multi_rejected} refused), at most {most} rounds"
     )
     assert accepted >= 90 and rejected >= 60 and reverted >= 70
-    assert multi_round >= 1
+    assert multi_accepted >= 1 and multi_rejected >= 1
 
 
 def _content(entity: dict[str, Any]) -> dict[str, Any]:

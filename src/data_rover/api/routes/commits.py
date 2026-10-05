@@ -697,7 +697,7 @@ def _follow_commit(
             project_id,
             rev,
         )
-        get_registry().discard(project_id)
+        get_registry().discard(project_id, only=session)
         return
     session.model_rev = rev
     session.state_digest_value = parse_digest(digest)

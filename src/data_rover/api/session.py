@@ -201,7 +201,7 @@ class SessionRegistry:
             with self._guard:
                 self._sessions.pop(project_id, None)
 
-    def discard(self, project_id: str) -> None:
+    def discard(self, project_id: str, only: Session | None = None) -> None:
         """Drop a session WITHOUT snapshotting and WITHOUT the evict guard.
 
         For the delete-project path: by the time the registry is asked to
@@ -218,16 +218,21 @@ class SessionRegistry:
         the socket closes on client disconnect, and a reconnect gets 4404
         because the project row is gone.
 
+        With ``only``, drops the session only while the registry still holds
+        that exact one: a session already dropped must not take its
+        replacement with it.
+
         Takes ``write_mutex`` to serialise against an in-flight commit
         (same rationale — and same lock ordering vs ``_guard`` — as
         ``evict``)."""
         with self._guard:
             session = self._sessions.get(project_id)
-        if session is None:
+        if session is None or (only is not None and session is not only):
             return
         with session.write_mutex:
             with self._guard:
-                self._sessions.pop(project_id, None)
+                if only is None or self._sessions.get(project_id) is only:
+                    self._sessions.pop(project_id, None)
 
     def touch(self, project_id: str) -> None:
         with self._guard:

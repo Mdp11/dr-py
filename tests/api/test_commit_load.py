@@ -324,7 +324,7 @@ def _plan_without_attachments(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def scan(*args: Any, **kwargs: Any) -> Any:
         named = real(*args, **kwargs)
-        named.attached.clear()
+        named.attachments.clear()
         return named
 
     monkeypatch.setattr(commit_load, "_scan", scan)
@@ -545,7 +545,9 @@ def test_a_commit_never_checks_against_a_rebind_that_is_refused(
     def refuse_inside_the_rebind(model: Any, ids: Any) -> Any:
         if not rebind_swapped.is_set():
             rebind_swapped.set()
-            other_read.wait()  # the other commit reads the session now
+            # the other commit reads the session now; the timeout only bounds a
+            # hang, it is not a pause
+            assert other_read.wait(timeout=30), "the second commit never read"
             return [Issue(Severity.ERROR, "forced", ["X"], IssueCategory.STRUCTURAL)]
         return real_blockers(model, ids)
 
@@ -587,7 +589,7 @@ def test_a_commit_never_checks_against_a_rebind_that_is_refused(
 
     first = threading.Thread(target=rebind)
     first.start()
-    rebind_swapped.wait()
+    assert rebind_swapped.wait(timeout=30), "the rebind never swapped"
     second = threading.Thread(target=create)
     second.start()
     first.join()
@@ -616,6 +618,91 @@ def test_a_session_not_at_the_revision_before_the_commit_is_dropped_not_advanced
     assert head().elements["B1"]["properties"]["label"] == "z"
     fresh = get_registry().get(DEFAULT_PROJECT_ID)
     assert fresh is not session_ and fresh.model_rev == base + 1
+
+
+# --- what an attachment loads ----------------------------------------------------
+
+
+def test_a_referencer_inside_an_attached_subtree_that_nothing_deletes_is_judged(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R sits below C, which the batch attaches (not deletes); R points at D,
+    which it deletes, and at nine more elements. R is judged in the first
+    round, targets loaded, so the answer is the full model's, not a 500."""
+    targets = [f"T{i}" for i in range(9)]
+    model = json.dumps(
+        {
+            "elements": [
+                _el("Y"),
+                _el("C"),
+                _el("R", refs=["D", *targets]),
+                _el("D"),
+                *(_el(t) for t in targets),
+            ],
+            "relationships": [_rel("cr", "Contains", "C", "R")],
+        }
+    )
+    install(metamodel=MM, model=model)
+    ops = [_contains("Y", "C"), _delete("D")]
+    want = Oracle(model).run(model_ops(ops))
+    assert want.status == 422  # R now points at nothing
+    rounds = _Rounds(monkeypatch)
+    r = post_commit(client, ops)
+    assert (r.status_code, r.json()) == (want.status, want.body)
+    assert rounds.n == 1
+
+
+def test_moving_a_subtree_beside_an_unrelated_delete_loads_none_of_it() -> None:
+    n = 200
+    install(
+        metamodel=MM,
+        model=json.dumps(
+            {
+                "elements": [
+                    _el("Y"),
+                    _el("C"),
+                    _el("Z"),
+                    *(_el(f"d{i}") for i in range(n)),
+                ],
+                "relationships": [
+                    _rel(f"k{i}", "Contains", "C", f"d{i}") for i in range(n)
+                ],
+            }
+        ),
+    )
+    move = _contains("Y", "C")
+    alone = _plan([move])
+    with_delete = _plan([move, _delete("Z")])
+    assert _ids(with_delete) == (_ids(alone)[0] | {"Z"}, _ids(alone)[1])
+    assert len(_ids(with_delete)[0]) == 3
+    # a delete that does reach the attachment loads the subtree
+    assert len(_ids(_plan([move, _delete("Y")]))[0]) == n + 2
+
+
+def test_an_attachment_below_an_attached_element_is_planned_through_the_chain() -> None:
+    # C goes under tmp, tmp under X, and X is deleted: C is below X by then
+    rows = _plan(
+        [
+            _contains("X", "tmp_t", "tmp_a"),
+            _contains("tmp_t", "C", "tmp_b"),
+            _delete("X"),
+        ]
+    )
+    assert rows.edges_complete == {"X", "C", "C1"}
+
+
+def test_a_dropped_session_does_not_drop_its_replacement() -> None:
+    from data_rover.api.routes.commits import _follow_commit
+
+    registry = get_registry()
+    old = registry.get(DEFAULT_PROJECT_ID)
+    registry.discard(DEFAULT_PROJECT_ID)
+    new = registry.get(DEFAULT_PROJECT_ID)
+    assert new is not old
+    with old.write_mutex:  # the old session cannot follow: it is at the wrong rev
+        _follow_commit(old, DEFAULT_PROJECT_ID, [], rev=99, digest="0" * 16)
+    assert registry.peek(DEFAULT_PROJECT_ID) is new
+    assert old.model_rev != 99
 
 
 # --- the rounds do not grow with the batch -----------------------------------------

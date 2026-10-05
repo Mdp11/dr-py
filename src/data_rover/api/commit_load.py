@@ -14,9 +14,9 @@ relationship ends, id hints, and the ids held by element-valued properties):
 - every named id's row, or its place in ``absent`` when neither table holds it
   (temp ids included: a lookup of one that nothing created is the same 422 the
   full model gives);
-- for each delete root (a ``delete_element`` target, an id a round missed, and,
-  when the batch deletes, the target of every containment relationship it
-  creates):
+- for each delete root (a ``delete_element`` target, an id a round missed, and
+  the target of every containment relationship the batch creates below an
+  element it deletes):
   its containment subtree, every relationship incident to the subtree with that
   relationship's other end, and the referencers of the subtree's ids and of
   those relationships, with the subtree complete in edges and in referencers;
@@ -154,10 +154,9 @@ class _Named:
     deleted_relationships: set[str] = field(default_factory=set)
     #: ids a create reinstates: an id hint, or the canonical id of a restore
     hinted: set[str] = field(default_factory=set)
-    #: targets of the containment relationships the batch creates: once one of
-    #: them is attached below an element a later delete removes, its subtree goes
-    #: with it
-    attached: set[str] = field(default_factory=set)
+    #: (source, target) of each containment relationship the batch creates: a
+    #: target attached below an element a later delete removes goes with it
+    attachments: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _reinstated_id(op: CreateElementOp | CreateRelationshipOp) -> str | None:
@@ -196,7 +195,7 @@ def _scan(metamodel: Metamodel, ops: Sequence[ModelOpIn]) -> _Named:
                 named.hinted.add(hinted)
             named.touched.update((op.source_id, op.target_id))
             if metamodel.is_containment(op.type_name):
-                named.attached.add(op.target_id)
+                named.attachments.append((op.source_id, op.target_id))
             refs(op.properties)
         elif isinstance(op, UpdateRelationshipOp):
             named.relationships.add(op.id)
@@ -362,14 +361,21 @@ def plan_load(
     rows.probe(named.ids | extra)
 
     # deletes: the subtree, what touches it, who points at it
-    # An element attached by the batch may sit below a deleted one by the time
-    # the delete runs, which the rows cannot say; with a delete in the batch
-    # each is planned as a root, so the rounds do not grow with their number.
-    deleting = named.delete_roots | extra
-    if named.delete_roots:
-        deleting |= named.attached
-    roots = {i for i in deleting if i in rows.elements}
-    subtree = subtree_ids(db, project_id, roots, types)
+    real_roots = {i for i in named.delete_roots | extra if i in rows.elements}
+    deleted = subtree_ids(db, project_id, real_roots, types)
+    subtree = set(deleted)
+    # The batch may attach an element below one a delete removes, which the rows
+    # cannot say. Each attachment whose source can end up deleted (it is in a
+    # deleted subtree, is deleted itself, or was attached into one) makes its
+    # target a root too: the rounds then do not grow with their number, and
+    # moving a subtree that nothing deletes loads nothing of it.
+    doomed = subtree | named.delete_roots | extra
+    while fresh := {t for s_, t in named.attachments if s_ in doomed} - doomed:
+        doomed |= fresh
+        attached = {t for t in fresh if t in rows.elements}
+        below = subtree_ids(db, project_id, attached, types)
+        subtree |= below
+        doomed |= below
     rows.load_elements(subtree)
     deleted_relationships = rows.incident(subtree) | {
         r for r in named.deleted_relationships if r in rows.relationships
@@ -386,7 +392,7 @@ def plan_load(
     }
     judged = {
         i
-        for i in named.touched | extra | ends | (referencers - subtree)
+        for i in named.touched | extra | ends | (referencers - deleted)
         if i in rows.elements
     }
     chain = ancestor_ids(db, project_id, judged, types)
