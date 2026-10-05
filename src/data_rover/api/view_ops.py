@@ -4,10 +4,10 @@ A view is a materialized head (``session.views[id]`` in memory, ``ViewRow.blob``
 durable), so view ops must never reach the model applier. This module is the
 in-memory twin of ``artifact_ops``: ``apply_view_ops`` mutates a core ``View``
 in place while collecting EXACT inverses — apply-then-inverse restores a
-byte-identical blob, the invariant ``POST /model/undo`` and the commit-diff
+byte-identical blob, the invariant revert and the commit-diff
 API lean on. ``routes/commits.py`` is the write caller (apply under the write
-mutex, persist the blob on the commit's DB transaction); ``routes/ops.py``'s
-undo replays inverses in restore mode; ``/commits/preview`` validates dry.
+mutex, persist the blob on the commit's DB transaction); ``/commits/preview``
+validates dry.
 
 Unlike the artifact applier there is no DB here: rollback is
 ``rollback_view`` (apply the collected inverse units in reverse), the same
@@ -44,7 +44,7 @@ from collections.abc import Mapping
 
 from fastapi import HTTPException
 
-from data_rover.core.view.ids import find_folder, folder_subtree, locate_folder
+from data_rover.core.view.ids import find_folder, locate_folder
 from data_rover.core.view.schema import VIEW_ROOT_ID, ArtifactRef, Folder, View
 
 from .locking import container_resource
@@ -574,65 +574,6 @@ def validate_view_ops(view: View, ops: list[ViewOpIn]) -> None:
     applier means preview and commit can never disagree on a batch's
     validity."""
     apply_view_ops(view.model_copy(deep=True), ops, restore=False)
-
-
-def view_op_resources(
-    view_id: str, view: View | None, ops: Sequence[ViewOpIn]
-) -> set[str]:
-    """Every container lease (`folder:`/`view:` namespaced) a batch against
-    ``view_id`` references — the undo route's peer-lease guard input.
-
-    Mostly over-reports on purpose (a create's temp/parent id, both ends of a
-    move): a spurious id can only produce a conservative 409, never hide a
-    held lease. But two op kinds need the SAME expansion ``required_locks``
-    (``locking.py``) performs for a forward batch, or a genuinely-held peer
-    lease goes unseen entirely:
-
-    - ``delete_folder`` only NAMES its own id, yet removes its whole subtree,
-      so a peer's lease on any DESCENDANT must also block the undo that would
-      delete it out from under them (``folder_subtree``, degrading to
-      ``{op.id}`` when ``view`` is None/stale — total, like
-      ``required_locks``'s own DELETE-intent expansion).
-    - ``move_folder`` only names its DESTINATION parent — the op carries no
-      field for where the folder currently lives — so a peer's lease on its
-      CURRENT parent (resolved by walking ``view`` via ``locate_folder``,
-      silently skipped if unresolvable) must also be reported.
-
-    ``view`` is the CURRENT (pre-undo-application) view, exactly the state
-    ``required_locks`` itself is evaluated against — the undo caller passes
-    ``session.view`` before applying anything. Deliberately NOT reimplemented
-    by delegating straight to ``required_locks``: that function's `created`
-    bookkeeping (a batch's own same-batch creates need no lock) is correct
-    for a FORWARD commit but wrong for a RESTORE-mode replay, where a
-    ``create_folder`` reinstates a REAL, previously-existing id (e.g. inside
-    a ``delete_folder``'s recreate unit) that a peer could still hold a lease
-    on — delegating would silently exclude it."""
-    ids: set[str] = set()
-    for op in ops:
-        if isinstance(op, CreateFolderOp):
-            ids |= {op.temp_id, op.parent_id}
-        elif isinstance(op, RenameFolderOp):
-            ids.add(op.id)
-        elif isinstance(op, DeleteFolderOp):
-            ids |= set(folder_subtree(view, op.id))
-        elif isinstance(op, MoveFolderOp):
-            ids |= {op.id, op.to_parent_id}
-            if view is not None:
-                located = locate_folder(view, op.id)
-                if located is not None:
-                    parent = located[0]
-                    ids.add(parent.id if isinstance(parent, Folder) else VIEW_ROOT_ID)
-        elif isinstance(op, (PlaceElementOp, RemoveElementOp)):
-            ids.add(op.folder_id)
-        elif isinstance(op, MoveElementOp):
-            ids |= {op.from_folder_id, op.to_folder_id}
-        elif isinstance(op, (PlaceArtifactOp, RemoveArtifactOp)):
-            ids.add(op.folder_id)
-        elif isinstance(op, MoveArtifactOp):
-            ids |= {op.from_folder_id, op.to_folder_id}
-        else:
-            assert_never(op)
-    return {container_resource(view_id, fid) for fid in ids}
 
 
 #: Placement-subject namespaces for the conflict backstop ONLY (no lease ever

@@ -32,53 +32,24 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #:   - No future *write* POST may end with one of these suffixes, or it would
 #:     be silently exempted from the viewer-write check (privilege hole).
 #:
-#: Deliberately NOT included: ``POST /model/save`` — it writes to the SERVER's
-#: filesystem (a privileged side effect), so it stays a "write" even though it
-#: doesn't mutate the in-memory model. Viewers cannot export to server disk.
-#: Also NOT included: ``POST /model/apply-cr`` — a dry run that never mutates,
-#: but its only consumer is staging edits, which a viewer cannot do, so it
-#: stays a write. ``POST /model/compare`` only reads (a viewer may compare and
-#: save the resulting CR file), so it IS included.
-#:
 #: ``/clone`` (``POST /projects/{id}/clone``) only READS the source project —
 #: it creates a brand-new project owned by the caller and never mutates the
 #: source, so a viewer of the source may clone it.
 #:
-#: ``/snippets/run`` and ``/snippets/lint`` only READ the model (the runner's
-#: bridge dispatcher never calls a `Model` mutation-boundary method; writes
-#: are recorded op *proposals*, never applied — see core/script/bridge.py),
-#: so a viewer may execute/lint a snippet. ``/snippets/cancel`` touches no
-#: model state at all (it only mutates the in-process run registry), but a
-#: viewer who is allowed to start a run must also be allowed to cancel their
-#: own run, so it is allowlisted too rather than left to fall through as a
-#: write.
+#: ``/snippets/lint`` and ``/snippets/format`` touch no model state, so a
+#: viewer may lint and format a snippet.
 #:
 #: ``/artifacts/export`` and ``/artifacts/export/preview`` read ONLY artifact
 #: DB rows (never the in-memory model, no session touched at all), so a
 #: viewer may export. ``/artifacts/import/plan`` is deliberately NOT here —
 #: planning is part of the write flow.
 _READ_ONLY_POST_SUFFIXES = (
-    "/model/search",
-    "/model/elements/batch",
-    "/model/elements/tree-items",
-    "/model/validate",
-    "/model/compare",
     "/commits/preview",
-    "/metamodel/diff",
     "/clone",
-    "/navigations/evaluate",
-    "/tables/evaluate",
-    "/tables/export",
-    "/tables/json-preview",
-    "/tables/script-errors",
-    "/snippets/run",
     "/snippets/lint",
     "/snippets/format",
-    "/snippets/cancel",
     "/artifacts/export",
     "/artifacts/export/preview",
-    "/exports/run",
-    "/exports/preview-transform",
 )
 
 

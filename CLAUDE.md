@@ -18,7 +18,7 @@ This file is the map. How the code works lives in the README next to it; read th
 | Repo rules: layout, git, comments, tests (`RC-n`) | `architecture/conventions.md` |
 | Python core: metamodel, `Model`, validation pipeline, custom validation rules | `src/data_rover/core/README.md` |
 | Backend: sessions, ops and the commit delta, replica routes, tenancy/auth, persistence, locking, feed, tables/exports, metamodel editing | `src/data_rover/api/README.md` |
-| Snippets (WASM sandbox) and embedded evaluation | `src/data_rover/core/script/README.md` |
+| Snippet facade reference | `src/data_rover/core/script/README.md` |
 | TypeScript engine | `engine/README.md` |
 | Sandbox site and engine worker | `sandbox/README.md` |
 | Replica shell (frame, client, sync, surfaces) | `frontend/src/lib/engine/README.md` |
@@ -63,15 +63,14 @@ Gotchas:
 - Frontend, engine and sandbox tasks set their own cwd; `pixi run -e frontend npm test` from the repo root fails with "Missing script". Use the tasks.
 - e2e reuses a server already on :8000/:5173/:5174. A stale sandbox `vite preview` serves its OLD `dist/`, so stop it first.
 - Open the app at `http://127.0.0.1:5173`, not `localhost`: the sandbox is `localhost:5174` and must be a different site (CN-17). On `localhost` the app refuses the engine and reads from the server.
-- The snippet runner's WASM guest is fetched by a pixi activation hook (`scripts/ensure_guest.sh`, *sourced*, so never `exit` in it). Without it, snippet routes answer 503.
 - Python is 3.14 everywhere (runtime, ruff `py314`, pyright); use modern stdlib freely.
 
 ## Rules that span the codebase
 
 - **One mutation boundary per store** (RC-8): Python `Model` (`core/model/model.py`), engine op applier (`engine/src/ops/`). Indexes are maintained there; a bulk loader that fills dicts directly must rebuild them. Property values are replaced wholesale, never mutated in place: the op log's inverse patches alias prior values.
 - **`Metamodel` is frozen after load.** Go through its cached lookups; never re-walk `extends` chains by hand.
-- **The model can be ~80 MB.** A per-request path never copies or scans it: reads are paged, validator hooks are O(entity) over `model.indexes` and metamodel caches, whole-model work runs as background sweeps. Full `POST /model/validate` runs only from an explicit user click.
-- **Validation pipelines carry per-metamodel memos**: build one per request/thread (`api/rules.session_pipeline` when the session's rules apply), never share one.
+- **The model can be ~80 MB.** A per-request path never copies or scans it. The server answers no model reads and runs no whole-model work (the engine does both); a commit's structural gate is O(batch) over `model.indexes` and metamodel caches.
+- **Validation pipelines carry per-metamodel memos**: build one per request/thread, never share one.
 - **Golden fixtures are frozen.** A fixture change is a reviewed edit; the Python reader tests (`tests/golden/`) hold the server's kept code to them.
 - **The frontend imports the engine as types only** (`import type` from `$engine` / `$sandbox`; ESLint refuses value imports outside tests). Engine `src/` has no DOM or Node dependency and imports with `.ts` specifiers.
 - **Wire text reaches the engine as received** (AD-26): feed frames, commit responses and tails are never re-serialized, since `JSON.parse` loses `1.0` and integers past 2^53.

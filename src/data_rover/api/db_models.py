@@ -243,8 +243,7 @@ class Commit(Base):
     ops: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     inverse_ops: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     id_map: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    #: optional human commit message. Empty for the legacy
-    #: /model/ops + /model/undo paths (they pass no message).
+    #: optional human commit message. Empty when the client sends none.
     message: Mapped[str] = mapped_column(Text, nullable=False, default="")
     #: the validation error count the client reported at commit; NULL for a
     #: revert, which has no client preview.

@@ -9,9 +9,7 @@ from data_rover.core.metamodel.schema import (
 )
 from data_rover.core.validation.rules.compile import (
     RuleSetSource,
-    applies_type_names,
     compile_rule_sets,
-    empty_compiled,
 )
 
 
@@ -110,9 +108,3 @@ def test_unparseable_set_skipped_whole_with_diagnostic():
     c = compile_rule_sets([_src("rules: [", name="broken"), _src(GOOD, "a2", "ok")], _mm())
     assert c.total == 1
     assert c.skipped[0].set_name == "broken" and c.skipped[0].rule == ""
-
-
-def test_empty_and_applies_union():
-    assert empty_compiled().total == 0
-    c = compile_rule_sets([_src(GOOD)], _mm())
-    assert applies_type_names(empty_compiled(), c) == {"Building", "OfficeBuilding"}

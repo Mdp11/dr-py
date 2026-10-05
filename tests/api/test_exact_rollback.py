@@ -165,17 +165,6 @@ def test_a_preview_leaves_no_trace(client: TestClient) -> None:
     assert _observed(_live()) == before
 
 
-def test_a_staged_validation_leaves_no_trace(client: TestClient) -> None:
-    ids = _seed(client)
-    before = _observed(_live())
-    res = client.post(
-        papi("/model/validate"),
-        json={"base_rev": get_session().model_rev, "ops": _touching(ids)},
-    )
-    assert res.status_code == 200, res.text
-    assert _observed(_live()) == before
-
-
 def test_a_commit_refused_for_a_structural_blocker_leaves_no_trace(
     client: TestClient,
 ) -> None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
@@ -21,35 +20,23 @@ from .routes import (
     artifact_bundle,
     artifacts,
     auth,
-    change_request,
     commits,
-    elements,
-    exports,
     feed,
     health,
     locks,
     metamodel,
     metamodel_layout,
     metamodel_swap,
-    model,
-    ops,
     projects,
-    read,
-    relationships,
     replica,
     rules,
     settings as settings_routes,
     snippets,
-    tables,
-    validation,
     views,
 )
-from .script_runner import build_runner_from_settings, get_runner, set_runner
 from .session import get_registry, install_persistent_registry
 from .settings import Settings, get_settings
 from .storage import build_store_from_settings, set_snapshot_store
-
-logger = logging.getLogger(__name__)
 
 
 def _configure_logging() -> None:
@@ -180,55 +167,6 @@ def _sweep_expired_locks(now: float) -> int:
     return released
 
 
-def _boot_script_runner(settings: Settings) -> None:
-    """Construct the process-wide `ScriptRunner` at lifespan
-    startup and install it via `script_runner.set_runner`.
-
-    Lazy-construction policy: a `WasmScriptRunner` boots
-    `settings.snippet_pool_size` real guest interpreter instances, so it must
-    NEVER be built at import time (`create_app()` runs at module import via
-    `app = create_app()` below) -- only here, when the ASGI app actually
-    starts serving. For `snippet_runner="wasm"` specifically, this also
-    checks the guest binary exists first: it is a large, uncommitted vendor
-    artifact fetched by the `scripts/ensure_guest.sh` pixi activation hook (or
-    by hand via `spikes/code_exec/fetch_python_wasi.sh`), so a checkout where
-    that never ran -- no network, or a deployment that does not go through
-    pixi -- must boot cleanly with the runner left `None`; the routes are
-    expected to 503 on that, not crash startup.
-
-    The `snippet_runner="trusted"` RCE tripwire lives in
-    `build_runner_from_settings` itself (unit-testable there); calling it
-    here is what makes the guard fire for a real deployment's boot, mirroring
-    `_guard_prod_secret`'s refuse-to-boot posture -- unlike the binary-missing
-    case, a misconfigured `trusted` selection outside a dev checkout is a
-    hard failure, not a graceful 503.
-    """
-    if settings.snippet_runner == "wasm" and not os.path.exists(
-        settings.snippet_guest_wasm_path
-    ):
-        logger.warning(
-            "snippet guest binary not found at %r; script execution routes "
-            "will report the runner unavailable until it is fetched (see "
-            "spikes/code_exec/fetch_python_wasi.sh)",
-            settings.snippet_guest_wasm_path,
-        )
-        set_runner(None)
-        return
-    set_runner(build_runner_from_settings(settings))
-
-
-def _shutdown_script_runner() -> None:
-    """Close the process-wide runner (if one was booted) and clear the
-    singleton. `TrustedRunner` (dev-only) has no `.close()`, hence the
-    `hasattr` guard rather than assuming every `ScriptRunner` needs teardown."""
-    runner = get_runner()
-    if runner is not None:
-        close = getattr(runner, "close", None)
-        if callable(close):
-            close()
-    set_runner(None)
-
-
 def _start_lock_sweeper(interval: float) -> tuple[threading.Thread, threading.Event]:
     stop = threading.Event()
 
@@ -266,14 +204,6 @@ def create_app() -> FastAPI:
                 float(settings.lock_sweep_seconds)
             )
         try:
-            # Inside the try (not before it): if this raises -- the RCE
-            # tripwire firing on a misconfigured deployment, or
-            # WasmScriptRunner.__init__ failing against a present-but-broken
-            # binary -- the already-started sweeper threads above still get
-            # stopped/joined by the finally below. The exception still
-            # propagates (boot must still fail loudly); only the cleanup is
-            # unconditional.
-            _boot_script_runner(settings)
             yield
         finally:
             if idle_stop is not None:
@@ -284,7 +214,6 @@ def create_app() -> FastAPI:
                 lock_stop.set()
             if lock_thread is not None:
                 lock_thread.join(timeout=2.0)
-            _shutdown_script_runner()
 
     app = FastAPI(
         title="data-rover API",
@@ -310,21 +239,12 @@ def create_app() -> FastAPI:
     app.include_router(metamodel.router, prefix=proj, tags=["metamodel"])
     app.include_router(metamodel_layout.router, prefix=proj, tags=["metamodel"])
     app.include_router(metamodel_swap.router, prefix=proj, tags=["metamodel"])
-    app.include_router(model.router, prefix=proj, tags=["model"])
-    app.include_router(ops.router, prefix=proj, tags=["ops"])
-    app.include_router(read.router, prefix=proj, tags=["read"])
-    app.include_router(change_request.router, prefix=proj, tags=["change-request"])
-    app.include_router(elements.router, prefix=proj, tags=["elements"])
-    app.include_router(relationships.router, prefix=proj, tags=["relationships"])
-    app.include_router(validation.router, prefix=proj, tags=["validation"])
     app.include_router(rules.router, prefix=proj, tags=["rules"])
     app.include_router(views.router, prefix=proj, tags=["views"])
     app.include_router(locks.router, prefix=proj, tags=["locks"])
     app.include_router(commits.router, prefix=proj, tags=["commits"])
     app.include_router(artifacts.router, prefix=proj, tags=["artifacts"])
     app.include_router(artifact_bundle.router, prefix=proj, tags=["artifacts"])
-    app.include_router(tables.router, prefix=proj, tags=["tables"])
-    app.include_router(exports.router, prefix=proj, tags=["exports"])
     app.include_router(snippets.router, prefix=proj, tags=["snippets"])
     app.include_router(settings_routes.router, prefix=proj, tags=["settings"])
     app.include_router(feed.router, prefix=proj, tags=["feed"])

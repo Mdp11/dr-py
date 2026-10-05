@@ -94,27 +94,6 @@ def split_ops(
     return model_ops, artifact_ops, view_ops, metamodel_ops
 
 
-def artifact_op_ids(ops: Sequence[ArtifactOpIn]) -> set[str]:
-    """The artifact ROW ids a batch would write.
-
-    A create op's ``temp_id`` is included because in RESTORE mode (undo) it is
-    not provisional at all — it is the exact canonical id being reinstated, so
-    a peer's lease on it is just as meaningful as on an update/delete target.
-    Used by the peer-lease guards on the writers that are not themselves
-    lock-verified (see ``LockTable.peer_leases``); ids are BARE here — callers
-    namespace them with ``locking.artifact_resource`` for lease comparison.
-    """
-    ids: set[str] = set()
-    for op in ops:
-        if isinstance(op, CreateArtifactOp):
-            ids.add(op.temp_id)
-        elif isinstance(op, (UpdateArtifactOp, DeleteArtifactOp)):
-            ids.add(op.id)
-        else:
-            assert_never(op)
-    return ids
-
-
 # ---------------------------------------------------------------------------
 # Artifact op applier — the DB-side twin of routes/ops.py::_apply_batch
 # ---------------------------------------------------------------------------
@@ -519,8 +498,8 @@ def artifact_delta_headers(
     """Project an applied batch into (changed headers, ids that are NEW).
 
     Every write path that lands artifact ops — ``POST /commits`` and
-    ``POST /model/undo`` — needs exactly this, and their results must be
-    wire-identical (a peer cannot tell an undo's artifact event from a
+    ``POST /commits/revert`` — needs exactly this, and their results must be
+    wire-identical (a peer cannot tell a revert's artifact event from a
     commit's), so it is derived in ONE place rather than restated per route.
 
     Rows are RE-READ rather than projected off the ops: the applier reruns

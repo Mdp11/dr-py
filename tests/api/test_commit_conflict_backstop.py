@@ -279,19 +279,18 @@ def test_future_base_rev_still_409(client: TestClient) -> None:
 
 
 def test_short_tail_from_unjournaled_mutation_409(client: TestClient) -> None:
-    """A legacy PATCH mutates the model OUTSIDE the ops/commit protocol:
-    ``Session.touch_model()`` bumps ``model_rev`` but writes NO ``Commit``
+    """A model replacement outside the commit protocol:
+    ``Session.set_model()`` bumps ``model_rev`` but writes NO ``Commit``
     row at all. The tail is then too SHORT to explain the gap, so a stale
     batch must fail closed even though its own touched id never appears
     anywhere in the (empty) tail — there is nothing to inspect for that rev."""
     r = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",
                           "type_name": "Node", "properties": {}}], _rev(client))
     assert r.status_code == 200, r.text
-    aid = r.json()["id_map"]["tmp_a"]
     base = _rev(client)
 
-    r_patch = client.patch(papi(f"/model/elements/{aid}"), json={"properties": {}})
-    assert r_patch.status_code == 200, r_patch.text
+    session = get_session()
+    session.set_model(session.model, announce=False)
 
     r2 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_z",
                            "type_name": "Node", "properties": {}}], base)

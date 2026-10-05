@@ -94,7 +94,7 @@ def test_async_job_writes_the_snapshot_row() -> None:
     """No request is in flight here, so the job's ``db_session()`` is the
     only user of the shared in-memory-SQLite connection: this is what
     exercises the genuine daemon thread doing a genuine durable write."""
-    c = _client()
+    _client()
     session = _live_session()
     rev = session.model_rev
     job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, session, sync=False)

@@ -15,55 +15,27 @@ existing test suite stays green.
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Any
 
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
-from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import View
 
-from . import content, rules
+from . import content
 from .artifact_ops import split_ops
 from .db import db_session
 from .db_models import Commit
 from .schemas import OPS_ADAPTER, OpIn
-from .search_index_build import start_search_index_build
 from .session import Session
 from .snapshot_codec import decode_snapshot, encode_snapshot_v2
 from .storage import get_snapshot_store, snapshot_key
-from .validation_sweep import start_validation_sweep
-
-
-@dataclass
-class HydrationProgress:
-    """Live progress of one in-flight hydration, keyed by project id.
-
-    Registered for exactly the duration of ``hydrate_session`` so the status
-    endpoint can report an open that has not produced a Session yet. ``total``
-    is 0 until the build phase knows its entity count (indeterminate)."""
-
-    phase: str = "download"  # download | parse | build | replay
-    done: int = 0
-    total: int = 0
-
-
-#: project id -> in-flight hydration progress (single mutating writer — the
-#: hydrating thread under the registry's per-project init-once lock; readers
-#: are GET /model/status requests, which only read primitive fields)
-_hydration_progress: dict[str, HydrationProgress] = {}
-
-
-def hydration_progress(project_id: str) -> HydrationProgress | None:
-    return _hydration_progress.get(project_id)
 
 
 def serialize_ops(ops: Sequence[OpIn]) -> list[Any]:
     # Sequence (covariant), not list: model-only callers pass a
-    # `list[ModelOpIn]` (e.g. /model/ops, which rejects artifact ops), which
+    # `list[ModelOpIn]`, which
     # is not a `list[OpIn]` under list's invariance even though
     # ModelOpIn <: OpIn. Mixed commits pass a genuine `list[OpIn]`.
     return OPS_ADAPTER.dump_python(list(ops), mode="json")
@@ -115,34 +87,6 @@ def write_snapshot(project_id: str, session: Session, rev: int) -> None:
             )
 
 
-def persist_baseline(
-    project_id: str, session: Session, *, author_id: str | None
-) -> None:
-    """Make the session's CURRENT model the project's durable baseline.
-
-    Clears prior history, writes a snapshot at ``session.model_rev``, records a
-    rev-0-style "baseline" commit row at that rev (empty ops — the snapshot IS
-    the state), and sets ``models.model_rev`` to the session rev. The in-memory
-    ``session.model_rev`` is left as-is (load-replace already bumped it), so
-    snapshot rev == model_rev == DB model_rev."""
-    assert session.model is not None
-    rev = session.model_rev
-    with db_session() as s:
-        content.clear_history(s, project_id)
-        content.append_commit(
-            s,
-            project_id,
-            rev=rev,
-            commit_id=uuid.uuid4().hex,
-            author_id=author_id,
-            ops=[],
-            inverse_ops=[],
-            id_map={},
-        )
-        content.set_model_rev(s, project_id, rev)
-    write_snapshot(project_id, session, rev)
-
-
 def replay_commits_into(session: Session, commits: list[Commit]) -> None:
     """Apply each commit's ops to the session model in restore mode.
 
@@ -191,8 +135,7 @@ def reconstruct_model_at(project_id: str, rev: int) -> Model | None:
         assert mm_row is not None
         snap = content.latest_snapshot(s, project_id, max_rev=rev)
         # With a snapshot, replay only the tail above it; with none (e.g. a
-        # project built purely via the unlocked /model/ops path, which writes
-        # no eager baseline snapshot), replay the whole journal from rev 0 so
+        # project whose baseline snapshot was never written), replay the whole journal from rev 0 so
         # the reconstructed state is complete. (hydrate_session uses ``else []``
         # because a missing snapshot is an anomaly there; here it is normal.)
         tail = content.commits_between(
@@ -222,18 +165,8 @@ def reconstruct_model_at(project_id: str, rev: int) -> Model | None:
 def hydrate_session(project_id: str) -> Session:
     """Build the live ``Session`` for a project from durable storage.
 
-    No ``ModelRow`` -> empty ``Session``. Progress is published in
-    ``_hydration_progress`` for GET /model/status while this runs (the
-    registry's init-once lock guarantees one hydration per id)."""
-    progress = HydrationProgress()
-    _hydration_progress[project_id] = progress
-    try:
-        return _hydrate_session(project_id, progress)
-    finally:
-        _hydration_progress.pop(project_id, None)
-
-
-def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
+    No ``ModelRow`` -> empty ``Session``. The registry's init-once lock
+    guarantees one hydration per id."""
     with db_session() as s:
         model_row = content.get_model_row(s, project_id)
         if model_row is None:
@@ -261,9 +194,6 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
                     bump_rev=False,
                 )
             views[view_row.id] = view
-        # read here: compilation needs the metamodel built below, and the
-        # sweep it feeds runs with no DB session of its own
-        rule_sources = rules.rule_sources(s, project_id)
 
     metamodel = load_metamodel_str(mm_row.blob)
     if snap_key is None:
@@ -273,30 +203,15 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
     else:
         from .routes._snapshot import build_model_from_dicts
 
-        progress.phase = "download"
-        blob = get_snapshot_store().get(snap_key)
-        progress.phase = "parse"
-        raw = decode_snapshot(blob)  # "parse" covers decompress + loads
-        progress.phase = "build"
-
-        def _on_build(done: int, total: int) -> None:
-            progress.done, progress.total = done, total
-
+        raw = decode_snapshot(get_snapshot_store().get(snap_key))
         # strict=False: hydration tolerates unknown types so a project rebound
-        # onto a type-removing metamodel survives eviction; the validation
-        # pipeline reports the conformance issues.
-        model = build_model_from_dicts(
-            metamodel, raw, strict=False, on_progress=_on_build
-        )
+        # onto a type-removing metamodel survives eviction; the engine reports
+        # the conformance issues.
+        model = build_model_from_dicts(metamodel, raw, strict=False)
 
     session = Session(metamodel=metamodel, model=model)
     session.model_rev = model_rev
-    progress.phase = "replay"
     replay_commits_into(session, tail)
     session.views = views
-    session.validation = ValidationState()
     session.strict_mode = strict_mode
-    session.compiled_rules = rules.compile_sources(rule_sources, metamodel)
-    start_validation_sweep(session)
-    start_search_index_build(session)
     return session

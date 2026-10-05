@@ -62,7 +62,7 @@ def test_rebuild_after_metamodel_swap_rederives_containment() -> None:
     m, a, b = _model_with_contains()
     assert m.indexes.parents_of(b) == [a]
     m.metamodel = load_metamodel_str(_MM_B)
-    m.indexes.rebuild(keep_search=True)
+    m.indexes.rebuild()
     assert m.indexes.parents_of(b) == ()
     assert set(m.indexes.iter_roots()) == {a, b}
     m.indexes.verify_consistent()

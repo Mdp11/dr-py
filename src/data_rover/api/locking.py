@@ -258,9 +258,8 @@ class LockTable:
         *holder*.
 
         The "is a peer mid-edit on this?" question, asked by the writers that
-        are NOT themselves lock-verified: the legacy artifact CRUD routes
-        (``PUT``/``DELETE /artifacts/{id}``) and the legacy unlocked
-        ``POST /model/undo``. A lease is only a guarantee if EVERY writer to
+        are NOT themselves lock-verified: the artifact CRUD routes
+        (``PUT``/``DELETE /artifacts/{id}``). A lease is only a guarantee if EVERY writer to
         the resource honours it — a writer that ignores it turns a held lease
         into a silent lost update, with no error anywhere (the holder's own
         commit still verifies, applies and wins).

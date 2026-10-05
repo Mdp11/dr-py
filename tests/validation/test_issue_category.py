@@ -5,7 +5,6 @@ from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import Issue, IssueCategory, Severity
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
-from data_rover.core.validation.state import ValidationState
 
 # minimal metamodel: a containment relationship so we can build a cycle
 MM = """
@@ -49,16 +48,3 @@ def test_two_parents_is_structural() -> None:
     issues = default_pipeline().validate(model, Scope.all())
     multi = [i for i in issues if "containment parents" in i.message]
     assert multi and all(i.category is IssueCategory.STRUCTURAL for i in multi)
-
-
-def test_state_category_counts_and_structural_issues() -> None:
-    state = ValidationState()
-    state.set_full(
-        [
-            Issue(Severity.ERROR, "struct", ["e1"], IssueCategory.STRUCTURAL),
-            Issue(Severity.ERROR, "soft1", ["e2"]),
-            Issue(Severity.ERROR, "soft2", ["e3"]),
-        ]
-    )
-    assert state.category_counts() == {"structural": 1, "conformance": 2}
-    assert [i.message for i in state.structural_issues()] == ["struct"]

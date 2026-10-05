@@ -12,7 +12,7 @@ is a rebind (``can_fold``).
 Any other range is answered by rebuilding the model at both ends
 (``reconstruct_model_at``, O(model) twice) and comparing entity by entity, so
 the cost of a range the journal cannot express is that of
-``GET /commits/{rev}/model`` twice. Both paths feed ``render_range``, whose
+``reconstruct_model_at`` twice. Both paths feed ``render_range``, whose
 equality ignores ``id`` and ``rev``: an entity that returns to its earlier
 state, with a newer ``rev``, is no change.
 

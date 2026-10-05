@@ -18,6 +18,7 @@ from .conftest import (
     seed_default_project,
     install,
     EMPTY_MODEL,
+    commit_ops,
 )
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
@@ -54,15 +55,24 @@ def client() -> TestClient:
 def _bootstrap(client: TestClient) -> tuple[str, str]:
     """Upload metamodel + a tiny model with two Blocks; return their ids."""
     install(metamodel=EXAMPLE.read_text(encoding="utf-8"), model=EMPTY_MODEL)
-    a = client.post(
-        f"{API}/model/elements",
-        json={"type": "Block", "properties": {"name": "A", "mass": 1.0}},
-    ).json()
-    b = client.post(
-        f"{API}/model/elements",
-        json={"type": "Block", "properties": {"name": "B", "mass": 2.0}},
-    ).json()
-    return a["id"], b["id"]
+    out = commit_ops(
+        client,
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_a",
+                "type_name": "Block",
+                "properties": {"name": "A", "mass": 1.0},
+            },
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_b",
+                "type_name": "Block",
+                "properties": {"name": "B", "mass": 2.0},
+            },
+        ],
+    )
+    return out["id_map"]["tmp_a"], out["id_map"]["tmp_b"]
 
 
 def test_list_empty_and_unknown_404(client: TestClient) -> None:
@@ -96,20 +106,12 @@ def test_create_list_get_delete(client: TestClient) -> None:
     assert got["view"]["name"] == "Ops"
     assert got["view"]["folders"][0]["id"]
     assert got["view"]["folders"][0]["elements"] == [a_id]
-    assert got["warnings"] == []
     assert get_session().views[vid].name == "Ops"
 
     assert client.delete(papi(f"/views/{vid}")).status_code == 204
     assert [v["name"] for v in client.get(papi("/views")).json()] == ["Arch"]
     assert client.get(papi(f"/views/{vid}")).status_code == 404
     assert vid not in get_session().views
-
-
-def test_get_surfaces_validate_view_warnings(client: TestClient) -> None:
-    _bootstrap(client)
-    vid = create_view(client, "V", {"folders": [{"name": "F", "elements": ["ghost"]}]})
-    got = client.get(papi(f"/views/{vid}")).json()
-    assert got["warnings"] and got["warnings"][0]["check"] == "view"
 
 
 def test_duplicate_name_409_and_bad_input_422(client: TestClient) -> None:
@@ -194,15 +196,6 @@ def test_add_and_delete_broadcast_view_events(client: TestClient) -> None:
         while ev["type"] != "view":
             ev = ws.receive_json()
         assert ev == {"type": "view", "action": "deleted", "view": {"id": vid, "name": "Ops"}}
-
-
-def test_excluded_roots_take_a_view_id(client: TestClient) -> None:
-    a_id, b_id = _bootstrap(client)
-    vid = create_view(client, "V", {"folders": [{"name": "F", "elements": [a_id]}]})
-    all_roots = client.get(papi("/model/containment/roots/excluded")).json()
-    assert {i["id"] for i in all_roots["items"]} == {a_id, b_id}
-    scoped = client.get(papi(f"/model/containment/roots/excluded?view_id={vid}")).json()
-    assert {i["id"] for i in scoped["items"]} == {b_id}
 
 
 def test_put_replaces_document_and_bumps_rev(client: TestClient) -> None:

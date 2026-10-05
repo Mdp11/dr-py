@@ -20,7 +20,7 @@ Python string. ``iter_model_json`` yields one entity at a time (each entity
 is dumped individually and re-indented), so peak extra memory is one
 entity's text. ``json.dump`` directly to a file handle would also avoid the
 big string, but it cannot feed a ``StreamingResponse``; one generator serves
-both /model/save and /model/download and guarantees their bytes are
+every writer of the model document and guarantees their bytes are
 identical.
 """
 
@@ -214,8 +214,7 @@ def iter_buffered(chunks: Iterable[str], min_size: int = 64 * 1024) -> Iterator[
     ``iter_model_json`` yields one ~400-byte chunk per entity, which is the
     right granularity for memory but pathological for a ``StreamingResponse``:
     every chunk costs a full ASGI send cycle, and a large model has hundreds
-    of thousands of them (measured: ~2 MB/s on /model/download vs. the same
-    bytes written to disk in under 2 s by /model/save). This wrapper
+    of thousands of them. This wrapper
     accumulates chunks and yields them joined once the buffer reaches
     ``min_size``, cutting the send count by ~100x while keeping peak extra
     memory at one buffer (~min_size).

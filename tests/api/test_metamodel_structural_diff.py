@@ -1,4 +1,4 @@
-"""``POST /metamodel/structural-diff``: the diff route's structural half alone."""
+"""``POST /metamodel/structural-diff``: the live metamodel against a candidate."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,8 +6,10 @@ from fastapi.testclient import TestClient
 from data_rover.api import db
 from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
+from data_rover.core.metamodel.diff import diff_metamodels
+from data_rover.core.metamodel.loader import load_metamodel_str
 
 from .conftest import (
     AUTH_HEADERS,
@@ -72,19 +74,22 @@ def _member(user_id: str, role: Role) -> dict[str, str]:
     return {**_YAML, "x-user-id": user_id, "x-user-email": f"{user_id}@example.com"}
 
 
+def _expected(candidate: str) -> object:
+    diff = diff_metamodels(load_metamodel_str(_MM), load_metamodel_str(candidate))
+    return diff.model_dump(mode="json", by_alias=True)
+
+
 @pytest.mark.parametrize(
     "candidate",
     [_MM_STRUCT_RENAMED, _MM_STRUCT_MULT, _MM],
     ids=["renamed", "field-change", "identical"],
 )
-def test_equals_the_diff_routes_structural(client: TestClient, candidate: str) -> None:
-    full = client.post(papi("/metamodel/diff"), content=candidate, headers=_YAML)
-    assert full.status_code == 200, full.text
+def test_equals_the_core_diff(client: TestClient, candidate: str) -> None:
     r = client.post(
         papi("/metamodel/structural-diff"), content=candidate, headers=_YAML
     )
     assert r.status_code == 200, r.text
-    assert r.json() == full.json()["structural"]
+    assert r.json() == _expected(candidate)
 
 
 def test_a_field_change_keeps_the_from_key(client: TestClient) -> None:
@@ -98,13 +103,11 @@ def test_a_field_change_keeps_the_from_key(client: TestClient) -> None:
     ]
 
 
-def test_a_json_body_reads_as_the_diff_route_reads_it(client: TestClient) -> None:
+def test_a_json_body_reads_as_yaml_does(client: TestClient) -> None:
     doc = {"elements": [{"name": "Widget"}]}
-    full = client.post(papi("/metamodel/diff"), json=doc)
-    assert full.status_code == 200, full.text
     r = client.post(papi("/metamodel/structural-diff"), json=doc)
     assert r.status_code == 200, r.text
-    assert r.json() == full.json()["structural"]
+    assert r.json() == _expected("elements:\n  - name: Widget\n")
 
 
 @pytest.mark.parametrize(
@@ -144,16 +147,10 @@ def test_a_viewer_is_refused_and_an_editor_is_not(client: TestClient) -> None:
     assert r.status_code == 200, r.text
 
 
-def test_the_model_and_the_issue_store_are_untouched(client: TestClient) -> None:
-    before = head().rev
-    issues = client.get(papi("/model/issues")).json()
-    session = get_session()
-    model, store = session.model, session.validation
-    assert store is not None
+def test_the_model_is_untouched(client: TestClient) -> None:
+    before = head()
     r = client.post(
         papi("/metamodel/structural-diff"), content=_MM_STRUCT_RENAMED, headers=_YAML
     )
     assert r.status_code == 200, r.text
-    assert head().rev == before
-    assert client.get(papi("/model/issues")).json() == issues
-    assert session.model is model and session.validation is store
+    assert head() == before

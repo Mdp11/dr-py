@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,9 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: Origins the browser frontend is served from in dev (`vite dev`, port 5173)
 #: and local preview (`vite preview`, port 4173), under both spellings of
-#: loopback. These are the CORS allowlist default AND the allowlist used by
-#: the Origin guard on the local-filesystem endpoints (see
-#: ``deps.require_allowed_origin``). Override via the environment as JSON,
+#: loopback. These are the CORS allowlist default. Override via the environment as JSON,
 #: e.g. ``DATA_ROVER_CORS_ORIGINS='["http://localhost:3000"]'``
 #: (pydantic-settings parses list fields from env as JSON).
 DEFAULT_CORS_ORIGINS = [
@@ -112,131 +109,15 @@ class Settings(BaseSettings):
     #: bounded per-client feed queue. A client whose queue overflows is dropped
     #: and reconnects. Large enough to absorb a burst of commits.
     feed_queue_max: int = 256
-    #: Ceiling (bytes) on a raw request body the API buffers whole — POST
-    #: /model/upload and POST /model/compare (see ``deps.read_capped_body``).
-    #: A runaway/abuse backstop, not a tuning knob: the documented target
-    #: model is ~80 MB, so this sits far above any legitimate upload. 0
-    #: disables the cap.
-    max_request_body_bytes: int = 512 * 1024 * 1024
-    #: xlsx export autofit ceiling, in pixels: one huge cell must not
-    #: blow a column out to an unusable width, but 300 (~43 chars) proved too
-    #: tight in practice. ~86 chars by default; Excel's own hard cap is 1790.
-    #: Definition ``width_px`` values stay deliberately ignored on export —
-    #: on-screen widths are a display preference, the export always autofits.
-    xlsx_autofit_max_px: int = 600
-    #: run the background validation sweep inline (synchronously) on the
-    #: load/upload/hydrate paths. False in production; the API test conftest
-    #: pins it true so tests keep deterministic "seeded after load" semantics.
-    validation_sweep_sync: bool = False
-    #: Run the background trigram search-index build synchronously on the
-    #: load/upload/hydrate paths. False in production (a daemon thread
-    #: indexes in chunks while search falls back to the scan); the API test
-    #: conftest pins it true so every test sees a complete index after load.
-    search_index_sync: bool = False
     #: Run the periodic full-model snapshot inline on the committing request
     #: (synchronously, inside its write_mutex section) instead of on a daemon
     #: thread. False in production; the API test conftest pins it true so a
     #: test can assert the snapshot row right after the commit returns.
     snapshot_sync: bool = False
-    #: Which ScriptRunner ``build_runner_from_settings`` constructs: "wasm"
-    #: (the wasmtime/CPython-WASI sandbox, the only choice safe for real
-    #: deployments) or "trusted" (the in-process, unsandboxed test runner —
-    #: see the RCE tripwire in ``script_runner.build_runner_from_settings``,
-    #: which refuses "trusted" whenever ``dev_seed`` is false).
-    snippet_runner: Literal["wasm", "trusted"] = "wasm"
-    #: Path to the CPython-WASI guest binary (`python.wasm`) the wasm runner
-    #: loads. Not committed: it is fetched by the `scripts/ensure_guest.sh`
-    #: pixi activation hook (or by hand via
-    #: `spikes/code_exec/fetch_python_wasi.sh`), so a checkout where that never
-    #: ran — no network, a non-pixi deployment — simply leaves the runner unset
-    #: (routes 503) rather than failing to boot.
-    snippet_guest_wasm_path: str = "spikes/code_exec/vendor/python.wasm"
-    #: Path to the CPython-WASI stdlib the wasm runner preopens as
-    #: `PYTHONHOME`/`PYTHONPATH` for the guest.
-    snippet_guest_lib_path: str = "spikes/code_exec/vendor/lib/python3.14"
-    #: Warm-instance pool size for the wasm runner (`WasmScriptRunner.
-    #: pool_size`). More instances absorb concurrent runs without a cold
-    #: boot, at the cost of one idle CPython-WASI interpreter per slot.
-    #:
-    #: SIZED FOR THE SHARDED SWEEP: a background sweep
-    #: fans its cell work out across ``snippet_sweep_workers`` (4) guest
-    #: sessions, and it draws from its OWN process-wide semaphore — it does
-    #: NOT take a slot from the interactive ``snippet_concurrency`` guard. So
-    #: a running sweep plus concurrent console/table evaluation would exhaust
-    #: a pool of 2 and degrade those interactive calls to ``unavailable``.
-    #: 4 sweep workers + 2 interactive headroom = 6.
-    snippet_pool_size: int = 6
-    #: Global cap on concurrently executing snippet runs.
-    snippet_concurrency: int = 4
-    #: Per-user cap on concurrently executing snippet runs.
-    snippet_per_user_concurrency: int = 1
-    #: Mirrors ``RunLimits.wall_timeout_s`` (see ``run_limits_from_settings``).
-    snippet_wall_timeout_s: float = 10
-    #: Mirrors ``RunLimits.memory_bytes``.
-    snippet_memory_bytes: int = 256 * 1024 * 1024
-    #: Mirrors ``RunLimits.stdout_bytes``.
-    snippet_stdout_bytes: int = 256 * 1024
-    #: Mirrors ``RunLimits.result_repr_bytes``.
-    snippet_result_repr_bytes: int = 64 * 1024
-    #: Cap on the export-transform document, BOTH directions: the
-    #: serialized doc handed to transform() and the serialized replacement it
-    #: returns. Host-side (TransformHost) — deliberately NOT a RunLimits
-    #: field, since the guest never enforces it. Breach -> 422 naming the
-    #: entry, never a truncation: a machine consumer must not receive a
-    #: silently clipped document.
-    snippet_transform_max_bytes: int = 8 * 1024 * 1024
-    #: Mirrors ``RunLimits.max_ops``.
-    snippet_max_ops: int = 1000
-    #: Mirrors ``RunLimits.max_op_bytes``.
-    snippet_max_op_bytes: int = 1024 * 1024
-    #: Mirrors ``RunLimits.page_limit``.
-    snippet_page_limit: int = 500
     #: Wall budget for one ``ruff format`` subprocess (POST /snippets/format).
     #: Generous for a <=64 KiB file; a breach means something is wrong with the
     #: host, which the route reports as 503 rather than hanging the editor.
     snippet_format_timeout_s: float = 5.0
-    #: Capacity (entries) of the guest facade's session-lifetime read memo.
-    #: One entry is one memoized bridge read response (element projection /
-    #: adjacency list / type info). 0 disables.
-    snippet_read_memo_max: int = 4096
-    #: Total wall budget (seconds) for ALL embedded snippet work one
-    #: evaluate/export request triggers (``ScriptBudget``, script
-    #: columns/steps) — shared across every script column/step call the
-    #: request transitively makes, not a per-call timeout.
-    snippet_eval_budget_s: float = 30.0
-    #: Capacity of each session's ``ScriptCellCache``.
-    #: Consumed at ``Session`` CONSTRUCTION: the ``script_cell_cache`` field's
-    #: ``default_factory`` reads this via ``get_settings()`` so every
-    #: construction path (the empty-fallback ``Session()`` and hydration's
-    #: ``Session(metamodel=..., model=...)``) gets a setting-sized cache
-    #: without threading a cap argument through ``SessionRegistry``. 50k cells
-    #: comfortably holds a whole large table's script column at one rev.
-    snippet_cell_cache_max: int = 50_000
-    #: Process-wide bound on concurrently RUNNING background sweep jobs
-    #: (``script_sweep._global_slots``). Bounded across ALL sessions so N open
-    #: projects cannot mean N×workers guest instances — a sweep pool separate
-    #: from the interactive ``snippet_concurrency`` guard.
-    snippet_sweep_workers: int = 4
-    #: Per-sweep wall ceiling (seconds): a ``SweepJob`` whose ``ScriptBudget``
-    #: exhausts mid-grind aborts (``failed``, and NOT cached) rather than
-    #: pinning a worker on one pathological table forever.
-    snippet_sweep_ceiling_s: float = 600.0
-    #: Consecutive-timeout abort threshold: a sweep that sees this many script
-    #: timeouts in a row gives up (``failed``). A single slow cell resets the
-    #: counter on the next success, so only a persistently-timing-out snippet
-    #: trips it.
-    snippet_sweep_timeout_abort: int = 3
-    #: Run each background sweep inline (synchronously) inside
-    #: ``kick_or_join_sweep`` instead of on a daemon thread. False in
-    #: production; tests pin it true (``DATA_ROVER_SNIPPET_SWEEP_SYNC``) so a
-    #: sweep completes deterministically within the calling test.
-    snippet_sweep_sync: bool = False
-    #: Incremental cell-cache invalidation on the op-delta commit paths.
-    #: True: a commit evicts only the cells whose recorded read-sets
-    #: intersect its touched keys, and survivors stay warm at the new rev.
-    #: False: clear-all semantics via rev-stamp mismatch. Escape hatch,
-    #: default on.
-    snippet_incremental_invalidation: bool = True
 
 
 def get_settings() -> Settings:

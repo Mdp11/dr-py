@@ -87,10 +87,9 @@ class Model:
             )
         if prop not in names:
             raise KeyError(f"{target.type_name!r} has no property {prop!r}")
-        old = target.properties.get(prop)
         target.properties[prop] = value
         target.rev += 1
-        self.indexes.on_property_changed(target, prop, old)
+        self.indexes.on_properties_changed(target)
 
     def delete_property(self, target: Element | Relationship, prop: str) -> None:
         """Remove a property key from an attached entity (merge-patch null).
@@ -115,9 +114,9 @@ class Model:
             raise KeyError(f"{target.type_name!r} has no property {prop!r}")
         if prop not in target.properties:
             return
-        old = target.properties.pop(prop)
+        del target.properties[prop]
         target.rev += 1
-        self.indexes.on_property_changed(target, prop, old)
+        self.indexes.on_properties_changed(target)
 
     def connect(self, rel_type: str, source_id: str, target_id: str) -> Relationship:
         if self.metamodel.relationship_type(rel_type) is None:

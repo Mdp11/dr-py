@@ -11,7 +11,6 @@ from data_rover.core.metamodel.schema import (
     PropertyDef,
     RelationshipType,
 )
-from data_rover.core.model.change_request import ChangeRequest, apply_change_request
 from data_rover.core.model.element import Element
 from data_rover.core.model.indexes import IndexSet
 from data_rover.core.model.model import Model
@@ -434,28 +433,6 @@ def test_rebuild_after_direct_population():
     model.indexes.verify_consistent()
 
 
-def test_apply_change_request_result_has_consistent_indexes():
-    model = Model(_mm())
-    a = model.create_element("Doc")
-    b = model.create_element("Doc")
-    model.set_property(a, "name", "a")
-    model.set_property(b, "name", "b")
-    rel = model.connect("Links", a.id, b.id)
-
-    cr = ChangeRequest(
-        elements_added=[Element(id="new", type_name="Folder", properties={})],
-        relationships_deleted=[
-            Relationship(
-                id=rel.id, type_name="Links", source_id=a.id, target_id=b.id
-            )
-        ],
-    )
-    result = apply_change_request(model, cr)
-    result.indexes.verify_consistent()
-    assert result.relationships_from(a.id) == []
-    assert "new" in result.indexes.elements_by_type["Folder"]
-
-
 def test_verify_consistent_detects_corruption():
     model = Model(_mm())
     a = model.create_element("Doc")
@@ -770,7 +747,7 @@ def test_element_order_rebuilt_from_dict_order():
     model.indexes.verify_consistent()
 
 
-def test_element_order_rederived_by_keep_search_rebuild():
+def test_element_order_rederived_by_rebuild():
     model = Model(_mm())
     a = model.create_element("Doc")
     b = model.create_element("Doc")
@@ -778,7 +755,7 @@ def test_element_order_rederived_by_keep_search_rebuild():
     model.restore_element(a.id, "Doc")
     assert model.indexes.element_order[a.id] > model.indexes.element_order[b.id]
 
-    model.indexes.rebuild(keep_search=True)
+    model.indexes.rebuild()
     # dense numbers in dict order: b was never deleted, a was re-inserted last
     assert model.indexes.element_order == {b.id: 0, a.id: 1}
     _assert_order_matches_dict(model)

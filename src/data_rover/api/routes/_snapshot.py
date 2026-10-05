@@ -150,12 +150,8 @@ def _build_model_from_payload(
     elements: list[ElementOut],
     relationships: list[RelationshipOut],
 ) -> Model:
-    """Materialize a `Model` from snapshot/inline payload data.
-
-    Shared by `POST /model`, `PUT /model/snapshot`, and the inline branch of
-    `POST /model/validate` so all three endpoints apply the same guards (see
-    the shared-guard section above for the list).
-    """
+    """Materialize a `Model` from snapshot/inline payload data, applying the
+    shared guards listed above."""
     model = Model(metamodel)
 
     seen_element_ids: set[str] = set()

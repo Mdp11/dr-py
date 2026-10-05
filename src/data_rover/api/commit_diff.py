@@ -6,8 +6,8 @@ at commit time (``commit_states``) because the inverse ops alone cannot
 render a ``modified`` entry: an update's inverse patch carries only the
 touched keys, never the whole entity. A row without it (written before the
 column existed, or a batch over ``ENTITY_STATES_MAX``) falls back to
-reconstructing the model at rev-1 and rev (same machinery and cost class as
-GET /commits/{rev}/model) and comparing only the ids the commit's ops name.
+reconstructing the model at rev-1 and rev (``reconstruct_model_at``) and
+comparing only the ids the commit's ops name.
 Both paths feed the same renderer, so the output is identical.
 
 Artifacts: journal-only. Canonical artifact ops carry full AFTER state and

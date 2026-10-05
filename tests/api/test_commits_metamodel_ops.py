@@ -81,18 +81,6 @@ def test_split_ops_separates_metamodel_family() -> None:
     assert len(model) == 1 and not art and not view
 
 
-def test_validate_route_rejects_metamodel_ops(client: TestClient) -> None:
-    # routes/validation.py destructures split_ops too, and mirrors the
-    # existing PERMANENT artifact/view rejection there (test_view_op_schemas.py
-    # ::test_validate_route_rejects_view_ops is the sibling for that pattern).
-    r = client.post(
-        papi("/model/validate"),
-        json={"ops": [{"kind": "metamodel.move_node", "node": "el:Node", "pos": None}]},
-    )
-    assert r.status_code == 422
-    assert "commits" in r.json()["detail"]
-
-
 # ---------------------------------------------------------------------------
 # Metamodel ops through POST /commits
 # ---------------------------------------------------------------------------
@@ -422,9 +410,7 @@ def test_mid_batch_model_failure_restores_the_old_schema(client: TestClient) -> 
     # no journal row was written for the rejected batch
     hist = client.get(papi("/commits"), params={"limit": 5}).json()["commits"]
     assert all(not c["is_rebind"] for c in hist)
-    # the unwind's rebuild(keep_search=True) left search intact
-    assert session.model.indexes.search_ready is True
-    assert eid in (session.model.indexes.search_candidates(eid[:3].lower()) or set())
+    session.model.indexes.verify_consistent()
 
 
 def test_layout_only_commit_is_cheap_and_journalled(client: TestClient) -> None:
@@ -833,8 +819,7 @@ def test_orphan_db_commit_failure_unwinds_the_batch(
     in-memory-only project's shape) so the route reaches its
     ``if (artifact_ops or view_ops or metamodel_ops) and not persisted:``
     branch, and the DB session's ``commit`` is made to raise there. Without
-    the try/except the raise escapes with ``model_rev`` already bumped and
-    the batch already in ``op_log``.
+    the try/except the raise escapes with ``model_rev`` already bumped.
     """
     import sqlalchemy.orm as sa_orm
 
@@ -843,7 +828,6 @@ def test_orphan_db_commit_failure_unwinds_the_batch(
     session = get_session()
     token = _acquire_mm(client)
     base = _rev(client)
-    log_depth = len(session.op_log)
 
     monkeypatch.setattr(commits_mod, "_persist_commit", lambda *a, **k: False)
 
@@ -866,43 +850,3 @@ def test_orphan_db_commit_failure_unwinds_the_batch(
 
     assert r.status_code == 500, r.text
     assert session.model_rev == base  # rev bump unwound
-    assert len(session.op_log) == log_depth  # batch not left undoable
-
-
-def test_rebind_preview_and_commit_keep_the_search_index(client: TestClient) -> None:
-    """The search index is metamodel-independent, so the rebind paths rebuild
-    with ``keep_search=True``: after a preview (swap + restore = two
-    rebuilds) and after a real rebind commit the live index is still ready
-    and still answers — no scan fallback, no background rebuild."""
-    from data_rover.api.session import get_session
-
-    eid = _create_node(client, "turbine hall")
-    session = get_session()
-    assert session.model is not None
-    idx = session.model.indexes
-    assert idx.search_ready is True
-    assert idx.search_candidates("turbine") == {eid}
-
-    r = client.post(
-        papi("/commits/preview"),
-        json={"base_rev": _rev(client), "ops": [{"kind": "metamodel.rebind", "blob": MM_V4}]},
-    )
-    assert r.status_code == 200, r.text
-    assert idx.search_ready is True
-    assert idx.search_candidates("turbine") == {eid}
-
-    token = _acquire_mm(client)
-    r = client.post(
-        papi("/commits"),
-        json={
-            "base_rev": _rev(client),
-            "ops": [{"kind": "metamodel.rebind", "blob": MM_V4}],
-            "lock_tokens": [token],
-        },
-    )
-    assert r.status_code == 200, r.text
-    assert session.model is not None and session.model.indexes is idx
-    assert idx.search_ready is True
-    assert idx.search_candidates("turbine") == {eid}
-    r = client.get(papi("/model/elements"), params={"q": "turbine"})
-    assert [e["id"] for e in r.json()["items"]] == [eid]

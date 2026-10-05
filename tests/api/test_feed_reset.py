@@ -118,46 +118,6 @@ def _seed(client: TestClient) -> dict[str, str]:
     return {"a": ids["tmp_a"], "b": ids["tmp_b"], "r": ids["tmp_r"]}
 
 
-_LEGACY: dict[str, Callable[[TestClient, dict[str, str]], int]] = {
-    "post_element": lambda c, ids: (
-        c.post(
-            papi("/model/elements"), json={"type": "Node", "properties": {"label": "x"}}
-        ).status_code
-    ),
-    "patch_element": lambda c, ids: (
-        c.patch(
-            papi(f"/model/elements/{ids['a']}"), json={"properties": {"label": "y"}}
-        ).status_code
-    ),
-    "delete_element": lambda c, ids: (
-        c.delete(papi(f"/model/elements/{ids['b']}")).status_code
-    ),
-    "post_relationship": lambda c, ids: (
-        c.post(
-            papi("/model/relationships"),
-            json={"type": "Refers", "source_id": ids["b"], "target_id": ids["a"]},
-        ).status_code
-    ),
-    "delete_relationship": lambda c, ids: (
-        c.delete(papi(f"/model/relationships/{ids['r']}")).status_code
-    ),
-}
-
-
-@pytest.mark.parametrize("route", sorted(_LEGACY))
-def test_a_legacy_write_announces_itself(client: TestClient, route: str) -> None:
-    ids = _seed(client)
-    with client.websocket_connect(_feed_url()) as ws:
-        _settle(ws)
-        before = get_session().model_rev
-        assert _LEGACY[route](client, ids) in (200, 201, 204)
-        rev = get_session().model_rev
-        assert rev == before + 1
-        assert _resets(_frames_before_join(client, ws)) == [
-            {"type": "reset", "model_rev": rev}
-        ]
-
-
 def _spy_on_resets(
     monkeypatch: pytest.MonkeyPatch, read: Callable[[], Any]
 ) -> list[Any]:
@@ -226,11 +186,10 @@ def test_post_metamodel_announces_after_its_rows(
     assert seen == [new_id]
 
 
-@pytest.mark.parametrize("path", ["/metamodel", "/model"])
-def test_a_delete_announces_itself(client: TestClient, path: str) -> None:
+def test_a_metamodel_delete_announces_itself(client: TestClient) -> None:
     with client.websocket_connect(_feed_url()) as ws:
         _settle(ws)
-        assert client.delete(papi(path)).status_code == 204
+        assert client.delete(papi("/metamodel")).status_code == 204
         rev = get_session().model_rev
         assert _resets(_frames_before_join(client, ws)) == [
             {"type": "reset", "model_rev": rev}
@@ -272,9 +231,9 @@ def test_a_commit_does_not(client: TestClient) -> None:
 
 def test_the_replica_routes_after_a_reset(client: TestClient) -> None:
     before = get_session().model_rev
-    res = client.post(papi("/model/elements"), json={"type": "Node", "properties": {}})
-    assert res.status_code == 201, res.text
-    head = get_session().model_rev
+    session = get_session()
+    session.set_model(session.model, announce=False)
+    head = session.model_rev
     assert head == before + 1
 
     tail = client.get(papi(f"/replica/tail?from_rev={before}"))

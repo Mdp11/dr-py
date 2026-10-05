@@ -21,7 +21,7 @@ MODEL = Path("examples/smart-city.model.json").read_text(encoding="utf-8")
 
 def test_upload_survives_eviction_via_hydration() -> None:
     seed_default_project()
-    c = TestClient(create_app())
+    create_app()
     install(metamodel=MM, model=MODEL)
     before = head()
 

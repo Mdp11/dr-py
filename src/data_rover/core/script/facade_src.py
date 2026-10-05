@@ -5,15 +5,12 @@ ever exists as the string constant :data:`FACADE_SOURCE`, which a runner
 `exec`s (verbatim, prepended to the user's snippet) in a fresh namespace.
 That is deliberate, not an oversight:
 
-- In production the snippet + facade run inside a WASM guest
-  (wasmtime + CPython-WASI); there is no way to "import" a host-side `.py`
-  file into that guest, so the facade has to travel as source text the guest
-  interpreter compiles for itself.
-- In tests (`tests/script/trusted_runner.py`'s `TrustedRunner`) the same
-  string is `exec`'d in-process. Using the *same* source both ways is the
-  point: it is the only way to guarantee the facade snippet authors see in
-  tests is byte-identical to the one running inside the sandbox — no second
-  implementation to drift out of sync.
+- The snippet + facade run inside the engine's sandboxed Python guest;
+  there is no way to "import" a host-side `.py` file into that guest, so the
+  facade has to travel as source text the guest interpreter compiles for
+  itself.
+- The same string also feeds the generated authoring docs (`docs.py`), so
+  the reference snippet authors read cannot drift from the facade they run.
 
 Because it is only ever `exec`'d, this string must be plain, stdlib-only,
 Python 3.10-compatible source. It must never `import data_rover` (or
@@ -22,32 +19,22 @@ available, and the facade's only channel to the host is the transport
 contract below.
 
 **The `_transport` contract.** `FACADE_SOURCE` refers to a module-level
-name, `_transport`, that it does *not* define. The embedding runner MUST
-bind `_transport` to a `Callable[[dict], dict]` in the `exec` namespace
-*before* `FACADE_SOURCE` executes (e.g. `namespace = {"_transport": ...}`,
-then `exec(FACADE_SOURCE, namespace)`). `_transport(req)` takes one bridge
-request dict (see `bridge.py`'s module docstring for the wire shape: a
+name, `_transport`, that it does *not* define. The embedding runner (the
+engine's script bridge, `engine/src/script/bridge.ts`) MUST bind `_transport`
+to a `Callable[[dict], dict]` in the `exec` namespace *before*
+`FACADE_SOURCE` executes. `_transport(req)` takes one bridge request dict (a
 string `"op"` selects a read, a dict `"op"` records a write) and returns one
 response dict, synchronously, never raising — errors come back as
-`{"id", "error": "ExcName: message"}`. In production `_transport` writes a
-newline-JSON request to a pipe/stdio channel and blocks for the matching
-response line; in `TrustedRunner` it is `BridgeDispatcher.dispatch` called
-directly, in-process. The facade code below is oblivious to which.
+`{"id", "error": "ExcName: message"}`. The facade code below is oblivious to
+how the request travels.
 
 **The `_read_memo_max` contract.** The embedding runner MUST also bind
-`_read_memo_max` (an `int`, the memo capacity — see `RunLimits.read_memo_max`)
-in the same namespace before `FACADE_SOURCE` executes. It caps the facade's
-session-lifetime read memo (`_memo`, defined below): memoized reads cost zero
-round trips on repeat. For embedded/sweep work the results this memo backs
-are rev-stamped and discarded if the model rev moves under them, so the memo
-can never be *observed* stale there; a console run reads without holding
-`session.write_mutex` at all and can already observe a torn read with or
-without the memo (see `RunLimits.read_memo_max`'s docstring in `runner.py`
-for the full scoping). Missing the binding (e.g. a caller that forgets it)
-falls back to a hardcoded default via `except (NameError, TypeError,
-ValueError)`, so the facade never hard-fails on it — but every real
-embedding path threads it through explicitly (`RunLimits.read_memo_max` ->
-`start_msg`/`namespace`).
+`_read_memo_max` (an `int`, the memo capacity) in the same namespace before
+`FACADE_SOURCE` executes. It caps the facade's session-lifetime read memo
+(`_memo`, defined below): memoized reads cost zero round trips on repeat.
+Missing the binding falls back to a hardcoded default via
+`except (NameError, TypeError, ValueError)`, so the facade never hard-fails
+on it.
 """
 
 from __future__ import annotations

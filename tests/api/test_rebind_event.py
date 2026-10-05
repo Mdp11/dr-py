@@ -1,5 +1,4 @@
 from data_rover.api.feed import rebind_event
-from data_rover.api.schemas import MetamodelDiffResponse
 
 
 def test_rebind_event_shape() -> None:
@@ -17,12 +16,3 @@ def test_rebind_event_shape() -> None:
         "validation_error_count": 3,
     }
 
-
-def test_response_models_construct() -> None:
-    # MetamodelDiffResponse backs POST /metamodel/diff and is worth a
-    # construction smoke test.
-    d = MetamodelDiffResponse(
-        now_failing=[], now_passing=[], unchanged_count=2,
-        current_error_count=2, candidate_error_count=2,
-    )
-    assert d.unchanged_count == 2

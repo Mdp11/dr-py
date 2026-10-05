@@ -709,8 +709,8 @@ def test_route_reconstructs_an_over_cap_batch(
 def test_route_reconstructs_across_a_hole(client: TestClient) -> None:
     b = _rev(client)
     _ops(client, [_create("a", label="one")])
-    r = client.post(papi("/model/elements"), json={"type": "Node", "properties": {}})
-    assert r.status_code == 201, r.text
+    session = get_session()
+    session.set_model(session.model, announce=False)
     _ops(client, [_create("c", label="three")])
     head = _rev(client)
     with _db() as s:
@@ -944,8 +944,7 @@ def test_fold_equals_reconstruction_over_random_histories(
     tally = _Tally()
     earlier: dict[str, list[Any]] = {}
     for _ in range(40):
-        session = get_session()
-        if rng.random() < 1 / 6 and session.op_log:
+        if rng.random() < 1 / 6 and _rev(client) > 0:
             _undo(client)
             tally.undos += 1
             continue

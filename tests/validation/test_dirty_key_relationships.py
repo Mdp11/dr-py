@@ -1,7 +1,7 @@
 """A relationship type named in a uniqueness key (``out:R`` / ``in:R``)
 re-keys its ends when it is connected, disconnected or deleted with a
 cascade: the dirty hooks must reach the groups those ends leave and join, or
-the issue store keeps a duplicate that is gone, or misses one that appeared.
+the issue list keeps a duplicate that is gone, or misses one that appeared.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from data_rover.core.model.model import Model
 from data_rover.core.validation.dirty import DirtyCollector
 from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
 from data_rover.core.validation.scope import Scope
-from data_rover.core.validation.state import ValidationState
+from data_rover.core.validation.issue import Issue
 
 _MM = Metamodel.model_validate(
     {
@@ -50,18 +50,18 @@ def _issues(issues: object) -> list[tuple[str, ...]]:
 
 def _store_after(
     model: Model, mutate: Callable[[DirtyCollector], None]
-) -> tuple[ValidationState, list[str]]:
-    """A store swept over ``model``, then spliced over the dirty set of
-    ``mutate``, as a session finalizes a batch."""
+) -> tuple[list[Issue], list[str]]:
+    """Issues swept over ``model``, then spliced over the dirty set of
+    ``mutate``: the issues owned (first target) by a dirty id are replaced by
+    the scoped run's."""
     pipeline = ValidationPipeline(default_validators())
-    state = ValidationState()
     ids = _all_ids(model)
-    state.replace(ids, pipeline.validate(model, Scope(ids)))
+    issues = pipeline.validate(model, Scope(ids))
     collector = DirtyCollector()
     mutate(collector)
     dirty = list(collector.ids)
-    state.replace(dirty, pipeline.validate(model, Scope(dirty)))
-    return state, dirty
+    kept = [i for i in issues if i.target_ids[0] not in set(dirty)]
+    return [*kept, *pipeline.validate(model, Scope(dirty))], dirty
 
 
 def _fresh(model: Model) -> list[tuple[str, ...]]:
@@ -77,9 +77,9 @@ def test_connect_dirties_the_group_its_source_leaves():
     def connect(d: DirtyCollector) -> None:
         connected.append(d.connect(model, "Feeds", s1, s2).id)
 
-    state, dirty = _store_after(model, connect)
+    issues, dirty = _store_after(model, connect)
     assert set(dirty) == {s1, s2, s3, connected[0]}
-    assert _issues(state.all_issues()) == _fresh(model) == []
+    assert _issues(issues) == _fresh(model) == []
 
 
 def test_disconnect_dirties_the_group_its_source_joins():
@@ -87,11 +87,11 @@ def test_disconnect_dirties_the_group_its_source_joins():
     s1, s3, s2 = _slot(model, 1), _slot(model, 1), _slot(model, 5)
     rel = model.connect("Feeds", s1, s2)
 
-    state, dirty = _store_after(model, lambda d: d.disconnect(model, rel.id))
+    issues, dirty = _store_after(model, lambda d: d.disconnect(model, rel.id))
     assert s3 in dirty
     fresh = _fresh(model)
     assert [issue[:2] for issue in fresh] == [(s3, s1)]
-    assert _issues(state.all_issues()) == fresh
+    assert _issues(issues) == fresh
 
 
 def test_a_cascade_dirties_the_groups_of_the_keyed_ends_it_leaves():
@@ -102,8 +102,8 @@ def test_a_cascade_dirties_the_groups_of_the_keyed_ends_it_leaves():
     model.connect("Holds", box, s2)
     model.connect("Feeds", s1, s2)
 
-    state, dirty = _store_after(model, lambda d: d.delete_element(model, box))
+    issues, dirty = _store_after(model, lambda d: d.delete_element(model, box))
     assert s3 in dirty
     fresh = _fresh(model)
     assert [issue[:2] for issue in fresh] == [(s3, s1)]
-    assert _issues(state.all_issues()) == fresh
+    assert _issues(issues) == fresh

@@ -468,30 +468,6 @@ def find_artifact(
     ).scalar_one_or_none()
 
 
-def find_artifacts_by_name(
-    db: Session, project_id: str, kind: ArtifactKind, name: str
-) -> list[ArtifactRow]:
-    """Every row sharing `(kind, name)` — unlike `find_artifact`, which
-    `scalar_one_or_none`s and would RAISE on a duplicate. `project_artifacts`
-    carries a DB-level `UNIQUE (project_id, kind, name)` constraint, so >1
-    row is unreachable through any write path against today's schema; but
-    this query makes no such assumption, and `GET /exports/run-by-name`'s
-    ambiguity contract (409 listing candidates) must answer deterministically
-    should that invariant ever be relaxed. Ordered by id for a stable
-    detail."""
-    return list(
-        db.execute(
-            select(ArtifactRow)
-            .where(
-                ArtifactRow.project_id == project_id,
-                ArtifactRow.kind == kind,
-                ArtifactRow.name == name,
-            )
-            .order_by(ArtifactRow.id)
-        ).scalars()
-    )
-
-
 def list_artifacts(
     db: Session,
     project_id: str,
@@ -507,24 +483,6 @@ def list_artifacts(
         q = q.where(ArtifactRow.id.in_(ids))
     q = q.order_by(ArtifactRow.kind, ArtifactRow.name)
     return list(db.execute(q).scalars())
-
-
-def list_artifact_ids(db: Session, project_id: str) -> set[str]:
-    """Ids-only projection of every artifact row in the project.
-
-    Callers that only need to know WHICH ids exist (``validate_view``'s
-    ``known_artifact_ids``, checked on every ``GET /view``) must not pay to
-    deserialize each row's full ``payload`` JSON via ``list_artifacts`` — a
-    ``code_snippet`` payload alone is capped at 64 KiB, so a project with a
-    few hundred artifacts would otherwise cost megabytes of JSON parsing on
-    every view read purely to build a membership set. ``select(ArtifactRow.id)``
-    projects only the id column, so the payload/name/etc. columns are never
-    fetched from the DB at all, not just skipped after the fact."""
-    return set(
-        db.execute(
-            select(ArtifactRow.id).where(ArtifactRow.project_id == project_id)
-        ).scalars()
-    )
 
 
 def update_artifact(

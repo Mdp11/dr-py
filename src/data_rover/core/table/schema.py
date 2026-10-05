@@ -359,7 +359,7 @@ class TableDefinition(BaseModel):
     #: behavior, and the no-migration guarantee for existing payloads).
     json_split: JsonSplitOptions | None = None
     #: Standalone-export snippet post-processor: applies to
-    #: POST /tables/export in JSON-family formats ONLY — an exporter entry
+    #: a standalone table export in JSON-family formats ONLY — an exporter entry
     #: never consults it (no-bleed). Ref or inline, like every other
     #: `SnippetSource`; `None` or an empty (`{}`/unconfigured) source both
     #: mean "no transform". Presentation-family: never consulted during

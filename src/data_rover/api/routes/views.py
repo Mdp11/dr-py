@@ -17,18 +17,16 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.view.ids import ensure_folder_ids, iter_folders
 from data_rover.core.view.schema import View
-from data_rover.core.view.validation import validate_view
 
 from .. import content
 from ..db import get_db
 from ..db_models import User
-from ..deps import Session, get_request_session, require_model
+from ..deps import Session, get_request_session
 from ..feed import view_event
 from ..identity import get_current_user
 from ..locking import folder_resource, view_resource
 from ..schemas import (
     CreateViewIn,
-    IssueOut,
     ViewOut,
     ViewStateResponse,
     UpdateViewIn,
@@ -63,16 +61,9 @@ def get_view(
     row = content.get_view(db, project_id, view_id)
     if view is None or row is None:
         raise HTTPException(status_code=404, detail="view not found")
-    _, model = require_model(session)
-    known = content.list_artifact_ids(db, project_id)
-    warnings = [
-        IssueOut.from_core(i)
-        for i in validate_view(view, model, known_artifact_ids=known)
-    ]
     return ViewStateResponse(
         id=row.id,
         view=ViewOut.from_core(view),
-        warnings=warnings,
         view_rev=row.view_rev,
     )
 

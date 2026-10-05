@@ -16,10 +16,6 @@ os.environ.setdefault("DATA_ROVER_DEV_SEED", "false")
 os.environ.setdefault("DATA_ROVER_SNAPSHOT_STORE", "memory")
 os.environ.setdefault("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
 os.environ.setdefault("DATA_ROVER_LOCK_SWEEP_SECONDS", "0")
-# The chunked background validation sweep runs inline so the existing
-# suite's "validation seeded after load" assumption keeps holding.
-os.environ.setdefault("DATA_ROVER_VALIDATION_SWEEP_SYNC", "true")
-os.environ.setdefault("DATA_ROVER_SEARCH_INDEX_SYNC", "true")
 os.environ.setdefault("DATA_ROVER_SNAPSHOT_SYNC", "true")
 # Pin all existing data tests to the header provider so they keep working after
 # the default flips to "cookie" in settings.py.
@@ -37,7 +33,6 @@ from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E4
 from data_rover.api.identity import set_identity_provider  # noqa: E402
 from data_rover.api.importer import install_model  # noqa: E402
 from data_rover.api.lock_mirror import MemoryLeaseMirror, set_lease_mirror  # noqa: E402
-from data_rover.api.script_sweep import reset_global_slots  # noqa: E402
 from data_rover.api.session import (  # noqa: E402
     DEFAULT_PROJECT_ID,
     get_registry,
@@ -53,9 +48,6 @@ def _fresh_db() -> Iterator[None]:
     db.init_engine("sqlite://")
     db.create_all()
     reset_session()
-    # a test pinning different sweep settings gets a freshly sized process-wide
-    # sweep semaphore instead of one another test lazily sized
-    reset_global_slots()
     set_snapshot_store(MemorySnapshotStore())
     set_lease_mirror(MemoryLeaseMirror())
     install_persistent_registry()  # get() now hydrates from the (empty) DB
@@ -65,7 +57,6 @@ def _fresh_db() -> Iterator[None]:
     finally:
         db.drop_all()
         reset_session()
-        reset_global_slots()
         set_snapshot_store(None)
         set_lease_mirror(None)
         set_identity_provider(None)

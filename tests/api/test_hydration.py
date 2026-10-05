@@ -44,6 +44,20 @@ def _env():
     set_snapshot_store(None)
 
 
+def _persist_baseline(project_id: str, session: Session) -> None:
+    """Make the session's model the project's durable baseline at its rev: one
+    empty-ops commit row plus a snapshot."""
+    rev = session.model_rev
+    with db.db_session() as s:
+        content.clear_history(s, project_id)
+        content.append_commit(
+            s, project_id, rev=rev, commit_id="baseline", author_id=None,
+            ops=[], inverse_ops=[], id_map={},
+        )
+        content.set_model_rev(s, project_id, rev)
+    hydration.write_snapshot(project_id, session, rev)
+
+
 def _seed_baseline() -> Session:
     """Build an in-memory session with the metamodel + a tiny model, persist it."""
     from data_rover.core.model.model import Model
@@ -54,7 +68,7 @@ def _seed_baseline() -> Session:
     with db.db_session() as s:
         mmrow = content.create_metamodel(s, name="smart-city", version=1, blob=MM_YAML)
         content.upsert_model_row(s, "p1", metamodel_id=mmrow.id)
-    hydration.persist_baseline("p1", sess, author_id=None)
+    _persist_baseline("p1", sess)
     return sess
 
 
@@ -239,26 +253,6 @@ def test_hydrate_replay_ignores_id_hint_in_restore_mode() -> None:
     assert "e1" in h.model.elements and "ignored" not in h.model.elements
 
 
-def test_hydrate_builds_the_search_index() -> None:
-    """Hydration rebuilds from a snapshot (search index reset) and must kick
-    the builder; under the conftest's sync pin the index is complete by the
-    time the session is returned."""
-    from data_rover.core.model.element import Element
-
-    sess = _seed_baseline()
-    assert sess.model is not None
-    sess.model.elements["x1"] = Element(
-        id="x1", type_name=_first_concrete_element_type(sess), properties={"name": "turbine"}
-    )
-    sess.model.indexes.rebuild()
-    hydration.persist_baseline("p1", sess, author_id=None)
-    h = hydration.hydrate_session("p1")
-    assert h.model is not None
-    assert h.search_index_build is not None and h.search_index_build.running is False
-    assert h.model.indexes.search_ready is True
-    assert h.model.indexes.search_candidates("turbine") == {"x1"}
-
-
 def test_snapshot_blob_is_a_gzipped_v2_text_under_the_gz_key() -> None:
     _seed_baseline()
     key = snapshot_key("p1", 0)
@@ -286,7 +280,7 @@ def test_persist_then_hydrate_roundtrip_nonempty_model() -> None:
             id=f"x{i}", type_name=et, properties={"name": f"türbine {i}", "n": i}
         )
     sess.model.indexes.rebuild()
-    hydration.persist_baseline("p1", sess, author_id=None)
+    _persist_baseline("p1", sess)
     h = hydration.hydrate_session("p1")
     assert h.model is not None
     assert sorted(h.model.elements) == ["x0", "x1", "x2"]
@@ -313,7 +307,6 @@ def test_hydrate_loads_a_legacy_plain_json_snapshot_row() -> None:
     h = hydration.hydrate_session("p1")
     assert h.model is not None
     assert h.model.elements["old1"].properties == {"name": "v"}
-    assert h.model.indexes.search_ready is True  # sync pin: index built after load
 
 
 def test_reconstruct_model_at_reads_the_compressed_snapshot() -> None:
@@ -324,7 +317,7 @@ def test_reconstruct_model_at_reads_the_compressed_snapshot() -> None:
     et = _first_concrete_element_type(sess)
     sess.model.elements["base"] = Element(id="base", type_name=et, properties={})
     sess.model.indexes.rebuild()
-    hydration.persist_baseline("p1", sess, author_id=None)
+    _persist_baseline("p1", sess)
     create = {"kind": "create_element", "temp_id": "e1", "type_name": et, "properties": {}}
     with db.db_session() as s:
         content.append_commit(
@@ -336,4 +329,3 @@ def test_reconstruct_model_at_reads_the_compressed_snapshot() -> None:
     at1 = hydration.reconstruct_model_at("p1", 1)
     assert at0 is not None and sorted(at0.elements) == ["base"]
     assert at1 is not None and sorted(at1.elements) == ["base", "e1"]
-    assert at1.indexes.search_ready is False  # transient model: no search index

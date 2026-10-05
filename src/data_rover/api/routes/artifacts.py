@@ -19,44 +19,23 @@ Concurrency is TWO-layered:
   `LockTable.peer_leases`).
 
 Payloads are validated per kind on write via the `artifact_kinds` registry.
-
-A `validation_rules` write here — PUT and DELETE alike — deliberately leaves
-`session.compiled_rules` alone, so it takes effect only once the session is
-evicted and rehydrated. `POST /commits` is the path that keeps rules live,
-and it does TWO things together: it recompiles, and it re-splices the issue
-store over the applies-to population of the old and new rule sets. Doing only
-the first here would be WORSE than doing neither — the compiled rules would
-then report against a store still holding issues minted by the rules they
-replaced, and nothing in a read path can tell the two apart. A DELETE leaves
-one more stale trace: `rules_status.skipped[].artifact_id` keeps naming the
-row until the rehydrate.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Annotated, Any
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session as DbSession
-
-from data_rover.core.navigation.evaluate import evaluate
-from data_rover.core.navigation.resolve import (
-    NavigationResolveError,
-    navigation_has_script,
-    resolve_refs,
-)
-from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
-from data_rover.core.script.runner import ScriptRunner
-from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
 
 from .. import content
 from ..artifact_kinds import get_spec
 from ..artifact_ops import artifact_header
 from ..db import get_db
 from ..db_models import ArtifactKind, ArtifactRow, User
-from ..deps import Session, get_request_session, require_model
+from ..deps import Session, get_request_session
 from ..feed import artifact_event
 from ..identity import get_current_user
 from ..locking import artifact_resource
@@ -67,20 +46,7 @@ from ..schemas import (
     ArtifactPayloadListOut,
     ArtifactPayloadOut,
     ArtifactUpdateIn,
-    ChainPageOut,
-    ChainValueOut,
-    EvaluateNavigationIn,
-    ScriptWarningOut,
 )
-from ..script_eval import (
-    close_script_context,
-    open_script_context,
-    refuse_scripts,
-    scripts_engine_only,
-)
-from ..script_runner import get_runner
-from ..settings import Settings, get_settings
-from .read import _tree_item  # shared lite projection
 from .rules import parse_result
 
 router = APIRouter()
@@ -288,98 +254,3 @@ def delete_artifact(
     db.commit()
     session.hub.broadcast(artifact_event("deleted", header))
     return Response(status_code=204)
-
-
-@router.post("/navigations/evaluate")
-def evaluate_navigation(
-    payload: EvaluateNavigationIn,
-    project_id: str,
-    session: Session = Depends(get_request_session),
-    db: DbSession = Depends(get_db),
-    runner: ScriptRunner | None = Depends(get_runner),
-    settings: Settings = Depends(get_settings),
-    engine_only: Annotated[bool, Depends(scripts_engine_only)] = False,
-) -> ChainPageOut:
-    """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
-    Stateless offset paging: the evaluator's deterministic chain order makes
-    re-evaluating per page sound. No write_mutex — same benign-race stance as
-    routes/read.py."""
-    metamodel, model = require_model(session)
-
-    def _fetch(artifact_id: str) -> NavigationDefinition:
-        row = content.get_artifact(db, artifact_id)
-        if (
-            row is None
-            or row.project_id != project_id
-            or row.kind is not ArtifactKind.navigation
-        ):
-            raise LookupError(artifact_id)
-        return NAVIGATION_ADAPTER.validate_python(row.payload)
-
-    def _fetch_snippet(artifact_id: str) -> SnippetDefinition:
-        row = content.get_artifact(db, artifact_id)
-        if (
-            row is None
-            or row.project_id != project_id
-            or row.kind is not ArtifactKind.code_snippet
-        ):
-            raise LookupError(artifact_id)
-        return SNIPPET_ADAPTER.validate_python(row.payload)
-
-    try:
-        if payload.artifact_id is not None:
-            defn = _fetch(payload.artifact_id)
-            defn = resolve_refs(
-                defn,
-                _fetch,
-                frozenset({payload.artifact_id}),
-                snippet_fetch=_fetch_snippet,
-            )
-        else:
-            assert payload.definition is not None  # schema: exactly one
-            defn = resolve_refs(
-                payload.definition, _fetch, snippet_fetch=_fetch_snippet
-            )
-        refuse_scripts(engine_only, navigation_has_script(defn))
-        row_elements = (
-            [payload.row_element_id] if payload.row_element_id is not None else None
-        )
-        script_ctx, acquired = open_script_context(
-            runner,
-            model,
-            settings,
-            needs_script=navigation_has_script(defn),
-            cell_cache=session.script_cell_cache,
-            rev=session.model_rev,
-        )
-        try:
-            result = evaluate(
-                metamodel, model, defn, row_elements=row_elements, script=script_ctx
-            )
-        finally:
-            close_script_context(script_ctx, acquired)
-    except LookupError as exc:
-        raise HTTPException(
-            status_code=422, detail=f"unknown navigation artifact {exc}"
-        ) from exc
-    except NavigationResolveError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    window = result.chains[payload.offset : payload.offset + payload.limit]
-    return ChainPageOut(
-        step_types=result.step_types,
-        chains=[
-            [
-                _tree_item(model, node)
-                if isinstance(node, str)
-                else ChainValueOut(value=node.value)
-                for node in chain
-            ]
-            for chain in window
-        ],
-        total=len(result.chains),
-        truncated=result.truncated,
-        warnings=[ScriptWarningOut.from_core(w) for w in result.warnings],
-    )

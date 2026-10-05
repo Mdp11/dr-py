@@ -10,9 +10,6 @@ from .criteria import (
     OrphanCriterion,
     PropertyCriterion,
     RelationCountCriterion,
-    match_element,
-    match_relationship,
-    name_prop,
 )
 
 __all__ = [
@@ -25,7 +22,4 @@ __all__ = [
     "OrphanCriterion",
     "PropertyCriterion",
     "RelationCountCriterion",
-    "match_element",
-    "match_relationship",
-    "name_prop",
 ]

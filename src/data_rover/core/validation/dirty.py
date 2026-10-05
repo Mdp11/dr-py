@@ -3,10 +3,7 @@
 A single model mutation can only change the validation verdict of a bounded
 set of entities; everything else is untouched. This module computes that set
 — the "dirty set" — for every mutation kind, so callers can re-validate
-``Scope(dirty)`` instead of the whole model and splice the scoped issues into
-a :class:`~data_rover.core.validation.state.ValidationState`.
-
-Two entry points:
+``Scope(dirty)`` instead of the whole model.
 
 * :class:`DirtyCollector` — hook-style API for live mutations through the
   Model mutation boundary (also the ops endpoint). Prefer the
@@ -31,22 +28,15 @@ Two entry points:
                              ``after_element_delete``)
   =========================  =========================================  ========================
 
-  The raw hooks stay public (the CR diff path and callers that mutate
+  The raw hooks stay public (callers that mutate
   through other means use them): call the ``before_*`` hook immediately
   BEFORE the mutation (it captures pre-mutation contributions such as the
   old uniqueness-group members) and the ``after_*`` hook immediately AFTER.
   Hooks only ever ADD ids and keep no pairing state, so they nest and
   interleave freely; one collector can span a whole operation batch.
 
-* :func:`change_request_dirty_ids` — post-hoc diff for the CR-apply path:
-  ``apply_change_request`` is pure (base untouched, result freshly indexed),
-  so old-state contributions are read from the base model's indexes and
-  new-state contributions from the result's. No hooks around individual ops
-  are needed.
-
 The dirty set may legitimately contain ids of deleted entities: the
-validation pipeline silently skips ids that resolve to nothing, while
-``ValidationState.replace`` uses them to drop the deleted entities' issues.
+validation pipeline silently skips ids that resolve to nothing.
 Sets pulled from the indexes are sorted before insertion so the collected
 order — and therefore scoped-validation issue order — is deterministic.
 
@@ -78,7 +68,6 @@ from ..model.relationship import Relationship
 from .scope import Scope
 
 if TYPE_CHECKING:
-    from ..model.change_request import ChangeRequest
     from ..model.element import Element
     from ..model.model import Model
 
@@ -345,90 +334,3 @@ class DirtyCollector:
         keyed = self.before_element_delete(model, element_id)
         model.delete_element(element_id)
         self.after_element_delete(model, keyed)
-
-
-# ---------------------------------------------------------------------------
-# Change-request path: post-hoc diff between base and result
-# ---------------------------------------------------------------------------
-
-
-def change_request_dirty_ids(
-    base: Model, result: Model, cr: ChangeRequest
-) -> list[str]:
-    """Union of the dirty sets of every operation in *cr*.
-
-    ``apply_change_request(base, cr) == result`` is assumed: *base* carries
-    the pre-CR indexes (old uniqueness groups, old adjacency, referencers)
-    and *result* the post-CR ones, so no per-op hooks are required.
-
-    Note that CR element deletes do NOT cascade (the CR must list every
-    deletion explicitly, and dangling relationships are rejected by the API
-    gate), so unlike ``DirtyCollector.before_element_delete`` no closure walk
-    happens here — each listed op contributes its own dirty set.
-    """
-    d = DirtyCollector()
-    is_containment = base.metamodel.is_containment
-
-    for e in cr.elements_added:
-        d.add(e.id)
-        d.add_uniqueness_group_of(result, e.id)
-        # entities whose reference to this id was dangling in the base
-        d.update(sorted(base.indexes.referencers_of(e.id)))
-
-    for me in cr.elements_modified:
-        d.add(me.id)
-        d.add_uniqueness_group_of(base, me.id)
-        d.add_uniqueness_group_of(result, me.id)
-        current = base.elements.get(me.id)
-        if current is not None and current.type_name != me.after.type_name:
-            # a type change can flip incident relationships' endpoint-typing
-            # verdicts and referencers' reference-type verdicts
-            indexes = base.indexes
-            d.update(sorted(indexes.outgoing_ids(me.id) | indexes.incoming_ids(me.id)))
-            d.update(sorted(indexes.referencers_of(me.id)))
-
-    for e in cr.elements_deleted:
-        d.add(e.id)
-        indexes = base.indexes
-        for rid in sorted(indexes.outgoing_ids(e.id)):
-            d.add(rid, base.relationships[rid].target_id)
-        for rid in sorted(indexes.incoming_ids(e.id)):
-            d.add(rid, base.relationships[rid].source_id)
-        d.update(sorted(indexes.referencers_of(e.id)))
-        d.add_uniqueness_group_of(base, e.id)
-
-    for r in cr.relationships_added:
-        d.add(r.id, r.source_id, r.target_id)
-        if is_containment(r.type_name):
-            d.add_uniqueness_group_of(base, r.target_id)
-            d.add_uniqueness_group_of(result, r.target_id)
-
-    for mr in cr.relationships_modified:
-        d.add(mr.id)
-        before = base.relationships.get(mr.id)
-        after = result.relationships.get(mr.id)
-        # endpoints on both sides: end-multiplicity counts move on all four
-        for rel in (before, after):
-            if rel is not None:
-                d.add(rel.source_id, rel.target_id)
-        # containment on either side: targets' old AND new uniqueness groups
-        # (re-targeting/re-typing re-parents elements)
-        if any(
-            rel is not None and is_containment(rel.type_name) for rel in (before, after)
-        ):
-            targets = dict.fromkeys(
-                rel.target_id for rel in (before, after) if rel is not None
-            )
-            for t in targets:
-                d.add_uniqueness_group_of(base, t)
-                d.add_uniqueness_group_of(result, t)
-
-    for r in cr.relationships_deleted:
-        before = base.relationships.get(r.id)
-        rel = before if before is not None else r
-        d.add(r.id, rel.source_id, rel.target_id)
-        if is_containment(rel.type_name):
-            d.add_uniqueness_group_of(base, rel.target_id)
-            d.add_uniqueness_group_of(result, rel.target_id)
-
-    return list(d.ids)

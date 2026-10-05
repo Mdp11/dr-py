@@ -123,7 +123,7 @@ def test_apply_ops_rolls_back_in_memory_on_persist_failure(
     c = _client()
     t = _concrete_type(c)
     base = head().rev
-    elem_count_before = c.get(papi("/model/elements"), headers=AUTH_HEADERS).json()["total"]
+    elem_count_before = len(head().elements)
 
     def _boom(*_a: object, **_kw: object) -> None:
         raise RuntimeError("simulated DB failure")
@@ -141,7 +141,7 @@ def test_apply_ops_rolls_back_in_memory_on_persist_failure(
 
     # the element must NOT have been created (model has original count)
     monkeypatch.undo()  # restore append_commit so next request works
-    after_total = c.get(papi("/model/elements"), headers=AUTH_HEADERS).json()["total"]
+    after_total = len(head().elements)
     assert after_total == elem_count_before, "element was not rolled back"
 
     # no journal row must have landed

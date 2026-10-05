@@ -1,7 +1,7 @@
 """Structural metamodel diff.
 
-One pure differ, two API surfaces: ``POST /metamodel/diff`` (pre-rebind
-review) and the commit-diff renderer (post-hoc history of rebind commits).
+One pure differ, two API surfaces: ``POST /metamodel/structural-diff``
+(pre-rebind review) and the commit-diff renderer (post-hoc history of rebind commits).
 Lives in core because it compares two core ``Metamodel`` objects and core has
 no api imports.
 

@@ -17,11 +17,10 @@ from pathlib import Path
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.loader import load_metamodel_str
-from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import Folder, View
 
-from . import content, rules, tenancy
+from . import content, tenancy
 from .artifact_bundle import ArtifactBundle, BundleArtifact, SkippedEntry
 from .artifact_kinds import get_spec, rewrite_refs
 from .db import db_session, init_engine
@@ -29,10 +28,8 @@ from .db_models import ArtifactKind, Membership, Project, Role
 from .hydration import write_snapshot
 from .routes._snapshot import build_model_from_dicts
 from .serialize import parse_model_json
-from .search_index_build import start_search_index_build
 from .session import Session, get_registry
 from .settings import get_settings
-from .validation_sweep import start_validation_sweep
 
 
 def _remap_view_artifact_refs(view: View, id_map: Mapping[str, str]) -> None:
@@ -68,8 +65,8 @@ def _landable_artifacts(
       — registered kind, adapter-valid payload, server-derived metadata rerun
       (``entry_points`` is never client-trusted) — because whatever lands here
       becomes a persistent row that read routes deserialize on every request.
-      An invalid one is not merely ugly: ``routes/tables.py`` re-validates on
-      every read, so it would 500 that table forever. Filtering matches
+      An invalid one is not merely ugly: the artifact routes re-validate on
+      every read, so it would 500 that artifact forever. Filtering matches
       ``derive_plan``, the third import-from-outside path, so all three accept
       the same bundle; only clone is the deliberate exception, and only because
       its input never left the database.
@@ -231,11 +228,9 @@ def install_model(
     model = build_model_from_dicts(metamodel, parse_model_json(model_json))
     session = get_registry().get(project_id)
     session.set_metamodel(metamodel, announce=False)
-    session.compiled_rules = rules.load_compiled_rules(db, project_id, metamodel)
-    # set_model bumps the rev, so start one below the baseline; its cache
-    # invalidation then stamps rev 0
+    # set_model bumps the rev, so start one below the baseline
     session.model_rev = -1
-    session.set_model(model, validation=ValidationState(), announce=False)
+    session.set_model(model, announce=False)
     mm_row = content.create_metamodel(db, name="", version=1, blob=metamodel_yaml)
     content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
     content.clear_history(db, project_id)
@@ -253,8 +248,6 @@ def install_model(
     db.commit()
     write_snapshot(project_id, session, 0)
     session.announce_reset()
-    start_validation_sweep(session)
-    start_search_index_build(session)
 
 
 def main(argv: list[str] | None = None) -> int:

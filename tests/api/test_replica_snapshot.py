@@ -174,9 +174,10 @@ def _rebind(client: TestClient) -> None:
     assert res.status_code == 200, res.text
 
 
-def _legacy_create(client: TestClient) -> None:
-    res = client.post(papi("/model/elements"), json={"type": "Node", "properties": {}})
-    assert res.status_code == 201, res.text
+def _unjournaled_bump(client: TestClient) -> None:
+    """A rev that moves with no journal row."""
+    session = get_session()
+    session.set_model(session.model, announce=False)
 
 
 # --- ways no stored snapshot qualifies ----------------------------------------
@@ -213,9 +214,9 @@ def _past_the_revision_cap(client: TestClient, mp: pytest.MonkeyPatch) -> None:
     _ops(client, [_node("B")])
 
 
-def _touch_model_hole(client: TestClient, mp: pytest.MonkeyPatch) -> None:
+def _unjournaled_bump_hole(client: TestClient, mp: pytest.MonkeyPatch) -> None:
     _ops(client, [_node("A")])
-    _legacy_create(client)
+    _unjournaled_bump(client)
 
 
 _NONE_QUALIFIES: dict[str, Callable[[TestClient, pytest.MonkeyPatch], None]] = {
@@ -224,7 +225,7 @@ _NONE_QUALIFIES: dict[str, Callable[[TestClient, pytest.MonkeyPatch], None]] = {
     "over-the-entity-states-cap": _over_the_cap,
     "rebind-without-its-snapshot": _rebind_without_its_snapshot,
     "past-the-revision-cap": _past_the_revision_cap,
-    "touch-model-hole": _touch_model_hole,
+    "unjournaled-bump": _unjournaled_bump_hole,
 }
 
 
@@ -302,7 +303,7 @@ def test_the_descriptor_and_the_tail_agree(
 def test_a_second_opener_writes_nothing(
     client: TestClient, store: _CountingStore
 ) -> None:
-    _touch_model_hole(client, pytest.MonkeyPatch())
+    _unjournaled_bump_hole(client, pytest.MonkeyPatch())
     puts = store.puts
     first, second = _descriptor(client), _descriptor(client)
     assert first == second
@@ -310,7 +311,7 @@ def test_a_second_opener_writes_nothing(
 
 
 def test_the_head_write_happens_under_the_write_mutex(client: TestClient) -> None:
-    _touch_model_hole(client, pytest.MonkeyPatch())
+    _unjournaled_bump_hole(client, pytest.MonkeyPatch())
     session = get_session()
     probing = _ProbingStore(session.write_mutex)
     set_snapshot_store(probing)
@@ -357,7 +358,7 @@ def _mutex_is_free() -> bool:
 def test_a_failed_head_write_is_a_503(
     client: TestClient, store: _CountingStore
 ) -> None:
-    _touch_model_hole(client, pytest.MonkeyPatch())
+    _unjournaled_bump_hole(client, pytest.MonkeyPatch())
     store.fail = True
     res = client.get(papi("/replica/snapshot"))
     assert res.status_code == 503
@@ -385,7 +386,7 @@ def _seed_viewer() -> None:
 
 def test_a_viewer_may_open(client: TestClient, store: _CountingStore) -> None:
     _seed_viewer()
-    _touch_model_hole(client, pytest.MonkeyPatch())
+    _unjournaled_bump_hole(client, pytest.MonkeyPatch())
     puts = store.puts
     desc = _descriptor(client, headers=_VIEWER)
     assert desc["rev"] == _head() and store.puts == puts + 1

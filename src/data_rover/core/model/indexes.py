@@ -14,8 +14,7 @@ maintained incrementally at the mutation boundary (``create_element``,
 loaders that populate the model dicts directly must call :meth:`IndexSet.
 rebuild` afterwards; code that writes ``entity.properties`` directly must call
 :meth:`IndexSet.on_properties_changed` (``set_property``/``delete_property``
-themselves go through :meth:`IndexSet.on_property_changed`, the
-single-property form that diffs the search index from the changed value).
+themselves do).
 The containment-roots order index
 (``roots_order`` / ``_root_key_of``) is maintained at that same boundary and
 carries the same obligations: ``rebuild()`` recomputes it from scratch, and
@@ -26,17 +25,6 @@ maintained by the create and delete hooks alone — an entity never moves within
 its dict, so property changes leave them untouched — and re-derived by
 ``rebuild()``. A create hook handed an ``order`` puts the entity back under
 the number it had (``Model.insert_element`` / ``insert_relationship``).
-The trigram search index (``search_postings`` / ``_trigrams_of``) is
-maintained at that same boundary with the same obligations; it feeds
-``search_candidates`` (the fuzzy-search candidate generator) and, like the
-reference index, is diffed on property change. It is deliberately NOT built
-by ``rebuild()`` (see that method) — ``search_ready`` says whether it covers
-every element, and ``index_search_chunk``/``build_search_index`` (re)build
-it. Ownership is per element: ``_trigrams_of`` holds an entry for every
-element whose trigrams are indexed, so an element WITHOUT one is the chunked
-build's until it reaches it, and the property hooks leave it alone while
-``search_ready`` is False.
-
 Uniqueness grouping mirrors the UniquenessValidator exactly: two elements are
 identical when they share ``type_name``, their first containment parent (or
 both are unowned), and either match on the type's effective ``key`` properties
@@ -46,13 +34,12 @@ or, when no key is declared, on all properties.
 from __future__ import annotations
 
 from collections import Counter
-from bisect import bisect_left, insort
-from collections.abc import Hashable, Iterable, Iterator, Set, Sequence
+from collections.abc import Hashable, Iterator, Set, Sequence
 from typing import TYPE_CHECKING, Any
 
 from ._sorted import Pair, SortedPairs
 from .element import Element
-from .naming import display_name, name_of
+from .naming import display_name
 from .relationship import Relationship
 from ..metamodel.schema import KeyRel, KeySpec
 
@@ -65,14 +52,6 @@ if TYPE_CHECKING:
 # each relationship multiset rendered as tuple(sorted(endpoint_ids)).
 UniqKey = tuple[str, "str | None", Hashable]
 
-#: ``search_candidates`` gives up (returns None -> the caller scans) when the
-#: SMALLEST posting set for the query is this large: intersecting and scoring
-#: ~everything costs more than the plain scan it would replace (measured 5.6x
-#: slower at 500k for a query matching every element). Fraction-of-model rule
-#: with an absolute floor so small models never trip it.
-_SEARCH_FALLBACK_FLOOR = 10_000
-_SEARCH_FALLBACK_FRACTION = 4
-
 
 def _frozen(value: Any) -> Hashable:
     """Deep-freeze a JSON-ish property value into a hashable signature."""
@@ -83,22 +62,13 @@ def _frozen(value: Any) -> Hashable:
     return value
 
 
-def _text_trigrams(text: str) -> set[str]:
-    """Lowercased trigrams of one field's text (fewer than 3 chars: none)."""
-    s = text.lower()
-    return {s[i : i + 3] for i in range(len(s) - 2)}
-
-
 class IndexSet:
     """Incrementally maintained secondary indexes for one Model.
 
     All structures are kept SPARSE — keys whose set/list/count becomes empty
-    or zero are removed — with one exception: ``_trigrams_of`` keeps an empty
-    tuple entry for an indexed element, marking it as reached (as opposed to
-    left for the chunked search build); see ``_update_trigrams``. An
-    incrementally maintained instance compares equal, structure by structure,
-    to a freshly :meth:`rebuild`-t one, except the search structures, which
-    only compare once ``search_ready`` is set (see :meth:`verify_consistent`).
+    or zero are removed. An incrementally maintained instance compares equal,
+    structure by structure, to a freshly :meth:`rebuild`-t one (see
+    :meth:`verify_consistent`).
     """
 
     def __init__(self, model: Model) -> None:
@@ -158,40 +128,6 @@ class IndexSet:
         #: ``element_order`` over ``model.relationships``, with its own counter.
         self.relationship_order: dict[str, int] = {}
         self._next_relationship_order: int = 0
-        #: lowercased trigram -> ids of elements whose searchable text
-        #: contains it. The searchable text is exactly the fields the fuzzy
-        #: element search scores (routes/read.py _search_score): the id, the
-        #: type name, and every top-level string property value. Candidate
-        #: index only: a query's true hits are always a SUBSET of the
-        #: intersection of its trigrams' postings (see search_candidates).
-        self.search_postings: dict[str, set[str]] = {}
-        #: whether ``search_postings`` covers EVERY element, i.e. whether the
-        #: candidate generator's superset guarantee holds. True on a fresh
-        #: index (an empty model's empty index is complete); False after
-        #: ``rebuild()`` until the search index is (re)built through
-        #: ``index_search_chunk`` + ``mark_search_ready``. The mutation hooks
-        #: maintain postings for every element that has a ``_trigrams_of``
-        #: entry and defer the rest to the build while this is False — that
-        #: is what lets a chunked background build interleave with live edits
-        #: without indexing anything twice.
-        self.search_ready: bool = True
-        #: bumped every time ``rebuild()`` resets the search index (i.e. every
-        #: ``not keep_search`` call). Lets a chunked background build in flight
-        #: detect that the postings it is filling were thrown away underneath
-        #: it, even though ``session.model`` and this ``IndexSet`` are unchanged.
-        self._rebuild_gen: int = 0
-        # element id -> its current merged trigram set (reverse map; needed
-        # to diff on property change and to drop postings on delete — by hook
-        # time the old text is gone — mirroring _refs_of). An entry for EVERY
-        # indexed element — an empty tuple when its text has no trigram — so
-        # absence means exactly "bulk-loaded and not yet reached by the
-        # build" (see ``_builder_owned``). Stored as a SORTED TUPLE of trigrams
-        # canonicalized through ``_canon_trigrams`` — a tuple is ~4x smaller
-        # than a frozenset, and canonicalization collapses the per-element
-        # ``s[i:i+3]`` slice copies to one string object per distinct trigram
-        # for this model's lifetime (the copies were the dominant index
-        # memory cost at 500k).
-        self._trigrams_of: dict[str, tuple[str, ...]] = {}
         # entity id -> reference-target ids currently held in its properties
         # (reverse of ref_targets; needed to diff on property changes)
         self._refs_of: dict[str, set[str]] = {}
@@ -201,13 +137,6 @@ class IndexSet:
         self._element_ref_props: dict[str, tuple[str, ...]] = {}
         self._relationship_ref_props: dict[str, tuple[str, ...]] = {}
         self._key_specs: dict[str, KeySpec | None] = {}
-        # trigram -> the SAME trigram (canonical object). Dedups the per-element
-        # s[i:i+3] slice copies (the dominant index memory cost at 500k) without
-        # sys.intern's process-lifetime retention: this table dies with the
-        # IndexSet. Grows with every trigram ever seen in THIS model (never
-        # pruned on removal — entries are 3-char strings, negligible next to
-        # the postings they canonicalize).
-        self._canon_trigrams: dict[str, str] = {}
         # relationship-type names that appear with each direction in ANY element
         # type's effective key; per-type cache, re-derived by rebuild() when a
         # metamodel swap replaces model.metamodel. None until first built. Used
@@ -260,44 +189,6 @@ class IndexSet:
         """All root ids in (display_name, id) order — lazily, O(1) per step."""
         return (eid for _, eid in self.roots_order.iter_all())
 
-    def search_candidates(self, q: str) -> Set[str] | None:
-        """Ids of elements that MAY fuzzy-match ``q`` — a guaranteed superset
-        of the true hits — or ``None`` when the index cannot answer OR cannot
-        beat a scan: the index is not built yet (``search_ready`` is False),
-        ``len(q) < 3``, or the query's rarest trigram is ubiquitous. The
-        caller falls back to a scan either way. ``q`` must already be trimmed
-        and lowercased. May return a live internal set — do NOT mutate.
-
-        Superset argument: any string containing ``q`` contains every trigram
-        of ``q``, so a matching element sits in ALL those posting sets and
-        survives the intersection. Intersection starts from the smallest set,
-        so cost is O(smallest posting); a degenerate all-common query
-        approaches the scan it replaces, never exceeds it asymptotically.
-        """
-        if not self.search_ready or len(q) < 3:
-            return None
-        postings: list[set[str]] = []
-        for i in range(len(q) - 2):
-            ids = self.search_postings.get(q[i : i + 3])
-            if not ids:
-                # a true hit would contain ALL trigrams; one absent => none
-                return frozenset()
-            postings.append(ids)
-        postings.sort(key=len)
-        if len(postings[0]) >= max(
-            _SEARCH_FALLBACK_FLOOR,
-            len(self._model.elements) // _SEARCH_FALLBACK_FRACTION,
-        ):
-            # even the rarest trigram of ``q`` matches a large fraction of the
-            # model: the scan is cheaper than intersecting + scoring it all
-            return None
-        result: Set[str] = postings[0]
-        for ids in postings[1:]:
-            result = result & ids
-            if not result:
-                break
-        return result
-
     # -- mutation hooks (called from the Model mutation boundary) ----------
 
     def on_element_created(self, element: Element, order: int | None = None) -> None:
@@ -312,7 +203,6 @@ class IndexSet:
         self._update_refs(element.id, self._element_refs(element))
         # a fresh element has no containment parent -> it is a root
         self._roots_add(element)
-        self._update_trigrams(element.id, self._element_trigrams(element))
 
     def on_element_deleted(self, element: Element) -> None:
         """Called after the element's relationships are gone and it has been
@@ -325,8 +215,6 @@ class IndexSet:
         self._remove_from_group(element.id)
         self._update_refs(element.id, set())
         self._roots_remove(element.id)
-        self._update_trigrams(element.id, frozenset())
-        self._trigrams_of.pop(element.id, None)
         self.element_order.pop(element.id, None)
 
     def on_relationship_created(
@@ -396,50 +284,21 @@ class IndexSet:
         self._rekey_key_rel_endpoints(rel)
 
     def on_properties_changed(self, entity: Element | Relationship) -> None:
-        """Re-derive property-driven indexes (references, uniqueness, roots,
-        search) for one entity from scratch. The explicit hook for code that
-        writes ``entity.properties`` directly instead of using
-        ``set_property``; see :meth:`on_property_changed` for the diffing
-        form the mutation boundary uses."""
+        """Re-derive property-driven indexes (references, uniqueness, roots)
+        for one entity from scratch. The hook the mutation boundary calls
+        after a property write, and for code that writes
+        ``entity.properties`` directly."""
         if isinstance(entity, Element):
             self._update_refs(entity.id, self._element_refs(entity))
             self._rekey(entity)
             self._roots_reposition(entity)
-            if not self._builder_owned(entity.id):
-                self._update_trigrams(entity.id, self._element_trigrams(entity))
-        else:
-            self._update_refs(entity.id, self._relationship_refs(entity))
-
-    def on_property_changed(
-        self, entity: Element | Relationship, prop: str, old_value: Any
-    ) -> None:
-        """Same post-state as :meth:`on_properties_changed`, after ONE
-        property changed from ``old_value`` (``None`` = absent) to its current
-        value — the ``set_property``/``delete_property`` hook. The search
-        index is diffed from the changed value's text where that is exact
-        (``_update_trigrams_for``) instead of re-deriving the element."""
-        if isinstance(entity, Element):
-            self._update_refs(entity.id, self._element_refs(entity))
-            self._rekey(entity)
-            self._roots_reposition(entity)
-            self._update_trigrams_for(entity, prop, old_value)
         else:
             self._update_refs(entity.id, self._relationship_refs(entity))
 
     # -- bulk load ----------------------------------------------------------
 
-    def rebuild(self, *, keep_search: bool = False) -> None:
+    def rebuild(self) -> None:
         """Recompute every index from the model dicts (bulk-load path).
-
-        The search index is NOT built here: it is the dominant cost of a
-        bulk load, and most callers never search (rebind views, previews,
-        change-request copies, history reconstructions). By default it is
-        reset and ``search_ready`` drops to False, so ``search_candidates``
-        falls back to the scan until ``build_search_index`` or the chunked
-        builder restores it. ``keep_search=True`` leaves the search
-        structures untouched — legal only when the entity dicts are
-        unchanged since the index was last consistent (the metamodel-rebind
-        case: the indexed text does not depend on the metamodel).
 
         The per-type metamodel caches are always cleared: a rebind swaps
         ``model.metamodel`` and rebuilds this same instance, so containment
@@ -465,12 +324,6 @@ class IndexSet:
         self._is_containment.clear()
         self._out_key_rel_types = None
         self._in_key_rel_types = None
-        if not keep_search:
-            self.search_postings.clear()
-            self._trigrams_of.clear()
-            self._canon_trigrams.clear()
-            self.search_ready = False
-            self._rebuild_gen += 1
 
         # relationships first so containment parents are known before grouping
         rel_order: dict[str, int] = {}
@@ -501,41 +354,6 @@ class IndexSet:
         # bulk-construct in one O(n log n) pass instead of n incremental adds
         self.roots_order = SortedPairs(self._root_key_of.values())
 
-    # -- search index build --------------------------------------------------
-
-    def index_search_chunk(self, element_ids: Iterable[str]) -> None:
-        """Add postings for the given elements that are not indexed yet.
-
-        Skips ids no longer in the model and ids already present in
-        ``_trigrams_of`` (an element the mutation hooks own: created after
-        the caller snapshotted its id list, or already reached), so a
-        chunked build that interleaves with live edits converges on exactly
-        what a full build produces.
-        """
-        elements = self._model.elements
-        trigrams_of = self._trigrams_of
-        postings = self.search_postings
-        for eid in element_ids:
-            if eid in trigrams_of:
-                continue
-            element = elements.get(eid)
-            if element is None:
-                continue
-            trigs = self._element_trigrams(element)
-            trigrams_of[eid] = tuple(sorted(trigs))  # () marks it indexed too
-            for t in trigs:
-                postings.setdefault(t, set()).add(eid)
-
-    def mark_search_ready(self) -> None:
-        """Declare the search index complete (``search_candidates`` starts
-        answering). Call only once every element has been indexed."""
-        self.search_ready = True
-
-    def build_search_index(self) -> None:
-        """Synchronous full build: index every element, then mark ready."""
-        self.index_search_chunk(self._model.elements)
-        self.mark_search_ready()
-
     # -- debugging ----------------------------------------------------------
 
     def verify_consistent(self) -> None:
@@ -546,9 +364,6 @@ class IndexSet:
         """
         fresh = IndexSet(self._model)
         fresh.rebuild()
-        if self.search_ready:
-            fresh.build_search_index()
-        search_names = ("search_postings", "_trigrams_of") if self.search_ready else ()
 
         def _norm(name: str, obj: object) -> object:
             # Counter.__eq__ ignores zero-count entries, so compare as plain
@@ -576,7 +391,6 @@ class IndexSet:
                 "_root_key_of",
                 "roots_order",
                 "_refs_of",
-                *search_names,
             )
             if _norm(name, getattr(self, name)) != _norm(name, getattr(fresh, name))
         ]
@@ -815,125 +629,6 @@ class IndexSet:
             self._refs_of[entity_id] = new_refs
         else:
             self._refs_of.pop(entity_id, None)
-
-    # -- internals: search trigrams -----------------------------------------
-
-    def _builder_owned(self, element_id: str) -> bool:
-        """True while the chunked search build still owns this element: the
-        bulk load left it unindexed and the index is not ready yet. The hooks
-        leave its trigrams alone — ``index_search_chunk`` indexes its CURRENT
-        text when it reaches it — so nothing is derived twice."""
-        return not self.search_ready and element_id not in self._trigrams_of
-
-    def _element_trigrams(self, element: Element) -> frozenset[str]:
-        """Merged lowercased trigram set of the element's searchable text —
-        exactly the fields the fuzzy search scores: id, type name, every
-        top-level string property value, and the resolved ``name_of`` name
-        (which can live inside a LIST value the string sweep misses — without
-        it a list-named element would be scoreable but never a candidate,
-        breaking the superset guarantee). Fields shorter than 3 chars
-        contribute nothing (they cannot contain a >=3-char query), and
-        merging across fields is sound because candidates are score-verified
-        by the caller (cross-field false positives are filtered there)."""
-        trigs: set[str] = set()
-        texts = [element.id, element.type_name]
-        texts.extend(v for v in element.properties.values() if isinstance(v, str))
-        name = name_of(element)
-        if name is not None:
-            texts.append(name)  # dedup via the set; only list-valued names are new
-        for text in texts:
-            s = text.lower()
-            for i in range(len(s) - 2):
-                t = s[i : i + 3]
-                trigs.add(self._canon_trigrams.setdefault(t, t))
-        return frozenset(trigs)
-
-    def _update_trigrams(self, element_id: str, new: frozenset[str]) -> None:
-        """Diff-apply an element's trigram set (mirrors _update_refs).
-        Posting sets hold references to the id strings the model dicts own —
-        no string duplication; empty posting sets are deleted (sparse); the
-        element's entry is always written, an empty tuple included — it marks
-        the element as indexed (deletion pops it explicitly)."""
-        old = frozenset(self._trigrams_of.get(element_id) or ())
-        if new == old:
-            if element_id not in self._trigrams_of:
-                self._trigrams_of[element_id] = ()  # no text, still indexed
-            return
-        for t in old - new:
-            ids = self.search_postings.get(t)
-            if ids is not None:
-                ids.discard(element_id)
-                if not ids:
-                    del self.search_postings[t]
-        for t in new - old:
-            self.search_postings.setdefault(t, set()).add(element_id)
-        self._trigrams_of[element_id] = tuple(sorted(new))
-
-    def _update_trigrams_for(self, element: Element, prop: str, old_value: Any) -> None:
-        """Trigram diff for one changed property.
-
-        Exact only when both values are plain strings (or absent) and no
-        name-keyed property holds a list or tuple (``name_of`` then reads inside the
-        value — text a per-value diff never sees); anything else, and an
-        element without an entry, falls back to the whole-element
-        re-derivation. Additions are the new value's trigrams not already
-        present; a removal candidate (in the old value, not the new) is kept
-        when any OTHER searchable field still contains it — one substring
-        test per candidate instead of re-deriving every field. The sorted
-        tuple is patched in place (bisect) rather than re-sorted.
-        """
-        eid = element.id
-        cur = self._trigrams_of.get(eid)
-        if cur is None:
-            if not self.search_ready:
-                return  # the chunked build owns it (see _builder_owned)
-            self._update_trigrams(eid, self._element_trigrams(element))
-            return
-        new_value = element.properties.get(prop)
-        if (
-            not (old_value is None or isinstance(old_value, str))
-            or not (new_value is None or isinstance(new_value, str))
-            or any(
-                isinstance(v, (list, tuple))
-                for k, v in element.properties.items()
-                if k.lower() == "name"
-            )
-        ):
-            self._update_trigrams(eid, self._element_trigrams(element))
-            return
-        old_t = _text_trigrams(old_value) if old_value else set()
-        new_t = _text_trigrams(new_value) if new_value else set()
-        if old_t == new_t:
-            return
-        removed = old_t - new_t
-        if removed:
-            others = [eid.lower(), element.type_name.lower()]
-            others.extend(
-                v.lower()
-                for k, v in element.properties.items()
-                if k != prop and isinstance(v, str)
-            )
-            removed = {t for t in removed if not any(t in s for s in others)}
-        added = new_t.difference(cur)
-        if not removed and not added:
-            return
-        postings = self.search_postings
-        canon = self._canon_trigrams
-        trigs = list(cur)
-        for t in removed:
-            ids = postings.get(t)
-            if ids is not None:
-                ids.discard(eid)
-                if not ids:
-                    del postings[t]
-            i = bisect_left(trigs, t)
-            if i < len(trigs) and trigs[i] == t:
-                del trigs[i]
-        for t in added:
-            t = canon.setdefault(t, t)
-            postings.setdefault(t, set()).add(eid)
-            insort(trigs, t)
-        self._trigrams_of[eid] = tuple(trigs)
 
     # -- internals: counters --------------------------------------------------
 

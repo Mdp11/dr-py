@@ -432,9 +432,10 @@ def test_a_tail_is_incomplete_across_a_rebind(client: TestClient) -> None:
     _assert_complete(client, rebind)
 
 
-def _legacy_create(client: TestClient) -> None:
-    res = client.post(papi("/model/elements"), json={"type": "Node", "properties": {}})
-    assert res.status_code == 201, res.text
+def _unjournaled_bump(client: TestClient) -> None:
+    """A rev that moves with no journal row."""
+    session = get_session()
+    session.set_model(session.model, announce=False)
 
 
 def test_a_tail_is_incomplete_across_a_bump_with_no_row_at_head(
@@ -442,7 +443,7 @@ def test_a_tail_is_incomplete_across_a_bump_with_no_row_at_head(
 ) -> None:
     r0 = _head()
     _ops(client, [_node("tmp_a", "A")])
-    _legacy_create(client)
+    _unjournaled_bump(client)
     # nothing landed since: only the session's head reveals the hole
     _assert_incomplete(client, r0)
 
@@ -452,7 +453,7 @@ def test_a_tail_is_incomplete_across_a_bump_with_no_row_in_the_middle(
 ) -> None:
     r0 = _head()
     _ops(client, [_node("tmp_a", "A")])
-    _legacy_create(client)
+    _unjournaled_bump(client)
     hole = _head()
     _ops(client, [_node("tmp_b", "B")])
     _assert_incomplete(client, r0)

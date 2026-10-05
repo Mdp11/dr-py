@@ -1,11 +1,6 @@
 """Rule-set compilation: parse, drift-check, and build the dispatch map.
 
-Compilation is pure and cheap; the output is treated as immutable and cached
-on the API Session (immutable-swap — never mutate a published CompiledRules).
-The `eval_errors` counter is the one piece that moves after publication, and
-it moves by whole-object swap under `_lock`: readers therefore always see a
-Counter no one is mutating, so an unlocked `dict(compiled.eval_errors)`
-snapshot cannot tear or raise.
+Compilation is pure and cheap; the output is treated as immutable.
 
 Drift stance: a rule referencing a schema name the metamodel doesn't have is
 skipped WHOLE with a diagnostic — never evaluated half-blind, never an error.
@@ -13,13 +8,10 @@ skipped WHOLE with a diagnostic — never evaluated half-blind, never an error.
 
 from __future__ import annotations
 
-import threading
-from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from ...metamodel.schema import Metamodel
-from .reach import ReversePath, derive_paths
 from .schema import (
     AllCond,
     AnyCond,
@@ -55,7 +47,6 @@ class CompiledRule:
     rule: Rule
     applies_types: frozenset[str]
     check: str
-    paths: tuple[ReversePath, ...] = ()
 
 
 @dataclass
@@ -64,41 +55,10 @@ class CompiledRules:
     rules: tuple[CompiledRule, ...] = ()
     rules_by_type: dict[str, tuple[CompiledRule, ...]] = field(default_factory=dict)
     skipped: tuple[RuleDiagnostic, ...] = ()
-    #: per-rule unexpected-evaluation-failure counts (check name -> count).
-    #: Replaced wholesale, never incremented in place — read it directly for a
-    #: snapshot, and go through the methods below to change it.
-    eval_errors: Counter[str] = field(default_factory=Counter)
-    _lock: threading.Lock = field(
-        default_factory=threading.Lock, init=False, repr=False, compare=False
-    )
 
     @property
     def total(self) -> int:
         return len(self.rules)
-
-    def merge_eval_errors(self, counts: Mapping[str, int]) -> None:
-        """Fold one run's per-rule failure counts in (validators call this
-        once at the end of a run, not per element)."""
-        if not counts:
-            return
-        with self._lock:
-            merged = self.eval_errors.copy()
-            merged.update(counts)
-            self.eval_errors = merged
-
-    def eval_error_counts(self) -> dict[str, int]:
-        with self._lock:
-            return dict(self.eval_errors)
-
-    def reset_eval_errors(self) -> None:
-        """Zero the counter so it reports current state, not lifetime totals
-        (a full sweep re-derives every count from scratch)."""
-        with self._lock:
-            self.eval_errors = Counter()
-
-
-def empty_compiled() -> CompiledRules:
-    return CompiledRules()
 
 
 def _drift_reason(rule: Rule, mm: Metamodel) -> str | None:
@@ -168,7 +128,6 @@ def compile_rule_sets(
                     rule=rule,
                     applies_types=metamodel.element_descendants(rule.applies_to),
                     check=f"rule:{rule.name}",
-                    paths=tuple(derive_paths(rule, metamodel)),
                 )
             )
     by_type: dict[str, list[CompiledRule]] = {}
@@ -181,12 +140,3 @@ def compile_rule_sets(
         rules_by_type={t: tuple(rs) for t, rs in by_type.items()},
         skipped=tuple(skipped),
     )
-
-
-def applies_type_names(*compiled: CompiledRules) -> set[str]:
-    """Union of every compiled rule's applies-to closure (rule-edit rescope)."""
-    out: set[str] = set()
-    for c in compiled:
-        for cr in c.rules:
-            out |= cr.applies_types
-    return out

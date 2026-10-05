@@ -1,11 +1,8 @@
-"""POST /model/ops and POST /model/undo — the delta mutation protocol.
+"""The op applier and the journal append behind ``POST /commits``.
 
 The session model is the source of truth and clients mutate it by sending
-small op batches (mirroring the frontend op union in
-``frontend/src/lib/state/ops.ts``) instead of pushing whole-model snapshots.
-Each accepted batch returns a delta (changed/deleted entities + validation-
-issue delta), bumps ``session.model_rev`` once, and is appended to
-``session.op_log`` so /model/undo can walk history backwards.
+small op batches (the op union in ``schemas.py``) instead of pushing
+whole-model snapshots.
 
 Atomicity without deep copies
 -----------------------------
@@ -15,114 +12,35 @@ of every entity is noted before its first touch. If an op fails mid-batch,
 ``_rollback`` puts each touched entity back from that before-image —
 properties, ``rev`` and place in insertion order — and the request fails with
 422. Every other path that applies a batch and takes it back (a preview, a
-staged validation, a commit refused or not persisted) rolls back the same way,
-so none of them leaves a trace. This trades a small rollback path for O(batch)
-request cost instead of O(model).
+commit refused or not persisted) rolls back the same way, so none of them
+leaves a trace. This trades a small rollback path for O(batch) request cost
+instead of O(model).
 
-Validation seeding
-------------------
-Incremental validation needs a full-run baseline (``session.validation``).
-If none exists yet, one full validation of the PRE-batch model is run to
-seed it; a session whose load endpoint already seeded the store at load
-time pays nothing here.
-
-Undo and rev counters
----------------------
-Undo pops the last batch and applies its ``inverse_ops`` through the same
-machinery (in restore mode, so original entity ids are reinstated exactly
-via ``Model.restore_element`` / ``restore_relationship``). The undo itself
-is popped from the in-memory op_log (so repeated undos walk back through
-in-memory history), but with durable persistence each undo ALSO appends a
-compensating forward commit to the journal (append-only; ``model_rev`` moves
-forward) so hydration replays to the post-undo state.
-
-A batch recorded by POST /commits can span all four content families, so
-undo splits the inverse ops and replays the artifact half through
-``artifact_ops.apply_artifact_ops``, the view half through
-``view_ops.apply_view_ops_atomic`` (both in restore mode), and — LAYOUT ops
-only — the metamodel half through ``metamodel_ops.apply_metamodel_ops``: one
-compensating commit covers all four, and every failure path unwinds every
-half that was live (in-memory model rollback + ``rollback_view`` +
-``db.rollback()``) AND pushes the popped batch back so undo history is never
-silently eaten. A popped batch whose metamodel half carries a
-``metamodel.rebind`` is refused outright with a 409 (see the 409 branch's
-own comment for why) rather than replayed —
-restore-mode model inverses are schema-checked at the core mutation boundary,
-so no single replay order is correct across a schema swap in either
-direction. The view blob (when touched) rides the SAME DB transaction as the
-compensating Commit row — see ``_persist_undo_commit``'s caller below, which
-stages it inside the same try/except for the same reason ``create_commit``
-does (a staging failure must not escape with ``model_rev`` already bumped and
-the batch already off the op_log).
-
-Undo restores entity STATE (ids, types, endpoints, properties) but not the
-per-entity ``rev`` counters: an entity it reinstates starts counting again.
-Nothing uses ``rev`` for conflict detection (CR matching explicitly ignores
-it, see ``core/model/change_request.py``); it is a change ticker, and with the
-id one half of every pair the state digest folds (``api/state_digest.py``).
-
-The delta a replica follows
----------------------------
-Every landed batch answers with the revision it continues from (``prev_rev``),
-the ids it deleted and created again (``recreated_*``) and the state digest of
-the model after it, which the session keeps up in O(batch)
-(``Session.advance_state_digest``) and the journal row records. A path that
-takes a landed batch back puts the digest back with it.
+``rev`` counters are a change ticker, not part of the state a restore
+reinstates; with the id they are one half of every pair the state digest
+folds (``api/state_digest.py``).
 """
 
 from __future__ import annotations
 
-import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, assert_never
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 from data_rover.core.validation.dirty import DirtyCollector, containment_closure
-from data_rover.core.validation.scope import Scope
-from data_rover.core.validation.state import ValidationState
-from data_rover.core.view.schema import View
 
 from .. import content
-from ..artifact_ops import (
-    apply_artifact_ops,
-    artifact_delta_headers,
-    artifact_op_ids,
-    broadcast_artifact_events,
-    split_ops,
-)
-from ..commit_states import capture_entity_states
-from ..db import get_db
-from ..db_models import User
-from ..deps import Session, get_request_session, require_model
+from ..deps import Session
 from ..hydration import serialize_ops
-from ..identity import get_current_user
-from ..invalidation import touched_keys
-from ..locking import METAMODEL_RESOURCE, artifact_resource
-from ..metamodel_ops import MetamodelBatchResult, apply_metamodel_ops
-from ..rules import (
-    applies_population,
-    expand_dirty,
-    load_compiled_rules,
-    rules_touched,
-    session_pipeline,
-)
 from ..settings import get_settings
 from ..snapshot_job import schedule_periodic_snapshot
-from ..view_ops import (
-    ViewBatchResult,
-    apply_view_ops_atomic,
-    group_by_view,
-    rollback_view,
-    view_op_resources,
-)
 from ..schemas import (
     CreateElementOp,
     CreateRelationshipOp,
@@ -130,20 +48,13 @@ from ..schemas import (
     DeleteRelationshipOp,
     ElementOut,
     is_reserved_id,
-    IssueOut,
     ModelOpIn,
     OpIn,
-    OpsRequest,
-    OpsResponse,
     RelationshipOut,
     TEMP_ID_PREFIX,
     UpdateElementOp,
     UpdateRelationshipOp,
-    ViewOpIn,
 )
-from ..session import AppliedBatch
-
-router = APIRouter()
 
 # ``TEMP_ID_PREFIX`` is imported from ``schemas`` above — its single source,
 # living with the op union it is part of — and re-exported through this module
@@ -610,71 +521,6 @@ def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _Batch
     return res
 
 
-def _ensure_validation_seeded(session: Session, model: Model) -> ValidationState:
-    """Make sure a full-run issue baseline exists BEFORE mutating.
-
-    Shared by every endpoint that validates against the issue store: the ops
-    and commit endpoints, ``POST /model/validate`` (routes/validation.py) and
-    the metamodel diff (routes/metamodel_swap.py). Load endpoints that seed
-    the store at load time make this a no-op; it only does work for sessions
-    populated through the legacy snapshot routes. Seeding pre-batch keeps
-    the post-batch replace() delta exact.
-    """
-    if session.validation is None:
-        state = ValidationState()
-        state.set_full(session_pipeline(session).validate(model, Scope.all()))
-        session.validation = state
-    return session.validation
-
-
-def _finalize(
-    session: Session,
-    state: ValidationState,
-    model: Model,
-    res: _BatchResult,
-    *,
-    prev_rev: int,
-    state_digest: str,
-) -> OpsResponse:
-    """Scoped re-validation + issue-store splice + response assembly.
-
-    ``state`` is the seeded issue store returned by
-    ``_ensure_validation_seeded`` (threaded through instead of re-read from
-    the session). ``session.model_rev`` must already be bumped.
-    Deterministic ordering throughout: changed/deleted ids in first-touch op
-    application order, issues in dirty-set / scoped-pipeline order.
-
-    A user rule reports on the element it applies to but reads across
-    relationship hops, so the dirty set is first widened to every element the
-    compiled rules can reach back from this batch's own touched entities —
-    otherwise an edit to a FAR element would leave the owning element's rule
-    verdict stale in the store.
-    """
-    expand_dirty(session, model, res.dirty)
-    scoped_issues = session_pipeline(session).validate(model, res.dirty.to_scope())
-    delta = state.replace(res.dirty.ids, scoped_issues)
-    return OpsResponse(
-        model_rev=session.model_rev,
-        id_map=dict(res.id_map),
-        changed_elements=[
-            ElementOut.from_core(model.elements[eid]) for eid in res.changed_element_ids
-        ],
-        changed_relationships=[
-            RelationshipOut.from_core(model.relationships[rid])
-            for rid in res.changed_relationship_ids
-        ],
-        deleted_element_ids=list(res.deleted_element_ids),
-        deleted_relationship_ids=list(res.deleted_relationship_ids),
-        recreated_element_ids=list(res.recreated_element_ids),
-        recreated_relationship_ids=list(res.recreated_relationship_ids),
-        prev_rev=prev_rev,
-        state_digest=state_digest,
-        issues_removed_owner_ids=delta.removed_owner_ids,
-        issues_added=[IssueOut.from_core(i) for i in delta.added],
-        issue_counts=state.counts(),
-    )
-
-
 def _persist_commit(
     db: DbSession,
     project_id: str,
@@ -705,14 +551,13 @@ def _persist_commit(
     ``list[OpIn]`` under list invariance.
 
     Only persists when the project actually has a durable model row (an
-    in-memory-only session has none yet — it persists a baseline via the
-    load/upload routes). Keeps DB model_rev in lockstep with the
+    in-memory-only session has none yet — it persists a baseline when it is installed). Keeps DB model_rev in lockstep with the
     just-bumped session.model_rev.
 
     The keyword-only ``_commit_id``/``_message``/``_validation_error_count``/
     ``_issues`` parameters are optional metadata carried by the structured
-    commit endpoint (``POST /commits``); the plain ``/model/ops`` path omits
-    them and gets the same defaults as before (append-only, no message/issues).
+    commit endpoint (``POST /commits``); a caller that omits them gets an
+    append-only row with no message and no issues.
 
     ``_from_metamodel_id``/``_to_metamodel_id`` are the rebind FK columns: a
     ``metamodel.rebind`` op in the batch sets both, and every reader keyed
@@ -751,60 +596,6 @@ def _persist_commit(
     return True
 
 
-def _persist_undo_commit(
-    db: DbSession,
-    project_id: str,
-    *,
-    rev: int,
-    author_id: str | None,
-    ops: Sequence[OpIn],
-    inverse_ops: Sequence[OpIn],
-    id_map: dict[str, str],
-    entity_states: dict[str, Any] | None = None,
-    state_digest: str | None = None,
-) -> bool:
-    """Record an undo as a forward compensating commit (append-only journal).
-
-    ``ops`` are the ops that reproduce the undo on replay (the applied inverse
-    batch, canonicalized) and ``inverse_ops`` redo the original change. They
-    arrive as explicit lists rather than a ``_BatchResult`` for the same reason
-    ``_persist_commit`` does: an undone batch can span BOTH content families,
-    so the model applier's result has to be merged with the artifact applier's
-    (``artifact_ops.ArtifactBatchResult``) and neither type is a superset of
-    the other.
-
-    Returns True if a durable row existed and the commit was persisted,
-    False when the project has no model row (in-memory-only legacy flow)."""
-    if content.get_model_row(db, project_id) is None:
-        return False
-    content.append_commit(
-        db,
-        project_id,
-        rev=rev,
-        commit_id=uuid.uuid4().hex,
-        author_id=author_id,
-        ops=serialize_ops(ops),
-        inverse_ops=serialize_ops(inverse_ops),
-        id_map=dict(id_map),
-        entity_states=entity_states,
-        state_digest=state_digest,
-    )
-    content.set_model_rev(db, project_id, rev)
-    db.commit()
-    return True
-
-
-def _resolve_undo_view_id(session: Session, view_id: str) -> str | None:
-    """The live view an inverse group targets. An empty id is the journal
-    shape from before named views: it resolves to the project's sole view,
-    the only reading that cannot be wrong. None means push back (409)."""
-    if view_id:
-        return view_id if view_id in session.views else None
-    if len(session.views) == 1:
-        return next(iter(session.views))
-    return None
-
-
 def _maybe_periodic_snapshot(
     db: DbSession, project_id: str, session: Session, rev: int
 ) -> None:
@@ -816,400 +607,3 @@ def _maybe_periodic_snapshot(
     every = get_settings().snapshot_every
     if every > 0 and rev % every == 0:
         schedule_periodic_snapshot(project_id, session)
-
-
-@router.post("/model/ops", response_model=None)
-def apply_ops(
-    payload: OpsRequest,
-    project_id: str,
-    session: Session = Depends(get_request_session),
-    db: DbSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> OpsResponse | JSONResponse:
-    _, model = require_model(session)
-    if payload.base_rev != session.model_rev:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": (
-                    f"base_rev {payload.base_rev} does not match current "
-                    f"model_rev {session.model_rev}"
-                ),
-                "model_rev": session.model_rev,
-            },
-        )
-    model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
-    if artifact_ops:
-        # The legacy unlocked path is model-only FOREVER: artifact edits go
-        # through POST /commits (lock-verified) or legacy PUT /artifacts.
-        raise HTTPException(
-            status_code=422,
-            detail="artifact ops are not supported on /model/ops; use /commits",
-        )
-    if view_ops:
-        raise HTTPException(
-            status_code=422,
-            detail="view ops are not supported on /model/ops; use /commits",
-        )
-    if metamodel_ops:
-        raise HTTPException(
-            status_code=422,
-            detail="metamodel ops are not supported on /model/ops; use /commits",
-        )
-    state = _ensure_validation_seeded(session, model)
-    if not payload.ops:
-        # Empty batch: nothing to apply. Report the current state WITHOUT
-        # bumping model_rev or recording an op_log entry — an accidental
-        # empty POST must not invalidate clients or burn an undo step.
-        return OpsResponse(model_rev=session.model_rev, issue_counts=state.counts())
-    with session.write_mutex:
-        res = _apply_batch(model, model_ops, restore=False)
-        prev_rev = session.model_rev
-        prior_digest = session.state_digest_value
-        session.model_rev += 1
-        state_digest = session.advance_state_digest(res)
-        if get_settings().snippet_incremental_invalidation:
-            session.evict_touched_caches(touched_keys(model, model.metamodel, res))
-        # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
-        session.record_batch(
-            AppliedBatch(
-                # list displays, not the raw lists: AppliedBatch is typed over
-                # the full OpIn union (mixed batches land here from
-                # POST /commits) and list is invariant, so a list[ModelOpIn]
-                # is not a list[OpIn].
-                ops=[*res.canonical_ops],
-                inverse_ops=[*res.inverse_ops()],
-                id_map=dict(res.id_map),
-            )
-        )
-        try:
-            persisted = _persist_commit(
-                db,
-                project_id,
-                rev=session.model_rev,
-                author_id=user.id,
-                ops=res.canonical_ops,
-                inverse_ops=res.inverse_ops(),
-                id_map=dict(res.id_map),
-                _entity_states=capture_entity_states(model, res),
-                _state_digest=state_digest,
-            )
-        except Exception as exc:
-            _rollback(model, res)  # undo the in-memory mutation
-            session.model_rev -= 1
-            session.state_digest_value = prior_digest
-            # The rev moves BACKWARDS here. A concurrent lock-free
-            # /tables/evaluate may already have stamped the script cell cache
-            # at the higher rev (it only self-clears on a FORWARD stamp move),
-            # which would brick every later write/read at the restored rev and
-            # then serve values computed against this rolled-back model once a
-            # LATER commit reaches that rev again.
-            session.invalidate_derived_caches()
-            session.op_log.pop()  # drop the batch we just recorded
-            db.rollback()
-            raise HTTPException(
-                status_code=500, detail="failed to persist commit"
-            ) from exc
-        if persisted:
-            _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
-        return _finalize(
-            session, state, model, res, prev_rev=prev_rev, state_digest=state_digest
-        )
-
-
-@router.post("/model/undo", response_model=None)
-def undo(
-    project_id: str,
-    session: Session = Depends(get_request_session),
-    db: DbSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> OpsResponse | JSONResponse:
-    _, model = require_model(session)
-    if not session.op_log:
-        return JSONResponse(
-            status_code=409,
-            content={"detail": "Nothing to undo", "model_rev": session.model_rev},
-        )
-    state = _ensure_validation_seeded(session, model)
-    with session.write_mutex:
-        batch = session.op_log.pop()
-        # A batch recorded by POST /commits can span all three content
-        # families, so the undo replays each half through its own applier:
-        # the model half in place, the artifact half staged on this request's
-        # DB transaction, the view half in place on the views it names (also
-        # staged on this request's DB transaction once accepted — see the
-        # persist step below).
-        model_inv, artifact_inv, view_inv, metamodel_inv = split_ops(batch.inverse_ops)
-        if any(op.kind == "metamodel.rebind" for op in metamodel_inv):
-            # Restore-mode model inverses are schema-checked at the core
-            # mutation boundary (_check_patch_keys + Model.set_property), so
-            # replaying them across a schema swap fails whichever side of the
-            # swap-back they run on — a migration batch's inverse patches name
-            # OLD-schema properties (invalid once the candidate is back out)
-            # while an additive batch's inverse patches name NEW-schema ones
-            # (invalid before it), and no single replay order is correct in
-            # both directions without a schema-independent restore mode.
-            # Refused cleanly, history intact — a "new rebind back" through
-            # the metamodel editor is the supported path.
-            session.op_log.append(batch)
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": "undo across a metamodel change is not supported; "
-                    "rebind back through the metamodel editor instead",
-                    "model_rev": session.model_rev,
-                },
-            )
-        # Resolve every view the inverse batch names ONCE, before the
-        # peer-lease guard reads them: an unknown id (the view was deleted
-        # since) or a legacy empty id on a project that no longer has exactly
-        # one view is a push-back 409, not a half-applied undo. The batch is
-        # re-pushed on every refusal so a refusal never eats undo history.
-        view_groups: dict[str, list[ViewOpIn]] = {}
-        for vid, group in group_by_view(view_inv).items():
-            resolved = _resolve_undo_view_id(session, vid)
-            if resolved is None:
-                session.op_log.append(batch)
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "detail": "undo needs a view this project no longer has "
-                        "(or, for a change that predates named views, exactly "
-                        "one view)",
-                        "model_rev": session.model_rev,
-                    },
-                )
-            for op in group:
-                op.view_id = resolved
-            view_groups.setdefault(resolved, []).extend(group)
-        # The MODEL half of this route stays deliberately unlocked (the
-        # documented migration-window stance until the frontend moves to
-        # check-out/commit). The ARTIFACT, VIEW and (layout-only, by this
-        # point) METAMODEL halves cannot: artifact rows, the view blob and the
-        # layout blob are ONLY ever protected by their `art:`/`folder:`/`mm`
-        # leases — there is no per-request write_mutex ordering and no rev to
-        # conflict on — so replaying an artifact/view/layout inverse over a
-        # peer's checked-out resource would void, from this side, exactly the
-        # guarantee POST /commits and the legacy artifact CRUD routes enforce
-        # on theirs. Refuse instead, and push the batch BACK so a refusal
-        # never eats undo history. ``view_op_resources`` mostly over-reports
-        # on purpose (a create's temp/parent id, both ends of a move) — a
-        # spurious id can only produce a conservative 409, never hide a held
-        # lease — but delete_folder/move_folder need the CURRENT (pre-undo-
-        # application) view to resolve the subtree/current-parent ids the op
-        # itself doesn't name (see its docstring).
-        peer_resources = (
-            [artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)]
-            + [
-                rid
-                for vid, group in view_groups.items()
-                for rid in view_op_resources(vid, session.views[vid], group)
-            ]
-            # metamodel_inv here is layout-only (a rebind-carrying batch was
-            # already refused above) — the ``mm`` lease is the layout's only
-            # concurrency control, the same honor rule as ``art:``/``folder:``.
-            + ([METAMODEL_RESOURCE] if metamodel_inv else [])
-        )
-        peer_held = session.lock_table.peer_leases(
-            peer_resources, user.id, now=time.monotonic()
-        )
-        if peer_held:
-            session.op_log.append(batch)
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": "resource is checked out by someone else",
-                    "model_rev": session.model_rev,
-                    "conflicts": [
-                        {
-                            "resource_id": le.resource_id,
-                            "mode": le.mode.value,
-                            "holder_id": le.holder,
-                        }
-                        for le in peer_held
-                    ],
-                },
-            )
-        try:
-            res = _apply_batch(model, model_inv, restore=True)
-        except Exception:
-            session.op_log.append(batch)  # _apply_batch already rolled back
-            raise
-        try:
-            # restore mode on all three halves: exact ids are reinstated and
-            # the already-accepted state is replayed without re-validation.
-            art_res = apply_artifact_ops(
-                db, project_id, artifact_inv, user_id=user.id, restore=True
-            )
-        except Exception:
-            # Broad on purpose, mirroring create_commit's artifact branch: the
-            # expected rejections are HTTPException 422/409 (a peer deleted or
-            # renamed the row this undo wants back), but an UNforeseen error
-            # must not be the one case that leaves the model half-undone.
-            # Undo BOTH halves and re-push the batch so undo history survives.
-            _rollback(model, res)
-            session.invalidate_derived_caches()  # rolled back in place
-            session.op_log.append(batch)
-            db.rollback()  # discard staged artifact rows
-            raise
-        # Every view writer (POST /commits) is lock-verified and journaled,
-        # so the exception handling below is a general backstop: it should
-        # never see a silently-wrong inverse applied over a view the caller
-        # has since replaced.
-        view_results: list[tuple[str, View, ViewBatchResult]] = []
-        for vid, group in view_groups.items():
-            target = session.views[vid]
-            try:
-                vres = apply_view_ops_atomic(target, group, restore=True)
-            except Exception:
-                # mirror the artifact branch's stance: never leave the model
-                # or artifact halves applied. apply_view_ops_atomic already
-                # rolled its own applied prefix back internally (see its
-                # docstring), so there is no separate rollback_view call here
-                # — only a failure raised AFTER it succeeded needs one (the
-                # persist-failure branch below).
-                _rollback(model, res)
-                session.invalidate_derived_caches()
-                for _vid, done_view, done_res in reversed(view_results):
-                    rollback_view(done_view, done_res.inverse_units)
-                session.op_log.append(batch)
-                db.rollback()  # discard staged artifact rows
-                raise
-            view_results.append((vid, target, vres))
-        all_view_res = [vres for _vid, _view, vres in view_results]
-        # Apply the metamodel half LAST, after the view half — layout-only by
-        # construction here (the rebind arm is unreachable: the 409 above
-        # already filtered any batch whose metamodel_inv carries a rebind, so
-        # ``mm_res.rebound`` is always False and ``apply_metamodel_ops`` never
-        # touches session.metamodel/model.metamodel/model.indexes on this
-        # path). No lock-check gate here — that already happened above via
-        # ``peer_resources``/``peer_held`` (the ``mm`` lease is HONORED, not
-        # verified, the same rule ``art:``/``folder:`` leases follow on this
-        # legacy route) — this call only STAGES the layout blob rewrite on the
-        # request's DB transaction. Failure here (a DB error; there is no
-        # validation to fail on a bare move) unwinds every half already
-        # applied — model in place, view in place (if touched) — before
-        # re-raising, mirroring the artifact/view branches above: db.rollback()
-        # discards the staged layout row along with any staged artifact rows.
-        mm_res: MetamodelBatchResult | None = None
-        if metamodel_inv:
-            try:
-                mm_res = apply_metamodel_ops(db, project_id, session, metamodel_inv)
-            except Exception:
-                _rollback(model, res)
-                session.invalidate_derived_caches()
-                for _vid, done_view, done_res in reversed(view_results):
-                    rollback_view(done_view, done_res.inverse_units)
-                session.op_log.append(batch)
-                db.rollback()
-                raise
-        prev_rev = session.model_rev
-        prior_digest = session.state_digest_value
-        session.model_rev += 1
-        state_digest = session.advance_state_digest(res)
-        if get_settings().snippet_incremental_invalidation:
-            session.evict_touched_caches(touched_keys(model, model.metamodel, res))
-        # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
-        # append-only journal: the undo is a NEW forward commit whose ops are
-        # the inverse batch, so hydration replays to the post-undo state and
-        # model_rev moves up (revert reuses this same shape). ONE entry per
-        # undo, spanning all four families: model ops first, then artifact
-        # ops, then view ops, then metamodel ops. Metamodel LAST here mirrors
-        # ``create_commit``'s own FORWARD list (see its comment) — but note
-        # this is purely for symmetry, not the load-bearing reason that
-        # governs THAT list's INVERSE half: this route never journals a
-        # rebind (the 409 above refuses any batch whose metamodel_inv carries
-        # one), so metamodel_inv here is always layout-only and carries no
-        # schema dependency on the other three families in either direction.
-        # Position genuinely carries no meaning on replay: hydration skips the
-        # metamodel family outright (materialized heads), and the other three
-        # are mutually independent (see split_ops) — so it stays last only to
-        # avoid drifting from the established convention.
-        canonical_ops: list[OpIn] = [
-            *res.canonical_ops,
-            *art_res.canonical_ops,
-            *(op for vres in all_view_res for op in vres.canonical_ops),
-            *(mm_res.canonical_ops if mm_res else []),
-        ]
-        inverse_ops: list[OpIn] = [
-            *res.inverse_ops(),
-            *art_res.inverse_ops(),
-            *(op for vres in reversed(all_view_res) for op in vres.inverse_ops()),
-            *(mm_res.inverse_ops() if mm_res else []),
-        ]
-        # mm_res contributes no id_map: layout ops mint no ids (mirrors
-        # create_commit's merged_id_map comment).
-        merged_id_map = {**res.id_map, **art_res.id_map}
-        for vres in all_view_res:
-            merged_id_map.update(vres.id_map)
-        try:
-            # The view blob (when touched) is staged INSIDE this same try, on
-            # the same DB transaction _persist_undo_commit's own db.commit()
-            # will flush — so the view row and the compensating Commit row
-            # land or roll back together. It MUST be inside the try: staging
-            # is a db.flush() (content.upsert_view), which can raise on its
-            # own (FK/constraint/connection error) — the same failure class
-            # this try/except exists to catch (mirrors create_commit's step e).
-            for vid, target, vres in view_results:
-                if vres.canonical_ops:
-                    content.upsert_view(
-                        db, project_id, vid, blob=target.model_dump_json()
-                    )
-            persisted = _persist_undo_commit(
-                db,
-                project_id,
-                rev=session.model_rev,
-                author_id=user.id,
-                ops=canonical_ops,
-                inverse_ops=inverse_ops,
-                id_map=merged_id_map,
-                entity_states=capture_entity_states(model, res),
-                state_digest=state_digest,
-            )
-        except Exception as exc:
-            _rollback(model, res)  # undo the in-memory mutation
-            session.model_rev -= 1
-            session.state_digest_value = prior_digest
-            session.invalidate_derived_caches()  # rev moved BACK; see apply_ops
-            for _vid, done_view, done_res in reversed(view_results):
-                rollback_view(done_view, done_res.inverse_units)
-            session.op_log.append(batch)  # re-push the batch so undo history is intact
-            db.rollback()  # also discards the staged artifact + view + layout rows
-            raise HTTPException(
-                status_code=500, detail="failed to persist commit"
-            ) from exc
-        if (artifact_inv or view_inv or metamodel_inv) and not persisted:
-            # No durable model row (in-memory-only legacy project), so
-            # _persist_undo_commit skipped its db.commit() — but the restored/
-            # removed artifact rows, the view blob and the staged layout row
-            # are real DB state that must not vanish when the request session
-            # closes (mirrors create_commit's same guard).
-            db.commit()
-        if persisted:
-            _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
-        # artifact feed events, shared with POST /commits step h so a peer
-        # cannot tell an undo's artifact event from a commit's. Inside the
-        # mutex, like every other broadcast site (enqueue order == rev order).
-        headers, created_ids = artifact_delta_headers(db, art_res)
-        broadcast_artifact_events(session.hub, headers, created_ids, art_res.deleted)
-        # Recompile the user rule sets when the artifact half put a rules
-        # artifact back (or took one away), and widen the dirty set to the
-        # applies-to population of BOTH the outgoing and the incoming sets so
-        # _finalize drops the issues the undone rules minted as well as adding
-        # the restored ones. Mirrors create_commit's step b4 — except the swap
-        # sits AFTER the durable commit rather than under an unwind ledger:
-        # every rollback path above has already been passed, so no failure can
-        # strand the session on rules the DB no longer backs. The metamodel
-        # cannot have changed here (a rebind-carrying batch is refused above),
-        # so model.metamodel is still the one the prior set compiled against.
-        if rules_touched(db, artifact_inv, art_res):
-            prior_compiled = session.compiled_rules
-            session.compiled_rules = load_compiled_rules(
-                db, project_id, model.metamodel
-            )
-            res.dirty.update(
-                applies_population(model, prior_compiled, session.compiled_rules)
-            )
-        return _finalize(
-            session, state, model, res, prev_rev=prev_rev, state_digest=state_digest
-        )

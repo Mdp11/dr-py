@@ -1,11 +1,7 @@
-"""Read-only metamodel sandbox: diff, structural diff + lint.
+"""Read-only metamodel sandbox: structural diff + lint.
 
-``/metamodel/diff`` validates the live model against a CANDIDATE metamodel via
-a no-copy ``build_rebind_view`` (shares the instance payload, rebuilds indexes)
-and returns a conformance diff, running under the per-project ``write_mutex``
-so the validation sweep can't race a concurrent commit; its model half lives in
-``metamodel_candidate.py``. ``/metamodel/structural-diff`` is the document half
-alone, with no model and no mutex. ``/metamodel/lint`` is a cheap parse +
+``/metamodel/structural-diff`` diffs the live metamodel document against a
+candidate, with no model and no mutex. ``/metamodel/lint`` is a cheap parse +
 schema check with no session/model/mutex at all.
 
 The non-destructive rebind itself lands through the ``metamodel.rebind`` op
@@ -22,14 +18,11 @@ from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 
 from ..authz import require_membership
 from ..db_models import Membership
-from ..deps import Session, get_request_session, require_metamodel, require_model
-from ..metamodel_candidate import candidate_issues, model_half
+from ..deps import Session, get_request_session, require_metamodel
 from ..schemas import (
     LintErrorOut,
-    MetamodelDiffResponse,
     MetamodelLintResponse,
 )
-from .ops import _ensure_validation_seeded
 
 router = APIRouter()
 
@@ -51,40 +44,14 @@ def _load_candidate(blob: str):  # type: ignore[return]
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/metamodel/diff", response_model=None)
-async def diff_metamodel(
-    request: Request,
-    session: Session = Depends(get_request_session),
-    membership: Membership = Depends(require_membership),
-) -> MetamodelDiffResponse:
-    current_mm, model = require_model(session)
-    candidate = _load_candidate(await _read_metamodel_blob(request))
-    # Both metamodels are immutable (schema.py), so the structural diff needs
-    # no lock — only the sandbox validation below touches the live model and
-    # must stay inside the write_mutex.
-    structural = diff_metamodels(current_mm, candidate)
-    with session.write_mutex:
-        current = _ensure_validation_seeded(session, model).all_issues()
-        # The candidate side runs the session's rule SOURCES recompiled against
-        # the CANDIDATE schema, so the diff reports rule flips the swap would
-        # cause.
-        candidate_list = candidate_issues(
-            model, candidate, session.compiled_rules.sources
-        )
-    return MetamodelDiffResponse(
-        **model_half(current, candidate_list), structural=structural
-    )
-
-
 @router.post("/metamodel/structural-diff", response_model=None)
 async def structural_diff_metamodel(
     request: Request,
     session: Session = Depends(get_request_session),
     membership: Membership = Depends(require_membership),
 ) -> MetamodelStructuralDiff:
-    """The document half of ``/metamodel/diff`` alone: no model, no mutex,
-    so a client that computes the model half itself costs the server no
-    sweep. NOT in the read-only-POST allowlist, like lint: only the
+    """The document diff: no model, no mutex. NOT in the read-only-POST
+    allowlist, like lint: only the
     owner-gated editing flow previews a candidate this way. An undecodable
     body or an unconstructible YAML scalar is a bad candidate, 422 like any
     other."""
@@ -108,7 +75,7 @@ async def lint_metamodel(
     owner-gated editing flow calls it, and viewers have nothing to lint.
 
     ``_read_metamodel_blob`` itself is called INSIDE this try block, not
-    before it: the helper is shared with ``diff_metamodel`` and
+    before it: the helper is shared with
     ``structural_diff_metamodel`` (whose contract is 422-on-bad-input, not
     always-200), so it must not be changed to
     swallow its own decode errors. An undecodable body

@@ -21,10 +21,8 @@ the request path's connection-then-mutex order; this is not a regression
 (the inline path had the same inversion, and the job holds no connection
 while it sits queued for the mutex) but matters when tuning the pool.
 
-The legacy direct-mutation routes (``routes/elements.py``,
-``routes/relationships.py``) bump ``session.model_rev`` via ``touch_model()``
-without journaling a commit, so a job waking after one of those calls can
-record a ``Snapshot`` row at a rev ahead of ``models.model_rev``. That row is
+A model replacement (``Session.set_model``) bumps ``session.model_rev``
+without journaling a commit, so a job waking after one can record a ``Snapshot`` row at a rev ahead of ``models.model_rev``. That row is
 harmless — ``_hydrate_session`` selects with ``max_rev=model_row.model_rev``,
 so it is never chosen — but it leaves a dead row and an orphan blob behind.
 """

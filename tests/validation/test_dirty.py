@@ -1,7 +1,7 @@
 """Exact dirty-set contents per mutation kind (core/validation/dirty.py).
 
 Each test pins the EXACT set of ids a mutation may have re-verdicted:
-under-approximation would let stale issues survive in a ValidationState, so
+under-approximation would let stale issues survive an incremental splice, so
 these are equality (not superset) assertions.
 """
 
@@ -13,19 +13,10 @@ from data_rover.core.metamodel.schema import (
     PropertyDef,
     RelationshipType,
 )
-from data_rover.core.model.change_request import (
-    ChangeRequest,
-    ModifiedElement,
-    ModifiedRelationship,
-    apply_change_request,
-)
-from data_rover.core.model.element import Element
 from data_rover.core.model.ids import SequentialIdGenerator
 from data_rover.core.model.model import Model
-from data_rover.core.model.relationship import Relationship
 from data_rover.core.validation.dirty import (
     DirtyCollector,
-    change_request_dirty_ids,
     containment_closure,
 )
 
@@ -234,184 +225,3 @@ def test_relationship_props_change_dirties_only_the_relationship():
     model.set_property(rel, "label", "x")
 
     assert set(collector.ids) == {rel.id}
-
-
-# ---------------------------------------------------------------------------
-# change_request_dirty_ids (CR-apply path)
-# ---------------------------------------------------------------------------
-
-
-def _dirty_for(base: Model, cr: ChangeRequest) -> tuple[Model, set[str]]:
-    result = apply_change_request(base, cr)
-    return result, set(change_request_dirty_ids(base, result, cr))
-
-
-def test_cr_element_added_dirties_result_group_and_dangling_referencers():
-    base = _model()
-    existing = _named(base, "Part", "Dup")  # n-1
-    holder = _named(base, "Block", "H")  # n-2: dangling ref to the new id
-    base.set_property(holder, "ref", "new-1")
-    unrelated = _named(base, "Part", "U")  # n-3
-
-    cr = ChangeRequest(
-        elements_added=[
-            Element(id="new-1", type_name="Part", properties={"name": "Dup"})
-        ]
-    )
-    _, dirty = _dirty_for(base, cr)
-    assert dirty == {"new-1", existing.id, holder.id}
-    assert unrelated.id not in dirty
-
-
-def test_cr_element_modified_dirties_old_and_new_groups():
-    base = _model()
-    a = _named(base, "Part", "X")
-    b = _named(base, "Part", "X")
-    c = _named(base, "Part", "Y")
-
-    cr = ChangeRequest(
-        elements_modified=[
-            ModifiedElement(
-                id=c.id,
-                before=Element(id=c.id, type_name="Part", properties={"name": "Y"}),
-                after=Element(id=c.id, type_name="Part", properties={"name": "X"}),
-            )
-        ]
-    )
-    _, dirty = _dirty_for(base, cr)
-    assert dirty == {a.id, b.id, c.id}
-
-
-def test_cr_element_type_change_dirties_incident_rels_and_referencers():
-    base = _model()
-    blk = _named(base, "Block", "B")
-    part = _named(base, "Part", "P")
-    rel = base.connect("Link", blk.id, part.id)
-    referencer = _named(base, "Block", "R")
-    base.set_property(referencer, "ref", part.id)
-
-    cr = ChangeRequest(
-        elements_modified=[
-            ModifiedElement(
-                id=part.id,
-                before=Element(id=part.id, type_name="Part", properties={"name": "P"}),
-                after=Element(id=part.id, type_name="Block", properties={"name": "P"}),
-            )
-        ]
-    )
-    _, dirty = _dirty_for(base, cr)
-    assert dirty == {part.id, rel.id, referencer.id}
-
-
-def test_cr_element_deleted_dirties_endpoints_referencers_and_group():
-    base = _model()
-    victim = _named(base, "Part", "Dup")
-    twin = _named(base, "Part", "Dup")
-    blk = _named(base, "Block", "B")
-    rel = base.connect("Link", blk.id, victim.id)
-    referencer = _named(base, "Block", "R")
-    base.set_property(referencer, "ref", victim.id)
-    unrelated = _named(base, "Part", "U")
-
-    cr = ChangeRequest(
-        elements_deleted=[
-            Element(id=victim.id, type_name="Part", properties={"name": "Dup"})
-        ],
-        relationships_deleted=[
-            Relationship(
-                id=rel.id, type_name="Link", source_id=blk.id, target_id=victim.id
-            )
-        ],
-    )
-    _, dirty = _dirty_for(base, cr)
-    assert dirty == {victim.id, twin.id, blk.id, rel.id, referencer.id}
-    assert unrelated.id not in dirty
-
-
-def test_cr_relationship_added_containment_dirties_old_and_new_target_groups():
-    base = _model()
-    p = _named(base, "Block", "Parent")
-    e3 = _named(base, "Part", "Dup")
-    base.connect("HasPart", p.id, e3.id)  # existing child of p
-    e = _named(base, "Part", "Dup")  # unowned, about to be re-parented
-    e2 = _named(base, "Part", "Dup")  # unowned duplicate of e
-
-    cr = ChangeRequest(
-        relationships_added=[
-            Relationship(
-                id="rel-new", type_name="HasPart", source_id=p.id, target_id=e.id
-            )
-        ]
-    )
-    _, dirty = _dirty_for(base, cr)
-    assert dirty == {"rel-new", p.id, e.id, e2.id, e3.id}
-
-
-def test_cr_relationship_modified_retarget_dirties_all_endpoints_and_groups():
-    base = _model()
-    p = _named(base, "Block", "Parent")
-    p2 = _named(base, "Block", "Parent2")
-    c_old = _named(base, "Part", "Dup")
-    c_old_twin = _named(base, "Part", "Dup")  # unowned: c_old's NEW group
-    c_new = _named(base, "Part", "N")
-    rel = base.connect("HasPart", p.id, c_old.id)
-
-    cr = ChangeRequest(
-        relationships_modified=[
-            ModifiedRelationship(
-                id=rel.id,
-                before=Relationship(
-                    id=rel.id, type_name="HasPart", source_id=p.id, target_id=c_old.id
-                ),
-                after=Relationship(
-                    id=rel.id, type_name="HasPart", source_id=p2.id, target_id=c_new.id
-                ),
-            )
-        ]
-    )
-    _, dirty = _dirty_for(base, cr)
-    assert dirty == {rel.id, p.id, p2.id, c_old.id, c_old_twin.id, c_new.id}
-
-
-def test_cr_relationship_modified_plain_dirties_rel_and_endpoints():
-    base = _model()
-    b = _named(base, "Block", "B")
-    part = _named(base, "Part", "P")
-    rel = base.connect("Link", b.id, part.id)
-    rel_snapshot = Relationship(
-        id=rel.id, type_name="Link", source_id=b.id, target_id=part.id
-    )
-    after = Relationship(
-        id=rel.id,
-        type_name="Link",
-        source_id=b.id,
-        target_id=part.id,
-        properties={"label": "x"},
-    )
-    cr = ChangeRequest(
-        relationships_modified=[
-            ModifiedRelationship(id=rel.id, before=rel_snapshot, after=after)
-        ]
-    )
-    _, dirty = _dirty_for(base, cr)
-    assert dirty == {rel.id, b.id, part.id}
-
-
-def test_cr_relationship_deleted_containment_dirties_target_groups():
-    base = _model()
-    p = _named(base, "Block", "Parent")
-    e = _named(base, "Part", "Dup")
-    e3 = _named(base, "Part", "Dup")  # stays child of p
-    e2 = _named(base, "Part", "Dup")  # unowned: e re-keys into its group
-    rel = base.connect("HasPart", p.id, e.id)
-    base.connect("HasPart", p.id, e3.id)
-
-    cr = ChangeRequest(
-        relationships_deleted=[
-            Relationship(
-                id=rel.id, type_name="HasPart", source_id=p.id, target_id=e.id
-            )
-        ]
-    )
-    _, dirty = _dirty_for(base, cr)
-    assert dirty == {rel.id, p.id, e.id, e2.id, e3.id}

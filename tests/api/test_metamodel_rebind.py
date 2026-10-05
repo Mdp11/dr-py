@@ -85,11 +85,9 @@ def test_rebind_commit_survives_eviction(client: TestClient) -> None:
     # present in the snapshot: strict=False hydration lets it through, and the
     # element survives, reported as a CONFORMANCE issue instead of being
     # dropped.
-    elements_before = client.get(
-        papi("/model/elements"), params={"limit": 1}, headers=AUTH_HEADERS
-    ).json()["items"]
+    elements_before = list(head().elements)
     assert elements_before, "fixture must have created a Node element"
-    node_id = elements_before[0]["id"]
+    node_id = elements_before[0]
 
     before = _rev(client)
     token = _acquire_mm(client)
@@ -115,10 +113,7 @@ def test_rebind_commit_survives_eviction(client: TestClient) -> None:
     assert not any(e["name"] == "Node" for e in mm["elements"])
 
     # (b) the pre-existing Node element survived re-hydration
-    items_after = client.get(
-        papi("/model/elements"), params={"limit": 100}, headers=AUTH_HEADERS
-    ).json()["items"]
-    ids_after = {item["id"] for item in items_after}
+    ids_after = set(head().elements)
     assert node_id in ids_after, (
         f"Node element {node_id!r} was lost after eviction+rehydration; "
         f"elements present: {ids_after}"

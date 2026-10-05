@@ -22,6 +22,7 @@ from .conftest import (
     papi,
     seed_default_project,
     EMPTY_MODEL,
+    head,
     install,
 )
 
@@ -505,7 +506,7 @@ def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
 ) -> None:
     """Characterization pin for create_commit's persist-failure (500) unwind —
     the richest failure block: model rollback, rev decrement, view rollback,
-    op_log pop, db rollback — and the caller's leases must NOT be released
+    db rollback — and the caller's leases must NOT be released
     (release is step g, strictly after a durable commit). Mirrors
     test_apply_ops_rolls_back_in_memory_on_persist_failure
     (tests/api/test_ops_persistence.py), which pins the same seam for
@@ -516,8 +517,7 @@ def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
     token = _view_lease(client, vid)
     base = _rev(client)
     session = get_session()
-    op_log_before = len(session.op_log)
-    elems_before = client.get(papi("/model/elements")).json()["total"]
+    elems_before = len(head().elements)
 
     def _boom(*_a: object, **_kw: object) -> None:
         raise RuntimeError("simulated DB failure")
@@ -537,15 +537,14 @@ def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
     )
     assert r.status_code == 500
 
-    # rev + undo history rolled back in-memory; the view group unwound
+    # rev rolled back in-memory; the view group unwound
     assert session.model_rev == base
-    assert len(session.op_log) == op_log_before
     assert session.views[vid].folders == []
 
     monkeypatch.undo()  # restore append_commit so the probe requests work
     out = _get_view(client, vid)
     assert out["view"]["folders"] == [] and out["view_rev"] == 0
-    assert client.get(papi("/model/elements")).json()["total"] == elems_before
+    assert len(head().elements) == elems_before
     assert _rev(client) == base
     # leases survive a failed commit — release only follows a durable commit
     held = {le["resource_id"] for le in client.get(papi("/locks")).json()["leases"]}

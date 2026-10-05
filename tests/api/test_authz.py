@@ -21,16 +21,16 @@ def app() -> FastAPI:
     def write(m: Membership = Depends(require_membership)) -> dict[str, str]:
         return {"role": m.role.value}
 
-    @app.post("/projects/{project_id}/model/search")
-    def search(m: Membership = Depends(require_membership)) -> dict[str, str]:
+    @app.post("/projects/{project_id}/commits/preview")
+    def preview(m: Membership = Depends(require_membership)) -> dict[str, str]:
         return {"role": m.role.value}
 
-    @app.post("/projects/{project_id}/model/elements/tree-items")
-    def tree_items(m: Membership = Depends(require_membership)) -> dict[str, str]:
+    @app.post("/projects/{project_id}/snippets/format")
+    def format_snippet(m: Membership = Depends(require_membership)) -> dict[str, str]:
         return {"role": m.role.value}
 
-    @app.post("/projects/{project_id}/exports/run")
-    def exports_run(m: Membership = Depends(require_membership)) -> dict[str, str]:
+    @app.post("/projects/{project_id}/artifacts/export")
+    def artifacts_export(m: Membership = Depends(require_membership)) -> dict[str, str]:
         return {"role": m.role.value}
 
     @app.delete("/projects/{project_id}/owned", status_code=204, response_model=None)
@@ -95,27 +95,24 @@ def test_editor_can_write(client: TestClient) -> None:
 
 def test_viewer_can_call_readonly_post(client: TestClient) -> None:
     pid = _seed()
-    r = client.post(f"/projects/{pid}/model/search", headers=_h("viewer"))
+    r = client.post(f"/projects/{pid}/commits/preview", headers=_h("viewer"))
     assert r.status_code == 200
 
 
-def test_viewer_can_call_readonly_post_tree_items(client: TestClient) -> None:
+def test_viewer_can_call_readonly_post_snippets_format(client: TestClient) -> None:
     pid = _seed()
-    r = client.post(f"/projects/{pid}/model/elements/tree-items", headers=_h("viewer"))
+    r = client.post(f"/projects/{pid}/snippets/format", headers=_h("viewer"))
     assert r.status_code == 200
 
 
-def test_viewer_can_call_readonly_post_exports_run(client: TestClient) -> None:
+def test_viewer_can_call_readonly_post_artifacts_export(client: TestClient) -> None:
     pid = _seed()
-    r = client.post(
-        f"/projects/{pid}/exports/run", headers=_h("viewer"),
-        json={"artifact_id": "x"},
-    )
+    r = client.post(f"/projects/{pid}/artifacts/export", headers=_h("viewer"))
     # The fixture app registers a real stub for this path (see `app` above),
     # so a 403 here can ONLY come from `require_membership`'s viewer-write
     # gate — unlike a bare `!= 403` against an unmatched route (which Starlette
     # 404s before authz ever runs), this assertion can actually fail if
-    # "/exports/run" is ever dropped from `_READ_ONLY_POST_SUFFIXES`.
+    # "/artifacts/export" is ever dropped from `_READ_ONLY_POST_SUFFIXES`.
     assert r.status_code == 200
 
 

@@ -17,7 +17,7 @@ from data_rover.api.schemas import (
     CreateArtifactOp,
 )
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
+from .conftest import AUTH_HEADERS, seed_default_project, EMPTY_MODEL, install
 
 _MM = """
 elements:
@@ -91,11 +91,3 @@ def test_split_ops_three_ways() -> None:
     assert isinstance(model_ops[0], CreateElementOp)
     assert isinstance(artifact_ops[0], CreateArtifactOp)
     assert len(view_ops) == 1 and view_ops[0].kind == "create_folder"
-
-
-def test_validate_route_rejects_view_ops(client: TestClient) -> None:
-    r = client.post(
-        papi("/model/validate"),
-        json={"ops": [RAW_VIEW_OPS[0]]},
-    )
-    assert r.status_code == 422

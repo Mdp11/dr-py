@@ -6,7 +6,7 @@ reference the UI shows cannot drift from the API snippets actually get: the
 tripwire below makes an undocumented public member a hard failure, which
 means adding a facade method forces writing its docs in the same commit.
 
-Stays `data_rover.core.*`-pure: stdlib only, no api/wasmtime imports.
+Stays `data_rover.core.*`-pure: stdlib only, no api imports.
 """
 
 from __future__ import annotations

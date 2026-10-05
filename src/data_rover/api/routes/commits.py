@@ -8,9 +8,9 @@ batch's applier, and reports no issues (validation is the engine's). This
 module deliberately imports those module-private helpers — they are part of the ops package's internal
 surface, shared with this sibling. The artifact delta is likewise not built
 here: ``artifact_ops.artifact_delta_headers`` /
-``artifact_ops.broadcast_artifact_events`` are shared with POST /model/undo,
-over the single ``artifact_header`` row->header projection the artifact CRUD
-routes use (``routes/artifacts._header`` is an alias of it) — same fields on
+``artifact_ops.broadcast_artifact_events`` are shared by the commit and
+revert paths, over the single ``artifact_header`` row->header projection the
+artifact CRUD routes use (``routes/artifacts._header`` is an alias of it) — same fields on
 created, updated AND deleted events, so no two write paths can drift.
 
 A commit can carry artifact ops as well as model ops
@@ -53,7 +53,7 @@ from .. import content
 from ..db import get_db
 from ..db_models import Commit, Membership, Role, User
 from ..deps import Session, get_request_session, require_model
-from ..hydration import deserialize_ops, reconstruct_model_at, write_snapshot
+from ..hydration import deserialize_ops, write_snapshot
 from ..identity import get_current_user
 from ..lock_mirror import mirror_session_leases
 from ..locking import (
@@ -98,7 +98,6 @@ from ..schemas import (
     IssueOut,
     METAMODEL_OP_KINDS,
     ModelOpIn,
-    ModelOut,
     MoveArtifactOp,
     MoveElementOp,
     MoveFolderOp,
@@ -122,7 +121,6 @@ from ..schemas import (
     VIEW_OP_ADAPTER,
     VIEW_OP_KINDS,
 )
-from ..session import AppliedBatch
 from .ops import (
     TEMP_ID_PREFIX,
     _apply_batch,
@@ -358,7 +356,7 @@ class _CommitUnwind:
     went live, at the moment it goes live and NEVER LATER (``model_res``
     after the model apply, one ``view_results`` entry per view group after
     its apply,
-    ``rev_bumped`` after the rev bump + ``record_batch``; ``db_staged``
+    ``rev_bumped`` after the rev bump; ``db_staged``
     BEFORE the first call that stages rows, and ``prior_metamodel`` DURING
     ``apply_metamodel_ops`` via its ``on_swap`` callback — those last two
     register ahead of the state going live because the very statement that
@@ -373,39 +371,26 @@ class _CommitUnwind:
     inline blocks this replaces:
 
     - ``model_res`` rollback first (restores the in-place model), then the
-      metamodel swap, then the rev decrement, THEN
-      ``invalidate_derived_caches()`` — that method re-stamps the cell cache
-      to the CURRENT ``model_rev`` (see its docstring), so decrementing after
-      it would stamp the wrong rev.
-      Invalidation is tied to ``model_res``: it exists because the in-place
-      apply-then-rollback leaves the model rev-identical but momentarily
-      different, so a lock-free concurrent ``/tables/evaluate`` could have
-      cached rows computed mid-flight.
+      metamodel swap, then the rev decrement.
     - ``prior_metamodel`` unwinds AFTER ``model_res``,
       reversing apply order: the rebind is HOISTED to apply first (so the
       batch's model ops validate against the candidate schema), therefore it
       unwinds last among the in-memory halves. It restores the three
       pieces the swap touched — ``session.metamodel``, ``model.metamodel`` and
       ``model.indexes`` (containment flags + key groups are
-      metamodel-derived) — plus derived-cache invalidation, which it shares
-      with the ``model_res`` step rather than doing itself precisely BECAUSE
-      of the rev-decrement ordering above.
+      metamodel-derived).
     - ``view_results`` roll back newest group first; each entry pairs the
       live ``View`` object with its batch result, so the unwind never has
       to re-resolve a view id.
-    - ``op_log.pop()`` only when ``rev_bumped``: the batch enters the op
-      log at the same instant the rev bumps (step d), never earlier. The
-      state digest advances at that instant too, so the same flag puts
-      ``prior_digest`` back; before it, the exact model rollback leaves the
-      digest true as it stands.
+    - ``prior_digest`` goes back only when ``rev_bumped``: the state digest
+      advances at the instant the rev bumps (step d), never earlier; before
+      it, the exact model rollback leaves the digest true as it stands.
     - ``db.rollback()`` last, and only once ``db_staged`` — the paths
       before any staging (missing-lock 409, model-apply failure) never
       rolled the request transaction back and still must not.
 
     NOT part of the ledger, on purpose: lock release (leases survive a
-    failed commit — release is step g, strictly after a durable commit) and
-    the op-log/``model_rev`` bookkeeping of ``routes/ops.py::undo`` (its
-    unwind must re-PUSH a batch popped at entry — a different contract).
+    failed commit — release is step g, strictly after a durable commit).
     """
 
     session: Session
@@ -432,27 +417,15 @@ class _CommitUnwind:
             _rollback(self.model, self.model_res)
         if self.prior_metamodel is not None:
             # Reverse of apply order: the swap went in first, so it unwinds
-            # after the model ops that were applied on top of it. See the
-            # class docstring for why cache invalidation is deferred to the
-            # shared step below.
+            # after the model ops that were applied on top of it.
             self.session.metamodel = self.prior_metamodel
             self.model.metamodel = self.prior_metamodel
-            self.model.indexes.rebuild(keep_search=True)
+            self.model.indexes.rebuild()
         if self.rev_bumped:
             self.session.model_rev -= 1
             self.session.state_digest_value = self.prior_digest
-        if self.model_res is not None or self.prior_metamodel is not None:
-            # Runs AFTER the rev decrement by the invariant above. The
-            # metamodel arm matters as much as the model one: every derived
-            # row order / script cell key computed between the swap and this
-            # failure was built against the CANDIDATE schema, so leaving them
-            # live after restoring the prior metamodel would serve
-            # schema-mismatched rows.
-            self.session.invalidate_derived_caches()
         for view, vres in reversed(self.view_results):
             rollback_view(view, vres.inverse_units)
-        if self.rev_bumped:
-            self.session.op_log.pop()
         if self.db_staged:
             self.db.rollback()
 
@@ -547,7 +520,7 @@ def preview_commit(
             assert prior_mm is not None
             session.metamodel = candidate
             model.metamodel = candidate
-            model.indexes.rebuild(keep_search=True)
+            model.indexes.rebuild()
         try:
             # _apply_batch raises 422 on a mutation-boundary structural error
             # (unknown type, missing endpoint, unknown property): the batch
@@ -564,12 +537,7 @@ def preview_commit(
                 assert prior_mm is not None
                 session.metamodel = prior_mm
                 model.metamodel = prior_mm
-                model.indexes.rebuild(keep_search=True)
-            # The in-place apply-then-rollback leaves model_rev unchanged, so a
-            # concurrent lock-free /tables/evaluate could have cached rows AND
-            # script cell values computed mid-preview at this rev. Invalidate
-            # both caches and the sweeps behind them.
-            session.invalidate_derived_caches()
+                model.indexes.rebuild()
     return PreviewResponse()
 
 
@@ -581,8 +549,7 @@ def list_commits(
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
 ) -> CommitHistoryResponse:
-    """Durable commit history, newest-first (distinct from GET /model/changes,
-    which reports the capped in-memory op_log). Read endpoint — any member.
+    """Durable commit history, newest-first. Read endpoint — any member.
 
     The ``session`` dependency ensures the caller is an authenticated project
     member (``get_request_session`` depends on ``require_membership``). No
@@ -640,33 +607,6 @@ def commits_range_diff(
     return diff_range(db, project_id, from_rev, to_rev)
 
 
-@router.get("/commits/{rev}/model", response_model=None)
-def model_at_rev(
-    rev: int,
-    project_id: str,
-    session: Session = Depends(get_request_session),
-    db: DbSession = Depends(get_db),
-) -> ModelOut | JSONResponse:
-    """Reconstruct the FULL model as it existed at ``rev``.
-
-    Read endpoint — any member (history is readable by viewers). O(model)
-    response, like GET /model and the /compare page; the client diffs two of
-    these with ``computeDiff``. Reconstruction reads durable content directly,
-    so it is correct for cold/evicted projects.
-    """
-    model_row = content.get_model_row(db, project_id)
-    head = model_row.model_rev if model_row is not None else 0
-    if rev < 0 or rev > head:
-        return JSONResponse(
-            status_code=422,
-            content={"detail": "rev out of range", "model_rev": head},
-        )
-    model = reconstruct_model_at(project_id, rev)
-    if model is None:
-        return ModelOut(elements=[], relationships=[])
-    return ModelOut.from_core(model)
-
-
 @router.get("/commits/{rev}/diff", response_model=None)
 def commit_diff_endpoint(
     rev: int,
@@ -679,7 +619,7 @@ def commit_diff_endpoint(
     Read endpoint — any member (the ``session`` dependency only establishes
     membership, exactly like GET /commits above). O(commit) for rows that
     carry ``entity_states`` (every commit written since the column exists); a
-    row without them reconstructs both sides like GET /commits/{rev}/model.
+    row without them reconstructs both sides (``reconstruct_model_at``).
     The rendering itself lives in ``commit_diff.diff_commit`` so the future
     change-request workflow can point it at a draft instead of a commit row.
     """
@@ -703,15 +643,13 @@ def create_commit(
     """Lock-verified, structural-gated commit.
 
     Flow:
-    1. Staleness check (before the mutex — mirrors preview and apply_ops).
+    1. Staleness check (before the mutex — mirrors preview).
        A future ``base_rev`` always 409s. A behind-head ``base_rev`` uses a
        GENERALIZED rule: the batch conflicts iff the
        resources it touches overlap what landed in ``(base_rev, head]`` — see
        ``_batch_touched_ids``/``_affected_ids``. Leases already prevent most
-       conflicts up front; this is the backstop for the window where the
-       legacy unlocked ``/model/ops`` path and this lock-verified path
-       coexist, so a stale-but-non-overlapping batch lands instead of being
-       rejected.
+       conflicts up front; a stale-but-non-overlapping batch lands instead
+       of being rejected.
 
        This requires the durable journal to fully explain the gap between
        ``base_rev`` and head, so several fallbacks fail CLOSED (409 "stale
@@ -720,17 +658,14 @@ def create_commit(
          - the tail is SHORTER than the rev gap — the completeness invariant
            (one journaled batch == one rev == one row, spelled out at the
            check itself below) means a short tail can only mean some rev in
-           the gap advanced without a journal row (``Session.touch_model()``,
-           the legacy unlocked mutation routes, or ``set_model(...)`` — model
-           load/clear and CR-apply, which passes the replacement model and
-           its spliced validation state in), so there is no way to know what
-           it touched;
+           the gap advanced without a journal row (``set_model(...)``), so there
+           is no way to know what it touched;
          - a rebind is in the tail (the metamodel changed under the client,
            so its element ops were computed against a schema that no longer
            exists);
          - an EMPTY-ops commit is in the tail that still consumed a rev —
-           ``persist_baseline``'s marker for "the whole model was replaced
-           opaquely" (model upload/clear/apply-cr baseline reset). The tail
+           the marker for "the whole model was replaced opaquely" (a
+           baseline reset). The tail
            fully accounts for the rev gap here, but names no resources at
            all, so the overlap check alone would find nothing and let a
            stale batch land against a wholesale-replaced model.
@@ -841,12 +776,10 @@ def create_commit(
             # Completeness invariant (db_models.Commit's own docstring: "one
             # accepted ops batch == one revision == one journal row"): every
             # journaled batch bumps model_rev by exactly 1 and writes exactly
-            # 1 row (create_commit/undo/revert each do both under the same
+            # 1 row (create_commit/revert each do both under the same
             # mutex). So a FULL tail always has len(tail) == head - base_rev.
             # A SHORT tail means some rev in the gap moved without a journal
-            # row at all — e.g. touch_model() (legacy PATCH/POST/DELETE
-            # mutation routes) or set_model() (model load/clear, and CR-apply,
-            # which passes the replacement model in) — so there
+            # row at all — e.g. set_model() — so there
             # is nothing to inspect for that rev and no way to know it didn't
             # touch this batch's resources. Fail closed.
             return _conflict_response(session.model_rev, "stale base_rev")
@@ -879,10 +812,10 @@ def create_commit(
                 session.model_rev, "conflicting concurrent commits"
             )
     if not payload.ops:
-        # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
-        # no-op early returns — current state, no rev bump, no undo slot. It
-        # matters MORE here than there: an empty-ops journal row is
-        # persist_baseline's marker for "the whole model was replaced
+        # Empty batch: nothing to apply. Mirrors revert's
+        # no-op early return — current state, no rev bump. It
+        # matters MORE here: an empty-ops journal row is
+        # the marker for "the whole model was replaced
         # opaquely", which the staleness guard above reads as an
         # unconditional 409 for every client below that rev. A message-only
         # "checkpoint" commit would therefore permanently disable the overlap
@@ -1087,8 +1020,8 @@ def create_commit(
         # to match some other order.
         # The view id_maps are seeded with the model+artifact maps (see b3),
         # so the last group's is already a superset — merging them last is
-        # correct and the other two spreads are redundant but harmless, kept
-        # for symmetry with undo. The metamodel family mints no ids at all.
+        # correct and the other two spreads are redundant but harmless.
+        # The metamodel family mints no ids at all.
         # View groups are independent (one view each), so their relative
         # order in the journal is free; inverses go newest group first.
         merged_id_map = {**res.id_map, **art_res.id_map}
@@ -1106,16 +1039,9 @@ def create_commit(
             *(op for vres in reversed(all_view_res) for op in vres.inverse_ops()),
             *(mm_res.inverse_ops() if mm_res else []),
         ]
-        session.record_batch(
-            AppliedBatch(
-                ops=canonical_ops,
-                inverse_ops=inverse_ops,
-                id_map=merged_id_map,
-            )
-        )
         unwind.rev_bumped = True
-        # e. persist to the durable journal; mirror apply_ops 500 pattern
-        #    exactly. The view blob (if touched) is staged INSIDE this same
+        # e. persist to the durable journal; 500 + full rollback
+        #    on failure. The view blob (if touched) is staged INSIDE this same
         #    try, on the same DB transaction _persist_commit's own
         #    db.commit() will flush — so the view row and the Commit row
         #    land or roll back together. It MUST be inside the try: staging
@@ -1123,7 +1049,7 @@ def create_commit(
         #    on its own (FK/constraint/connection error) — the same failure
         #    class this try/except exists to catch. Staging it outside would
         #    let that exception escape every rollback below with model_rev
-        #    already bumped and the batch already in op_log.
+        #    already bumped.
         commit_id = uuid.uuid4().hex
         issues_json = [i.model_dump() for i in payload.issues]
         new_view_revs: dict[str, int] = {}
@@ -1156,7 +1082,7 @@ def create_commit(
             )
         except Exception as exc:
             # undo every live half — see _CommitUnwind. By this point that is
-            # all of them: the rev bump and op_log entry included, and the
+            # all of them: the rev bump included, and the
             # db.rollback() also discards the staged artifact + view +
             # metamodel/layout rows.
             unwind.unwind()
@@ -1176,9 +1102,8 @@ def create_commit(
             # Inside the SAME try/except shape as the persist step above, and
             # for the same reason: this is still a
             # db.commit(), it can still raise on its own (constraint,
-            # connection), and by this point model_rev is bumped and the batch
-            # is in op_log — an escaping raise would leave both standing with
-            # nothing rolled back. The ledger's db.rollback() also discards the
+            # connection), and by this point model_rev is bumped — an
+            # escaping raise would leave it standing with nothing rolled back. The ledger's db.rollback() also discards the
             # staged artifact/view/metamodel rows this commit was flushing.
             try:
                 db.commit()
@@ -1187,7 +1112,7 @@ def create_commit(
                 raise HTTPException(
                     status_code=500, detail="failed to persist commit"
                 ) from exc
-        # f. snapshot — periodic normally (mirrors apply_ops so a hot
+        # f. snapshot — periodic normally (so a hot
         #    commit-only project doesn't accumulate an unbounded replay tail),
         #    FORCED after a rebind. The durable commit has
         #    already landed; a snapshot failure here is recoverable (hydration
@@ -1212,7 +1137,7 @@ def create_commit(
                     exc_info=True,
                 )
         # f2. artifact half of the response/feed delta — shared with
-        #     POST /model/undo so both write paths are wire-identical (see
+        #     revert so both write paths are wire-identical (see
         #     artifact_ops.artifact_delta_headers for the re-read rationale).
         changed_artifact_headers, created_artifact_ids = artifact_delta_headers(
             db, art_res
@@ -1334,7 +1259,7 @@ def revert_commit(
 ) -> CommitResponse | JSONResponse:
     """Revert the model to the state at ``target_rev``.
 
-    Mechanism (the same POST /model/undo compensating-commit shape, applied
+    Mechanism (a compensating commit, applied
     to a *range*): apply the inverse_ops of every commit after target_rev,
     newest-first, in restore mode, recorded as ONE new forward commit. The
     journal stays append-only; model_rev only moves forward; the revert is
@@ -1355,7 +1280,7 @@ def revert_commit(
             },
         )
     if payload.target_rev == session.model_rev:
-        # no-op: nothing to revert. Mirror the empty-batch path in apply_ops —
+        # no-op: nothing to revert —
         # return current state WITHOUT bumping model_rev or recording a commit.
         return CommitResponse(
             model_rev=session.model_rev,
@@ -1384,7 +1309,7 @@ def revert_commit(
             # change means replaying row state a range of commits deep, and
             # ``ArtifactRow`` names are UNIQUE per (project, kind) — a range
             # revert can therefore collide with rows created after the target
-            # rev in ways a single undo step never can. Refused as a clean 409
+            # rev in ways a single step never can. Refused as a clean 409
             # (a conflict, like the rebind and peer-lock refusals around it)
             # naming the offending commit, checked on the RAW journal dicts so
             # it fires before anything is deserialized or applied.
@@ -1412,7 +1337,7 @@ def revert_commit(
                 )
         for c in commits:
             # Same permanent boundary as the view family: a range revert
-            # across a schema swap is exactly the undo refusal, and
+            # across a schema swap is refused for the same reason, and
             # layout rows share the artifact family's row-identity hazard.
             # Checked on op KIND, not the from/to_metamodel_id FK columns the
             # rebind loop above already handles — a layout-only commit
@@ -1488,17 +1413,6 @@ def revert_commit(
         unwind.prior_digest = session.state_digest_value
         session.model_rev += 1
         state_digest = session.advance_state_digest(res)
-        session.record_batch(
-            AppliedBatch(
-                # list displays, not the raw lists: AppliedBatch is typed over
-                # the full OpIn union (mixed batches land here from
-                # POST /commits) and list is invariant, so a list[ModelOpIn]
-                # is not a list[OpIn].
-                ops=[*res.canonical_ops],
-                inverse_ops=[*res.inverse_ops()],
-                id_map=dict(res.id_map),
-            )
-        )
         unwind.rev_bumped = True
         commit_id = uuid.uuid4().hex
         message = payload.message or f"Revert to rev {payload.target_rev}"

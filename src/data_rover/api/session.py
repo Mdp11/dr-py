@@ -8,64 +8,15 @@ from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
-from data_rover.core.script.cell_cache import ScriptCellCache
-from data_rover.core.script.runner import ReadKey
-from data_rover.core.validation.rules.compile import CompiledRules, empty_compiled
-from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
 from .feed import FeedHub, reset_event
 from .locking import LockTable
-from .script_sweep import ScriptSweepRegistry
-from .settings import get_settings
 from .state_digest import digest_value, fold_batch, format_digest
-from .table_cache import TableOrderCache
 
 if TYPE_CHECKING:
     from .routes.ops import _BatchResult
-    from .schemas import OpIn
-    from .search_index_build import SearchIndexProgress
     from .snapshot_job import SnapshotJob
-    from .validation_sweep import SweepProgress
-
-#: Maximum number of applied batches retained for undo. Each batch holds the
-#: ops, their inverses, and snapshots of deleted entities' properties, so an
-#: unbounded log would grow without limit over a long editing session; 1000
-#: undo steps is far more history than any UI exposes. Oldest batches are
-#: dropped first. Note the cap counts BATCHES, not bytes: a single batch's
-#: inverses can still be large (a cascade delete snapshots every removed
-#: entity), so memory is bounded per-entry only in the typical small-batch
-#: case — an accepted tradeoff for a trivial trimming rule.
-OP_LOG_MAX = 1000
-
-
-@dataclass
-class AppliedBatch:
-    """One accepted ops batch: what was applied and how to undo it.
-
-    ``ops`` are the applied ops in canonical form (temp ids resolved to the
-    generated canonical ids, both in op ids and inside reference property
-    values). ``inverse_ops`` use the SAME op format and are stored in
-    execution order (already reversed relative to ``ops``), so undo is
-    exactly "apply ``inverse_ops`` front to back" through the restore-mode
-    applier. ``id_map`` is the temp-id resolution the batch produced.
-    """
-
-    #: Typed over the FULL ``OpIn`` union (model + artifact ops):
-    #: ``POST /commits`` accepts mixed batches and records
-    #: the merged canonical/inverse lists here, so the log genuinely can
-    #: hold artifact ops. ``/model/ops`` still rejects them (that path is
-    #: model-only forever), but the log is shared.
-    #:
-    #: The narrower type is NOT recoverable by a cast: every consumer that
-    #: feeds the model applier must funnel the batch through
-    #: ``artifact_ops.split_ops`` first (see ``routes/ops.py::undo`` and
-    #: ``changes.compact_changes``). That split — not this annotation — is
-    #: what keeps ``_apply_one``'s ``assert_never`` over ``ModelOpIn``
-    #: exhaustive and the model applier model-only.
-    ops: list[OpIn]
-    inverse_ops: list[OpIn]
-    id_map: dict[str, str]
 
 
 @dataclass
@@ -74,24 +25,12 @@ class Session:
     model: Model | None = None
     #: every view of the project by row id — complete after hydration (a
     #: cold session hydrates ALL rows), mutated only by POST/DELETE /views
-    #: and the view half of the commit/undo paths, all under write_mutex.
+    #: and the view half of the commit/revert paths, all under write_mutex.
     views: dict[str, View] = field(default_factory=dict)
-    #: issue store seeded by the last FULL validation of `model`; incremental
-    #: paths delta from it via ValidationState.replace
-    validation: ValidationState | None = None
-    #: revision counter of the session model: bumped on every accepted ops
-    #: batch / undo and on every model load-replace. Clients echo it as
+    #: revision counter of the session model: bumped on every accepted commit
+    #: and on every model replace. Clients echo it as
     #: ``base_rev`` so stale op batches are rejected with 409.
     model_rev: int = 0
-    #: applied-batch history for POST /model/undo, newest last; cleared
-    #: whenever the model is replaced, capped at OP_LOG_MAX
-    op_log: list[AppliedBatch] = field(default_factory=list)
-    #: number of batches trimmed off ``op_log`` because OP_LOG_MAX was
-    #: exceeded since the current model was loaded. While this is non-zero
-    #: the retained log no longer reaches back to the loaded base state, so
-    #: GET /model/changes reports ``complete: false``. Reset together with
-    #: ``op_log`` (model replacement / out-of-protocol mutation).
-    op_log_dropped: int = 0
     #: serializes commit-persist and eviction for THIS project. An RLock so
     #: the ops path can take it around a block that also calls helpers which
     #: assume it is held; its role spans preview/commit as well as
@@ -125,62 +64,14 @@ class Session:
     #: owner-gated PATCH /settings route under the write-mutex. Default False
     #: keeps the engine's inspectable behaviour for every untouched project.
     strict_mode: bool = False
-    #: progress of the in-flight background validation sweep, installed by
-    #: validation_sweep.start_validation_sweep;
-    #: stays set after completion (running=False) so /model/status can report
-    #: "ready". Replaced wholesale by the next sweep.
-    validation_sweep: SweepProgress | None = field(default=None, repr=False)
-    #: progress of the in-flight background search-index build
-    #: (search_index_build.start_search_index_build); stays set after
-    #: completion. Never blocks eviction — the snapshot does not depend on
-    #: it — so ``evict``/``discard`` cancel it instead.
-    search_index_build: SearchIndexProgress | None = field(default=None, repr=False)
     #: the in-flight (or last) periodic snapshot job
     #: (snapshot_job.schedule_periodic_snapshot); a trigger that finds one
     #: still running is dropped. Never blocks eviction: the job checks the
     #: registry under write_mutex and writes nothing for a dropped session.
     snapshot_job: SnapshotJob | None = field(default=None, repr=False)
-    #: per-session cache of ordered table row keys, keyed by
-    #: (resolved-definition fingerprint, sort). A stored entry's model_rev
-    #: pins it to the model state it was computed against; both model
-    #: replacement and out-of-protocol mutation invalidate the whole cache
-    #: since any prior ordering may no longer reflect the current model.
-    table_order_cache: TableOrderCache = field(
-        default_factory=TableOrderCache, repr=False
-    )
-    #: per-session cache of embedded snippet call results.
-    #: Rev-stamped; cleared by the same two invalidation points as
-    #: table_order_cache. Sound because of the runner determinism guarantee.
-    #: Its capacity comes from ``settings.snippet_cell_cache_max``: the factory
-    #: reads ``get_settings()`` so BOTH construction paths — the empty-fallback
-    #: ``Session()`` and hydration's ``Session(metamodel=..., model=...)`` —
-    #: pick the setting up in this one place, with no cap argument threaded
-    #: through ``SessionRegistry``/``hydration``.
-    script_cell_cache: ScriptCellCache = field(
-        default_factory=lambda: ScriptCellCache(
-            cap=get_settings().snippet_cell_cache_max
-        ),
-        repr=False,
-    )
-    #: compiled user-defined validation rules, built from the project's
-    #: `validation_rules` artifacts at hydration. Immutable-swap cache: a
-    #: rebuild REPLACES the whole object, since a reader holds its reference
-    #: across a full validation run. Empty (the default for a project with no
-    #: rule artifacts) validates exactly as an unruled project does.
-    compiled_rules: CompiledRules = field(default_factory=empty_compiled, repr=False)
-    #: per-session background script-sweep jobs. One
-    #: ``SweepJob`` per resolved-definition fingerprint, with FAILED-JOB
-    #: memory: an aborted job stays registered at its ``(fingerprint, rev)`` so
-    #: a polling client never restarts the grind. Cancelled+cleared by the same
-    #: two invalidation points as the caches (``set_model``/``touch_model``)
-    #: and, unconditionally, by ``SessionRegistry.evict`` — sweeps never block
-    #: eviction.
-    script_sweeps: ScriptSweepRegistry = field(
-        default_factory=ScriptSweepRegistry, repr=False
-    )
     #: the state digest of ``model`` (``state_digest.py``) as an integer, or
     #: None while it is not known: on a fresh or hydrated session, and after
-    #: ``set_model`` / ``touch_model``. A landed batch folds into it in
+    #: ``set_model``. A landed batch folds into it in
     #: O(batch); a batch that is rolled back needs nothing, the rollback being
     #: exact. Read and written under ``write_mutex``.
     state_digest_value: int | None = field(default=None, repr=False)
@@ -204,127 +95,23 @@ class Session:
             )
         return self.state_digest()
 
-    def invalidate_derived_caches(self) -> None:
-        """Drop every model-derived cache and re-stamp the cell cache to the
-        CURRENT ``model_rev``.
-
-        Called by ``set_model``/``touch_model`` after they bump the rev, and —
-        this is the load-bearing part — by every route that mutates the model
-        IN PLACE and then rolls it back (``routes/commits.py``,
-        ``routes/ops.py``).
-
-        Table routes take NO ``write_mutex``, so a concurrent
-        ``/tables/evaluate`` can sample the rev mid-mutation and write results
-        computed against the about-to-be-discarded model. Two distinct hazards
-        follow, and both are fixed here:
-
-        * ROLLBACK AT AN UNCHANGED REV — the values are simply wrong for the
-          model that survives, and their key (fingerprint, rev) is unchanged,
-          so nothing would ever evict them.
-        * ROLLBACK THAT MOVES THE REV BACKWARDS (a persist failure doing
-          ``model_rev -= 1``) — the racing writer may have already stamped the
-          cell cache at the HIGHER rev. ``ScriptCellCache`` only self-clears on
-          a FORWARD stamp move, so afterwards every ``put``/``get`` at the
-          restored rev is refused/misses (the cache is bricked, sweeps cache
-          nothing and end ``done`` — stranding the evaluate route's poller),
-          and when a LATER commit legitimately reaches that rev again the
-          stamp matches and the cache serves values computed against the
-          ROLLED-BACK model. ``clear_and_stamp(self.model_rev)`` moves the
-          stamp back in lockstep with the rev; it is the only writer allowed
-          to move a stamp DOWN WITHOUT CLEARING (``evict_touched``'s
-          clear-all branch also moves the stamp down, but only ever after
-          clearing the cache first, so no stale entry can survive under it).
-
-        In-flight sweeps are cancelled for the same reason: they were computing
-        cells against the discarded model state (and, past a rev rollback,
-        would keep re-stamping the cache forward). The next evaluate re-kicks.
-        """
-        self.table_order_cache.clear()
-        self.script_cell_cache.clear_and_stamp(self.model_rev)
-        self.script_sweeps.cancel_all()
-
-    def evict_touched_caches(self, touched: frozenset[ReadKey] | None) -> None:
-        """Selective sibling of ``invalidate_derived_caches`` for the
-        op-delta commit paths (``/model/ops``, ``/model/undo``,
-        ``/commits`` — the ONLY places an exact touched-key set exists).
-        Must be called AFTER ``model_rev`` is bumped, under the write mutex.
-
-        The order cache still clears (row membership/order can change on any
-        commit) and in-flight sweeps still cancel (they compute against the
-        pre-commit rev), but cells whose read-sets this commit provably did
-        not touch survive re-stamped — that is the whole point (a 3k-row
-        table no longer recomputes wholesale because one element changed).
-        ``touched=None`` means "unknown" and degrades to clear-all.
-        """
-        self.table_order_cache.clear()
-        if touched is None:
-            self.script_cell_cache.clear_and_stamp(self.model_rev)
-        else:
-            self.script_cell_cache.evict_touched(touched, self.model_rev)
-        self.script_sweeps.cancel_all()
-
     def announce_reset(self) -> None:
         """Broadcast a ``reset`` for the current ``model_rev``: the rev moved
         without a journal row, so a replica has no delta to follow."""
         self.hub.broadcast(reset_event(model_rev=self.model_rev))
 
-    def set_model(
-        self,
-        model: Model | None,
-        *,
-        validation: ValidationState | None = None,
-        announce: bool = True,
-    ) -> None:
-        """Replace (or clear) the model and invalidate model-derived state.
-
-        ``validation``: callers that already computed a fresh/spliced
-        ``ValidationState`` for the NEW model (the load endpoints seed at
-        load time; session-mode apply-cr splices the CR's dirty set) pass it
-        here so it is installed in the same step instead of cleared.
+    def set_model(self, model: Model | None, *, announce: bool = True) -> None:
+        """Replace (or clear) the model; the rev moves and the digest is
+        recomputed on next use.
 
         ``announce=False`` is for a caller that writes durable state after the
         swap and calls ``announce_reset()`` once it has: a replica told
         earlier would open from the rows the caller is about to replace.
         """
         self.model = model
-        # view is intentionally untouched on model replacement
-        # previous full-run baseline is stale unless the caller replaced it
-        self.validation = validation
-        self.op_log.clear()  # recorded inverses no longer apply to this model
-        self.op_log_dropped = 0
+        # views are intentionally untouched on model replacement
         self.model_rev += 1
         self.state_digest_value = None
-        self.invalidate_derived_caches()
-        if announce:
-            self.announce_reset()
-
-    def touch_model(self, *, announce: bool = True) -> None:
-        """Call when the model is mutated outside the ops protocol.
-
-        Legacy mutation routes (POST/PATCH/DELETE on /model/elements and
-        /model/relationships) change the model without producing an op-log
-        entry, so every coherence artifact of the ops protocol is stale
-        afterwards: bump ``model_rev`` (in-flight batches with the old
-        ``base_rev`` get 409), clear ``op_log`` (recorded inverses would
-        replay against a diverged model), drop the validation baseline, and
-        clear ``table_order_cache`` (any cached row order was computed
-        against the pre-mutation model and the new ``model_rev`` alone
-        wouldn't evict it, since a cache miss is keyed on rev *mismatch* —
-        bumping rev already makes stale entries unreachable, but clearing
-        also reclaims their memory immediately rather than leaving them for
-        the LRU to age out), and clear+re-stamp ``script_cell_cache`` for the
-        same reason (its rev-stamp check would otherwise reject every entry
-        computed against the pre-mutation model without ever reclaiming
-        their memory), and cancel+forget any in-flight ``script_sweeps`` (they
-        were computing cells for the pre-mutation rev; the next evaluate
-        re-kicks at the new rev).
-        """
-        self.model_rev += 1
-        self.op_log.clear()
-        self.op_log_dropped = 0
-        self.validation = None
-        self.state_digest_value = None
-        self.invalidate_derived_caches()
         if announce:
             self.announce_reset()
 
@@ -332,26 +119,9 @@ class Session:
         self, metamodel: Metamodel | None, *, announce: bool = True
     ) -> None:
         """Replace (or clear) the metamodel; the model conforms to it, so the
-        model and its validation baseline are cleared too.
-
-        ``compiled_rules`` resets to empty: every rule's applies-to closure,
-        relationship-type closure and drift diagnostic is resolved against the
-        OUTGOING schema, so keeping it would evaluate rules against types that
-        no longer exist. Empty is the safe default — no verdicts beats wrong
-        verdicts. A caller with a DB handle recompiles against the new schema
-        right after (``rules.load_compiled_rules``).
-        """
+        model is cleared too."""
         self.metamodel = metamodel
-        self.compiled_rules = empty_compiled()
         self.set_model(None, announce=announce)
-
-    def record_batch(self, batch: AppliedBatch) -> None:
-        """Append an accepted batch to the op log, dropping the oldest entry
-        once OP_LOG_MAX is exceeded (bounds memory; see OP_LOG_MAX)."""
-        self.op_log.append(batch)
-        if len(self.op_log) > OP_LOG_MAX:
-            del self.op_log[0]
-            self.op_log_dropped += 1
 
 
 #: Project id for the no-request-context ``get_session()`` (internal/test
@@ -426,32 +196,13 @@ class SessionRegistry:
             return
         # Serialise vs an in-flight commit (evict-during-commit guard).
         with session.write_mutex:
-            if (
-                session.lock_table.active_leases(time.monotonic())
-                or session.hub.has_clients()
-                or (
-                    session.validation_sweep is not None
-                    and session.validation_sweep.running
-                )
+            if session.lock_table.active_leases(time.monotonic()) or (
+                session.hub.has_clients()
             ):
                 # A holder still has a check-out open, or a feed client is
                 # connected. The session was never removed, so it stays
-                # registered — no re-insert needed. A running validation
-                # sweep also blocks eviction — evicting would snapshot fine
-                # but waste the sweep; sweeps finish in seconds and the idle
-                # sweeper retries.
+                # registered — no re-insert needed.
                 return
-            # Only now that eviction is actually going ahead do we cancel the
-            # script sweeps: they must NEVER block eviction (they are
-            # deliberately absent from the guard above — reads are lock-free
-            # and rev-stamped, so a cancelled sweep merely wastes its
-            # remaining work), but cancelling a session that the guard just
-            # REFUSED to evict would kill a sweep the session still needs, and
-            # the idle sweeper's next retry would kill it again — a sweep on a
-            # long-lived session would restart forever and never converge.
-            session.script_sweeps.cancel_all()
-            if session.search_index_build is not None:
-                session.search_index_build.cancel.set()
             if self._evict_hook is not None:
                 self._evict_hook(project_id, session)
             # Remove only after the snapshot hook completes, and only when we
@@ -487,9 +238,6 @@ class SessionRegistry:
         if session is None:
             return
         with session.write_mutex:
-            session.script_sweeps.cancel_all()
-            if session.search_index_build is not None:
-                session.search_index_build.cancel.set()
             with self._guard:
                 self._sessions.pop(project_id, None)
 

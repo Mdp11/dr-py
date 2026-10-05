@@ -30,22 +30,15 @@ from .schema import (
 
 #: Hard cap on entries per exporter. A schema bound in the tradition of
 #: SNIPPET_MAX_CODE_BYTES — enforced at validation (so it rejects at artifact
-#: save), NOT an export-time strictness rule. Without it, POST /exports/run's
-#: viewer-supplied draft definitions could chain unboundedly many whole-table
-#: exports (each O(model)) into one synchronous request.
+#: save), NOT an export-time strictness rule. Without it, a saved
+#: exporter could chain unboundedly many whole-table exports (each O(model))
+#: into one run.
 MAX_EXPORTER_ENTRIES = 50
 
 
 #: The four wire formats an export can ship as. One vocabulary for
-#: `ExporterEntry.format` and the standalone route's `ExportTableIn.format`
-#: (extending both is nearly free — the engine branch is shared).
+#: `ExporterEntry.format`.
 type ExportFormat = Literal["xlsx", "json", "csv", "jsonl"]
-
-#: The two formats that render through the JSON document list — ONE spelling
-#: for every "json family" gate (the engine's split/render branches, the run
-#: route's split-template validation). csv/xlsx take the layout path. The
-#: frontend mirror is `isJsonFamily` in `frontend/src/lib/api/types.ts`.
-JSON_FAMILY: frozenset[ExportFormat] = frozenset({"json", "jsonl"})
 
 
 class JsonDocumentOptions(BaseModel):

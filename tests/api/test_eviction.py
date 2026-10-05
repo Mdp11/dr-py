@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 
 from data_rover.api import main
 from data_rover.api.main import create_app
@@ -20,7 +19,7 @@ MODEL = Path("examples/smart-city.model.json").read_text(encoding="utf-8")
 
 def test_idle_sweep_evicts_and_snapshots_stale_sessions() -> None:
     seed_default_project()
-    c = TestClient(create_app())
+    create_app()
     install(metamodel=MM, model=MODEL)
     assert "default" in get_registry().project_ids()
 
@@ -35,6 +34,6 @@ def test_idle_sweep_evicts_and_snapshots_stale_sessions() -> None:
 
 def test_idle_sweep_keeps_fresh_sessions() -> None:
     seed_default_project()
-    c = TestClient(create_app())
+    create_app()
     install(metamodel=MM, model=MODEL)
     assert main._idle_sweep_once(now=time.monotonic(), ttl=10_000.0) == []

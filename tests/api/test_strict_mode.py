@@ -15,7 +15,7 @@ from data_rover.api.storage import (
     snapshot_key,
 )
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install, head
+from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
 
 
 #: a minimal but VALID metamodel blob — the hydration test re-parses it

@@ -10,28 +10,13 @@ from pydantic import (
     Field,
     TypeAdapter,
     field_validator,
-    model_validator,
 )
 
 from data_rover.core.metamodel.diff import MetamodelStructuralDiff
 from data_rover.core.metamodel.schema import Metamodel
-from data_rover.core.model.change_request import (
-    ChangeRequest as CoreChangeRequest,
-    ModifiedElement as CoreModifiedElement,
-    ModifiedRelationship as CoreModifiedRelationship,
-)
 from data_rover.core.model.element import Element
-from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
-from data_rover.core.navigation.schema import NavigationDefinition
 from data_rover.core.script.schema import SNIPPET_MAX_CODE_BYTES
-from data_rover.core.script.warnings import ScriptWarning
-from data_rover.core.table.exporter import (
-    ExporterDefinition,
-    ExporterEntry,
-    ExportFormat,
-)
-from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.validation.rules.schema import RULES_MAX_YAML_BYTES
 from data_rover.core.view.schema import Folder, View
@@ -48,24 +33,6 @@ class ElementOut(BaseModel):
         return cls(**asdict(element))
 
 
-class TreeItem(BaseModel):
-    """Lightweight tree-row projection: everything Sidebar/TreeRow.svelte
-    renders for a row (display name, type, expand caret) WITHOUT the element's
-    full ``properties`` bag. A ~1k-row folder ships as tens of KB instead of
-    many MB, and the payload cost no longer scales with property size."""
-
-    id: str
-    type_name: str
-    display_name: str
-    child_count: int = 0
-
-
-class TreeItemPage(BaseModel):
-    items: list[TreeItem] = Field(default_factory=list)
-    #: number of items BEFORE limit/offset paging
-    total: int = 0
-
-
 class RelationshipOut(BaseModel):
     id: str
     type_name: str
@@ -77,55 +44,6 @@ class RelationshipOut(BaseModel):
     @classmethod
     def from_core(cls, rel: Relationship) -> RelationshipOut:
         return cls(**asdict(rel))
-
-
-class ModelOut(BaseModel):
-    elements: list[ElementOut]
-    relationships: list[RelationshipOut]
-
-    @classmethod
-    def from_core(cls, model: Model) -> ModelOut:
-        return cls(
-            elements=[ElementOut.from_core(e) for e in model.elements.values()],
-            relationships=[
-                RelationshipOut.from_core(r) for r in model.relationships.values()
-            ],
-        )
-
-
-class CreateElementRequest(BaseModel):
-    type: str
-    properties: dict[str, Any] = Field(default_factory=dict)
-
-
-class UpdateElementRequest(BaseModel):
-    properties: dict[str, Any]
-
-
-class CreateRelationshipRequest(BaseModel):
-    type: str
-    source_id: str
-    target_id: str
-
-
-class InlineModel(BaseModel):
-    elements: list[ElementOut] = Field(default_factory=list)
-    relationships: list[RelationshipOut] = Field(default_factory=list)
-
-
-class SnapshotIn(BaseModel):
-    elements: list[ElementOut] = Field(default_factory=list)
-    relationships: list[RelationshipOut] = Field(default_factory=list)
-
-
-class ValidateRequest(BaseModel):
-    scope: list[str] | None = None
-    inline: InlineModel | None = None
-    #: staged (uncommitted) op batch to validate against the committed model;
-    #: when present, the response tags each issue's origin. Mirrors PreviewRequest.
-    ops: list[OpIn] | None = None
-    #: model_rev the ops were computed against; mismatch -> 409 (like preview).
-    base_rev: int | None = None
 
 
 class IssueOut(BaseModel):
@@ -152,45 +70,6 @@ class IssueOut(BaseModel):
             check=issue.check,
             origin=origin,
         )
-
-
-class RuleSkipOut(BaseModel):
-    """One rule (or whole set) skipped at compile time. ``rule`` is ``""``
-    when the whole set failed to parse."""
-
-    artifact_id: str
-    set_name: str
-    rule: str
-    reason: str
-
-
-class RulesStatusOut(BaseModel):
-    """Compiled-rules health, read straight off the session's cached
-    ``CompiledRules`` — never a model touch. Drift (a rule naming a schema
-    element the metamodel doesn't have) is skipped WHOLE, never evaluated
-    half-blind, and surfaced here rather than as an ownerless issue."""
-
-    total: int
-    skipped: list[RuleSkipOut] = Field(default_factory=list)
-    eval_errors: dict[str, int] = Field(default_factory=dict)
-
-
-class IssueListOut(BaseModel):
-    """Snapshot of the session's maintained issue store (GET /model/issues).
-
-    A cheap read — never a pipeline run: the store is seeded at load/hydrate,
-    streamed into by the background sweep, and spliced by every commit.
-    ``counts`` is exact even when ``issues`` is truncated, so a client can
-    always render true totals.
-    """
-
-    model_config = ConfigDict(protected_namespaces=())
-
-    model_rev: int
-    issues: list[IssueOut] = Field(default_factory=list)
-    counts: dict[str, int] = Field(default_factory=dict)
-    truncated: bool = False
-    rules_status: RulesStatusOut | None = None
 
 
 class RawMetamodelResponse(BaseModel):
@@ -266,20 +145,6 @@ class RulesParseOut(BaseModel):
     errors: list[LintErrorOut] = Field(default_factory=list)
 
 
-class MetamodelDiffResponse(BaseModel):
-    """Read-only sandbox conformance diff + structural document
-    diff. now_failing = issues the candidate metamodel introduces;
-    now_passing = issues it resolves; structural = what changed in the
-    document itself (one differ, also rendered by the commit-diff API)."""
-
-    now_failing: list[IssueOut]
-    now_passing: list[IssueOut]
-    unchanged_count: int
-    current_error_count: int
-    candidate_error_count: int
-    structural: MetamodelStructuralDiff = Field(default_factory=MetamodelStructuralDiff)
-
-
 class ArtifactRefOut(BaseModel):
     id: str
     kind: str
@@ -328,7 +193,6 @@ class ViewOut(BaseModel):
 class ViewStateResponse(BaseModel):
     id: str
     view: ViewOut
-    warnings: list[IssueOut] = Field(default_factory=list)
     view_rev: int = 0
 
 
@@ -362,7 +226,7 @@ class CreateViewIn(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Delta-protocol op schemas (POST /model/ops) — mirror frontend
+# Delta-protocol op schemas (POST /commits) — mirror frontend
 # `frontend/src/lib/state/ops.ts` exactly (THE FILE IS THE CONTRACT)
 # ---------------------------------------------------------------------------
 
@@ -660,12 +524,6 @@ OPS_ADAPTER: TypeAdapter[list[OpIn]] = TypeAdapter(list[OpIn])
 VIEW_OP_ADAPTER: TypeAdapter[ViewOpIn] = TypeAdapter(ViewOpIn)
 
 
-class OpsRequest(BaseModel):
-    #: the model revision the ops were computed against; mismatch -> 409
-    base_rev: int
-    ops: list[OpIn] = Field(default_factory=list)
-
-
 class SnapshotDescriptorOut(BaseModel):
     """``GET /replica/snapshot``: the blob's header fields and the path of
     ``GET /replica/snapshots/{rev}``."""
@@ -712,15 +570,16 @@ class OpsResponse(BaseModel):
     #: None on a response that applied nothing.
     prev_rev: int | None = None
     state_digest: str | None = None
-    #: issue-store delta of the scoped re-validation (see ValidationState)
+    #: always empty: validation is the engine's, so the server reports no
+    #: issue delta
     issues_removed_owner_ids: list[str] = Field(default_factory=list)
     issues_added: list[IssueOut] = Field(default_factory=list)
-    #: post-batch issue count per severity, over the WHOLE issue store
+    #: always empty, as above
     issue_counts: dict[str, int] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
-# Change-request schemas
+# Changed-entity schemas (range diff)
 # ---------------------------------------------------------------------------
 
 
@@ -746,201 +605,6 @@ class CrRelationshipOps(BaseModel):
     added: list[RelationshipOut] = Field(default_factory=list)
     modified: list[ModifiedRelationshipOut] = Field(default_factory=list)
     deleted: list[RelationshipOut] = Field(default_factory=list)
-
-
-class CrOps(BaseModel):
-    elements: CrElementOps = Field(default_factory=CrElementOps)
-    relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
-
-
-class CrBaseline(BaseModel):
-    filename: str | None = None
-    elementCount: int = 0
-    relationshipCount: int = 0
-
-
-def _el(e: ElementOut) -> Element:
-    return Element(
-        id=e.id,
-        type_name=e.type_name,
-        properties=dict(e.properties),
-        rev=e.rev,
-    )
-
-
-def _rel(r: RelationshipOut) -> Relationship:
-    return Relationship(
-        id=r.id,
-        type_name=r.type_name,
-        source_id=r.source_id,
-        target_id=r.target_id,
-        properties=dict(r.properties),
-        rev=r.rev,
-    )
-
-
-class ChangeRequestIn(BaseModel):
-    format: Literal["datarover.cr/v1"]
-    createdAt: str
-    baseline: CrBaseline = Field(default_factory=CrBaseline)
-    ops: CrOps = Field(default_factory=CrOps)
-
-    def to_core(self) -> CoreChangeRequest:
-        return CoreChangeRequest(
-            elements_added=[_el(e) for e in self.ops.elements.added],
-            elements_modified=[
-                CoreModifiedElement(
-                    id=m.id,
-                    before=_el(m.before),
-                    after=_el(m.after),
-                )
-                for m in self.ops.elements.modified
-            ],
-            elements_deleted=[_el(e) for e in self.ops.elements.deleted],
-            relationships_added=[_rel(r) for r in self.ops.relationships.added],
-            relationships_modified=[
-                CoreModifiedRelationship(
-                    id=m.id,
-                    before=_rel(m.before),
-                    after=_rel(m.after),
-                )
-                for m in self.ops.relationships.modified
-            ],
-            relationships_deleted=[_rel(r) for r in self.ops.relationships.deleted],
-        )
-
-
-# ---------------------------------------------------------------------------
-# Paged/on-demand read schemas (see routes/read.py)
-# ---------------------------------------------------------------------------
-
-
-class ModelSummary(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-
-    model_rev: int
-    element_count: int
-    relationship_count: int
-    #: exact-type element counts (no inheritance roll-up), sorted by type name
-    elements_by_type: dict[str, int] = Field(default_factory=dict)
-    #: issue count per severity from the session issue store; ``None`` means
-    #: the model has not been validated yet (no full run seeded the store) —
-    #: clients should render "not validated" rather than zero issues
-    issue_counts: dict[str, int] | None = None
-    #: number of op batches available to POST /model/undo
-    undo_depth: int = 0
-
-
-class ElementPage(BaseModel):
-    items: list[ElementOut] = Field(default_factory=list)
-    #: number of matches BEFORE limit/offset paging
-    total: int = 0
-
-
-class NeighborhoodOut(BaseModel):
-    nodes: list[ElementOut] = Field(default_factory=list)
-    #: relationships whose BOTH endpoints are in ``nodes``, sorted by id
-    edges: list[RelationshipOut] = Field(default_factory=list)
-    #: BFS distance from the center element (0) for every node
-    hops_by_id: dict[str, int] = Field(default_factory=dict)
-    #: True if some neighbors were dropped because ``cap`` was reached
-    truncated: bool = False
-
-
-class RelationshipPage(BaseModel):
-    items: list[RelationshipOut] = Field(default_factory=list)
-    #: number of incident relationships BEFORE limit/offset paging
-    total: int = 0
-
-
-class ChangesOut(BaseModel):
-    """``datarover.cr/v1`` change request derived from the session op log.
-
-    Shape-compatible with the frontend's ``ChangeRequest`` type
-    (``frontend/src/lib/state/cr.ts``) plus one extra field, ``complete``,
-    which :class:`ChangeRequestIn` ignores on the apply path — so the
-    document round-trips through POST /model/apply-cr unchanged.
-    """
-
-    format: Literal["datarover.cr/v1"] = "datarover.cr/v1"
-    createdAt: str
-    baseline: CrBaseline = Field(default_factory=CrBaseline)
-    ops: CrOps = Field(default_factory=CrOps)
-    #: False when the op log was truncated (OP_LOG_MAX exceeded) since the
-    #: model was loaded: the CR then describes only the RETAINED history and
-    #: its baseline is the post-truncation state, not the loaded base model
-    complete: bool = True
-
-
-class ChangesSummaryOut(BaseModel):
-    #: batches currently retained in the op log
-    batches: int = 0
-    #: compacted CR op count (= adds + modifies + deletes)
-    ops: int = 0
-    adds: int = 0
-    modifies: int = 0
-    deletes: int = 0
-    #: see ChangesOut.complete
-    complete: bool = True
-
-
-#: rejected at request-parse time: every CR costs one O(model) copy plus a
-#: full index rebuild, so an unbounded list is an N-fold multiplier on it
-MAX_CRS_PER_REQUEST = 20
-
-
-class ProposeCrRequest(BaseModel):
-    #: applied in order; each CR sees the result of the previous one
-    crs: list[ChangeRequestIn] = Field(min_length=1, max_length=MAX_CRS_PER_REQUEST)
-
-
-class ProposeCrResponse(BaseModel):
-    """Dry-run result of POST /model/apply-cr: nothing was applied."""
-
-    model_config = ConfigDict(protected_namespaces=())
-
-    #: the session rev the proposal was computed against; the client refuses
-    #: to stage the batch if it has moved
-    model_rev: int
-    #: the COMBINED base -> final change request (what the preview renders)
-    cr: ChangesOut
-    #: the op batch that lands ``cr`` when staged and committed
-    ops: list[ModelOpIn] = Field(default_factory=list)
-
-
-class CompareResponse(BaseModel):
-    """POST /model/compare: the session -> other-model change request."""
-
-    model_config = ConfigDict(protected_namespaces=())
-
-    model_rev: int
-    cr: ChangesOut
-    #: entity counts of the OTHER model (the "to" side) so the client can
-    #: report how many unchanged entities the diff hides
-    other_element_count: int
-    other_relationship_count: int
-
-
-# ---------------------------------------------------------------------------
-# Streaming load/save schemas (see routes/model.py)
-# ---------------------------------------------------------------------------
-
-
-class LoadModelRequest(BaseModel):
-    #: local filesystem path of the model JSON file, resolved server-side
-    path: str
-
-
-class SaveModelRequest(BaseModel):
-    #: local filesystem path to write to, resolved server-side
-    path: str
-
-
-class SaveModelResponse(BaseModel):
-    path: str
-    element_count: int
-    relationship_count: int
-    bytes_written: int
 
 
 # --- check-out / commit + locking ------------------------------------------
@@ -972,13 +636,6 @@ class LeaseOut(BaseModel):
     token: str
     intent: str
     expires_at: float
-
-
-class LockConflictOut(BaseModel):
-    resource_id: str
-    held_by: str
-    held_by_email: str = ""
-    held_mode: str
 
 
 class LockResponse(BaseModel):
@@ -1307,102 +964,8 @@ class ArtifactUpdateIn(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Snippet execution (POST /snippets/run|lint|cancel)
+# Snippet authoring (POST /snippets/lint|format, GET /snippets/docs)
 # ---------------------------------------------------------------------------
-
-
-class ElementsInputIn(BaseModel):
-    """A named run input carrying elements — mirrors
-    `core.script.runner.ElementsInput`."""
-
-    kind: Literal["elements"]
-    ids: list[str] = Field(default_factory=list)
-
-
-class ScalarsInputIn(BaseModel):
-    """A named run input carrying scalar values — mirrors
-    `core.script.runner.ScalarsInput`."""
-
-    kind: Literal["scalars"]
-    values: list[Any] = Field(default_factory=list)
-
-
-SnippetInputIn = Annotated[
-    ElementsInputIn | ScalarsInputIn, Field(discriminator="kind")
-]
-
-
-class SnippetRunIn(BaseModel):
-    """Body for POST /snippets/run. Exactly one of `code` (inline) /
-    `artifact_id` (a saved `code_snippet` artifact) must be supplied — mirrors
-    `EvaluateNavigationIn`'s exactly-one pattern above."""
-
-    run_id: str
-    code: str | None = None
-    artifact_id: str | None = None
-    entry: Literal["script", "value", "step"] = "script"
-    element_ids: list[str] = Field(default_factory=list)
-    #: Named inputs for a two-argument `value` — what a script column's
-    #: `inputs` resolve to for one row, bound by hand because a console run
-    #: has no row to resolve them from.
-    inputs: dict[str, SnippetInputIn] | None = None
-
-    @model_validator(mode="after")
-    def _exactly_one(self) -> SnippetRunIn:
-        if (self.code is None) == (self.artifact_id is None):
-            raise ValueError("provide exactly one of `code` / `artifact_id`")
-        return self
-
-    @model_validator(mode="after")
-    def _entry_context(self) -> SnippetRunIn:
-        """`value` runs against 1+ bound elements, `step` against exactly one;
-        `script` ignores the field. Enforced here (not in the runner) so a bad
-        request 422s before a sandbox instance is consumed."""
-        if self.entry == "value" and len(self.element_ids) < 1:
-            raise ValueError("entry 'value' requires at least one element id")
-        if self.entry == "step" and len(self.element_ids) != 1:
-            raise ValueError("entry 'step' requires exactly one element id")
-        if self.inputs is not None and self.entry != "value":
-            raise ValueError("`inputs` is only meaningful for entry 'value'")
-        return self
-
-
-class SnippetErrorOut(BaseModel):
-    """Mirrors `core.script.runner.ScriptError` field-for-field."""
-
-    kind: Literal[
-        "syntax",
-        "runtime",
-        "timeout",
-        "cancelled",
-        "memory",
-        "limit",
-        "unavailable",
-        "pending",
-    ]
-    message: str
-    traceback: str | None = None
-
-
-class SnippetRunOut(BaseModel):
-    run_id: str
-    stdout: str
-    result_repr: str | None
-    #: recorded op batch, validated through `OPS_ADAPTER` by the route before
-    #: this response is built (a runner emitting an invalid op dict is a
-    #: server bug, surfaced as a 500 instead of reaching this model).
-    ops: list[OpIn]
-    error: SnippetErrorOut | None
-    duration_ms: int
-    #: `session.model_rev` as observed AFTER the run completed.
-    model_rev: int
-    #: True when `model_rev` moved between the run's start and end — the run
-    #: executed without holding `write_mutex` (see routes/snippets.py's
-    #: module docstring), so a concurrent commit could land mid-run. The
-    #: run's own read was still a consistent point-in-time snapshot; `stale`
-    #: only tells the caller that snapshot may now be behind HEAD.
-    stale: bool
-    truncated: bool
 
 
 class SnippetLintIn(BaseModel):
@@ -1421,10 +984,6 @@ class DiagnosticOut(BaseModel):
 class SnippetLintOut(BaseModel):
     diagnostics: list[DiagnosticOut]
     entry_points: list[str]
-
-
-class SnippetCancelIn(BaseModel):
-    run_id: str
 
 
 class SnippetFormatIn(BaseModel):
@@ -1454,7 +1013,7 @@ class FacadeDocEntryOut(BaseModel):
 
 
 class SnippetLimitsOut(BaseModel):
-    """The actual configured `RunLimits` values the runner enforces."""
+    """The limits the browser engine's script runner enforces."""
 
     wall_timeout_s: float
     memory_bytes: int
@@ -1469,306 +1028,3 @@ class SnippetDocsOut(BaseModel):
     facade: list[FacadeDocEntryOut]
     limits: SnippetLimitsOut
     notes: list[str]
-
-
-# ---------------------------------------------------------------------------
-# Navigation evaluation (POST /navigations/evaluate)
-# ---------------------------------------------------------------------------
-
-
-class EvaluateNavigationIn(BaseModel):
-    """Exactly one of `definition` (inline) / `artifact_id` (saved)."""
-
-    definition: NavigationDefinition | None = None
-    artifact_id: str | None = None
-    row_element_id: str | None = None
-    limit: int = Field(100, ge=1, le=500)
-    offset: int = Field(0, ge=0)
-
-    @model_validator(mode="after")
-    def _exactly_one(self) -> EvaluateNavigationIn:
-        if (self.definition is None) == (self.artifact_id is None):
-            raise ValueError("provide exactly one of `definition` / `artifact_id`")
-        return self
-
-
-class ScriptWarningOut(BaseModel):
-    """A structured embedded-evaluation degradation.
-
-    `code` is typed `str`, NOT the enum, so a client that does not know a
-    newly added code still parses the payload — the frontend formatter falls
-    back to `detail` for an unrecognized code. Copy lives client-side, which
-    is why nothing here is a sentence.
-    """
-
-    code: str
-    #: How many times this kind fired.
-    occurrences: int
-    #: Summed subject quantity (unknown ids, dropped elements); 0 when the
-    #: kind carries no such number.
-    total: int = 0
-    #: The variable part — an artifact ref, an exception message.
-    detail: str | None = None
-
-    @classmethod
-    def from_core(cls, w: ScriptWarning) -> ScriptWarningOut:
-        return cls(
-            code=str(w.code), occurrences=w.occurrences, total=w.total, detail=w.detail
-        )
-
-
-class ChainValueOut(BaseModel):
-    """Terminal VALUE node in a chain: a scalar property step ends its chain at
-    the property's value instead of an element. Discriminated from `TreeItem`
-    by the `kind` tag (TreeItem has no `kind` field)."""
-
-    kind: Literal["value"] = "value"
-    value: str | int | float | bool
-
-
-class ChainPageOut(BaseModel):
-    """One page of navigation chains, each node a TreeItem projection — except
-    a possible trailing `ChainValueOut` when the path ends in a scalar property
-    step or in a script step that returned a non-element. `total` counts
-    chains found WITHIN the evaluation caps; `truncated` means the caps
-    stopped enumeration (there may be more matches than `total`)."""
-
-    step_types: list[str] = Field(default_factory=list)
-    chains: list[list[TreeItem | ChainValueOut]] = Field(default_factory=list)
-    total: int = 0
-    truncated: bool = False
-    warnings: list[ScriptWarningOut] = Field(
-        default_factory=list,
-        description="Script-step degradations produced by this evaluation.",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Table evaluation (POST /tables/evaluate)
-# ---------------------------------------------------------------------------
-
-
-class EvaluateTableIn(BaseModel):
-    """Exactly one of `definition` (inline) / `artifact_id` (saved). The row
-    order is the definition's own `sort`."""
-
-    definition: TableDefinition | None = None
-    artifact_id: str | None = None
-    offset: int = Field(0, ge=0)
-    limit: int = Field(100, ge=1, le=500)
-
-    @model_validator(mode="after")
-    def _exactly_one(self) -> EvaluateTableIn:
-        if (self.definition is None) == (self.artifact_id is None):
-            raise ValueError("provide exactly one of `definition` / `artifact_id`")
-        return self
-
-
-class ExportTableIn(EvaluateTableIn):
-    """`/tables/export`'s payload: `EvaluateTableIn` plus the output format.
-
-    A SUBCLASS rather than a new field on `EvaluateTableIn` so `/tables/evaluate`
-    and `/tables/script-errors` — which have no notion of a format — keep their
-    exact wire contract. `offset`/`limit` are inherited and ignored here: an
-    export is always whole-table.
-    """
-
-    format: ExportFormat = "xlsx"
-
-
-class RunExportIn(BaseModel):
-    """`POST /exports/run` body. The id travels in the BODY, not the path:
-    `authz._READ_ONLY_POST_SUFFIXES` matches fixed path suffixes, and this
-    route must be viewer-callable like `/tables/export`.
-
-    Exactly one of `artifact_id`/`definition` is required (the route 422s
-    otherwise). A `definition` is a staged DRAFT: it is validated
-    by this field's own `ExporterDefinition` typing — the same shape
-    `EXPORTER_ADAPTER` enforces on a committed payload — and flows through
-    the identical run guards, so a draft is render-only client input, no more
-    trusted than a committed row. Referenced tables always evaluate from
-    their COMMITTED definitions: presentation drafts export live; evaluation
-    drafts still require commit."""
-
-    artifact_id: str | None = None
-    definition: ExporterDefinition | None = None
-    #: Stands in for the artifact name on a draft run: feeds the zip-stem
-    #: fallback and the manifest's `artifact_name`; "" -> "export".
-    name: str = ""
-
-
-class TransformPreviewIn(BaseModel):
-    """`POST /exports/preview-transform`: the exporter entry AS DRAFTED —
-    inline transform code that was never saved works, which is the point of
-    a test button. Validated by the same `ExporterEntry` schema the artifact
-    payload uses."""
-
-    entry: ExporterEntry
-
-
-class TransformPreviewFileOut(BaseModel):
-    """One dry `transform(doc)` call: the document of ONE file the export
-    would write. `filename` is the member name the export would use (the
-    deduplicated split stem, or `<entry>.<format>` unsplit). `input`/`output`
-    are pretty-printed JSON TEXT (rendered server-side, so the panes never
-    disagree with the export's document shape). `output` is None iff `error`
-    is set."""
-
-    filename: str
-    input: str
-    output: str | None
-    stdout: str
-    error: SnippetErrorOut | None
-    duration_ms: int
-
-
-class TransformPreviewOut(BaseModel):
-    """The entry's transform run over its table: one `TransformPreviewFileOut`
-    per file. Unsplit, that is a single file rendered from a bounded sample
-    (`truncated` = the sample covers only the head of the table). Split
-    (`split` True), it is the FULL run — every partition of every row, each
-    transformed like the export does — bounded only by a file cap
-    (`truncated` = more files exist than were transformed). A file whose
-    transform failed carries its own `error`; the run continues past it.
-    `duration_ms` is the whole run's wall time."""
-
-    files: list[TransformPreviewFileOut]
-    split: bool
-    truncated: bool
-    duration_ms: int
-
-
-class JsonPreviewOut(BaseModel):
-    """A bounded, already-rendered JSON sample for the export settings UI.
-
-    `sample` is the rendered TEXT rather than parsed objects: the pane displays
-    it verbatim, and re-serializing it client-side would let key order and
-    formatting drift from what the real export produces.
-    """
-
-    sample: str
-    truncated: bool
-
-
-class TableColumnOut(BaseModel):
-    kind: str
-    header: str
-    width_px: int | None = None
-
-
-class TableCellOut(BaseModel):
-    kind: Literal["element", "value", "values", "elements", "error", "pending"]
-    # element
-    item: TreeItem | None = None
-    #: element: the type an editable reference cell's picker offers
-    ref_type: str | None = None
-    # value — and element, where `element_id` is the OWNER of the reference
-    # (the patch target) and `editable` mirrors the value cell's flag
-    present: bool | None = None
-    value: object | None = None
-    element_id: str | None = None
-    editable: bool | None = None
-    # values / elements
-    items: list[TreeItem] | None = None
-    values: list[object] | None = None
-    total: int | None = None
-    truncated: bool | None = None
-    # error
-    message: str | None = None
-    traceback: str | None = None
-
-
-class TableRowOut(BaseModel):
-    key: list[object]
-    cells: list[TableCellOut]
-
-
-class ScriptStatusOut(BaseModel):
-    """Progress of script-column computation for this table.
-
-    `ready`: NOTHING IS PENDING COMPUTATION — the rows in this response are
-    final for this model rev and polling again would not change them. It does
-    NOT promise every cell holds a value: the degraded-not-failed stance means
-    a cell whose call was never attempted (no runner, no free concurrency slot)
-    or whose snippet raised renders as an `unavailable`/error cell under a
-    `ready` status, because retrying is the client's decision, not a matter of
-    waiting for a background sweep.
-    `computing`: a background sweep is filling the cell cache; the rows in this
-    response are DEGRADED (build order, possibly `pending` cells) — poll again.
-    `failed`: the work is dead and will not finish on its own; `message` says
-    why. Cleared by the next commit, which re-keys the sweep registry.
-
-    Only ever populated for tables that actually carry a script column: a table
-    with no script work reports `script_status: null`.
-
-    The field names below are part of the frontend contract — the client reads
-    `state`/`done`/`total`/`message` verbatim (see
-    `frontend/src/lib/state/table-editor.svelte.ts`), so they must not be
-    renamed without changing the client in the same commit.
-    """
-
-    state: Literal["ready", "computing", "failed"]
-    done: int = 0
-    total: int | None = None
-    message: str | None = None
-
-
-class ScriptErrorItemOut(BaseModel):
-    """One failed script cell, addressable by grid position.
-
-    `row_index` is an index into the row order the CLIENT DISPLAYS for the same
-    `(definition, model_rev)` — the recap route derives it exactly the way
-    `/tables/evaluate` derives its page, degrade rules included — so the panel
-    can scroll straight to the offending cell. `column_index` indexes
-    `defn.columns`, i.e. the same positions as `TablePageOut.columns` and each
-    `TableRowOut.cells` (hidden columns are NOT filtered out, so the two stay
-    aligned).
-
-    `row_element_id`/`row_label` describe the row's first key slot when it holds
-    an element id (`display_name` of it), purely so the panel can name the row
-    without a second round trip; both are None for a row keyed by a scalar.
-    """
-
-    row_index: int
-    row_element_id: str | None = None
-    row_label: str | None = None
-    column_index: int
-    column_label: str
-    message: str
-
-
-class ScriptErrorsOut(BaseModel):
-    """Whole-table script-error recap (cache-only; never drives the guest).
-
-    `state` is a one-valued literal on purpose: the recap route answers either
-    this shape with 200, or a `ScriptStatusOut` (`computing`/`failed`) with 202,
-    so a client can discriminate the two bodies on `state` alone even though the
-    STATUS CODE is the actual retry signal (same contract as `/tables/export`).
-
-    `errors` is capped at `routes.tables.SCRIPT_ERRORS_CAP`; `total_errors` is
-    always the full count, and `truncated` says the list is short of it.
-    """
-
-    state: Literal["ready"] = "ready"
-    errors: list[ScriptErrorItemOut]
-    total_errors: int
-    truncated: bool
-
-
-class TablePageOut(BaseModel):
-    columns: list[TableColumnOut]
-    rows: list[TableRowOut]
-    total: int
-    #: Rows the row source produced BEFORE expand columns split them (for a
-    #: scope source: the scope size) — see `evaluate.RowBuild.base_total`.
-    base_total: int
-    truncated: bool
-    offset: int
-    model_rev: int
-    #: script-step degradations from navigations this evaluation triggered
-    #: (pruned-frontier warnings etc.) + nothing else today. Structured, with
-    #: aggregated counts; the client renders the copy.
-    warnings: list[ScriptWarningOut] = Field(default_factory=list)
-    #: None when the table has no script column at all; otherwise the
-    #: poll-again contract for this page (see `ScriptStatusOut`).
-    script_status: ScriptStatusOut | None = None

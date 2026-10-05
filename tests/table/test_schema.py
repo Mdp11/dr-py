@@ -234,12 +234,9 @@ def test_table_definition_transform_both_set_is_rejected():
 
 
 # ---- script inputs ----------------------------------------------------------
-import pytest
-from pydantic import ValidationError
 
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
 from data_rover.core.table.schema import (
-    TABLE_ADAPTER,
     ColumnRef,
     ElementColumn,
     PropertyColumn,
