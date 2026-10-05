@@ -36,7 +36,7 @@ from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 from data_rover.core.validation.dirty import DirtyCollector, containment_closure
 
-from .. import content
+from .. import content, head
 from ..deps import Session
 from ..hydration import serialize_ops
 from ..settings import get_settings
@@ -521,7 +521,7 @@ def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _Batch
     return res
 
 
-def _persist_commit(
+def _stage_commit(
     db: DbSession,
     project_id: str,
     *,
@@ -539,7 +539,8 @@ def _persist_commit(
     _entity_states: dict[str, Any] | None = None,
     _state_digest: str | None = None,
 ) -> bool:
-    """Append the accepted batch to the durable journal and advance model_rev.
+    """Stage the accepted batch in the durable journal and advance model_rev.
+    The caller writes the head rows and commits (``_commit_head``).
 
     The batch arrives as three explicit lists rather than a ``_BatchResult``
     because a commit can span BOTH content families: ``POST /commits`` merges
@@ -550,7 +551,7 @@ def _persist_commit(
     the model-only caller passes a ``list[ModelOpIn]``, which is not a
     ``list[OpIn]`` under list invariance.
 
-    Only persists when the project actually has a durable model row (an
+    Only stages when the project actually has a durable model row (an
     in-memory-only session has none yet — it persists a baseline when it is installed). Keeps DB model_rev in lockstep with the
     just-bumped session.model_rev.
 
@@ -568,11 +569,13 @@ def _persist_commit(
     ``_entity_states`` is ``capture_entity_states(model, res)`` for the
     applied batch — the diff reader's journal-only input; None (over-cap or
     a writer that has no model batch) means the reader reconstructs.
-    ``_state_digest`` is the session's state digest after the batch.
+    ``_state_digest`` is the session's state digest after the batch; it lands
+    on the model row.
 
-    Returns True if a durable row existed and the commit was persisted,
+    Returns True if a durable row existed and the commit was staged,
     False when the project has no model row (in-memory-only session)."""
-    if content.get_model_row(db, project_id) is None:
+    model_row = content.get_model_row(db, project_id)
+    if model_row is None:
         return False
     content.append_commit(
         db,
@@ -592,8 +595,26 @@ def _persist_commit(
         state_digest=_state_digest,
     )
     content.set_model_rev(db, project_id, rev)
-    db.commit()
+    if _state_digest is not None:
+        model_row.state_digest = _state_digest
     return True
+
+
+def _commit_head(
+    db: DbSession,
+    project_id: str,
+    model: Model,
+    res: _BatchResult,
+    *,
+    rebound: bool = False,
+) -> None:
+    """Write the staged batch's head rows and commit the transaction, so the
+    ``Commit`` row, the ``ModelRow`` update and the rows land together. A
+    rebind changes which properties are references, so its refs are rebuilt."""
+    head.write_batch(db, project_id, model.metamodel, model, res)
+    if rebound:
+        head.rebuild_refs(db, project_id, model.metamodel)
+    db.commit()
 
 
 def _maybe_periodic_snapshot(

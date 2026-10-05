@@ -126,7 +126,8 @@ from .ops import (
     _apply_batch,
     _BatchResult,
     _maybe_periodic_snapshot,
-    _persist_commit,
+    _commit_head,
+    _stage_commit,
     _rollback,
 )
 
@@ -1041,7 +1042,7 @@ def create_commit(
         unwind.rev_bumped = True
         # e. persist to the durable journal; 500 + full rollback
         #    on failure. The view blob (if touched) is staged INSIDE this same
-        #    try, on the same DB transaction _persist_commit's own
+        #    try, on the same DB transaction _commit_head's
         #    db.commit() will flush — so the view row and the Commit row
         #    land or roll back together. It MUST be inside the try: staging
         #    is a db.flush() (content.upsert_view), which can raise
@@ -1059,7 +1060,7 @@ def create_commit(
                         db, project_id, vid, blob=target.model_dump_json()
                     )
                     new_view_revs[vid] = view_row.view_rev
-            persisted = _persist_commit(
+            persisted = _stage_commit(
                 db,
                 project_id,
                 rev=session.model_rev,
@@ -1079,6 +1080,8 @@ def create_commit(
                 _entity_states=capture_entity_states(model, res),
                 _state_digest=state_digest,
             )
+            if persisted:
+                _commit_head(db, project_id, model, res, rebound=rebound)
         except Exception as exc:
             # undo every live half — see _CommitUnwind. By this point that is
             # all of them: the rev bump included, and the
@@ -1090,7 +1093,7 @@ def create_commit(
             ) from exc
         if (artifact_ops or view_ops or metamodel_ops) and not persisted:
             # No durable model row (in-memory-only legacy project), so
-            # _persist_commit skipped its db.commit() — but artifact rows,
+            # _stage_commit left the transaction open — but artifact rows,
             # view blobs and metamodel/layout rows are real DB state that must
             # not silently vanish when the request session closes. Commit them
             # on their own; the journal entry is the only thing this project
@@ -1418,7 +1421,7 @@ def revert_commit(
         issues_json: list[dict] = []
         unwind.db_staged = True
         try:
-            persisted = _persist_commit(
+            persisted = _stage_commit(
                 db,
                 project_id,
                 rev=session.model_rev,
@@ -1433,6 +1436,8 @@ def revert_commit(
                 _entity_states=capture_entity_states(model, res),
                 _state_digest=state_digest,
             )
+            if persisted:
+                _commit_head(db, project_id, model, res)
         except Exception as exc:
             unwind.unwind()  # undo every live half — see _CommitUnwind
             raise HTTPException(

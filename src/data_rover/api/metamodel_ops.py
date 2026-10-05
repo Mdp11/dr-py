@@ -73,7 +73,7 @@ class MetamodelBatchResult:
     the ``on_swap`` callback instead (see the module docstring, and
     ``routes/commits.py``'s a3 step).
 
-    The two row ids feed ``_persist_commit``'s ``from/to_metamodel_id``
+    The two row ids feed ``_stage_commit``'s ``from/to_metamodel_id``
     columns so every reader keyed off them (staleness guard, history
     ``is_rebind``, ``first_rebind_after``, ``_metamodel_structural``) keeps
     working unchanged."""

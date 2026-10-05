@@ -23,7 +23,7 @@ from data_rover.core.model.model import Model
 from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import View
 
-from . import content
+from . import content, head
 from .artifact_ops import split_ops
 from .db import db_session
 from .db_models import Commit
@@ -175,6 +175,7 @@ def hydrate_session(project_id: str) -> Session:
         assert mm_row is not None  # FK guarantees it
         model_rev = model_row.model_rev
         strict_mode = bool((model_row.validation_policy or {}).get("strict", False))
+        head_unwritten = model_row.next_seq is None
         snap = content.latest_snapshot(s, project_id, max_rev=model_rev)
         tail = (
             content.commits_after(s, project_id, snap.rev) if snap is not None else []
@@ -212,6 +213,11 @@ def hydrate_session(project_id: str) -> Session:
     session = Session(metamodel=metamodel, model=model)
     session.model_rev = model_rev
     replay_commits_into(session, tail)
+    if head_unwritten:
+        # a project from before the head tables: write its rows from the
+        # hydrated model once
+        with db_session() as s:
+            head.write_baseline(s, project_id, metamodel, model)
     session.views = views
     session.strict_mode = strict_mode
     return session

@@ -12,6 +12,7 @@ import enum
 from datetime import datetime, UTC
 
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     ForeignKey,
     Index,
@@ -169,11 +170,79 @@ class ModelRow(Base):
     #: ``{"strict": bool}``. NULL / missing key reads as strict=false (the
     #: inspectable default).
     validation_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    #: The head tables' bookkeeping (``head.py``): the state digest of the rows
+    #: as 16 hex digits, their counts, and the next ``seq`` to hand out (one
+    #: counter above both tables; NULL = the rows are not written yet).
+    state_digest: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    element_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    relationship_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    next_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     #: Declared so SQLAlchemy's unit-of-work can order INSERTs correctly (it
     #: resolves FK dependencies via relationship edges, not FK columns alone).
     metamodel: Mapped[MetamodelRow] = relationship()
     project: Mapped[Project] = relationship()
+
+
+class ElementRow(Base):
+    """One element of a project's head. ``properties`` is the JSON text the
+    snapshot line encoder writes for the dict (``head.encode_properties``),
+    stored as text so floats such as ``1.0`` and integers past 2**53 stay exact.
+    ``seq`` orders the rows as the model's dict orders its elements."""
+
+    __tablename__ = "elements"
+    __table_args__ = (UniqueConstraint("project_id", "seq"),)
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    type_name: Mapped[str] = mapped_column(String, nullable=False)
+    properties: Mapped[str] = mapped_column(Text, nullable=False)
+    rev: Mapped[int] = mapped_column(Integer, nullable=False)
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class RelationshipRow(Base):
+    """One relationship of a project's head; the columns of ``ElementRow`` plus
+    its ends. Its ``seq`` is in a space of its own."""
+
+    __tablename__ = "relationships"
+    __table_args__ = (
+        UniqueConstraint("project_id", "seq"),
+        Index("ix_rel_source", "project_id", "source_id"),
+        Index("ix_rel_target", "project_id", "target_id"),
+    )
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    type_name: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(String, nullable=False)
+    target_id: Mapped[str] = mapped_column(String, nullable=False)
+    properties: Mapped[str] = mapped_column(Text, nullable=False)
+    rev: Mapped[int] = mapped_column(Integer, nullable=False)
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class EntityRefRow(Base):
+    """One element-valued property reference: ``referencer_id`` (an element or a
+    relationship) holds ``target_id`` in such a property. A row belongs to its
+    referencer and outlives the target, so a dangling reference stays findable."""
+
+    __tablename__ = "entity_refs"
+    __table_args__ = (Index("ix_refs_target", "project_id", "target_id"),)
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    referencer_id: Mapped[str] = mapped_column(String, primary_key=True)
+    target_id: Mapped[str] = mapped_column(String, primary_key=True)
 
 
 class ViewRow(Base):

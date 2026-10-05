@@ -10,8 +10,9 @@ import yaml
 
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.metamodel.schema import Metamodel
+from data_rover.core.model.model import Model
 
-from .. import content
+from .. import content, head
 from ..db import get_db
 from ..db_models import User
 from ..deps import Session, get_request_session, require_metamodel
@@ -91,6 +92,7 @@ async def upload_metamodel(
         content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
         content.clear_history(db, project_id)
         content.set_model_rev(db, project_id, session.model_rev)
+        head.write_baseline(db, project_id, metamodel, Model(metamodel))
         db.commit()
     finally:
         session.announce_reset()

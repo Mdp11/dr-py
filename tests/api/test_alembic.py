@@ -251,3 +251,67 @@ def test_migration_0017_downgrade_backfills_null_counts(tmp_path: Path) -> None:
             text("SELECT validation_error_count FROM commits WHERE rev = 1")
         ).scalar_one()
     assert count == 0
+
+
+def test_migration_0018_adds_head_tables_and_model_columns(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 't10.db'}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "0017")
+    engine = create_engine(url)
+    head_tables = {"elements", "relationships", "entity_refs"}
+    assert not head_tables & set(inspect(engine).get_table_names())
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO projects (id, name) VALUES ('p1', 'P1')"))
+        conn.execute(
+            text("INSERT INTO metamodels (id, name, version, blob, created_at) "
+                 "VALUES ('m1', '', 1, '', '2026-10-05 00:00:00')")
+        )
+        conn.execute(
+            text("INSERT INTO models (id, project_id, metamodel_id, name, model_rev) "
+                 "VALUES ('x1', 'p1', 'm1', 'model', 3)")
+        )
+
+    command.upgrade(cfg, "0018")
+    insp = inspect(engine)
+    assert head_tables <= set(insp.get_table_names())
+    cols = {c["name"]: c for c in insp.get_columns("models")}
+    assert cols["state_digest"]["nullable"] is True
+    assert cols["next_seq"]["nullable"] is True
+    assert cols["element_count"]["nullable"] is False
+    assert cols["relationship_count"]["nullable"] is False
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT model_rev, element_count, relationship_count, next_seq, "
+                 "state_digest FROM models")
+        ).one()
+    assert tuple(row) == (3, 0, 0, None, None)
+
+    rel_cols = {c["name"] for c in insp.get_columns("relationships")}
+    assert {"project_id", "id", "type_name", "properties", "rev", "seq",
+            "source_id", "target_id"} == rel_cols
+    assert {i["name"] for i in insp.get_indexes("relationships")} >= {
+        "ix_rel_source", "ix_rel_target"
+    }
+    assert {i["name"] for i in insp.get_indexes("entity_refs")} >= {"ix_refs_target"}
+    assert insp.get_pk_constraint("entity_refs")["constrained_columns"] == [
+        "project_id", "referencer_id", "target_id"
+    ]
+    for table in ("elements", "relationships"):
+        assert any(
+            u["column_names"] == ["project_id", "seq"]
+            for u in insp.get_unique_constraints(table)
+        )
+        fks = insp.get_foreign_keys(table)
+        assert fks[0]["referred_table"] == "projects"
+        assert fks[0].get("options", {}).get("ondelete") == "CASCADE"
+
+    command.downgrade(cfg, "0017")
+    insp = inspect(engine)
+    assert not head_tables & set(insp.get_table_names())
+    cols = {c["name"] for c in insp.get_columns("models")}
+    assert not {"state_digest", "element_count", "relationship_count", "next_seq"} & cols
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT model_rev FROM models")).scalar_one() == 3

@@ -267,7 +267,7 @@ def test_a_commit_that_could_not_be_persisted_takes_the_digest_back(
     def _boom(*args: Any, **kwargs: Any) -> bool:
         raise RuntimeError("no database")
 
-    monkeypatch.setattr("data_rover.api.routes.commits._persist_commit", _boom)
+    monkeypatch.setattr("data_rover.api.routes.commits._stage_commit", _boom)
     res = client.post(
         papi("/commits"),
         json={

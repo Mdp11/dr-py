@@ -815,7 +815,7 @@ def test_orphan_db_commit_failure_unwinds_the_batch(
     """The layout-only branch that commits orphan DB state on a project with
     no durable model row must unwind like every other persist step.
 
-    ``_persist_commit`` is stubbed to report "nothing journalled" (the
+    ``_stage_commit`` is stubbed to report "nothing journalled" (the
     in-memory-only project's shape) so the route reaches its
     ``if (artifact_ops or view_ops or metamodel_ops) and not persisted:``
     branch, and the DB session's ``commit`` is made to raise there. Without
@@ -829,7 +829,7 @@ def test_orphan_db_commit_failure_unwinds_the_batch(
     token = _acquire_mm(client)
     base = _rev(client)
 
-    monkeypatch.setattr(commits_mod, "_persist_commit", lambda *a, **k: False)
+    monkeypatch.setattr(commits_mod, "_stage_commit", lambda *a, **k: False)
 
     def _boom(self: object) -> None:
         raise RuntimeError("db down")

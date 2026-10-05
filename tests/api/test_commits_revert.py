@@ -138,7 +138,7 @@ def test_revert_db_failure_rolls_back_in_memory(
     def _boom(*a: object, **k: object) -> None:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(commits_mod, "_persist_commit", _boom)
+    monkeypatch.setattr(commits_mod, "_stage_commit", _boom)
     r = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
         json={"target_rev": target, "base_rev": before_rev},

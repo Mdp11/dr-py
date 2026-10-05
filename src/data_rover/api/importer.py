@@ -20,7 +20,7 @@ from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import Folder, View
 
-from . import content, tenancy
+from . import content, head, tenancy
 from .artifact_bundle import ArtifactBundle, BundleArtifact, SkippedEntry
 from .artifact_kinds import get_spec, rewrite_refs
 from .db import db_session, init_engine
@@ -150,6 +150,10 @@ def import_project(
     with db_session() as s:
         if s.get(Project, project_id) is not None:
             return []  # already imported
+        # built first and inside the transaction: a model that does not build
+        # leaves no project behind, and its head rows land with the baseline
+        metamodel = load_metamodel_str(metamodel_yaml)
+        model = build_model_from_dicts(metamodel, parse_model_json(model_json))
         tenancy.upsert_user(s, owner_id, "")
         s.add(Project(id=project_id, name=name))
         s.add(Membership(user_id=owner_id, project_id=project_id, role=Role.owner))
@@ -166,6 +170,7 @@ def import_project(
             id_map={},
         )
         content.set_model_rev(s, project_id, 0)
+        head.write_baseline(s, project_id, metamodel, model)
 
         # Every landed artifact gets a FRESH id; the map below feeds both the
         # payload ref rewrite here and the view-blob rewrite further down. It
@@ -210,10 +215,8 @@ def import_project(
                 except content.DuplicateViewNameError:
                     continue
 
-    # build the model + write the rev-0 snapshot (outside the txn above; the
-    # commit/model rows are already durable and the snapshot row is its own).
-    metamodel = load_metamodel_str(metamodel_yaml)
-    model = build_model_from_dicts(metamodel, parse_model_json(model_json))
+    # the rev-0 snapshot (outside the txn above; the commit/model/head rows are
+    # already durable and the snapshot row is its own)
     sess = Session(metamodel=metamodel, model=model)
     sess.model_rev = 0
     write_snapshot(project_id, sess, 0)
@@ -245,6 +248,7 @@ def install_model(
         id_map={},
     )
     content.set_model_rev(db, project_id, 0)
+    head.write_baseline(db, project_id, metamodel, model)
     db.commit()
     write_snapshot(project_id, session, 0)
     session.announce_reset()

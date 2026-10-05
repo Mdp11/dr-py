@@ -85,10 +85,41 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   at a time. `DATA_ROVER_SNAPSHOT_SYNC=true` (the test conftest) runs it inline. The
   rebind-forced, evict and baseline snapshots stay synchronous — they are correctness, not
   bounding.
+- **Head tables** (`head.py`, Alembic `0018`). `elements`, `relationships` and `entity_refs`
+  hold the project's current state as rows, written beside the session model on every path
+  that changes it and equal to it after each one; the session model stays the reader's source
+  until the rows take over.
+  - `elements` and `relationships` are keyed `(project_id, id)` and carry `type_name`, `rev`,
+    `seq` (and `source_id`/`target_id` on a relationship). `properties` is TEXT: the JSON the
+    snapshot line encoder writes for the dict (`head.encode_properties`: compact,
+    `ensure_ascii=False`, `allow_nan=False`), read back through `parse_model_json`. Text keeps
+    `1.0` and integers past 2^53 exact; a float `NaN` arriving by op is refused by the encoder
+    and the commit answers 500 with every write rolled back.
+  - `seq` orders rows as the model's dict orders its entities, which is the order
+    `iter_entity_lines` writes. A batch leaves a surviving entity's `seq` alone; an entity it
+    created, or deleted and created again, takes `ModelRow.next_seq` (then increments it), in
+    the model's `element_order`/`relationship_order`. A revert's restored entities are
+    "created" this way too. A baseline numbers each table from 0 and sets `next_seq` to the
+    larger count; the two tables share the one counter, each with its own unique `(project_id,
+    seq)`.
+  - `entity_refs` has one `(referencer_id, target_id)` row per element-valued property
+    reference of an element or relationship (`head.ref_props` mirrors
+    `IndexSet._ref_prop_names`: properties whose datatype is an element type), equal to the
+    model's referencer index. A row outlives its target; a touched entity's rows are replaced,
+    a deleted one's removed, and a rebind rebuilds them all (`rebuild_refs`, paged by `seq`).
+  - `ModelRow` gains `state_digest` (the commit's folded digest, or `digest_value` at a
+    baseline), `element_count`, `relationship_count` and `next_seq`; NULL `next_seq` means the
+    rows are not written.
+  - Writers, all in the transaction of the `Commit`/`ModelRow` write and never committing
+    themselves: `write_batch` (`POST /commits` and `/commits/revert` through
+    `routes/ops._commit_head`, after `_stage_commit`; it does nothing without a `ModelRow` or
+    while `next_seq` is NULL), `write_baseline` (`importer.install_model`, the model build and
+    write inside `import_project`'s transaction, `POST /metamodel` with an empty model), and
+    the backfill in `hydrate_session` for a project whose `next_seq` is NULL.
 - **`Commit.entity_states`** (nullable JSON) is the full before/after state of every model
   entity a batch touched, captured by every journal writer (`POST /commits`, `/commits/revert`) via `api/commit_states.capture_entity_states` — the applier
   snapshots each entity on first touch (`_BatchResult.before_*`), the post-state is read off the
-  live model right before `_persist_commit`, and a `recreated` key names the ids the batch deleted
+  live model right before `_stage_commit`, and a `recreated` key names the ids the batch deleted
   and created again (`_BatchResult.recreated_*`; absent from older rows). It exists because the inverse ops cannot render a
   `modified` diff entry (an update's inverse patch carries only the touched keys).
   `GET /commits/{rev}/diff` renders the model half from it and reconstructs the model at
@@ -116,7 +147,7 @@ Pessimistic leases gate every durable mutation.
 - **`routes/locks.py`** — `POST /locks` acquires leases (all-or-nothing; 409 with conflict detail on failure); `POST /locks/release` releases by token; `POST /locks/renew` heartbeat-extends all leases under a token; `GET /locks` lists active leases for the project. Holder = authenticated user; times use `time.monotonic()` (same clock as the sweeper).
 - **`routes/commits.py`** — `GET /open` returns `{model_rev, role, element_count, relationship_count, lock_ttl_seconds, strict_mode}`; `POST /commits/preview` checks the non-model ops dry, applies the model batch → rolls back (all under `write_mutex`; the applier's 422 is its only refusal) and answers no issues (`conformance_error_count` 0, empty `issues`/`structural_blockers`, `would_block` false: the engine previews validation) without advancing `model_rev`; `POST /commits` is the durable lock-verified commit (see below).
 - **Commit flow** (`POST /commits`): (1) stale-rev 409 before the mutex; (2) under `write_mutex`: verify caller holds every required lock (409 if any expired/missing), apply batch (422 on mutation-boundary error), hard-reject structural blockers (422 + rollback) found by `structural_blockers` over the batch's touched entities, the ends of its touched relationships and the referencers of the elements it deleted (a rebind-carrying batch checks every entity instead, since a schema swap can break untouched ones; otherwise structure elsewhere never blocks; no conformance or rule check, no strict-mode gate, no rule recompile), bump `model_rev`, persist a `Commit` row with `message` and the `validation_error_count`/`issues` the client reported in the request (stored and echoed as given, never recomputed; 500 + full in-memory rollback on DB failure), release caller's locks. Returns `CommitResponse` with full element/relationship delta and commit metadata.
-- **`Commit` row columns** — `message TEXT`, `validation_error_count INTEGER NULL`, `issues JSON` on the `commits` table. The count and issues are client-reported (`CommitRequest.validation_error_count`/`issues`, from the frontend's preview); a revert has no client preview and stores `NULL` and `[]`, which the history shows as "—"; fed by `_persist_commit` via the `_commit_id`/`_message`/`_validation_error_count`/`_issues` kwargs.
+- **`Commit` row columns** — `message TEXT`, `validation_error_count INTEGER NULL`, `issues JSON` on the `commits` table. The count and issues are client-reported (`CommitRequest.validation_error_count`/`issues`, from the frontend's preview); a revert has no client preview and stores `NULL` and `[]`, which the history shows as "—"; fed by `_stage_commit` via the `_commit_id`/`_message`/`_validation_error_count`/`_issues` kwargs.
 - **Lifespan sweepers** — a `lock-sweeper` daemon thread runs every `lock_sweep_seconds` (default 60) calling `LockTable.sweep_expired` on every registered session; `lock_ttl_seconds` (default 300) is the per-lease TTL refreshed on each `renew` call. Both settings are 0-disableable (tests use 0).
 - **Evict-with-live-locks guard** — `SessionRegistry.evict` checks `lock_table.active_leases` under the `write_mutex` before removing the session; if any lease is live, eviction is skipped and the session stays registered.
 - **Artifact ops** — `create_artifact`/`update_artifact`/`delete_artifact` join the `OpIn` union: they flow through `POST /commits` (applied, lock-verified — `art:<id>` leases from the typed lock namespace in `locking.py`) and are dry-validated — no lock check, no persistence — by `POST /commits/preview`; `api/artifact_ops.py`'s `split_ops` separates the union so they are applied to `ArtifactRow`s on the request's DB transaction, never to the in-memory model (materialized heads — model hydration replay SKIPS artifact ops entirely), with full-state inverses so `GET /commits/{rev}/diff` can render them journal-only, like the model half (`api/commit_diff.py`); `/commits/revert` answers a clean 409 for any range containing artifact ops. The kind registry lives in `api/artifact_kinds.py` (`ArtifactKindSpec`: adapter + derived metadata + `extract_deps`/`rewrite_refs`, which drive the import/export closure) — `navigation`, `table`, `code_snippet` and `exporter` are registered; `diagram`/`diagram_kind` stay unregistered and 422 on write. Commit staleness is **overlap-based with a completeness guard**: a stale `base_rev` 409s only when the batch's touched resources intersect the journal tail, but falls back to a strict 409 whenever the tail cannot fully account for the rev gap (something bumped `model_rev` without journaling) or contains an empty-ops/rebind commit; `/commits/preview` keeps strict equality (an empty `POST /commits` is a no-op early return, so a commit can never mint that always-conflict marker itself). Commit feed events carry a `scope` list (`model`/`artifact`). Legacy `PUT`/`DELETE /artifacts/{id}` stay mounted, bumping `artifact_rev` and emitting the same-shaped feed events as the op path. **Lease rule**: `POST /commits` is the only lock-VERIFIED artifact writer, but every other writer HONORS `art:` leases — the legacy PUT/DELETE both 409 while a peer holds one (the caller's own lease never blocks them) — because `UpdateArtifactOp.artifact_rev` is an optional precondition the current client contract omits, which makes the lease, not OCC, the real concurrency control.
