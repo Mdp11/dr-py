@@ -17,7 +17,7 @@ This file is the map. How the code works lives in the README next to it; read th
 | Where the system is going: decisions `AD-n`, contracts `CT-n`, constraints `CN-n`, build order `MR-n`. Read before designing or planning anything touching the engine, sync, evaluation, scripts or deployment | `architecture/README.md`, then `architecture/program.md` for what exists yet |
 | Repo rules: layout, git, comments, tests (`RC-n`) | `architecture/conventions.md` |
 | Python core: metamodel, `Model`, validation pipeline, custom validation rules | `src/data_rover/core/README.md` |
-| Backend: sessions, ops and the commit delta, replica routes, tenancy/auth, persistence, locking, feed, tables/exports, metamodel editing | `src/data_rover/api/README.md` |
+| Backend: sessions, ops and the commit delta, replica routes, tenancy/auth, persistence, locking, feed, metamodel editing | `src/data_rover/api/README.md` |
 | Snippet facade reference | `src/data_rover/core/script/README.md` |
 | TypeScript engine | `engine/README.md` |
 | Sandbox site and engine worker | `sandbox/README.md` |

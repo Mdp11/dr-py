@@ -61,8 +61,8 @@ def test_docs_served_with_facade_limits_and_notes(client: TestClient) -> None:
     assert "dr.create" in names and "Element.set" in names
     assert all(e["doc"] for e in body["facade"])
     assert set(body["limits"]) == {
-        "wall_timeout_s", "memory_bytes", "stdout_bytes",
-        "result_repr_bytes", "max_ops", "max_op_bytes", "page_limit",
+        "wall_timeout_s", "stdout_chars",
+        "result_repr_chars", "max_ops", "max_op_bytes", "page_limit",
     }
     assert body["notes"] and all(isinstance(n, str) for n in body["notes"])
 

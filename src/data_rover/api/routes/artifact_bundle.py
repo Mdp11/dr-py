@@ -144,7 +144,7 @@ def import_confirm(
     if not ops:
         # All-reuse / all-skipped. NEVER hand create_commit an empty batch:
         # its empty-ops early return is harmless in itself, but an empty-ops
-        # JOURNAL row is persist_baseline's "the whole model was replaced
+        # JOURNAL row is the "the whole model was replaced
         # opaquely" marker, which the commit staleness guard reads as an
         # unconditional 409 for every client below that rev. Nothing was
         # written, so there is no rev to report either.

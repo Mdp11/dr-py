@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     #: bounded per-client feed queue. A client whose queue overflows is dropped
     #: and reconnects. Large enough to absorb a burst of commits.
     feed_queue_max: int = 256
+    #: Ceiling (bytes) on the body of an upload request. A runaway/abuse
+    #: backstop, not a tuning knob: the documented target model is ~80 MB, so
+    #: this sits far above any legitimate upload. 0 disables the cap.
+    max_request_body_bytes: int = 512 * 1024 * 1024
     #: Run the periodic full-model snapshot inline on the committing request
     #: (synchronously, inside its write_mutex section) instead of on a daemon
     #: thread. False in production; the API test conftest pins it true so a

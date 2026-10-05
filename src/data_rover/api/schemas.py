@@ -1016,9 +1016,8 @@ class SnippetLimitsOut(BaseModel):
     """The limits the browser engine's script runner enforces."""
 
     wall_timeout_s: float
-    memory_bytes: int
-    stdout_bytes: int
-    result_repr_bytes: int
+    stdout_chars: int
+    result_repr_chars: int
     max_ops: int
     max_op_bytes: int
     page_limit: int

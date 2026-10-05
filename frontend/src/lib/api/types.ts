@@ -830,9 +830,8 @@ export type FacadeDocEntry = z.infer<typeof FacadeDocEntrySchema>;
 
 export const SnippetLimitsSchema = z.object({
 	wall_timeout_s: z.number(),
-	memory_bytes: z.number(),
-	stdout_bytes: z.number(),
-	result_repr_bytes: z.number(),
+	stdout_chars: z.number(),
+	result_repr_chars: z.number(),
 	max_ops: z.number(),
 	max_op_bytes: z.number(),
 	page_limit: z.number()

@@ -61,6 +61,27 @@ REMOVED = [
 ]
 
 
+def _template(path: str) -> str:
+    """The route template a probe path would match: ids become parameters."""
+    return (
+        path.replace("/e1", "/{element_id}")
+        .replace("/r1", "/{relationship_id}")
+        .replace("/commits/1/", "/commits/{rev}/")
+    )
+
+
+def test_no_route_serves_a_removed_method_and_path() -> None:
+    prefix = "/api/v1/projects/{project_id}"
+    served = {
+        (method.upper(), path.removeprefix(prefix))
+        for path, methods in create_app().openapi()["paths"].items()
+        for method in methods
+    }
+    assert ("POST", "/commits") in served  # the probe sees the mounted routes
+    for method, path in REMOVED:
+        assert (method, _template(path)) not in served, (method, path)
+
+
 @pytest.fixture
 def client() -> TestClient:
     install()

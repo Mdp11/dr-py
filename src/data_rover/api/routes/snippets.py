@@ -85,17 +85,16 @@ _SNIPPET_DOC_NOTES = [
     "same code against the same model produces identical output.",
     "The sandbox has no network or filesystem access; many stdlib modules "
     "(os, subprocess, socket, ...) are absent or blocked.",
-    "Stopping a run is not instant: the run ends at the wall timeout, and a "
-    "new run may be rejected until the slot frees.",
+    "Stopping a run is not instant: a run that does not end on its own is "
+    "stopped at the wall timeout.",
 ]
 
 
 #: The limits the browser engine's script runner enforces, shown in the docs.
 _SNIPPET_LIMITS = SnippetLimitsOut(
     wall_timeout_s=10,
-    memory_bytes=256 * 1024 * 1024,
-    stdout_bytes=256 * 1024,
-    result_repr_bytes=64 * 1024,
+    stdout_chars=262144,
+    result_repr_chars=65536,
     max_ops=1000,
     max_op_bytes=1024 * 1024,
     page_limit=500,

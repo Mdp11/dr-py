@@ -3,8 +3,8 @@ overlapping ones 409. Leases make conflicts rare — this is the backstop.
 
 Also covers the fail-closed fallbacks that keep the rule sound when the
 durable journal does NOT fully explain the gap between ``base_rev`` and
-head: an unjournaled rev bump (legacy mutation routes / apply-cr), a
-``persist_baseline`` empty-ops marker (model upload/clear), a rebind, and a
+head: an unjournaled rev bump (``set_model``), an empty-ops baseline
+marker, a rebind, and a
 project with no durable journal at all.
 """
 
@@ -375,10 +375,10 @@ def test_empty_commit_is_a_no_op_and_never_poisons_the_tail(
     client: TestClient,
 ) -> None:
     """A message-only "checkpoint" commit must not burn a rev. An empty-ops
-    journal row IS ``persist_baseline``'s marker for
+    journal row IS the marker for
     "the whole model was replaced opaquely", so writing one here would turn
     every later stale base_rev into an unconditional 409 forever — permanently
-    disabling the overlap rule this module tests. Mirrors ``apply_ops``' own
+    disabling the overlap rule this module tests. Mirrors the
     empty-batch early return."""
     base = _rev(client)
     r = client.post(

@@ -29,9 +29,8 @@ const DOCS: SnippetDocsOut = {
 	],
 	limits: {
 		wall_timeout_s: 10,
-		memory_bytes: 268435456,
-		stdout_bytes: 262144,
-		result_repr_bytes: 65536,
+		stdout_chars: 262144,
+		result_repr_chars: 65536,
 		max_ops: 1000,
 		max_op_bytes: 1048576,
 		page_limit: 500

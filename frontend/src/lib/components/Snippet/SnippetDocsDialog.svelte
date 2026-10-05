@@ -119,9 +119,8 @@
 				<Tabs.Content value="limits" class="min-h-0 flex-1 overflow-y-auto pr-2 text-sm">
 					<ul class="space-y-1.5 text-xs text-muted-foreground">
 						<li>Wall timeout: {formatSeconds(docs.limits.wall_timeout_s)}</li>
-						<li>Memory: {formatBytes(docs.limits.memory_bytes)}</li>
-						<li>Stdout cap: {formatBytes(docs.limits.stdout_bytes)}</li>
-						<li>Result cap: {formatBytes(docs.limits.result_repr_bytes)}</li>
+						<li>Stdout cap: {docs.limits.stdout_chars} characters</li>
+						<li>Result cap: {docs.limits.result_repr_chars} characters</li>
 						<li>Max ops: {docs.limits.max_ops}</li>
 						<li>Max op bytes: {formatBytes(docs.limits.max_op_bytes)}</li>
 						<li>Read page size: {docs.limits.page_limit}</li>

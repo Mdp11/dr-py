@@ -793,9 +793,8 @@ def create_commit(
             # changed the metamodel under the client (its element ops were
             # computed against a schema that no longer exists), and an
             # EMPTY-ops commit that still consumed a rev is
-            # persist_baseline's marker for "the whole model was replaced
-            # opaquely" (model upload/clear/apply-cr baseline reset — see
-            # hydration.persist_baseline). Both fully account for the rev
+            # the marker for "the whole model was replaced opaquely" (a
+            # baseline reset). Both fully account for the rev
             # gap (so the short-tail check above doesn't catch them) but
             # name no resources the overlap check could ever match against,
             # so without this branch a stale batch would silently land

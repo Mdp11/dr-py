@@ -1,10 +1,8 @@
 """``ruff format`` seam for ``POST /snippets/format``.
 
 Lives in the api package, not ``core``: it shells out to a binary, and
-``core`` is deliberately dependency-light (``core/script/runner.py`` is
-sandbox-agnostic by design). It is the sibling of ``script_runner.py``, but
-carries none of that module's tripwires — ``ruff format`` PARSES and PRINTS
-the snippet, it never executes it, so untrusted input needs no sandbox here.
+``core`` is deliberately dependency-light. It runs no snippet: ``ruff format`` PARSES
+and PRINTS the snippet, it never executes it, so untrusted input needs no sandbox here.
 
 ``indent-width`` is passed explicitly rather than left to ruff's default so
 the formatter and the editor's own ``INDENT_WIDTH`` (four spaces, see
