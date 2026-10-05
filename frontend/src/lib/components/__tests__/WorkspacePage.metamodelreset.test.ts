@@ -78,7 +78,6 @@ vi.mock('$lib/state', async (orig) => {
 		handleRemoteLockEvent: () => {},
 		refreshSummary: () => Promise.resolve(),
 		refreshView: () => Promise.resolve(),
-		trackOpenProgress: () => Promise.resolve(),
 		loadProjectInfo: () => Promise.resolve(),
 		loadArtifacts: () => Promise.resolve(),
 		reactToBootError: () => false,

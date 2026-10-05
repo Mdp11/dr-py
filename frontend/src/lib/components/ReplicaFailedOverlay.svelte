@@ -32,8 +32,7 @@
 			Model out of sync
 		</span>
 		<p class="text-xs text-muted-foreground">
-			The local copy of the model could not be rebuilt from the server. Your uncommitted edits are
-			kept.
+			The local copy of the model is not available. Any uncommitted edits are kept.
 		</p>
 		{#if reason}
 			<p class="text-xs text-muted-foreground" data-testid="replica-blocked-reason">{reason}</p>

@@ -277,7 +277,9 @@ test('a workspace whose engine cannot start shows the blocking overlay with its 
 
 		await expect(replica(page)).toHaveAttribute('data-phase', 'unavailable', { timeout: 30_000 });
 		await expect(page.getByTestId('replica-blocked')).toBeVisible();
-		await expect(page.getByTestId('replica-blocked-reason')).not.toBeEmpty();
+		await expect(page.getByTestId('replica-blocked-reason')).toContainText(
+			'the sandbox did not answer within'
+		);
 	} finally {
 		await context.close();
 	}

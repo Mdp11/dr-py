@@ -206,7 +206,6 @@ test('a navigation reads the staged navigation it refers to, then the committed 
 	await commitStaged(page, 'eval navigation: staged refs');
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(0);
 
-	// A tab restored by the reload may evaluate before the replica's indicator is read.
 	await page.reload();
 	await expectLiveFeed(page);
 	await expectReplicaReady(page);

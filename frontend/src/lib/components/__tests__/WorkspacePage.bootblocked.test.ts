@@ -73,7 +73,6 @@ vi.mock('$lib/state', async (orig) => {
 			return boot.blocked ? Promise.reject(new Error('the replica is blocked')) : Promise.resolve();
 		},
 		refreshView: () => Promise.resolve(),
-		trackOpenProgress: () => Promise.resolve(),
 		loadProjectInfo: loaded.info,
 		loadArtifacts: loaded.artifacts,
 		reactToBootError: () => false,

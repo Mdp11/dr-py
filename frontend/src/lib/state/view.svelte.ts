@@ -27,6 +27,7 @@
  */
 import * as viewsApi from '$lib/api/views';
 import { NotFoundError } from '$lib/api/errors';
+import { EngineUnavailableError } from '$lib/api/engine-route';
 import type { ArtifactRef, Folder, Issue, View, ViewSummary } from '$lib/api/types';
 import {
 	applyViewOp,
@@ -147,7 +148,9 @@ function recomputeWarnings(): void {
 					viewId === null || view === null
 						? []
 						: await viewsApi.viewWarnings(view).catch((error: unknown) => {
-								console.error('View warnings failed', error);
+								if (!(error instanceof EngineUnavailableError)) {
+									console.error('View warnings failed', error);
+								}
 								return null;
 							});
 				current = !_computeAgain && viewId === getActiveViewId() && view === _view;

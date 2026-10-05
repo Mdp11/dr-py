@@ -65,7 +65,7 @@ describe('ReplicaFailedOverlay', () => {
 		expect(labelId).toBeTruthy();
 		expect(document.getElementById(labelId!)?.textContent?.trim()).toBe('Model out of sync');
 		expect(el?.textContent?.replace(/\s+/g, ' ')).toContain(
-			'The local copy of the model could not be rebuilt from the server. Your uncommitted edits are kept.'
+			'The local copy of the model is not available. Any uncommitted edits are kept.'
 		);
 	});
 
