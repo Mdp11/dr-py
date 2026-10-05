@@ -67,6 +67,9 @@ logger = logging.getLogger(__name__)
 
 #: the most times one commit loads and runs its batch
 MAX_ROUNDS = 8
+#: deleted relationships past which the plan stops excluding them from the
+#: deleted subtree (it then judges more, never less)
+MAX_SKIPPED = 5000
 
 
 class Refused(Exception):
@@ -88,11 +91,12 @@ def _walk(
     containment_types: Collection[str],
     *,
     down: bool,
+    skip: Collection[str] = (),
 ) -> set[str]:
     """The elements reached from ``starts`` along containment relationships, the
     starts that exist included: ``down`` follows source to target, otherwise
     target to source. ``UNION`` drops a row it already holds, so a containment
-    cycle ends the walk."""
+    cycle ends the walk. The relationships in ``skip`` are not followed."""
     types = sorted(containment_types)
     near, far = (
         (RelationshipRow.source_id, RelationshipRow.target_id)
@@ -112,6 +116,7 @@ def _walk(
                     RelationshipRow.project_id == project_id,
                     RelationshipRow.type_name.in_(types),
                     near == walk.c.id,
+                    *([RelationshipRow.id.not_in(sorted(skip))] if skip else []),
                 )
             )
         found.update(db.execute(select(walk.c.id)).scalars())
@@ -123,9 +128,11 @@ def subtree_ids(
     project_id: str,
     roots: Collection[str],
     containment_types: Collection[str],
+    skip: Collection[str] = (),
 ) -> set[str]:
-    """The roots that exist and every element they contain, transitively."""
-    return _walk(db, project_id, roots, containment_types, down=True)
+    """The roots that exist and every element they contain, transitively, not
+    following the relationships in ``skip``."""
+    return _walk(db, project_id, roots, containment_types, down=True, skip=skip)
 
 
 def ancestor_ids(
@@ -351,10 +358,14 @@ def plan_load(
     metamodel: Metamodel,
     ops: Sequence[ModelOpIn],
     extra: frozenset[str] = frozenset(),
+    *,
+    thorough: bool = False,
 ) -> PartialRows:
     """The rows ``ops`` need, read from the head tables (see the module
     docstring). Every id in ``extra`` is a delete root and a judged element:
-    what a round found missing."""
+    what a round found missing. ``thorough`` judges every element it loads, with
+    its ancestor chain and all its reference targets: the plan for a batch that
+    has already missed once."""
     named = _scan(metamodel, ops)
     types = _containment_types(metamodel)
     rows = _Rows(db, project_id)
@@ -362,8 +373,16 @@ def plan_load(
 
     # deletes: the subtree, what touches it, who points at it
     real_roots = {i for i in named.delete_roots | extra if i in rows.elements}
-    deleted = subtree_ids(db, project_id, real_roots, types)
-    subtree = set(deleted)
+    subtree = subtree_ids(db, project_id, real_roots, types)
+    # What certainly goes: the batch may detach part of a root's subtree before
+    # it deletes the root, so the relationships it deletes are not followed.
+    detached = named.deleted_relationships
+    if not detached:
+        deleted = set(subtree)
+    elif len(detached) > MAX_SKIPPED:
+        deleted = set(real_roots)
+    else:
+        deleted = subtree_ids(db, project_id, real_roots, types, detached)
     # The batch may attach an element below one a delete removes, which the rows
     # cannot say. Each attachment whose source can end up deleted (it is in a
     # deleted subtree, is deleted itself, or was attached into one) makes its
@@ -392,7 +411,11 @@ def plan_load(
     }
     judged = {
         i
-        for i in named.touched | extra | ends | (referencers - deleted)
+        for i in (
+            set(rows.elements)
+            if thorough
+            else named.touched | extra | ends | (referencers - deleted)
+        )
         if i in rows.elements
     }
     chain = ancestor_ids(db, project_id, judged, types)
@@ -400,7 +423,13 @@ def plan_load(
     rows.incoming_containment(chain, types)
     rows.reference_targets(
         judged
-        | {r for r in named.relationships | referencers if r in rows.relationships}
+        | (
+            set(rows.relationships)
+            if thorough
+            else {
+                r for r in named.relationships | referencers if r in rows.relationships
+            }
+        )
     )
 
     return PartialRows(
@@ -440,7 +469,9 @@ def load_and_apply(
     missed: frozenset[str] = frozenset()
     rounds = 0
     for rounds in range(1, MAX_ROUNDS + 1):
-        rows = plan_load(db, project_id, metamodel, ops, extra)
+        # After a miss the plan judges every element it loads, so a batch whose
+        # elements hold many references does not miss on them one per round.
+        rows = plan_load(db, project_id, metamodel, ops, extra, thorough=bool(missed))
         model = build_partial_model(metamodel, rows)
         try:
             if pre_apply is not None:

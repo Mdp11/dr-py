@@ -448,10 +448,20 @@ def test_a_commit_on_head_rows_equals_the_full_model(
         rounds.clear()  # the helper retries a request that lacked locks
         return real_lock(*a, **k)
 
-    # every third seed runs with a planner that does not foresee what a batch
-    # attaches below a deleted element, so the re-run loop answers real batches
+    # every third seed runs with a planner that foresees no subtree and no
+    # attachment, so the re-run loop answers real batches, one miss at a time
     blind = [False]
     real_scan = commit_load._scan
+    real_subtree = commit_load.subtree_ids
+
+    def shallow(
+        db: Any, project_id: str, roots: Any, types: Any, skip: Any = ()
+    ) -> Any:
+        if blind[0]:
+            return set(roots)
+        return real_subtree(db, project_id, roots, types, skip)
+
+    monkeypatch.setattr(commit_load, "subtree_ids", shallow)
 
     def scan(*a: Any, **k: Any) -> Any:
         named = real_scan(*a, **k)
@@ -468,6 +478,7 @@ def test_a_commit_on_head_rows_equals_the_full_model(
     for seed in SEEDS:
         why = f"seed {seed}"
         blind[0] = seed % 3 == 0
+        monkeypatch.setattr(commit_load, "MAX_ROUNDS", 64 if blind[0] else 8)
         rng = random.Random(seed)
         text, facts = make_model(rng, seed)
         install(metamodel=MM, model=text)
@@ -549,7 +560,7 @@ def test_a_commit_on_head_rows_equals_the_full_model(
         f"{multi_rejected} refused), at most {most} rounds"
     )
     assert accepted >= 90 and rejected >= 60 and reverted >= 70
-    assert multi_accepted >= 1 and multi_rejected >= 1
+    assert multi_accepted >= 10 and multi_rejected >= 1
 
 
 def _content(entity: dict[str, Any]) -> dict[str, Any]:

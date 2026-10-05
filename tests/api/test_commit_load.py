@@ -652,6 +652,109 @@ def test_a_referencer_inside_an_attached_subtree_that_nothing_deletes_is_judged(
     assert rounds.n == 1
 
 
+def _check_against_the_oracle(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    ops: list[dict[str, Any]],
+    rounds_wanted: int,
+) -> None:
+    install(metamodel=MM, model=model)
+    want = Oracle(model).run(model_ops(ops))
+    rounds = _Rounds(monkeypatch)
+    r = post_commit(client, ops)
+    assert want.status == 422
+    assert (r.status_code, r.json()) == (want.status, want.body)
+    assert rounds.n == rounds_wanted
+
+
+def _move_out_models() -> dict[str, tuple[str, list[dict[str, Any]]]]:
+    ts = [f"T{i}" for i in range(9)]
+    targets = [_el(t) for t in ts]
+    # Y sits below X in the rows; the batch detaches Y and deletes X. W, below
+    # Y, survives; it points at X (or at the sibling S) and at nine more.
+    parent = {
+        "elements": [_el("X"), _el("Y"), _el("W", refs=["X", *ts]), *targets],
+        "relationships": [
+            _rel("xy", "Contains", "X", "Y"),
+            _rel("yw", "Contains", "Y", "W"),
+        ],
+    }
+    sibling = {
+        "elements": [_el("X"), _el("Y"), _el("S"), _el("W", refs=["S", *ts]), *targets],
+        "relationships": [
+            _rel("xy", "Contains", "X", "Y"),
+            _rel("xs", "Contains", "X", "S"),
+            _rel("yw", "Contains", "Y", "W"),
+        ],
+    }
+    detach = {"kind": "delete_relationship", "id": "xy"}
+    return {
+        "referencer of the deleted parent": (
+            json.dumps(parent),
+            [detach, _delete("X")],
+        ),
+        "referencer of a deleted sibling": (
+            json.dumps(sibling),
+            [detach, _delete("X")],
+        ),
+    }
+
+
+@pytest.mark.parametrize("case", list(_move_out_models()))
+def test_a_subtree_detached_before_its_parent_is_deleted_is_judged(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    model, ops = _move_out_models()[case]
+    _check_against_the_oracle(client, monkeypatch, model, ops, 1)
+
+
+@pytest.mark.parametrize("case", list(_move_out_models()))
+def test_a_miss_on_a_judged_referencer_loads_all_its_targets_at_once(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """A planner that cannot tell what the batch detaches misses on the
+    referencer's targets; the next round judges everything it loads, so the
+    rounds do not grow with the number of references."""
+    real = commit_load._scan
+
+    def blind(*args: Any, **kwargs: Any) -> Any:
+        named = real(*args, **kwargs)
+        named.deleted_relationships.clear()
+        return named
+
+    monkeypatch.setattr(commit_load, "_scan", blind)
+    model, ops = _move_out_models()[case]
+    _check_against_the_oracle(client, monkeypatch, model, ops, 2)
+
+
+def test_attach_then_disconnect_then_delete_judges_a_referencer_below(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A is attached under X and detached again, so it survives X's delete; W
+    below it points at the deleted Q and at nine more elements."""
+    ts = [f"T{i}" for i in range(9)]
+    model = json.dumps(
+        {
+            "elements": [
+                _el("X"),
+                _el("A"),
+                _el("W", refs=["Q", *ts]),
+                _el("Q"),
+                *(_el(t) for t in ts),
+            ],
+            "relationships": [_rel("aw", "Contains", "A", "W")],
+        }
+    )
+    ops = [
+        _contains("X", "A", "tmp_1"),
+        {"kind": "delete_relationship", "id": "tmp_1"},
+        _delete("X"),
+        _delete("Q"),
+    ]
+    _check_against_the_oracle(client, monkeypatch, model, ops, 1)
+
+
 def test_moving_a_subtree_beside_an_unrelated_delete_loads_none_of_it() -> None:
     n = 200
     install(
