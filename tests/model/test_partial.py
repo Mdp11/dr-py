@@ -426,6 +426,78 @@ def test_deleting_an_element_created_under_an_absent_id_sees_its_referencers() -
     assert structural_blockers(m, _structural_ids(m, res)) == want
 
 
+def _rel_id_batch(restore: bool) -> list[ModelOpIn]:
+    """A relationship goes, an element takes its id and goes in turn."""
+    made = "R" if restore else "tmp_1"
+    return [
+        DeleteRelationshipOp(kind="delete_relationship", id="R"),
+        CreateElementOp(
+            kind="create_element",
+            temp_id=made,
+            type_name="Item",
+            id=None if restore else "R",
+        ),
+        DeleteElementOp(kind="delete_element", id=made),
+    ]
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_an_element_created_under_a_relationship_id_sees_its_referencers(
+    restore: bool,
+) -> None:
+    # p holds a reference to "R", which is a relationship, so it points to no
+    # element. The database can hold such references to any id it has held.
+    elements = [_el("P", name="p", ref="R"), _el("A"), _el("B")]
+    rels = [_rel("R", "Link", "A", "B")]
+    full = _full_model(elements, rels)
+    res = _apply_batch(full, _rel_id_batch(restore), restore=restore)
+    want = structural_blockers(full, _structural_ids(full, res))
+    assert [i.target_ids for i in want] == [["P"]]
+
+    rows = PartialRows(
+        elements=elements[1:],
+        relationships=rels,
+        absent=frozenset(),
+        edges_complete=frozenset({"A", "B"}),
+        parents_complete=frozenset(),
+        referencers_complete=frozenset(),
+    )
+    m = build_partial_model(_mm(), rows)
+    before = _state(m)
+    with pytest.raises(NotLoaded) as info:
+        _apply_batch(m, _rel_id_batch(restore), restore=restore)
+    assert info.value.ids == {"R"}
+    assert _state(m) == before  # rolled back, the relationship included
+
+    rows = dataclasses.replace(
+        rows,
+        elements=elements,
+        edges_complete=frozenset({"A", "B", "P"}),
+        referencers_complete=frozenset({"R"}),
+    )
+    m = build_partial_model(_mm(), rows)
+    res = _apply_batch(m, _rel_id_batch(restore), restore=restore)
+    assert structural_blockers(m, _structural_ids(m, res)) == want
+
+
+def test_a_generated_id_has_no_referencer_outside_the_model() -> None:
+    m = _partial()
+    made = m.create_element("Item")
+    assert set(m.indexes.referencers_of(made.id)) == set()
+    # an id the model's generator made is the only one; a loaded element's id
+    # or a restored one is not
+    with pytest.raises(NotLoaded):
+        m.indexes.referencers_of("p")
+
+
+def test_entity_dicts_refuse_comparison() -> None:
+    m = _partial()
+    with pytest.raises(WholeModelRead):
+        assert m.elements == {}
+    with pytest.raises(WholeModelRead):
+        assert m.relationships != {}
+
+
 def test_build_refuses_rows_that_break_the_contract() -> None:
     with pytest.raises(ValueError, match="endpoint"):
         _partial(relationships=[_rel("l9", "Link", "q", "nowhere")])
@@ -710,6 +782,12 @@ def _random_batch(rng: random.Random, model: Model) -> list[ModelOpIn]:
             return rng.choice(_GHOSTS)
         return rng.choice(rels)
 
+    def ref_target() -> str:
+        # now and then a relationship's id: a reference to it points to no element
+        if rels and rng.random() < 0.2:
+            return rng.choice(rels)
+        return element_id()
+
     ops: list[ModelOpIn] = []
     for _ in range(rng.randint(1, 6)):
         kind = rng.choice(
@@ -727,6 +805,7 @@ def _random_batch(rng: random.Random, model: Model) -> list[ModelOpIn]:
                 "dr",
                 "re",
                 "rr",
+                "rce",
             ]
         )
         counter += 1
@@ -734,10 +813,14 @@ def _random_batch(rng: random.Random, model: Model) -> list[ModelOpIn]:
         if kind == "ce":
             props: dict[str, Any] = {"name": f"n{rng.randrange(5)}"}
             if rng.random() < 0.4:
-                props["ref"] = element_id()
+                props["ref"] = ref_target()
             if rng.random() < 0.03:
                 props["bogus"] = 1
-            hint = rng.choice(_HINTS + elements[:1]) if rng.random() < 0.3 else None
+            hint = (
+                rng.choice(_HINTS + elements[:1] + rels[:3])
+                if rng.random() < 0.3
+                else None
+            )
             ops.append(
                 CreateElementOp(
                     kind="create_element",
@@ -753,7 +836,7 @@ def _random_batch(rng: random.Random, model: Model) -> list[ModelOpIn]:
             if rng.random() < 0.7:
                 patch["name"] = f"n{rng.randrange(5)}"
             if rng.random() < 0.5:
-                patch["ref"] = element_id() if rng.random() < 0.8 else None
+                patch["ref"] = ref_target() if rng.random() < 0.8 else None
             ops.append(
                 UpdateElementOp(
                     kind="update_element", id=element_id(), properties_patch=patch
@@ -788,6 +871,22 @@ def _random_batch(rng: random.Random, model: Model) -> list[ModelOpIn]:
                 )
             )
             temps.append(temp)
+        elif kind == "rce":
+            # a relationship goes and an element takes its id (and may go again)
+            rid = rel_id()
+            ops.append(DeleteRelationshipOp(kind="delete_relationship", id=rid))
+            ops.append(
+                CreateElementOp(
+                    kind="create_element",
+                    temp_id=temp,
+                    type_name="Item",
+                    properties={"name": "took"},
+                    id=rid,
+                )
+            )
+            temps.append(temp)
+            if rng.random() < 0.6:
+                ops.append(DeleteElementOp(kind="delete_element", id=temp))
         elif kind == "rr":
             rid = rel_id()
             ops.append(DeleteRelationshipOp(kind="delete_relationship", id=rid))
@@ -862,7 +961,9 @@ def _random_restore_batch(rng: random.Random, model: Model) -> list[ModelOpIn]:
     for _ in range(rng.randint(1, 5)):
         kind = rng.choice(["ce", "ce", "cr", "de", "dr", "ue"])
         if kind == "ce":
-            eid = rng.choice(_HINTS)
+            eid = rng.choice(_HINTS + rels[:3])
+            if eid in rels and rng.random() < 0.8:
+                ops.append(DeleteRelationshipOp(kind="delete_relationship", id=eid))
             ops.append(
                 CreateElementOp(
                     kind="create_element",
@@ -902,10 +1003,14 @@ def _random_restore_batch(rng: random.Random, model: Model) -> list[ModelOpIn]:
 def _attempt(model: Model, ops: list[ModelOpIn], restore: bool) -> Any:
     """What a commit check would see of a batch: the result, the ids whose
     structure it can have changed and the blockers there."""
+    before = _state(model)
     try:
         res = _apply_batch(model, ops, restore=restore)
     except HTTPException as exc:
         return ("refused", exc.status_code, exc.detail)
+    except NotLoaded:
+        assert _state(model) == before, "NotLoaded left the model changed"
+        raise
     ids = _structural_ids(model, res)
     return ("ok", _result_view(res), ids, structural_blockers(model, ids))
 
@@ -945,10 +1050,11 @@ def _clone(model: Model) -> Model:
     return twin
 
 
-def _partial_of(full: Model, loaded_hints: set[str]) -> Model:
+def _partial_of(full: Model, loaded_refs: set[str], rel_ids: frozenset[str]) -> Model:
     """The partial model a loader would build for ``full``'s current state:
-    every row, every set complete, except the referencers of the hint ids
-    nothing holds yet, which only ``loaded_hints`` have."""
+    every row, every set complete, except the referencers of the ids that are
+    no element (hint ids nothing holds yet, relationship ids), which only
+    ``loaded_refs`` have."""
     elements, rels = _rows_of(full)
     present = {row["id"] for row in [*elements, *rels]}
     hints = frozenset(_HINTS) - present
@@ -970,8 +1076,8 @@ def _partial_of(full: Model, loaded_hints: set[str]) -> Model:
             parents_complete=ids,
             referencers_complete=ids
             | frozenset(_GHOSTS)
-            | (dangling - hints)
-            | (hints & loaded_hints),
+            | (dangling - hints - rel_ids)
+            | loaded_refs,
         ),
         id_generator=copy.copy(full._ids),
     )
@@ -993,8 +1099,9 @@ def test_parity_with_a_full_model_over_random_batches(
 ) -> None:
     rng = random.Random(seed)
     full = _full_model(*_seed_rows(rng))
-    loaded_hints = set(_HINTS) if referencers_of_hints_loaded else set()
-    partial = _partial_of(full, loaded_hints)
+    rel_ids = set(full.relationships)  # every relationship id the run has seen
+    loaded_refs = set(_HINTS) | rel_ids if referencers_of_hints_loaded else set()
+    partial = _partial_of(full, loaded_refs, frozenset(rel_ids))
     assert _state(partial) == _state(full)
     seen = dict.fromkeys(
         (
@@ -1013,6 +1120,7 @@ def test_parity_with_a_full_model_over_random_batches(
     for step in range(100):
         restore = rng.random() < 0.3
         ops = (_random_restore_batch if restore else _random_batch)(rng, full)
+        rel_ids |= full.relationships.keys()
         before = _clone(full)
         want = _attempt(full, ops, restore)
         for _ in range(8):
@@ -1021,10 +1129,10 @@ def test_parity_with_a_full_model_over_random_batches(
                 break
             except NotLoaded as exc:
                 # the loader would look again: it learns these referencers
-                assert exc.ids <= set(_HINTS), f"batch {step}: {exc}"
-                loaded_hints |= exc.ids
+                assert exc.ids <= set(_HINTS) | rel_ids, f"batch {step}: {exc}"
+                loaded_refs |= exc.ids
                 seen["reloaded"] += 1
-                partial = _partial_of(before, loaded_hints)
+                partial = _partial_of(before, loaded_refs, frozenset(rel_ids))
         else:
             pytest.fail(f"batch {step}: still not loaded")
         assert got == want, f"batch {step}"

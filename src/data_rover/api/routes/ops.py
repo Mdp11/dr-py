@@ -246,10 +246,14 @@ def _apply_one(
                 # mutation-boundary error gets
                 _reject_reserved_hint(op.id)
                 element = model.restore_element(op.id, op.type_name)
+                # noted before the hook: a partial model's hook can raise
+                # NotLoaded, and the rollback must find the element it made
+                res.note_element_before(model, element.id, None)
                 d.after_element_create(model, element.id)
             res.id_map[op.temp_id] = element.id
         elif restore:
             element = model.restore_element(op.temp_id, op.type_name)
+            res.note_element_before(model, element.id, None)
             d.after_element_create(model, element.id)
         else:
             raise ValueError(

@@ -78,7 +78,6 @@ class _Known:
         "created",
         "edges",
         "loaded",
-        "looked_for",
         "parents",
         "referencers",
         "unreferenced",
@@ -89,8 +88,6 @@ class _Known:
         #: id has no incident relationship (an endpoint always exists), so it
         #: has no edges or parents; its referencers are known only if loaded.
         self.absent = set(rows.absent)
-        #: the ids the loader looked for and did not find
-        self.looked_for = rows.absent
         self.edges = rows.edges_complete
         self.parents = rows.parents_complete | rows.edges_complete
         self.referencers = rows.referencers_complete
@@ -99,10 +96,10 @@ class _Known:
         #: elements created here under an id that was not loaded: no edge or
         #: parent of theirs is missing from the model
         self.created: set[str] = set()
-        #: created here and no referencer of theirs can exist outside the
-        #: model: the id was never the loader's to look for (a fresh id). An id
-        #: the loader looked for and did not find may still be the target of a
-        #: dangling reference in the database, so creating it settles nothing.
+        #: ids the model's own generator made: the database cannot hold a
+        #: reference to one. Any other id, hinted or restored, may be the target
+        #: of a dangling reference there (to an absent id, or to a deleted
+        #: element or relationship), so creating it settles nothing.
         self.unreferenced: set[str] = set()
 
 
@@ -166,6 +163,14 @@ class _Entities[V](dict[str, V]):
             self._known.absent.add(key)
         return value
 
+    def __eq__(self, other: object) -> bool:
+        raise WholeModelRead("comparing the entities")
+
+    def __ne__(self, other: object) -> bool:
+        raise WholeModelRead("comparing the entities")
+
+    __hash__ = None  # type: ignore[assignment]
+
     def __len__(self) -> int:
         raise WholeModelRead("counting the entities")
 
@@ -189,6 +194,19 @@ class _Entities[V](dict[str, V]):
 
     def items(self):  # type: ignore[override]
         raise WholeModelRead("listing the entities")
+
+
+class _GeneratedIds:
+    """The model's id generator, noting every id it makes."""
+
+    def __init__(self, inner: IdGenerator, known: _Known) -> None:
+        self._inner = inner
+        self._known = known
+
+    def new_id(self) -> str:
+        new = self._inner.new_id()
+        self._known.unreferenced.add(new)
+        return new
 
 
 class PartialIndexSet(IndexSet):
@@ -256,11 +274,8 @@ class PartialIndexSet(IndexSet):
 
     def on_element_created(self, element: Element, order: int | None = None) -> None:
         super().on_element_created(element, order)
-        known = self._known
-        if element.id not in known.loaded:
-            known.created.add(element.id)
-            if element.id not in known.looked_for:
-                known.unreferenced.add(element.id)
+        if element.id not in self._known.loaded:
+            self._known.created.add(element.id)
 
     # -- no uniqueness groups -----------------------------------------------
 
@@ -316,6 +331,7 @@ def build_partial_model(
 
     known = _Known(rows, frozenset(element_ids))
     model = Model(metamodel, id_generator)
+    model._ids = _GeneratedIds(model._ids, known)
     elements = _Entities[Element](known)
     relationships = _Entities[Relationship](known)
     elements._other = relationships
