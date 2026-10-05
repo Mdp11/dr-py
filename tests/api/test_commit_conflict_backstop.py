@@ -341,18 +341,13 @@ def test_rebind_in_tail_always_conflicts(client: TestClient) -> None:
     assert r2.json()["detail"] == "stale base_rev"
 
 
-def test_no_durable_journal_keeps_strict_rule() -> None:
-    """A project with no durable ``ModelRow`` (never uploaded its metamodel
-    through the durable-persisting route) has no journal to inspect the gap
-    against, so it keeps the PRE-generalization strict-equality rule: ANY
-    stale ``base_rev`` 409s, even for a batch that would not have overlapped."""
+def test_a_project_with_no_durable_model_row_refuses_commits() -> None:
+    """A project with no ``ModelRow`` (a session set up without the
+    durable-persisting route) has no head rows to check a batch against, so a
+    commit is refused outright, never answered from rows that are not there."""
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    # Set up the session directly (bypassing the /metamodel HTTP route,
-    # which is what creates the durable ModelRow) so get_request_session
-    # resolves the SAME in-memory Session with model+metamodel set but no
-    # backing DB content row — the in-memory-only legacy shape.
     from data_rover.core.metamodel.loader import load_metamodel_str
     from data_rover.core.model.model import Model
 
@@ -361,15 +356,15 @@ def test_no_durable_journal_keeps_strict_rule() -> None:
     session.set_model(Model(session.metamodel))
 
     base = _rev(c)
-    r1 = _commit(c, [{"kind": "create_element", "temp_id": "tmp_a",
-                      "type_name": "Node", "properties": {}}], base)
-    assert r1.status_code == 200, r1.text
-    # a second, non-overlapping batch at the same stale base still 409s:
-    # there is no journal to prove it didn't overlap.
-    r2 = _commit(c, [{"kind": "create_element", "temp_id": "tmp_c",
-                      "type_name": "Node", "properties": {}}], base)
-    assert r2.status_code == 409
-    assert r2.json()["detail"] == "stale base_rev"
+    for ops in (
+        [{"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node", "properties": {}}],
+        [{"kind": "delete_element", "id": "anything"}],
+    ):
+        r = _commit(c, ops, base)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"] == "the project has no durable model to commit to"
+    assert session.model_rev == base
+    assert session.model is not None and len(session.model.elements) == 0
 
 
 def test_empty_commit_is_a_no_op_and_never_poisons_the_tail(

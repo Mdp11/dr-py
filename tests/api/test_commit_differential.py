@@ -484,6 +484,12 @@ def test_a_commit_on_head_rows_equals_the_full_model(
             why
         )
         assert body["recreated_element_ids"] == list(res.recreated_element_ids), why
+        assert body["recreated_relationship_ids"] == list(
+            res.recreated_relationship_ids
+        ), why
+        assert [r["id"] for r in body["changed_relationships"]] == list(
+            res.changed_relationship_ids
+        ), why
         assert [e["id"] for e in body["changed_elements"]] == list(
             res.changed_element_ids
         ), why

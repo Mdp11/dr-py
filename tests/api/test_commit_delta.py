@@ -24,6 +24,7 @@ from .conftest import (
     EMPTY_MODEL,
     install,
     commit_ops,
+    unjournaled_bump,
 )
 
 _MM = """
@@ -130,8 +131,9 @@ def test_whatever_moves_the_model_around_the_digest_leaves_it_unknown(
     _ops(client, [_node("tmp_a", "a")])
     assert session.state_digest_value is not None
 
-    # the model is swapped behind the op protocol
-    session.set_model(session.model, announce=False)
+    # the model is swapped behind the op protocol (the row's revision moves with
+    # the session's, as a commit needs them to)
+    unjournaled_bump()
     assert session.state_digest_value is None
     assert _ops(client, [_node("tmp_b", "b")])["state_digest"] == _true_digest()
 

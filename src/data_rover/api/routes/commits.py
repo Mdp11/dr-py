@@ -339,7 +339,7 @@ def _batch_touched_ids(
 def _conflict_response(model_rev: int, detail: str) -> JSONResponse:
     """The uniform 409 envelope every staleness/overlap fallback in
     ``create_commit`` returns — factored out so that branch structure (see
-    its docstring: no-journal / short-tail / baseline-or-rebind / overlap)
+    its docstring: short-tail / baseline-or-rebind / overlap)
     reads at a glance instead of four near-identical ``JSONResponse`` blocks.
 
     Single-instance assumption: the completeness reasoning behind these
@@ -644,30 +644,31 @@ def commit_diff_endpoint(
 
 def _open_transaction(
     db: DbSession, project_id: str, session: Session, unwind: _CommitUnwind
-) -> tuple[ModelRow | None, int]:
+) -> tuple[ModelRow, int]:
     """Take the project's ``ModelRow`` lock and read its revision: the
     transaction every check and write of a commit runs in, so the revision and
     the tail read under it are the committed ones. ``unwind`` learns the
-    transaction is open. A project without a row has no durable state; the
-    session's revision stands for it. A row whose head rows are not written yet
-    (a database from before the head tables that was never hydrated) gets them
-    from the session model first, since the check reads only rows."""
+    transaction is open. A project without a row has no head rows to check
+    against: 409. A row whose head rows are not written yet (a database from
+    before the head tables that was never hydrated) gets them from the session
+    model first, since the check reads only rows."""
     row = content.lock_model_row(db, project_id)
     unwind.db_open = True
     if row is None:
-        return None, session.model_rev
+        unwind.unwind()
+        raise HTTPException(
+            status_code=409, detail="the project has no durable model to commit to"
+        )
     if row.next_seq is None or row.state_digest is None:
         assert session.metamodel is not None and session.model is not None
         head.write_baseline(db, project_id, session.metamodel, session.model)
     return row, row.model_rev
 
 
-def _digest_before(session: Session, row: ModelRow | None) -> int:
+def _digest_before(row: ModelRow) -> int:
     """The state digest of the head rows before the batch."""
-    if row is not None:
-        assert row.state_digest is not None
-        return parse_digest(row.state_digest)
-    return parse_digest(session.state_digest())
+    assert row.state_digest is not None
+    return parse_digest(row.state_digest)
 
 
 def _follow_commit(
@@ -680,9 +681,14 @@ def _follow_commit(
 ) -> None:
     """Take a commit that has landed in the rows into the session model, which
     mirrors them, and into the session's revision and digest. Under the write
-    mutex. A mirror that cannot follow is dropped, and the next request
-    hydrates it again from the journal, which holds the commit."""
+    mutex. A mirror that is not at the revision before the commit, or cannot
+    follow it, is dropped and not advanced: the next request hydrates it again
+    from the journal, which holds the commit."""
     try:
+        if session.model_rev != rev - 1:
+            raise RuntimeError(
+                f"the session is at rev {session.model_rev}, not {rev - 1}"
+            )
         assert session.model is not None
         _apply_batch(session.model, list(ops), restore=True)
     except Exception:
@@ -692,6 +698,7 @@ def _follow_commit(
             rev,
         )
         get_registry().discard(project_id)
+        return
     session.model_rev = rev
     session.state_digest_value = parse_digest(digest)
 
@@ -731,7 +738,6 @@ def create_commit(
        This requires the durable journal to fully explain the gap between
        ``base_rev`` and head, so several fallbacks fail CLOSED (409 "stale
        base_rev") rather than risk a silent false negative:
-         - no durable journal to inspect at all (in-memory-only project);
          - the tail is SHORTER than the rev gap — the completeness invariant
            (one journaled batch == one rev == one row, spelled out at the
            check itself below) means a short tail can only mean some rev in
@@ -827,7 +833,7 @@ def create_commit(
     — the ledger would have no handle and the session would keep serving the
     candidate schema against a DB still bound to the old one.
     """
-    metamodel, mirror = require_model(session)
+    require_model(session)  # the 404; what it returns is read again under the mutex
     model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
     # Pre-mutex, because both are pure rejections that touch nothing: the
     # one-rebind-per-batch 422 (split_rebind) and the owner gate. Splitting
@@ -846,19 +852,22 @@ def create_commit(
     # The unwind ledger every failure path below shares — see _CommitUnwind.
     # INVARIANT: every MUTATION of a view in this function happens under
     # session.write_mutex.
-    unwind = _CommitUnwind(session, db, mirror)
     with session.write_mutex:
+        # The metamodel and the model are read under the mutex: a rebind that is
+        # refused swaps the metamodel in and out again while it holds it, and a
+        # commit that read the candidate would check and write rows against a
+        # schema that never lands.
+        metamodel, mirror = require_model(session)
+        unwind = _CommitUnwind(session, db, mirror)
         head_row, head_rev = _open_transaction(db, project_id, session, unwind)
         # 1. staleness — see the docstring above for the full rationale; branch
-        #    order mirrors it: no-journal / short-tail / baseline-or-rebind,
+        #    order mirrors it: short-tail / baseline-or-rebind,
         #    cheapest-and-safest first, each a fail-closed 409 before the
         #    overlap check runs.
         tail_ids: set[str] | None = None
         if payload.base_rev > head_rev:
             return unwind.refuse(_conflict_response(head_rev, "stale base_rev"))
         if payload.base_rev < head_rev:
-            if head_row is None:
-                return unwind.refuse(_conflict_response(head_rev, "stale base_rev"))
             tail = content.commits_after(db, project_id, payload.base_rev)
             if len(tail) != head_rev - payload.base_rev:
                 # Completeness invariant (db_models.Commit's own docstring: "one
@@ -1104,9 +1113,7 @@ def create_commit(
         # d. commit accepted: fold the digest, record the batch
         prev_rev = head_rev
         new_rev = head_rev + 1
-        state_digest = format_digest(
-            fold_batch(_digest_before(session, head_row), model, res)
-        )
+        state_digest = format_digest(fold_batch(_digest_before(head_row), model, res))
         # ONE journal entry per commit, spanning all four families: model
         # ops first, then artifact ops, then view ops, then metamodel ops.
         # The first three are mutually independent (see split_ops), so their
@@ -1357,9 +1364,11 @@ def revert_commit(
     a partial model of the rows the inverse ops need, the structural check, then
     the rows and the journal in one transaction.
     """
-    metamodel, mirror = require_model(session)
-    unwind = _CommitUnwind(session, db, mirror)
+    require_model(session)  # the 404; what it returns is read again under the mutex
     with session.write_mutex:
+        # read under the mutex, as in create_commit
+        metamodel, mirror = require_model(session)
+        unwind = _CommitUnwind(session, db, mirror)
         head_row, head_rev = _open_transaction(db, project_id, session, unwind)
         if payload.base_rev != head_rev:
             return unwind.refuse(
@@ -1518,9 +1527,7 @@ def revert_commit(
             return unwind.refuse(_structural_response(structural))
         prev_rev = head_rev
         new_rev = head_rev + 1
-        state_digest = format_digest(
-            fold_batch(_digest_before(session, head_row), model, res)
-        )
+        state_digest = format_digest(fold_batch(_digest_before(head_row), model, res))
         commit_id = uuid.uuid4().hex
         message = payload.message or f"Revert to rev {payload.target_rev}"
         issues_json: list[dict] = []

@@ -274,11 +274,12 @@ def test_a_row_without_the_recreated_key_loads_with_none_named() -> None:
     assert loaded.recreated_relationship_ids == []
 
 
-def test_a_big_batch_captures_every_entity() -> None:
+def test_a_batch_over_the_old_cap_captures_every_entity() -> None:
     m = _model()
-    res = _apply_batch(m, [_create(f"tmp_{i}") for i in range(6)], restore=False)
+    n = 5001  # the cap that was removed
+    res = _apply_batch(m, [_create(f"tmp_{i}") for i in range(n)], restore=False)
     states = capture_entity_states(m, res)
-    assert states is not None and len(states["elements"]) == 6
+    assert states is not None and len(states["elements"]) == n
 
 
 def test_load_round_trips_capture() -> None:
@@ -431,15 +432,3 @@ def test_revert_persists_states(client: TestClient) -> None:
     assert states is not None
     assert states["elements"][eid]["before"]["properties"] == {"label": "b"}
     assert states["elements"][eid]["after"]["properties"] == {"label": "a"}
-
-
-def test_a_big_commit_persists_every_entity_state(client: TestClient) -> None:
-    body = _commit(
-        client,
-        [
-            {"kind": "create_element", "temp_id": f"tmp_{i}", "type_name": "Node"}
-            for i in range(6)
-        ],
-    )
-    states = _states_at(body["model_rev"])
-    assert states is not None and len(states["elements"]) == 6

@@ -97,15 +97,12 @@ def _tree() -> dict[str, Any]:
 
 
 @pytest.fixture(autouse=True)
-def _installed() -> None:
-    seed_default_project()
-    install(metamodel=MM, model=json.dumps(_tree()))
-
-
-@pytest.fixture
-def client(_installed: None) -> TestClient:
+def client(_fresh_db: None) -> TestClient:
+    """The app first (building it resets the snapshot store), then the project."""
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
+    seed_default_project()
+    install(metamodel=MM, model=json.dumps(_tree()))
     return c
 
 
@@ -250,6 +247,14 @@ def test_plan_makes_every_element_of_an_extra_subtree_complete() -> None:
     assert {"C", "C1", "R", "D1"} <= _ids(rows)[0]  # R and D1: ends of c-R-C and L4
 
 
+def test_plan_makes_what_a_batch_attaches_a_delete_root_when_it_deletes() -> None:
+    rows = _plan([_contains("X", "C"), _delete("X")])
+    assert rows.edges_complete == {"X", "C", "C1"}
+    assert {"C", "c-C-C1"} <= {r["id"] for r in (*rows.elements, *rows.relationships)}
+    # without a delete in the batch an attachment needs no subtree
+    assert _plan([_contains("X", "C")]).edges_complete == frozenset()
+
+
 def test_plan_chunks_its_in_lists(monkeypatch: pytest.MonkeyPatch) -> None:
     ops = [_delete("A"), _contains("A1a", "Z", "tmp_k")]
     whole = _plan(ops)
@@ -309,8 +314,20 @@ def test_the_walks_end_on_a_containment_cycle() -> None:
 
 
 def _attach_then_delete() -> list[dict[str, Any]]:
-    # C is named by nothing the plan expands: it is only an endpoint
     return [_contains("X", "C"), _delete("X")]
+
+
+def _plan_without_attachments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A planner that does not foresee what the batch attaches: C is then only
+    an endpoint, and the delete reaches it by surprise."""
+    real = commit_load._scan
+
+    def scan(*args: Any, **kwargs: Any) -> Any:
+        named = real(*args, **kwargs)
+        named.attached.clear()
+        return named
+
+    monkeypatch.setattr(commit_load, "_scan", scan)
 
 
 class _Rounds:
@@ -334,9 +351,22 @@ class _Rounds:
         monkeypatch.setattr(content, "lock_model_row", new_request)
 
 
+def test_attach_then_delete_is_planned_in_one_round(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    oracle = Oracle(json.dumps(_tree()))
+    assert oracle.run(model_ops(_attach_then_delete())).status == 200
+    rounds = _Rounds(monkeypatch)
+    commit_ops(client, _attach_then_delete())
+    assert rounds.n == 1
+    assert not {"X", "C", "C1"} & set(head().elements)
+    assert_rows(oracle, DEFAULT_PROJECT_ID, "attach then delete")
+
+
 def test_attach_then_delete_reruns(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _plan_without_attachments(monkeypatch)
     oracle = Oracle(json.dumps(_tree()))
     want = oracle.run(model_ops(_attach_then_delete()))
     assert want.status == 200
@@ -359,6 +389,7 @@ class _Records(logging.Handler):
 
 
 def test_round_bound(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _plan_without_attachments(monkeypatch)
     monkeypatch.setattr(commit_load, "MAX_ROUNDS", 1)
     before = head()
     with session() as s:
@@ -482,6 +513,138 @@ def test_an_id_of_the_other_table_is_the_422_a_full_model_gives(
     r = post_commit(client, ops)
     assert (r.status_code, r.json()) == (want.status, want.body)
     assert r.status_code == 422
+
+
+# --- the metamodel is read under the mutex ---------------------------------------
+
+
+def test_a_commit_never_checks_against_a_rebind_that_is_refused(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rebind refused after it swapped the candidate in puts the old metamodel
+    back before it releases the mutex. A commit that arrives meanwhile must not
+    have read the candidate: rows of a type only the candidate has would land."""
+    import threading
+
+    import data_rover.api.routes.commits as commits_mod
+    from data_rover.core.validation.issue import Issue, IssueCategory, Severity
+
+    from .test_commits_metamodel_ops import _acquire_mm
+
+    candidate = MM.replace("relationships:", "  - name: Ghosty\nrelationships:", 1)
+    other = TestClient(create_app())
+    other.headers.update(AUTH_HEADERS)
+    token = _acquire_mm(client)
+    rev = head().rev
+
+    rebind_swapped = threading.Event()
+    other_read = threading.Event()
+    real_blockers = commits_mod.structural_blockers
+    real_require = commits_mod.require_model
+
+    def refuse_inside_the_rebind(model: Any, ids: Any) -> Any:
+        if not rebind_swapped.is_set():
+            rebind_swapped.set()
+            other_read.wait()  # the other commit reads the session now
+            return [Issue(Severity.ERROR, "forced", ["X"], IssueCategory.STRUCTURAL)]
+        return real_blockers(model, ids)
+
+    def reading(session_: Any) -> Any:
+        out = real_require(session_)
+        if rebind_swapped.is_set():
+            other_read.set()
+        return out
+
+    monkeypatch.setattr(commits_mod, "structural_blockers", refuse_inside_the_rebind)
+    monkeypatch.setattr(commits_mod, "require_model", reading)
+    answers: dict[str, Any] = {}
+
+    def rebind() -> None:
+        answers["rebind"] = client.post(
+            papi("/commits"),
+            json={
+                "base_rev": rev,
+                "ops": [{"kind": "metamodel.rebind", "blob": candidate}],
+                "lock_tokens": [token],
+            },
+        )
+
+    def create() -> None:
+        answers["create"] = other.post(
+            papi("/commits"),
+            json={
+                "base_rev": rev,
+                "ops": [
+                    {
+                        "kind": "create_element",
+                        "temp_id": "tmp_g",
+                        "type_name": "Ghosty",
+                        "properties": {},
+                    }
+                ],
+            },
+        )
+
+    first = threading.Thread(target=rebind)
+    first.start()
+    rebind_swapped.wait()
+    second = threading.Thread(target=create)
+    second.start()
+    first.join()
+    second.join()
+    monkeypatch.undo()
+    assert answers["rebind"].status_code == 422, answers["rebind"].text
+    assert answers["create"].status_code in (409, 422), answers["create"].text
+    assert {e["type_name"] for e in head().elements.values()} == {"Node"}
+    mm = get_registry().get(DEFAULT_PROJECT_ID).metamodel
+    assert mm is not None and not mm.is_element_type("Ghosty")
+
+
+def test_a_session_not_at_the_revision_before_the_commit_is_dropped_not_advanced(
+    client: TestClient,
+) -> None:
+    session_ = get_registry().get(DEFAULT_PROJECT_ID)
+    base = head().rev
+    session_.model_rev = base + 5  # a mirror that has drifted from the row
+    body = commit_ops(
+        client,
+        [{"kind": "update_element", "id": "B1", "properties_patch": {"label": "z"}}],
+    )
+    assert body["model_rev"] == base + 1  # the row is the authority
+    assert session_.model_rev == base + 5  # the dropped session was not advanced
+    # the next request hydrates from the journal, which holds the commit
+    assert head().elements["B1"]["properties"]["label"] == "z"
+    fresh = get_registry().get(DEFAULT_PROJECT_ID)
+    assert fresh is not session_ and fresh.model_rev == base + 1
+
+
+# --- the rounds do not grow with the batch -----------------------------------------
+
+
+def test_many_attached_elements_then_a_delete_take_one_round(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Attach more elements than ``MAX_ROUNDS`` under X, then delete X: each is
+    planned as a delete root, so the batch does not need a round apiece."""
+    n = commit_load.MAX_ROUNDS + 4
+    model = json.dumps(
+        {
+            "elements": [_el("X"), *(_el(f"{k}{i}") for i in range(n) for k in "cd")],
+            "relationships": [
+                _rel(f"k{i}", "Contains", f"c{i}", f"d{i}") for i in range(n)
+            ],
+        }
+    )
+    install(metamodel=MM, model=model)
+    ops = [_contains("X", f"c{i}", f"tmp_{i}") for i in range(n)] + [_delete("X")]
+    oracle = Oracle(model)
+    want = oracle.run(model_ops(ops))
+    assert want.status == 200
+    rounds = _Rounds(monkeypatch)
+    commit_ops(client, ops)
+    assert rounds.n == 1
+    assert head().elements == {}
+    assert_rows(oracle, DEFAULT_PROJECT_ID, "attached then deleted")
 
 
 # --- the transaction ----------------------------------------------------------------
