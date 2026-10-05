@@ -1391,8 +1391,10 @@ is not ready` or `replica closed` — the staged batches, the `base_rev` or
   reader refuses, a rebind preview whose staged ops the candidate does not
   admit (the server's own wording). A rule set it cannot read is not an
   error: it is skipped with its reason in `getModelIssues`' `rules_status`.
-  A call that moves buffers in `transfer` (`compareModel`'s file) is not
-  asked again: they are detached once posted.
+  A call that moves fixed buffers in `transfer` is not asked again: they are
+  detached once posted; with `params` and `transfer` as functions, each
+  attempt gets its own buffers (`compareModel` reads its file again) and the
+  call is asked again like any other.
 - The gate (`createGate(read)`, `lib/engine/gate.ts`). `read()` says `open`,
   `closed` or `unavailable` with a reason. An open gate resolves
   `whenReady` at once and an unavailable one rejects it at once with
@@ -1576,8 +1578,11 @@ sync exists:
   `closed` while the phase is `opening` or `resyncing` or until those two
   hold (a `frozen` replica keeps `seeded`: its list matches the old-metamodel
   UI until the adoption re-bootstraps it), and `unavailable` at `failed`,
-  `server` or `off` — its reason the status's, such as `no model` — or without
-  an installed replica. `moved()` runs at every status change, every
+  `server` or `off` — its reason the status's, such as `no model` — when the
+  follower's first load failed for good (`loadFailed()`, its retry included:
+  the workspace then blocks behind the failure overlay, which shows
+  `getReplicaBlockReason()`, and Retry asks for a new load), or without an
+  installed replica. `moved()` runs at every status change, every
   follower load and stop and every seam install and uninstall; a waiting
   read therefore resolves the moment the gate opens, and rejects when the
   replica fails, stops or finds no model. The switches are read ONCE, at the

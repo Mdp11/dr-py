@@ -2,10 +2,11 @@
 	import { fade } from 'svelte/transition';
 	import { dur, PANEL } from '$lib/util/motion';
 	import { Button } from '$lib/components/ui/button';
-	import { isReplicaRetrying, retryReplica } from '$lib/state';
+	import { getReplicaBlockReason, isReplicaRetrying, retryReplica } from '$lib/state';
 
 	let retryButton = $state<HTMLButtonElement | null>(null);
 	const retrying = $derived(isReplicaRetrying());
+	const reason = $derived(getReplicaBlockReason());
 	// Focus follows the button back whenever it re-enables: on mount, and
 	// again if a retry lands back on `failed`.
 	$effect(() => {
@@ -34,6 +35,9 @@
 			The local copy of the model could not be rebuilt from the server. Your uncommitted edits are
 			kept.
 		</p>
+		{#if reason}
+			<p class="text-xs text-muted-foreground" data-testid="replica-blocked-reason">{reason}</p>
+		{/if}
 		<Button bind:ref={retryButton} disabled={retrying} onclick={() => retryReplica()}>
 			{retrying ? 'Retrying…' : 'Retry'}
 		</Button>

@@ -4,7 +4,10 @@ import type { ChangeRequest } from '$lib/state/cr';
 import { resetModelStore, setModelRev } from '$lib/state/model.svelte';
 import { stageProposedOps } from '$lib/state/stage-proposed';
 import { compareModel, proposeCr } from '../changeRequest';
-import { EngineUnavailableError } from '../engine-route';
+import { createEngineSeam } from '$lib/engine/seam';
+import { ready } from '$lib/engine/__tests__/support/project-server';
+import { EngineUnavailableError, installEngineSeam } from '../engine-route';
+import { errorForStatus } from '../errors';
 import { CompareOutSchema, type ChangesDoc } from '../types';
 import { issuesEngine, rename, uninstallIssuesEngine, type IssuesEngine } from './issues-engine';
 import { server } from './server';
@@ -133,6 +136,29 @@ describe('the compare reads on the engine', () => {
 
 		const call = engine.over.calls.find((entry) => entry.method === 'compareModel')!;
 		expect((call.params as { file: ArrayBuffer }).file.byteLength).toBe(0);
+	});
+
+	it('compareModel moved under by a replica that closed is asked again with the file read afresh', async () => {
+		const engine = await issuesEngine(made);
+		let refused = 0;
+		installEngineSeam(
+			createEngineSeam(
+				{
+					call: (method, params, options) => {
+						if (refused++ === 0) {
+							return Promise.reject(errorForStatus(409, {}, 'replica closed'));
+						}
+						return engine.over.sync.call(method, params, options);
+					}
+				},
+				ready
+			)
+		);
+
+		const answer = await compareModel(modelFile(engine));
+
+		expect(refused).toBe(2);
+		expect(answer.cr.ops.elements.modified).toMatchObject([{ id: 'e_000001' }]);
 	});
 
 	it("proposeCr answers the engine's proposal as ok, and a conflict as not ok", async () => {

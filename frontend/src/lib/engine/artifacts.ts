@@ -15,6 +15,8 @@ export type ArtifactFollowerDeps = {
 	pause?(): Promise<void>;
 	/** Called once, when the first load has landed and `loaded()` turned true. */
 	onLoaded?(): void;
+	/** Called when a load that is the first to land failed, its retry included: `loadFailed()` turned true. */
+	onLoadFailed?(error: unknown): void;
 };
 
 /** What a feed event or a commit says of one artifact. */
@@ -28,6 +30,12 @@ export type ArtifactFollower = {
 	load(): void;
 	/** Whether a load has landed since the follower was made, and it is not stopped. */
 	loaded(): boolean;
+	/**
+	 * Whether the follower has loaded nothing yet and its last load failed, its
+	 * retry included. A new `load()` clears it; a failed reload after one has
+	 * landed leaves the artifacts as they were and does not set it.
+	 */
+	loadFailed(): boolean;
 	onEvent(action: 'created' | 'updated' | 'deleted', header: ArtifactMark): void;
 	/**
 	 * The user's own commit landed; its staged buffer was cleared in the same
@@ -116,6 +124,7 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 	const { sync } = deps;
 	let stopped = false;
 	let loadedOnce = false;
+	let failedLoad = false;
 	/** The rev of every committed artifact the engine was handed. */
 	let revs = new Map<string, number>();
 	/** The kind of every committed artifact the engine was handed. */
@@ -265,15 +274,24 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 	const offParsed = deps.parser.onParsed(stagedChanged);
 
 	const load = () => {
+		failedLoad = false;
 		enqueue(async () => {
 			let list: ArtifactPayload[];
 			try {
-				list = await deps.payloads();
-			} catch {
-				// One retry, in the same queue slot, so later answers still land after it.
-				await deps.pause?.();
-				if (stopped) return;
-				list = await deps.payloads();
+				try {
+					list = await deps.payloads();
+				} catch {
+					// One retry, in the same queue slot, so later answers still land after it.
+					await deps.pause?.();
+					if (stopped) return;
+					list = await deps.payloads();
+				}
+			} catch (error) {
+				if (!stopped && !loadedOnce) {
+					failedLoad = true;
+					deps.onLoadFailed?.(error);
+				}
+				throw error;
 			}
 			if (stopped) return;
 			const wired = list.map(wire);
@@ -399,6 +417,10 @@ export function createArtifactFollower(deps: ArtifactFollowerDeps): ArtifactFoll
 
 		loaded() {
 			return loadedOnce && !stopped;
+		},
+
+		loadFailed() {
+			return failedLoad && !loadedOnce && !stopped;
 		},
 
 		stop() {

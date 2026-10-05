@@ -87,6 +87,8 @@ const _placedViews = new Set<string>();
 let _noticeDismissed = $state(false);
 /** Set by `retryReplica()`, cleared once the retry lands at `ready`, `failed`, `off` or `server`. */
 let _retrying = $state(false);
+/** Why the follower's first artifact load failed, retry included; null while it has not, or has landed. */
+let _loadFailure = $state<string | null>(null);
 // eslint-disable-next-line svelte/prefer-svelte-reactivity -- never read reactively
 const _statusListeners = new Set<StatusListener>();
 /** Unsubscribes the issues refetch from the sync's `changed` events. */
@@ -361,6 +363,12 @@ function gateState(): GateState {
 			return { state: 'closed' };
 		case 'ready':
 		case 'frozen':
+			if (_follower?.follower.loadFailed() ?? false) {
+				return {
+					state: 'unavailable',
+					reason: `the artifacts could not be loaded: ${_loadFailure ?? 'the fetch failed'}`
+				};
+			}
 			return seeded && (_follower?.follower.loaded() ?? false)
 				? { state: 'open' }
 				: { state: 'closed' };
@@ -592,9 +600,18 @@ function follow(sync: ReplicaSync, projectId: string): void {
 		staged: stagedArtifactsForEngine,
 		parser: createRulesParser((yaml) => parseRules(yaml, cfg)),
 		pause: () => new Promise<void>((resolve) => setTimeout(resolve, LOAD_RETRY_MS)),
+		// Reads would wait for artifacts that are not coming: the gate rejects them
+		// and the workspace blocks, its Retry loading them again.
+		onLoadFailed: (error) => {
+			_loadFailure = error instanceof Error ? error.message : String(error);
+			_retrying = false;
+			_gate.moved();
+		},
 		// The issues, tables and views gates open here too: the server's list,
 		// pages and warnings, answered until now, hold none of the staged edits.
 		onLoaded: () => {
+			_loadFailure = null;
+			_retrying = false;
 			_followerEpoch += 1;
 			_gate.moved();
 			if (issuesOnEngine(_status)) scheduleIssuesRefetch();
@@ -616,6 +633,7 @@ function stopFollower(notify = true): void {
 	_follower.follower.stop();
 	_follower.removeQuiet();
 	_follower = null;
+	_loadFailure = null;
 	_followerEpoch += 1;
 	_gate.moved();
 	if (notify && viewsWereOpen) viewsClosed();
@@ -691,22 +709,46 @@ export function dismissReplicaNotice(): void {
 	_noticeDismissed = true;
 }
 
-/** Whether the workspace is blocked: the replica cannot be rebuilt, or a retry of that is running. */
+/**
+ * Whether the workspace is blocked: the replica cannot be rebuilt, the
+ * artifacts could not be loaded, or a retry of either is running.
+ */
 export function isReplicaBlocked(): boolean {
 	return (
-		_anyEngine() && (_status.phase === 'failed' || (_retrying && _status.phase === 'resyncing'))
+		_anyEngine() &&
+		(_status.phase === 'failed' ||
+			_loadFailure !== null ||
+			(_retrying && _status.phase === 'resyncing'))
 	);
+}
+
+/** Why the workspace is blocked, when it is. */
+export function getReplicaBlockReason(): string | null {
+	if (_status.phase === 'failed') return _status.reason;
+	return _loadFailure === null ? null : `The artifacts could not be loaded: ${_loadFailure}`;
 }
 
 export function isReplicaRetrying(): boolean {
 	return _retrying;
 }
 
-/** An in-place re-bootstrap that adopts the batches the sync still holds; a no-op unless `failed`. */
+/**
+ * An in-place re-bootstrap that adopts the batches the sync still holds, when
+ * `failed`; else, when the artifacts could not be loaded, a new load of them.
+ * A no-op otherwise.
+ */
 export function retryReplica(): void {
-	if (_status.phase !== 'failed') return;
-	_retrying = true;
-	_sync?.retry();
+	if (_status.phase === 'failed') {
+		_retrying = true;
+		_sync?.retry();
+		return;
+	}
+	if (_loadFailure !== null && _follower !== null) {
+		_retrying = true;
+		_follower.follower.load();
+		// A load asked again is waited for, not refused, until it fails once more.
+		_gate.moved();
+	}
 }
 
 /**
@@ -820,6 +862,7 @@ export function resetReplica(): void {
 	setStatus(OFF);
 	_noticeDismissed = false;
 	_retrying = false;
+	_loadFailure = null;
 	_offSinceReady = false;
 	_releaseGate();
 }

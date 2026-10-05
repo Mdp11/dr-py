@@ -31,10 +31,13 @@ export type ProposeCrResult =
  * 422. Read-only.
  */
 export async function compareModel(file: Blob): Promise<CompareOut> {
-	const bytes = await file.arrayBuffer();
-	const params = { file: bytes, created_at: new Date().toISOString() };
+	// The buffer is read again for each attempt: the engine detaches it once posted.
 	const answer = EngineCompareSchema.parse(
-		await route<unknown>('compareModel', params, { transfer: [bytes] })
+		await route<unknown>(
+			'compareModel',
+			async () => ({ file: await file.arrayBuffer(), created_at: new Date().toISOString() }),
+			{ transfer: (params) => [(params as { file: ArrayBuffer }).file] }
+		)
 	);
 	return { ...answer, workingCopy: true };
 }

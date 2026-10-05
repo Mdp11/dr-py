@@ -286,7 +286,7 @@ describe('the view warnings as the views gate opens and closes', () => {
 		return snapshot;
 	}
 
-	it("open from the replica reaching ready: the server's warnings, then the engine's, with one engine call and at most one retry", async () => {
+	it("open from the replica reaching ready: the server's warnings, then the engine's, with one or two engine calls", async () => {
 		const { project, validations } = await open('engine');
 		await refreshView();
 		await vi.waitFor(() => expect(validations()).toBe(1));

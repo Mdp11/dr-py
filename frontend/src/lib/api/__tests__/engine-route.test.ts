@@ -270,7 +270,7 @@ describe('a moved 409', () => {
 		expect(events).toEqual(['ready', 'call']);
 	});
 
-	it('a call that moved buffers to the engine is not retried: they are detached', async () => {
+	it('a call that moved fixed buffers to the engine is not retried: they are detached', async () => {
 		const moved = errorForStatus(409, { detail: 'replica closed' }, 'replica closed');
 		const { seam, events } = seamOf([() => Promise.reject(moved), ok({ n: 1 })]);
 		installEngineSeam(seam);
@@ -278,5 +278,31 @@ describe('a moved 409', () => {
 
 		await expect(route('compareModel', { file }, { transfer: [file] })).rejects.toBe(moved);
 		expect(events).toEqual(['ready', 'call']);
+	});
+
+	it('params made afresh for each attempt, with their buffers named afresh, are retried', async () => {
+		const { seam, events, calls } = seamOf([refuse(409, 'replica closed'), ok({ n: 4 })]);
+		installEngineSeam(seam);
+		const made: ArrayBuffer[] = [];
+
+		await expect(
+			route(
+				'compareModel',
+				() => {
+					const file = new ArrayBuffer(8);
+					made.push(file);
+					return { file };
+				},
+				{ transfer: (params) => [(params as { file: ArrayBuffer }).file] }
+			)
+		).resolves.toEqual({ n: 4 });
+
+		expect(events).toEqual(['ready', 'call', 'ready', 'call']);
+		expect(made).toHaveLength(2);
+		expect(made[0]).not.toBe(made[1]);
+		expect(calls).toEqual([
+			{ method: 'compareModel', params: { file: made[0] }, transfer: [made[0]] },
+			{ method: 'compareModel', params: { file: made[1] }, transfer: [made[1]] }
+		]);
 	});
 });

@@ -539,7 +539,31 @@ describe('the artifact follower', () => {
 		expect(f.fetches).toEqual([undefined, undefined]);
 		expect(f.posted).toEqual([]);
 		expect(f.follower.loaded()).toBe(false);
+		expect(f.follower.loadFailed()).toBe(true);
 		expect(f.loads.told).toBe(0);
+
+		// A new load clears it, and lands.
+		f.follower.load();
+		expect(f.follower.loadFailed()).toBe(false);
+		await f.follower.settled();
+		expect(f.follower.loaded()).toBe(true);
+		expect(f.follower.loadFailed()).toBe(false);
+	});
+
+	it('a reload that fails after one landed is not a load failure', async () => {
+		const over = await ready();
+		const f = follow(over.sync);
+		f.follower.load();
+		await f.follower.settled();
+		const first = f.gate();
+		const retry = f.gate();
+		f.follower.load();
+		first.reject(new Error('offline'));
+		retry.reject(new Error('offline'));
+		await f.follower.settled();
+
+		expect(f.follower.loaded()).toBe(true);
+		expect(f.follower.loadFailed()).toBe(false);
 	});
 
 	it('a failed refresh reloads once at once', async () => {

@@ -53,6 +53,7 @@ import {
 	metamodelIncludesStaged,
 	forgetViewPlacement,
 	forgetViewPlacements,
+	getReplicaBlockReason,
 	getReplicaNotice,
 	getReplicaStatus,
 	getStagingSide,
@@ -516,6 +517,40 @@ describe('the engine seam', () => {
 
 		await expect(waiting).rejects.toBeInstanceOf(EngineUnavailableError);
 		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
+	});
+
+	it('artifacts that cannot be loaded block the workspace and reject the reads; Retry loads them again', async () => {
+		const project = fakeProject();
+		let healthy = false;
+		server.use(
+			http.get(`${PAGE_ORIGIN}/api/v1/projects/p/artifacts/payloads`, () =>
+				healthy ? HttpResponse.json({ items: [] }) : new HttpResponse(null, { status: 503 })
+			),
+			...project.handlers()
+		);
+		const replica = realReplica();
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'ready' && s.seeded);
+		// Asked before the load has failed for good: it waits, then rejects.
+		const waiting = getElementsBatch(['e_000001']);
+
+		await expect(waiting).rejects.toBeInstanceOf(EngineUnavailableError);
+		await expect(waiting).rejects.toThrow('the artifacts could not be loaded');
+		expect(getReplicaStatus().phase).toBe('ready');
+		expect(isReplicaBlocked()).toBe(true);
+		expect(getReplicaBlockReason()).toMatch(/^The artifacts could not be loaded/);
+		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
+
+		healthy = true;
+		retryReplica();
+		expect(isReplicaRetrying()).toBe(true);
+		const afterRetry = getElementsBatch(['e_000001']);
+
+		expect((await afterRetry).map((item) => item.id)).toEqual(['e_000001']);
+		expect(isReplicaBlocked()).toBe(false);
+		expect(isReplicaRetrying()).toBe(false);
+		expect(getReplicaBlockReason()).toBeNull();
 	});
 
 	it('a read waits for the artifacts too: none is answered before the follower has loaded', async () => {

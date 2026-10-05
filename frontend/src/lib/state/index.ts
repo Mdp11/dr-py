@@ -202,6 +202,7 @@ export {
 	getReplicaStatus,
 	getWorkingStamp,
 	isReplicaBlocked,
+	getReplicaBlockReason,
 	isReplicaRetrying,
 	metamodelIncludesStaged,
 	registerViewPlacement,

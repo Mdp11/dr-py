@@ -54,10 +54,18 @@ export class EngineUnavailableError extends Error {
 	}
 }
 
+/** The params of a call, or a function making them afresh for each attempt. */
+export type RouteParams = unknown | (() => unknown | Promise<unknown>);
+
 export type RouteOptions = {
 	signal?: AbortSignal;
-	/** Buffers of `params` moved to the engine: a call that moves some is not retried, as they are detached. */
-	transfer?: ArrayBuffer[];
+	/**
+	 * Buffers of the params moved to the engine, detached once posted. Fixed
+	 * buffers are moved by the first attempt only, so such a call is not asked
+	 * again; a function names those of each attempt's params, which a params
+	 * function makes afresh, so the call is asked again like any other.
+	 */
+	transfer?: ArrayBuffer[] | ((params: unknown) => ArrayBuffer[]);
 };
 
 let installed: EngineSeam | null = null;
@@ -94,18 +102,23 @@ export function asSent(body: object): unknown {
  */
 export async function route<T>(
 	method: string,
-	params: unknown,
+	params: RouteParams,
 	options: RouteOptions = {}
 ): Promise<T> {
 	const seam = installed;
 	if (seam === null) throw new EngineUnavailableError('the engine is not running');
 	const { signal, transfer } = options;
+	const attempt = async (): Promise<T> => {
+		const sent = typeof params === 'function' ? await (params as () => unknown)() : params;
+		const moved = typeof transfer === 'function' ? transfer(sent) : transfer;
+		return seam.call<T>(method, sent, signal, moved);
+	};
 	await seam.whenReady(signal);
 	try {
-		return await seam.call<T>(method, params, signal, transfer);
+		return await attempt();
 	} catch (error) {
-		if (!movedUnder(error) || (transfer !== undefined && transfer.length > 0)) throw error;
+		if (!movedUnder(error) || (Array.isArray(transfer) && transfer.length > 0)) throw error;
 	}
 	await seam.whenReady(signal);
-	return seam.call<T>(method, params, signal);
+	return attempt();
 }
