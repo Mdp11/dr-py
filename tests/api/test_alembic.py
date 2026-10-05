@@ -40,7 +40,14 @@ def test_migration_creates_content_tables(tmp_path: Path) -> None:
     command.upgrade(cfg, "head")
 
     engine = create_engine(url)
-    content = {"metamodels", "models", "views", "commits", "snapshots", "project_artifacts"}
+    content = {
+        "metamodels",
+        "models",
+        "views",
+        "commits",
+        "snapshots",
+        "project_artifacts",
+    }
     assert content <= set(inspect(engine).get_table_names())
 
     command.downgrade(cfg, "base")
@@ -266,12 +273,16 @@ def test_migration_0018_adds_head_tables_and_model_columns(tmp_path: Path) -> No
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO projects (id, name) VALUES ('p1', 'P1')"))
         conn.execute(
-            text("INSERT INTO metamodels (id, name, version, blob, created_at) "
-                 "VALUES ('m1', '', 1, '', '2026-10-05 00:00:00')")
+            text(
+                "INSERT INTO metamodels (id, name, version, blob, created_at) "
+                "VALUES ('m1', '', 1, '', '2026-10-05 00:00:00')"
+            )
         )
         conn.execute(
-            text("INSERT INTO models (id, project_id, metamodel_id, name, model_rev) "
-                 "VALUES ('x1', 'p1', 'm1', 'model', 3)")
+            text(
+                "INSERT INTO models (id, project_id, metamodel_id, name, model_rev) "
+                "VALUES ('x1', 'p1', 'm1', 'model', 3)"
+            )
         )
 
     command.upgrade(cfg, "0018")
@@ -284,20 +295,33 @@ def test_migration_0018_adds_head_tables_and_model_columns(tmp_path: Path) -> No
     assert cols["relationship_count"]["nullable"] is False
     with engine.connect() as conn:
         row = conn.execute(
-            text("SELECT model_rev, element_count, relationship_count, next_seq, "
-                 "state_digest FROM models")
+            text(
+                "SELECT model_rev, element_count, relationship_count, next_seq, "
+                "state_digest FROM models"
+            )
         ).one()
     assert tuple(row) == (3, 0, 0, None, None)
 
     rel_cols = {c["name"] for c in insp.get_columns("relationships")}
-    assert {"project_id", "id", "type_name", "properties", "rev", "seq",
-            "source_id", "target_id"} == rel_cols
+    assert {
+        "project_id",
+        "id",
+        "type_name",
+        "properties",
+        "rev",
+        "seq",
+        "source_id",
+        "target_id",
+    } == rel_cols
     assert {i["name"] for i in insp.get_indexes("relationships")} >= {
-        "ix_rel_source", "ix_rel_target"
+        "ix_rel_source",
+        "ix_rel_target",
     }
     assert {i["name"] for i in insp.get_indexes("entity_refs")} >= {"ix_refs_target"}
     assert insp.get_pk_constraint("entity_refs")["constrained_columns"] == [
-        "project_id", "referencer_id", "target_id"
+        "project_id",
+        "referencer_id",
+        "target_id",
     ]
     for table in ("elements", "relationships"):
         assert any(
@@ -312,6 +336,8 @@ def test_migration_0018_adds_head_tables_and_model_columns(tmp_path: Path) -> No
     insp = inspect(engine)
     assert not head_tables & set(insp.get_table_names())
     cols = {c["name"] for c in insp.get_columns("models")}
-    assert not {"state_digest", "element_count", "relationship_count", "next_seq"} & cols
+    assert (
+        not {"state_digest", "element_count", "relationship_count", "next_seq"} & cols
+    )
     with engine.connect() as conn:
         assert conn.execute(text("SELECT model_rev FROM models")).scalar_one() == 3

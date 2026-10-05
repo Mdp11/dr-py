@@ -98,9 +98,7 @@ def _assert_rows_equal_session(project_id: str = DEFAULT_PROJECT_ID) -> None:
     else:
         want_e = [asdict(e) for e in model.elements.values()]
         want_r = [asdict(r) for r in model.relationships.values()]
-        want_refs = {
-            (r, t) for t, rs in model.indexes.ref_targets.items() for r in rs
-        }
+        want_refs = {(r, t) for t, rs in model.indexes.ref_targets.items() for r in rs}
         want_digest = model_digest(model)
     with _db() as s:
         got_e, got_r = head_mod.read_head(s, project_id)
@@ -140,11 +138,15 @@ def test_install_writes_rows_in_model_order() -> None:
         row = content.get_model_row(s, DEFAULT_PROJECT_ID)
         assert row is not None
         # baseline: seq 0..n-1 in each table, one allocation counter above both
-        seqs = s.execute(
-            select(ElementRow.seq)
-            .where(ElementRow.project_id == DEFAULT_PROJECT_ID)
-            .order_by(ElementRow.seq)
-        ).scalars().all()
+        seqs = (
+            s.execute(
+                select(ElementRow.seq)
+                .where(ElementRow.project_id == DEFAULT_PROJECT_ID)
+                .order_by(ElementRow.seq)
+            )
+            .scalars()
+            .all()
+        )
         assert seqs == list(range(len(session.model.elements)))
         assert row.next_seq == max(
             len(session.model.elements), len(session.model.relationships)
@@ -157,13 +159,17 @@ def test_reinstall_replaces_the_rows() -> None:
     _assert_rows_equal_session()
     with _db() as s:
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == ([], [])
-        assert s.execute(select(func.count()).select_from(EntityRefRow)).scalar_one() == 0
+        assert (
+            s.execute(select(func.count()).select_from(EntityRefRow)).scalar_one() == 0
+        )
 
 
 # --- randomized commits -----------------------------------------------------
 
 
-def _random_ops(rng: random.Random, session_ids: tuple[list[str], list[str]]) -> list[dict]:
+def _random_ops(
+    rng: random.Random, session_ids: tuple[list[str], list[str]]
+) -> list[dict]:
     els, rels = session_ids
     ops: list[dict] = []
     fresh = 0
@@ -187,15 +193,32 @@ def _random_ops(rng: random.Random, session_ids: tuple[list[str], list[str]]) ->
     for _ in range(rng.randint(1, 3)):
         live = [e for e in els if e not in dead]
         kind = rng.choice(
-            ["create", "create", "create", "update", "update", "delete", "link",
-             "contain", "unlink", "recreate_element", "recreate_rel", "update_rel"]
+            [
+                "create",
+                "create",
+                "create",
+                "update",
+                "update",
+                "delete",
+                "link",
+                "contain",
+                "unlink",
+                "recreate_element",
+                "recreate_rel",
+                "update_rel",
+            ]
         )
         if kind == "create" or not live:
             fresh += 1
             eid = f"e{rng.randrange(10**6)}-{len(els)}-{fresh}"
             ops.append(
-                {"kind": "create_element", "temp_id": f"tmp_{eid}", "id": eid,
-                 "type_name": "Node", "properties": props()}
+                {
+                    "kind": "create_element",
+                    "temp_id": f"tmp_{eid}",
+                    "id": eid,
+                    "type_name": "Node",
+                    "properties": props(),
+                }
             )
             els.append(eid)
         elif kind == "update":
@@ -205,8 +228,11 @@ def _random_ops(rng: random.Random, session_ids: tuple[list[str], list[str]]) ->
             if not patch:
                 patch["label"] = "z"
             ops.append(
-                {"kind": "update_element", "id": rng.choice(live),
-                 "properties_patch": patch}
+                {
+                    "kind": "update_element",
+                    "id": rng.choice(live),
+                    "properties_patch": patch,
+                }
             )
         elif kind == "delete":
             eid = rng.choice(live)
@@ -216,9 +242,12 @@ def _random_ops(rng: random.Random, session_ids: tuple[list[str], list[str]]) ->
             fresh += 1
             rid = f"r{rng.randrange(10**6)}-{len(rels)}-{fresh}"
             op: dict[str, Any] = {
-                "kind": "create_relationship", "temp_id": f"tmp_{rid}", "id": rid,
+                "kind": "create_relationship",
+                "temp_id": f"tmp_{rid}",
+                "id": rid,
                 "type_name": "Link" if kind == "link" else "Contains",
-                "source_id": rng.choice(live), "target_id": rng.choice(live),
+                "source_id": rng.choice(live),
+                "target_id": rng.choice(live),
             }
             if kind == "link" and rng.random() < 0.5:
                 op["properties"] = {"via": rng.choice(live)}
@@ -228,23 +257,36 @@ def _random_ops(rng: random.Random, session_ids: tuple[list[str], list[str]]) ->
             ops.append({"kind": "delete_relationship", "id": rng.choice(rels)})
         elif kind == "update_rel" and rels:
             ops.append(
-                {"kind": "update_relationship", "id": rng.choice(rels),
-                 "properties_patch": {"via": rng.choice(live)}}
+                {
+                    "kind": "update_relationship",
+                    "id": rng.choice(rels),
+                    "properties_patch": {"via": rng.choice(live)},
+                }
             )
         elif kind == "recreate_element":
             eid = rng.choice(live)
             ops.append({"kind": "delete_element", "id": eid})
             ops.append(
-                {"kind": "create_element", "temp_id": f"tmp_re{fresh}", "id": eid,
-                 "type_name": "Node", "properties": {"label": "again"}}
+                {
+                    "kind": "create_element",
+                    "temp_id": f"tmp_re{fresh}",
+                    "id": eid,
+                    "type_name": "Node",
+                    "properties": {"label": "again"},
+                }
             )
         elif kind == "recreate_rel" and rels:
             rid = rng.choice(rels)
             ops.append({"kind": "delete_relationship", "id": rid})
             ops.append(
-                {"kind": "create_relationship", "temp_id": f"tmp_rr{fresh}", "id": rid,
-                 "type_name": "Link", "source_id": rng.choice(live),
-                 "target_id": rng.choice(live)}
+                {
+                    "kind": "create_relationship",
+                    "temp_id": f"tmp_rr{fresh}",
+                    "id": rid,
+                    "type_name": "Link",
+                    "source_id": rng.choice(live),
+                    "target_id": rng.choice(live),
+                }
             )
     return ops
 
@@ -283,8 +325,14 @@ def test_failed_commit_leaves_rows_unchanged(
 ) -> None:
     commit_ops(
         client,
-        [{"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node",
-          "properties": {"label": "keep"}}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_a",
+                "type_name": "Node",
+                "properties": {"label": "keep"},
+            }
+        ],
     )
     with _db() as s:
         before = head_mod.read_head(s, DEFAULT_PROJECT_ID)
@@ -298,8 +346,14 @@ def test_failed_commit_leaves_rows_unchanged(
     monkeypatch.setattr(head_mod, "_replace_refs", boom)
     r = post_commit(
         client,
-        [{"kind": "create_element", "temp_id": "tmp_b", "type_name": "Node",
-          "properties": {"label": "lost"}}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_b",
+                "type_name": "Node",
+                "properties": {"label": "lost"},
+            }
+        ],
     )
     assert r.status_code == 500
     monkeypatch.undo()
@@ -352,7 +406,33 @@ def test_nonfinite_float_arriving_by_op_is_refused(client: TestClient) -> None:
         content=body,
         headers={**AUTH_HEADERS, "content-type": "application/json"},
     )
-    assert r.status_code == 500, r.text
+    assert r.status_code == 422, r.text
+    assert "Non-finite" in r.text
+    assert get_registry().get(DEFAULT_PROJECT_ID).model_rev == rev
+    _assert_rows_equal_session()
+    with _db() as s:
+        assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == ([], [])
+
+
+@pytest.mark.parametrize(
+    "literal", ["Infinity", "-Infinity", "[1.0, NaN]", '{"a": NaN}']
+)
+def test_nonfinite_float_in_update_patch_is_refused(
+    client: TestClient, literal: str
+) -> None:
+    rev = get_registry().get(DEFAULT_PROJECT_ID).model_rev
+    body = (
+        '{"base_rev": %d, "ops": [{"kind": "create_element", "temp_id": "tmp_a",'
+        ' "type_name": "Node", "properties": {"label": "a"}},'
+        ' {"kind": "update_element", "id": "tmp_a",'
+        ' "properties_patch": {"x": %s}}]}' % (rev, literal)
+    )
+    r = client.post(
+        papi("/commits"),
+        content=body,
+        headers={**AUTH_HEADERS, "content-type": "application/json"},
+    )
+    assert r.status_code == 422, r.text
     assert get_registry().get(DEFAULT_PROJECT_ID).model_rev == rev
     _assert_rows_equal_session()
     with _db() as s:
@@ -368,16 +448,28 @@ def test_float_and_bigint_survive(client: TestClient) -> None:
     values = {"label": "NaN", "x": 1.0, "n": 2**60}
     body = commit_ops(
         client,
-        [{"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node",
-          "properties": values},
-         {"kind": "create_element", "temp_id": "tmp_b", "type_name": "Node",
-          "properties": {"label": "-Infinity", "x": 0.5, "n": -(2**60)}}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_a",
+                "type_name": "Node",
+                "properties": values,
+            },
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_b",
+                "type_name": "Node",
+                "properties": {"label": "-Infinity", "x": 0.5, "n": -(2**60)},
+            },
+        ],
     )
     with _db() as s:
         elements, _ = head_mod.read_head(s, DEFAULT_PROJECT_ID)
     by_id = {e["id"]: e for e in elements}
     got = by_id[body["id_map"]["tmp_a"]]["properties"]
-    assert {k: repr(v) for k, v in got.items()} == {k: repr(v) for k, v in values.items()}
+    assert {k: repr(v) for k, v in got.items()} == {
+        k: repr(v) for k, v in values.items()
+    }
     assert repr(got["x"]) == "1.0" and repr(got["n"]) == repr(2**60)
     _assert_rows_equal_session()
 
@@ -427,12 +519,26 @@ def test_ref_props_follow_the_metamodel_and_are_cached() -> None:
 def test_rebind_rebuilds_refs(client: TestClient) -> None:
     commit_ops(
         client,
-        [{"kind": "create_element", "temp_id": "tmp_a", "id": "a", "type_name": "Node"},
-         {"kind": "create_element", "temp_id": "tmp_b", "id": "b", "type_name": "Node",
-          "properties": {"label": "a"}}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_a",
+                "id": "a",
+                "type_name": "Node",
+            },
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_b",
+                "id": "b",
+                "type_name": "Node",
+                "properties": {"label": "a"},
+            },
+        ],
     )
     with _db() as s:
-        assert s.execute(select(func.count()).select_from(EntityRefRow)).scalar_one() == 0
+        assert (
+            s.execute(select(func.count()).select_from(EntityRefRow)).scalar_one() == 0
+        )
     rebound = _MM.replace(
         "{name: label, datatype: string}", "{name: label, datatype: Node}"
     )
@@ -440,9 +546,12 @@ def test_rebind_rebuilds_refs(client: TestClient) -> None:
     token = _acquire_mm(client)
     r = client.post(
         papi("/commits"),
-        json={"base_rev": rev,
-              "ops": [{"kind": "metamodel.rebind", "blob": rebound}],
-              "message": "", "lock_tokens": [token]},
+        json={
+            "base_rev": rev,
+            "ops": [{"kind": "metamodel.rebind", "blob": rebound}],
+            "message": "",
+            "lock_tokens": [token],
+        },
     )
     assert r.status_code == 200, r.text
     with _db() as s:
@@ -459,9 +568,21 @@ def test_rebind_rebuilds_refs(client: TestClient) -> None:
 def test_dangling_reference_survives_target_deletion(client: TestClient) -> None:
     commit_ops(
         client,
-        [{"kind": "create_element", "temp_id": "tmp_a", "id": "a", "type_name": "Node"},
-         {"kind": "create_element", "temp_id": "tmp_b", "id": "b", "type_name": "Node",
-          "properties": {"ref": "a"}}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_a",
+                "id": "a",
+                "type_name": "Node",
+            },
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_b",
+                "id": "b",
+                "type_name": "Node",
+                "properties": {"ref": "a"},
+            },
+        ],
     )
     r = post_commit(client, [{"kind": "delete_element", "id": "a"}])
     # a dangling reference is a structural blocker; the refused batch changes nothing
@@ -546,13 +667,31 @@ def test_import_project_with_an_unbuildable_model_leaves_no_project() -> None:
 def test_clone_copies_the_rows(client: TestClient) -> None:
     commit_ops(
         client,
-        [{"kind": "create_element", "temp_id": "tmp_a", "id": "a", "type_name": "Node",
-          "properties": {"label": "A", "n": 2**60}},
-         {"kind": "create_element", "temp_id": "tmp_b", "id": "b", "type_name": "Node",
-          "properties": {"ref": "a"}},
-         {"kind": "create_relationship", "temp_id": "tmp_l", "id": "l",
-          "type_name": "Link", "source_id": "a", "target_id": "b",
-          "properties": {"via": "a"}}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_a",
+                "id": "a",
+                "type_name": "Node",
+                "properties": {"label": "A", "n": 2**60},
+            },
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_b",
+                "id": "b",
+                "type_name": "Node",
+                "properties": {"ref": "a"},
+            },
+            {
+                "kind": "create_relationship",
+                "temp_id": "tmp_l",
+                "id": "l",
+                "type_name": "Link",
+                "source_id": "a",
+                "target_id": "b",
+                "properties": {"via": "a"},
+            },
+        ],
     )
     r = client.post(papi("/clone"), json={"name": "copy"}, headers=AUTH_HEADERS)
     assert r.status_code == 201, r.text
@@ -590,10 +729,17 @@ def test_write_batch_skips_a_project_without_a_model_row() -> None:
         assert s.execute(select(func.count()).select_from(ModelRow)).scalar_one() == 0
 
 
-def test_rebuild_refs_streams_in_chunks(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rebuild_refs_streams_in_chunks(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ops = [
-        {"kind": "create_element", "temp_id": f"tmp_{i}", "id": f"n{i}",
-         "type_name": "Node", "properties": {"refs": ["n0", f"n{i}"] if i else []}}
+        {
+            "kind": "create_element",
+            "temp_id": f"tmp_{i}",
+            "id": f"n{i}",
+            "type_name": "Node",
+            "properties": {"refs": ["n0", f"n{i}"] if i else []},
+        }
         for i in range(25)
     ]
     commit_ops(client, ops)
@@ -608,8 +754,15 @@ def test_rebuild_refs_streams_in_chunks(client: TestClient, monkeypatch: pytest.
 def test_deleting_the_project_removes_its_rows(client: TestClient) -> None:
     commit_ops(
         client,
-        [{"kind": "create_element", "temp_id": "tmp_a", "id": "a", "type_name": "Node",
-          "properties": {"ref": "a"}}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_a",
+                "id": "a",
+                "type_name": "Node",
+                "properties": {"ref": "a"},
+            }
+        ],
     )
     with _db() as s:
         tenancy.delete_project(s, DEFAULT_PROJECT_ID)

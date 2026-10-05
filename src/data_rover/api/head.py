@@ -81,6 +81,7 @@ def ref_props(metamodel: Metamodel) -> RefProps:
             for t in metamodel.relationships
         },
     )
+
     def forget(_ref: object) -> None:
         _ref_props_cache.pop(key, None)
 
@@ -119,7 +120,9 @@ def _element_values(project_id: str, element: Element, seq: int) -> dict[str, An
     }
 
 
-def _relationship_values(project_id: str, rel: Relationship, seq: int) -> dict[str, Any]:
+def _relationship_values(
+    project_id: str, rel: Relationship, seq: int
+) -> dict[str, Any]:
     return {
         "project_id": project_id,
         "id": rel.id,
@@ -132,7 +135,9 @@ def _relationship_values(project_id: str, rel: Relationship, seq: int) -> dict[s
     }
 
 
-def _insert_refs(db: Session, project_id: str, pairs: Sequence[tuple[str, str]]) -> None:
+def _insert_refs(
+    db: Session, project_id: str, pairs: Sequence[tuple[str, str]]
+) -> None:
     for chunk in batched(pairs, CHUNK):
         db.execute(
             insert(EntityRefRow),
@@ -267,13 +272,21 @@ def write_batch(
     # encode first: a value no writer can emit refuses the batch before any
     # statement runs
     kept_element_values = [
-        {"project_id": project_id, "id": e.id,
-         "properties": encode_properties(e.properties), "rev": e.rev}
+        {
+            "project_id": project_id,
+            "id": e.id,
+            "properties": encode_properties(e.properties),
+            "rev": e.rev,
+        }
         for e in kept_elements
     ]
     kept_rel_values = [
-        {"project_id": project_id, "id": r.id,
-         "properties": encode_properties(r.properties), "rev": r.rev}
+        {
+            "project_id": project_id,
+            "id": r.id,
+            "properties": encode_properties(r.properties),
+            "rev": r.rev,
+        }
         for r in kept_relationships
     ]
     new_element_values = []
@@ -361,7 +374,10 @@ def rebuild_refs(db: Session, project_id: str, metamodel: Metamodel) -> None:
         .execution_options(synchronize_session=False)
     )
     rp = ref_props(metamodel)
-    for table, by_type in ((ElementRow, rp.element), (RelationshipRow, rp.relationship)):
+    for table, by_type in (
+        (ElementRow, rp.element),
+        (RelationshipRow, rp.relationship),
+    ):
         last = -1
         while True:
             page = db.execute(
@@ -377,8 +393,7 @@ def rebuild_refs(db: Session, project_id: str, metamodel: Metamodel) -> None:
                 names = by_type.get(type_name, ())
                 if names:
                     pairs.extend(
-                        (entity_id, t)
-                        for t in refs_of(parse_model_json(text), names)
+                        (entity_id, t) for t in refs_of(parse_model_json(text), names)
                     )
             _insert_refs(db, project_id, pairs)
             last = page[-1].seq

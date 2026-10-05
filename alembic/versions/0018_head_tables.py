@@ -54,9 +54,7 @@ def upgrade() -> None:
     with op.batch_alter_table("models") as batch:
         batch.add_column(sa.Column("state_digest", sa.String(16), nullable=True))
         batch.add_column(
-            sa.Column(
-                "element_count", sa.Integer(), nullable=False, server_default="0"
-            )
+            sa.Column("element_count", sa.Integer(), nullable=False, server_default="0")
         )
         batch.add_column(
             sa.Column(

@@ -23,6 +23,7 @@ folds (``api/state_digest.py``).
 
 from __future__ import annotations
 
+import math
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -78,7 +79,24 @@ def _resolve_value(value: Any, id_map: dict[str, str]) -> Any:
     return value
 
 
+def _reject_nonfinite(value: Any) -> None:
+    """A float NaN or infinity is no property value: no writer can persist it
+    (the readers yield the strings "NaN" / "Infinity" / "-Infinity", which stay
+    legal)."""
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"Non-finite float property value {value!r}")
+    elif isinstance(value, list):
+        for item in value:
+            _reject_nonfinite(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _reject_nonfinite(item)
+
+
 def _resolve_props(props: dict[str, Any], id_map: dict[str, str]) -> dict[str, Any]:
+    for value in props.values():
+        _reject_nonfinite(value)
     return {k: _resolve_value(v, id_map) for k, v in props.items()}
 
 
