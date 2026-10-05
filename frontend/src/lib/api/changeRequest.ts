@@ -12,8 +12,7 @@ import {
 import type { ChangeRequest } from '$lib/state/cr';
 import type { ModelOp } from '$lib/state/ops';
 
-/** `workingCopy` says the answer holds the staged edits: the engine reads the working copy. */
-export type CompareOut = z.infer<typeof CompareOutSchema> & { workingCopy: boolean };
+export type CompareOut = z.infer<typeof CompareOutSchema>;
 
 /** Mirrors `MAX_CRS_PER_REQUEST` in `api/schemas.py`: the server rejects a
  * longer `crs` list at request-parse time. Mirrored so the dialog can say so
@@ -21,8 +20,8 @@ export type CompareOut = z.infer<typeof CompareOutSchema> & { workingCopy: boole
 export const MAX_CRS_PER_REQUEST = 20;
 
 export type ProposeCrResult =
-	| { ok: true; modelRev: number; cr: ChangesDoc; ops: ModelOp[]; workingCopy: boolean }
-	| { ok: false; modelRev: number; crIndex: number; conflicts: Conflict[]; workingCopy: boolean };
+	| { ok: true; modelRev: number; cr: ChangesDoc; ops: ModelOp[] }
+	| { ok: false; modelRev: number; crIndex: number; conflicts: Conflict[] };
 
 /**
  * Diff the working copy, staged edits included, against a model file
@@ -32,36 +31,30 @@ export type ProposeCrResult =
  */
 export async function compareModel(file: Blob): Promise<CompareOut> {
 	// The buffer is read again for each attempt: the engine detaches it once posted.
-	const answer = EngineCompareSchema.parse(
+	return EngineCompareSchema.parse(
 		await route<unknown>(
 			'compareModel',
 			async () => ({ file: await file.arrayBuffer(), created_at: new Date().toISOString() }),
 			{ transfer: (params) => [(params as { file: ArrayBuffer }).file] }
 		)
 	);
-	return { ...answer, workingCopy: true };
 }
 
-function proposed(body: z.infer<typeof ProposeCrOutSchema>, workingCopy: boolean): ProposeCrResult {
+function proposed(body: z.infer<typeof ProposeCrOutSchema>): ProposeCrResult {
 	return {
 		ok: true,
 		modelRev: body.model_rev,
 		cr: body.cr,
-		ops: body.ops as unknown as ModelOp[],
-		workingCopy
+		ops: body.ops as unknown as ModelOp[]
 	};
 }
 
-function conflicted(
-	body: z.infer<typeof ProposeCrConflictSchema>,
-	workingCopy: boolean
-): ProposeCrResult {
+function conflicted(body: z.infer<typeof ProposeCrConflictSchema>): ProposeCrResult {
 	return {
 		ok: false,
 		modelRev: body.model_rev,
 		crIndex: body.cr_index,
-		conflicts: body.conflicts,
-		workingCopy
+		conflicts: body.conflicts
 	};
 }
 
@@ -75,5 +68,5 @@ function conflicted(
 export async function proposeCr(crs: ChangeRequest[]): Promise<ProposeCrResult> {
 	const params = { crs: asSent(crs), created_at: new Date().toISOString() };
 	const answer = EngineProposeSchema.parse(await route<unknown>('proposeCr', params));
-	return 'conflict' in answer ? conflicted(answer.conflict, true) : proposed(answer, true);
+	return 'conflict' in answer ? conflicted(answer.conflict) : proposed(answer);
 }

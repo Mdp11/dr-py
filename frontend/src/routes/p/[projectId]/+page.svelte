@@ -14,10 +14,8 @@
 	import HistoryDrawer from '$lib/components/HistoryDrawer.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import ResultsPanel from '$lib/components/ResultsPanel.svelte';
-	import ReplicaFallbackNotice from '$lib/components/ReplicaFallbackNotice.svelte';
 	import ReplicaFailedOverlay from '$lib/components/ReplicaFailedOverlay.svelte';
 	import { metamodel as metamodelApi } from '$lib/api';
-	import { anyEngineSurface, readSwitches } from '$lib/engine/surfaces';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		getFeedTermination,
@@ -31,7 +29,6 @@
 		beginJourney,
 		bindStagedArtifacts,
 		cancelJourney,
-		cancelOpenProgress,
 		clearModelError,
 		clearOverlay,
 		clearSelection,
@@ -44,7 +41,6 @@
 		getDiffDrawerOpen,
 		getHistoryDrawerOpen,
 		getModelError,
-		getReplicaNotice,
 		getResultsPanelOpen,
 		getViewDiscardNotice,
 		clearViewDiscardNotice,
@@ -80,8 +76,7 @@
 		startRealtime,
 		startReplica,
 		stopRealtime,
-		stopReplica,
-		trackOpenProgress
+		stopReplica
 	} from '$lib/state';
 
 	// Before the feed starts, so the replica is open to take its first frames.
@@ -102,10 +97,7 @@
 	});
 	onDestroy(() => stopRealtime());
 	onDestroy(() => stopReplica());
-	onDestroy(() => {
-		cancelOpenProgress();
-		cancelJourney();
-	});
+	onDestroy(() => cancelJourney());
 
 	// Unload guard: staged (uncommitted) edits and unsaved table/navigation
 	// drafts live only in this page's memory — losing the document loses them.
@@ -141,16 +133,14 @@
 	// paint is already view-shaped instead of flashing all elements and then
 	// collapsing to the view a beat later.
 	async function boot(): Promise<void> {
-		// Warm opens never show the open-progress overlay (status is 'ready'
-		// immediately), so this flag is what keeps the containment tree on a
-		// skeleton instead of flashing its empty states while the loads below run.
+		// This flag keeps the containment tree on a skeleton instead of flashing
+		// its empty states while the loads below run.
 		setProjectOpening(true);
 		// Adopt the journey started on the picker/wizard click, or start one now for
 		// a direct-URL landing. Idempotent: a create/open journey already running is
-		// preserved (kind + slice table intact).
-		beginJourney('open', { replica: anyEngineSurface(readSwitches()) });
+		// preserved (kind intact).
+		beginJourney('open');
 		try {
-			void trackOpenProgress(); // fire-and-forget: feeds the journey while the requests below hydrate
 			markViewUnresolved(); // reset the view-answered gate on every project (re)entry
 			// …and drop the previous project's view state with it. The view stores
 			// are module-scope singletons: an in-SPA project switch that left
@@ -213,8 +203,7 @@
 					setNotice: setAccessNotice,
 					navigate: () => void goto(resolve('/projects'))
 				});
-				cancelOpenProgress(); // stop the status poll loop
-				cancelJourney(); // and tear the progress bar down
+				cancelJourney(); // tear the progress bar down
 				return;
 			}
 			// List the project's views and pick the active one (remembered ->
@@ -256,9 +245,8 @@
 			// role/ttl best-effort; editing stays gated as viewer until it loads
 		}
 		await loadArtifacts().catch(() => {}); // artifact library is best-effort
-		// The replica's own open, if any surface is on the engine: the overlay
-		// stays up through download/parse/index/tail, not just the server-side
-		// steps above.
+		// The replica's own open: the overlay stays up through
+		// download/parse/index/tail, not just the loads above.
 		await replicaGate();
 	}
 
@@ -315,11 +303,8 @@
 	// across the interim is the whole point).
 	const viewDiscardNotice = $derived(getViewDiscardNotice());
 
-	// The engine could not start: this tab reads from the server, and the
-	// dismissible notice says so.
-	const replicaNotice = $derived(getReplicaNotice());
-	// The replica could not be rebuilt: the workspace is blocked until Retry
-	// brings it back or the phase moves on its own.
+	// The replica could not be built or rebuilt: the workspace is blocked until
+	// Retry brings it back or the phase moves on its own.
 	const replicaBlocked = $derived(isReplicaBlocked());
 
 	// Rebind is non-destructive: only the metamodel pointer and conformance issues change;
@@ -477,10 +462,9 @@
 		const rebindBanner = pendingRebind !== null ? 'auto ' : '';
 		const feedBanner = feedTerminationView !== null ? 'auto ' : '';
 		const viewDiscardBanner = viewDiscardNotice !== null ? 'auto ' : '';
-		const replicaBanner = replicaNotice ? 'auto ' : '';
 		return panelOpen
-			? `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}${replicaBanner}1fr auto ${panelHeight}px auto`
-			: `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}${replicaBanner}1fr auto`;
+			? `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}1fr auto ${panelHeight}px auto`
+			: `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}1fr auto`;
 	});
 </script>
 
@@ -572,9 +556,6 @@
 				Dismiss
 			</Button>
 		</div>
-	{/if}
-	{#if replicaNotice}
-		<ReplicaFallbackNotice />
 	{/if}
 	<Sidebar />
 	<ResizeHandle value={leftWidth} side="left" onchange={(n) => (leftWidth = n)} />

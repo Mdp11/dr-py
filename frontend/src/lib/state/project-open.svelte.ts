@@ -3,10 +3,8 @@
  * onReloadModel() around their metamodel → view → summary loads, and read by
  * the containment tree to show a loading skeleton instead of the misleading
  * intermediate states those sequential loads otherwise paint on a WARM open
- * ("Load a metamodel…" → "Model is empty." → blank rows). The global
- * open-progress overlay only covers COLD opens (GET /model/status reports
- * hydrating/validating); a warm open is 'ready' immediately, so this flag is
- * the only loading signal the tree gets.
+ * ("Load a metamodel…" → "Model is empty." → blank rows). The tree's
+ * loading signal is this flag.
  */
 
 let _opening = $state(false);

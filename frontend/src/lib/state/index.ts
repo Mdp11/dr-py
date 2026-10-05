@@ -192,12 +192,9 @@ export {
 	adoptWorkingStamp,
 	callEngine,
 	beginReplicaCommit,
-	dismissReplicaNotice,
 	exportsIncludeStaged,
-	compareOnEngine,
 	forgetViewPlacement,
 	forgetViewPlacements,
-	getReplicaNotice,
 	getLinkGeneration,
 	getReplicaStatus,
 	getWorkingStamp,
@@ -583,14 +580,7 @@ export {
 	resetProgress,
 	type ProgressEntry
 } from './progress.svelte';
-export { cancelOpenProgress, trackOpenProgress } from './open-progress.svelte';
-export {
-	beginJourney,
-	journeyUpload,
-	journeyStatus,
-	finishJourney,
-	cancelJourney
-} from './open-journey';
+export { beginJourney, journeyUpload, finishJourney, cancelJourney } from './open-journey';
 export {
 	deriveStagedElementRows,
 	stagedRelationshipOpIds,

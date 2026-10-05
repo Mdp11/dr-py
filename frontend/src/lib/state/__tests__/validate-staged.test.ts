@@ -25,11 +25,10 @@ import {
 	getIssuesByOwner,
 	getIssueCounts
 } from '../model.svelte';
+import { ConflictError } from '$lib/api/errors';
 import { clearOverlay, getLastError, getOverlay } from '../validation.svelte';
 import { runValidation } from '../validate-action';
 import { engineStore, rename, type EngineStore } from './support/engine-store';
-
-const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
@@ -39,107 +38,7 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-describe('validateAll with staged ops', () => {
-	it('sends staged ops + base_rev to /model/validate', async () => {
-		setModelApiConfig({ baseUrl: BASE });
-		adoptSummary({
-			model_rev: 4,
-			element_count: 0,
-			relationship_count: 0,
-			elements_by_type: {},
-			issue_counts: {},
-			undo_depth: 0
-		});
-		emit({ kind: 'create_element', temp_id: 'tmp1', type_name: 'Block', properties: {} });
-
-		let body: { ops?: unknown[]; base_rev?: number } | undefined;
-		server.use(
-			http.post(`${BASE}/model/validate`, async ({ request }) => {
-				body = (await request.json()) as typeof body;
-				return HttpResponse.json([
-					{ severity: 'error', message: 'e', target_ids: ['tmp1'], origin: 'uncommitted' }
-				]);
-			})
-		);
-
-		const issues = await validateAll();
-		expect(body?.base_rev).toBe(4);
-		expect(body?.ops).toHaveLength(1);
-		expect(issues[0].origin).toBe('uncommitted');
-	});
-});
-
-describe('runValidation stores the origin-tagged run as the overlay, not the live map', () => {
-	it('setOverlay (via runValidation) does not touch issuesByOwner/counts', async () => {
-		setModelApiConfig({ baseUrl: BASE });
-		adoptSummary({
-			model_rev: 1,
-			element_count: 0,
-			relationship_count: 0,
-			elements_by_type: {},
-			issue_counts: { error: 1 },
-			undo_depth: 0
-		});
-		emit({ kind: 'create_element', temp_id: 'tmp3', type_name: 'Block', properties: {} });
-
-		server.use(
-			http.post(`${BASE}/model/validate`, () =>
-				HttpResponse.json([
-					{
-						severity: 'error',
-						message: 'staged issue',
-						target_ids: ['tmp3'],
-						origin: 'uncommitted'
-					}
-				])
-			)
-		);
-
-		await runValidation();
-
-		// The overlay carries the origin-tagged run result...
-		expect(getOverlay()?.map((i) => i.message)).toEqual(['staged issue']);
-		expect(getOverlay()?.[0].origin).toBe('uncommitted');
-		// ...while the live committed map/counts are untouched (validateAll is a
-		// pure fetch; StatusBar keeps reading committed truth throughout).
-		expect(getIssuesByOwner().size).toBe(0);
-		expect(getIssueCounts()).toEqual({ error: 1 });
-	});
-});
-
-describe('runValidation — 409 conflict path', () => {
-	it('sets conflict model error and lastError when /model/validate returns 409', async () => {
-		setModelApiConfig({ baseUrl: BASE });
-		adoptSummary({
-			model_rev: 9,
-			element_count: 0,
-			relationship_count: 0,
-			elements_by_type: {},
-			issue_counts: {},
-			undo_depth: 0
-		});
-		emit({ kind: 'create_element', temp_id: 'tmp2', type_name: 'Block', properties: {} });
-
-		server.use(
-			http.post(
-				`${BASE}/model/validate`,
-				() =>
-					new HttpResponse(JSON.stringify({ detail: 'stale base_rev', model_rev: 9 }), {
-						status: 409,
-						headers: { 'content-type': 'application/json' }
-					})
-			)
-		);
-
-		// runValidation swallows the error — it must resolve (not reject)
-		await expect(runValidation()).resolves.toBeUndefined();
-
-		expect(getModelError()?.kind).toBe('conflict');
-		expect(getLastError()).not.toBeNull();
-	});
-});
-
-describe('validateAll on the engine side', () => {
+describe('validateAll', () => {
 	const API = `${PAGE_ORIGIN}/api/v1/projects/p`;
 	let store: EngineStore | null = null;
 
@@ -152,8 +51,7 @@ describe('validateAll on the engine side', () => {
 	});
 
 	/** The engine store; `/model/validate` records what it is sent and answers nothing. */
-	async function open(surfaces: { [surface: string]: string } = {}, project = fakeProject()) {
-		// The suites above name their server; these reach the active project's.
+	async function open(project = fakeProject()) {
 		setModelApiConfig(undefined);
 		const bodies: unknown[] = [];
 		server.use(
@@ -164,7 +62,7 @@ describe('validateAll on the engine side', () => {
 			}),
 			http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] }))
 		);
-		store = await engineStore({ surfaces, project });
+		store = await engineStore({ project });
 		await ensureElements(['e_000001']);
 		return { s: store, bodies };
 	}
@@ -209,7 +107,7 @@ describe('validateAll on the engine side', () => {
 		const B = yamlOf(DE_OR_FR);
 		project.artifacts.set('r1', ruleSet('r1', 'Rules', A, parsed(DE_ONLY)));
 		project.rulesParses.set(B, parsed(DE_OR_FR));
-		const { s, bodies } = await open({}, project);
+		const { s, bodies } = await open(project);
 		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
 
 		try {
@@ -231,5 +129,53 @@ describe('validateAll on the engine side', () => {
 		} finally {
 			resetArtifactEdits();
 		}
+	});
+
+	it('runValidation stores the origin-tagged run as the overlay, not the live map', async () => {
+		const { s } = await open();
+		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
+		adoptSummary({
+			model_rev: 0,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: { error: 1 },
+			undo_depth: 0
+		});
+		emit(rename('e_000001', 'x'.repeat(201)));
+		await stagedSettled();
+
+		await runValidation();
+
+		// The overlay carries the origin-tagged run result...
+		expect(getOverlay()?.map((i) => i.message)).toEqual([
+			'name: length 201 exceeds max_length 200'
+		]);
+		expect(getOverlay()?.[0]?.origin).toBe('uncommitted');
+		// ...while the live committed map/counts are untouched (validateAll is a
+		// pure fetch; StatusBar keeps reading committed truth throughout).
+		expect(getIssuesByOwner().size).toBe(0);
+		expect(getIssueCounts()).toEqual({ error: 1 });
+	});
+
+	it('a 409 marks the store conflicted and sets lastError; runValidation still resolves', async () => {
+		const { s } = await open();
+		if (!s.sync.status().seeded) await s.until((status) => status.seeded);
+		adoptSummary({
+			model_rev: 0,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: {},
+			undo_depth: 0
+		});
+		vi.spyOn(validationApi, 'validateModel').mockRejectedValue(
+			new ConflictError(409, { detail: 'stale base_rev', model_rev: 9 }, 'stale base_rev')
+		);
+
+		await expect(runValidation()).resolves.toBeUndefined();
+
+		expect(getModelError()?.kind).toBe('conflict');
+		expect(getLastError()).not.toBeNull();
 	});
 });

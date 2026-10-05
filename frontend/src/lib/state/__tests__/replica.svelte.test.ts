@@ -9,7 +9,6 @@ import { evaluateNavigation } from '$lib/api/artifacts';
 import { getElementsBatch } from '$lib/api/model-read';
 import * as validationApi from '$lib/api/validation';
 import { createSnapshotCache } from '$lib/engine/cache';
-import { SURFACES } from '$lib/engine/surfaces';
 import type { EngineLink } from '$lib/engine/client';
 import { FrameError } from '$lib/engine/frame';
 import {
@@ -46,17 +45,12 @@ import {
 import {
 	beginReplicaCommit,
 	configureReplica,
-	dismissReplicaNotice,
-	engineSide,
 	exportsIncludeStaged,
-	compareOnEngine,
 	metamodelIncludesStaged,
 	forgetViewPlacement,
 	forgetViewPlacements,
 	getReplicaBlockReason,
-	getReplicaNotice,
 	getReplicaStatus,
-	getStagingSide,
 	handReplicaFeed,
 	isReplicaBlocked,
 	isReplicaRetrying,
@@ -107,7 +101,6 @@ afterEach(() => {
 	for (const link of links.splice(0)) link.dispose();
 	clearActiveProject();
 	server.resetHandlers();
-	localStorage.removeItem('dr.surfaces');
 	vi.restoreAllMocks();
 });
 
@@ -371,77 +364,20 @@ describe('the engine seam', () => {
 			)
 		);
 	});
-	const onEngine = (surfaces: Record<string, string>) =>
-		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
-
-	it('startReplica installs a seam whose sides follow dr.surfaces and the phase', async () => {
-		onEngine({ staging: 'legacy', search: 'server' });
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica();
-		setActiveProject('p');
-		expect(engineSide('elements')).toBe('server');
-
-		startReplica();
-		expect(getReplicaStatus().phase).toBe('opening');
-		expect(engineSide('elements')).toBe('engine');
-		expect(engineSide('search')).toBe('server');
-		await replica.until((s) => s.phase === 'ready');
-
-		expect(engineSide('elements')).toBe('engine');
-		expect(engineSide('search')).toBe('server');
-	});
-
-	it("a phase of off or server is the server's", () => {
-		onEngine({ summary: 'engine' });
-		const status = { current: OFF };
-		configureReplica({ sync: spySync(undefined, status) });
-		setActiveProject('p');
-		startReplica();
-
-		expect(engineSide('summary')).toBe('server');
-		status.current = READY;
-		expect(engineSide('summary')).toBe('engine');
-		status.current = { ...OFF, phase: 'server', reason: 'engine unreachable' };
-		expect(engineSide('summary')).toBe('server');
-	});
-
-	it('reads the switches once; resetReplica makes the next start read them again', () => {
-		onEngine({ staging: 'legacy', search: 'server' });
+	it('stopReplica and resetReplica uninstall the seam: every read is unavailable', async () => {
 		configureReplica({ sync: spySync(undefined, { current: READY }) });
 		setActiveProject('p');
-		startReplica();
-		expect(engineSide('search')).toBe('server');
 
-		localStorage.removeItem('dr.surfaces');
+		startReplica();
 		stopReplica();
-		startReplica();
-		expect(engineSide('search')).toBe('server');
+		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
 
-		resetReplica();
-		configureReplica({ sync: spySync(undefined, { current: READY }) });
 		startReplica();
-		expect(engineSide('search')).toBe('engine');
+		resetReplica();
+		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
 	});
 
-	it('stopReplica and resetReplica uninstall it', () => {
-		onEngine({ elements: 'engine' });
-		configureReplica({ sync: spySync(undefined, { current: READY }) });
-		setActiveProject('p');
-
-		startReplica();
-		expect(engineSide('elements')).toBe('engine');
-		stopReplica();
-		expect(engineSide('elements')).toBe('server');
-
-		startReplica();
-		expect(engineSide('elements')).toBe('engine');
-		resetReplica();
-		expect(engineSide('elements')).toBe('server');
-	});
-
-	it('a read of a surface on the engine is answered by the replica', async () => {
-		onEngine({ elements: 'engine' });
+	it('a read is answered by the replica', async () => {
 		const project = fakeProject();
 		server.use(...project.handlers());
 		realReplica();
@@ -467,8 +403,75 @@ describe('the engine seam', () => {
 
 		await expect(waiting).rejects.toBeInstanceOf(EngineUnavailableError);
 		await expect(waiting).rejects.toThrow('no frame here');
-		expect(getReplicaStatus().phase).toBe('server');
+		expect(getReplicaStatus().phase).toBe('unavailable');
 		await expect(getElementsBatch(['e_000001'])).rejects.toBeInstanceOf(EngineUnavailableError);
+	});
+
+	it('a replica that never becomes ready is unavailable and blocks the workspace', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica({
+			connect: () => Promise.reject(new FrameError('same-host', 'no frame here'))
+		});
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'unavailable');
+
+		expect(isReplicaBlocked()).toBe(true);
+		expect(getReplicaStatus().reason).toBe('no frame here');
+		expect(getReplicaBlockReason()).toBe('no frame here');
+		expect(isReplicaRetrying()).toBe(false);
+	});
+
+	it('retry from unavailable reconnects: a second connect is made and the phase reaches ready', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		let attempts = 0;
+		const replica = realReplica({
+			connect: () => {
+				attempts += 1;
+				if (attempts === 1) return Promise.reject(new FrameError('same-host', 'no frame here'));
+				const link = connectInProcess();
+				links.push(link);
+				return Promise.resolve(link);
+			}
+		});
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'unavailable');
+		let unblocked = false;
+		const released = whenReplicaUnblocked().then(() => (unblocked = true));
+		await macrotask();
+		expect(unblocked).toBe(false);
+
+		const ready = replica.until((s) => s.phase === 'ready' && s.seeded);
+		retryReplica();
+		expect(isReplicaRetrying()).toBe(true);
+		expect(isReplicaBlocked()).toBe(true);
+		await ready;
+		await released;
+
+		expect(attempts).toBe(2);
+		expect(isReplicaBlocked()).toBe(false);
+		expect(isReplicaRetrying()).toBe(false);
+		expect(getReplicaBlockReason()).toBeNull();
+		expect((await getElementsBatch(['e_000001'])).map((item) => item.id)).toEqual(['e_000001']);
+	});
+
+	it('a retry that fails again is unavailable again, with Retry enabled', async () => {
+		const project = fakeProject();
+		server.use(...project.handlers());
+		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
+		setActiveProject('p');
+		startReplica();
+		await replica.until((s) => s.phase === 'unavailable');
+
+		const again = replica.until((s) => s.phase === 'unavailable');
+		retryReplica();
+		await again;
+
+		expect(isReplicaBlocked()).toBe(true);
+		expect(isReplicaRetrying()).toBe(false);
 	});
 
 	it('a read in a project with no model is unavailable, saying so', async () => {
@@ -589,138 +592,7 @@ describe('the engine seam', () => {
 	});
 });
 
-describe('getStagingSide', () => {
-	const onStaging = (staging: string) =>
-		localStorage.setItem('dr.surfaces', JSON.stringify({ staging }));
-
-	// Driven through a REAL sync (`realReplica()`/`fakeProject()`), not a spy:
-	// `getStagingSide()` reads the reactive `_status`, which only a sync wired
-	// through `build()`'s `onStatus` (spySync bypasses it) ever updates.
-
-	it('is legacy without a sync', () => {
-		expect(getStagingSide()).toBe('legacy');
-	});
-
-	it("is legacy with dr.surfaces {staging: 'legacy'}, even at ready", async () => {
-		onStaging('legacy');
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-
-		expect(getStagingSide()).toBe('legacy');
-	});
-
-	it("is engine with {staging: 'engine'} at ready", async () => {
-		onStaging('engine');
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-
-		expect(getStagingSide()).toBe('engine');
-	});
-
-	it('is legacy at server, staging on the engine', async () => {
-		onStaging('engine');
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'server');
-
-		expect(getStagingSide()).toBe('legacy');
-	});
-
-	it('is legacy at off, staging on the engine', async () => {
-		onStaging('engine');
-		const project = fakeProject();
-		project.fail('descriptor', 404, 1);
-		server.use(...project.handlers());
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'off');
-
-		expect(getStagingSide()).toBe('legacy');
-	});
-
-	it('is engine at failed, staging on the engine', async () => {
-		onStaging('engine');
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await failReplica(project, replica);
-
-		expect(getStagingSide()).toBe('engine');
-	});
-
-	it('is engine at frozen, staging on the engine', async () => {
-		onStaging('engine');
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-
-		// The freeze is synchronous (no queued delta), so the watcher must be
-		// registered BEFORE the event fires, or the one push it waits for is
-		// already past by the time `until` starts watching.
-		const frozen = replica.until((s) => s.phase === 'frozen');
-		handReplicaFeed(
-			{
-				type: 'rebind',
-				rev: 1,
-				from_metamodel_id: 'a',
-				to_metamodel_id: 'b',
-				validation_error_count: 0
-			},
-			'{}'
-		);
-		await frozen;
-
-		expect(getStagingSide()).toBe('engine');
-	});
-
-	it('reacts through $derived when the phase moves to server', async () => {
-		onStaging('engine');
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
-
-		let side: (() => string) | undefined;
-		const dispose = $effect.root(() => {
-			const s = $derived(getStagingSide());
-			side = () => s;
-		});
-		flushSync();
-		expect(side!()).toBe('legacy'); // no sync yet
-
-		setActiveProject('p');
-		startReplica();
-		flushSync();
-		expect(side!()).toBe('engine'); // opening: staging on the engine, phase not off/server
-
-		await replica.until((s) => s.phase === 'server');
-		flushSync();
-
-		expect(side!()).toBe('legacy'); // the derived re-ran on its own, without a fresh read
-		dispose();
-	});
-});
-
 describe('the status listeners and the engine handle', () => {
-	const onStaging = (staging: string) =>
-		localStorage.setItem('dr.surfaces', JSON.stringify({ staging }));
-
 	it('subscribeReplicaStatus gets (status, previous) on every change', async () => {
 		const project = fakeProject();
 		server.use(...project.handlers());
@@ -743,8 +615,7 @@ describe('the status listeners and the engine handle', () => {
 		expect(runs(seen.map(([status]) => status.phase))).toEqual(['opening', 'ready', 'off']);
 	});
 
-	it('startReplica attaches the engine half with staging on the engine; stopReplica detaches it', async () => {
-		onStaging('engine');
+	it('startReplica attaches the engine half; stopReplica detaches it', async () => {
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica();
@@ -764,20 +635,6 @@ describe('the status listeners and the engine handle', () => {
 		stopReplica();
 		expect(detach).toHaveBeenCalled();
 		expect(handle.status()).toBe(OFF);
-	});
-
-	it('with staging on legacy, the engine half is never attached', async () => {
-		onStaging('legacy');
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica();
-		const attach = vi.spyOn(modelEngine, 'attachEngine');
-		setActiveProject('p');
-
-		startReplica();
-		await replica.until((s) => s.phase === 'ready');
-
-		expect(attach).not.toHaveBeenCalled();
 	});
 });
 
@@ -831,42 +688,7 @@ describe('the structure rev after a re-bootstrap', () => {
 });
 
 describe('replicaGate', () => {
-	const onEngine = (surfaces: Record<string, string>) =>
-		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
-	// A default may put a surface on the engine (see `lib/engine/surfaces.ts`);
-	// force every one to `server` for a test about there being none on it — and
-	// pin staging to 'legacy' too, since staging on the engine (the default)
-	// forces every surface back to it whatever this object says of them.
-	const onServer = () =>
-		onEngine({
-			staging: 'legacy',
-			...Object.fromEntries(SURFACES.map((s) => [s, 'server']))
-		});
-
-	it('resolves at once with every surface on server, even while genuinely opening', async () => {
-		onServer();
-		const project = fakeProject();
-		const held = hold();
-		server.use(...project.handlers({ hold: held }));
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await held.reached;
-		expect(getReplicaStatus().phase).toBe('opening');
-
-		let resolved = false;
-		void replicaGate().then(() => {
-			resolved = true;
-		});
-		await macrotask();
-
-		expect(resolved).toBe(true);
-		held.release();
-		await replica.until((s) => s.phase === 'ready');
-	});
-
-	it('with a surface on the engine, waits for opening to end, resolving at ready', async () => {
-		onEngine({ elements: 'engine' });
+	it('waits for opening to end, resolving at ready', async () => {
 		const project = fakeProject();
 		const held = hold();
 		server.use(...project.handlers({ hold: held }));
@@ -890,14 +712,13 @@ describe('replicaGate', () => {
 		expect(resolved).toBe(true);
 	});
 
-	it('resolves at server (a rejected connect)', async () => {
-		onEngine({ elements: 'engine' });
+	it('resolves at unavailable (a rejected connect)', async () => {
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
 		setActiveProject('p');
 		startReplica();
-		await replica.until((s) => s.phase === 'server');
+		await replica.until((s) => s.phase === 'unavailable');
 
 		let resolved = false;
 		void replicaGate().then(() => {
@@ -909,7 +730,6 @@ describe('replicaGate', () => {
 	});
 
 	it('resolves at off (no model)', async () => {
-		onEngine({ elements: 'engine' });
 		const project = fakeProject();
 		project.fail('descriptor', 404, 1);
 		server.use(...project.handlers());
@@ -928,7 +748,6 @@ describe('replicaGate', () => {
 	});
 
 	it('resolves on stopReplica()', async () => {
-		onEngine({ elements: 'engine' });
 		const project = fakeProject();
 		const held = hold();
 		server.use(...project.handlers({ hold: held }));
@@ -952,7 +771,6 @@ describe('replicaGate', () => {
 	});
 
 	it('feeds the journey (journeyReplica) while opening only', async () => {
-		onEngine({ elements: 'engine' });
 		const spy = vi.spyOn(openJourney, 'journeyReplica');
 		const project = fakeProject();
 		server.use(...project.handlers());
@@ -971,51 +789,8 @@ describe('replicaGate', () => {
 	});
 });
 
-describe('the notice and the block', () => {
-	const onEngine = (surfaces: Record<string, string>) =>
-		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
-	// A default may put a surface on the engine (see `lib/engine/surfaces.ts`);
-	// force every one to `server` for a test about there being none on it — and
-	// pin staging to 'legacy' too, since staging on the engine (the default)
-	// forces every surface back to it whatever this object says of them.
-	const onServer = () =>
-		onEngine({
-			staging: 'legacy',
-			...Object.fromEntries(SURFACES.map((s) => [s, 'server']))
-		});
-
-	it('the notice shows at server with a surface on the engine, not after dismiss, again after startReplica', async () => {
-		onEngine({ elements: 'engine' });
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'server');
-
-		expect(getReplicaNotice()).toBe(true);
-
-		dismissReplicaNotice();
-		expect(getReplicaNotice()).toBe(false);
-
-		startReplica();
-		expect(getReplicaNotice()).toBe(true);
-	});
-
-	it('the notice never shows with no surface on the engine', async () => {
-		onServer();
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
-		setActiveProject('p');
-		startReplica();
-		await replica.until((s) => s.phase === 'server');
-
-		expect(getReplicaNotice()).toBe(false);
-	});
-
+describe('the block', () => {
 	it("isReplicaBlocked is true at failed, stays true through the retry's resyncing, false at ready", async () => {
-		onEngine({ elements: 'engine' });
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica();
@@ -1040,7 +815,6 @@ describe('the notice and the block', () => {
 	});
 
 	it('a retry that fails again is blocked again, with Retry enabled', async () => {
-		onEngine({ elements: 'engine' });
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica();
@@ -1056,46 +830,7 @@ describe('the notice and the block', () => {
 		expect(isReplicaRetrying()).toBe(false);
 	});
 
-	it('with every surface on server, a failed replica blocks nothing', async () => {
-		onServer();
-		const project = fakeProject();
-		server.use(...project.handlers());
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await failReplica(project, replica);
-
-		expect(isReplicaBlocked()).toBe(false);
-	});
-
-	it('an opt-out stored without the issues switch, staging on legacy, waits for and blocks nothing', async () => {
-		onEngine({
-			staging: 'legacy',
-			...Object.fromEntries(SURFACES.filter((s) => s !== 'issues').map((s) => [s, 'server']))
-		});
-		const project = fakeProject();
-		const held = hold();
-		server.use(...project.handlers({ hold: held }));
-		const replica = realReplica();
-		setActiveProject('p');
-		startReplica();
-		await held.reached;
-		expect(getReplicaStatus().phase).toBe('opening');
-		let resolved = false;
-		void replicaGate().then(() => {
-			resolved = true;
-		});
-		await macrotask();
-		expect(resolved).toBe(true);
-		held.release();
-
-		await failReplica(project, replica);
-		expect(isReplicaBlocked()).toBe(false);
-		expect(engineSide('issues')).toBe('server');
-	});
-
 	it('retryReplica in ready leaves isReplicaRetrying false', async () => {
-		onEngine({ elements: 'engine' });
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica();
@@ -1111,59 +846,46 @@ describe('the notice and the block', () => {
 	});
 });
 
-describe('the notice and the block react through $derived', () => {
-	const onEngine = (surfaces: Record<string, string>) =>
-		localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
-
+describe('the block reacts through $derived', () => {
 	/**
-	 * `getReplicaNotice()`/`isReplicaBlocked()` short-circuit on whether some
-	 * surface is on the engine before ever reading the phase; created here,
-	 * BEFORE `startReplica()`, that first (false) answer is all a plain
-	 * variable would ever see — this is `+page.svelte`'s own shape, so a
-	 * regression there (e.g. a tracked value going back to a plain `let`)
-	 * shows up here exactly as it would in the app.
+	 * Derived before `startReplica()` and read once, as `+page.svelte` does: a
+	 * regression there (e.g. a tracked value going back to a plain `let`) shows
+	 * up here exactly as it would in the app.
 	 */
-	function deriveBoth(): { notice(): boolean; blocked(): boolean; dispose(): void } {
-		let notice: (() => boolean) | undefined;
+	function deriveBlocked(): { blocked(): boolean; dispose(): void } {
 		let blocked: (() => boolean) | undefined;
 		const dispose = $effect.root(() => {
-			const n = $derived(getReplicaNotice());
 			const b = $derived(isReplicaBlocked());
-			notice = () => n;
 			blocked = () => b;
 		});
-		return { notice: notice!, blocked: blocked!, dispose };
+		return { blocked: blocked!, dispose };
 	}
 
-	it('getReplicaNotice, derived before startReplica() and read once, still flips when the phase reaches server', async () => {
-		onEngine({ elements: 'engine' });
+	it('isReplicaBlocked flips when the phase reaches unavailable', async () => {
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica({ connect: () => Promise.reject(new Error('no frame')) });
 
-		const derived = deriveBoth();
+		const derived = deriveBlocked();
 		flushSync();
-		expect(derived.notice()).toBe(false);
 		expect(derived.blocked()).toBe(false);
 
 		setActiveProject('p');
 		startReplica();
-		await replica.until((s) => s.phase === 'server');
+		await replica.until((s) => s.phase === 'unavailable');
 		flushSync();
 
-		expect(derived.notice()).toBe(true);
+		expect(derived.blocked()).toBe(true);
 		derived.dispose();
 	});
 
-	it('isReplicaBlocked, derived before startReplica() and read once, still flips when the phase reaches failed', async () => {
-		onEngine({ elements: 'engine' });
+	it('isReplicaBlocked flips when the phase reaches failed', async () => {
 		const project = fakeProject();
 		server.use(...project.handlers());
 		const replica = realReplica();
 
-		const derived = deriveBoth();
+		const derived = deriveBlocked();
 		flushSync();
-		expect(derived.notice()).toBe(false);
 		expect(derived.blocked()).toBe(false);
 
 		setActiveProject('p');
@@ -1240,7 +962,6 @@ describe("the overlay's promise, and the frozen replica's", () => {
 		await frozen;
 		expect(getReplicaStatus().reason).toBe(`metamodel changed at rev ${freezeRev}`);
 		expect(isReplicaBlocked()).toBe(false);
-		expect(getReplicaNotice()).toBe(false);
 
 		const op = rename('e_000002', 'while frozen');
 		emit(op);
@@ -1303,7 +1024,6 @@ describe('a worker that dies after the handshake', () => {
 		await settled(s);
 
 		expect(s.link).not.toBe(dead);
-		expect(getStagingSide()).toBe('engine');
 		expect(getStagedOps()).toEqual(ops);
 		expect(getStagedBatchIds()).toEqual(ids);
 		expect(await s.link.client.call('staged')).toEqual([
@@ -1381,13 +1101,12 @@ describe('a worker that dies after the handshake', () => {
 
 		s.refuseConnects(1);
 		s.link.dispose();
-		const gaveUp = s.until((status) => status.phase === 'failed' || status.phase === 'server');
+		const gaveUp = s.until((status) => status.phase === 'failed' || status.phase === 'unavailable');
 		feedPeer(s);
 		await gaveUp;
 
 		expect(getReplicaStatus().phase).toBe('failed');
 		expect(isReplicaBlocked()).toBe(true);
-		expect(getStagingSide()).toBe('engine');
 		expect(getStagedOps()).toEqual(ops);
 
 		const ready = s.until((status) => status.phase === 'ready');
@@ -1670,7 +1389,6 @@ describe('the artifact follower', () => {
 			let answered = false;
 			let pending: Promise<{ total: number }>;
 			try {
-				expect(engineSide('navigation')).toBe('server');
 				pending = evaluateNavigation({ definition: refUnion('n1') as never }).then((page) => {
 					answered = true;
 					return page;
@@ -1718,38 +1436,6 @@ describe('the artifact follower', () => {
 			dispose();
 		});
 
-		it('compareOnEngine follows the follower loading and unloading', async () => {
-			localStorage.setItem('dr.surfaces', JSON.stringify({ compare: 'engine' }));
-			const project = fakeProject();
-			let release!: () => void;
-			const first = new Promise<void>((resolve) => (release = resolve));
-			serve(project, [first], () => Promise.reject(new Error('not asked')));
-			const replica = realReplica();
-			let on: (() => boolean) | undefined;
-			const dispose = $effect.root(() => {
-				const derived = $derived(compareOnEngine());
-				on = () => derived;
-			});
-			setActiveProject('p');
-			startReplica();
-			await replica.until((s) => s.phase === 'ready');
-
-			try {
-				flushSync();
-				expect(on!()).toBe(false);
-			} finally {
-				release();
-			}
-
-			await vi.waitFor(() => expect(engineSide('compare')).toBe('engine'));
-			flushSync();
-			expect(on!()).toBe(true);
-			stopReplica();
-			flushSync();
-			expect(on!()).toBe(false);
-			dispose();
-		});
-
 		it("the metamodel's staged note follows what is staged", async () => {
 			const project = fakeProject();
 			serve(project, [], () => Promise.reject(new Error('not asked')));
@@ -1782,35 +1468,6 @@ describe('the artifact follower', () => {
 			dispose();
 		});
 
-		it('the compare is gated as the issues are, and never with staging on legacy', async () => {
-			localStorage.setItem('dr.surfaces', JSON.stringify({ compare: 'engine' }));
-			const project = fakeProject();
-			let release!: () => void;
-			const first = new Promise<void>((resolve) => (release = resolve));
-			serve(project, [first], () => Promise.reject(new Error('not asked')));
-			const replica = realReplica();
-			setActiveProject('p');
-			startReplica();
-			await replica.until((s) => s.seeded);
-
-			try {
-				expect(engineSide('compare')).toBe('server');
-			} finally {
-				release();
-			}
-			await vi.waitFor(() => expect(engineSide('compare')).toBe('engine'));
-			stopReplica();
-			expect(engineSide('compare')).toBe('server');
-
-			resetReplica();
-			localStorage.setItem('dr.surfaces', JSON.stringify({ compare: 'engine', staging: 'legacy' }));
-			const legacy = realReplica();
-			startReplica();
-			await legacy.until((s) => s.seeded);
-			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
-			expect(engineSide('compare')).toBe('server');
-		});
-
 		it('a failed first load is asked once more, then the engine answers', async () => {
 			const project = fakeProject();
 			project.artifacts.set('n1', nav('n1', 1, 'Organization'));
@@ -1820,7 +1477,6 @@ describe('the artifact follower', () => {
 			startReplica();
 			await replica.until((s) => s.phase === 'ready');
 
-			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'), { timeout: 5_000 });
 			expect((await evaluateNavigation({ definition: refUnion('n1') as never })).total).toBe(
 				(
 					await links[0]!.client.call<{ total: number }>('evaluateNavigation', {
@@ -1840,18 +1496,23 @@ describe('the artifact follower', () => {
 			setActiveProject('p');
 			startReplica();
 			await replica.until((s) => s.phase === 'ready');
-			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+			await getElementsBatch(['e_000001']);
 
 			stopReplica();
 			startReplica();
 			await replica.until((s) => s.phase === 'ready');
+			let answered = false;
+			const read = getElementsBatch(['e_000001']).then((items) => {
+				answered = true;
+				return items;
+			});
 			try {
-				expect(engineSide('elements')).toBe('engine');
-				expect(engineSide('navigation')).toBe('server');
+				await macrotask();
+				expect(answered).toBe(false);
 			} finally {
 				release();
 			}
-			await vi.waitFor(() => expect(engineSide('navigation')).toBe('engine'));
+			expect((await read).map((item) => item.id)).toEqual(['e_000001']);
 		});
 	});
 
@@ -1880,7 +1541,7 @@ describe('the artifact follower', () => {
 	});
 });
 
-describe('the issues on the engine', () => {
+describe('the issues', () => {
 	const API = `${PAGE_ORIGIN}/api/v1/projects/p`;
 	const TOO_LONG = 'x'.repeat(201);
 	const tooLong = {
@@ -1899,7 +1560,7 @@ describe('the issues on the engine', () => {
 	});
 
 	/**
-	 * The engine store with the issues on the engine. Every `getModelIssues`
+	 * The engine store. Every `getModelIssues`
 	 * answer is recorded with the replica's `seeded` when it came.
 	 */
 	async function issuesStore(project = fakeProject()) {
@@ -1910,7 +1571,7 @@ describe('the issues on the engine', () => {
 			answers.push({ seeded: getReplicaStatus().seeded, issues: list.issues });
 			return list;
 		});
-		store = await engineStore({ project, surfaces: { issues: 'engine' } });
+		store = await engineStore({ project });
 		return { s: store, spy, real, answers };
 	}
 
@@ -1919,7 +1580,6 @@ describe('the issues on the engine', () => {
 	it('the gate opening at the end of the first sweep schedules one refetch, from the engine', async () => {
 		const { s, spy, answers } = await issuesStore();
 		if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
-		expect(engineSide('issues')).toBe('engine');
 
 		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
 		await sleep(350);
@@ -1959,21 +1619,6 @@ describe('the issues on the engine', () => {
 		await sleep(350);
 		expect(spy).not.toHaveBeenCalled();
 		expect(getLiveIssues()).toEqual([tooLong]);
-	});
-
-	it('with the issues on the server, a changed schedules nothing', async () => {
-		const spy = vi.spyOn(validationApi, 'getModelIssues');
-		store = await engineStore({ surfaces: { issues: 'server' } });
-		const s = store;
-		if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
-		await ensureElements(['e_000001']);
-
-		emit(rename('e_000001', TOO_LONG));
-		await settled(s);
-		await sleep(350);
-
-		expect(engineSide('issues')).toBe('server');
-		expect(spy).not.toHaveBeenCalled();
 	});
 
 	it('a worker that dies closes the gate: a refetch waits for the new replica to be swept, and no unswept list is adopted', async () => {
@@ -2054,7 +1699,6 @@ describe('the issues on the engine', () => {
 			await load.reached;
 
 			// Swept, but the engine does not yet hold the rule set its list must carry.
-			expect(engineSide('issues')).toBe('server');
 			let adopted = false;
 			const waiting = refetchIssues().then(() => (adopted = true));
 			await macrotask();
@@ -2148,7 +1792,6 @@ describe('the issues on the engine', () => {
 				];
 				const { s, answers } = await issuesStore(project);
 				if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
-				await vi.waitFor(() => expect(engineSide('issues')).toBe('engine'));
 				await vi.waitFor(() => expect(answers).toHaveLength(1));
 				setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
 

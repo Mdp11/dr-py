@@ -1,14 +1,13 @@
 /**
  * Unified project open/create progress ("the journey"): one entry in the global
  * progress store spanning click → workspace-ready, fed by real upload bytes and
- * `/model/status` polls, with time-based creep filling phases that report no
- * fraction. The controller (added below) contains no Date.now() and no direct
- * Math.random() call: elapsed time is accumulated from the ticker interval,
- * and randomness comes from the injectable `_rand` seam (default
+ * the replica's progress events, with time-based creep filling phases that
+ * report no fraction. The controller (added below) contains no Date.now() and
+ * no direct Math.random() call: elapsed time is accumulated from the ticker
+ * interval, and randomness comes from the injectable `_rand` seam (default
  * `Math.random`, overridable via `setSplineRandom`) — so the store stays
  * deterministic under fake timers. This file is the whole journey unit.
  */
-import type { ModelStatus } from '$lib/api/model-status';
 import { startProgress, updateProgress, setProgressLabel, endProgress } from './progress.svelte';
 
 export type JourneyKind = 'create' | 'open';
@@ -16,16 +15,11 @@ export type PhaseName =
 	| 'upload'
 	| 'create'
 	| 'hydrate'
-	| 'validate'
 	| 'download'
 	| 'parse'
 	| 'index'
 	| 'tail'
 	| 'finalize';
-export interface StatusProgress {
-	phase: 'hydrate' | 'validate' | 'ready' | 'cold';
-	fraction: number | null;
-}
 /** A replica progress event (`lib/engine/sync.ts`'s `ReplicaProgress`); `verify`
  * (the background digest check), `sweep` (the issue store's) and `scripts` (the
  * script evaluation the app does not ask for) are valid tasks but
@@ -38,13 +32,11 @@ export interface ReplicaProgressInput {
 
 /** Forward-only phase order: a phase never moves back to an earlier one, so
  * `download` and `parse` — which interleave — cannot flap the bar, and a
- * late/superseded report (a stray `validate` poll after `download` started,
- * a late `download` report after `parse` started) is simply ignored. */
+ * late/superseded report (a late `download` report after `parse` started) is simply ignored. */
 const PHASE_ORDER: readonly PhaseName[] = [
 	'upload',
 	'create',
 	'hydrate',
-	'validate',
 	'download',
 	'parse',
 	'index',
@@ -123,57 +115,27 @@ export function clampMonotonic(candidate: number, last: number): number {
 	return Math.max(Math.min(candidate, 100), last);
 }
 
-// The four replica phases have no place in a `replica: false` journey —
-// `journeyReplica` refuses to touch one at all (see below) — but the table
-// must stay total over PhaseName, so each is pinned zero-width at
-// validate's ceiling as a placeholder no code ever reads.
-const SLICES: Record<JourneyKind, Record<PhaseName, [number, number]>> = {
-	create: {
-		upload: [0, 30],
-		create: [30, 42],
-		hydrate: [42, 80],
-		validate: [80, 96],
-		download: [96, 96],
-		parse: [96, 96],
-		index: [96, 96],
-		tail: [96, 96],
-		finalize: [96, 100]
-	},
-	// open has no upload/create phases; those slices are unused but kept so the
-	// record is total over PhaseName.
-	open: {
-		upload: [0, 0],
-		create: [0, 0],
-		hydrate: [0, 72],
-		validate: [72, 95],
-		download: [95, 95],
-		parse: [95, 95],
-		index: [95, 95],
-		tail: [95, 95],
-		finalize: [95, 100]
-	}
-};
-
 // The replica phases' weights are measured, not guessed — see
 // `frontend/README.md`'s "The open journey's replica phases" for the numbers
-// and the reasoning; hydrate/validate/upload/create are untouched.
-const REPLICA_SLICES: Record<JourneyKind, Record<PhaseName, [number, number]>> = {
+// and the reasoning. `hydrate` is the creep before the replica reports its
+// first download.
+const SLICES: Record<JourneyKind, Record<PhaseName, [number, number]>> = {
 	create: {
 		upload: [0, 22],
 		create: [22, 32],
-		hydrate: [32, 48],
-		validate: [48, 52],
+		hydrate: [32, 52],
 		download: [52, 58],
 		parse: [58, 88],
 		index: [88, 96],
 		tail: [96, 97],
 		finalize: [97, 100]
 	},
+	// open has no upload/create phases; those slices are unused but kept so the
+	// record is total over PhaseName.
 	open: {
 		upload: [0, 0],
 		create: [0, 0],
-		hydrate: [0, 28],
-		validate: [28, 34],
+		hydrate: [0, 34],
 		download: [34, 43],
 		parse: [43, 84],
 		index: [84, 95],
@@ -182,27 +144,8 @@ const REPLICA_SLICES: Record<JourneyKind, Record<PhaseName, [number, number]>> =
 	}
 };
 
-export function phaseSlice(kind: JourneyKind, phase: PhaseName, replica = false): [number, number] {
-	return (replica ? REPLICA_SLICES : SLICES)[kind][phase];
-}
-
-/** Map a `/model/status` poll to a coarse phase + real fraction (null = creep). */
-export function statusToProgress(status: ModelStatus): StatusProgress {
-	if (status.state === 'validating' && status.validation) {
-		const { done, total } = status.validation;
-		return { phase: 'validate', fraction: total > 0 ? done / total : null };
-	}
-	if (status.state === 'hydrating' && status.hydration) {
-		const { done, total } = status.hydration;
-		return { phase: 'hydrate', fraction: total > 0 ? done / total : null };
-	}
-	if (status.state === 'ready' || status.state === 'empty') {
-		return { phase: 'ready', fraction: 1 };
-	}
-	if (status.state === 'cold') {
-		return { phase: 'cold', fraction: null };
-	}
-	return { phase: 'hydrate', fraction: null };
+export function phaseSlice(kind: JourneyKind, phase: PhaseName): [number, number] {
+	return SLICES[kind][phase];
 }
 
 // Tick cadence (ms). Elapsed time is accumulated from these nominal intervals —
@@ -211,9 +154,9 @@ const TICK_MS = 80;
 const SPLINE_MS = 4200;
 // Creep time-constant. Deliberately long: with a short tau the creep pins itself
 // to the slice ceil within a few seconds and then *looks frozen* for the whole
-// rest of a slow hydrate. A long tau keeps the bar inching for a minute-plus.
+// rest of a slow open. A long tau keeps the bar inching for a minute-plus.
 const TAU_MS = 6000;
-// Per-tick easing toward the target. Real signals (a status poll, a phase
+// Per-tick easing toward the target. Real signals (a progress report, a phase
 // change) move the *target*; the displayed percent chases it so no update
 // teleports the bar.
 const SMOOTH = 0.2;
@@ -223,9 +166,6 @@ const MIN_VISIBLE_MS = 600; // floor so a warm open reads as a smooth fill, not 
 
 let _active = false;
 let _kind: JourneyKind = 'open';
-/** Which slice table this journey reads; also gates `journeyReplica` — a
- * journey begun without `replica: true` never touches a replica phase. */
-let _replica = false;
 let _phase: PhaseName = 'hydrate';
 let _phaseElapsed = 0;
 let _totalElapsed = 0;
@@ -248,12 +188,12 @@ export function setSplineRandom(fn: () => number): void {
 let _order: readonly string[] = SPLINES;
 // Anchor for remapping a real fraction onto the *remaining* slice. Without it,
 // a creep that ran ahead of the first reported fraction (e.g. displayed 20% of
-// the hydrate slice while the server reports 2% done) stalls at that value
+// the hydrate slice while the replica reports 2% done) stalls at that value
 // until the real fraction catches up — the long freeze users saw mid-open.
 let _anchorPercent: number | null = null;
 let _anchorFraction = 0;
 let _phaseFloor = 0;
-// Clock since the last *changed* signal, for the residual creep between polls.
+// Clock since the last *changed* signal, for the residual creep between reports.
 let _signalElapsed = 0;
 let _signalPercent = 0;
 let _token: number | null = null;
@@ -268,7 +208,7 @@ function _setPhase(phase: PhaseName, fraction: number | null): void {
 	if (phase !== _phase) {
 		_phase = phase;
 		_phaseElapsed = 0; // restart the creep clock for the new slice
-		_phaseFloor = Math.max(phaseSlice(_kind, phase, _replica)[0], _last);
+		_phaseFloor = Math.max(phaseSlice(_kind, phase)[0], _last);
 		_anchorPercent = null;
 		_anchorFraction = 0;
 	}
@@ -281,7 +221,7 @@ function _setPhase(phase: PhaseName, fraction: number | null): void {
 
 /** Where the bar *wants* to be right now, before easing. */
 function _targetPercent(): number {
-	const [floor, ceil] = phaseSlice(_kind, _phase, _replica);
+	const [floor, ceil] = phaseSlice(_kind, _phase);
 	if (_fraction === null) {
 		_anchorPercent = null; // a phase can drop back to creeping
 		return easeToward(Math.max(floor, _phaseFloor), ceil, _phaseElapsed, TAU_MS);
@@ -299,7 +239,7 @@ function _targetPercent(): number {
 		floor + _fraction * (ceil - floor),
 		_anchorPercent + norm * (ceil - _anchorPercent)
 	);
-	// Between two polls the fraction is constant; keep inching into a slice of
+	// Between two reports the fraction is constant; keep inching into a slice of
 	// what's left so a slow server still reads as "working", not "hung".
 	const soft = base + 0.25 * (ceil - base);
 	return Math.max(base, easeToward(Math.max(base, _signalPercent), soft, _signalElapsed, TAU_MS));
@@ -320,7 +260,6 @@ function _stop(): void {
 	_splineTick = null;
 	_token = null;
 	_active = false;
-	_replica = false;
 	_finishing = false;
 	_finishStep = 0;
 	_phaseElapsed = 0;
@@ -363,15 +302,10 @@ function _onSplineTick(): void {
 }
 
 /** Start the journey. Idempotent: a no-op if one is already active, so the
- * create flow can start it and the workspace boot() can adopt the same one
- * (options included — a later idempotent call's `replica` is not applied).
- * `options.replica` picks the slice table: pass `anyEngineSurface(readSwitches())`
- * — a journey begun with `replica: false` (or no options) keeps today's
- * slices exactly, and `journeyReplica` never touches it. */
-export function beginJourney(kind: JourneyKind, options?: { replica?: boolean }): void {
+ * create flow can start it and the workspace boot() can adopt the same one. */
+export function beginJourney(kind: JourneyKind): void {
 	if (_active) return;
 	_active = true;
-	_replica = options?.replica ?? false;
 	_kind = kind;
 	_phase = kind === 'create' ? 'upload' : 'hydrate';
 	_phaseElapsed = 0;
@@ -384,7 +318,7 @@ export function beginJourney(kind: JourneyKind, options?: { replica?: boolean })
 	_order = shuffled(SPLINES, _rand);
 	_anchorPercent = null;
 	_anchorFraction = 0;
-	_phaseFloor = phaseSlice(kind, _phase, _replica)[0];
+	_phaseFloor = phaseSlice(kind, _phase)[0];
 	_signalElapsed = 0;
 	_signalPercent = 0;
 	_token = startProgress(cycleAt(_order, 0));
@@ -402,28 +336,12 @@ export function journeyUpload(loaded: number, total: number | null): void {
 	}
 }
 
-/** Feed a `/model/status` poll result. */
-export function journeyStatus(status: ModelStatus): void {
-	if (!_active || _finishing) return;
-	const p = statusToProgress(status);
-	if (p.phase === 'cold') return; // keep creeping in the current slice
-	if (p.phase === 'ready') {
-		_setPhase('validate', 1); // push to the validate ceil while boot's last fetches finish
-		return;
-	}
-	_setPhase(p.phase, p.fraction);
-}
-
 /** Feed a replica progress event (`download`/`parse`/`index`/`tail`).
- * No-op unless this journey was begun with `replica: true` — the replica
- * opens whatever `dr.surfaces` says, so a `replica: false` journey (no
- * surface on the engine) can still be handed a stray report, and without
- * this guard `download` outranks `validate` in the phase order and would
- * hijack the bar from the real `/model/status` polls. `verify`, `sweep` and `scripts`
- * (the background digest check, the issue sweep and the script evaluation) are ignored too, and so is
- * anything the forward-only phase order has already passed. */
+ * `verify`, `sweep` and `scripts` (the background digest check, the issue
+ * sweep and the script evaluation) are ignored, and so is anything the
+ * forward-only phase order has already passed. */
 export function journeyReplica(progress: ReplicaProgressInput): void {
-	if (!_active || _finishing || !_replica) return;
+	if (!_active || _finishing) return;
 	if (progress.task === 'verify' || progress.task === 'sweep' || progress.task === 'scripts')
 		return;
 	const fraction = progress.total ? progress.done / progress.total : null;

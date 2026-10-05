@@ -1,30 +1,6 @@
 import { ApiError } from './errors';
 
 /**
- * A surface: a group of the engine's reads that `dr.surfaces` switches
- * together — the five model reads, the navigation evaluation, the criteria
- * search, the validation issues, the table pages, the exports, the metamodel
- * previews, the model download, the view warnings and the compare with
- * apply-CR.
- */
-export type Surface =
-	| 'elements'
-	| 'search'
-	| 'relationships'
-	| 'tree'
-	| 'summary'
-	| 'navigation'
-	| 'criteria'
-	| 'issues'
-	| 'tables'
-	| 'exports'
-	| 'metamodel'
-	| 'download'
-	| 'views'
-	| 'compare';
-export type Side = 'engine' | 'server';
-
-/**
  * One read method of the engine, answered with the route's response body.
  * `transfer` moves those buffers of `params` to the engine: detached once
  * posted.

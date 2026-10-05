@@ -402,7 +402,7 @@ describe('the engine reads', () => {
 		server.use(...project.handlers());
 		over.sync.open(project.projectId);
 		await over.sync.settled();
-		expect(over.sync.status().phase).toBe('server');
+		expect(over.sync.status().phase).toBe('unavailable');
 		const call = vi.fn(
 			(method: string, params?: unknown, options?: { signal?: AbortSignal }): Promise<unknown> =>
 				over.sync.call(method, params, options)

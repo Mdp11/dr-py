@@ -7,6 +7,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
 import type { FeedEvent } from '$lib/api/feed';
 import { errorForStatus } from '$lib/api/errors';
+import { getElementsBatch } from '$lib/api/model-read';
 import * as tablesApi from '$lib/api/tables';
 import { TableDefinitionSchema, type TableDefinition, type TablePage } from '$lib/api/types';
 import type { ChangedEvent } from '$lib/engine/sync';
@@ -18,7 +19,7 @@ import {
 } from '../artifact-edits.svelte';
 import { cancelIssuesRefetch, emit, ensureElements } from '../model.svelte';
 import { handleFeedEvent } from '../realtime.svelte';
-import { engineSide, getReplicaStatus, handReplicaFeed, onTablesMoved } from '../replica.svelte';
+import { getReplicaStatus, handReplicaFeed, onTablesMoved } from '../replica.svelte';
 import {
 	ensureTableDraft,
 	ensureTableRange,
@@ -81,12 +82,11 @@ type Started = {
 };
 
 /**
- * The engine store with `surfaces`, quiet: swept, its artifacts loaded and
+ * The engine store, quiet: swept, its artifacts loaded and
  * any re-page their events scheduled spent, before a table is opened.
  */
 async function start(
 	options: {
-		surfaces?: { [surface: string]: string };
 		artifacts?: [string, object][];
 		/** The follower's artifact load is answered only once this resolves; the start does not wait for it. */
 		holdPayloads?: Promise<void>;
@@ -109,14 +109,13 @@ async function start(
 	server.use(
 		http.get(`${API}/model/issues`, () => HttpResponse.json({ model_rev: 0, issues: [] }))
 	);
-	store = await engineStore({ project, surfaces: options.surfaces });
+	store = await engineStore({ project });
 	const s = store;
 	const changes: Started['changes'] = [];
 	s.sync.on('changed', (event) => void changes.push({ event, at: Date.now() }));
 	if (!getReplicaStatus().seeded) await s.until((status) => status.seeded);
-	if (options.surfaces?.['tables'] !== 'server' && held === undefined) {
-		await vi.waitFor(() => expect(engineSide('tables')).toBe('engine'));
-	}
+	// A read is answered once the artifacts have loaded.
+	if (held === undefined) await getElementsBatch(['e_000001']);
 	await sleep(350);
 	return { s, changes };
 }
@@ -520,25 +519,7 @@ describe('one re-page path per side', () => {
 		handleFeedEvent(JSON.parse(committed.eventText) as FeedEvent, committed.eventText);
 	}
 
-	it('with the tables on the server, a changed re-pages nothing and the commit feed does', async () => {
-		const { s } = await start({ surfaces: { tables: 'server' } });
-		expect(engineSide('tables')).toBe('server');
-		await open('tbl:draft:1');
-		const first = 'e_000031';
-		const spy = spyEvaluate();
-
-		await stageRename(s, first, 'staged');
-		// A staged change moves no table on the server side: no debounce to await.
-		await flushTablesRepage();
-		expect(spy).not.toHaveBeenCalled();
-
-		peerCommit(s, first);
-		await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
-		await flushTablesRepage();
-		expect(spy).toHaveBeenCalledOnce();
-	});
-
-	it('with the tables on the engine, a peer commit re-pages once, through changed, not the feed', async () => {
+	it('a peer commit re-pages once, through changed', async () => {
 		const { s, changes } = await start();
 		await open('tbl:draft:1');
 		const first = await idAt(0);
@@ -623,7 +604,6 @@ describe('the open tables re-page when the engine takes the tables over', () => 
 		const off = s.until((status) => status.phase === 'off');
 		await s.link.client.call('applyDelta', { text: withWrongDigest(peer) });
 		await off;
-		expect(engineSide('tables')).toBe('server');
 		// With no replica to ask the page is an error, not another side's rows.
 		await loadTablePage('tbl:draft:1', 0);
 		expect(getTableError('tbl:draft:1')).toMatchObject({ kind: 'error', message: 'no model' });
@@ -646,7 +626,6 @@ describe('the open tables re-page when the engine takes the tables over', () => 
 		const held = new Promise<void>((resolve) => (release = resolve));
 		await start({ holdPayloads: held });
 		expect(getReplicaStatus()).toMatchObject({ phase: 'ready', seeded: true });
-		expect(engineSide('tables')).toBe('server');
 		await ensureTableDraft('tbl:draft:1');
 		updateTableDefinition('tbl:draft:1', PEOPLE);
 		await vi.waitFor(() => expect(getTableLoading('tbl:draft:1')).toBe(true));

@@ -997,7 +997,6 @@ describe('named views — feed reconciliation', () => {
 
 const { configureReplica, resetReplica } = await import('../replica.svelte');
 const { OFF } = await import('$lib/engine/sync');
-const { quiet } = await import('$lib/engine/quiet');
 const { NotFoundError } = await import('$lib/api/errors');
 
 describe('the placements the replica is told of', () => {
@@ -1136,24 +1135,5 @@ describe('the placements the replica is told of', () => {
 		expect(calls.map(({ call, args }) => ({ call, args }))).toEqual([
 			{ call: 'drop', args: ['v1'] }
 		]);
-	});
-
-	it('quiet() waits for a refreshView() in flight', async () => {
-		placementSync();
-		setActiveViewId('v1');
-		let answer: (value: { view: View; warnings: []; view_rev: number }) => void = () => {};
-		vi.spyOn(viewApi, 'getView').mockReturnValue(new Promise((resolve) => (answer = resolve)));
-		const refreshing = refreshView();
-		let settled = false;
-		const waiting = quiet().then(() => (settled = true));
-
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(settled).toBe(false);
-
-		answer({ view: placing(['e1']), warnings: [], view_rev: 0 });
-		await refreshing;
-		await waiting;
-		expect(settled).toBe(true);
-		await quiet();
 	});
 });

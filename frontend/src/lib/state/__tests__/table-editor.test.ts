@@ -3,7 +3,6 @@ import * as artifactsApi from '$lib/api/artifacts';
 import * as checkoutApi from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
 import * as tablesApi from '$lib/api/tables';
-import type { FeedEvent } from '$lib/api/feed';
 import type { ArtifactHeader } from '$lib/api/types';
 import {
 	closeTableDraft,
@@ -15,9 +14,9 @@ import {
 	getTableLockHolder,
 	getTablePage,
 	getTableWarnings,
-	handleTableModelRevChanged,
 	loadTablePage,
 	reloadTableDraft,
+	repageOpenTables,
 	resetTableEditors,
 	retryTableLock,
 	saveAsTableDraft,
@@ -37,9 +36,6 @@ import {
 	stagedCreateSourceTab
 } from '../artifact-edits.svelte';
 import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
-// NB: `handleFeedEvent` only — never `resetRealtime` here, which would clear the
-// module-load commit-tap table-editor registers and silently disarm the test.
-import { handleFeedEvent } from '../realtime.svelte';
 import { isTempId } from '../ops';
 
 /** Flush the microtask/macrotask queue so a fire-and-forget `loadTablePage`
@@ -168,7 +164,7 @@ describe('table-editor', () => {
 		expect(spy).not.toHaveBeenCalled();
 		expect(getTablePage('tbl:draft:1')).toBeUndefined();
 		// a peer's commit must not surprise-fill the never-evaluated table either
-		handleTableModelRevChanged();
+		repageOpenTables();
 		await flush();
 		expect(spy).not.toHaveBeenCalled();
 		// the first definition edit triggers the first evaluation
@@ -593,7 +589,7 @@ describe('table-editor', () => {
 		expect(evaluate.mock.calls.length).toBeGreaterThanOrEqual(2);
 	});
 
-	it('handleTableModelRevChanged re-runs evaluateTable over the range the grid last asked for', async () => {
+	it('repageOpenTables re-runs evaluateTable over the range the grid last asked for', async () => {
 		const spy = vi
 			.spyOn(tablesApi, 'evaluateTable')
 			.mockImplementation(async (args) => pageAt(args.offset ?? 0, args.limit ?? 100, 1000));
@@ -604,7 +600,7 @@ describe('table-editor', () => {
 		await flush();
 		spy.mockClear();
 
-		handleTableModelRevChanged();
+		repageOpenTables();
 		await flush();
 
 		expect(spy).toHaveBeenCalledTimes(1);
@@ -612,40 +608,6 @@ describe('table-editor', () => {
 		// Chunk-aligned start covering [250, 320): offset 200, limit 200.
 		expect(lastCall.offset ?? 0).toBe(200);
 		expect(lastCall.limit).toBe(200);
-	});
-
-	it('a peer commit re-pages open tables only when it touched model content', async () => {
-		const commit = (scope: string[]): FeedEvent => ({
-			type: 'commit',
-			rev: scope.length, // any forward rev; the reducer adopts it either way
-			commit_id: 'c',
-			author_id: 'peer',
-			message: 'm',
-			validation_error_count: 0,
-			changed_elements: [],
-			changed_relationships: [],
-			deleted_element_ids: [],
-			deleted_relationship_ids: [],
-			scope
-		});
-
-		const spy = vi
-			.spyOn(tablesApi, 'evaluateTable')
-			.mockImplementation(async (args) => pageAt(args.offset ?? 0, args.limit ?? 100, 1000));
-		await ensureTableDraft('tbl:draft:11');
-		await loadTablePage('tbl:draft:11', 0);
-		await flush();
-		spy.mockClear();
-
-		// Artifact-only: no model content changed and no server-side evaluation
-		// cache was invalidated, so re-paging every open table is pure waste.
-		handleFeedEvent(commit(['artifact']));
-		await flush();
-		expect(spy).not.toHaveBeenCalled();
-
-		handleFeedEvent(commit(['model', 'artifact']));
-		await flush();
-		expect(spy).toHaveBeenCalledTimes(1);
 	});
 
 	describe('lazy range loading', () => {

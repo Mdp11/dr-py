@@ -15,6 +15,7 @@ import {
 	applyDeltaShared,
 	bumpStructureRev,
 	getModelRev,
+	setClientConfig,
 	setModelError,
 	setModelRev
 } from './model-shared.svelte';
@@ -58,6 +59,9 @@ import { getSelection, select } from './selection.svelte';
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
+
+/** Test/dev hook: ClientConfig forwarded to every API call the model store makes. The value lives in the shared half. */
+export const setModelApiConfig = setClientConfig;
 
 export type StatusListener = (status: ReplicaStatus, previous: ReplicaStatus) => void;
 

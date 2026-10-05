@@ -1,9 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as modelReadApi from '$lib/api/model-read';
+import { server } from '$lib/api/__tests__/server';
 
 import { isProjectQuiet } from '../quiet';
 import { hasModelLocks, handleFeedEvent, resetRealtime } from '../realtime.svelte';
-import { emit, getStagedDepth, resetModelStore, seedElements } from '../model.svelte';
+import {
+	emit,
+	ensureElement,
+	getStagedDepth,
+	resetModelStore,
+	stagedSettled
+} from '../model.svelte';
 import { resetArtifactEdits, stageArtifactCreate } from '../artifact-edits.svelte';
 import { resetViewEdits, stageViewOp } from '../view-edits.svelte';
 import {
@@ -13,6 +20,10 @@ import {
 	stageNodeMove
 } from '../metamodel-stage.svelte';
 import type { LeaseLite } from '$lib/api/feed';
+import { engineStore, rename } from './support/engine-store';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
 
 /**
  * The quiet-project gate (history Revert / metamodel Swap). The case that
@@ -102,11 +113,17 @@ describe('isProjectQuiet', () => {
 		expect(isProjectQuiet()).toBe(false);
 	});
 
-	it('is false while a model op is staged', () => {
-		seedElements([{ id: 'e1', type_name: 'T', properties: { name: 'a' }, rev: 1 }]);
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'b' } });
-		expect(getStagedDepth()).toBe(1);
-		expect(isProjectQuiet()).toBe(false);
+	it('is false while a model op is staged', async () => {
+		const store = await engineStore();
+		try {
+			await ensureElement('e_000001');
+			emit(rename('e_000001', 'staged name'));
+			await stagedSettled();
+			expect(getStagedDepth()).toBe(1);
+			expect(isProjectQuiet()).toBe(false);
+		} finally {
+			store.dispose();
+		}
 	});
 
 	it('is false while an ARTIFACT op is staged, even with no lease', () => {

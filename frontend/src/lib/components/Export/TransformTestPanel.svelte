@@ -24,7 +24,7 @@
 	import { previewTransform } from '$lib/api/exports';
 	import { ApiError, isScriptsNeedEngine } from '$lib/api/errors';
 	import ScriptsNeedEngine from '$lib/components/ScriptsNeedEngine.svelte';
-	import { getReplicaStatus } from '$lib/state/replica.svelte';
+	import { scriptsNeedEngine } from '$lib/state/replica.svelte';
 	import type { ExporterEntry, TransformPreviewOut } from '$lib/api/types';
 	import { isEmptySnippetSource } from '$lib/snippet/source';
 	import TransformTestFile from './TransformTestFile.svelte';
@@ -44,9 +44,7 @@
 	let result = $state<TransformPreviewOut | null>(null);
 	let notice = $state<string | null>(null);
 	// Scripts run in the engine only: with no engine nothing is called.
-	const needsEngine = $derived(
-		getReplicaStatus().phase === 'off' || getReplicaStatus().phase === 'server'
-	);
+	const needsEngine = $derived(scriptsNeedEngine());
 	let refused = $state(false);
 	/** Indices of the expanded files of a split result; reset per run so a
 	 * fresh run always starts fully collapsed. */

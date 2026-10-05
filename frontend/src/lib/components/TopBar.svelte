@@ -82,7 +82,7 @@
 	// view-edits.svelte.ts. Mirrors the DiffDrawer's own switch to the journal.
 	const viewChanges = $derived(getStagedViewDepth());
 	const combinedChanges = $derived(totalChanges + artifactChanges + viewChanges);
-	// A parked batch (engine staging only — always `[]` on the legacy side)
+	// A parked batch
 	// never counts toward `combinedChanges` (it is neither a change nor
 	// committable), but it is still the only route to the drawer's Discard —
 	// without this the gate below would strand it unreachable whenever it is

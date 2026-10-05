@@ -7,17 +7,21 @@ import { installEngineSeam } from '../../api/engine-route';
 import { NotFoundError } from '../../api/errors';
 import {
 	emit,
+	ensureElements,
 	getCachedElements,
 	resetModelStore,
-	seedElements,
-	setModelApiConfig
+	setModelApiConfig,
+	stagedSettled
 } from '../../state/model.svelte';
+import { server } from '../../api/__tests__/server';
+import { engineStore } from '../../state/__tests__/support/engine-store';
 import { clearSelection, select } from '../../state/selection.svelte';
 import Inspector from '../Inspector.svelte';
 
 const BASE = 'http://api.test/api/v1';
 
 beforeAll(() => {
+	server.listen({ onUnhandledRequest: 'error' });
 	setModelApiConfig({ baseUrl: BASE });
 });
 afterEach(() => {
@@ -26,6 +30,7 @@ afterEach(() => {
 });
 afterAll(() => {
 	setModelApiConfig(undefined);
+	server.close();
 });
 beforeEach(() => {
 	resetModelStore();
@@ -91,17 +96,14 @@ it('shows "Selection not found" once the engine confirms the id is missing', asy
 });
 
 it('renders "Selection not found" for a staged-deleted element instead of refetching it', async () => {
-	// The engine still has the committed element (the delete is only staged);
-	// the Inspector must neither resurrect it into the cache nor sit on the
-	// loading skeleton forever.
-	stubEngine({
-		getElement: () => el('e1'),
-		listElementRelationships: () => ({ items: [], total: 0 })
-	});
-	seedElements([el('e1')]);
-	emit({ kind: 'delete_element', id: 'e1' });
+	// The delete is only staged; the Inspector must neither resurrect the
+	// element into the cache nor sit on the loading skeleton forever.
+	const store = await engineStore();
+	await ensureElements(['e_000001']);
+	emit({ kind: 'delete_element', id: 'e_000001' });
+	await stagedSettled();
 
-	select({ kind: 'element', id: 'e1' });
+	select({ kind: 'element', id: 'e_000001' });
 	const component = mount(Inspector, { target: document.body });
 	try {
 		flushSync();
@@ -109,8 +111,9 @@ it('renders "Selection not found" for a staged-deleted element instead of refetc
 		flushSync();
 		expect(document.querySelector('[data-testid="inspector-loading"]')).toBeNull();
 		expect(document.body.textContent).toContain('Selection not found');
-		expect(getCachedElements().has('e1')).toBe(false);
+		expect(getCachedElements().has('e_000001')).toBe(false);
 	} finally {
 		unmount(component);
+		store.dispose();
 	}
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, it, expect, beforeEach, vi } from 'vitest';
 import {
 	commitStaged,
 	discardAll,
@@ -20,7 +20,6 @@ import {
 	resetViewEdits,
 	refreshView,
 	resetWorkspaceTabs,
-	seedElements,
 	setProjectInfo,
 	stageArtifactUpdate,
 	stageRenameFolder,
@@ -32,6 +31,9 @@ import { setActiveViewId } from '../active-view.svelte';
 import * as editGate from '../edit-gate';
 import type { CommitResponse, View } from '$lib/api/types';
 import type { ViewOp } from '../ops';
+import { server } from '$lib/api/__tests__/server';
+import { cancelIssuesRefetch, ensureElements, stagedSettled } from '../model.svelte';
+import { engineStore, rename, type EngineStore } from './support/engine-store';
 
 /**
  * View half of the checkout store: the `folder:` lock namespace, the
@@ -89,11 +91,13 @@ function commitResponse(over: Partial<CommitResponse> = {}): CommitResponse {
 	};
 }
 
-/** Check out `e1` exclusively (token t_el_e1) and stage a property edit on it. */
+/** Check out `e_000001` exclusively (token t_el_e_000001) and stage a property edit on it, on a real engine. */
 async function checkoutAndEditElement() {
-	seedElements([{ id: 'e1', type_name: 'T', properties: { name: 'a' }, rev: 1 }]);
-	await ensureCheckout([{ resource_id: 'e1', mode: 'exclusive' }], 'edit');
-	emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'b' } });
+	store = await engineStore();
+	await ensureElements(['e_000001']);
+	await ensureCheckout([{ resource_id: 'e_000001', mode: 'exclusive' }], 'edit');
+	emit(rename('e_000001', 'b'));
+	await stagedSettled();
 }
 
 /** Check out folder `id` (token t_folder_<id>). */
@@ -101,6 +105,10 @@ function checkoutFolder(id: string) {
 	return ensureCheckout([{ resource_id: id, mode: 'exclusive', type: 'folder' }], 'edit');
 }
 
+let store: EngineStore | null = null;
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
 beforeEach(() => {
 	resetModelStore();
 	resetCheckout();
@@ -108,6 +116,11 @@ beforeEach(() => {
 	resetWorkspaceTabs();
 	resetViewEdits();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 100 });
+});
+afterEach(() => {
+	store?.dispose();
+	store = null;
+	cancelIssuesRefetch();
 });
 
 describe('folder leases in the checkout registry', () => {
@@ -135,7 +148,7 @@ describe('three-buffer commit ordering', () => {
 		});
 		await previewStaged();
 		expect(preview.mock.calls[0][1]).toEqual([
-			expect.objectContaining({ kind: 'update_element', id: 'e1' }),
+			expect.objectContaining({ kind: 'update_element', id: 'e_000001' }),
 			expect.objectContaining({ kind: 'update_artifact', id: 'a9', name: 'renamed' }),
 			expect.objectContaining({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'New name' })
 		]);
@@ -148,7 +161,7 @@ describe('three-buffer commit ordering', () => {
 		off();
 
 		expect(commit.mock.calls[0][0].ops).toEqual([
-			expect.objectContaining({ kind: 'update_element', id: 'e1' }),
+			expect.objectContaining({ kind: 'update_element', id: 'e_000001' }),
 			expect.objectContaining({ kind: 'update_artifact', id: 'a9', name: 'renamed' }),
 			expect.objectContaining({ kind: 'rename_folder', view_id: 'v1', id: 'f1', name: 'New name' })
 		]);
@@ -175,7 +188,7 @@ describe('three-buffer commit ordering', () => {
 describe('commit-time token partition: folder tokens ride the element rule', () => {
 	it('sends a folder token the batch does not need; keeps an unneeded artifact-only token', async () => {
 		mockAcquire();
-		await checkoutAndEditElement(); // token t_el_e1, staged update_element e1 (keeps ops non-empty)
+		await checkoutAndEditElement(); // token t_el_e_000001, staged update_element e_000001 (keeps ops non-empty)
 		await checkoutFolder('f1'); // token t_folder_f1, nothing staged that needs f1
 		await ensureCheckout([{ resource_id: 'a9', mode: 'exclusive', type: 'artifact' }], 'edit'); // token t_art_a9
 		openArtifactTab('table', { artifactId: 'a9', title: 'T' }); // keeps the artifact editor "open"
@@ -188,7 +201,7 @@ describe('commit-time token partition: folder tokens ride the element rule', () 
 		// always sent, deliberately, even when the batch does not name their
 		// folder — folders follow the element rule, not the artifact
 		// keep-open rule.
-		expect(commit.mock.calls[0][0].lockTokens.sort()).toEqual(['t_el_e1', 't_folder_f1']);
+		expect(commit.mock.calls[0][0].lockTokens.sort()).toEqual(['t_el_e_000001', 't_folder_f1']);
 		// the still-open artifact editor's lease survives, exactly as before.
 		expect(getHeldTokens()).toEqual(['t_art_a9']);
 		expect(isCheckedOutByMe('folder:f1')).toBe(false);

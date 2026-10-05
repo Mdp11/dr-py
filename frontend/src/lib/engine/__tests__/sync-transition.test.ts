@@ -239,7 +239,7 @@ describe('transitions', () => {
 			connect: () => Promise.reject(new FrameError('timeout', 'no answer'))
 		});
 		await refused.sync.settled();
-		expect(refused.sync.status().phase).toBe('server');
+		expect(refused.sync.status().phase).toBe('unavailable');
 		await expect(stage(refused, rename('e_000001', 'x'))).rejects.toBeInstanceOf(EngineGoneError);
 
 		const empty = fakeProject({ projectId: 'empty' });
@@ -265,7 +265,7 @@ describe('transitions', () => {
 		const refusal = expect(staged).rejects.toBeInstanceOf(EngineGoneError);
 		await over.sync.settled();
 
-		expect(over.sync.status().phase).toBe('server');
+		expect(over.sync.status().phase).toBe('unavailable');
 		await refusal;
 		expect(over.methods()).not.toContain('stage');
 	});

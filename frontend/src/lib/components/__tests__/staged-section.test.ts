@@ -9,7 +9,6 @@ import {
 	getSelection,
 	getStagedDepth,
 	resetModelStore,
-	seedElements,
 	stagedSettled
 } from '$lib/state';
 import { createTempId } from '$lib/state/ops';
@@ -17,15 +16,17 @@ import { engineStore, type EngineStore } from '../../state/__tests__/support/eng
 import StagedSection from '../Sidebar/StagedSection.svelte';
 
 // `discardElementCascade` is wrapped so a per-row revert can be asserted to
-// call it, without breaking the real behavior it forwards to (both the
-// legacy tests below and the engine ones over `engineStore()` exercise the
-// real revert).
+// call it, without breaking the real behavior it forwards to (the tests over
+// `engineStore()` exercise the real revert).
 vi.mock('$lib/state', async (orig) => {
 	const actual = await orig<typeof import('$lib/state')>();
 	return { ...actual, discardElementCascade: vi.fn(actual.discardElementCascade) };
 });
 
 import { discardElementCascade } from '$lib/state';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
 
 let host: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
@@ -51,75 +52,61 @@ afterEach(() => {
 });
 
 describe('StagedSection', () => {
+	let store: EngineStore | null = null;
+
+	beforeEach(async () => {
+		store = await engineStore();
+	});
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+	});
+
+	/** Every staged edit has reached the engine and the mirror. */
+	async function settle(): Promise<void> {
+		await store!.sync.settled();
+		await stagedSettled();
+	}
+
+	const create = (tmp: string, name = 'Fresh') =>
+		emit({
+			kind: 'create_element',
+			temp_id: tmp,
+			type_name: 'Organization',
+			properties: { name }
+		});
+
 	it('renders nothing when no ops are staged', () => {
 		mountSection();
 		expect(host.querySelector('[data-testid="staged-section"]')).toBeNull();
 	});
 
-	it('lists staged elements with status badges and a count', () => {
-		seedElements([
-			{ id: 'e1', type_name: 'Device', properties: { name: 'Edited one' }, rev: 1 },
-			{ id: 'e2', type_name: 'Device', properties: { name: 'Doomed' }, rev: 1 }
-		]);
+	it('clicking a row selects the element; deleted rows have no select button', async () => {
+		await ensureElement('e_000008');
 		const tmp = createTempId();
-		emit({
-			kind: 'create_element',
-			temp_id: tmp,
-			type_name: 'Device',
-			properties: { name: 'Fresh' }
-		});
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'Edited two' } });
-		emit({ kind: 'delete_element', id: 'e2' });
-		mountSection();
-		expect(host.textContent).toContain('Staged elements');
-		expect(host.textContent).toContain('3');
-		expect(host.querySelector(`[data-staged-id="${tmp}"]`)?.getAttribute('data-status')).toBe(
-			'new'
-		);
-		expect(host.querySelector('[data-staged-id="e1"]')?.getAttribute('data-status')).toBe(
-			'modified'
-		);
-		expect(host.querySelector('[data-staged-id="e2"]')?.getAttribute('data-status')).toBe(
-			'deleted'
-		);
-		expect(host.textContent).toContain('Fresh');
-		expect(host.textContent).toContain('Edited two');
-		expect(host.textContent).toContain('Doomed'); // name from journal pre-state
-	});
-
-	it('clicking a row selects the element; deleted rows have no select button', () => {
-		seedElements([{ id: 'e2', type_name: 'Device', properties: { name: 'Doomed' }, rev: 1 }]);
-		const tmp = createTempId();
-		emit({
-			kind: 'create_element',
-			temp_id: tmp,
-			type_name: 'Device',
-			properties: { name: 'Fresh' }
-		});
-		emit({ kind: 'delete_element', id: 'e2' });
+		create(tmp);
+		emit({ kind: 'delete_element', id: 'e_000008' });
+		await settle();
 		mountSection();
 		const newRow = host.querySelector(`[data-staged-id="${tmp}"]`)!;
 		(newRow.querySelector('button.staged-select') as HTMLButtonElement).click();
 		flushSync();
 		expect(getSelection()).toEqual({ kind: 'element', id: tmp });
-		const deletedRow = host.querySelector('[data-staged-id="e2"]')!;
+		const deletedRow = host.querySelector('[data-staged-id="e_000008"]')!;
 		expect(deletedRow.querySelector('button.staged-select')).toBeNull();
 	});
 
-	it('revert un-creates a new element, clears its selection, and hides the empty section', () => {
+	it('revert un-creates a new element, clears its selection, and hides the empty section', async () => {
 		const tmp = createTempId();
-		emit({
-			kind: 'create_element',
-			temp_id: tmp,
-			type_name: 'Device',
-			properties: { name: 'Fresh' }
-		});
+		create(tmp);
+		await settle();
 		mountSection();
 		(
 			host.querySelector(`[data-staged-id="${tmp}"] button.staged-select`) as HTMLButtonElement
 		).click();
 		flushSync();
 		(host.querySelector('[data-testid="staged-revert"]') as HTMLButtonElement).click();
+		await settle();
 		flushSync();
 		expect(getStagedDepth()).toBe(0);
 		expect(getCachedElements().has(tmp)).toBe(false);
@@ -127,31 +114,30 @@ describe('StagedSection', () => {
 		expect(host.querySelector('[data-testid="staged-section"]')).toBeNull();
 	});
 
-	it('revert on a modified element keeps the selection', () => {
-		seedElements([{ id: 'e1', type_name: 'Device', properties: { name: 'a' }, rev: 1 }]);
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'b' } });
+	it('revert on a modified element keeps the selection', async () => {
+		await ensureElement('e_000002');
+		const before = getCachedElements().get('e_000002')?.properties.name;
+		emit({ kind: 'update_element', id: 'e_000002', properties_patch: { name: 'b' } });
+		await settle();
 		mountSection();
-		(host.querySelector('[data-staged-id="e1"] button.staged-select') as HTMLButtonElement).click();
+		(
+			host.querySelector('[data-staged-id="e_000002"] button.staged-select') as HTMLButtonElement
+		).click();
 		flushSync();
 		(host.querySelector('[data-testid="staged-revert"]') as HTMLButtonElement).click();
+		await settle();
 		flushSync();
-		expect(getCachedElements().get('e1')?.properties.name).toBe('a');
-		expect(getSelection()).toEqual({ kind: 'element', id: 'e1' });
+		expect(getCachedElements().get('e_000002')?.properties.name).toBe(before);
+		expect(getSelection()).toEqual({ kind: 'element', id: 'e_000002' });
 	});
 
-	it('virtualizes: mounts a window of rows while the header counts them all', () => {
+	it('virtualizes: mounts a window of rows while the header counts them all', async () => {
 		// A snippet batch can stage thousands of ops; the scroller shows ~8 rows.
 		// In this detached host clientHeight is 0, so the window degrades to the
 		// overscan band — rows still render, just not all of them.
 		const ids = Array.from({ length: 40 }, () => createTempId());
-		for (const [i, id] of ids.entries()) {
-			emit({
-				kind: 'create_element',
-				temp_id: id,
-				type_name: 'Device',
-				properties: { name: `el-${String(i).padStart(2, '0')}` }
-			});
-		}
+		for (const [i, id] of ids.entries()) create(id, `el-${String(i).padStart(2, '0')}`);
+		await settle();
 		mountSection();
 		expect(host.textContent).toContain('40');
 		const mounted = host.querySelectorAll('[data-staged-id]');
@@ -164,14 +150,10 @@ describe('StagedSection', () => {
 		expect(spacers[1].getAttribute('style')).not.toBe('height: 0px');
 	});
 
-	it('marks the selected row with aria-current', () => {
+	it('marks the selected row with aria-current', async () => {
 		const tmp = createTempId();
-		emit({
-			kind: 'create_element',
-			temp_id: tmp,
-			type_name: 'Device',
-			properties: { name: 'Fresh' }
-		});
+		create(tmp);
+		await settle();
 		mountSection();
 		const btn = host.querySelector(
 			`[data-staged-id="${tmp}"] button.staged-select`
@@ -186,14 +168,10 @@ describe('StagedSection', () => {
 		).toBe('true');
 	});
 
-	it('header toggle collapses the row list', () => {
+	it('header toggle collapses the row list', async () => {
 		const tmp = createTempId();
-		emit({
-			kind: 'create_element',
-			temp_id: tmp,
-			type_name: 'Device',
-			properties: { name: 'Fresh' }
-		});
+		create(tmp);
+		await settle();
 		mountSection();
 		expect(host.querySelector(`[data-staged-id="${tmp}"]`)).not.toBeNull();
 		(host.querySelector('[data-testid="staged-header"]') as HTMLButtonElement).click();
@@ -203,14 +181,10 @@ describe('StagedSection', () => {
 	});
 });
 
-// Proves the section needs no change for engine staging: `deriveStagedElementRows`
-// is fed by `getStagedDiff()`, which the facade already answers from the
-// engine's own diff in engine mode.
-describe('StagedSection over the engine', () => {
+// `deriveStagedElementRows` is fed by `getStagedDiff()`, which the facade
+// answers from the engine's own diff.
+describe('StagedSection rows from the engine diff', () => {
 	let store: EngineStore | null = null;
-
-	beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-	afterAll(() => server.close());
 
 	afterEach(() => {
 		store?.dispose();

@@ -91,13 +91,11 @@ const LAX: ChangeRequest = {
 	}
 };
 
-/** `value` without `cr.createdAt` and `workingCopy`: the clocks of two requests differ. */
+/** `value` without `cr.createdAt`: the clocks of two requests differ. */
 function masked<T extends { cr: ChangesDoc }>(value: T): Omit<T, 'cr'> & { cr: Answer } {
 	const cr: Answer = { ...value.cr };
 	delete cr['createdAt'];
-	const out: Answer = { ...value, cr };
-	delete out['workingCopy'];
-	return out as never;
+	return { ...value, cr } as never;
 }
 
 /** How many times the seam asked the engine `method`. */
@@ -112,7 +110,6 @@ describe('the compare reads on the engine', () => {
 		const answer = await compareModel(file);
 
 		expect(asked(engine, 'compareModel')).toBe(1);
-		expect(answer.workingCopy).toBe(true);
 		expect(answer.cr.createdAt).toMatch(ISO_MILLISECONDS);
 		expect(answer.cr.createdAt).not.toBe(OTHER_CLOCK);
 		const direct = await engine.over.link!.client.call('compareModel', {
@@ -171,7 +168,6 @@ describe('the compare reads on the engine', () => {
 		expect(asked(engine, 'proposeCr')).toBe(2);
 		expect(proposal).toMatchObject({
 			ok: true,
-			workingCopy: true,
 			modelRev: engine.project.rev,
 			ops: [{ kind: 'update_element', id: 'e_000001', properties_patch: { name: 'from file' } }]
 		});
@@ -180,7 +176,6 @@ describe('the compare reads on the engine', () => {
 			ok: false,
 			modelRev: engine.project.rev,
 			crIndex: 1,
-			workingCopy: true,
 			conflicts: [
 				{
 					kind: 'id_exists',

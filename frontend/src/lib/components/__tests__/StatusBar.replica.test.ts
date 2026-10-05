@@ -114,7 +114,7 @@ describe('the replica indicator', () => {
 	it.each([
 		['frozen', 'replica frozen', 'metamodel changed at rev 9'],
 		['failed', 'replica failed', 'tail failed'],
-		['server', 'server mode', 'open the app at http://127.0.0.1:5173']
+		['unavailable', 'replica unavailable', 'open the app at http://127.0.0.1:5173']
 	] as const)('%s: warned, the reason in the title', (phase, text, reason) => {
 		const el = render({ phase, rev: 8, reason })!;
 		expect(el.textContent?.trim()).toBe(text);

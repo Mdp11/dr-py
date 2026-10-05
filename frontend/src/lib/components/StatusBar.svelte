@@ -51,8 +51,6 @@
 			}
 			case 'ready':
 				return `replica r${s.rev}`;
-			case 'server':
-				return 'server mode';
 			default:
 				return `replica ${s.phase}`;
 		}

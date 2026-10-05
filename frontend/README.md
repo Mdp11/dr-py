@@ -38,7 +38,10 @@ The app is served **cross-origin isolated** — `Cross-Origin-Opener-Policy:
 same-origin` and `Cross-Origin-Embedder-Policy: require-corp` on every
 response — in both `pixi run frontend-start` and e2e, so it can host the
 sandbox site (`pixi run sandbox-start`, `http://localhost:5174`) in an
-iframe (CN-17). Any future cross-origin subresource the app loads needs
+iframe (CN-17). A request on `localhost:<port>` is redirected (302) to
+`http://127.0.0.1:<port>` by the `localhostRedirect` plugin of `vite.config.ts`,
+first in `plugins` for both the dev and the preview server (`preview.host` is
+`127.0.0.1`), since the app and the sandbox must be different sites. Any future cross-origin subresource the app loads needs
 `Cross-Origin-Resource-Policy` or CORS to match, or COEP blocks it (CN-14).
 
 ## Layout
@@ -162,33 +165,23 @@ Access is **cookie-based** and project-scoped. The shape:
 
 ### State model (staged-commit flow)
 
-The model store is four files. `lib/state/model.svelte.ts` is a thin
-**facade**: it re-exports the shared half and, for every entity read/write,
-dispatches to whichever entity half `staging` (`lib/engine/surfaces.ts`,
-`getStagingSide()` in `replica.svelte.ts`) names — `resetModelStore` and
-`validateAll` touch both halves directly, since neither is one entity half's
-concern. `lib/state/model-shared.svelte.ts` holds what every entity half
-agrees on: the summary, `model_rev`, the structure-rev counter, the live
-issue map, rules status and the store error. `lib/state/model-legacy.svelte.ts`
-is the server-mode entity half — the fetched-subset caches and the
-staged-edits buffer described below; it is **frozen** and deleted once the
-engine half is the only one (sub-project F).
-`lib/state/model-engine.svelte.ts` is the engine half, a view over the
-replica (see "The engine store" below); the facade dispatches to it while
-`getStagingSide()` is `engine`. `setModelApiConfig` is not dispatched: it
-sets the shared half's client config, which the engine half never uses.
-`lib/state/model-caches.ts` holds the pure id-remap helpers
-(`remapElement`, `remapRelationship`, `remapCaches`) an entity half's delta
-application uses to resolve temp ids to canonical ones.
+The model store is three files. `lib/state/model.svelte.ts` is a thin
+**facade**: it re-exports the shared half and the engine half's names, and
+adds `captureStaged`, `validateAll`, `resetModelStore` and `reloadModelStore`,
+which span both. `lib/state/model-shared.svelte.ts` holds what every entity
+half agrees on: the summary, `model_rev`, the structure-rev counter, the live
+issue map, rules status and the store error.
+`lib/state/model-engine.svelte.ts` is the entity half, a view over the
+replica (see "The engine store" below); it also exports `setModelApiConfig`,
+which sets the shared half's client config. `lib/state/model-caches.ts` holds
+the pure id-remap helpers (`remapElement`, `remapRelationship`,
+`remapCaches`) the entity half's delta application uses to resolve temp ids
+to canonical ones.
 
 The **backend session model is the source of truth**; the client never holds
 the whole model, and editing follows a pessimistic **check-out → stage →
-commit** loop. Steps 1–2 and step 5's opening (the client-side undo buffer)
-describe the **server-mode path** (`staging: legacy`, `model-legacy.svelte.ts`)
-specifically; step 3 (the lock auto-acquire through the checkout store) holds
-on both sides. `staging: engine` is the default (`STAGING_DEFAULT`) and
-stages in the replica instead, called out inline below and detailed in "The
-engine store":
+commit** loop. The edits are staged in the replica's working copy, detailed in
+"The engine store":
 
 1. The store caches only the **fetched subset** of the model — entities
    brought in by paged reads, searches, neighborhoods, and commit deltas —
@@ -196,9 +189,9 @@ engine store":
 2. The user's edits are emitted as **ops** (`create_element`,
    `update_element`, `delete_element`, and the matching three for
    relationships). Each op is applied to the local caches **optimistically**
-   and pushed onto a **staged-edits buffer** — there is **no auto-flush**.
-   Property updates of the same entity coalesce into one staged op. The buffer
-   is held locally until an explicit commit.
+   and staged in the replica's working copy — there is **no auto-flush**.
+   Property updates of the same entity coalesce into one staged op. The staged
+   edits are held until an explicit commit.
 3. The **first edit of a resource auto-acquires a lock** through the checkout
    store (`lib/state/checkout.svelte.ts`): it derives the required locks from
    the staged ops, calls `POST /locks`, and starts a heartbeat that renews the
@@ -219,8 +212,7 @@ engine store":
    the next commit of that edit may 409 "required lock not held" until the
    element is touched again (`K-42`, `BACKLOG-ENGINE.md`).
    A stale-rev 409 or a structural-blocker 422 is surfaced as a commit error.
-   **On the engine side** (`staging: engine`, see "The engine store") the
-   staged model edits are the replica's batches. `previewStaged()`,
+   The staged model edits are the replica's batches (see "The engine store"). `previewStaged()`,
    `commitStaged()` and `validateAll()` first wait for `stagedSettled()` —
    while the engine cannot say what is staged they refuse with
    `StagedUnreadableError` and post nothing — and then take the model ops
@@ -259,7 +251,7 @@ engine store":
    committing — Commit and Cancel disabled, no close button, Escape and
    outside clicks ignored — through the POST and, once the commit landed,
    until `commitApplied()` resolves: `commitsLanded()`, or the replica
-   gone (`off` / `server`, nothing staged to merge into) or `failed`;
+   gone (`off` / `unavailable`, nothing staged to merge into) or `failed`;
    only then does it close. While the replica is `ready` that is once it
    has applied the answer. A `failed` replica keeps the answer for the one
    `retry()` rebuilds, which applies it on its first drain — the committed
@@ -271,12 +263,11 @@ engine store":
    keeps the answer queued until the new metamodel is adopted; meanwhile an
    update the engine would merge into a committed batch is DEFERRED by the
    store (see "The engine store") rather than dropped with it. A refused commit
-   frees the drawer at once, and on the legacy side (`commitApplied()` is
-   `null`) it closes as soon as the POST answers.
-5. **Undo** is **client-side** over the staged buffer (`popLastStaged` reverts
-   the last staged op from its per-op journal); per-element and discard-all
-   reverts (`revertStagedFor` / `revertAllStaged`) work the same way. There is
-   no server-side undo in the editing loop.
+   frees the drawer at once.
+5. **Undo** is an unstage the engine answers (`popLastStaged` withdraws the
+   last staged batch); per-element and discard-all reverts
+   (`revertStagedFor` / `revertAllStaged`) work the same way. There is no
+   server-side undo in the editing loop.
    Staged elements are also browsable: the sidebar's **"Staged elements"**
    section (`components/Sidebar/StagedSection.svelte`, rows derived by
    `state/staged-rows.ts`) lists every element the buffer touches — new /
@@ -286,9 +277,9 @@ engine store":
    element's own ops PLUS every staged relationship op incident to it — a
    surviving rel pointing at a reverted temp id would 422 the commit) and then
    releases the element's lock token when no remaining staged op still needs it.
-   It needs no engine-side branch: `getStagedDiff()` already answers from the
-   replica's own diff when `staging: engine`, cascade and all.
-   - **On the engine side, a batch can be PARKED rather than staged** — a
+   It needs no branch of its own: `getStagedDiff()` answers from the
+   replica's own diff, cascade and all.
+   - **A batch can be PARKED rather than staged** — a
      peer's commit deleted or retyped something an in-flight batch still
      needs, and the engine refuses to replay it. `DiffDrawer` renders these
      as a section of their own, under the entity rows
@@ -300,8 +291,7 @@ engine store":
      conflict is never in the drawer's `total` and never rides a commit —
      `getStagedOps()` already excludes parked batches — so its only action
      is a ghost **Discard** button, `discardConflict(batchId)`
-     (`unstage {batch}` plus the lease sweep). On the legacy side
-     `getStagedConflicts()` is always `[]`, so the section never renders.
+     (`unstage {batch}` plus the lease sweep).
 6. **Artifacts ride the same loop.** Saved navigations, tables, code
    snippets and exporters are project artifacts rather than model
    entities, but their editing is the identical check-out → stage → commit
@@ -522,29 +512,19 @@ engine store":
      peer commit's rev and applies its delta UNCONDITIONALLY (preview
      compares our `base_rev` with strict equality, so declining to adopt an
      artifact-only rev would 409 the next preview); only the `onCommitEvent`
-     taps are handed `scope`, which lets the table editor skip its re-page
-     when the commit touched no model content. An absent `scope` defaults to
+     taps are handed `scope`. An absent `scope` defaults to
      `['model']` — the defensive direction is the one that does more work.
 7. Reads are **paged/on-demand**: element pages and fuzzy search
    (`/model/elements`), containment tree roots/children
    (`/model/containment/*`), and BFS neighborhoods for the graph view
    (`/model/elements/{id}/neighborhood`).
-   **Every read fill-path must honor the staged-delete guard.** A staged
-   delete removes the entity from the local caches while the server still
-   returns it (nothing is committed yet), so a read result that re-inserts it
-   would silently resurrect it — the staged diff row vanishes from the badge
-   and DiffDrawer while the queued delete op still commits, and edits staged
-   against the phantom 422 the eventual batch. `isStagedDeleted` /
-   `isStagedDeletedRelationship` in `model.svelte.ts` are the predicates
-   (the relationship flavor also catches a `delete_element` cascade's victims,
-   which have journal entries but NO queued op of their own, so
-   `hasQueuedOpFor` misses them); `ensureElement`/`ensureElements`/
-   `ensureTreeItems` skip such ids (and re-check after the `await` for deletes
-   staged mid-flight), and `seedRelationships`/`applyDelta` skip such
-   relationships. A staged-deleted id is NOT added to `_missingElementIds` —
-   that set means "the server confirmed it doesn't exist", and the Inspector
-   checks `isStagedDeleted` separately to render not-found instead of an
-   eternal skeleton.
+   Nothing a read answers can resurrect a staged delete: the replica's answers
+   already hold the staged edits, so a staged-deleted element is absent from
+   them. `isStagedDeleted` in `model.svelte.ts` is the predicate the
+   Inspector uses to render
+   not-found instead of an eternal skeleton; a staged-deleted id is NOT added
+   to `_missingElementIds`, which means "the engine answered it does not
+   exist".
 8. **Export** streams the last committed session state to a file: a picked
    file goes up as a raw `fetch` body (`POST /model/upload`, no JS-side parse)
    or by server path (`POST /model/load`); export saves `downloadModel()`'s
@@ -559,25 +539,21 @@ engine store":
 
 #### The engine store
 
-`model-engine.svelte.ts` is the entity half the facade dispatches to with
-staging on the engine. The user's staged edits live in the replica's working
-copy, and every read of this half goes through the `lib/api` seam to the
-replica (staging on the engine puts every read surface there), so what it
-caches is the committed model WITH the staged edits on top. It has no
-`ClientConfig`, and none of the legacy half's guards: nothing the replica
-answers can resurrect a staged delete, and a temp id is an id like any
+`model-engine.svelte.ts` is the entity half of the model store. The user's
+staged edits live in the replica's working copy, and every read of this half
+goes through the `lib/api` seam to the replica, so what it caches is the
+committed model WITH the staged edits on top. Nothing the replica answers can
+resurrect a staged delete, and a temp id is an id like any
 other — `ensureElement('tmp_…')` asks the engine, and a 404 puts it in
 `getMissingElementIds()` whatever its prefix, since that set means "the
 engine answered it does not exist". Its seeds take no rev guard either: an
 unstaged edit puts the committed, LOWER `rev` back, and the engine's later
 answer is the newer one.
 
-- **The caches** have the legacy half's names and shapes — `_elements`,
-  `_relationships`, `_treeItems`, `_missingElementIds` — and hold only what
-  the UI asked for.
+- **The caches** — `_elements`, `_relationships`, `_treeItems`,
+  `_missingElementIds` — hold only what the UI asked for.
 - **The handle.** The replica store injects the engine through
-  `attachEngine({call, on, status, subscribe})` on `startReplica()` with
-  staging on the engine, and takes it back with `detachEngine()` in
+  `attachEngine({call, on, status, subscribe})` on `startReplica()`, and takes it back with `detachEngine()` in
   `stopReplica()` / `resetReplica()`, which drops everything the half holds;
   an answer that lands after a detach or a `resetModelStore()` is dropped.
 - **An edit** — `emit(op)`, or `emitMany(ops)` for ONE batch (all or
@@ -700,7 +676,7 @@ could not be read: …`, the readers keep showing the answered edits over
   `clearOverlay()`) WITHOUT moving the structure rev, which on this side
   moves on the replica's `changed` event alone, so a structural delta moves
   it once; then re-keys the caches through `id_map` (`remapCaches`), the
-  visit history and the selection, in the legacy half's order; then upserts
+  visit history and the selection; then upserts
   the delta's entities EXCEPT those a staged batch touches (the mirror's
   diff), whose cached record is the working copy's — the replica replays the
   batch over the delta and its `changed` event re-reads them — and drops the
@@ -712,8 +688,7 @@ could not be read: …`, the readers keep showing the answered edits over
   cached entity — only its issue splice, its issue counts (the summary's
   too), the overlay clear and its `id_map` re-keying still apply. An own
   commit whose `changed` came first is at the store's rev, not older, and
-  applies whole. The legacy half's `applyDelta` is unchanged: it moves the
-  structure rev by its own formula, and the rev as the delta says.
+  applies whole.
 - **The unstage family** waits for every edit before it to reach the mirror
   and for every earlier unstage to be answered — with the mirror refused, it
   reads it once more and, refused still, does nothing — posts one
@@ -723,8 +698,7 @@ could not be read: …`, the readers keep showing the answered edits over
   are read again). `popLastStaged()` is `unstage {batch: last}` — false when
   nothing is staged or the mirror is refused (it reads it again for the
   next try); a coalesced keystroke lives in its FIRST batch, so Undo
-  may remove an older batch than the last keystroke, as the legacy
-  coalesced queue does. `revertStagedFor(id)` is `unstage {entity}`, which
+  may remove an older batch than the last keystroke. `revertStagedFor(id)` is `unstage {entity}`, which
   leaves a parked batch for the conflicts; `revertStagedForElement(id)` is
   `unstage {entity, incident: true}` and then `unstage {batch}` for every
   parked batch whose ops target `id` or have it as an end;
@@ -732,8 +706,7 @@ could not be read: …`, the readers keep showing the answered edits over
   `discardAllStaged()` is the same whatever the mirror's state, and resolves
   once the store has taken it in — the facade's `reloadModelStore()` awaits
   it before `resetModelStore()`, so "Reload model", which drops the lock
-  registry, drops the batches those leases covered too (the legacy side is
-  `resetModelStore()` alone, which empties its buffer);
+  registry, drops the batches those leases covered too;
   `revertConflict(batchId)` drops one parked batch. `clearStaged()` does
   nothing, since the engine drops the committed batches itself on the
   commit's delta; `dropBatches(ids)` unstages the batches of a commit that
@@ -749,9 +722,7 @@ could not be read: …`, the readers keep showing the answered edits over
 - **The facade** also exports `emitMany`, `stagedSettled`,
   `getStagedBatchIds`, `getStagedConflicts`, `revertConflict`,
   `captureStaged`, `dropStagedBatches`, `markStagedLanded`,
-  `reloadModelStore` and the type `StagedConflict`; on the legacy side they
-  are a loop of `emit`, a resolved promise, `[]`, `[]`, a no-op, the
-  buffer's ops with no batch id, a no-op, a no-op and `resetModelStore()`.
+  `reloadModelStore` and the type `StagedConflict`.
   The staged probe (`lib/engine/staged-probe.ts`) asks whether the replica
   holds anything staged — committed batches it still holds included — while
   the engine half is attached (`attachEngine` sets it, `detachEngine` clears
@@ -763,14 +734,11 @@ There are **two** issue stores, and every consumer reads exactly one selector.
 
 - **Live** — `_issuesByOwner` in `model.svelte.ts`, keyed by owner
   (`issue.target_ids[0]`), mirroring the backend's maintained `ValidationState`.
-  It is the DEFAULT source: it holds committed truth — with the issues on the
-  engine, the working copy's issues (see below) — and is kept fresh without
-  anyone clicking anything.
+  It is the DEFAULT source: it holds the working copy's issues (see below)
+  and is kept fresh without anyone clicking anything.
 - **Overlay** — `validation.svelte.ts` holds the origin-tagged snapshot of the
   last EXPLICIT Validate run. That run is the only view that can show
-  `resolved` issues, and with the issues on the server the only one that can
-  show `uncommitted` ones, because it is the only one that validated the staged
-  buffer; with them on the engine the live map shows `uncommitted` too. `null` means "no overlay: render live". **`[]` is still an
+  `resolved` issues; the live map shows `uncommitted` ones too. `null` means "no overlay: render live". **`[]` is still an
   overlay** — a Validate that found nothing renders its own empty state, not the
   live list. `overlayMode = getOverlay() !== null` in `IssuesPanel.svelte` is the
   one place that distinction changes rendering.
@@ -792,12 +760,11 @@ dropped). Triggers, all of them best-effort:
 | project boot                  | `boot()` in `routes/p/[projectId]/+page.svelte`                                                    |
 | in-app model reload           | `onReloadModel()`, same file                                                                       |
 | peer-rebind banner reload     | `onReloadRebind()`, same file (**never** a full validate)                                          |
-| background-sweep completion   | `open-progress.svelte.ts`                                                                          |
 | peer commit (300 ms debounce) | `realtime.svelte.ts`                                                                               |
 | feed reconnect snapshot       | `realtime.svelte.ts` — **unconditional**, deliberately NOT rev-guarded (see the sweep note above)  |
 | own-commit rebind adoption    | `checkout.svelte.ts`'s `adoptReboundMetamodel()` — refetches metamodel + issues + summary in place |
-| replica issue store moved     | `replica.svelte.ts` — a `changed` whose `issues_version` moved, with the issues on the engine      |
-| issues gate opening           | `replica.svelte.ts` — the replica's first sweep ended, with the issues on the engine               |
+| replica issue store moved     | `replica.svelte.ts` — a `changed` whose `issues_version` moved                                     |
+| issues gate opening           | `replica.svelte.ts` — the replica's first sweep ended                                              |
 
 Refetch, not feed deltas: commit feed events deliberately carry **no** issue
 delta, because reconnect needs the refetch path anyway. The debounced triggers
@@ -844,8 +811,7 @@ reader refuses, or one that came without a parse) sends the issue calls to
 the server.
 
 Adopting committed truth **clears the overlay** (`adoptIssues`, `applyDelta`) —
-the staged state it described has been superseded. With the issues on the
-engine every staged edit moves `issues_version`, so the refetch after it clears
+the staged state it described has been superseded. Every staged edit moves `issues_version`, so the refetch after it clears
 the overlay too: a Validate result lasts until the next edit. So do `resetModelStore()` and
 `boot()`, which install a different model entirely. `clearOverlay()` keeps
 `_lastError`: a failed Validate's error strip must survive a peer commit.
@@ -1021,7 +987,7 @@ base URL is a module global read at call time).
    `off`, reason `no model` — no frame is even built.
 2. The engine link, built on first need and kept until `stop()`. A `connect()`
    that rejects (`FrameError`: same host, timeout, worker error) ends the
-   attempts AT ONCE, its message the reason, no retry: phase `server` when
+   attempts AT ONCE, its message the reason, no retry: phase `unavailable` when
    this open was never `ready`, `failed` otherwise (a worker that died and
    whose replacement does not load — `retry()` tries again, with the batches
    the sync holds).
@@ -1052,7 +1018,7 @@ base URL is a module global read at call time).
 9. `ready` at the result's `rev`, and the waiting inputs drain.
 
 A failed attempt tells the engine `close` (its answer ignored), sleeps 1 s,
-then 3 s, and tries again; after the third failure the phase is `server` when
+then 3 s, and tries again; after the third failure the phase is `unavailable` when
 this open was never `ready` — the link is disposed — and `failed` otherwise;
 a wait that itself rejects ends the attempts the same way. Going `failed`
 empties the waiting inputs but the user's own commit responses: the batches a
@@ -1071,41 +1037,25 @@ of another, `stop()` first. `settled()` resolves once no attempt runs, the
 pump is idle, no sleep is pending and the cache write is done — tests await it
 instead of polling.
 
-`server` is the boot fallback, and it says so beyond the indicator: with some
-surface on the engine, `getReplicaNotice()` is a dismissible warning row above
-the workspace (`ReplicaFallbackNotice.svelte`) — the engine could not start,
-this tab reads from the server, reload to try again — until
-`dismissReplicaNotice()` or the next `startReplica()`. With every surface on
-`server` the notice never shows; the tab behaves exactly as it does without a
-replica.
+`unavailable` is the boot failure: the workspace is blocked behind the failure
+overlay, which shows the status's reason (see "Following"); `retry()` connects
+afresh. A project with no model is `off`, which blocks nothing.
 
 **The open journey's replica phases** (`lib/state/open-journey.ts`). The
-single progress bar (`beginJourney`/`journeyStatus`/`finishJourney`) gains
-four phases — `download`, `parse`, `index`, `tail` — fed by
-`journeyReplica(progress)` from the replica's own `progress` while the phase
-is `opening` (see "Wiring" → "The gate"). `PhaseName`'s order is now
-`upload < create < hydrate < validate < download < parse < index < tail <
-finalize`, and a phase report earlier than the one already reached is
+single progress bar (`beginJourney`/`journeyUpload`/`finishJourney`) is fed by
+the replica's own `progress` through `journeyReplica(progress)` while the phase
+is `opening` (see "Wiring" → "The gate"): four phases — `download`, `parse`,
+`index`, `tail` — after the creeping `hydrate` the bar starts in.
+`PhaseName`'s order is `upload < create < hydrate < download < parse < index
+< tail < finalize`, and a phase report earlier than the one already reached is
 dropped whole, fraction included: `download` and `parse` interleave (a
 chunk is parsed as it arrives, so the engine's `parse` events can start
 before the shell has posted every chunk), so without this a late `download`
-report after `parse` had begun would pull the bar back; a stray
-`/model/status` poll landing after the replica has moved the phase into
-`download` is dropped the same way. `verify` (the background digest check,
-also reported while `ready`) is ignored outright — it is never a phase this
-journey has a slice for.
+report after `parse` had begun would pull the bar back. `verify` (the
+background digest check, also reported while `ready`), `sweep` and `scripts`
+are ignored outright — they are never a phase this journey has a slice for.
 
-`startReplica()` opens the replica whatever `dr.surfaces` says, so a
-`replica: false` journey (no surface on the engine) can still be handed a stray `journeyReplica` call
-from that background open — and `download` outranks `validate` in the phase
-order, so an unguarded call would hijack the bar from the real
-`/model/status` polls before the model has even finished hydrating.
-`journeyReplica` therefore refuses outright unless the journey itself was
-begun with `replica: true`; the four phases stay pinned zero-width at
-validate's ceiling in the other table only so it remains total over
-`PhaseName` — no code ever reads that placeholder.
-
-The replica phases' weights (`REPLICA_SLICES`) come from a measured split of
+The replica phases' weights (`SLICES`) come from a measured split of
 a cold open through the **real app** (`vite dev`, the dev proxy, the built
 sandbox), not the browser benchmark's loopback numbers (`pixi run
 engine-bench-browser`) — that is what a user's tab actually sees. One
@@ -1132,9 +1082,8 @@ is split by the BENCH's own
 parse/index durations (parse 56 → 1438 ms, index 1446 → 1842 ms — 1382 ms /
 396 ms, 77.7 % / 22.3 %) to get parse ≈ 66.3 % and index ≈ 19.0 % of the
 whole span. Rounded onto a `[34, 96]` (open) and `[52, 97]` (create) budget
-for the four replica phases together — `hydrate`/`validate`/`upload`/`create`
-themselves were left as they were, only the split among `download`/`parse`/
-`index`/`tail` was tuned — this gives `download [34,43]`, `parse [43,84]`,
+for the four replica phases together — `hydrate` fills the budget up to
+`download`'s floor (`[0, 34]` open, `[32, 52]` create) — this gives `download [34,43]`, `parse [43,84]`,
 `index [84,95]`, `tail [95,96]` for `open`, and the same proportions over
 the narrower `create` budget. `tail`'s real share (0.9 %) rounds to a bare
 one-point sliver rather than zero, so the phase stays visible (and
@@ -1146,7 +1095,7 @@ each to its end. Deltas wait in `rev` order (a frame that arrives out of order
 takes its place); anything else in arrival order. While `opening` or
 `resyncing` inputs wait; at 1,000 waiting the queue is emptied and a catch-up
 is owed instead — the tail from the replica's `rev`, which covers everything
-that was waiting. In `off` and `server` they are dropped, and in `frozen`
+that was waiting. In `off` and `unavailable` they are dropped, and in `frozen`
 and `failed` too, except the user's own. Once `ready`, the pump:
 
 - A delta whose `rev` is not past the replica's is dropped without a call —
@@ -1174,7 +1123,8 @@ In `off` (the descriptor said there is no model) a `reset` or a snapshot event
 restarts the open — phase `opening`, attempt 1, the same run and link — since
 a model may have come since; it carries the batches a re-bootstrap before the
 `off` held, less those of the user's own commits whose answers the `off`
-dropped (below). `server` is terminal for the tab: neither wakes it.
+dropped (below). `unavailable` is not woken by either: only `retry()` leaves
+it, with a fresh connect (the same run, link dropped, nothing held).
 
 The replica's `rev` comes from the answers of `end`, `applyTail` and
 `applyDelta`, and from the engine's `replica` events while `ready` (before
@@ -1199,32 +1149,32 @@ adopting those batches (`adoptStaged`) — the sync holds them across the
 attempts, since after `close` the engine no longer has them, and until a
 replica is ready with them. Reads posted to the engine meanwhile wait in it
 and are answered from the new replica. Feed inputs wait in the queue. Three
-failed attempts are `failed` (not `server`: this open was ready once), and
+failed attempts are `failed` (not `unavailable`: this open was ready once), and
 stay so until `retry()`: a re-bootstrap with a fresh budget of three attempts
 that adopts the batches the sync still holds — the engine's `close` took them
 from the worker, so a page reload would lose them. Reads asked while `failed`
 are posted and wait in the closed engine for the replica `retry()` brings;
-`retry()` in any other phase does nothing. A
+`retry()` in `unavailable` connects afresh instead (phase `opening`, attempt 1);
+in any other phase it does nothing. A
 re-bootstrap asked for while one runs is remembered and runs once more after
 it, never in parallel; the divergence a delta's answer and the engine's event
 both report is one re-bootstrap, not two — every re-bootstrap and freeze
 moves an epoch, and whatever judged an older replica is not acted on.
 
-`failed` blocks the workspace, with some surface on the engine:
+`failed` and `unavailable` block the workspace:
 `isReplicaBlocked()` is true, and `ReplicaFailedOverlay.svelte` — a fixed
-dialog under the progress overlay — covers it with "Model out of sync" and one
-`Retry` button, focused on mount. `retryReplica()` calls the sync's `retry()`
-above — the SAME in-place re-bootstrap, never a reload, since a reload would
-lose the edits the sync still holds — "the edits" are the engine's staged
-batches, which the sync carries into `retry()` exactly as any other
+dialog under the progress overlay — covers it with "Model out of sync", the
+reason (`getReplicaBlockReason()`, `data-testid="replica-blocked-reason"`) and
+one `Retry` button, focused on mount. `retryReplica()` calls the sync's `retry()`
+above — from `failed` the SAME in-place re-bootstrap, never a reload, since a
+reload would lose the edits the sync still holds — "the edits" are the engine's
+staged batches, which the sync carries into `retry()` exactly as any other
 re-bootstrap does (above): the same ops land under the same batch ids once
-`retryReplica()` reaches `ready` — and the overlay stays up through the
-retry's `resyncing` (the button reads `Retrying…`, disabled, while
-`isReplicaRetrying()`); it clears at `ready` and comes back, `Retry` enabled
-again, if the retry itself lands on `failed`. With every surface on `server`
-`isReplicaBlocked()` is always false — `anyEngineSurface` gates it exactly as
-it gates the notice and the gate — and the indicator, which reads the phase
-unconditionally, is the only consumer of a `failed` replica there. Whichever
+`retryReplica()` reaches `ready`; from `unavailable` a fresh connect. The
+overlay stays up through the retry's `resyncing` or `opening` (the button reads
+`Retrying…`, disabled, while `isReplicaRetrying()`); it clears at `ready` and
+comes back, `Retry` enabled again, if the retry itself lands on `failed` or
+`unavailable`. A project with no model (`off`) is not blocked. Whichever
 way a re-bootstrap starts — this retry, or the replica's own over a
 divergence — `onStatus` calls `markStructureChanged()` once it reaches
 `ready` from `resyncing`, so the tree and the relationships list (the two
@@ -1239,15 +1189,15 @@ the response: `rebound` freezes the replica and applies nothing; `applied:
 false` (the batch applied nothing, `prev_rev` null) queues nothing; otherwise
 the response body's text is queued as a delta at its place by `rev` — before
 its echo — with `own: {batch_ids, id_map}` (`batchIds` is the ids of the
-staged batches the POST sent: `commitStaged` passes them on the engine side,
-the revert none), and the pump goes: what landed
+staged batches the POST sent: `commitStaged` passes them, the revert
+none), and the pump goes: what landed
 before the commit, the commit, the rest; the echo, no longer past the
 replica, drops without a call. `flight.abandon()` (the POST failed) just lets
 the pump go. Settling or abandoning twice is a no-op. A response settled while
 the replica is not `ready` waits like any delta, and still reaches the engine
 when the tail already covered it. A response no replica will apply — settled
-in `off` or `server`, emptied with the queue when a re-bootstrap finds no
-model or an open gives up to `server`, or dropped by the pump after its one
+in `off` or `unavailable`, emptied with the queue when a re-bootstrap finds no
+model or an open gives up to `unavailable`, or dropped by the pump after its one
 retry — takes the batches it names with it: they leave the batches the run
 holds, every re-bootstrap's read leaves them out until a replica is `ready`
 without them, and `onAbandoned(batchIds)` tells the model store, so a
@@ -1292,7 +1242,7 @@ queue:
   response has not come.
 - `frozen` and `failed` answer as they are: a frozen replica at its `rev`, a
   closed one keeping the read in the engine until the next replica comes.
-- No open, phase `off` or `server`, a `stop()` while it waits, or no link
+- No open, phase `off` or `unavailable`, a `stop()` while it waits, or no link
   when it is released (the worker died) reject with `EngineGoneError` — and
   so does a read whose worker turns out gone, which re-bootstraps a `ready`
   replica on a new one. An
@@ -1323,7 +1273,7 @@ place in arrival order, for the replica that replaces it — which adopts the
 batches first — so a worker that dies loses no staged edit. A `frozen`
 replica whose worker is gone is rebuilt only by the adoption, so until then
 it refuses every call as `off` does — an edit held that long would hold every
-commit and read behind it. `off`, `server` and `stop()` reject
+commit and read behind it. `off`, `unavailable` and `stop()` reject
 `EngineGoneError`; an aborted `signal` an `AbortError`, as
 for a read — and a transition aborted while held frees the calls behind it.
 
@@ -1353,7 +1303,7 @@ order, unfiltered, artifacts ignored — the server's
 `lib/engine` needs no `lib/api/types` value.
 
 **Reads** (`lib/api/engine-route.ts`, `lib/engine/gate.ts`,
-`lib/engine/seam.ts`, `lib/engine/surfaces.ts`). Every read of `lib/api` the
+`lib/engine/seam.ts`). Every read of `lib/api` the
 replica can answer keeps its signature and schema and is answered by the
 engine alone, from the working copy — staged edits and staged artifacts
 included:
@@ -1405,7 +1355,7 @@ is not ready` or `replica closed` — the staged batches, the `base_rev` or
   `signal` rejects that caller alone with an `AbortError`. The replica store
   supplies `read` (see "Wiring"): open at `ready` or `frozen` with the
   replica swept and the artifacts loaded, closed while it opens or
-  re-bootstraps, unavailable at `failed`, `server`, `off` or without a replica.
+  re-bootstraps, unavailable at `failed`, `unavailable`, `off` or without a replica.
 - `createEngineSeam(sync, whenReady)` (`seam.ts`) makes the seam of a
   `ReplicaSync`: `call` is `sync.call` (so the read barrier holds) with the
   signal and the transfer list as its options, and an `EngineGoneError` from
@@ -1429,18 +1379,18 @@ is not ready` or `replica closed` — the staged batches, the `base_rev` or
   `previewTransform` routes through the `exports` surface to the engine's
   `previewTransform`; `Export/TransformTestPanel.svelte` shows
   `ScriptsNeedEngine` and calls nothing while the replica phase is `off` or
-  `server`.
+  `unavailable` (`scriptsNeedEngine()`).
   **The snippet console** (`SnippetTab`, `SnippetConsole`) runs on the engine:
   `runSnippetTab` (`state/snippet-editor.svelte.ts`) calls `runSnippet`
   (`api/snippets.ts`, over `callEngine` of `state/replica.svelte.ts`) with an
   `AbortController` held per tab. Stop aborts it — the engine stops the script
   and the call rejects locally — so the tab is idle at once; closing, rekeying
-  or resetting a tab aborts its run too. With the replica `off` or `server`
+  or resetting a tab aborts its run too. With the replica `off` or `unavailable`
   (`scriptsNeedEngine()`) the console shows `ScriptsNeedEngine` and Run calls
   nothing. A result carries the `stamp` `{rev, staged}` of the working copy
   where the run began; `getWorkingStamp()` is the stamp of the latest `changed`
   event of the current link (null before the first one, and again on a new
-  link, a re-bootstrap or phase `off`/`server`, since the staged version
+  link, a re-bootstrap or phase `off`/`unavailable`, since the staged version
   restarts with each worker; a run's own stamp is adopted while it is null).
   `isResultStale(result, getWorkingStamp())` (`snippet/console-view.ts`) is
   true when the current stamp is null or differs in either field, and disables
@@ -1499,58 +1449,24 @@ artifact_id, row_element_id, limit, offset}`, `searchModel`'s
   `{definition | artifact_id, offset, limit}`. The option bags (and
   `evaluateTable`'s args) take a `signal`: the engine gets it with the call,
   and an abort cancels a search's or a table's scan.
-- The switches (`readSwitches(storage?)` → `{surfaces, staging}`):
-  `SURFACE_DEFAULTS` — `engine` for every surface — and
-  `STAGING_DEFAULT`, `engine`,
-  overlaid with the JSON object in `localStorage['dr.surfaces']` — a known
-  surface set to `engine` or `server` is taken, `staging` set to `engine` or
-  `legacy` is taken, anything else ignored, and no storage, a throwing one or
-  bad JSON give the defaults. `staging` says where the user's model edits are
-  staged: `engine` in the replica's working copy, `legacy` in the model
-  store's own buffer. `staging: engine` (the default) puts all five read
-  surfaces on `engine`, whatever the object says of them — a staged edit
-  shows only in the replica's answers, so a read-surface-only override on its
-  own (e.g. `{"search": "server"}`) is a no-op; it needs `staging: legacy`
-  alongside it (e.g. `{"staging": "legacy", "search": "server"}`) to actually
-  take effect. `navigation`, `criteria`, `tables`, `exports`, `issues`, `download`, `views` and `compare` are never
-  forced by `staging`. They route nothing — every read is the engine's, once
-  the gate is open — and decide only what `engineSide(surface)`
-  (`state/replica.svelte.ts`: the switch, the surface's gate and a phase that is neither `off`
-  nor `server`) says to the stores that follow the replica: whether the open
-  tables re-page and the view warnings recompute when the replica moves, and
-  whether the summary, the compare dialog and the notices count the engine's
-  answer as theirs. The switches are read once, with the
-  rest, and honoured in a build too. `readSurfaces(storage?)` is
-  `readSwitches(storage).surfaces`; `anyEngineSurface(switches)` says whether
-  any surface is on the engine, `issues`, `metamodel`, `views` and `compare` counting only with `staging:
-engine` — on legacy their gate never opens, so an opt-out stored before the
-  `issues` switch existed (seven surfaces on `server`, staging on legacy)
-  waits for, and is blocked by, nothing.
-- A `quiet()` registry (`lib/engine/quiet.ts`): `addQuietProbe(probe)`
-  registers a `() => Promise<void>` and returns the function that drops it
-  again; `quiet()` awaits every registered probe (none registered: resolves
-  at once). A store adds a probe for whatever could still change what a read
-  sees — the sync's own `settled()` and the artifact follower's (the replica
-  store) and "no `refreshView()` in flight" (the view store).
-
-**Status**. One `ReplicaStatus` object, replaced on every change and
-handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
-`frozen`, `failed`, `server`), `rev`, `progress` (`{task, done, total}` —
-`download` from the shell; `parse`, `index` and `tail` from the engine while
-opening; `verify`, the background digest check, carried in `ready` too),
-`attempt` (1–3 while opening or resyncing, else 0), `source` (`cache` /
-`network`), `isolated` (the frame's `crossOriginIsolated`, `null` before the
-handshake), `cspViolations` (every violation the frame reported), `reason`
-(why `off`, `frozen`, `failed` or `server`) and `seeded` (the replica's issue
-store has been swept whole once: set at the end of the first `sweep` the
-engine reports after it called the replica `ready`, cleared by every new
-replica — each open or re-bootstrap attempt, a new worker — and by the
-engine's replica leaving `ready`; a sweep started again, by `validateModel`,
-keeps it, its `done: 0` included; `sweep` is never `progress`, since the
-workspace opens at `ready`). `server` is the boot failure: the
-frame did not connect, or three opens failed, before the first `ready`. In
-`server` and `off` a read is an `EngineUnavailableError` (the gate is
-unavailable) and every surface's effective side is the server's.
+  **Status**. One `ReplicaStatus` object, replaced on every change and
+  handed to `onStatus`: `phase` (`off`, `opening`, `ready`, `resyncing`,
+  `frozen`, `failed`, `unavailable`), `rev`, `progress` (`{task, done, total}` —
+  `download` from the shell; `parse`, `index` and `tail` from the engine while
+  opening; `verify`, the background digest check, carried in `ready` too),
+  `attempt` (1–3 while opening or resyncing, else 0), `source` (`cache` /
+  `network`), `isolated` (the frame's `crossOriginIsolated`, `null` before the
+  handshake), `cspViolations` (every violation the frame reported), `reason`
+  (why `off`, `frozen`, `failed` or `unavailable`) and `seeded` (the replica's issue
+  store has been swept whole once: set at the end of the first `sweep` the
+  engine reports after it called the replica `ready`, cleared by every new
+  replica — each open or re-bootstrap attempt, a new worker — and by the
+  engine's replica leaving `ready`; a sweep started again, by `validateModel`,
+  keeps it, its `done: 0` included; `sweep` is never `progress`, since the
+  workspace opens at `ready`). `unavailable` is the boot failure: the
+  frame did not connect, or three opens failed, before the first `ready`. In
+  `unavailable` and `off` a read is an `EngineUnavailableError` (the gate is
+  unavailable).
 
 **Wiring** (`lib/state/replica.svelte.ts`). The one `ReplicaSync` of the
 tab lives in a thin store, built on the first `startReplica()` from
@@ -1569,38 +1485,32 @@ sync exists:
   old page.
 - **The seam and its gate.** `startReplica()` installs
   `createEngineSeam(sync, whenReady)` into `lib/api` (`installEngineSeam`),
-  `whenReady` being the store's gate, and registers `sync.settled()` as a
-  quiet probe; `stopReplica()` and `resetReplica()` uninstall both, so every
-  read is an `EngineUnavailableError` again and one waiting on the gate
-  rejects. The gate is `createGate(gateState)` (`lib/engine/gate.ts`):
-  `gateState()` is `open` when the phase is `ready` or `frozen`, the
-  status's `seeded` is true and the current follower's `loaded()` is true,
-  `closed` while the phase is `opening` or `resyncing` or until those two
-  hold (a `frozen` replica keeps `seeded`: its list matches the old-metamodel
-  UI until the adoption re-bootstraps it), and `unavailable` at `failed`,
-  `server` or `off` — its reason the status's, such as `no model` — when the
-  follower's first load failed for good (`loadFailed()`, its retry included:
-  the workspace then blocks behind the failure overlay, which shows
-  `getReplicaBlockReason()`, and Retry asks for a new load; `boot()` ends at the
-  first read that rejects while blocked and runs its content steps — summary,
-  issues, role, artifacts — once `whenReplicaUnblocked()` resolves), or without an
-  installed replica. `moved()` runs at every status change, every
-  follower load and stop and every seam install and uninstall; a waiting
-  read therefore resolves the moment the gate opens, and rejects when the
-  replica fails, stops or finds no model. The switches are read ONCE, at the
-  first start (`readSurfaces()`); `resetReplica()` forgets them, so the next
-  start reads `dr.surfaces` again. They route no read: `engineSide(surface)`,
-  exported by the store, reports their effect to the stores that follow the
-  replica.
+  `whenReady` being the store's gate; `stopReplica()` and `resetReplica()`
+  uninstall it, so every read is an `EngineUnavailableError` again and one
+  waiting on the gate rejects. The gate is `createGate(gateState)`
+  (`lib/engine/gate.ts`): `gateState()` is `open` when the phase is `ready` or
+  `frozen`, the status's `seeded` is true and the current follower's `loaded()`
+  is true, `closed` while the phase is `opening` or `resyncing` or until those
+  two hold (a `frozen` replica keeps `seeded`: its list matches the
+  old-metamodel UI until the adoption re-bootstraps it), and `unavailable` at
+  `failed`, `unavailable` or `off` — its reason the status's, such as
+  `no model` — when the follower's first load failed for good (`loadFailed()`,
+  its retry included: the workspace then blocks behind the failure overlay,
+  which shows `getReplicaBlockReason()`, and Retry asks for a new load;
+  `boot()` ends at the first read that rejects while blocked and runs its
+  content steps — summary, issues, role, artifacts — once
+  `whenReplicaUnblocked()` resolves, which a Retry that lands from `failed` or
+  `unavailable` releases too), or without an installed replica. `moved()` runs
+  at every status change, every follower load and stop and every seam install
+  and uninstall; a waiting read therefore resolves the moment the gate opens,
+  and rejects when the replica fails, stops or finds no model.
 - **The status and the engine half.** `subscribeReplicaStatus(listener)`
   hands `listener` every status change with the status before it, and
-  returns the unsubscribe. With staging on the engine, `startReplica()`
+  returns the unsubscribe. `startReplica()`
   attaches the model store's engine half (`attachEngine`, see "The engine
   store") with a handle over the sync — `call`, `on('changed')`, this
   store's status and `subscribeReplicaStatus` — and `stopReplica()` /
-  `resetReplica()` detach it before the sync stops. With staging on legacy
-  it is never attached: attached, it would move the structure rev on every
-  delta the replica applies, which the legacy half already moves.
+  `resetReplica()` detach it before the sync stops.
 - **The feed hand-over.** `handleFeedEvent(e, raw)` (`realtime.svelte.ts`)
   calls `handReplicaFeed(e, raw)` first, before anything moves the model
   store: a `commit` becomes `feedCommit(raw, e.rev)`, a `rebind`
@@ -1629,48 +1539,38 @@ sync exists:
   `stopReplica()` / `resetReplica()` stop the follower, so a payload answer
   for the old project is dropped (see `lib/engine/README.md`). Until the
   follower's first load lands (`loaded()`; a failed load is asked once more
-  after a second) the seam's `navigation` and `tables` gates are closed and
-  navigations and tables go to the server, and while it runs its
-  `settled()` is a quiet probe.
-- **The issues.** The seam's `issues` gate is `getStagingSide() === 'engine'`,
-  the status's `seeded` and the follower's `loaded()`. With the `issues`
-  switch on the engine, the status's half of it (staging and `seeded`)
-  going from closed to open schedules the debounced issues refetch
-  (`scheduleIssuesRefetch()`, `model-shared.svelte.ts`), and so does a
-  `changed` event whose `issues_version` is not the last one seen while
-  that half is open, wherever the seam then sends the call:
+  after a second) the gate is closed.
+- **The issues.** The live issue list follows the replica once it holds a
+  model and the status's `seeded` is true: that gate going from closed to
+  open schedules the debounced issues refetch (`scheduleIssuesRefetch()`,
+  `model-shared.svelte.ts`), and so does a `changed` event whose
+  `issues_version` is not the last one seen while it is open:
   `startReplica()` subscribes to the sync's `changed` events,
   `stopReplica()` / `resetReplica()` unsubscribe. The follower's first
-  load (its `onLoaded`) schedules the refetch too while that half is open:
-  the server's list before it held none of the staged edits' own issues.
-  The version is per worker, so a new worker's first may
-  repeat an old one; its gate opening refetches anyway (see "Validation
-  issues").
+  load (its `onLoaded`) schedules the refetch too: the list before it held
+  none of the staged edits' own issues. The version is per worker, so a new
+  worker's first may repeat an old one; its gate opening refetches anyway
+  (see "Validation issues").
 - **The tables.** `startReplica()` also follows the sync's `changed` events
   for the tables (`followTables`, unsubscribed by `stopReplica()` /
   `resetReplica()`): one whose `(rev, staged_version, artifacts_version)`
-  is not the last one seen, while `engineSide('tables')` is `engine`, calls
-  the `onTablesMoved` listeners — the table store's
-  `scheduleTablesRepage()` (see "Tables on the engine"); one heard while
-  the side is `server` is not remembered. The listeners are also called,
-  while the side is `engine`, wherever the tables come to the engine with
-  no `changed` to say so: a replica built again reaching `ready` (from
-  `resyncing`, or from `opening` after the sync reported `off`), which
-  also forgets the last tuple seen, since a new worker's versions start
-  over; and the follower's first load (`onLoaded`), which opens the gate.
-  A table asked before either was the server's page. The listener
-  registry keeps `replica.svelte.ts` from importing the table store, which
-  imports the realtime store, which imports this one.
-- **The view warnings.** `followViews` does the same for the `views`
-  surface: a new `(rev, staged_version, artifacts_version)` while
-  `engineSide('views')` is `engine` calls the `onViewsMoved` listeners — the
-  view store's recompute (see "View editing state") — and so does the views
-  gate opening, its status half in `onStatus` or the follower's first load.
-  The gate shutting (in `onStatus`, or `stopFollower`) calls the
-  `onViewsClosed` listeners, which the view store answers with a refresh.
-  `replica.svelte.ts` imports nothing of `view.svelte.ts`: the view store
-  subscribes, eagerly at module scope, since nothing it imports reaches
-  back into it through the replica store.
+  is not the last one seen calls the `onTablesMoved` listeners — the table
+  store's `scheduleTablesRepage()` (see "Tables on the engine"). The
+  listeners are also called wherever the tables come back with no `changed`
+  to say so: a replica built again reaching `ready` (from `resyncing`, or
+  from `opening` after the sync reported `off`), which also forgets the last
+  tuple seen, since a new worker's versions start over; and the follower's
+  first load (`onLoaded`), which opens the gate. The listener registry
+  keeps `replica.svelte.ts` from importing the table store, which imports
+  the realtime store, which imports this one.
+- **The view warnings.** `followViews` does the same for the view
+  warnings: a new `(rev, staged_version, artifacts_version)` calls the
+  `onViewsMoved` listeners — the view store's recompute (see "View editing
+  state") — and so does the views gate opening (the issues' gate with the
+  artifacts loaded), its status half in `onStatus` or the follower's first
+  load. `replica.svelte.ts` imports nothing of `view.svelte.ts`: the view
+  store subscribes, eagerly at module scope, since nothing it imports
+  reaches back into it through the replica store.
 - **Two flights.** `commitStaged` (`checkout.svelte.ts`) and the history
   drawer's revert (`HistoryDrawer.svelte::doRevert`) both call
   `beginReplicaCommit()` right before the POST, hand `commitChanges` /
@@ -1693,7 +1593,7 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   the phase is `off`: `<span data-testid="replica-indicator">` reading
   `replica 42 %` (opening or resyncing, progress with a known total),
   `replica …` (no total yet), `replica r128` (`ready`, dimmed),
-  `replica frozen`, `replica failed` or `server mode` (all three
+  `replica frozen`, `replica failed` or `replica unavailable` (all three
   `text-warning`). `data-phase`, `data-rev`, `data-source`, `data-isolated`
   (absent before the handshake) and `data-csp-violations` mirror the status
   for e2e; the `title` carries the reason, the attempt (`attempt 2 of 3`),
@@ -1719,21 +1619,15 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   refetches on `_view`'s identity and must find them posted. A view switch
   forgets the old view's; a view that 404s, no active view or a failed load
   forgets the one registered; `clearViewState()` (the project switch)
-  forgets them all. The view store also registers a quiet probe that is
-  pending while any `refreshView()` or view-event reconciliation
-  (`reconcileAfterViewEvent`) is in flight.
+  forgets them all.
 - **Searches abort.** The three debounced searches —
   `Sidebar/Search.svelte`, `Navigation/ElementStartPicker.svelte` and
   `Snippet/ElementContextRow.svelte` — pass `listElementsPage` a `signal`
   aborted by the next query (and on unmount): on the engine a search is a
   scan and scans run one after another, so a superseded one would delay the
   fresh one. An `AbortError` leaves the results as they were.
-- **The gate.** `replicaGate(): Promise<void>` resolves at once when no
-  surface is on the engine (`anyEngineSurface`, read at the same first start
-  as the switches) — nothing to wait for, so with every switch on `server`
-  the workspace behaves exactly as it does without a replica: an indicator
-  and nothing else. Otherwise it resolves once the phase is no
-  longer `opening` (`ready`, `server`, `off`, `failed` and `frozen` all
+- **The gate.** `replicaGate(): Promise<void>` resolves once the phase is no
+  longer `opening` (`ready`, `unavailable`, `off`, `failed` and `frozen` all
   answer as they are — a frozen or failed replica is not re-opening, so the
   overlay must not wait on it) or on `stopReplica()`. `boot()`
   (`routes/p/[projectId]/+page.svelte`) awaits it right after `loadArtifacts()`,
@@ -1742,14 +1636,13 @@ idMap: id_map})` BEFORE `applyDelta(res)`; a failed POST calls
   (a 403/404 on the metamodel fetch, a model-less project) are untouched,
   since neither has anything the replica could speak to yet. The status
   callback also feeds the open journey (below) while the phase is `opening`.
-- **The notice and the block**, both gated the same way as the gate
-  (`anyEngineSurface`). `getReplicaNotice()`/`dismissReplicaNotice()` and
-  `isReplicaBlocked()`/`isReplicaRetrying()`/`retryReplica()` read and act on
-  the same reactive status the indicator does; `routes/p/[projectId]/+page.svelte`
-  renders `ReplicaFallbackNotice.svelte` in its own `auto` grid row when
-  `getReplicaNotice()` is true, and `ReplicaFailedOverlay.svelte` — outside the
-  grid, `fixed` — when `isReplicaBlocked()` is true. See "Opening" (`server`)
-  and "Following" (`failed`) above for what each looks like and when it clears.
+- **The block.** `isReplicaBlocked()`/`isReplicaRetrying()`/`retryReplica()`
+  read and act on the same reactive status the indicator does;
+  `routes/p/[projectId]/+page.svelte` renders `ReplicaFailedOverlay.svelte` —
+  outside the grid, `fixed` — when `isReplicaBlocked()` is true (the phase is
+  `failed` or `unavailable`, the artifacts could not be loaded, or a retry of
+  either is running). See "Opening" and "Following" above for what it looks
+  like and when it clears.
 
 `configureReplica({deps?, sync?} | null)` is the tests' seam — `deps`
 replaces single dependencies of the sync built next (its `onStatus` observes
@@ -1825,12 +1718,11 @@ Both Model-menu items open `components/ModelChangeDialog.svelte`
 (`mode: 'compare' | 'apply-cr'`), whose lower half is the shared
 `ProposalPreview.svelte` (a `CompareDiff` over the proposal, a conflicts block,
 an error line). **Nothing runs on file selection** — every request sits behind
-a button. Both requests go through the `compare` surface (`engine` by default;
-`lib/engine/README.md` has the engine side), and a conflict is the same
-`{ok: false, …}` result whichever side answered:
+a button. Both requests are answered by the engine (`lib/engine/README.md`),
+and a conflict is an `{ok: false, …}` result, not an error:
 
 - **Compare…**: `Choose model…` → From/To + ⇄ Swap → **Preview diff**
-  (`POST /model/compare`, cached per file + `model_rev`; inverted client-side
+  (`compareModel`, asked again each time; inverted client-side
   by `invertChangeRequest` when swapped) · **Create CR** (saves the possibly-
   inverted CR via `saveJsonToFile`/`composeCrFilename`, `complete` stripped) ·
   **Replace** (session → file by definition, so disabled while swapped; posts
@@ -1843,22 +1735,14 @@ a button. Both requests go through the `compare` surface (`engine` by default;
   `stageProposedOps(ops, modelRev, prestate)` — the snippet-run primitive
   generalized: temp-id remap that keeps each create's `id` hint,
   `crPrestate(cr)` seeded into the caches so a large Replace fetches nothing,
-  per-intent lock groups, then `emitMany` — ONE batch on the engine side, all
+  per-intent lock groups, then `emitMany` — ONE batch, all
   or nothing. From there the edits are ordinary staged
   edits (DiffDrawer, Ctrl+S, commit).
-- **Gates**: Replace / Stage edits need `canEdit()` AND an empty model staged
-  buffer (`hasStagedOps()` false — the server proposes against the committed
-  model); a hint says why. While `compareOnEngine()` (reactive: the `compare`
-  surface's side, tracked with the follower's load) holds, staged edits do not
-  gate the buttons, because the engine proposes over the working copy. The
-  dialog then decides from the ANSWER: `compareModel` / `proposeCr` results carry
-  `workingCopy`, true when the engine answered, as it always does now. An
-  answer without it over staged edits stages nothing and shows the same hint —
-  in compare mode the diff's answer counts too, checked at Replace time, so a
-  cached server diff followed by newly staged edits is refused;
-  `mcd-staged-note` ("Includes staged changes") shows only for a `workingCopy`
-  answer given while edits were staged; and only a server answer is cached by
-  `ensureCompared` (an engine answer depends on staged state). In compare mode
+- **Gates**: Replace / Stage edits need `canEdit()`; staged edits do not
+  gate the buttons, because the engine proposes over the working copy, and
+  `mcd-staged-note` ("Includes staged changes") shows when edits were staged
+  as the answer was given. Nothing is cached: `ensureCompared` asks for the
+  diff again, since an answer depends on staged state. In compare mode
   Preview and Create CR are viewer-allowed (`POST /model/compare` is a read-only
   POST); in apply-cr mode Preview is gated on `canEdit()` too, since it goes
   through `POST /model/apply-cr`, which is deliberately treated as a write.
@@ -1921,24 +1805,18 @@ a project's view through `POST /views` after deleting whatever views exist.)
   deleted or renamed folder's prior name is unrecoverable from the blob
   itself, so the label is the only record of what the user actually did, for
   both undo-history display and the DiffDrawer's View tab.
-- **The warnings.** With the `views` surface on the server
-  `_warnings` are `GET /views/{id}`'s, over the committed view, set by
-  every `refreshView()`; when the gate shuts under warnings on the engine
-  (a resync, the follower stopping) the `onViewsClosed` listener is
-  `refreshView()`, so the server's take their place. With it on the engine (the default, and its
-  gate, the `issues` one, open) they are recomputed from `_view` AS STAGED, over the working
-  model and the working artifacts (`viewWarnings`, `validateView` in the
-  engine): at the end of every `refreshView()` (whose `warnings` are then
-  ignored; a refresh of the same view keeps the ones shown until the answer,
-  another view's are cleared), after every staged op (each mutator applies
-  and stages through one helper that asks for it), and on every
-  `onViewsMoved` from the replica store — a peer's model-only commit that
-  deletes a placed element, a staged model edit, a staged artifact delete.
-  One computation runs at a time, without timers: a request made while one
-  runs makes it run once more after, and an answer is applied only if the
-  active view and `_view` are still the ones it was asked for. A quiet probe
-  (`quiet()`) is pending while a `refreshView()` or a view event's
-  reconciliation is in flight (both counted in `_refreshing`).
+- **The warnings.** `_warnings` are recomputed from `_view` AS STAGED, over
+  the working model and the working artifacts (`viewWarnings`, `validateView`
+  in the engine; `GET /views/{id}`'s own warnings are ignored): at the end of
+  every `refreshView()` (a refresh of the same view keeps the ones shown
+  until the answer, another view's are cleared), after every staged op (each
+  mutator applies and stages through one helper that asks for it), and on
+  every `onViewsMoved` from the replica store — a peer's model-only commit
+  that deletes a placed element, a staged model edit, a staged artifact
+  delete. A recompute asked before the gate is open waits for it. One
+  computation runs at a time, without timers: a request made while one runs
+  makes it run once more after, and an answer is applied only if the active
+  view and `_view` are still the ones it was asked for.
 - **Every `stage*` mutator in `view.svelte.ts` follows the same three-phase
   shape**: GUARD (client-side precondition checks — name clash, cycle,
   no-op — mirroring `applyViewOp`'s own checks, so a doomed gesture never
@@ -2105,17 +1983,14 @@ the grid at once, and moves neither the page's `model_rev` nor its `total`.
 So the table store (`state/table-editor.svelte.ts`) follows the replica rather
 than the commit feed:
 
-- **One re-page path per side.** `scheduleTablesRepage()` (called through
+- **One re-page path.** `scheduleTablesRepage()` (called through
   `onTablesMoved`, see "Wiring") restarts a 300 ms debounce
   (`REPAGE_DEBOUNCE_MS`); when it fires, `repageOpenTables()` re-pages every
   table that has evaluated — a page, an error or a load in flight — over
   the range the user is looking at (`visibleRequest`). A tab whose settings
   dialog is open is only marked stale (`_suspendedStale`, its resume
-  reloads), and a table that never evaluated stays empty.
-  `handleTableModelRevChanged` (the commit feed's re-page) does nothing
-  while the side is `engine`: the replica applies the commit and its
-  `changed` re-pages, so a commit re-pages once. On the `server` side it is
-  the only path, and staged changes re-page nothing.
+  reloads), and a table that never evaluated stays empty. A commit
+  re-pages once: the replica applies it and its `changed` re-pages.
 - **In the background.** A re-page is a `background` `_loadTablePage`:
   the page, its error and its script-error recap stay on screen
   until the new page lands and replaces them in one install — the grid never
@@ -2219,7 +2094,7 @@ toggle`), a collapsed disclosure that expands to the shared
   button, and `SnippetResultView` — the same result surface the tab console
   renders, minus ops staging. Inline mode calls the engine's `runSnippet` with
   `{ code }`, ref mode with `{ artifact_id }`; both send `entry` +
-  `element_ids`. With the replica `off` or `server` the panel shows
+  `element_ids`. With the replica `off` or `unavailable` the panel shows
   `ScriptsNeedEngine` and calls nothing. Run is gated on all four of: a configured source, the entry
   point being available (`entryAvailable`, from the editor's local lint inline
   / implied by the pre-filtered dropdown in ref mode), and the element count
@@ -2328,7 +2203,7 @@ toggle`), a collapsed disclosure that expands to the shared
   `resumeTableEvaluation`, called from the dialog's `onOpenChange` close, does
   **one** reload — and only if the definition actually differs from the
   snapshot, or a peer's commit landed meanwhile
-  (`handleTableModelRevChanged` records that on `_suspendedStale` rather than
+  (`repageOpenTables` records that on `_suspendedStale` rather than
   re-evaluating a half-composed definition). Unchanged ⇒ no request, just a
   re-drive of the visible range to fill chunks skipped while suspended.
   `abandonTableEvaluationSuspension` (TableView unmount, close/reload/reset)
@@ -2622,8 +2497,8 @@ Rebind button — the buffer is staged commit CONTENT and lands through the same
   failed lint call clears the gutter rather than blocking anything.
 - **Preview** — on demand, never on a timer: `POST /metamodel/diff` sandboxes
   the candidate and returns which model issues would start/stop failing plus a
-  structural diff (`MetamodelPreviewPanel`). With the `metamodel` surface on
-  the engine (the default; `lib/engine/README.md`) the replica answers the model half over
+  structural diff (`MetamodelPreviewPanel`). The replica
+  answers the model half over
   the working copy and `POST /metamodel/structural-diff` the document half,
   and `metamodel-staged-note` ("Includes staged changes") shows above the
   panel when `metamodelIncludesStaged()` held as the preview's answer landed
@@ -3178,8 +3053,8 @@ src/
     api/replica.ts      The replica routes' client: snapshot descriptor,
                         snapshot bytes as a raw Response, tail text + its
                         envelope, the metamodel document + X-Metamodel-Id
-    api/engine-route.ts The injected engine seam: Surface, Side,
-                        installEngineSeam, route, EngineUnavailableError
+    api/engine-route.ts The injected engine seam: installEngineSeam,
+                        route, EngineUnavailableError
                         (see "Replica (engine shell)" → "Reads")
     engine/             The replica shell — plain TypeScript, no runes, no
                         lib/state import: frame.ts (the sandbox iframe and
@@ -3188,11 +3063,9 @@ src/
                         bytes), sync.ts (open, follow, heal, the commit in
                         flight, the rebind freeze, reads behind the
                         barrier, view placements), placements.ts (the ids
-                        a view places), surfaces.ts (the per-surface
-                        switches), seam.ts (the seam over a sync),
+                        a view places), seam.ts (the seam over a sync),
                         gate.ts (the wait for the replica to hold what a
-                        read needs), quiet.ts (the addQuietProbe/quiet
-                        registry),
+                        read needs),
                         staged-probe.ts (anyStaged: whether the model
                         store's engine half has anything staged),
                         origins.ts, testing.ts

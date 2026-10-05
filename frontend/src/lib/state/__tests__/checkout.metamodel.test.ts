@@ -238,10 +238,13 @@ describe('the metamodel half of the commit batch', () => {
 	it('notifies committed listeners with the blob that was SENT, not the live buffer', async () => {
 		vi.spyOn(api, 'acquireLocks').mockResolvedValue(MM_LEASE);
 		let resolveCommit!: (r: CommitResponse) => void;
+		let posted!: () => void;
+		const request = new Promise<void>((resolve) => (posted = resolve));
 		vi.spyOn(api, 'commitChanges').mockImplementation(
 			() =>
 				new Promise<CommitResponse>((res) => {
 					resolveCommit = res;
+					posted();
 				})
 		);
 		await acquireMetamodelLease();
@@ -252,6 +255,7 @@ describe('the metamodel half of the commit batch', () => {
 		const off = onMetamodelCommitted((info) => seen.push(info));
 
 		const inflight = commitStaged('m', false);
+		await request;
 		// A straggler keystroke lands while the request is in flight.
 		buffer = 'typed: after\n';
 		resolveCommit(commitResponse({ rebound: true }));

@@ -1,3 +1,4 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Connect, type Plugin } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
@@ -24,8 +25,31 @@ export function crossOriginIsolation(): Plugin {
 	};
 }
 
+// The sandbox is `localhost:5174`, so the app must not be `localhost` too
+// (same site): a request on `localhost:<port>` is sent to `127.0.0.1:<port>`.
+export function localhostRedirectHandler(
+	req: IncomingMessage,
+	res: ServerResponse,
+	next: () => void
+): void {
+	const host = req.headers.host ?? '';
+	if (!host.startsWith('localhost:')) return next();
+	res.statusCode = 302;
+	res.setHeader('Location', `http://127.0.0.1:${host.slice('localhost:'.length)}${req.url ?? '/'}`);
+	res.end();
+}
+
+export function localhostRedirect(): Plugin {
+	return {
+		name: 'localhost-redirect',
+		configureServer: (server) => void server.middlewares.use(localhostRedirectHandler),
+		configurePreviewServer: (server) => void server.middlewares.use(localhostRedirectHandler)
+	};
+}
+
 export default defineConfig({
-	plugins: [crossOriginIsolation(), tailwindcss(), sveltekit()],
+	plugins: [localhostRedirect(), crossOriginIsolation(), tailwindcss(), sveltekit()],
+	preview: { host: '127.0.0.1' },
 	server: {
 		host: '127.0.0.1',
 		port: 5173,

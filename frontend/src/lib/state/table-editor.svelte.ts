@@ -75,8 +75,7 @@ import {
 import { releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
-import { onCommitEvent } from './realtime.svelte';
-import { engineSide, onTablesMoved } from './replica.svelte';
+import { onTablesMoved } from './replica.svelte';
 import { downloadExport } from '$lib/util/export-download';
 import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
 
@@ -239,7 +238,7 @@ const _controllers = new Map<string, AbortController>();
  * only while its page's epoch is the current one and spliced only if none
  * moved meanwhile, so rows from before and after a staged change never share
  * a grid. `model_rev` and `total` cannot tell them apart: a staged edit moves
- * neither. On the server side it never moves.
+ * neither.
  */
 let _repageEpoch = 0;
 /** tabId -> the epoch the installed page was asked at. Control state, never read from templates. */
@@ -292,7 +291,7 @@ const CHUNK_RETRY_MAX = 3;
 
 /**
  * The row range the grid last asked for (`ensureTableRange`) — where the user
- * is looking. `handleTableModelRevChanged` refreshes THIS range after an
+ * is looking. `repageOpenTables` refreshes THIS range after an
  * external commit, not row 0. Control state, never read from templates.
  */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
@@ -330,7 +329,7 @@ const _viewRanges = new Map<string, { start: number; end: number }>();
 const _suspended = new Map<string, string>();
 
 /**
- * Suspended tabs that a peer's commit arrived for (`handleTableModelRevChanged`
+ * Suspended tabs that a peer's commit arrived for (`repageOpenTables`
  * skips suspended tabs — it would otherwise re-evaluate the half-composed
  * definition). Forces the reload on resume even when the definition came back
  * unchanged, so the user does not sit on data that is known to be stale.
@@ -1453,51 +1452,8 @@ export async function downloadTable(
 }
 
 /**
- * Feed reducer hook: fired after every commit/rebind feed event (a cell edit
- * committed anywhere may have changed data any open table reads). Re-runs
- * every OPEN table tab's load over the range the user is LOOKING at (the last
- * `ensureTableRange` window, chunk-aligned, capped at the backend's limit
- * bound), fire-and-forget — `loadTablePage`'s own per-tab generation guard
- * drops stale responses, so there is no need to await or serialize these.
- * Drafts are refetched too: their `row_source`/columns may read model data
- * that just changed even though the draft's definition itself is unsaved.
- * Only with the `tables` surface on the server: on the engine the replica
- * applies the commit and its `changed` re-pages, once.
- */
-export function handleTableModelRevChanged(): void {
-	// On the engine, the replica's `changed` re-pages instead (`scheduleTablesRepage`).
-	if (engineSide('tables') === 'engine') return;
-	for (const [tabId] of _drafts) {
-		// A tab that has never evaluated (no page, no error, no load in flight) is
-		// a brand-new table still waiting for its scope — a peer's commit must not
-		// surprise-fill it with every element.
-		if (!_pages.has(tabId) && !_errors.has(tabId) && !(_loading.get(tabId) ?? false)) continue;
-		// Mid-composition (settings dialog open): re-evaluating here would run
-		// the half-edited definition. Remember that this tab owes a refresh and
-		// let `resumeTableEvaluation` do it on close.
-		if (_suspended.has(tabId)) {
-			_suspendedStale.add(tabId);
-			continue;
-		}
-		const { offset, limit } = visibleRequest(tabId);
-		void loadTablePage(tabId, offset, limit);
-	}
-}
-
-// Register once at module load: the realtime store taps every commit/rebind
-// feed event and fans it out to registered listeners. This is a one-way
-// import (realtime.svelte.ts does not import table-editor), so no cycle.
-onCommitEvent(({ scope }) => {
-	// An artifact-only commit changes no model content and invalidates none of
-	// the server's cell-evaluation caches (artifact ops never reach the
-	// in-memory model), so re-paging every open table would be pure waste. We
-	// still adopt the rev — that happens unconditionally in the realtime store.
-	if (scope.includes('model')) handleTableModelRevChanged();
-});
-
-/**
  * The replica's staged state moved (its rev, its staged edits or its
- * artifacts), with the tables on the engine: every chunk asked before now is
+ * artifacts), every chunk asked before now is
  * dropped on landing, and once the moves pause for `REPAGE_DEBOUNCE_MS` the
  * open tables re-page (`repageOpenTables`). Each call restarts the wait.
  */

@@ -18,6 +18,7 @@ import {
 	commitStaged,
 	discardConflict,
 	discardElement,
+	discardElementCascade,
 	ensureCheckout,
 	getHeldTokens,
 	previewStaged,
@@ -205,8 +206,8 @@ function flights(s: EngineStore): { answers: CommitAnswer[]; abandoned: number }
 	return seen;
 }
 
-async function open(surfaces: { [surface: string]: string } = {}): Promise<EngineStore> {
-	store = await engineStore({ surfaces });
+async function open(): Promise<EngineStore> {
+	store = await engineStore();
 	return store;
 }
 
@@ -286,6 +287,71 @@ describe('the commit on the engine side', () => {
 		expect(nameOf('e_000002')).toBe('Quartz');
 		expect(getModelRev()).toBe(1);
 		expect(getReplicaStatus()).toMatchObject({ phase: 'ready', rev: 1 });
+	});
+
+	it('the commit sends every held token and the error acknowledgement', async () => {
+		const s = await open();
+		const bodies = routes(s);
+		await ensureElements(['e_000001']);
+		await ensureCheckout([{ resource_id: 'e_000001', mode: 'exclusive' }], 'edit');
+		emit(rename('e_000001', 'mine'));
+		await stagedSettled();
+
+		await commitStaged('m', true);
+
+		expect(bodies.commits).toHaveLength(1);
+		expect(bodies.commits[0]).toMatchObject({ lock_tokens: ['t1'], ack_errors: true });
+		expect(getHeldTokens()).toEqual([]);
+	});
+
+	it('the flight is settled with the answer as the server wrote it', async () => {
+		const s = await open();
+		routes(s);
+		// Spacing a re-serialized body would lose.
+		let served = '';
+		server.use(
+			http.post(`${API}/commits`, async ({ request }) => {
+				const body = (await request.json()) as { ops: EngineOp[] };
+				served = commitResponse(s.project.commit(body.ops), false).replace(
+					',"commit_id"',
+					',  "commit_id"'
+				);
+				return new HttpResponse(served, { headers: { 'Content-Type': 'application/json' } });
+			})
+		);
+		const seen = flights(s);
+		await ensureElements(['e_000001']);
+		emit(rename('e_000001', 'mine'));
+		await stagedSettled();
+
+		await commitStaged('m', false);
+
+		expect(seen.answers).toHaveLength(1);
+		expect(seen.answers[0]!.text).toBe(served);
+		expect(seen.answers[0]).toMatchObject({ rev: 1, applied: true, rebound: false });
+	});
+
+	it('an answer that applied nothing is settled as such', async () => {
+		const s = await open();
+		routes(s);
+		server.use(
+			http.post(`${API}/commits`, async ({ request }) => {
+				const body = (await request.json()) as { ops: EngineOp[] };
+				const text = commitResponse(s.project.commit(body.ops), false).replace(
+					/"prev_rev":\s*\d+/,
+					'"prev_rev":null'
+				);
+				return new HttpResponse(text, { headers: { 'Content-Type': 'application/json' } });
+			})
+		);
+		const seen = flights(s);
+		await ensureElements(['e_000001']);
+		emit(rename('e_000001', 'mine'));
+		await stagedSettled();
+
+		await commitStaged('m', false);
+
+		expect(seen.answers.map((answer) => answer.applied)).toEqual([false]);
 	});
 
 	it('an edit during the flight survives', async () => {
@@ -582,6 +648,96 @@ describe('discarding on the engine side', () => {
 		expect(getStagedOps()).toEqual([]);
 		expect(bodies.release).toEqual([{ token: 't1' }]);
 		expect(getHeldTokens()).toEqual([]);
+	});
+
+	const SRC = 'e_000206';
+	const TGT = 'e_000209';
+	const REFINES: ModelOp = {
+		kind: 'create_relationship',
+		temp_id: 'tmp_rel1',
+		type_name: 'Refines',
+		source_id: SRC,
+		target_id: TGT,
+		properties: {}
+	};
+
+	/** The source edited under its own token, then connected to the target under a second. */
+	async function connected(s: EngineStore) {
+		const bodies = routes(s);
+		await ensureElements([SRC, TGT]);
+		const original = nameOf(SRC);
+		// 1. edit-lock the source and stage a property edit on it (token t1)
+		await ensureCheckout([{ resource_id: SRC, mode: 'exclusive' }], 'edit');
+		emit(rename(SRC, 'a2'));
+		// 2. connect source->target: the source is already held (idempotent), so
+		//    this only acquires the target (t2) and stages a create_relationship.
+		await ensureCheckout(
+			[
+				{ resource_id: SRC, mode: 'exclusive' },
+				{ resource_id: TGT, mode: 'shared' }
+			],
+			'edit'
+		);
+		emit(REFINES);
+		await settled(s);
+		expect(getHeldTokens().sort()).toEqual(['t1', 't2']);
+		return { bodies, original };
+	}
+
+	it('discardElement keeps a lock a remaining co-acquired staged op still needs', async () => {
+		const s = await open();
+		const { bodies, original } = await connected(s);
+
+		await discardElement(SRC);
+
+		// t1 is NOT released: the staged relationship still needs the source lock.
+		expect(bodies.release).toEqual([]);
+		expect(getStagedOps()).toEqual([REFINES]);
+		expect(nameOf(SRC)).toBe(original);
+		expect(getHeldTokens()).toContain('t1');
+	});
+
+	it('discardElementCascade also drops incident relationship ops and releases the token', async () => {
+		const s = await open();
+		const { bodies, original } = await connected(s);
+
+		await discardElementCascade(SRC);
+
+		expect(getStagedOps()).toEqual([]); // the incident relationship op went too
+		expect(bodies.release).toEqual([{ token: 't1' }]);
+		// Only the source's OWN token is a release candidate (parity with
+		// discardElement): the far endpoint's shared pin survives the cascade and
+		// expires with its TTL.
+		expect(getHeldTokens()).toEqual(['t2']);
+		expect(nameOf(SRC)).toBe(original);
+	});
+
+	it('discardElementCascade keeps a token a remaining staged op still needs', async () => {
+		// One token co-acquires the element and a sibling (a subtree lease).
+		// Cascading the element's discard leaves the sibling's edit staged, and
+		// that op still needs a resource this token covers: the token stays held.
+		const s = await open();
+		const bodies = routes(s);
+		await ensureElements([SRC, TGT]);
+		const original = nameOf(SRC);
+		await ensureCheckout(
+			[
+				{ resource_id: SRC, mode: 'exclusive' },
+				{ resource_id: TGT, mode: 'exclusive' }
+			],
+			'edit'
+		);
+		emit(rename(SRC, 'a2'));
+		emit(rename(TGT, 'b2'));
+		await settled(s);
+
+		await discardElementCascade(SRC);
+
+		expect(bodies.release).toEqual([]);
+		expect(getHeldTokens()).toEqual(['t1']);
+		expect(getStagedOps()).toEqual([rename(TGT, 'b2')]);
+		expect(nameOf(SRC)).toBe(original);
+		expect(nameOf(TGT)).toBe('b2');
 	});
 });
 

@@ -17,31 +17,46 @@ import {
 	getModelRev,
 	getStagedBatchIds,
 	getStagedOps,
-	resetModelStore,
-	seedElements,
 	seedRelationships,
 	stagedSettled
 } from '../model.svelte';
 import { isTempId, type ModelOp } from '../ops';
-import { EL, EL2, REL } from './fixtures';
 import { engineStore, type EngineStore } from './support/engine-store';
 
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
+
 beforeEach(() => {
-	seedElements([EL, EL2]);
-	seedRelationships([REL]);
 	vi.spyOn(checkout, 'ensureCheckout').mockResolvedValue({ ok: true } as never);
 });
 afterEach(() => {
-	resetModelStore();
 	vi.restoreAllMocks();
 });
 
+/** The Organization `e_000001`, the Team `e_000006` it owns (`r_000070`). */
+const ORG = 'e_000001';
+const TEAM = 'e_000006';
+const OWNS = 'r_000070';
+
 describe('stageProposedOps', () => {
+	let store: EngineStore | null = null;
+
+	beforeEach(async () => {
+		store = await engineStore();
+		await ensureElements([ORG, TEAM]);
+		// A relationship is only ever cached: the engine has no single-relationship read.
+		seedRelationships([
+			{ id: OWNS, type_name: 'Owns', source_id: ORG, target_id: TEAM, properties: {}, rev: 0 }
+		]);
+	});
+	afterEach(() => {
+		store?.dispose();
+		store = null;
+	});
+
 	it('refuses empty and stale batches', async () => {
 		expect(await stageProposedOps([], { rev: 0 })).toEqual({ ok: false, reason: 'empty' });
-		const ops = [
-			{ kind: 'update_element', id: 'e1', properties_patch: { name: 'X' } }
-		] as ModelOp[];
+		const ops = [{ kind: 'update_element', id: ORG, properties_patch: { name: 'X' } }] as ModelOp[];
 		expect(await stageProposedOps(ops, { rev: 99 })).toEqual({
 			ok: false,
 			reason: 'stale'
@@ -53,10 +68,15 @@ describe('stageProposedOps', () => {
 			{
 				kind: 'create_element',
 				temp_id: 'tmp_1',
-				type_name: 'Building',
-				properties: { name: 'New B' }
+				type_name: 'Team',
+				properties: { name: 'New T' }
 			},
-			{ kind: 'create_element', temp_id: 'tmp_2', type_name: 'District', properties: {} },
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_2',
+				type_name: 'Organization',
+				properties: { name: 'New O' }
+			},
 			{
 				kind: 'create_relationship',
 				temp_id: 'tmp_3',
@@ -68,6 +88,7 @@ describe('stageProposedOps', () => {
 		] as ModelOp[];
 		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res).toEqual({ ok: true, count: 3 });
+		await stagedSettled();
 		const staged = getStagedOps();
 		const [c1, c2, rel] = staged as [
 			Extract<(typeof staged)[number], { kind: 'create_element' }>,
@@ -84,43 +105,46 @@ describe('stageProposedOps', () => {
 		const ensure = vi
 			.spyOn(checkout, 'ensureCheckout')
 			.mockResolvedValue({ ok: false, reason: 'conflict', conflicts: [] } as never);
-		const ops = [
-			{ kind: 'update_element', id: 'e1', properties_patch: { name: 'X' } }
-		] as ModelOp[];
+		const ops = [{ kind: 'update_element', id: ORG, properties_patch: { name: 'X' } }] as ModelOp[];
 		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res).toEqual({ ok: false, reason: 'locks' });
 		expect(getStagedOps()).toHaveLength(0);
-		expect(ensure).toHaveBeenCalledWith([{ resource_id: 'e1', mode: 'exclusive' }], 'edit');
+		expect(ensure).toHaveBeenCalledWith([{ resource_id: ORG, mode: 'exclusive' }], 'edit');
 	});
 
 	it('derives connect + delete lock targets, skipping temp-id endpoints', async () => {
 		const ensure = vi.spyOn(checkout, 'ensureCheckout').mockResolvedValue({ ok: true } as never);
 		const ops = [
-			{ kind: 'create_element', temp_id: 'tmp_1', type_name: 'Building', properties: {} },
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_1',
+				type_name: 'Team',
+				properties: { name: 'New T' }
+			},
 			{
 				kind: 'create_relationship',
 				temp_id: 'tmp_2',
 				type_name: 'Owns',
-				source_id: 'e1',
+				source_id: ORG,
 				target_id: 'tmp_1',
 				properties: {}
 			},
-			{ kind: 'delete_relationship', id: 'r1' }
+			{ kind: 'delete_relationship', id: OWNS }
 		] as ModelOp[];
 		const res = await stageProposedOps(ops, { rev: 0 });
-		expect(res.ok).toBe(true);
+		expect(res).toEqual({ ok: true, count: 3 });
 		const intents = ensure.mock.calls.map(([targets, intent]) => [intent, targets]);
-		expect(intents).toContainEqual(['connect', [{ resource_id: 'e1', mode: 'exclusive' }]]);
+		expect(intents).toContainEqual(['connect', [{ resource_id: ORG, mode: 'exclusive' }]]);
 		// delete_relationship locks its SOURCE element (RelationshipsList pattern)
-		expect(intents).toContainEqual(['delete', [{ resource_id: 'e1', mode: 'exclusive' }]]);
+		expect(intents).toContainEqual(['delete', [{ resource_id: ORG, mode: 'exclusive' }]]);
 	});
 
 	it('applies staged ops optimistically (update visible in cache)', async () => {
 		const ops = [
-			{ kind: 'update_element', id: 'e1', properties_patch: { name: 'Renamed' } }
+			{ kind: 'update_element', id: ORG, properties_patch: { name: 'Renamed' } }
 		] as ModelOp[];
 		await stageProposedOps(ops, { rev: 0 });
-		expect(getCachedElements().get('e1')?.properties.name).toBe('Renamed');
+		expect(getCachedElements().get(ORG)?.properties.name).toBe('Renamed');
 	});
 
 	it('remaps id on update/delete ops that reference a same-batch temp id', async () => {
@@ -132,24 +156,30 @@ describe('stageProposedOps', () => {
 			{
 				kind: 'create_element',
 				temp_id: 'tmp_1',
-				type_name: 'Building',
-				properties: { name: 'New B' }
+				type_name: 'Organization',
+				properties: { name: 'New O' }
 			},
 			{ kind: 'update_element', id: 'tmp_1', properties_patch: { name: 'Renamed' } },
-			{ kind: 'create_element', temp_id: 'tmp_2', type_name: 'District', properties: {} },
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_2',
+				type_name: 'Team',
+				properties: { name: 'New T' }
+			},
 			{ kind: 'delete_element', id: 'tmp_2' },
 			{
 				kind: 'create_relationship',
 				temp_id: 'tmp_3',
-				type_name: 'Owns',
-				source_id: 'tmp_1',
-				target_id: 'e2',
+				type_name: 'MemberOf',
+				source_id: 'e_000031',
+				target_id: TEAM,
 				properties: {}
 			},
-			{ kind: 'update_relationship', id: 'tmp_3', properties_patch: { note: 'x' } }
+			{ kind: 'update_relationship', id: 'tmp_3', properties_patch: { is_lead: true } }
 		] as ModelOp[];
 		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res).toEqual({ ok: true, count: 6 });
+		await stagedSettled();
 
 		const staged = getStagedOps();
 		const c1 = staged[0] as Extract<(typeof staged)[number], { kind: 'create_element' }>;
@@ -177,8 +207,8 @@ describe('stageProposedOps', () => {
 				kind: 'create_element',
 				temp_id: 'tmp_1',
 				id: 'real-1',
-				type_name: 'Building',
-				properties: {}
+				type_name: 'Organization',
+				properties: { name: 'Hinted' }
 			},
 			{
 				kind: 'create_relationship',
@@ -186,12 +216,13 @@ describe('stageProposedOps', () => {
 				id: 'real-r',
 				type_name: 'Owns',
 				source_id: 'tmp_1',
-				target_id: 'e2',
+				target_id: TEAM,
 				properties: {}
 			}
 		] as ModelOp[];
 		const res = await stageProposedOps(ops, { rev: 0 });
 		expect(res).toEqual({ ok: true, count: 2 });
+		await stagedSettled();
 		const [c, r] = getStagedOps() as [
 			Extract<ModelOp, { kind: 'create_element' }>,
 			Extract<ModelOp, { kind: 'create_relationship' }>
@@ -203,25 +234,22 @@ describe('stageProposedOps', () => {
 	});
 
 	it('seeds prestate so uncached targets need no fetch', async () => {
-		// e9 is NOT in the cache; without prestate ensureElement would hit the
-		// (unmocked) API and the stage would fail as 'missing'
 		const ops = [
-			{ kind: 'update_element', id: 'e9', properties_patch: { name: 'Renamed' } }
+			{ kind: 'update_element', id: 'e_000003', properties_patch: { name: 'Renamed' } }
 		] as ModelOp[];
 		const prestate = {
-			elements: [{ id: 'e9', type_name: 'Building', properties: { name: 'Old' }, rev: 1 }],
+			elements: [
+				{ id: 'e_000003', type_name: 'Organization', properties: { name: 'Old' }, rev: 0 }
+			],
 			relationships: []
 		};
 		const res = await stageProposedOps(ops, { rev: 0 }, prestate);
 		expect(res).toEqual({ ok: true, count: 1 });
-		expect(getCachedElements().get('e9')?.properties.name).toBe('Renamed');
+		expect(getCachedElements().get('e_000003')?.properties.name).toBe('Renamed');
 	});
 });
 
-describe('stageProposedOps with staging on the engine', () => {
-	beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-	afterAll(() => server.close());
-
+describe('stageProposedOps against the engine', () => {
 	let store: EngineStore | null = null;
 	afterEach(() => {
 		store?.dispose();

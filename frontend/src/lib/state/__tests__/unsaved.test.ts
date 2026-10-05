@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { server } from '$lib/api/__tests__/server';
 import * as artifactsApi from '$lib/api/artifacts';
 import * as rulesApi from '$lib/api/rules';
 import * as snippetsApi from '$lib/api/snippets';
@@ -6,6 +7,8 @@ import * as tablesApi from '$lib/api/tables';
 import {
 	closeTableDraft,
 	emit,
+	ensureElements,
+	stagedSettled,
 	ensureDraft,
 	ensureEmbeddedDraft,
 	ensureRulesDraft,
@@ -19,12 +22,15 @@ import {
 	resetRulesEditors,
 	resetSnippetEditors,
 	resetTableEditors,
-	seedElements,
 	updateDefinition,
 	updateSnippetCode,
 	updateTableDefinition
 } from '../index';
 import { hasUnsavedWork, isArtifactDirty, isTabDirty } from '../unsaved';
+import { engineStore, rename } from './support/engine-store';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
 import { openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
 import { resetArtifactEdits, stageArtifactCreate } from '../artifact-edits.svelte';
@@ -125,10 +131,16 @@ describe('hasUnsavedWork', () => {
 		expect(hasUnsavedWork()).toBe(false);
 	});
 
-	it('is true while ops are staged', () => {
-		seedElements([{ id: 'e1', type_name: 'T', properties: { name: 'a' }, rev: 1 }]);
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'b' } });
-		expect(hasUnsavedWork()).toBe(true);
+	it('is true while ops are staged', async () => {
+		const store = await engineStore();
+		try {
+			await ensureElements(['e_000001']);
+			emit(rename('e_000001', 'b'));
+			await stagedSettled();
+			expect(hasUnsavedWork()).toBe(true);
+		} finally {
+			store.dispose();
+		}
 	});
 
 	it('is true with a dirty table draft only', async () => {

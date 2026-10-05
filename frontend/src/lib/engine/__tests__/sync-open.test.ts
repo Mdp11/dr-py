@@ -241,7 +241,7 @@ describe('opening a replica', () => {
 		expect(project.requests.descriptor).toBe(4 + 1 + 1);
 		expect(over.sleeps).toEqual([1000, 3000]);
 		expect(last(over.statuses)).toMatchObject({
-			phase: 'server',
+			phase: 'unavailable',
 			reason: "the metamodel served is mm-other, the snapshot's mm-1"
 		});
 	});
@@ -301,7 +301,7 @@ describe('opening a replica', () => {
 		const attempts = runs(over.statuses.filter((s) => s.phase === 'opening').map((s) => s.attempt));
 		expect(attempts).toEqual([1, 2, 3]);
 		expect(last(over.statuses)).toMatchObject({
-			phase: 'server',
+			phase: 'unavailable',
 			attempt: 0,
 			reason: 'snapshot failed'
 		});
@@ -338,7 +338,7 @@ describe('opening a replica', () => {
 		const over = open(project, { sleep: () => Promise.reject(new Error('no timer')) });
 		await over.sync.settled();
 
-		expect(last(over.statuses)).toMatchObject({ phase: 'server', reason: 'no timer' });
+		expect(last(over.statuses)).toMatchObject({ phase: 'unavailable', reason: 'no timer' });
 		expect(project.requests.snapshot).toBe(1);
 	});
 
@@ -352,7 +352,7 @@ describe('opening a replica', () => {
 		await over.sync.settled();
 
 		expect(last(over.statuses)).toMatchObject({
-			phase: 'server',
+			phase: 'unavailable',
 			reason: 'the sandbox did not answer within 10000 ms'
 		});
 		expect(over.sleeps).toEqual([]);

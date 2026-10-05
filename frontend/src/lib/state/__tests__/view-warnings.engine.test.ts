@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { http, HttpResponse } from 'msw';
 import { server } from '$lib/api/__tests__/server';
 import type { FeedEvent } from '$lib/api/feed';
+import { getElementsBatch } from '$lib/api/model-read';
 import type { ArtifactHeader, Issue, View } from '$lib/api/types';
 import { viewWarnings } from '$lib/api/views';
 import {
@@ -15,7 +16,7 @@ import { setActiveViewId } from '../active-view.svelte';
 import { resetArtifactEdits, stageArtifactDelete } from '../artifact-edits.svelte';
 import * as editGate from '../edit-gate';
 import { cancelIssuesRefetch } from '../model.svelte';
-import { engineSide, handReplicaFeed, onViewsClosed, stopReplica } from '../replica.svelte';
+import { getReplicaStatus, handReplicaFeed, stopReplica } from '../replica.svelte';
 import {
 	clearViewState,
 	getView,
@@ -105,16 +106,13 @@ const SENTINEL = warning('the server said so');
 type Served = { view: View; warnings: Issue[]; hold: Hold | null };
 
 /**
- * The replica store over a fake project holding `NAV`, `views` on `side`;
- * `GET /views/v1` answers `served` — `committedView()` with the sentinel
- * warning at first — and `gets` counts it. On the engine, resolves once the
- * views gate is open, unless `payloads` holds the follower's artifact load.
- * `GET /model/issues` answers an empty list.
+ * The replica store over a fake project holding `NAV`; `GET /views/v1`
+ * answers `served` — `committedView()` with the sentinel warning at first —
+ * and `gets` counts it. Resolves once the replica holds the artifacts, unless
+ * `payloads` holds the follower's artifact load. `GET /model/issues` answers
+ * an empty list.
  */
-async function open(
-	side: 'engine' | 'server',
-	{ payloads, loads = [NAV] }: { payloads?: Hold; loads?: (typeof NAV)[] } = {}
-) {
+async function open({ payloads, loads = [NAV] }: { payloads?: Hold; loads?: (typeof NAV)[] } = {}) {
 	const project: FakeProject = fakeProject();
 	project.artifacts.set(NAV.id, NAV);
 	if (payloads !== undefined) {
@@ -130,7 +128,7 @@ async function open(
 			...handlers(options)
 		];
 	}
-	store = await engineStore({ project, surfaces: { views: side } });
+	store = await engineStore({ project });
 	const gets: string[] = [];
 	const served: Served = { view: committedView(), warnings: [SENTINEL], hold: null };
 	const base = `${PAGE_ORIGIN}/api/v1/projects/${project.projectId}`;
@@ -151,18 +149,17 @@ async function open(
 		await Promise.allSettled(calls.mock.results.map((result) => result.value as unknown));
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 	};
-	if (side === 'engine' && payloads === undefined) {
-		await vi.waitFor(() => expect(engineSide('views')).toBe('engine'));
-	}
+	// A read is answered once the artifacts have loaded.
+	if (payloads === undefined) await getElementsBatch(['e_000001']);
 	await new Promise<void>((resolve) => setTimeout(resolve, 0));
 	vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
 	setActiveViewId('v1');
 	return { project, gets, validations, served };
 }
 
-describe('the view warnings with the views on the engine', () => {
+describe('the view warnings', () => {
 	it("after a refresh are the engine's, never the server's", async () => {
-		const { gets, validations, served } = await open('engine');
+		const { gets, validations, served } = await open();
 		served.view.folders[0]!.elements.push('e_000006');
 
 		await refreshView();
@@ -174,7 +171,7 @@ describe('the view warnings with the views on the engine', () => {
 	});
 
 	it('a staged placement of a contained element warns without asking the server', async () => {
-		const { gets } = await open('engine');
+		const { gets } = await open();
 		await refreshView();
 
 		await stagePlaceElementsAt(FOLDER, ['e_000006']);
@@ -189,7 +186,7 @@ describe('the view warnings with the views on the engine', () => {
 	});
 
 	it("a peer's model-only commit deleting a placed element warns without a view reload", async () => {
-		const { project, gets, validations } = await open('engine');
+		const { project, gets, validations } = await open();
 		await refreshView();
 		await vi.waitFor(() => expect(validations()).toBe(1));
 
@@ -205,7 +202,7 @@ describe('the view warnings with the views on the engine', () => {
 	});
 
 	it('a staged delete of an artifact the view places warns about it', async () => {
-		const { gets, validations } = await open('engine');
+		const { gets, validations } = await open();
 		await refreshView();
 		await vi.waitFor(() => expect(validations()).toBe(1));
 		expect(getViewWarnings()).toEqual([]);
@@ -221,7 +218,7 @@ describe('the view warnings with the views on the engine', () => {
 	});
 
 	it('five placements in quick succession ask the engine at most twice, and the last answer is the last view’s', async () => {
-		const { validations } = await open('engine');
+		const { validations } = await open();
 		await refreshView();
 		await vi.waitFor(() => expect(validations()).toBe(1));
 		const before = validations();
@@ -237,7 +234,7 @@ describe('the view warnings with the views on the engine', () => {
 	});
 
 	it('an answer for a view the store no longer holds is dropped', async () => {
-		const { validations } = await open('engine');
+		const { validations } = await open();
 		await refreshView();
 		await vi.waitFor(() => expect(validations()).toBe(1));
 		await answered();
@@ -251,19 +248,19 @@ describe('the view warnings with the views on the engine', () => {
 		expect(getViewWarnings()).toEqual([]);
 	});
 
-	it('a refresh before the gate opens shows the server’s warnings until the engine can answer', async () => {
+	it('a refresh before the gate opens shows no warnings until the engine can answer', async () => {
 		const payloads = hold();
-		const { validations } = await open('engine', { payloads });
+		const { validations } = await open({ payloads });
 		await payloads.reached;
-		expect(engineSide('views')).toBe('server');
 
 		await refreshView();
-		expect(getViewWarnings()).toEqual([SENTINEL]);
+		expect(getViewWarnings()).toEqual([]);
 		expect(validations()).toBe(0);
 
 		payloads.release();
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
-		expect(validations()).toBeGreaterThan(0);
+		await vi.waitFor(() => expect(validations()).toBeGreaterThan(0));
+		await answered();
+		expect(getViewWarnings()).toEqual([]);
 	});
 });
 
@@ -286,87 +283,60 @@ describe('the view warnings as the views gate opens and closes', () => {
 		return snapshot;
 	}
 
-	it("open from the replica reaching ready: the server's warnings, then the engine's, with one or two engine calls", async () => {
-		const { project, validations } = await open('engine');
+	it('a resync keeps the warnings, and they are recomputed once the replica is ready again, with one or two engine calls', async () => {
+		const { project, validations } = await open();
 		await refreshView();
 		await vi.waitFor(() => expect(validations()).toBe(1));
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+		await stagePlaceElementsAt(FOLDER, ['e_000006']);
+		await vi.waitFor(() => expect(getViewWarnings()).toEqual([contained('e_000006')]));
 
 		const snapshot = resyncHeld(project);
-		await vi.waitFor(() => expect(engineSide('views')).toBe('server'));
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([SENTINEL]));
+		await vi.waitFor(() => expect(getReplicaStatus().phase).toBe('resyncing'));
+		expect(getViewWarnings()).toEqual([contained('e_000006')]);
 		const before = validations();
 
 		snapshot.release();
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
+		await vi.waitFor(() =>
+			expect(getReplicaStatus()).toMatchObject({ phase: 'ready', seeded: true })
+		);
 		await answered();
 		// The commit that closed the replica asked for a recompute of its own: it
 		// may be in flight as the replica closes, refused with a moved 409 and asked
 		// again once the gate opens, beside the one the opening asks for.
 		expect(validations() - before).toBeGreaterThanOrEqual(1);
 		expect(validations() - before).toBeLessThanOrEqual(2);
+		expect(getViewWarnings()).toEqual([contained('e_000006')]);
 	});
 
-	it('open from the follower loading after the replica is ready: the server’s warnings, then the engine’s, with one engine call', async () => {
+	it('open from the follower loading after the replica is ready: no warnings, then the engine’s, with one or two engine calls', async () => {
 		const payloads = hold();
 		// No artifact loads, so no `changed` of the artifacts asks: only the load's own hand-over does.
-		const { validations } = await open('engine', { payloads, loads: [] });
+		const { validations } = await open({ payloads, loads: [] });
 		await payloads.reached;
 		await refreshView();
-		expect(getViewWarnings()).toEqual([SENTINEL]);
+		expect(getViewWarnings()).toEqual([]);
 		expect(validations()).toBe(0);
 
 		payloads.release();
-		await vi.waitFor(() => expect(getViewWarnings()).not.toContainEqual(SENTINEL));
+		await vi.waitFor(() => expect(validations()).toBeGreaterThanOrEqual(1));
 		await answered();
-		expect(validations()).toBe(1);
+		// The refresh's own recompute waited at the gate; the gate opening asks
+		// again. The project holds no artifact, so the engine says the view's is unknown.
+		expect(getViewWarnings()).toEqual([
+			warning("view 'Smart': folder 'Orgs' references unknown artifact 'n1'; renderers skip it")
+		]);
+		expect(validations()).toBeLessThanOrEqual(2);
 	});
 
-	it("close: the engine's warnings give way to the server's, with one view fetch", async () => {
-		const { project, gets, validations } = await open('engine');
+	it('stopping the replica fetches no view', async () => {
+		const { gets } = await open();
 		await refreshView();
-		await vi.waitFor(() => expect(validations()).toBe(1));
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
-		expect(gets).toEqual(['v1']);
-
-		const snapshot = resyncHeld(project);
-
-		await vi.waitFor(() => expect(engineSide('views')).toBe('server'));
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([SENTINEL]));
-		expect(gets).toEqual(['v1', 'v1']);
-		snapshot.release();
-		await vi.waitFor(() => expect(getViewWarnings()).toEqual([]));
-	});
-
-	it('stopping the replica tells no closed listener and asks the server nothing', async () => {
-		const { gets } = await open('engine');
-		await refreshView();
-		const closed = vi.fn();
-		const off = onViewsClosed(closed);
 		await new Promise<void>((resolve) => setTimeout(resolve, 20));
 		const before = gets.length;
 
 		stopReplica();
 		await new Promise<void>((resolve) => setTimeout(resolve, 20));
-		off();
 
-		expect(closed).not.toHaveBeenCalled();
 		expect(gets.length).toBe(before);
-	});
-});
-
-describe('the view warnings with the views on the server', () => {
-	it("are the server's, and a staged placement asks the engine nothing", async () => {
-		const { gets, validations } = await open('server');
-		await refreshView();
-		expect(getViewWarnings()).toEqual([SENTINEL]);
-
-		await stagePlaceElementsAt(FOLDER, ['e_000006']);
-		await store!.sync.settled();
-		await new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-		expect(getViewWarnings()).toEqual([SENTINEL]);
-		expect(validations()).toBe(0);
-		expect(gets).toEqual(['v1']);
 	});
 });

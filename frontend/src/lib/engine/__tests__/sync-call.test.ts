@@ -201,7 +201,7 @@ describe('reading from the replica', () => {
 			connect: () => Promise.reject(new FrameError('timeout', 'no answer'))
 		});
 		await refused.sync.settled();
-		expect(refused.sync.status().phase).toBe('server');
+		expect(refused.sync.status().phase).toBe('unavailable');
 		await expect(summaryOf(refused)).rejects.toBeInstanceOf(EngineGoneError);
 
 		const empty = fakeProject({ projectId: 'empty' });
@@ -226,7 +226,7 @@ describe('reading from the replica', () => {
 		const refusal = expect(read).rejects.toBeInstanceOf(EngineGoneError);
 		await over.sync.settled();
 
-		expect(over.sync.status().phase).toBe('server');
+		expect(over.sync.status().phase).toBe('unavailable');
 		await refusal;
 		expect(over.methods()).not.toContain('getModelSummary');
 	});

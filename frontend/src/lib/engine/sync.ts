@@ -28,7 +28,7 @@ export type ReplicaPhase =
 	| 'resyncing'
 	| 'frozen'
 	| 'failed'
-	| 'server';
+	| 'unavailable';
 
 export type ReplicaProgress = {
 	task: 'download' | ProgressTask;
@@ -48,7 +48,7 @@ export type ReplicaStatus = {
 	/** The frame's `crossOriginIsolated`; `null` before the handshake. */
 	isolated: boolean | null;
 	cspViolations: number;
-	/** Why the phase is `off`, `frozen`, `failed` or `server`. */
+	/** Why the phase is `off`, `frozen`, `failed` or `unavailable`. */
 	reason: string | null;
 	/**
 	 * The replica's issue store has been swept whole once. False for every
@@ -141,7 +141,7 @@ export type ReplicaSync = {
 	 * re-bootstraps (its tail is incomplete), and `off` restarts the open.
 	 */
 	feedReset(rev: number): void;
-	/** A `failed` replica re-bootstraps, adopting the batches it held; any other phase: nothing. */
+	/** A `failed` replica re-bootstraps, adopting the batches it held; an `unavailable` one connects afresh; any other phase: nothing. */
 	retry(): void;
 	beginCommit(): CommitFlight;
 	/**
@@ -161,7 +161,7 @@ export type ReplicaSync = {
 	 * is posted after it. A call that finds the worker gone rebuilds a ready
 	 * replica on a new one; a transition then waits for it, a read rejects.
 	 * Rejects with `EngineGoneError` when there is no replica to ask — no
-	 * open, phase `off` or `server`, a `stop()` meanwhile, a worker gone
+	 * open, phase `off` or `unavailable`, a `stop()` meanwhile, a worker gone
 	 * under a read.
 	 */
 	call<T>(method: string, params?: unknown, options?: CallOptions): Promise<T>;
@@ -414,7 +414,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	 */
 	const refuses = (): boolean =>
 		status.phase === 'off' ||
-		status.phase === 'server' ||
+		status.phase === 'unavailable' ||
 		(status.phase === 'frozen' && link === null);
 
 	const refuseWaiters = () => {
@@ -832,9 +832,10 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 	};
 
 	/**
-	 * Before the first ready of an open, the server serves instead; after it,
-	 * the replica has failed — a worker that cannot be reached again included —
-	 * and `retry()` rebuilds it with the batches the run holds. A failed
+	 * Before the first ready of an open the replica is unavailable, and
+	 * `retry()` connects afresh; after it, the replica has failed — a worker
+	 * that cannot be reached again included — and `retry()` rebuilds it with
+	 * the batches the run holds. A failed
 	 * replica keeps the user's own commits for the one a retry rebuilds: the
 	 * batches it holds include the ones those commits carried, which only
 	 * their bookkeeping drops.
@@ -848,7 +849,7 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		} else {
 			dropQueue(r);
 			dropLink();
-			set({ phase: 'server', attempt: 0, progress: null, reason });
+			set({ phase: 'unavailable', attempt: 0, progress: null, reason });
 		}
 	};
 
@@ -1224,7 +1225,9 @@ export function createReplicaSync(deps: SyncDeps): ReplicaSync {
 		},
 
 		retry() {
-			if (run !== null && status.phase === 'failed') rebootstrap(run);
+			if (run === null) return;
+			if (status.phase === 'failed') rebootstrap(run);
+			else if (status.phase === 'unavailable') wake(run);
 		},
 
 		feedRebind(rev) {

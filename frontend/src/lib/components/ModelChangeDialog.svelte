@@ -5,15 +5,7 @@
 		MAX_CRS_PER_REQUEST,
 		type CompareOut
 	} from '$lib/api/changeRequest';
-	import {
-		canEdit,
-		getFilename,
-		getModelRev,
-		getModelSummary,
-		compareOnEngine,
-		hasStagedOps,
-		setLockNotice
-	} from '$lib/state';
+	import { canEdit, getFilename, getModelSummary, hasStagedOps, setLockNotice } from '$lib/state';
 	import { stageProposedOps } from '$lib/state/stage-proposed';
 	import {
 		composeCrFilename,
@@ -40,8 +32,6 @@
 	// compare-mode source
 	let otherFile = $state<File | null>(null);
 	let swapped = $state(false);
-	// cached per rev: Preview then Replace must not upload the file twice
-	let compared = $state<{ rev: number; out: CompareOut } | null>(null);
 	// apply-cr-mode source (display order = apply order). `uid` is assigned once
 	// per entry so the keyed list moves rows on reorder instead of re-creating
 	// them (two files may share a name).
@@ -55,23 +45,15 @@
 	let fileInputRef = $state<HTMLInputElement | null>(null);
 
 	const editable = $derived(canEdit());
-	// Before any answer, the engine is expected to read the working copy, so staged
-	// edits do not gate Replace. The answer says which side really gave it.
-	const onEngine = $derived(compareOnEngine());
-	const bufferDirty = $derived(!onEngine && hasStagedOps());
 	// whether the shown answer holds the staged edits that were there when it came
 	let answeredStaged = $state(false);
-	// a server answer over staged edits was refused for staging
-	let stagedBlocked = $state(false);
 	const hasSource = $derived(mode === 'compare' ? otherFile !== null : crFiles.length > 0);
 	// the server refuses a longer batch at request-parse time; saying so here
 	// beats surfacing the raw pydantic message
 	const tooManyCrs = $derived(mode === 'apply-cr' && crFiles.length > MAX_CRS_PER_REQUEST);
-	// On the server Replace/Stage compute against the COMMITTED model: pre-existing
-	// staged edits would surface as conflicts or double edits, so a clean buffer is
-	// required. Replace is session -> file by definition, hence off when swapped.
+	// Replace is session -> file by definition, hence off when swapped.
 	const proceedDisabled = $derived(
-		busy || !hasSource || !editable || bufferDirty || tooManyCrs || (mode === 'compare' && swapped)
+		busy || !hasSource || !editable || tooManyCrs || (mode === 'compare' && swapped)
 	);
 	// compare-mode Preview is POST /model/compare (viewer-allowed); apply-cr's
 	// is POST /model/apply-cr, which stays a write, so a viewer would only 403
@@ -93,13 +75,11 @@
 		conflicts = null;
 		error = null;
 		answeredStaged = false;
-		stagedBlocked = false;
 	}
 
 	function reset(): void {
 		otherFile = null;
 		swapped = false;
-		compared = null;
 		crFiles = [];
 		busy = false;
 		clearOutput();
@@ -118,7 +98,6 @@
 		clearOutput();
 		if (mode === 'compare') {
 			otherFile = files[0];
-			compared = null;
 			return;
 		}
 		// every rejected file is reported, not just the last one
@@ -155,18 +134,11 @@
 		clearOutput();
 	}
 
-	// only a server answer is cached: it reads committed state, while an engine
-	// answer depends on the staged edits and was computed without an upload to save
+	// never cached: the answer depends on the staged edits
 	async function ensureCompared(): Promise<CompareOut> {
-		const rev = getModelRev();
-		if (compared && compared.rev === rev) {
-			answeredStaged = false;
-			return compared.out;
-		}
 		if (!otherFile) throw new Error('Choose a model file first');
 		const out = await compareModel(otherFile);
-		answeredStaged = out.workingCopy && hasStagedOps();
-		if (!out.workingCopy) compared = { rev, out };
+		answeredStaged = hasStagedOps();
 		return out;
 	}
 
@@ -211,7 +183,7 @@
 				return;
 			}
 			const res = await proposeCr(crFiles.map((f) => f.cr));
-			answeredStaged = res.workingCopy && hasStagedOps();
+			answeredStaged = hasStagedOps();
 			if (!res.ok) {
 				conflicts = { crIndex: res.crIndex, items: res.conflicts };
 				return;
@@ -264,12 +236,6 @@
 			const res = await proposeCr(crs);
 			if (!res.ok) {
 				conflicts = { crIndex: mode === 'compare' ? null : res.crIndex, items: res.conflicts };
-				return;
-			}
-			// a server answer, of the diff or of the proposal, read committed state:
-			// staging it over staged edits would overwrite them or leave them in place
-			if (!(res.workingCopy && (diff?.workingCopy ?? true)) && hasStagedOps()) {
-				stagedBlocked = true;
 				return;
 			}
 			const outcome = await stageProposedOps(res.ops, { rev: res.modelRev }, crPrestate(res.cr));
@@ -401,10 +367,6 @@
 						You have view-only access — Stage edits is unavailable, and so is Preview diff (it asks
 						the server to propose the edits, which viewers may not do).
 					{/if}
-				</p>
-			{:else if stagedBlocked || (hasSource && bufferDirty)}
-				<p class="text-xs text-muted-foreground" data-testid="mcd-gate-hint">
-					Commit or discard your staged edits first.
 				</p>
 			{/if}
 

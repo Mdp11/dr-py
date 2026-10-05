@@ -62,12 +62,9 @@ import {
 import { confirm } from './confirm.svelte';
 import { elementDisplayName } from '$lib/util/element-name';
 import { placedElementIds } from '$lib/engine/placements';
-import { addQuietProbe } from '$lib/engine/quiet';
 import {
-	engineSide,
 	forgetViewPlacement,
 	forgetViewPlacements,
-	onViewsClosed,
 	onViewsMoved,
 	registerViewPlacement
 } from './replica.svelte';
@@ -129,13 +126,11 @@ let _computing = false;
 let _computeAgain = false;
 
 /**
- * With the view warnings on the engine, recomputes them for the active view
- * as staged. One computation runs at a time: a request made meanwhile runs
+ * Recomputes the warnings of the active view as staged, on the engine. One computation runs at a time: a request made meanwhile runs
  * it once more after, and an answer is applied only while it is for the
  * view and document the store still holds.
  */
 function recomputeWarnings(): void {
-	if (engineSide('views') !== 'engine') return;
 	if (_computing) {
 		_computeAgain = true;
 		return;
@@ -190,31 +185,6 @@ function registerCommitted(viewId: string | null, view: View | null): void {
 		_placedViewId = viewId;
 	}
 }
-
-/**
- * `refreshView()` calls and view-event reconciliations in flight — while
- * any runs, `_view` may lag the server's document — and who waits for
- * there to be none.
- */
-let _refreshing = 0;
-let _refreshWaiters: (() => void)[] = [];
-
-function refreshEnded(): void {
-	_refreshing -= 1;
-	if (_refreshing > 0) return;
-	const waiters = _refreshWaiters;
-	_refreshWaiters = [];
-	for (const resolve of waiters) resolve();
-}
-
-// After a commit of view ops the server's excluded pool is ahead of the
-// registered placements until the refetch lands, and a view event's
-// reconciliation lags the same way: `quiet()` waits for both.
-addQuietProbe(() =>
-	_refreshing === 0
-		? Promise.resolve()
-		: new Promise<void>((resolve) => void _refreshWaiters.push(resolve))
-);
 
 export function clearViewState(): void {
 	forgetViewPlacements();
@@ -292,7 +262,6 @@ export async function loadViews(): Promise<boolean> {
  * and this is a plain `setState`.
  */
 export async function refreshView(): Promise<void> {
-	_refreshing += 1;
 	try {
 		const activeId = getActiveViewId();
 		let res: { view: View | null; warnings: Issue[] };
@@ -329,11 +298,10 @@ export async function refreshView(): Promise<void> {
 				conflicted = true;
 			}
 		}
-		// On the engine the warnings are recomputed below; until then the ones
-		// shown for this view stay, and another view's go.
-		const onEngine = engineSide('views') === 'engine';
-		setState(next, !onEngine ? res.warnings : sameView ? _warnings : []);
-		if (onEngine) recomputeWarnings();
+		// The warnings are recomputed below; until then the ones shown for this
+		// view stay, and another view's go.
+		setState(next, sameView ? _warnings : []);
+		recomputeWarnings();
 		// Guarded on its own: a throw escaping here would land in the OUTER catch
 		// below, which nulls `_view` — turning a recoverable journal conflict into
 		// a blank sidebar. The unwind is best-effort by construction anyway (the
@@ -344,7 +312,6 @@ export async function refreshView(): Promise<void> {
 		setState(null, []);
 	} finally {
 		_viewResolved = true;
-		refreshEnded();
 	}
 }
 
@@ -422,7 +389,7 @@ export async function addView(name: string, doc: Record<string, unknown>): Promi
  * `id` is the active view, the displayed tree — without waiting for the feed
  * echo, which repeats this harmlessly. */
 export async function adoptSavedView(id: string): Promise<void> {
-	await reconcileAfterViewEvent(id);
+	await reconcileViews(id);
 }
 
 /** `DELETE /views/{id}` then reconcile: the list refresh picks the
@@ -430,7 +397,7 @@ export async function adoptSavedView(id: string): Promise<void> {
  * against it is unsalvageable and is dropped silently — the dialog warned. */
 export async function removeView(id: string): Promise<void> {
 	await viewsApi.deleteView(id);
-	await reconcileAfterViewEvent();
+	await reconcileViews();
 }
 
 /**
@@ -438,19 +405,9 @@ export async function removeView(id: string): Promise<void> {
  * {@link adoptSavedView}: refresh the list, refetch the active view when
  * `updatedId` names it, and if the active view is gone, drop its journal (its folders no
  * longer exist anywhere), release the leases, fall back per `loadViews` and
- * refetch. A created view only needs the list refreshed. It counts as a
- * refresh in flight: the server's document may already be ahead of `_view`.
+ * refetch. A created view only needs the list refreshed.
  */
-async function reconcileAfterViewEvent(updatedId: string | null = null): Promise<void> {
-	_refreshing += 1;
-	try {
-		await reconcileViews(updatedId);
-	} finally {
-		refreshEnded();
-	}
-}
-
-async function reconcileViews(updatedId: string | null): Promise<void> {
+async function reconcileViews(updatedId: string | null = null): Promise<void> {
 	const prior = getActiveViewId();
 	const priorName = _views.find((v) => v.id === prior)?.name ?? null;
 	const changed = await loadViews();
@@ -911,14 +868,10 @@ export async function discardViewChanges(): Promise<void> {
 // reinstating the very bug this registration exists to prevent.
 onViewDiscarded(() => refreshView());
 
-// The replica moved under the view warnings on the engine: a peer's commit,
-// a staged model edit, an artifact. Eager for the same reason as the discard
-// tap: replica.svelte.ts imports nothing that reaches this module.
+// The replica moved under the view warnings: a peer's commit, a staged model
+// edit, an artifact. Eager for the same reason as the discard tap:
+// replica.svelte.ts imports nothing that reaches this module.
 onViewsMoved(() => recomputeWarnings());
-
-// The views gate shut: the engine's warnings no longer hold, so the server's
-// come back with the view.
-onViewsClosed(() => void refreshView());
 
 // Post-commit reconciliation: a commit that carried view
 // ops refetches server truth ONCE (concretizes tmp_ folder ids — no client
@@ -957,5 +910,5 @@ setTimeout(() => {
 	});
 	// A view added/replaced/removed by ANY client (own actions echo too — a second
 	// list fetch of a tiny payload, same tolerance as the commit taps above).
-	onViewEvent((e) => void reconcileAfterViewEvent(e.action === 'updated' ? e.view.id : null));
+	onViewEvent((e) => void reconcileViews(e.action === 'updated' ? e.view.id : null));
 }, 0);

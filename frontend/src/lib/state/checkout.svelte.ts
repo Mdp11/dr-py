@@ -58,7 +58,6 @@ import { setMetamodel } from './metamodel.svelte';
 import {
 	beginReplicaCommit,
 	getReplicaStatus,
-	getStagingSide,
 	replicaMetamodelAdopted,
 	replicaOwnPending,
 	replicaSettled,
@@ -369,14 +368,13 @@ function _onTokenExpired(token: string): void {
  * once every edit has reached them, and a staged list the engine cannot say
  * rejects with `StagedUnreadableError`, posting nothing. */
 export async function previewStaged(): Promise<PreviewResponse> {
-	const onEngine = getStagingSide() === 'engine';
-	if (onEngine) await stagedSettled();
+	await stagedSettled();
 	const model = captureStaged();
 	return previewCommit(
 		getModelRev(),
 		[...getStagedMetamodelOps(), ...model.ops, ...getStagedArtifactOps(), ...getStagedViewOps()],
 		_clientConfig,
-		onEngine ? { strict: getStrictMode(), batchIds: model.batchIds } : undefined
+		{ strict: getStrictMode(), batchIds: model.batchIds }
 	);
 }
 
@@ -401,7 +399,7 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 		if (!landed) commitDone();
 		else {
 			void replicaSettled()
-				.then(() => (getStagingSide() === 'engine' ? stagedSettled() : undefined))
+				.then(() => stagedSettled())
 				.then(commitDone, commitDone);
 		}
 	}
@@ -433,11 +431,11 @@ export async function commitsLanded(): Promise<void> {
 
 /**
  * What the commit drawer waits for, after a commit landed, before it lets the
- * user edit again. On the engine side that is {@link commitsLanded}: until the
+ * user edit again: {@link commitsLanded}, until the
  * replica has applied the commit's answer, an edit could be merged into a
  * batch being committed and dropped with it. While the replica is `ready`
  * that wait ends once it has applied the answer. It ends at once when the
- * replica is `off` or `server`, which holds no staged batch to merge into,
+ * replica is `off` or `unavailable`, which holds no staged batch to merge into,
  * or `failed`: the sync keeps the answer for the replica a retry rebuilds,
  * which applies it on its first drain, and the failed overlay covers the
  * workspace until that replica is ready (waiting on would also wait on
@@ -447,14 +445,13 @@ export async function commitsLanded(): Promise<void> {
  * metamodel. Either way the committed batches have left the staged-edit
  * readers, an update the engine would merge into one of them waits in the
  * model store until the replica has dropped it, and a new commit is refused
- * until then ({@link CommitPendingError}). `null` on the legacy side, whose
- * buffer merges nothing.
+ * until then ({@link CommitPendingError}).
  */
-export function commitApplied(): Promise<void> | null {
-	if (getStagingSide() !== 'engine') return null;
+export function commitApplied(): Promise<void> {
 	return new Promise<void>((resolve) => {
 		let done = false;
-		const gone = (phase: string) => phase === 'off' || phase === 'server' || phase === 'failed';
+		const gone = (phase: string) =>
+			phase === 'off' || phase === 'unavailable' || phase === 'failed';
 		const finish = () => {
 			if (done) return;
 			done = true;
@@ -489,14 +486,11 @@ async function commitNow(
 	ackErrors: boolean,
 	onLanded: () => void
 ): Promise<CommitResponse> {
-	// On the engine side the model ops are its staged batches, read once every
-	// edit has reached them. A staged list the engine cannot say rejects here,
-	// before anything is posted. The legacy buffer is exact at once, and its
-	// commit is posted in the tick it is called.
-	if (getStagingSide() === 'engine') {
-		if (replicaOwnPending()) throw new CommitPendingError();
-		await stagedSettled();
-	}
+	// The model ops are the engine's staged batches, read once every edit has
+	// reached them. A staged list the engine cannot say rejects here, before
+	// anything is posted.
+	if (replicaOwnPending()) throw new CommitPendingError();
+	await stagedSettled();
 	// The ops sent and the batches named, read together: the response drops
 	// exactly the named batches, so an edit staged while the POST is in flight
 	// is in neither and stays staged.
@@ -992,10 +986,10 @@ function lockedResourcesNeededBy(ops: Op[]): Set<string> {
  * releasing every now-unneeded token would silently drop check-outs the user
  * still believes they hold.
  *
- * On the engine side the revert is an unstage the engine answers later, so
- * the remaining ops are read once it has reached the staged-edit readers; a
- * staged list the engine cannot say keeps every lease (the revert did
- * nothing then, and the store reports it).
+ * The revert is an unstage the engine answers later, so the remaining ops
+ * are read once it has reached the staged-edit readers; a staged list the
+ * engine cannot say keeps every lease (the revert did nothing then, and the
+ * store reports it).
  */
 async function _discardWith(ids: readonly string[], revert: () => void): Promise<void> {
 	// ephemeral dedup of token strings, not reactive state
@@ -1006,13 +1000,11 @@ async function _discardWith(ids: readonly string[], revert: () => void): Promise
 		if (token !== undefined) tokens.add(token);
 	}
 	revert();
-	if (getStagingSide() === 'engine') {
-		try {
-			await stagedSettled();
-		} catch (error) {
-			if (error instanceof StagedUnreadableError) return;
-			throw error;
-		}
+	try {
+		await stagedSettled();
+	} catch (error) {
+		if (error instanceof StagedUnreadableError) return;
+		throw error;
 	}
 	const stillNeeded = lockedResourcesNeededBy(getStagedOps());
 	for (const token of tokens) {

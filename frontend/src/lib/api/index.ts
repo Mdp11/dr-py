@@ -11,5 +11,5 @@ export * from './errors';
 export * from './types';
 export type { ClientConfig, ApiFetchInit } from './client';
 export { apiFetch, getCurrentUserId } from './client';
-export type { EngineCall, EngineSeam, Side, Surface } from './engine-route';
+export type { EngineCall, EngineSeam } from './engine-route';
 export { EngineUnavailableError, installEngineSeam, route } from './engine-route';

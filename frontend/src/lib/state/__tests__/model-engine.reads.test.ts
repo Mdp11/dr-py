@@ -20,13 +20,7 @@ import {
 	getStructureRev
 } from '../model.svelte';
 import { stagedSettled } from '../model-engine.svelte';
-import {
-	beginReplicaCommit,
-	getStagingSide,
-	handReplicaFeed,
-	startReplica,
-	stopReplica
-} from '../replica.svelte';
+import { beginReplicaCommit, handReplicaFeed, startReplica, stopReplica } from '../replica.svelte';
 import { getSelection, select } from '../selection.svelte';
 import { getVisitStack, resetInspectionHistory } from '../inspection-history.svelte';
 import { engineStore, peerDelta, type EngineStore } from './support/engine-store';
@@ -96,7 +90,6 @@ function feedPeer(s: EngineStore, ops: readonly EngineOp[]): void {
 describe('the engine store reads the replica', () => {
 	it('ensureElement reads the replica', async () => {
 		const s = await open();
-		expect(getStagingSide()).toBe('engine');
 		const call = vi.spyOn(s.sync, 'call');
 
 		const e = await ensureElement('e_000002');
@@ -288,14 +281,12 @@ describe('the engine store follows the replica', () => {
 		expect(getStagedOps()).toHaveLength(1);
 
 		stopReplica();
-		expect(getStagingSide()).toBe('legacy');
 
 		const ready = s.until((status) => status.phase === 'ready');
 		startReplica();
 		await ready;
 		await settled(s);
 
-		expect(getStagingSide()).toBe('engine');
 		expect(getCachedElements().size).toBe(0);
 		expect(getStagedOps()).toEqual([]);
 	});

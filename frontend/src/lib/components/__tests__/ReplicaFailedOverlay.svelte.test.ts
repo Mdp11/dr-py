@@ -9,13 +9,20 @@ import ReplicaFailedOverlay from '../ReplicaFailedOverlay.svelte';
 // escape hatch, not part of the real `$lib/state` module.
 vi.mock('$lib/state', async (orig) => {
 	const actual = await orig<typeof import('$lib/state')>();
-	const box = $state({ retrying: false });
+	const box = $state<{ retrying: boolean; reason: string | null }>({
+		retrying: false,
+		reason: null
+	});
 	return {
 		...actual,
 		isReplicaRetrying: () => box.retrying,
+		getReplicaBlockReason: () => box.reason,
 		retryReplica: vi.fn(),
 		__setRetrying: (value: boolean) => {
 			box.retrying = value;
+		},
+		__setReason: (value: string | null) => {
+			box.reason = value;
 		}
 	};
 });
@@ -28,10 +35,14 @@ import * as state from '$lib/state';
 const setRetrying = (value: boolean): void =>
 	(state as unknown as { __setRetrying(value: boolean): void }).__setRetrying(value);
 
+const setReason = (value: string | null): void =>
+	(state as unknown as { __setReason(value: string | null): void }).__setReason(value);
+
 let mounted: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
 	setRetrying(false);
+	setReason(null);
 });
 
 afterEach(() => {
@@ -56,6 +67,18 @@ describe('ReplicaFailedOverlay', () => {
 		expect(el?.textContent?.replace(/\s+/g, ' ')).toContain(
 			'The local copy of the model could not be rebuilt from the server. Your uncommitted edits are kept.'
 		);
+	});
+
+	it('renders the reason beneath its heading when there is one, and none otherwise', () => {
+		mounted = mount(ReplicaFailedOverlay, { target: document.body });
+		flushSync();
+		expect(document.querySelector('[data-testid="replica-blocked-reason"]')).toBeNull();
+
+		setReason('the engine frame did not load');
+		flushSync();
+
+		const reason = document.querySelector('[data-testid="replica-blocked-reason"]');
+		expect(reason?.textContent?.trim()).toBe('the engine frame did not load');
 	});
 
 	it('shows Retry enabled, and calls retryReplica on click', () => {

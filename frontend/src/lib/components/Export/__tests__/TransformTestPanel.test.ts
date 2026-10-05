@@ -15,7 +15,7 @@ import TransformTestPanel from '../TransformTestPanel.svelte';
 
 const replica = vi.hoisted(() => ({ phase: 'ready' as string }));
 vi.mock('$lib/state/replica.svelte', () => ({
-	getReplicaStatus: () => ({ phase: replica.phase })
+	scriptsNeedEngine: () => replica.phase === 'off' || replica.phase === 'unavailable'
 }));
 
 afterEach(() => {
@@ -100,7 +100,7 @@ async function runAndSettle(): Promise<void> {
 }
 
 describe('TransformTestPanel', () => {
-	it.each(['off', 'server'])(
+	it.each(['off', 'unavailable'])(
 		'with the replica %s it shows that scripts need the engine and calls nothing',
 		async (phase) => {
 			replica.phase = phase;

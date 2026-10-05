@@ -8,13 +8,11 @@ import { clearOverlay } from './validation.svelte';
 
 /**
  * Shared half of the staged-commit model store: the model-wide counters and
- * error/status state both entity halves (legacy, engine) read and write —
- * summary, revision, structure revision, the live issue map and the
- * generation counter. Neither half owns a copy of this state; they reach it
- * through the setters below (`setModelRev`, `bumpStructureRev`,
- * `nextGeneration`, `applyDeltaShared`, `patchSummary`) so `model.svelte.ts`
- * (the facade) can dispatch entity reads/writes to either half while this
- * file stays the single source of truth for what both agree on.
+ * error/status state the entity half (`model-engine.svelte.ts`) reads and
+ * writes — summary, revision, structure revision, the live issue map and the
+ * generation counter. The entity half reaches it through the setters below
+ * (`setModelRev`, `bumpStructureRev`, `nextGeneration`, `applyDeltaShared`,
+ * `patchSummary`).
  */
 
 export interface ModelStoreError {
@@ -46,9 +44,9 @@ let _error: ModelStoreError | null = $state(null);
  * models both start at the same rev). */
 let _generation = $state(0);
 
-/** Test/dev hook: `ClientConfig` forwarded to every direct API call either
- * half makes (bypassing the engine seam) — see `setModelApiConfig` in
- * `model-legacy.svelte.ts`, which is the public setter for this value. */
+/** Test/dev hook: `ClientConfig` forwarded to every direct API call the model
+ * store makes (bypassing the engine seam); `setModelApiConfig`
+ * (model-engine.svelte.ts) is the public setter for this value. */
 let _clientConfig: ClientConfig | undefined;
 
 export function getClientConfig(): ClientConfig | undefined {

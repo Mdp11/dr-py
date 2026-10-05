@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
 	commitStaged,
 	discardAll,
@@ -18,13 +18,15 @@ import {
 	resetCheckout,
 	resetModelStore,
 	resetWorkspaceTabs,
-	seedElements,
 	setProjectInfo,
 	stageArtifactUpdate
 } from '../index';
 import type { ArtifactCommitInfo } from '../index';
 import * as api from '$lib/api/checkout';
 import type { CommitResponse } from '$lib/api/types';
+import { server } from '$lib/api/__tests__/server';
+import { cancelIssuesRefetch, ensureElements, stagedSettled } from '../model.svelte';
+import { engineStore, rename, type EngineStore } from './support/engine-store';
 
 /**
  * Artifact half of the checkout store: canonical registry keys, mixed
@@ -73,11 +75,13 @@ function commitResponse(over: Partial<CommitResponse> = {}): CommitResponse {
 	};
 }
 
-/** Check out `e1` exclusively (token t_el_e1) and stage a property edit on it. */
+/** Check out `e_000001` exclusively (token t_el_e_000001) and stage a property edit on it, on a real engine. */
 async function checkoutAndEditElement() {
-	seedElements([{ id: 'e1', type_name: 'T', properties: { name: 'a' }, rev: 1 }]);
-	await ensureCheckout([{ resource_id: 'e1', mode: 'exclusive' }], 'edit');
-	emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'b' } });
+	store = await engineStore();
+	await ensureElements(['e_000001']);
+	await ensureCheckout([{ resource_id: 'e_000001', mode: 'exclusive' }], 'edit');
+	emit(rename('e_000001', 'b'));
+	await stagedSettled();
 }
 
 /** Check out artifact `id` (token t_art_<id>). */
@@ -85,15 +89,25 @@ function checkoutArtifact(id: string) {
 	return ensureCheckout([{ resource_id: id, mode: 'exclusive', type: 'artifact' }], 'edit');
 }
 
+let store: EngineStore | null = null;
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
 beforeEach(() => {
-	vi.useFakeTimers();
+	// Only the heartbeat's interval: the engine store runs on real timers.
+	vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
 	resetModelStore();
 	resetCheckout();
 	resetArtifactEdits();
 	resetWorkspaceTabs();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 100 }); // renew @ 50s
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+	vi.useRealTimers();
+	store?.dispose();
+	store = null;
+	cancelIssuesRefetch();
+});
 
 describe('artifact leases in the checkout registry', () => {
 	it('keys granted artifact leases canonically and does not re-acquire on re-open', async () => {
@@ -128,14 +142,14 @@ describe('mixed model + artifact batches', () => {
 		});
 		await previewStaged();
 		expect(preview.mock.calls[0][1]).toEqual([
-			expect.objectContaining({ kind: 'update_element', id: 'e1' }),
+			expect.objectContaining({ kind: 'update_element', id: 'e_000001' }),
 			expect.objectContaining({ kind: 'update_artifact', id: 'a9', name: 'renamed' })
 		]);
 
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
 		await commitStaged('m', false);
 		expect(commit.mock.calls[0][0].ops).toEqual([
-			expect.objectContaining({ kind: 'update_element', id: 'e1' }),
+			expect.objectContaining({ kind: 'update_element', id: 'e_000001' }),
 			expect.objectContaining({ kind: 'update_artifact', id: 'a9', name: 'renamed' })
 		]);
 	});
@@ -150,7 +164,7 @@ describe('mixed model + artifact batches', () => {
 describe('commit-time token partition', () => {
 	it('withholds an artifact-only token the batch does not need', async () => {
 		mockAcquire();
-		await checkoutAndEditElement(); // token t_el_e1, staged update_element e1
+		await checkoutAndEditElement(); // token t_el_e_000001, staged update_element e_000001
 		await checkoutArtifact('a9'); // token t_art_a9, nothing staged for it
 		const renew = vi.spyOn(api, 'renewLock').mockResolvedValue({ ok: true });
 		const commit = vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
@@ -158,10 +172,10 @@ describe('commit-time token partition', () => {
 		await commitStaged('m', false);
 
 		// only the element token is surrendered; the open editor's lease survives
-		expect(commit.mock.calls[0][0].lockTokens).toEqual(['t_el_e1']);
+		expect(commit.mock.calls[0][0].lockTokens).toEqual(['t_el_e_000001']);
 		expect(getHeldTokens()).toEqual(['t_art_a9']);
 		expect(isCheckedOutByMe('art:a9')).toBe(true);
-		expect(isCheckedOutByMe('e1')).toBe(false);
+		expect(isCheckedOutByMe('e_000001')).toBe(false);
 
 		// the heartbeat must keep renewing the withheld lease
 		await vi.advanceTimersByTimeAsync(50_000);
@@ -410,7 +424,7 @@ describe('discardAll', () => {
 		await discardAll();
 
 		expect(getStagedArtifactOps()).toEqual([]);
-		expect(release).toHaveBeenCalledWith('t_el_e1', undefined);
+		expect(release).toHaveBeenCalledWith('t_el_e_000001', undefined);
 		expect(release).not.toHaveBeenCalledWith('t_art_a9', undefined);
 		expect(getHeldTokens()).toEqual(['t_art_a9']);
 	});

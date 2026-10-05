@@ -9,7 +9,6 @@ import { select } from '../selection.svelte';
 import {
 	adoptIssues,
 	applyDelta,
-	emit,
 	ensureElement,
 	ensureElements,
 	ensureRelationship,
@@ -23,16 +22,12 @@ import {
 	getModelSummary,
 	getStructureRev,
 	getStagedDepth,
-	getStagedOps,
 	hasStagedOps,
 	loadSummary,
-	popLastStaged,
 	refreshSummary,
 	resetModelStore,
-	revertAllStaged,
 	seedElements,
 	setModelApiConfig,
-	setModelError,
 	validateAll
 } from '../model.svelte';
 
@@ -127,31 +122,6 @@ describe('applyDelta', () => {
 
 		applyDelta(delta({ model_rev: 3, changed_elements: [el('e1', { name: 'ABC' }, 3)] }));
 		expect(getStructureRev()).toBe(before);
-	});
-
-	it('bumps structureRev on create (id_map / unseen element), delete, and relationship change', () => {
-		expect(getStructureRev()).toBe(0);
-
-		// creation seen as a never-cached changed element (e.g. apply-cr delta)
-		applyDelta(delta({ model_rev: 1, changed_elements: [el('e1', {}, 1)] }));
-		expect(getStructureRev()).toBe(1);
-
-		// acked create carrying a temp-id remap
-		applyDelta(delta({ model_rev: 2, id_map: { tmp_a: 'E9' } }));
-		expect(getStructureRev()).toBe(2);
-
-		// relationship change
-		applyDelta(delta({ model_rev: 3, changed_relationships: [rel('r1', 'e1', 'E9', 1)] }));
-		expect(getStructureRev()).toBe(3);
-
-		// deletions
-		applyDelta(delta({ model_rev: 4, deleted_relationship_ids: ['r1'] }));
-		expect(getStructureRev()).toBe(4);
-		applyDelta(delta({ model_rev: 5, deleted_element_ids: ['e1'] }));
-		expect(getStructureRev()).toBe(5);
-
-		resetModelStore();
-		expect(getStructureRev()).toBe(0);
 	});
 
 	it('remaps temp ids in cache keys, endpoints, and ref-shaped property values', () => {
@@ -266,175 +236,6 @@ describe('applyDelta', () => {
 	});
 });
 
-describe('emit', () => {
-	it('applies ops optimistically and synchronously', () => {
-		vi.useFakeTimers();
-		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: { n: 1 } });
-		expect(getCachedElements().get('tmp_a')?.properties.n).toBe(1);
-		expect(hasStagedOps()).toBe(true);
-
-		emit({ kind: 'update_element', id: 'tmp_a', properties_patch: { n: 2, gone: null } });
-		expect(getCachedElements().get('tmp_a')?.properties.n).toBe(2);
-
-		emit({ kind: 'delete_element', id: 'tmp_a' });
-		expect(getCachedElements().has('tmp_a')).toBe(false);
-	});
-
-	it('cascades cached relationship deletion on optimistic delete_element', () => {
-		vi.useFakeTimers();
-		applyDelta(
-			delta({
-				changed_elements: [el('e1'), el('e2')],
-				changed_relationships: [rel('r1', 'e1', 'e2'), rel('r2', 'e2', 'e1'), rel('r3', 'e2', 'e2')]
-			})
-		);
-		emit({ kind: 'delete_element', id: 'e1' });
-		expect(getCachedRelationships().has('r1')).toBe(false);
-		expect(getCachedRelationships().has('r2')).toBe(false);
-		expect(getCachedRelationships().has('r3')).toBe(true);
-	});
-
-	// Edits stage in the buffer with NO auto-flush. Assert both structural ops
-	// are staged (queue depth 2, both visible in getStagedOps), caches reflect
-	// them optimistically with their TEMP ids (no ack ⇒ no remap), and NO
-	// network request is fired (onUnhandledRequest:'error' would throw if one
-	// escaped — no handler is registered here).
-	it('stages structural ops without flushing', async () => {
-		vi.useFakeTimers();
-		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: {} });
-		emit({
-			kind: 'create_relationship',
-			temp_id: 'tmp_r',
-			type_name: 'Link',
-			source_id: 'tmp_a',
-			target_id: 'e9',
-			properties: {}
-		});
-		// both staged, no flush ever scheduled
-		expect(getStagedDepth()).toBe(2);
-		expect(getStagedOps()).toHaveLength(2);
-		await vi.advanceTimersByTimeAsync(50); // no timer fires a flush
-		// caches hold the optimistic temp-id entries; never remapped (no ack)
-		expect(getCachedElements().has('tmp_a')).toBe(true);
-		expect(getCachedRelationships().get('tmp_r')?.source_id).toBe('tmp_a');
-		expect(getModelRev()).toBe(0); // unchanged — nothing committed
-		expect(hasStagedOps()).toBe(true); // staged edits still pending commit
-	});
-
-	// Coalescing logic applies with no debounce/flush. Assert two successive
-	// patches to the same entity collapse into ONE staged op (later keys win,
-	// nulls survive), the optimistic merge is visible immediately, and no
-	// network request fires.
-	it('coalesces property patches into one staged op without flushing', async () => {
-		vi.useFakeTimers();
-		applyDelta(delta({ model_rev: 2, changed_elements: [el('e1', { name: 'A' }, 1)] }));
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'B' } });
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'C', x: null } });
-		// optimistic merge visible immediately
-		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
-
-		await vi.advanceTimersByTimeAsync(400); // no debounce timer to fire
-		const staged = getStagedOps();
-		expect(staged).toHaveLength(1); // coalesced into one op
-		expect(staged[0]).toEqual({
-			kind: 'update_element',
-			id: 'e1',
-			properties_patch: { name: 'C', x: null } // later keys win, nulls survive
-		});
-		expect(getModelRev()).toBe(2); // unchanged — nothing committed
-	});
-
-	// A create followed by an update of the same temp id stays staged as two
-	// distinct ops (a create then a property update — they do NOT coalesce,
-	// only updates of the same id do), applied optimistically, with no
-	// network request.
-	it('stages a create then an update of the same temp id (no flush)', async () => {
-		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: {} });
-		emit({ kind: 'update_element', id: 'tmp_a', properties_patch: { name: 'B' } });
-		expect(hasStagedOps()).toBe(true);
-		// no remap (no ack): the temp id is still the cache key
-		expect(getCachedElements().get('tmp_a')?.properties.name).toBe('B');
-		const staged = getStagedOps();
-		expect(staged).toHaveLength(2);
-		expect(staged[0].kind).toBe('create_element');
-		expect(staged[1]).toEqual({
-			kind: 'update_element',
-			id: 'tmp_a',
-			properties_patch: { name: 'B' }
-		});
-		expect(getStagedDepth()).toBe(2); // both ops remain staged until commit
-	});
-
-	// Converted from 'does not clobber a newer queued optimistic edit when an
-	// in-flight batch acks': there is no in-flight batch anymore, but the
-	// applyDelta queue-guard (hasQueuedOpFor) is preserved and still load-bearing
-	// for peer deltas arriving over the realtime feed while the user has staged
-	// edits. Assert an incoming delta carrying a stale value does NOT clobber a
-	// staged optimistic edit for the same entity.
-	it('applyDelta does not clobber a staged optimistic edit for the same entity', () => {
-		applyDelta(delta({ model_rev: 1, changed_elements: [el('e1', { name: 'A' }, 1)] }));
-		// user stages an edit -> optimistic 'C'
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'C' } });
-		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
-		// a delta arrives carrying a stale 'B' for the same (still-staged) entity
-		applyDelta(delta({ model_rev: 2, changed_elements: [el('e1', { name: 'B' }, 9)] }));
-		// the staged optimistic value is preserved — no revert flicker
-		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
-		expect(hasStagedOps()).toBe(true);
-	});
-
-	// Converted from 'enters conflict state on 409...': the 409/flush networking
-	// path is gone (the conflict state is now driven by the realtime feed via
-	// setModelError, not by a flush response). The load-bearing behavior that
-	// survives is the emit conflict-DROP guard. Assert that, once conflicted,
-	// emit drops ops entirely — not applied, not staged — so the staged buffer
-	// cannot diverge while the model is known-stale.
-	it('drops emit() entirely in conflict state: buffer stays empty, no apply', () => {
-		applyDelta(delta({ model_rev: 0, changed_elements: [el('e1', { name: 'A' })] }));
-		setModelError({ kind: 'conflict', message: 'rev conflict' });
-		expect(getModelError()?.kind).toBe('conflict');
-
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'B' } });
-		expect(hasStagedOps()).toBe(false); // dropped, not staged
-		// not even applied optimistically — the cache keeps its pre-conflict value
-		expect(getCachedElements().get('e1')?.properties.name).toBe('A');
-
-		emit({ kind: 'delete_element', id: 'e1' });
-		expect(hasStagedOps()).toBe(false);
-		expect(getCachedElements().has('e1')).toBe(true); // delete not applied either
-	});
-
-	// Converted from 'reverts optimistic state exactly on 422...': the 422/flush
-	// rejection path is gone, but the journal-driven exact revert it exercised is
-	// preserved and now surfaced as the client-side revertAllStaged (the
-	// "discard all staged edits" action). Assert a mixed batch (update / create /
-	// cascading delete) reverts the caches exactly to the pre-staging state.
-	it('revertAllStaged restores the caches exactly across a mixed batch', () => {
-		applyDelta(
-			delta({
-				model_rev: 1,
-				changed_elements: [el('e1', { name: 'A' }, 1), el('e2')],
-				changed_relationships: [rel('r1', 'e1', 'e2')]
-			})
-		);
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { bogus: 'x' } });
-		emit({ kind: 'create_element', temp_id: 'tmp_n', type_name: 'Block', properties: {} });
-		emit({ kind: 'delete_element', id: 'e2' }); // cascades r1 optimistically
-		expect(getCachedElements().get('e1')?.properties.bogus).toBe('x');
-		expect(getCachedRelationships().has('r1')).toBe(false);
-
-		revertAllStaged();
-
-		// everything restored to the pre-staging state
-		expect(getCachedElements().get('e1')?.properties).toEqual({ name: 'A' });
-		expect(getCachedElements().has('tmp_n')).toBe(false);
-		expect(getCachedElements().has('e2')).toBe(true);
-		expect(getCachedRelationships().get('r1')?.source_id).toBe('e1');
-		expect(hasStagedOps()).toBe(false);
-		expect(getModelRev()).toBe(1); // rev untouched — nothing committed
-	});
-});
-
 describe('reads and lifecycle', () => {
 	it('ensureElement: cache hit does not fetch; miss fetches and caches; 404 -> null', async () => {
 		let fetches = 0;
@@ -457,7 +258,6 @@ describe('reads and lifecycle', () => {
 		expect(fetches).toBe(1);
 
 		expect(await ensureElement('missing')).toBeNull();
-		expect(await ensureElement('tmp_unknown')).toBeNull(); // no server round-trip
 		expect(fetches).toBe(2);
 	});
 
@@ -516,26 +316,6 @@ describe('reads and lifecycle', () => {
 		expect(fetches).toBe(2);
 	});
 
-	// Client-side undo: popLastStaged reverts the LAST STAGED op (there is no
-	// server-undo). Assert it reverts the staged create, drops it from the
-	// buffer, and reports success; no network request is involved.
-	it('popLastStaged reverts the last staged op client-side', () => {
-		seedElements([el('e0', { name: 'kept' }, 1)]);
-		emit({ kind: 'create_element', temp_id: 'e1', type_name: 'Block', properties: {} });
-		expect(getCachedElements().has('e1')).toBe(true);
-		expect(getStagedDepth()).toBe(1);
-
-		expect(popLastStaged()).toBe(true);
-		expect(getCachedElements().has('e1')).toBe(false); // staged create reverted
-		expect(getCachedElements().has('e0')).toBe(true); // untouched
-		expect(getStagedDepth()).toBe(0);
-	});
-
-	it('popLastStaged returns false when the staged buffer is empty', () => {
-		expect(popLastStaged()).toBe(false);
-		expect(getStagedDepth()).toBe(0);
-	});
-
 	it('validateAll is a pure fetch — the live issuesByOwner/counts are untouched', async () => {
 		stubEngine({
 			validateModel: () => [
@@ -570,8 +350,7 @@ describe('reads and lifecycle', () => {
 		expect(getIssueCounts()).toEqual({ error: 1 });
 	});
 
-	it('resetModelStore clears caches, counters, queue, and errors', async () => {
-		vi.useFakeTimers();
+	it('resetModelStore clears caches, counters, and errors', () => {
 		applyDelta(
 			delta({
 				model_rev: 3,
@@ -583,7 +362,6 @@ describe('reads and lifecycle', () => {
 				issue_counts: { error: 1 }
 			})
 		);
-		emit({ kind: 'delete_element', id: 'e1' });
 		resetModelStore();
 		expect(getCachedElements().size).toBe(0);
 		expect(getCachedRelationships().size).toBe(0);
@@ -594,10 +372,6 @@ describe('reads and lifecycle', () => {
 		expect(getModelSummary()).toBeNull();
 		expect(getModelError()).toBeNull();
 		expect(hasStagedOps()).toBe(false);
-		// the cancelled queue never reaches the server (an unhandled request
-		// would surface here as a flush error)
-		await vi.advanceTimersByTimeAsync(10);
-		expect(getModelError()).toBeNull();
 	});
 });
 
@@ -644,14 +418,14 @@ describe('ensureElements (batched)', () => {
 		expect(bodies).toEqual([['b', 'c'], ['d']]);
 	});
 
-	it('is a no-op when every id is cached or a temp id', async () => {
+	it('is a no-op when every id is cached', async () => {
 		seedElements([el('a')]);
 		stubEngine({
 			getElementsBatch: () => {
 				throw new Error('should not fetch');
 			}
 		});
-		await expect(ensureElements(['a', 'tmp_1'])).resolves.toBeUndefined();
+		await expect(ensureElements(['a'])).resolves.toBeUndefined();
 	});
 
 	it('records ids the engine omits as confirmed-missing and never re-requests them', async () => {

@@ -3,6 +3,7 @@ import type { ModelOp, ModelSummary, StageResult, WireBatch } from '$engine';
 import { server } from '$lib/api/__tests__/server';
 import { FrameError } from '../frame';
 import type { ReplicaStatus } from '../sync';
+import { connectInProcess } from '../testing';
 import {
 	fakeProject,
 	syncOver,
@@ -375,26 +376,36 @@ describe('waking from off', () => {
 		expect(await client.call<WireBatch[]>('staged')).toEqual(staged);
 	});
 
-	it('server wakes on neither', async () => {
+	it('unavailable wakes on neither a reset nor a snapshot event; retry connects afresh', async () => {
 		const project = fakeProject();
+		let asked = 0;
 		const over = open(project, {
-			connect: () =>
-				Promise.reject(new FrameError('timeout', 'the sandbox did not answer within 10000 ms'))
+			connect: () => {
+				asked += 1;
+				return asked === 1
+					? Promise.reject(new FrameError('timeout', 'the sandbox did not answer within 10000 ms'))
+					: Promise.resolve(connectInProcess());
+			}
 		});
 		await over.sync.settled();
-		expect(last(over.statuses)).toMatchObject({ phase: 'server' });
+		expect(last(over.statuses)).toMatchObject({ phase: 'unavailable' });
 		const statuses = over.statuses.length;
 		const requests = { ...project.requests };
 		project.opaqueBump();
 
 		over.sync.feedReset(project.rev);
 		over.sync.feedSnapshot(project.rev);
-		over.sync.retry();
 		await over.sync.settled();
 
 		expect(over.statuses).toHaveLength(statuses);
 		expect(project.requests).toEqual(requests);
 		expect(over.connects).toBe(1);
+
+		over.sync.retry();
+		await over.sync.settled();
+
+		expect(over.connects).toBe(2);
+		expect(last(over.statuses)).toMatchObject({ phase: 'ready', rev: project.rev });
 	});
 });
 

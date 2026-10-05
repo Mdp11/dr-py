@@ -11,10 +11,13 @@ import { stubEngine } from '../../api/__tests__/engine-stub';
 import { installEngineSeam } from '../../api/engine-route';
 import {
 	applyDelta,
+	ensureElements,
 	getStagedOps,
 	resetModelStore,
-	setModelApiConfig
+	setModelApiConfig,
+	stagedSettled
 } from '../../state/model.svelte';
+import { engineStore } from '../../state/__tests__/support/engine-store';
 import { resetCheckout, setCheckoutApiConfig, setProjectInfo } from '../../state/checkout.svelte';
 import { answerConfirm, getPendingConfirm, resetConfirm } from '../../state/confirm.svelte';
 import { handleFeedEvent, resetRealtime } from '../../state/realtime.svelte';
@@ -92,7 +95,7 @@ it('confirms, takes a DELETE lease, then stages delete_element and deselects', a
 				token: 'tok1',
 				leases: [
 					{
-						resource_id: 'e1',
+						resource_id: 'e_000001',
 						mode: 'exclusive',
 						holder: 'default-user',
 						token: 'tok1',
@@ -103,9 +106,10 @@ it('confirms, takes a DELETE lease, then stages delete_element and deselects', a
 			});
 		})
 	);
-	applyDelta(delta({ changed_elements: [el('e1')] }));
+	const store = await engineStore();
+	await ensureElements(['e_000001']);
 
-	const c = renderSelected('e1');
+	const c = renderSelected('e_000001');
 	try {
 		deleteButton().click();
 		flushSync();
@@ -122,12 +126,14 @@ it('confirms, takes a DELETE lease, then stages delete_element and deselects', a
 		// The lease is taken with DELETE intent (which conflicts with ANY peer
 		// lease server-side) BEFORE the op is staged.
 		expect(lockBodies).toEqual([
-			{ targets: [{ resource_id: 'e1', mode: 'exclusive' }], intent: 'delete', steal: false }
+			{ targets: [{ resource_id: 'e_000001', mode: 'exclusive' }], intent: 'delete', steal: false }
 		]);
-		expect(getStagedOps()).toEqual([{ kind: 'delete_element', id: 'e1' }]);
+		await stagedSettled();
+		expect(getStagedOps()).toEqual([{ kind: 'delete_element', id: 'e_000001' }]);
 		expect(getSelection()).toBeNull();
 	} finally {
 		unmount(c);
+		store.dispose();
 	}
 });
 

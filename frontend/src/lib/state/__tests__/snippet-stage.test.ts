@@ -1,10 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { server } from '$lib/api/__tests__/server';
 import { stageSnippetOps } from '../snippet-stage';
 import * as checkout from '../checkout.svelte';
 import { adoptWorkingStamp, resetReplica } from '../replica.svelte';
-import { getStagedOps, resetModelStore, seedElements } from '../model.svelte';
+import { getStagedOps, resetModelStore, stagedSettled } from '../model.svelte';
 import type { SnippetRunOut } from '$lib/api/snippets';
-import { EL } from './fixtures';
+import { engineStore, type EngineStore } from './support/engine-store';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
 
 function runOut(ops: SnippetRunOut['ops'], overrides: Partial<SnippetRunOut> = {}): SnippetRunOut {
 	return {
@@ -20,14 +24,17 @@ function runOut(ops: SnippetRunOut['ops'], overrides: Partial<SnippetRunOut> = {
 }
 
 const UPDATE = [
-	{ kind: 'update_element', id: 'e1', properties_patch: { name: 'X' } }
+	{ kind: 'update_element', id: 'e_000001', properties_patch: { name: 'X' } }
 ] as SnippetRunOut['ops'];
 
+let store: EngineStore | null = null;
+
 beforeEach(() => {
-	seedElements([EL]);
 	vi.spyOn(checkout, 'ensureCheckout').mockResolvedValue({ ok: true } as never);
 });
 afterEach(() => {
+	store?.dispose();
+	store = null;
 	resetReplica();
 	resetModelStore();
 	vi.restoreAllMocks();
@@ -49,8 +56,10 @@ describe('stageSnippetOps (wrapper over stageProposedOps)', () => {
 	});
 
 	it('stages a run that began where the working copy stands', async () => {
+		store = await engineStore();
 		adoptWorkingStamp({ rev: 0, staged: 0 });
 		expect(await stageSnippetOps(runOut(UPDATE))).toEqual({ ok: true, count: 1 });
+		await stagedSettled();
 		expect(getStagedOps()).toHaveLength(1);
 	});
 });

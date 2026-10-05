@@ -5,28 +5,37 @@
 // staged-name overlay. Same render convention as ValueCell.test.ts
 // (mount/unmount/flushSync — @testing-library/svelte is not a dependency).
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { TableCell } from '$lib/api/types';
+import { server } from '$lib/api/__tests__/server';
 import * as modelStore from '$lib/state/model.svelte';
+import { engineStore, type EngineStore } from '$lib/state/__tests__/support/engine-store';
 import ElementCell from '../ElementCell.svelte';
 import ElementsCell from '../ElementsCell.svelte';
 
 function elementCell(): Extract<TableCell, { kind: 'element' }> {
 	return {
 		kind: 'element',
-		item: { id: 'e1', type_name: 'Block', display_name: 'Old name', child_count: 0 }
+		item: { id: 'e_000001', type_name: 'Organization', display_name: 'Old name', child_count: 0 }
 	};
 }
 
-function seedAndStage(patch: Record<string, unknown>): void {
-	modelStore.seedElements([
-		{ id: 'e1', type_name: 'Block', properties: { name: 'Old name' }, rev: 0 }
-	]);
-	modelStore.emit({ kind: 'update_element', id: 'e1', properties_patch: patch });
+let store: EngineStore | null = null;
+
+/** A real engine with `patch` staged on `e_000001`. */
+async function stage(patch: Record<string, unknown>): Promise<void> {
+	store = await engineStore();
+	await modelStore.ensureElements(['e_000001']);
+	modelStore.emit({ kind: 'update_element', id: 'e_000001', properties_patch: patch });
+	await modelStore.stagedSettled();
 }
 
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
 afterEach(() => {
+	store?.dispose();
+	store = null;
 	modelStore.resetModelStore();
 	document.body.innerHTML = '';
 });
@@ -42,8 +51,8 @@ describe('ElementCell staged-name overlay', () => {
 		}
 	});
 
-	it('shows a staged (uncommitted) rename instead of the stale display_name', () => {
-		seedAndStage({ name: 'New name' });
+	it('shows a staged (uncommitted) rename instead of the stale display_name', async () => {
+		await stage({ name: 'New name' });
 		const c = mount(ElementCell, { target: document.body, props: { cell: elementCell() } });
 		flushSync();
 		try {
@@ -54,31 +63,20 @@ describe('ElementCell staged-name overlay', () => {
 		}
 	});
 
-	it('matches the name lookup case-insensitively (Name, NAME, ...)', () => {
-		seedAndStage({ Name: 'Cased name' });
+	it('falls back to the element id when the staged edit clears the name', async () => {
+		await stage({ name: null });
 		const c = mount(ElementCell, { target: document.body, props: { cell: elementCell() } });
 		flushSync();
 		try {
-			expect(document.body.textContent).toContain('Cased name');
-		} finally {
-			unmount(c);
-		}
-	});
-
-	it('falls back to the element id when the staged edit clears the name', () => {
-		seedAndStage({ name: null });
-		const c = mount(ElementCell, { target: document.body, props: { cell: elementCell() } });
-		flushSync();
-		try {
-			expect(document.body.textContent).toContain('e1');
+			expect(document.body.textContent).toContain('e_000001');
 			expect(document.body.textContent).not.toContain('Old name');
 		} finally {
 			unmount(c);
 		}
 	});
 
-	it('ignores staged patches that do not touch the name', () => {
-		seedAndStage({ mass: 5 });
+	it('ignores staged patches that do not touch the name', async () => {
+		await stage({ description: 'changed' });
 		const c = mount(ElementCell, { target: document.body, props: { cell: elementCell() } });
 		flushSync();
 		try {
@@ -90,11 +88,13 @@ describe('ElementCell staged-name overlay', () => {
 });
 
 describe('ElementsCell staged-name overlay', () => {
-	it('shows a staged rename on its element chips too', () => {
-		seedAndStage({ name: 'New name' });
+	it('shows a staged rename on its element chips too', async () => {
+		await stage({ name: 'New name' });
 		const cell: Extract<TableCell, { kind: 'elements' }> = {
 			kind: 'elements',
-			items: [{ id: 'e1', type_name: 'Block', display_name: 'Old name', child_count: 0 }],
+			items: [
+				{ id: 'e_000001', type_name: 'Organization', display_name: 'Old name', child_count: 0 }
+			],
 			total: 1,
 			truncated: false
 		};

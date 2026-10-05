@@ -4,7 +4,15 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 
 import type { Element, OpsResponse } from '$lib/api/types';
 import { server } from '../../api/__tests__/server';
-import { applyDelta, emit, getStagedOpsFor, resetModelStore } from '../../state/model.svelte';
+import {
+	applyDelta,
+	emit,
+	ensureElements,
+	getStagedOpsFor,
+	resetModelStore,
+	stagedSettled
+} from '../../state/model.svelte';
+import { engineStore, rename } from '../../state/__tests__/support/engine-store';
 import {
 	_recordLeases,
 	isCheckedOutByMe,
@@ -180,13 +188,15 @@ it('confirms before discarding staged changes on unlock; keeps the lock when dec
 			return HttpResponse.json({ released: 1 });
 		})
 	);
-	applyDelta(delta({ changed_elements: [el('e1', { name: '' })] }));
-	_recordLeases([lease('e1', 'default-user')]);
-	emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'edited' } });
+	const store = await engineStore();
+	await ensureElements(['e_000001']);
+	_recordLeases([lease('e_000001', 'default-user')]);
+	emit(rename('e_000001', 'edited'));
+	await stagedSettled();
 	flushSync();
-	expect(getStagedOpsFor('e1').length).toBe(1);
+	expect(getStagedOpsFor('e_000001').length).toBe(1);
 
-	const c = render('e1');
+	const c = render('e_000001');
 	try {
 		control().click();
 		flushSync();
@@ -201,8 +211,8 @@ it('confirms before discarding staged changes on unlock; keeps the lock when dec
 
 		// declined: nothing released, edit + lock retained
 		expect(released).toBe(0);
-		expect(isCheckedOutByMe('e1')).toBe(true);
-		expect(getStagedOpsFor('e1').length).toBe(1);
+		expect(isCheckedOutByMe('e_000001')).toBe(true);
+		expect(getStagedOpsFor('e_000001').length).toBe(1);
 
 		// accept this time: edit discarded and lock released
 		control().click();
@@ -212,9 +222,10 @@ it('confirms before discarding staged changes on unlock; keeps the lock when dec
 		flushSync();
 
 		expect(released).toBe(1);
-		expect(isCheckedOutByMe('e1')).toBe(false);
-		expect(getStagedOpsFor('e1').length).toBe(0);
+		expect(isCheckedOutByMe('e_000001')).toBe(false);
+		expect(getStagedOpsFor('e_000001').length).toBe(0);
 	} finally {
 		unmount(c);
+		store.dispose();
 	}
 });

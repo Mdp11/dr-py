@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import HistoryDrawer from '../HistoryDrawer.svelte';
 
@@ -59,7 +59,9 @@ import { applyDelta, beginReplicaCommit } from '$lib/state';
 // Left real by the `...actual` spread above so the revert gate is exercised
 // against the actual stores it reads in production.
 import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
-import { emit, resetModelStore, seedElements } from '$lib/state/model.svelte';
+import { emit, ensureElements, resetModelStore, stagedSettled } from '$lib/state/model.svelte';
+import { server } from '$lib/api/__tests__/server';
+import { engineStore, rename } from '$lib/state/__tests__/support/engine-store';
 import { handleFeedEvent, resetRealtime } from '$lib/state/realtime.svelte';
 import type { LeaseLite } from '$lib/api/feed';
 import { ConflictError, ValidationError } from '$lib/api';
@@ -77,6 +79,9 @@ function seedLocks(...resourceIds: string[]): void {
 		connected: []
 	});
 }
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterAll(() => server.close());
 
 afterEach(() => {
 	document.body.innerHTML = '';
@@ -282,20 +287,26 @@ describe('HistoryDrawer revert', () => {
 	});
 
 	it('blocks revert when there are staged edits', async () => {
-		seedElements([{ id: 'e1', type_name: 'T', properties: { name: 'a' }, rev: 1 }]);
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'b' } });
+		const store = await engineStore();
+		await ensureElements(['e_000001']);
+		emit(rename('e_000001', 'b'));
+		await stagedSettled();
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
-		flushSync();
-		await Promise.resolve();
-		flushSync();
-		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.includes('Revert')
-		)!;
-		revertBtn.click();
-		flushSync();
-		expect(document.body.textContent?.toLowerCase()).toContain('commit or discard');
-		expect(revertToCommit).not.toHaveBeenCalled();
-		unmount(c);
+		try {
+			flushSync();
+			await Promise.resolve();
+			flushSync();
+			const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
+				b.textContent?.includes('Revert')
+			)!;
+			revertBtn.click();
+			flushSync();
+			expect(document.body.textContent?.toLowerCase()).toContain('commit or discard');
+			expect(revertToCommit).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+			store.dispose();
+		}
 	});
 
 	it('blocks revert when only artifact ops are staged', async () => {

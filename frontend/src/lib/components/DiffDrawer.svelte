@@ -84,7 +84,7 @@
 	});
 
 	const diff = $derived<Diff>(getStagedDiff());
-	// Parked batches (engine staging only — always [] on the legacy side): the
+	// Parked batches: the
 	// engine rebased them over a peer's commit and they no longer apply. Never
 	// part of `total` below and never sent by `commitStaged` — they are not in
 	// `getStagedOps()` either — so a conflict can only be discarded, not committed.
@@ -383,9 +383,8 @@
 			// errorCount > 0 ⇒ ack_errors (the user clicked Commit anyway)
 			await commitStaged(message, errorCount > 0);
 			// Still committing, and so still undismissable, until the replica has
-			// applied the answer (see `commitApplied`); at once on the legacy side.
-			const applied = commitApplied();
-			if (applied !== null) await applied;
+			// applied the answer (see `commitApplied`).
+			await commitApplied();
 			message = '';
 			open = false;
 			// `POST /commits` RELEASES every lock token it is sent, and the batch

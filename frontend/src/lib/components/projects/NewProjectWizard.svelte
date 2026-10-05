@@ -5,7 +5,6 @@
 	import { createProject } from '$lib/api/projects';
 	import { ApiError } from '$lib/api/errors';
 	import { beginJourney, journeyUpload, cancelJourney } from '$lib/state/open-journey';
-	import { anyEngineSurface, readSwitches } from '$lib/engine/surfaces';
 	import FileSlot from './FileSlot.svelte';
 
 	let {
@@ -94,7 +93,7 @@
 		// Start the single journey bar now (on the click). It survives the goto()
 		// into the workspace, where boot() adopts the same journey (beginJourney is
 		// idempotent) and drives it through hydration/validation to 100%.
-		beginJourney('create', { replica: anyEngineSurface(readSwitches()) });
+		beginJourney('create');
 		try {
 			const created = await createProject(
 				{ name, metamodel, model, view, artifacts },
