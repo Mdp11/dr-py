@@ -7,9 +7,9 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
-from data_rover.api.session import get_session
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     create_folder_via_commit,
     create_view,
@@ -30,7 +30,7 @@ PEER = {"x-user-id": "peer-1", "x-user-email": "peer@example.com"}
 def _seed_member(user_id: str, email: str, role: str) -> None:
     from data_rover.api import db
     from data_rover.api.db_models import Role, User
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
     gen = db.get_db()
@@ -106,12 +106,12 @@ def test_create_list_get_delete(client: TestClient) -> None:
     assert got["view"]["name"] == "Ops"
     assert got["view"]["folders"][0]["id"]
     assert got["view"]["folders"][0]["elements"] == [a_id]
-    assert get_session().views[vid].name == "Ops"
+    assert default_state().views[vid].name == "Ops"
 
     assert client.delete(papi(f"/views/{vid}")).status_code == 204
     assert [v["name"] for v in client.get(papi("/views")).json()] == ["Arch"]
     assert client.get(papi(f"/views/{vid}")).status_code == 404
-    assert vid not in get_session().views
+    assert vid not in default_state().views
 
 
 def test_duplicate_name_409_and_bad_input_422(client: TestClient) -> None:
@@ -217,7 +217,7 @@ def test_put_replaces_document_and_bumps_rev(client: TestClient) -> None:
     top = got["view"]["folders"][0]
     assert top["id"] == fid and top["name"] == "F2" and top["elements"] == [b_id]
     assert top["folders"][0]["id"]  # healed
-    assert get_session().views[vid].folders[0].name == "F2"
+    assert default_state().views[vid].folders[0].name == "F2"
 
     # a stale base rev is refused
     r = client.put(papi(f"/views/{vid}"), json={"view": doc, "base_view_rev": 0})

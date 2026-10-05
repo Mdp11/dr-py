@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from data_rover.api import db
 from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 from data_rover.core.metamodel.diff import diff_metamodels
 from data_rover.core.metamodel.loader import load_metamodel_str

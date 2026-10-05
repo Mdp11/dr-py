@@ -1,6 +1,7 @@
-"""A batch applied and then taken back leaves no trace on the live model:
-every ``rev``, every place in insertion order, every index and the state
-digest as they were. One test per path that rolls a model batch back."""
+"""A batch applied and then taken back leaves no trace: on the head rows (every
+``rev``, every place in order, the state digest) when a commit or a preview
+refuses it, and on a whole model, which the applier rolls back too. One test per
+path that rolls a model batch back."""
 
 from __future__ import annotations
 
@@ -14,13 +15,13 @@ from data_rover.api.routes._snapshot import build_model_from_dicts
 from data_rover.api.routes.ops import _apply_batch, _rollback
 from data_rover.api.schemas import ModelOpIn
 from data_rover.api.serialize import iter_entity_lines
-from data_rover.api.session import get_session
 from data_rover.api.state_digest import model_digest
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 from pydantic import TypeAdapter
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     papi,
     seed_default_project,
@@ -28,6 +29,7 @@ from .conftest import (
     install,
     commit_ops,
     post_commit,
+    rows_model,
 )
 
 _MM = """
@@ -81,9 +83,8 @@ def client() -> TestClient:
 
 
 def _live() -> Model:
-    model = get_session().model
-    assert model is not None
-    return model
+    """The model of the head rows, as they are now."""
+    return rows_model()
 
 
 def _seed(client: TestClient) -> dict[str, str]:
@@ -146,12 +147,12 @@ def _touching(ids: dict[str, str]) -> list[dict[str, Any]]:
 def test_a_refused_batch_leaves_no_trace(client: TestClient) -> None:
     ids = _seed(client)
     before = _observed(_live())
-    rev = get_session().model_rev
+    rev = default_state().model_rev
     ghost = {"kind": "update_element", "id": "ghost", "properties_patch": {}}
     res = post_commit(client, [*_touching(ids), ghost])
     assert res.status_code == 422, res.text
     assert _observed(_live()) == before
-    assert get_session().model_rev == rev
+    assert default_state().model_rev == rev
 
 
 def test_a_preview_leaves_no_trace(client: TestClient) -> None:
@@ -159,7 +160,7 @@ def test_a_preview_leaves_no_trace(client: TestClient) -> None:
     before = _observed(_live())
     res = client.post(
         papi("/commits/preview"),
-        json={"base_rev": get_session().model_rev, "ops": _touching(ids)},
+        json={"base_rev": default_state().model_rev, "ops": _touching(ids)},
     )
     assert res.status_code == 200, res.text
     assert _observed(_live()) == before
@@ -185,7 +186,7 @@ def test_a_commit_refused_for_a_structural_blocker_leaves_no_trace(
     res = client.post(
         papi("/commits"),
         json={
-            "base_rev": get_session().model_rev,
+            "base_rev": default_state().model_rev,
             "ops": [
                 {
                     "kind": "update_element",
@@ -209,7 +210,7 @@ def test_a_batch_that_could_not_be_persisted_leaves_no_trace(
 ) -> None:
     ids = _seed(client)
     before = _observed(_live())
-    rev = get_session().model_rev
+    rev = default_state().model_rev
 
     def _boom(*args: Any, **kwargs: Any) -> bool:
         raise RuntimeError("no database")
@@ -218,7 +219,7 @@ def test_a_batch_that_could_not_be_persisted_leaves_no_trace(
     res = post_commit(client, _touching(ids))
     assert res.status_code == 500, res.text
     assert _observed(_live()) == before
-    assert get_session().model_rev == rev
+    assert default_state().model_rev == rev
 
 
 def test_rollback_puts_back_an_entity_whose_type_the_metamodel_lacks() -> None:

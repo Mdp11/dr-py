@@ -1,4 +1,4 @@
-"""Snapshots written from the head rows, never from a session model.
+"""Snapshots written from the head rows, never from a model.
 
 ``write_snapshot_from_rows`` streams the project's ``ElementRow`` then
 ``RelationshipRow`` rows, each table in ``seq`` order (the model's dict order),

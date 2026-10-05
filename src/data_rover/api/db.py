@@ -120,7 +120,7 @@ def get_db() -> Generator[Session]:
 
 @contextmanager
 def db_session() -> Generator[Session]:
-    """A DB session for non-request callers (hydration, eviction, importer).
+    """A DB session for non-request callers (state load, importer).
 
     Commits on clean exit, rolls back on exception, always closes. Distinct
     from ``get_db`` (the FastAPI generator dependency) so background/CLI code

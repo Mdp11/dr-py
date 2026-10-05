@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from data_rover.api import db
 from data_rover.api.db_models import Membership, Project, Role, User
 from data_rover.api.main import create_app
-from data_rover.api.session import get_registry
+from data_rover.api.project_state import get_registry
 from .conftest import (
     install,
     head,
@@ -91,5 +91,6 @@ def test_models_in_two_projects_do_not_share_state(client: TestClient) -> None:
         == 200
     )
     assert len(head("alpha").elements) == 1
-    # beta has its own metamodel but no model: alpha's load did NOT leak in
-    assert get_registry().get("beta").model is None
+    # beta has its own metamodel but no entities: alpha's load did NOT leak in
+    assert head("beta").elements == {} and head("beta").relationships == {}
+    assert get_registry().get("beta").metamodel is not None

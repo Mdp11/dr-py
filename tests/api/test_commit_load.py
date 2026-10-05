@@ -13,13 +13,13 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects import postgresql
 
-from data_rover.api import commit_load, content, db, head as head_mod
+from data_rover.api import commit_load, content, head as head_mod
 from data_rover.api.db_models import Commit, ElementRow, EntityRefRow, RelationshipRow
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model import model as model_mod
 from data_rover.core.model.ids import SequentialIdGenerator
@@ -32,6 +32,7 @@ from .conftest import (
     head,
     install,
     install_unchecked,
+    no_model_built,
     papi,
     post_commit,
     seed_default_project,
@@ -550,25 +551,25 @@ def test_a_commit_never_checks_against_a_rebind_that_is_refused(
     rebind_swapped = threading.Event()
     other_read = threading.Event()
     real_blockers = commits_mod.structural_blockers
-    real_require = commits_mod.require_model
+    real_require = commits_mod.require_metamodel
 
     def refuse_inside_the_rebind(model: Any, ids: Any) -> Any:
         if not rebind_swapped.is_set():
             rebind_swapped.set()
-            # the other commit reads the session now; the timeout only bounds a
+            # the other commit reads the metamodel now; the timeout only bounds a
             # hang, it is not a pause
             assert other_read.wait(timeout=30), "the second commit never read"
             return [Issue(Severity.ERROR, "forced", ["X"], IssueCategory.STRUCTURAL)]
         return real_blockers(model, ids)
 
-    def reading(session_: Any) -> Any:
-        out = real_require(session_)
+    def reading(state: Any) -> Any:
+        out = real_require(state)
         if rebind_swapped.is_set():
             other_read.set()
         return out
 
     monkeypatch.setattr(commits_mod, "structural_blockers", refuse_inside_the_rebind)
-    monkeypatch.setattr(commits_mod, "require_model", reading)
+    monkeypatch.setattr(commits_mod, "require_metamodel", reading)
     answers: dict[str, Any] = {}
 
     def rebind() -> None:
@@ -612,22 +613,20 @@ def test_a_commit_never_checks_against_a_rebind_that_is_refused(
     assert mm is not None and not mm.is_element_type("Ghosty")
 
 
-def test_a_session_not_at_the_revision_before_the_commit_is_dropped_not_advanced(
+def test_a_state_whose_rev_drifted_follows_the_row_after_a_commit(
     client: TestClient,
 ) -> None:
-    session_ = get_registry().get(DEFAULT_PROJECT_ID)
+    state = get_registry().get(DEFAULT_PROJECT_ID)
     base = head().rev
-    session_.model_rev = base + 5  # a mirror that has drifted from the row
+    state.model_rev = base + 5  # a state that has drifted from the row
     body = commit_ops(
         client,
         [{"kind": "update_element", "id": "B1", "properties_patch": {"label": "z"}}],
     )
     assert body["model_rev"] == base + 1  # the row is the authority
-    assert session_.model_rev == base + 5  # the dropped session was not advanced
-    # the next request hydrates from the journal, which holds the commit
+    assert state.model_rev == base + 1  # and the state is brought to it
     assert head().elements["B1"]["properties"]["label"] == "z"
-    fresh = get_registry().get(DEFAULT_PROJECT_ID)
-    assert fresh is not session_ and fresh.model_rev == base + 1
+    assert get_registry().get(DEFAULT_PROJECT_ID) is state
 
 
 # --- what an attachment loads ----------------------------------------------------
@@ -835,20 +834,6 @@ def test_an_attachment_below_an_attached_element_is_planned_through_the_chain() 
     assert rows.edges_complete == {"X", "C", "C1"}
 
 
-def test_a_dropped_session_does_not_drop_its_replacement() -> None:
-    from data_rover.api.routes.commits import _follow_commit
-
-    registry = get_registry()
-    old = registry.get(DEFAULT_PROJECT_ID)
-    registry.discard(DEFAULT_PROJECT_ID)
-    new = registry.get(DEFAULT_PROJECT_ID)
-    assert new is not old
-    with old.write_mutex:  # the old session cannot follow: it is at the wrong rev
-        _follow_commit(old, DEFAULT_PROJECT_ID, [], rev=99, digest="0" * 16)
-    assert registry.peek(DEFAULT_PROJECT_ID) is new
-    assert old.model_rev != 99
-
-
 # --- the rounds do not grow with the batch -----------------------------------------
 
 
@@ -1022,26 +1007,12 @@ def test_the_plan_names_a_hinted_create_once() -> None:
 # --- the transaction ----------------------------------------------------------------
 
 
-def test_the_check_reads_rows_not_the_session_model(
+def test_the_check_reads_rows_and_builds_no_whole_model(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """While the batch is checked the session model is an empty one: an answer
-    that came from it would be wrong."""
-    from data_rover.core.model.model import Model
-
-    session_ = get_registry().get(DEFAULT_PROJECT_ID)
-    real = commit_load.load_and_apply
-
-    def blind(*args: Any, **kwargs: Any) -> Any:
-        kept = session_.model
-        assert kept is not None
-        session_.model = Model(kept.metamodel)
-        try:
-            return real(*args, **kwargs)
-        finally:
-            session_.model = kept
-
-    monkeypatch.setattr(commit_load, "load_and_apply", blind)
+    """The batch is checked on a partial model of the rows it needs: no way of
+    building a whole one is left standing."""
+    no_model_built(monkeypatch)
     body = commit_ops(
         client,
         [
@@ -1055,12 +1026,12 @@ def test_the_check_reads_rows_not_the_session_model(
 
 def test_the_stale_rev_is_judged_on_the_row_under_the_lock(client: TestClient) -> None:
     """``model_rev`` and the tail come from the database inside the commit's
-    transaction: a commit the session has not heard of is still seen."""
+    transaction: a commit the project state has not heard of is still seen."""
     base = head().rev
     update = {"kind": "update_element", "id": "B1", "properties_patch": {"label": "1"}}
     commit_ops(client, [update])
-    session_ = get_registry().get(DEFAULT_PROJECT_ID)
-    session_.model_rev = base  # the session mirror lags the row
+    state = get_registry().get(DEFAULT_PROJECT_ID)
+    state.model_rev = base  # the state lags the row
     r = post_commit(
         client,
         [{**update, "properties_patch": {"label": "2"}}],
@@ -1190,7 +1161,7 @@ def test_a_failed_write_leaves_nothing(
     assert get_registry().get(DEFAULT_PROJECT_ID).model_rev == before.rev
 
 
-def test_a_project_whose_rows_are_not_written_gets_them_before_the_check(
+def test_a_project_whose_rows_are_not_written_is_refused_and_left_alone(
     client: TestClient,
 ) -> None:
     with session() as s:
@@ -1201,14 +1172,28 @@ def test_a_project_whose_rows_are_not_written_gets_them_before_the_check(
         row.next_seq = None
         row.state_digest = None
         s.commit()
-    oracle = Oracle(json.dumps(_tree()))
-    ops = [
-        {"kind": "update_element", "id": "B1", "properties_patch": {"label": "z"}},
-        _delete("D"),
-    ]
-    assert oracle.run(model_ops(ops)).status == 200
-    commit_ops(client, ops)
-    assert_rows(oracle, DEFAULT_PROJECT_ID, "rows written from the session model")
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": head().rev,
+            "ops": [
+                {
+                    "kind": "update_element",
+                    "id": "B1",
+                    "properties_patch": {"label": "z"},
+                }
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "project has no head rows: re-import it"
+    with session() as s:
+        row = content.get_model_row(s, DEFAULT_PROJECT_ID)
+        assert row is not None
+        assert row.next_seq is None and row.state_digest is None
+        assert s.execute(select(func.count()).select_from(ElementRow)).scalar_one() == 0
+        assert content.get_commit(s, DEFAULT_PROJECT_ID, head().rev + 1) is None
 
 
 def test_a_refused_commit_ends_the_transaction_the_row_lock_lives_in(

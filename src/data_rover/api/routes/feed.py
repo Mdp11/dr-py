@@ -2,7 +2,7 @@
 
 One socket per subscriber. On connect: authenticate via the IdentityProvider
 seam (query-param identity in dev — browsers can't set WS headers), authorize
-against Membership, register in the project ``Session.hub``, broadcast a
+against Membership, register in the project ``ProjectState.hub``, broadcast a
 presence-join, send the initial snapshot, then pump the per-client queue to the
 socket until disconnect. We never expect inbound application messages; the
 receive loop exists only to observe the client closing.
@@ -27,17 +27,14 @@ from ..feed import (
 from ..db import get_db
 from ..db_models import Project
 from ..identity import get_identity_provider
-from ..session import get_registry
+from ..project_state import ProjectState, get_registry
 from ..settings import get_settings
 from ..tenancy import get_membership, upsert_user
 
 router = APIRouter()
 
 
-def _lease_dicts(session: object, now: float) -> list[dict]:
-    from ..session import Session  # local: avoid a router import cycle
-
-    assert isinstance(session, Session)
+def _lease_dicts(state: ProjectState, now: float) -> list[dict]:
     return [
         {
             "resource_id": le.resource_id,
@@ -45,7 +42,7 @@ def _lease_dicts(session: object, now: float) -> list[dict]:
             "holder_id": le.holder,
             "holder_email": le.holder_email,
         }
-        for le in session.lock_table.active_leases(now)
+        for le in state.lock_table.active_leases(now)
     ]
 
 
@@ -75,8 +72,8 @@ async def feed_ws(websocket: WebSocket, project_id: str) -> None:
     finally:
         db_gen.close()
 
-    session = get_registry().get(project_id)
-    session.last_access = time.monotonic()
+    state = get_registry().get(project_id)
+    state.last_access = time.monotonic()
 
     try:
         await websocket.accept()
@@ -86,10 +83,8 @@ async def feed_ws(websocket: WebSocket, project_id: str) -> None:
         user_id=user_id,
         queue=asyncio.Queue(maxsize=get_settings().feed_queue_max),
     )
-    session.hub.register(conn)
-    session.hub.broadcast(
-        presence_event("join", user_id, session.hub.connected_user_ids())
-    )
+    state.hub.register(conn)
+    state.hub.broadcast(presence_event("join", user_id, state.hub.connected_user_ids()))
     pump: asyncio.Task[None] | None = None
     try:
         # The initial snapshot send sits INSIDE the guarded region: a client
@@ -99,9 +94,9 @@ async def feed_ws(websocket: WebSocket, project_id: str) -> None:
         # cleanup as a normal disconnect — never as an unhandled ASGI error.
         await websocket.send_json(
             snapshot_event(
-                model_rev=session.model_rev,
-                locks=_lease_dicts(session, time.monotonic()),
-                connected=session.hub.connected_user_ids(),
+                model_rev=state.model_rev,
+                locks=_lease_dicts(state, time.monotonic()),
+                connected=state.hub.connected_user_ids(),
             )
         )
         pump = asyncio.create_task(_pump(websocket, conn))
@@ -112,9 +107,9 @@ async def feed_ws(websocket: WebSocket, project_id: str) -> None:
     finally:
         if pump is not None:
             pump.cancel()
-        session.hub.unregister(conn)
-        session.hub.broadcast(
-            presence_event("leave", user_id, session.hub.connected_user_ids())
+        state.hub.unregister(conn)
+        state.hub.broadcast(
+            presence_event("leave", user_id, state.hub.connected_user_ids())
         )
 
 

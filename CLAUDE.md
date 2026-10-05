@@ -6,7 +6,7 @@ Data Rover is a reflective MBSE (Model-Based Systems Engineering) metamodel engi
 - **Model** (`*.model.json`): elements and relationships conforming to one metamodel.
 - **View** (`*.view.json`): named folder overlays that reference model elements by id and own nothing.
 
-A Python core and FastAPI backend (Postgres, in-memory sessions over a durable commit journal), a SvelteKit frontend, and a TypeScript engine that keeps a full model replica in the browser, hosted in a cross-origin sandbox worker. Example artifacts: `examples/smart-city.*`.
+A Python core and FastAPI backend (Postgres, in-memory per-project state over head rows and a durable commit journal; the server loads no model), a SvelteKit frontend, and a TypeScript engine that keeps a full model replica in the browser, hosted in a cross-origin sandbox worker. Example artifacts: `examples/smart-city.*`.
 
 ## Where things are documented
 
@@ -17,7 +17,7 @@ This file is the map. How the code works lives in the README next to it; read th
 | Where the system is going: decisions `AD-n`, contracts `CT-n`, constraints `CN-n`, build order `MR-n`. Read before designing or planning anything touching the engine, sync, evaluation, scripts or deployment | `architecture/README.md`, then `architecture/program.md` for what exists yet |
 | Repo rules: layout, git, comments, tests (`RC-n`) | `architecture/conventions.md` |
 | Python core: metamodel, `Model`, validation pipeline, custom validation rules | `src/data_rover/core/README.md` |
-| Backend: sessions, ops and the commit delta, replica routes, tenancy/auth, persistence, locking, feed, metamodel editing | `src/data_rover/api/README.md` |
+| Backend: project state, ops and the commit delta, replica routes, tenancy/auth, persistence, locking, feed, metamodel editing | `src/data_rover/api/README.md` |
 | Snippet facade reference | `src/data_rover/core/script/README.md` |
 | TypeScript engine | `engine/README.md` |
 | Sandbox site and engine worker | `sandbox/README.md` |

@@ -2,8 +2,8 @@
 
 Clients mutate the model by sending small op batches (the op union in
 ``schemas.py``) instead of pushing whole-model snapshots. The applier runs on
-whatever ``Model`` it is given: a commit hands it a partial one loaded from the
-head rows (``commit_load``), a preview or a rebind the session model.
+whatever ``Model`` it is given: a commit, a preview or a revert hands it a
+partial one loaded from the head rows (``commit_load``).
 
 Atomicity without deep copies
 -----------------------------
@@ -39,8 +39,6 @@ from data_rover.core.model.relationship import Relationship
 from data_rover.core.validation.dirty import DirtyCollector, containment_closure
 
 from .. import content, head
-from ..deps import Session
-from ..hydration import serialize_ops
 from ..settings import get_settings
 from ..snapshot_job import schedule_periodic_snapshot
 from ..schemas import (
@@ -54,6 +52,7 @@ from ..schemas import (
     OpIn,
     RelationshipOut,
     TEMP_ID_PREFIX,
+    serialize_ops,
     UpdateElementOp,
     UpdateRelationshipOp,
 )
@@ -572,13 +571,12 @@ def _stage_commit(
     the model applier's result with the artifact applier's (``artifact_ops.
     ArtifactBatchResult``) into one journal entry, and neither result type is
     a superset of the other. ``Sequence[OpIn]`` (covariant) rather than
-    ``list[OpIn]`` for the same reason ``hydration.serialize_ops`` uses it:
+    ``list[OpIn]`` for the same reason ``schemas.serialize_ops`` uses it:
     the model-only caller passes a ``list[ModelOpIn]``, which is not a
     ``list[OpIn]`` under list invariance.
 
-    Only stages when the project actually has a durable model row (an
-    in-memory-only session has none yet — it persists a baseline when it is installed). Keeps DB model_rev in lockstep with the
-    just-bumped session.model_rev.
+    Only stages when the project has a durable model row; the row's
+    ``model_rev`` moves to ``rev`` with the journal entry.
 
     The keyword-only ``_commit_id``/``_message``/``_validation_error_count``/
     ``_issues`` parameters are optional metadata carried by the structured
@@ -598,7 +596,7 @@ def _stage_commit(
     on the model row.
 
     Returns True if a durable row existed and the commit was staged,
-    False when the project has no model row (in-memory-only session)."""
+    False when the project has no model row."""
     model_row = content.get_model_row(db, project_id)
     if model_row is None:
         return False
@@ -642,14 +640,11 @@ def _write_head(
         head.rebuild_refs(db, project_id, model.metamodel)
 
 
-def _maybe_periodic_snapshot(
-    db: DbSession, project_id: str, session: Session, rev: int
-) -> None:
-    """Schedule a full-model snapshot every settings.snapshot_every commits so
-    the hydration replay tail stays bounded for a hot, never-evicted session
-    (on-evict + baseline snapshots otherwise leave it unbounded). The write
-    happens on the snapshot job's thread, off this request's critical
-    section; ``snapshot_sync`` (tests) runs it inline instead."""
+def _maybe_periodic_snapshot(project_id: str, rev: int) -> None:
+    """Schedule a snapshot of the head every settings.snapshot_every commits so
+    a replica's catch-up tail stays bounded. The write happens on the snapshot
+    job's thread, off this request's critical section; ``snapshot_sync``
+    (tests) runs it inline instead."""
     every = get_settings().snapshot_every
     if every > 0 and rev % every == 0:
         schedule_periodic_snapshot(project_id)

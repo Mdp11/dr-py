@@ -10,7 +10,7 @@ from data_rover.api.artifact_bundle import BUNDLE_FORMAT
 from data_rover.api.db_models import Role
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
 from .conftest import AUTH_HEADERS, feed_url, papi, seed_default_project, EMPTY_MODEL, install, head
 

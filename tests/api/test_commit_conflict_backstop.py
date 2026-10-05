@@ -3,7 +3,7 @@ overlapping ones 409. Leases make conflicts rare — this is the backstop.
 
 Also covers the fail-closed fallbacks that keep the rule sound when the
 durable journal does NOT fully explain the gap between ``base_rev`` and
-head: an unjournaled rev bump (``set_model``), an empty-ops baseline
+head: an unjournaled rev bump, an empty-ops baseline
 marker, a rebind, and a
 project with no durable journal at all.
 """
@@ -15,9 +15,10 @@ from fastapi.testclient import TestClient
 
 from data_rover.api import content, db
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     container_lock_target,
     create_view,
@@ -342,18 +343,16 @@ def test_rebind_in_tail_always_conflicts(client: TestClient) -> None:
 
 
 def test_a_project_with_no_durable_model_row_refuses_commits() -> None:
-    """A project with no ``ModelRow`` (a session set up without the
-    durable-persisting route) has no head rows to check a batch against, so a
+    """A project with no ``ModelRow`` (a state whose metamodel was set without
+    the durable-persisting route) has no head rows to check a batch against, so a
     commit is refused outright, never answered from rows that are not there."""
     seed_default_project()
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
     from data_rover.core.metamodel.loader import load_metamodel_str
-    from data_rover.core.model.model import Model
 
-    session = get_session()
-    session.metamodel = load_metamodel_str(_MM)
-    session.set_model(Model(session.metamodel))
+    state = default_state()
+    state.metamodel = load_metamodel_str(_MM)
 
     base = _rev(c)
     for ops in (
@@ -363,8 +362,7 @@ def test_a_project_with_no_durable_model_row_refuses_commits() -> None:
         r = _commit(c, ops, base)
         assert r.status_code == 409, r.text
         assert r.json()["detail"] == "the project has no durable model to commit to"
-    assert session.model_rev == base
-    assert session.model is not None and len(session.model.elements) == 0
+    assert state.model_rev == base
 
 
 def test_empty_commit_is_a_no_op_and_never_poisons_the_tail(

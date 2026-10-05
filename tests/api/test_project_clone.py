@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from data_rover.api import content, db
 from data_rover.api.db_models import ArtifactKind, Membership, Project, Role, User
 from data_rover.api.main import create_app
-from data_rover.api.session import get_registry
+from data_rover.api.project_state import get_registry
 from .conftest import (
     install,
     head,
@@ -182,8 +182,8 @@ def test_clone_carries_unregistered_diagram_payload_byte_intact(
 
 
 def test_cloned_artifacts_survive_eviction(client: TestClient) -> None:
-    """Artifacts are DB rows, independent of the in-memory Session: evicting
-    the clone's session must not lose them."""
+    """Artifacts are DB rows, independent of the in-memory ProjectState: evicting
+    the clone's state must not lose them."""
     _seed("src", "owner1")
     _load_content(client, "src", "owner1")
     _create_artifact(

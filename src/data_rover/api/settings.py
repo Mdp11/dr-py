@@ -95,14 +95,15 @@ class Settings(BaseSettings):
     #: default) keeps unprefixed keys, so an existing deployment still finds
     #: its own mirror across an upgrade.
     redis_key_prefix: str = ""
-    #: A full-model snapshot is written every Nth commit (bounds hydration
-    #: replay length). A snapshot is ALSO always written on eviction.
+    #: A snapshot of the head is written every Nth commit (bounds a replica's
+    #: catch-up tail).
     snapshot_every: int = 200
-    #: Idle sessions (no request for this many seconds) are snapshotted and
-    #: evicted by the background sweeper. 0 disables the sweeper (tests).
+    #: Idle project states (no request for this many seconds) are evicted by
+    #: the background sweeper, unless a lease is live or a feed client is
+    #: connected. 0 disables the sweeper (tests).
     idle_evict_seconds: int = 1800
     #: lease lifetime; renewed by client heartbeat. Must be well
-    #: under idle_evict_seconds so an idle session has no live leases to strand.
+    #: under idle_evict_seconds so an idle project has no live leases to strand.
     lock_ttl_seconds: int = 300
     #: lifespan sweeper interval for auto-releasing expired leases. 0 disables.
     lock_sweep_seconds: int = 60

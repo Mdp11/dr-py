@@ -42,7 +42,7 @@ also repositions nodes it renamed).
 
 This module is deliberately route-free: the future change-request workflow
 points these same functions at a draft instead of a commit, so nothing here
-may depend on FastAPI, a request, or a live ``Session``.
+may depend on FastAPI, a request, or a live ``ProjectState``.
 """
 
 from __future__ import annotations
@@ -64,10 +64,10 @@ from .commit_states import (
     load_entity_states,
 )
 from .db_models import Commit
-from .hydration import deserialize_ops
 from .schemas import (
     METAMODEL_OP_KINDS,
     VIEW_OP_KINDS,
+    deserialize_ops,
     ArtifactDiffAddedOut,
     ArtifactDiffDeletedOut,
     ArtifactDiffModifiedOut,

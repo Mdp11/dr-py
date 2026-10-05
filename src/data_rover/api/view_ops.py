@@ -1,6 +1,6 @@
 """View-op plumbing.
 
-A view is a materialized head (``session.views[id]`` in memory, ``ViewRow.blob``
+A view is a materialized head (``state.views[id]`` in memory, ``ViewRow.blob``
 durable), so view ops must never reach the model applier. This module is the
 in-memory twin of ``artifact_ops``: ``apply_view_ops`` mutates a core ``View``
 in place while collecting EXACT inverses — apply-then-inverse restores a
@@ -14,7 +14,7 @@ Unlike the artifact applier there is no DB here: rollback is
 in-place shape as ``routes/ops.py::_rollback``. Every op names its view by
 ``view_id``; ``group_by_view`` splits a batch so each group is applied to its
 own ``View``, and ``resolve_view`` turns an id into that view or a 422 —
-``session.views`` is complete after hydration, so a miss is a client error,
+``state.views`` is complete once the project's state is loaded, so a miss is a client error,
 never a cold-cache artefact.
 
 Tolerance stance (mirrors ``validate_view``): ids that merely DANGLE (an

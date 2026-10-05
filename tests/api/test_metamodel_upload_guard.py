@@ -49,14 +49,14 @@ def test_upload_on_nonempty_model_409(client: TestClient) -> None:
     assert "rebind" in r.json()["detail"]
 
 
-def test_upload_guard_reads_the_model_row_not_the_session_model(
-    client: TestClient,
+def test_upload_guard_reads_the_model_row(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from data_rover.api.session import get_registry
+    from .conftest import no_model_built
 
     install(metamodel=_MM, model=EMPTY_MODEL)
     commit_ops(client, [{"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}])
-    get_registry().get("default").model = None
+    no_model_built(monkeypatch)
     r = client.post(papi("/metamodel"), content=_MM,
                     headers={"content-type": "application/x-yaml"})
     assert r.status_code == 409
@@ -76,7 +76,7 @@ _PEER = {"x-user-id": "peer", "x-user-email": "peer@example.com"}
 def _add_editor(user_id: str, email: str) -> None:
     from data_rover.api import db
     from data_rover.api.db_models import Role, User
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
     gen = db.get_db()

@@ -16,12 +16,13 @@ from fastapi.testclient import TestClient
 from data_rover.api import content, db, snapshot_job
 from data_rover.api.db_models import Project
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, Session, get_registry
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.snapshot_job import SnapshotJob, schedule_periodic_snapshot
 from tests.api.conftest import (
     AUTH_HEADERS,
     EMPTY_MODEL,
     commit_ops,
+    default_state,
     install,
     papi,
     seed_default_project,
@@ -31,7 +32,7 @@ MM = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 
 
 def _client() -> TestClient:
-    """Live session + durable model row, so commits are actually journaled."""
+    """A durable model row, so commits are actually journaled."""
     seed_default_project()
     c = TestClient(create_app())
     install(metamodel=MM, model=EMPTY_MODEL)
@@ -49,17 +50,17 @@ def _concrete_type(c: TestClient) -> str:
 def _create_one(c: TestClient) -> int:
     body = commit_ops(
         c,
-        [{"kind": "create_element", "temp_id": "tmp_1",
-          "type_name": _concrete_type(c), "properties": {}}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_1",
+                "type_name": _concrete_type(c),
+                "properties": {},
+            }
+        ],
     )
     rev: int = body["model_rev"]
     return rev
-
-
-def _live_session() -> Session:
-    session = get_registry().peek(DEFAULT_PROJECT_ID)
-    assert session is not None
-    return session
 
 
 def _latest_snapshot_rev() -> int | None:
@@ -68,11 +69,14 @@ def _latest_snapshot_rev() -> int | None:
         return None if snap is None else snap.rev
 
 
-def test_route_schedules_the_job_asynchronously(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_route_schedules_the_job_asynchronously(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The route hands off to the thread rather than writing inline: the
     sentinel replaces ``write_snapshot_from_rows`` so the job thread performs no
     database work at all, keeping it from ever overlapping the request's
     own use of the shared in-memory-SQLite connection."""
+    c = _client()  # its rev-0 snapshot goes through the job, inline under the pin
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_SYNC", "false")
     monkeypatch.setenv("DATA_ROVER_SNAPSHOT_EVERY", "1")
     calls: list[str] = []
@@ -84,7 +88,6 @@ def test_route_schedules_the_job_asynchronously(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         "data_rover.api.snapshot_job.write_snapshot_from_rows", _sentinel
     )
-    c = _client()
     _create_one(c)
     job = snapshot_job.current_job(DEFAULT_PROJECT_ID)
     assert job is not None
@@ -99,7 +102,7 @@ def test_async_job_writes_the_snapshot_row() -> None:
     only user of the shared in-memory-SQLite connection: this is what
     exercises the genuine daemon thread doing a genuine durable write."""
     _client()
-    rev = _live_session().model_rev
+    rev = default_state().model_rev
     job = schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=False)
     assert job is not None
     assert job.done.wait(10.0), "snapshot job did not finish"
@@ -120,7 +123,7 @@ def test_sync_job_writes_inline_under_the_conftest_pin() -> None:
 
 def test_job_writes_the_rev_it_finds() -> None:
     """No rev is plumbed into schedule_periodic_snapshot: it always snapshots
-    whatever rev the session is at when it runs. Any rev at or past the
+    whatever rev the head is at when it runs. Any rev at or past the
     trigger bounds the replay tail equally."""
     c = _client()
     _create_one(c)
@@ -144,7 +147,7 @@ def test_second_trigger_while_a_job_runs_is_dropped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _client()
-    baseline_rev = _live_session().model_rev  # no _create_one: still at baseline
+    baseline_rev = default_state().model_rev  # no _create_one: still at baseline
     running = SnapshotJob()  # running=True by construction
     monkeypatch.setitem(snapshot_job._jobs, DEFAULT_PROJECT_ID, running)
     assert schedule_periodic_snapshot(DEFAULT_PROJECT_ID, sync=True) is None
@@ -204,3 +207,85 @@ def test_ops_route_survives_a_failing_periodic_snapshot(
     rev = _create_one(c)  # asserts 200 inside
     assert rev == baseline + 1
     assert _latest_snapshot_rev() == baseline
+
+
+# --- the rev-0 snapshot goes through the job -------------------------------------
+
+
+def _rev0_snapshot_exists(project_id: str) -> bool:
+    with db.db_session() as s:
+        return content.get_snapshot(s, project_id, 0) is not None
+
+
+def _wait_for_job(project_id: str) -> SnapshotJob:
+    job = snapshot_job.current_job(project_id)
+    assert job is not None, "no job was scheduled"
+    assert job.done.wait(10.0), "snapshot job did not finish"
+    return job
+
+
+def test_import_schedules_its_rev0_snapshot_on_the_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from data_rover.api import importer
+
+    monkeypatch.setenv("DATA_ROVER_SNAPSHOT_SYNC", "false")
+    importer.import_project(
+        project_id="imp",
+        name="Imp",
+        owner_id="u1",
+        metamodel_yaml=MM,
+        model_json=EMPTY_MODEL,
+    )
+    job = _wait_for_job("imp")
+    assert job.written_rev == 0
+    assert _rev0_snapshot_exists("imp")
+
+
+def test_clone_schedules_its_rev0_snapshot_on_the_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from data_rover.api import importer
+
+    _client()  # the source, installed under the inline pin
+    monkeypatch.setenv("DATA_ROVER_SNAPSHOT_SYNC", "false")
+    importer.clone_project(
+        source_id=DEFAULT_PROJECT_ID, project_id="copy", name="Copy", owner_id="u1"
+    )
+    job = _wait_for_job("copy")
+    assert job.written_rev == 0
+    assert _rev0_snapshot_exists("copy")
+
+
+def test_install_schedules_its_rev0_snapshot_on_the_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _client()
+    monkeypatch.setenv("DATA_ROVER_SNAPSHOT_SYNC", "false")
+    with db.db_session() as s:
+        from data_rover.api import importer
+
+        importer.install_model(
+            s, DEFAULT_PROJECT_ID, metamodel_yaml=MM, model_json=EMPTY_MODEL
+        )
+    job = _wait_for_job(DEFAULT_PROJECT_ID)
+    assert job.written_rev == 0
+    assert _rev0_snapshot_exists(DEFAULT_PROJECT_ID)
+
+
+def test_an_open_after_an_import_whose_job_has_not_written_gets_a_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The descriptor writes a missing rev-0 snapshot itself, so a replica that
+    opens before the job has written does not wait for it."""
+    c = _client()
+    with db.db_session() as s:
+        from sqlalchemy import delete
+
+        from data_rover.api.db_models import Snapshot
+
+        s.execute(delete(Snapshot))
+    r = c.get(papi("/replica/snapshot"), headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    assert r.json()["rev"] == 0
+    assert _rev0_snapshot_exists(DEFAULT_PROJECT_ID)

@@ -136,7 +136,7 @@ def _utcnow() -> datetime:
 
 class MetamodelRow(Base):
     """A versioned, shareable metamodel. ``blob`` is the YAML source text
-    (re-parsed via ``load_metamodel_str`` on hydrate). Immutable per version:
+    (re-parsed via ``load_metamodel_str`` when the project's state loads). Immutable per version:
     a new metamodel is a new row, never an in-place mutation."""
 
     __tablename__ = "metamodels"
@@ -345,8 +345,8 @@ class Commit(Base):
 
 
 class Snapshot(Base):
-    """A full-model snapshot in the SnapshotStore. Hydration loads the
-    nearest snapshot with ``rev <= model_rev`` then replays later commits."""
+    """A snapshot of the head rows in the SnapshotStore, which a replica opens
+    from and then catches up by the journal tail."""
 
     __tablename__ = "snapshots"
 

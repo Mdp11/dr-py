@@ -5,13 +5,13 @@ Degrade-graceful by construction (the mirror is optional): short
 socket timeouts so a down Redis costs at most ~1s once, then a cooldown so it
 costs nothing for the next ~30s; up→down and down→up transitions each log
 exactly once, never per call. Errors are swallowed HERE as well as in the
-``mirror_session_leases`` (write path) / ``restore_leases`` (load path)
-catch-alls — two layers on purpose, so neither a route nor hydration can ever
+``mirror_project_leases`` (write path) / ``restore_leases`` (load path)
+catch-alls — two layers on purpose, so neither a route nor a state load can ever
 fail because of the mirror.
 
 This instance is installed as a process-global singleton
 (``get_lease_mirror()``) and called concurrently from many request threads
-across many projects (``mirror_session_leases``, ``restore_leases``). The
+across many projects (``mirror_project_leases``, ``restore_leases``). The
 down/up transition bookkeeping (``_down``, ``_down_until``) is therefore
 guarded by a small lock — see ``_state_lock`` — so the "log exactly once"
 promise above holds even when several threads observe a failing Redis at the

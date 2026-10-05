@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -152,7 +153,7 @@ class ArtifactRefOut(BaseModel):
 
 class FolderOut(BaseModel):
     #: mirrors `Folder.id`; "" means not yet assigned (legacy blob healed at
-    #: hydration/import time — this field just carries whatever the core
+    #: load/import time — this field just carries whatever the core
     #: side already has).
     id: str = ""
     name: str
@@ -436,7 +437,7 @@ class MoveArtifactOp(BaseModel):
 
 
 #: View-content ops — applied by api/view_ops.py to
-#: the in-memory session.view, then the blob is persisted; never to the model.
+#: the in-memory ``ProjectState.views``, then the blob is persisted; never to the model.
 ViewOpIn = (
     CreateFolderOp
     | RenameFolderOp
@@ -517,6 +518,18 @@ METAMODEL_OP_KINDS = frozenset({"metamodel.rebind", "metamodel.move_node"})
 #: journal (Commit.ops / inverse_ops). Mode "json" keeps Literal "kind" tags
 #: so the discriminated union round-trips.
 OPS_ADAPTER: TypeAdapter[list[OpIn]] = TypeAdapter(list[OpIn])
+
+
+def serialize_ops(ops: Sequence[OpIn]) -> list[Any]:
+    # Sequence (covariant), not list: model-only callers pass a
+    # `list[ModelOpIn]`, which is not a `list[OpIn]` under list's invariance
+    # even though ModelOpIn <: OpIn. Mixed commits pass a genuine `list[OpIn]`.
+    return OPS_ADAPTER.dump_python(list(ops), mode="json")
+
+
+def deserialize_ops(raw: list[Any]) -> list[OpIn]:
+    return OPS_ADAPTER.validate_python(raw)
+
 
 #: validates ONE raw journal op dict into a typed view op (the conflict
 #: backstop deserializes only the view ops of tail commits; model/artifact

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import threading
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -19,7 +18,7 @@ from data_rover.api.db_models import ModelRow, Role, Snapshot, User
 from data_rover.api.snapshot_rows import write_snapshot_from_rows
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry, get_session
+from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
 from data_rover.api.storage import (
     MemorySnapshotStore,
     get_snapshot_store,
@@ -28,6 +27,7 @@ from data_rover.api.storage import (
 from data_rover.api.tenancy import add_member
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     papi,
     seed_default_project,
@@ -92,13 +92,15 @@ def client(store: _CountingStore) -> TestClient:
 
 
 def _head() -> int:
-    return get_session().model_rev
+    return default_state().model_rev
 
 
 def _live_digest() -> str:
-    session = get_session()
-    with session.write_mutex:
-        return session.state_digest()
+    """The digest the head rows carry, on the model row."""
+    with db.db_session() as s:
+        row = content.get_model_row(s, DEFAULT_PROJECT_ID)
+        assert row is not None and row.state_digest is not None
+        return row.state_digest
 
 
 def _descriptor(client: TestClient, **kw: Any) -> dict[str, Any]:
@@ -415,7 +417,7 @@ def test_no_blob_when_the_store_lost_it(client: TestClient) -> None:
     _blob_404(client, rev)
 
 
-def test_the_blob_route_hydrates_nothing(client: TestClient) -> None:
+def test_the_blob_route_loads_no_state(client: TestClient) -> None:
     _ops(client, [_node("A")])
     rev = _head()
     write_snapshot_from_rows(DEFAULT_PROJECT_ID)

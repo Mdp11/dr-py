@@ -4,13 +4,13 @@ observable from outside the process (redis-cli).
 ``LockTable`` (locking.py) stays the ONLY authority for conflict decisions;
 the mirror never participates in one. After each successful lease mutation the
 caller mirrors the project's ENTIRE live lease set wholesale
-(:func:`mirror_session_leases`); on session hydration the fresh table is
+(:func:`mirror_project_leases`); when a project's state is loaded the fresh table is
 seeded back (:func:`restore_leases`) with the ORIGINAL tokens, so a client
 that outlived the restart keeps renewing the token it already holds. Whole-set
 rewrite is idempotent and self-healing: a mirror that lagged truth during a
 Redis outage re-converges on the next mutation, and the client renew
 heartbeat guarantees one within ttl/2 for any lease still held. Write-throughs
-for one project are serialized by ``Session.mirror_mutex`` (held across
+for one project are serialized by ``ProjectState.mirror_mutex`` (held across
 snapshot AND write), so they land in snapshot order — two racing calls can
 never leave the mirror holding a released lease. The one remaining
 phantom window is an outage, not a race: a release whose write-through was
@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Protocol
 from .locking import Lease, LockIntent, LockMode, LockTable
 
 if TYPE_CHECKING:
-    from .session import Session
+    from .project_state import ProjectState
     from .settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -184,7 +184,7 @@ def get_lease_mirror() -> LeaseMirror:
     A build failure (bad ``redis_url`` scheme, unimportable ``redis``) is
     memoized as a permanent fallback to :class:`NullLeaseMirror` rather than
     retried on the next call: every lock acquire/release/renew, every commit
-    release and every cold hydration calls in here, so an unmemoized failure
+    release and every cold state load calls in here, so an unmemoized failure
     would re-attempt (and re-log) the same broken construction on every one
     of those forever — degraded-but-quiet is the goal, not a warning-log
     firehose. The stickiness lives in ``_mirror`` itself (bound to the Null
@@ -223,13 +223,13 @@ def build_mirror_from_settings(settings: Settings) -> LeaseMirror:
     return RedisLeaseMirror(settings.redis_url, key_prefix=settings.redis_key_prefix)
 
 
-def mirror_session_leases(project_id: str, session: Session) -> None:
+def mirror_project_leases(project_id: str, state: ProjectState) -> None:
     """Best-effort write-through: snapshot the live lease set and mirror it.
 
-    Call AFTER the mutating ``with session.write_mutex:`` block has exited —
-    ``session.mirror_mutex`` is acquired here, and its ordering contract is
+    Call AFTER the mutating ``with state.write_mutex:`` block has exited —
+    ``state.mirror_mutex`` is acquired here, and its ordering contract is
     that it is never taken while ``write_mutex`` is held (see the field's
-    docstring in session.py). The mutex pair does two jobs: ``write_mutex``
+    docstring in project_state.py). The mutex pair does two jobs: ``write_mutex``
     is re-taken only briefly, for a coherent snapshot, so mirror I/O (a
     network round trip to Redis) never extends a lock route's or commit's
     critical section; ``mirror_mutex`` is held across snapshot AND write so
@@ -237,10 +237,10 @@ def mirror_session_leases(project_id: str, session: Session) -> None:
 
     Never raises: a mirror failure must not fail a lock operation."""
     try:
-        with session.mirror_mutex:
+        with state.mirror_mutex:
             mono_now = time.monotonic()
-            with session.write_mutex:
-                leases = session.lock_table.active_leases(mono_now)
+            with state.write_mutex:
+                leases = state.lock_table.active_leases(mono_now)
             payload = to_mirrored(leases, mono_now=mono_now, wall_now=time.time())
             get_lease_mirror().write(project_id, payload)
     except Exception:
@@ -250,9 +250,9 @@ def mirror_session_leases(project_id: str, session: Session) -> None:
 
 
 def restore_leases(project_id: str, table: LockTable) -> None:
-    """Seed a freshly hydrated session's LockTable from the mirror.
+    """Seed a freshly loaded state's LockTable from the mirror.
 
-    Runs inside the registry loader BEFORE the session serves any request, so
+    Runs inside the registry loader BEFORE the state serves any request, so
     no locking around ``table`` is needed. Restored leases keep their
     original tokens — token continuity across restart is the point of the
     mirror. Never raises: a mirror failure degrades to today's cold start

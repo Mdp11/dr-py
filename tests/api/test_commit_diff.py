@@ -18,7 +18,7 @@ from data_rover.api import db
 from data_rover.api.commit_diff import _artifact_states, diff_commit, json_structural_diff
 from data_rover.api.db_models import Commit
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
 from .conftest import (
     AUTH_HEADERS,
@@ -30,7 +30,7 @@ from .conftest import (
     head,
     commit_ops,
     forget_entity_states,
-    without_session_model,
+    no_model_built,
 )
 from .test_commits_metamodel_ops import _acquire_mm
 
@@ -993,9 +993,9 @@ def test_a_commit_row_without_states_has_no_diff(client: TestClient) -> None:
 def test_commit_diff_needs_membership_not_a_session(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The endpoint reads rows only: it answers with no model in the session."""
+    """The endpoint reads rows only: it answers with no model built."""
     rev_create, *_ = _three_commits(client)
-    without_session_model(monkeypatch)
+    no_model_built(monkeypatch)
     d = client.get(papi(f"/commits/{rev_create}/diff"))
     assert d.status_code == 200, d.text
 

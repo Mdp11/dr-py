@@ -1,5 +1,5 @@
 """A snapshot streamed from the head rows is byte-identical to the one the model
-encoder writes, and the descriptor needs no session model."""
+encoder writes, and the descriptor needs no model."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from data_rover.api.db_models import Snapshot
 from data_rover.api.main import create_app
 from data_rover.api.routes._snapshot import build_model_from_dicts
 from data_rover.api.serialize import iter_entity_lines, parse_model_json
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.snapshot_codec import decode_snapshot, encode_snapshot_v2
 from data_rover.api.snapshot_rows import write_snapshot_from_rows
 from data_rover.api.storage import get_snapshot_store
@@ -31,7 +31,9 @@ from .conftest import (
     SMART_CITY_MM,
     SMART_CITY_MODEL,
     commit_ops,
+    head,
     install,
+    no_model_built,
     install_unchecked,
     papi,
     post_commit,
@@ -105,9 +107,8 @@ def test_rows_snapshot_after_random_commits(client: TestClient) -> None:
     while landed < 50:
         attempts += 1
         assert attempts < 600, "the generator no longer lands commits"
-        session = get_registry().get(DEFAULT_PROJECT_ID)
-        assert session.model is not None
-        ids = (list(session.model.elements), list(session.model.relationships))
+        current = head()
+        ids = (list(current.elements), list(current.relationships))
         landed += post_commit(client, _random_ops(rng, ids)).status_code == 200
     rev = write_snapshot_from_rows(DEFAULT_PROJECT_ID)
     model_rev, _, digest = _model_row()
@@ -152,16 +153,21 @@ def test_exact_values(client: TestClient) -> None:
     )
     rev = write_snapshot_from_rows(DEFAULT_PROJECT_ID)
     text = _stored(rev)
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    assert session.model is not None
-    for line in iter_entity_lines(session.model):
+    with db.db_session() as s:
+        elements, relationships = head_mod.read_head(s, DEFAULT_PROJECT_ID)
+    model = build_model_from_dicts(
+        load_metamodel_str(_MM), {"elements": elements, "relationships": relationships}
+    )
+    for line in iter_entity_lines(model):
         assert line.encode() + b"\n" in text
     for token in (b'"x":1.0', b'"n":1152921504606846976', b'"NaN"', b'"Infinity"'):
         assert token in text
     assert b"-Infinity" in text
 
 
-def test_descriptor_without_model(client: TestClient) -> None:
+def test_descriptor_without_model(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     commit_ops(
         client,
         [
@@ -173,13 +179,12 @@ def test_descriptor_without_model(client: TestClient) -> None:
             }
         ],
     )
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    session.model = None
     with db.db_session() as s:
         row = content.get_model_row(s, DEFAULT_PROJECT_ID)
         assert row is not None
         s.execute(delete(Snapshot))
         head_rev = row.model_rev
+    no_model_built(monkeypatch)
     res = client.get(papi("/replica/snapshot"))
     assert res.status_code == 200, res.text
     assert res.json()["rev"] == head_rev
@@ -192,14 +197,14 @@ class _Blob:
         self.opened: list[tuple[str, dict[str, Any]]] = []
         self.written = b""
 
-    def open(self, mode: str, **kwargs: Any) -> "_Blob":
+    def open(self, mode: str, **kwargs: Any) -> _Blob:
         self.opened.append((mode, kwargs))
         return self
 
     def write(self, data: bytes) -> None:
         self.written += data
 
-    def __enter__(self) -> "_Blob":
+    def __enter__(self) -> _Blob:
         return self
 
     def __exit__(self, *exc: object) -> None:

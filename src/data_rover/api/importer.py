@@ -45,11 +45,10 @@ from .db_models import (
     RelationshipRow,
     Role,
 )
-from .hydration import hydrate_session
 from .import_stream import ingest_model
-from .session import get_registry
-from .snapshot_rows import write_snapshot_from_rows
+from .project_state import get_registry
 from .settings import get_settings
+from .snapshot_job import current_job, schedule_periodic_snapshot
 
 
 def _remap_view_artifact_refs(view: View, id_map: Mapping[str, str]) -> None:
@@ -281,7 +280,8 @@ def import_project(
     project, its rows, its artifacts and its views land in ONE transaction that
     commits only when every check passes; a refusal is a 422
     (``HTTPException``) and leaves no project, no rows and no snapshot. The
-    rev-0 snapshot is written after the commit.
+    rev-0 snapshot is scheduled after the commit (the snapshot job); an
+    open that finds none writes it.
 
     Returns the bundle artifacts that were reported-and-skipped (empty on the
     trusted path in practice). ``trust_artifacts`` defaults to the SAFE side:
@@ -307,9 +307,8 @@ def import_project(
             trust_artifacts=trust_artifacts,
             views=views,
         )
-    # the rev-0 snapshot, after the commit above. Synchronous: hydrating a
-    # session reads it, and a session built without one is an empty model.
-    write_snapshot_from_rows(project_id)
+    # the rev-0 snapshot, after the commit above
+    schedule_periodic_snapshot(project_id)
     return skipped
 
 
@@ -340,7 +339,7 @@ def clone_project(*, source_id: str, project_id: str, name: str, owner_id: str) 
     project's rows, digest, counts and ``next_seq`` are the source's. Artifacts
     and views are copied through the importer's landing, which gives each
     artifact a fresh id and remaps the refs to it. One transaction, then the
-    rev-0 snapshot."""
+    rev-0 snapshot job."""
     with db_session() as s:
         tenancy.upsert_user(s, owner_id, "")
         src = s.get(Project, source_id)
@@ -395,7 +394,7 @@ def clone_project(*, source_id: str, project_id: str, name: str, owner_id: str) 
             trust_artifacts=True,
             views=views,
         )
-    write_snapshot_from_rows(project_id)
+    schedule_periodic_snapshot(project_id)
 
 
 def install_model(
@@ -408,8 +407,9 @@ def install_model(
     """Replace the project's metamodel and model with these documents at a fresh
     baseline (rev 0, no history).
 
-    One transaction: a refused model (422) leaves the project as it was. A warm
-    session's mirror follows the new rows and its feed clients get a reset."""
+    One transaction: a refused model (422) leaves the project as it was. The
+    warm project state takes the new metamodel and rev and its feed clients get
+    a reset."""
     metamodel = load_metamodel_str(metamodel_yaml)
     try:
         mm_row = content.create_metamodel(db, name="", version=1, blob=metamodel_yaml)
@@ -431,26 +431,15 @@ def install_model(
     except BaseException:
         db.rollback()
         raise
-    write_snapshot_from_rows(project_id)
-    _refresh_mirror(project_id)
-
-
-def _refresh_mirror(project_id: str) -> None:
-    """Bring a warm session's model mirror to the rows just installed, in place,
-    so its feed clients and leases stay attached, and tell its feed clients. A
-    cold project has no mirror: it hydrates from the rev-0 snapshot when first
-    asked. This is the one place the install builds a ``Model``, only while a
-    legacy mirror is warm."""
-    session = get_registry().peek(project_id)
-    if session is None:
-        return
-    fresh = hydrate_session(project_id)
-    with session.write_mutex:
-        session.metamodel = fresh.metamodel
-        session.model = fresh.model
-        session.model_rev = fresh.model_rev
-        session.state_digest_value = None
-    session.announce_reset()
+    schedule_periodic_snapshot(project_id)
+    # in place, so the feed clients and leases of a warm state stay attached; a
+    # cold project loads the new rows when first asked
+    state = get_registry().peek(project_id)
+    if state is not None:
+        with state.write_mutex:
+            state.metamodel = metamodel
+            state.model_rev = 0
+        state.announce_reset()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -480,6 +469,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.artifacts
             else None,
         )
+    # the process exits with the snapshot job's daemon thread
+    job = current_job(args.project_id)
+    if job is not None:
+        job.done.wait()
     print(f"Imported project {args.project_id!r}")
     for entry in skipped:
         print(f"  skipped artifact {entry.bundle_id}: {entry.reason}")

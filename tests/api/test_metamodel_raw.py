@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
-from data_rover.api.session import get_session
 from data_rover.core.metamodel.loader import load_metamodel_str
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     papi,
     seed_default_project,
@@ -86,11 +86,11 @@ def test_raw_returns_rebound_blob_verbatim() -> None:
 
 
 def test_raw_serialized_fallback_without_durable_rows() -> None:
-    """A session with an in-memory metamodel but no DB rows degrades to a
+    """A state with an in-memory metamodel but no DB rows degrades to a
     re-serialized blob rather than 404ing (house degraded-never-failed)."""
     c = _client()
-    sess = get_session()
-    sess.set_metamodel(load_metamodel_str(_MM))
+    sess = default_state()
+    sess.metamodel = load_metamodel_str(_MM)
     r = c.get(papi("/metamodel/raw"))
     assert r.status_code == 200, r.text
     body = r.json()

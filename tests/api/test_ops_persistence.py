@@ -1,7 +1,7 @@
 """Tests for durable commit persistence in POST /commits and POST /commits/revert.
 
 Verifies that accepted op batches are recorded as Commit rows and that
-models.model_rev stays in lockstep with the in-memory session.model_rev.
+models.model_rev stays in lockstep with the in-memory ProjectState.model_rev.
 
 Setup installs the metamodel and model, which persists the DB model row, so
 the commit path's ``get_model_row is None`` early-return does not fire and
@@ -115,10 +115,10 @@ def test_periodic_snapshot_not_written_for_default_snapshot_every() -> None:
 def test_apply_ops_rolls_back_in_memory_on_persist_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If append_commit raises, the in-memory model and session rev must be
+    """If append_commit raises, the in-memory state rev must be
     rolled back to the pre-request state and no journal row must appear."""
     from data_rover.api import content as _content
-    from data_rover.api.session import get_registry
+    from data_rover.api.project_state import get_registry
 
     c = _client()
     t = _concrete_type(c)
@@ -133,10 +133,10 @@ def test_apply_ops_rolls_back_in_memory_on_persist_failure(
     r = post_commit(c, _create(t))
     assert r.status_code == 500
 
-    # in-memory session rev must be back to base
-    session = get_registry().get("default")
-    assert session.model_rev == base, (
-        f"model_rev was not rolled back: expected {base}, got {session.model_rev}"
+    # in-memory state rev must be back to base
+    state = get_registry().get("default")
+    assert state.model_rev == base, (
+        f"model_rev was not rolled back: expected {base}, got {state.model_rev}"
     )
 
     # the element must NOT have been created (model has original count)

@@ -46,10 +46,10 @@ def test_open_reports_lock_ttl_seconds(client: TestClient) -> None:
     assert body["lock_ttl_seconds"] == 300
 
 
-def test_open_reads_the_model_row_not_the_session_model(
+def test_open_reads_the_model_row_and_builds_no_model(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from .conftest import commit_ops, head, without_session_model
+    from .conftest import commit_ops, head, no_model_built
 
     commit_ops(
         client,
@@ -65,7 +65,7 @@ def test_open_reads_the_model_row_not_the_session_model(
             },
         ],
     )
-    without_session_model(monkeypatch)
+    no_model_built(monkeypatch)
     r = client.get(papi("/open"), headers=AUTH_HEADERS)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -89,18 +89,18 @@ def test_open_of_a_project_without_a_model_row_is_404() -> None:
     assert c.get(papi("/open"), headers=AUTH_HEADERS).status_code == 404
 
 
-def test_open_hydrates_no_session(
+def test_open_loads_no_project_state(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from data_rover.api import hydration
-    from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+    from data_rover.api import project_state
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
 
     get_registry().evict(DEFAULT_PROJECT_ID)
 
     def refuse(*_a: object, **_k: object) -> None:
-        raise AssertionError("the open hydrated a session")
+        raise AssertionError("the open loaded a project state")
 
-    monkeypatch.setattr(hydration, "hydrate_session", refuse)
+    monkeypatch.setattr(project_state, "_load", refuse)
     r = client.get(papi("/open"), headers=AUTH_HEADERS)
     assert r.status_code == 200, r.text
     assert DEFAULT_PROJECT_ID not in get_registry().project_ids()

@@ -195,6 +195,20 @@ def write_baseline(
     row.next_seq = max(len(elements), len(relationships))
 
 
+def write_empty_baseline(db: Session, project_id: str) -> None:
+    """Replace the project's rows with none: a model with no entities, which
+    digests to 0 and numbers from 0."""
+    row = content.get_model_row(db, project_id)
+    if row is None:
+        raise LookupError(f"project {project_id!r} has no model row")
+    db.flush()
+    clear_rows(db, project_id)
+    row.element_count = 0
+    row.relationship_count = 0
+    row.state_digest = format_digest(0)
+    row.next_seq = 0
+
+
 def clear_rows(db: Session, project_id: str) -> None:
     for table in (EntityRefRow, RelationshipRow, ElementRow):
         db.execute(
@@ -218,7 +232,7 @@ def write_batch(
     allocation counter follow. ``state_digest`` is the commit path's.
 
     Does nothing for a project without a model row, or whose rows are not
-    written yet (``next_seq`` NULL: hydration writes them)."""
+    written yet (``next_seq`` NULL: such a project is imported again)."""
     row = content.get_model_row(db, project_id)
     if row is None or row.next_seq is None:
         return

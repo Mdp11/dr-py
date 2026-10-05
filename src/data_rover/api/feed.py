@@ -1,4 +1,4 @@
-"""Realtime feed plumbing. A per-``Session`` ``FeedHub`` fans server-side
+"""Realtime feed plumbing. A per-``ProjectState`` ``FeedHub`` fans server-side
 events out to connected WebSocket clients.
 
 The mutation path is SYNCHRONOUS (threadpool + write_mutex); WebSockets are
@@ -7,7 +7,7 @@ ASYNC. ``broadcast`` bridges the two by enqueuing onto each client's bounded
 is therefore safe to make while holding the write_mutex. A client whose queue
 overflows (cannot keep up) is dropped and told to close; it reconnects and
 re-syncs from the next snapshot. This module is intentionally dependency-free
-(no DB, no schemas) so ``session.py`` can import it without pulling in the
+(no DB, no schemas) so ``project_state.py`` can import it without pulling in the
 persistence stack.
 """
 
@@ -55,7 +55,7 @@ class ClientConn:
 
 @dataclass
 class FeedHub:
-    """Per-session set of connected clients with sync, thread-safe broadcast."""
+    """Per-project set of connected clients with sync, thread-safe broadcast."""
 
     _conns: set[ClientConn] = field(default_factory=set)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)

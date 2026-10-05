@@ -5,16 +5,17 @@ commits. Streaming a large head takes seconds, so the trigger schedules this
 job instead of writing inline: a daemon thread runs ``write_snapshot_from_rows``
 for the project, which snapshots the rows at whatever rev it finds committed
 there. Any rev at or past the trigger bounds the replay tail equally, and the
-job needs no session, no model and no write mutex. A project without a model
-row (deleted) is skipped.
+job needs no project state, no model and no write mutex. A project without a
+model row (deleted) is skipped.
 
 One job per project at a time, held in a process-wide slot; a trigger that
 finds one running is dropped (the next multiple re-triggers). Failure is
-logged and dropped: the commit is durable, and a replica or hydration
-rebuilds the snapshot on the next cache miss.
+logged and dropped: the commit is durable, and a replica's open writes the
+snapshot on the next cache miss.
 
-The snapshots that are correctness rather than bounding (the rebind's, the
-baseline's, the descriptor's miss) are written synchronously by their callers.
+The rev-0 snapshot of an import, a clone and an install goes through this job
+too. The snapshots that are correctness rather than bounding (the rebind's, the
+descriptor's miss) are written synchronously by their callers.
 """
 
 from __future__ import annotations
@@ -79,7 +80,7 @@ def _run(project_id: str, job: SnapshotJob) -> None:
     except Exception:
         logger.warning(
             "periodic snapshot failed for project %s; commit is durable, "
-            "hydration will rebuild",
+            "a replica's open will rebuild",
             project_id,
             exc_info=True,
         )

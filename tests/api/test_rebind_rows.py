@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.api import content, db, rebind_check
 from data_rover.api.db_models import EntityRefRow
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
 from data_rover.core.metamodel.loader import load_metamodel_str
 
 from .conftest import AUTH_HEADERS, head, install, papi, seed_default_project
@@ -151,16 +151,15 @@ def _bound_metamodel_id() -> str:
 
 
 def _assert_untouched(before_refs: set[tuple[str, str]], before_mm: str) -> None:
-    """A refused rebind leaves the rows, the refs, the binding and the session as
-    they were."""
+    """A refused rebind leaves the rows, the refs, the binding and the project
+    state as they were."""
     assert head().rev == 0
     assert _refs() == before_refs
     assert _bound_metamodel_id() == before_mm
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    assert session.metamodel is not None
-    assert session.model is not None and session.model.metamodel is session.metamodel
-    assert session.metamodel.element_type("Gadget") is not None
-    assert session.model_rev == 0
+    state = get_registry().get(DEFAULT_PROJECT_ID)
+    assert state.metamodel is not None
+    assert state.metamodel.element_type("Gadget") is not None
+    assert state.model_rev == 0
 
 
 # --- refusals ----------------------------------------------------------------
@@ -367,17 +366,16 @@ def test_the_batch_after_a_rebind_cannot_use_the_old_metamodel(
         {"kind": "create_element", "temp_id": "tmp_g", "type_name": "Gadget"},
     )
     assert r.status_code == 422, r.text
-    _assert_session_still_old(client)
+    _assert_state_still_old(client)
     assert head().rev == 0 and "Gadget" not in {
         e["type_name"] for e in head().elements.values()
     }
 
 
-def _assert_session_still_old(client: TestClient) -> None:
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    assert session.metamodel is not None
-    assert session.metamodel.element_type("Gadget") is not None
-    assert session.model is not None and session.model.metamodel is session.metamodel
+def _assert_state_still_old(client: TestClient) -> None:
+    state = get_registry().get(DEFAULT_PROJECT_ID)
+    assert state.metamodel is not None
+    assert state.metamodel.element_type("Gadget") is not None
 
 
 def test_a_rebind_whose_batch_is_refused_leaves_the_rebuilt_refs_out(
@@ -392,12 +390,12 @@ def test_a_rebind_whose_batch_is_refused_leaves_the_rebuilt_refs_out(
     assert r.status_code == 422, r.text  # the applier's, after the swap
     assert _refs() == set()
     assert head().rev == 0
-    _assert_session_still_old(client)
+    _assert_state_still_old(client)
 
 
-def test_the_session_model_follows_a_rebind_commit(client: TestClient) -> None:
-    """The mirror is swapped and takes the batch; its revision moves by the
-    guarded follow, as for any commit."""
+def test_the_state_follows_a_rebind_commit(client: TestClient) -> None:
+    """The state takes the candidate metamodel and the new revision; the batch
+    lands in the rows."""
     _install([_element("a")])
     blob = _mm().replace(
         "  - name: Gadget\n",
@@ -409,26 +407,26 @@ def test_the_session_model_follows_a_rebind_commit(client: TestClient) -> None:
         {"kind": "create_element", "temp_id": "tmp_g", "type_name": "Gadget"},
     )
     assert r.status_code == 200, r.text
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    assert session.model_rev == 1
-    assert session.model is not None
-    assert r.json()["id_map"]["tmp_g"] in session.model.elements
-    assert session.model.metamodel.element_type("Gadget") is not None
+    state = get_registry().get(DEFAULT_PROJECT_ID)
+    assert state.model_rev == 1
+    assert state.metamodel is not None
+    assert {p.name for p in state.metamodel.effective_element_properties("Gadget")} == {
+        "extra"
+    }
+    assert r.json()["id_map"]["tmp_g"] in head().elements
 
 
-def test_a_rebind_commit_is_not_taken_into_a_session_at_another_revision(
+def test_a_rebind_commit_moves_a_drifted_state_to_the_rows_revision(
     client: TestClient,
 ) -> None:
-    """The rev-1 guard: a mirror that is not at the revision before the commit
-    is dropped, never advanced to a revision it did not follow."""
     _install([_element("a")])
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    session.model_rev = 7  # not the durable 0
+    state = get_registry().get(DEFAULT_PROJECT_ID)
+    state.model_rev = 7  # not the durable 0
     r = _rebind(client, _mm(ref="Node"))
     assert r.status_code == 200, r.text
     assert head().rev == 1
-    assert DEFAULT_PROJECT_ID not in get_registry().project_ids()
-    assert session.model_rev == 7
+    assert get_registry().get(DEFAULT_PROJECT_ID) is state
+    assert state.model_rev == 1
 
 
 # --- the checks themselves ---------------------------------------------------

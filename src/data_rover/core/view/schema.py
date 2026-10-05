@@ -33,7 +33,7 @@ class Folder(BaseModel):
 
     #: Stable identity (uuid4 hex), assigned lazily by
     #: `core.view.ids.ensure_folder_ids` — old blobs parse with "" and are
-    #: healed at their next hydration/save. Once assigned, an id is never
+    #: healed at their next load/save. Once assigned, an id is never
     #: rewritten: view ops, folder leases and view diffs all key on it.
     id: str = ""
     name: str

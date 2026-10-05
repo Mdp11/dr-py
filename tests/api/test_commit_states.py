@@ -25,7 +25,7 @@ from data_rover.api.schemas import (
     UpdateElementOp,
     UpdateRelationshipOp,
 )
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 

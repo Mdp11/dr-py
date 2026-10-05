@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
-from data_rover.api.session import get_session
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     seed_default_project,
     install,
@@ -190,10 +190,10 @@ def test_422_on_bad_metamodel(client: TestClient) -> None:
     assert res.status_code == 422
 
 
-def test_delete_metamodel_clears_model(client: TestClient) -> None:
+def test_delete_metamodel_clears_the_loaded_metamodel(client: TestClient) -> None:
     _upload_example_metamodel(client)
     _empty_model(client)
     res = client.delete(f"{API}/metamodel")
     assert res.status_code == 204
     assert client.get(f"{API}/metamodel").status_code == 404
-    assert get_session().model is None
+    assert default_state().metamodel is None

@@ -17,9 +17,10 @@ from data_rover.api.schemas import (
     MoveMetamodelNodeOp,
     RebindMetamodelOp,
 )
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     seed_default_project,
     install,
@@ -60,7 +61,7 @@ def test_split_rebind_rejects_two_rebinds() -> None:
 
 
 def test_apply_rebind_swaps_memory_and_stages_rows(client: TestClient) -> None:
-    session = get_session()
+    session = default_state()
     s, gen = _db()
     try:
         res = apply_metamodel_ops(
@@ -95,7 +96,7 @@ def test_apply_rebind_persists_even_with_no_prior_model_row(client: TestClient) 
     persisted rebind: upsert_model_row self-creates the missing row, so
     gating the persist on the row's presence would silently leave
     from/to_metamodel_id NULL on a rebind that IS otherwise fully applied."""
-    session = get_session()
+    session = default_state()
     s, gen = _db()
     try:
         s.execute(delete(ModelRow).where(ModelRow.project_id == DEFAULT_PROJECT_ID))
@@ -119,7 +120,7 @@ def test_apply_rebind_persists_even_with_no_prior_model_row(client: TestClient) 
 
 
 def test_apply_moves_updates_layout_blob_with_inverses(client: TestClient) -> None:
-    session = get_session()
+    session = default_state()
     s, gen = _db()
     try:
         content.stage_metamodel_layout(

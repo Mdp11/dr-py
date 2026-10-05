@@ -14,8 +14,8 @@ not a lint candidate, unlike ``/metamodel/lint`` whose raw body IS the
 candidate.
 
 ``POST /rules/parse`` answers the same way for the engine: the rule set's
-normalized document, or the one parse error lint gives. It reads no session
-and no metamodel, so it never hydrates the project; like lint, a viewer gets
+normalized document, or the one parse error lint gives. It reads no project state
+and no metamodel, so it never loads the project; like lint, a viewer gets
 a 403."""
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from data_rover.core.validation.rules.schema import (
 
 from ..authz import require_membership
 from ..db_models import Membership
-from ..deps import Session, get_request_session
+from ..project_state import ProjectState, get_project_state
 from ..schemas import (
     LintErrorOut,
     RulesLintRequest,
@@ -77,16 +77,16 @@ def parse_result(yaml: str) -> RulesParseOut:
 @router.post("/rules/lint")
 def lint_rules(
     payload: RulesLintRequest,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
 ) -> RulesLintResponse:
     try:
         parse_rule_set(payload.yaml)
     except RuleSetError as exc:
         return RulesLintResponse(ok=False, errors=[_lint_error(exc)])
     warnings: list[RuleWarningOut] = []
-    if session.metamodel is not None:
+    if state.metamodel is not None:
         compiled = compile_rule_sets(
-            [RuleSetSource("draft", "draft", payload.yaml)], session.metamodel
+            [RuleSetSource("draft", "draft", payload.yaml)], state.metamodel
         )
         warnings = [
             RuleWarningOut(rule=d.rule, message=d.reason) for d in compiled.skipped

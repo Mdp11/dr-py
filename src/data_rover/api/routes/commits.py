@@ -3,7 +3,7 @@
 Reuses the delta machinery from ``routes/ops.py`` — ``_apply_batch`` (atomic
 apply with inverse collection; raises 422 on a mutation-boundary error). Preview
 runs the model batch on a partial model through ``load_and_apply`` in a
-transaction it rolls back, all under ``session.write_mutex``; it checks the
+transaction it rolls back, all under ``state.write_mutex``; it checks the
 non-model ops and the model batch's applier, and reports no issues (validation
 is the engine's). This module deliberately imports those module-private
 helpers — they are part of the ops package's internal surface, shared with this
@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, assert_never, get_args
 
@@ -55,10 +55,9 @@ from ..feed import commit_event, lock_event, rebind_event
 from .. import content, head
 from ..db import get_db
 from ..db_models import Commit, Membership, ModelRow, Role, User
-from ..deps import Session, get_request_session, require_metamodel, require_model
-from ..hydration import deserialize_ops
+from ..deps import require_metamodel
 from ..identity import get_current_user
-from ..lock_mirror import mirror_session_leases
+from ..lock_mirror import mirror_project_leases
 from ..locking import (
     ARTIFACT_PREFIX,
     METAMODEL_RESOURCE,
@@ -74,7 +73,7 @@ from ..metamodel_ops import (
     load_candidate,
     split_rebind,
 )
-from ..session import get_registry
+from ..project_state import ProjectState, get_project_state
 from ..settings import get_settings
 from ..state_digest import fold_batch, format_digest, parse_digest
 from ..structural import structural_blockers
@@ -129,10 +128,10 @@ from ..schemas import (
     UpdateRelationshipOp,
     VIEW_OP_ADAPTER,
     VIEW_OP_KINDS,
+    deserialize_ops,
 )
 from .ops import (
     TEMP_ID_PREFIX,
-    _apply_batch,
     _BatchResult,
     _maybe_periodic_snapshot,
     _stage_commit,
@@ -171,7 +170,7 @@ def _id_field_names(op_types: Iterable[Any]) -> frozenset[str]:
 
 #: op-dict keys that carry a resource id, per family. In CANONICAL stored ops
 #: every one of these holds a real id — a create op's ``temp_id`` was rewritten
-#: to the assigned canonical id at apply time (see session.py / _apply_one and
+#: to the assigned canonical id at apply time (see _apply_one and
 #: artifact_ops.apply_artifact_ops).
 _MODEL_ID_KEYS = _id_field_names(get_args(ModelOpIn))
 _ARTIFACT_ID_KEYS = _id_field_names(get_args(ArtifactOpIn))
@@ -347,7 +346,7 @@ def _conflict_response(model_rev: int, detail: str) -> JSONResponse:
 
     Single-instance assumption: the completeness reasoning behind these
     branches (one journaled batch == one rev == one row) holds because ONE
-    process owns the session and its journal writes. Multi-instance
+    process owns the project state and its journal writes. Multi-instance
     deployment is not supported, a limitation shared with ``LockTable``."""
     return JSONResponse(
         status_code=409,
@@ -362,8 +361,8 @@ class _CommitUnwind:
 
     A commit batch can span three content families living in three places
     (see ``create_commit``'s "Mixed-batch atomicity" docstring): the model half
-    is applied to a throwaway partial model and reaches the rows and the
-    session mirror only once the transaction has committed, artifact rows are
+    is applied to a throwaway partial model and reaches the rows only once the
+    transaction has committed, artifact rows are
     staged on this request's DB transaction, and the view is mutated IN PLACE
     plus staged as a blob on that same transaction. Every rejection/failure
     path therefore has to undo *however many halves are live at that point*.
@@ -379,16 +378,15 @@ class _CommitUnwind:
     ``unwind()`` exactly once and then returns/raises. A new stage touches
     ONE registration site instead of every downstream block.
 
-    ``unwind()`` runs under ``session.write_mutex`` — every caller already
+    ``unwind()`` runs under ``state.write_mutex`` — every caller already
     holds it. Field-order invariants, preserved from the
     inline blocks this replaces:
 
     - ``prior_metamodel`` unwinds first among the in-memory halves: the rebind
       is HOISTED to apply first (so the batch's model ops validate against the
       candidate schema), and the model half runs on a partial model, so nothing
-      of it is live in memory. It restores the three pieces the swap touched —
-      ``session.metamodel``, ``model.metamodel`` and ``model.indexes``
-      (containment flags + key groups are metamodel-derived).
+      of it is live in memory. It restores ``state.metamodel``, the one piece
+      the swap touched.
     - ``view_results`` roll back newest group first; each entry pairs the
       live ``View`` object with its batch result, so the unwind never has
       to re-resolve a view id.
@@ -396,17 +394,15 @@ class _CommitUnwind:
       rows and ends the transaction the row lock lives in, so every refusal
       releases the project.
 
-    The session's ``model_rev`` and state digest are not here: they follow the
-    rows once the transaction has committed, so there is nothing to put back.
+    The state's ``model_rev`` is not here: it follows the rows once the
+    transaction has committed, so there is nothing to put back.
 
     NOT part of the ledger, on purpose: lock release (leases survive a
     failed commit — release is step g, strictly after a durable commit).
     """
 
-    session: Session
+    state: ProjectState
     db: DbSession
-    #: the session model, which a schema swap rebuilds
-    model: Model
     view_results: list[tuple[View, ViewBatchResult]] = field(default_factory=list)
     #: the metamodel this request swapped OUT. Registered from
     #: ``apply_metamodel_ops``' ``on_swap`` callback — i.e. at the instant the
@@ -420,9 +416,7 @@ class _CommitUnwind:
 
     def unwind(self) -> None:
         if self.prior_metamodel is not None:
-            self.session.metamodel = self.prior_metamodel
-            self.model.metamodel = self.prior_metamodel
-            self.model.indexes.rebuild()
+            self.state.metamodel = self.prior_metamodel
         for view, vres in reversed(self.view_results):
             rollback_view(view, vres.inverse_units)
         if self.db_open:
@@ -460,7 +454,7 @@ def open_project(
     membership: Membership = Depends(require_membership),
 ) -> OpenResponse:
     """The open handshake, from the model row and the membership alone: it takes
-    no session, so it hydrates nothing."""
+    no project state."""
     row = content.get_model_row(db, project_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No model loaded")
@@ -478,18 +472,18 @@ def open_project(
 def preview_commit(
     payload: PreviewRequest,
     project_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     membership: Membership = Depends(require_membership),
 ) -> PreviewResponse | JSONResponse:
     """Check a staged batch without landing it: ``base_rev`` against the model
     row, artifact and view ops dry, and the model ops through the commit's own
     check (``load_and_apply``) in a transaction that is rolled back. The
-    session's model is not read."""
+    state's views are read."""
     row = content.get_model_row(db, project_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No model loaded")
-    metamodel = require_metamodel(session)
+    metamodel = require_metamodel(state)
     if payload.base_rev != row.model_rev:
         return JSONResponse(
             status_code=409,
@@ -506,7 +500,7 @@ def preview_commit(
     if rebind_op is not None and membership.role is not Role.owner:
         # The same owner gate ``create_commit`` puts on the rebind op: a
         # rebind preview checks every row against the candidate and rebuilds
-        # the refs under ``session.write_mutex``, so every commit in the
+        # the refs under ``state.write_mutex``, so every commit in the
         # project is blocked for the duration. ``/commits/preview`` is a
         # read-only POST (``authz``'s allowlist), so a VIEWER reaches it;
         # without this gate any member could stall an ~80 MB project at will.
@@ -520,14 +514,14 @@ def preview_commit(
     # contribute no issues. Deliberately outside the write mutex — it writes
     # nothing.
     validate_artifact_ops(db, project_id, artifact_ops)
-    with session.write_mutex:
+    with state.write_mutex:
         # View ops are validated DRY against a deep copy (views are small):
         # nothing to roll back, and sharing the real applier means preview and
         # commit cannot disagree. Inside the mutex because a concurrent commit
-        # mutates the session's views in place. Grouped per view exactly like
+        # mutates the state's views in place. Grouped per view exactly like
         # the commit path; an empty/unknown view_id is the same 422 there.
         for vid, group in group_by_view(view_ops).items():
-            validate_view_ops(resolve_view(session.views, vid), group)
+            validate_view_ops(resolve_view(state.views, vid), group)
         try:
             if candidate is not None:
                 # Nothing is swapped: the rows are checked against the
@@ -556,13 +550,13 @@ def list_commits(
     project_id: str,
     limit: int = 50,
     before_rev: int | None = None,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
 ) -> CommitHistoryResponse:
     """Durable commit history, newest-first. Read endpoint — any member.
 
-    The ``session`` dependency ensures the caller is an authenticated project
-    member (``get_request_session`` depends on ``require_membership``). No
+    The ``state`` dependency ensures the caller is an authenticated project
+    member (``get_project_state`` depends on ``require_membership``). No
     write-allowlist entry is needed because reads are open to all roles.
 
     Pagination: pass ``before_rev=<last_rev_on_page>`` to fetch older commits.
@@ -653,15 +647,14 @@ def commit_diff_endpoint(
 
 
 def _open_transaction(
-    db: DbSession, project_id: str, session: Session, unwind: _CommitUnwind
+    db: DbSession, project_id: str, unwind: _CommitUnwind
 ) -> tuple[ModelRow, int]:
     """Take the project's ``ModelRow`` lock and read its revision: the
     transaction every check and write of a commit runs in, so the revision and
     the tail read under it are the committed ones. ``unwind`` learns the
     transaction is open. A project without a row has no head rows to check
-    against: 409. A row whose head rows are not written yet (a database from
-    before the head tables that was never hydrated) gets them from the session
-    model first, since the check reads only rows."""
+    against: 409, and so does a row whose head rows were never written (a
+    database from before the head tables), which has to be imported again."""
     row = content.lock_model_row(db, project_id)
     unwind.db_open = True
     if row is None:
@@ -670,8 +663,10 @@ def _open_transaction(
             status_code=409, detail="the project has no durable model to commit to"
         )
     if row.next_seq is None or row.state_digest is None:
-        assert session.metamodel is not None and session.model is not None
-        head.write_baseline(db, project_id, session.metamodel, session.model)
+        unwind.unwind()
+        raise HTTPException(
+            status_code=409, detail="project has no head rows: re-import it"
+        )
     return row, row.model_rev
 
 
@@ -679,39 +674,6 @@ def _digest_before(row: ModelRow) -> int:
     """The state digest of the head rows before the batch."""
     assert row.state_digest is not None
     return parse_digest(row.state_digest)
-
-
-def _follow_commit(
-    session: Session,
-    project_id: str,
-    ops: Sequence[ModelOpIn],
-    *,
-    rev: int,
-    digest: str,
-) -> bool:
-    """Take a commit that has landed in the rows into the session model, which
-    mirrors them, and into the session's revision and digest. Under the write
-    mutex. A mirror that is not at the revision before the commit, or cannot
-    follow it, is dropped and not advanced: the next request hydrates it again
-    from the journal, which holds the commit. Whether it followed."""
-    try:
-        if session.model_rev != rev - 1:
-            raise RuntimeError(
-                f"the session is at rev {session.model_rev}, not {rev - 1}"
-            )
-        assert session.model is not None
-        _apply_batch(session.model, list(ops), restore=True)
-    except Exception:
-        logger.exception(
-            "the session model of project %s could not follow rev %s; dropping it",
-            project_id,
-            rev,
-        )
-        get_registry().discard(project_id, only=session)
-        return False
-    session.model_rev = rev
-    session.state_digest_value = parse_digest(digest)
-    return True
 
 
 def _structural_response(structural: list[Any]) -> JSONResponse:
@@ -730,7 +692,7 @@ def _structural_response(structural: list[Any]) -> JSONResponse:
 def create_commit(
     payload: CommitRequest,
     project_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
     membership: Membership = Depends(require_membership),
@@ -795,8 +757,7 @@ def create_commit(
        view blob (if touched) and the layout blob (ditto) are staged on the
        SAME DB transaction as the Commit row, so all land or none do. A rebind
        additionally sets the row's from/to_metamodel_id columns.
-    e. Take the batch into the session model, which mirrors the rows, and the
-       session's revision and digest.
+    e. Move the project state's revision to the new one.
     f. Snapshot: periodic normally, FORCED after a rebind (so the replay
        tail never spans a schema boundary).
     g. Release the caller's locks (explicit loop).
@@ -813,9 +774,9 @@ def create_commit(
     different place: the model half is applied to a throwaway partial model
     and lands in the head rows with the transaction, artifact
     ops stage row changes on this request's DB transaction, view ops
-    mutate ``session.views[view_id]`` IN PLACE plus (once accepted) stage
+    mutate ``state.views[view_id]`` IN PLACE plus (once accepted) stage
     that view's blob row on the same DB transaction as the artifact rows, and metamodel ops do BOTH at
-    once (a rebind swaps ``session.metamodel``/``model.metamodel`` in place AND
+    once (a rebind swaps ``state.metamodel`` in place AND
     stages a new ``MetamodelRow`` + repointed ``ModelRow``; layout moves stage
     the ``metamodel_layouts`` blob only). So every failure path after
     an apply has to undo however many halves are live at that point — which
@@ -838,14 +799,14 @@ def create_commit(
     that applier's ``on_swap`` callback, i.e. DURING the call, at the instant
     of the swap: after the candidate blob parses (so an invalid blob's 422
     costs no unwind work — nothing was swapped) and immediately before
-    ``session.metamodel`` is reassigned. Registering it from the return value
+    ``state.metamodel`` is reassigned. Registering it from the return value
     instead would be too late: the applier's row staging runs AFTER the
     in-memory swap and goes through ``db.flush()``, which can raise, and
     ``db.rollback()`` discards staged rows while restoring NOTHING in memory
-    — the ledger would have no handle and the session would keep serving the
+    — the ledger would have no handle and the state would keep serving the
     candidate schema against a DB still bound to the old one.
     """
-    require_model(session)  # the 404; what it returns is read again under the mutex
+    require_metamodel(state)  # the 404; read again under the mutex
     model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
     # Pre-mutex, because both are pure rejections that touch nothing: the
     # one-rebind-per-batch 422 (split_rebind) and the owner gate. Splitting
@@ -863,15 +824,15 @@ def create_commit(
         )
     # The unwind ledger every failure path below shares — see _CommitUnwind.
     # INVARIANT: every MUTATION of a view in this function happens under
-    # session.write_mutex.
-    with session.write_mutex:
+    # state.write_mutex.
+    with state.write_mutex:
         # The metamodel and the model are read under the mutex: a rebind that is
         # refused swaps the metamodel in and out again while it holds it, and a
         # commit that read the candidate would check and write rows against a
         # schema that never lands.
-        metamodel, mirror = require_model(session)
-        unwind = _CommitUnwind(session, db, mirror)
-        head_row, head_rev = _open_transaction(db, project_id, session, unwind)
+        metamodel = require_metamodel(state)
+        unwind = _CommitUnwind(state, db)
+        head_row, head_rev = _open_transaction(db, project_id, unwind)
         # 1. staleness — see the docstring above for the full rationale; branch
         #    order mirrors it: short-tail / baseline-or-rebind,
         #    cheapest-and-safest first, each a fail-closed 409 before the
@@ -937,9 +898,9 @@ def create_commit(
         def check_before(before: Model) -> None:
             """Overlap with the tail, view ids, held locks: all judged on the
             model as it is before the batch."""
-            reqs = required_locks(before, session.views, payload.ops)
+            reqs = required_locks(before, state.views, payload.ops)
             if tail_ids is not None and tail_ids & _batch_touched_ids(
-                before, session.views, payload.ops, reqs
+                before, state.views, payload.ops, reqs
             ):
                 raise Refused(
                     _conflict_response(head_rev, "conflicting concurrent commits")
@@ -948,11 +909,11 @@ def create_commit(
             # (no half is live yet), whereas discovering it at b3 would apply
             # and roll back the model half for a batch that could never land.
             for vid in group_by_view(view_ops):
-                resolve_view(session.views, vid)
+                resolve_view(state.views, vid)
             # a2. verify the caller still holds every required lock.
             #     `payload.ops` (not `model_ops`) so the `art:`-namespaced leases
             #     artifact ops need are derived and checked too.
-            missing = session.lock_table.verify_held(
+            missing = state.lock_table.verify_held(
                 user.id, payload.lock_tokens, reqs, now=time.monotonic()
             )
             if missing:
@@ -980,7 +941,7 @@ def create_commit(
             #     and THEN stages MetamodelRow/ModelRow via db.flush(), which can
             #     raise. Assigning after the call would leave that failure path
             #     with prior_metamodel still None — db.rollback() would discard
-            #     the rows while the process-wide session went on serving the
+            #     the rows while the process-wide state went on serving the
             #     CANDIDATE schema against a DB that still points at the old one.
             #     The callback fires at the exact instant the state goes dirty, so
             #     registration is neither early (an invalid-candidate 422 swapped
@@ -992,7 +953,7 @@ def create_commit(
 
             try:
                 mm_res = apply_metamodel_ops(
-                    db, project_id, session, metamodel_ops, on_swap=_register_swap
+                    db, project_id, state, metamodel_ops, on_swap=_register_swap
                 )
             except Exception:
                 unwind.unwind()  # undo every live half — see _CommitUnwind
@@ -1010,7 +971,7 @@ def create_commit(
             #     lease is the one this caller holds).
             peer_model = [
                 le
-                for le in session.lock_table.active_leases(time.monotonic())
+                for le in state.lock_table.active_leases(time.monotonic())
                 if le.holder != user.id and is_model_resource(le.resource_id)
             ]
             if peer_model:
@@ -1026,11 +987,10 @@ def create_commit(
             #     schema swaps and the refs are rebuilt, so the batch's model
             #     ops are an ordinary commit under the new metamodel.
             apply_metamodel_half()
-            assert session.metamodel is not None  # the candidate, swapped in
-            batch_metamodel = session.metamodel
-        # b. the model half, on a partial model of the rows. The session
-        #    model is not touched: nothing here needs undoing but the
-        #    transaction (and, for a rebind, the swap).
+            assert state.metamodel is not None  # the candidate, swapped in
+            batch_metamodel = state.metamodel
+        # b. the model half, on a partial model of the rows: nothing here
+        #    needs undoing but the transaction (and, for a rebind, the swap).
         try:
             model, res, structural = load_and_apply(
                 db,
@@ -1077,7 +1037,7 @@ def create_commit(
         view_results: list[tuple[str, View, ViewBatchResult]] = []
         view_id_map = {**res.id_map, **art_res.id_map}
         for vid, group in group_by_view(view_ops).items():
-            target = session.views[vid]
+            target = state.views[vid]
             try:
                 vres = apply_view_ops_atomic(
                     target, group, id_map=view_id_map, restore=False
@@ -1121,7 +1081,7 @@ def create_commit(
         # and then run the model inverse against it, which is a 422 on exactly
         # the migration batches this feature exists for. The FORWARD list keeps
         # metamodel last purely for symmetry: no replay path applies metamodel
-        # ops at all (hydration skips the family, revert 409s across it), so its
+        # ops at all (revert 409s across the family), so its
         # position there is inert today — but do not "tidy" the inverse list
         # to match some other order.
         # The view id_maps are seeded with the model+artifact maps (see b3),
@@ -1195,32 +1155,27 @@ def create_commit(
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
-        # e2. the rows are durable: the session model follows them
-        _follow_commit(
-            session, project_id, res.canonical_ops, rev=new_rev, digest=state_digest
-        )
+        # e2. the rows are durable: the state follows them
+        state.model_rev = new_rev
         # f. snapshot — periodic normally (so a hot
         #    commit-only project doesn't accumulate an unbounded replay tail),
         #    FORCED after a rebind. The durable commit has
-        #    already landed; a snapshot failure here is recoverable (hydration
-        #    rebuilds the snapshot on the next cache-miss), so we log and proceed
+        #    already landed; a snapshot failure here is recoverable (a replica's
+        #    open writes the snapshot on a miss), so we log and proceed
         #    rather than returning a 500 that would mislead the client into
         #    thinking the commit failed.
         if persisted:
             try:
                 if rebound:
-                    # FORCED, not periodic: keeps "the replay tail never spans
-                    # a rebind boundary" (hydration binds the CURRENT metamodel
-                    # and would otherwise replay pre-rebind ops under it). It is
-                    # written from the rows, whether or not the session mirror
-                    # followed the commit.
+                    # FORCED, not periodic: a replica's catch-up tail then
+                    # never spans a rebind boundary. Written from the rows.
                     write_snapshot_from_rows(project_id)
                 else:
-                    _maybe_periodic_snapshot(db, project_id, session, new_rev)
+                    _maybe_periodic_snapshot(project_id, new_rev)
             except Exception:
                 logger.warning(
                     "post-commit snapshot failed for project %s at rev %s; "
-                    "commit is durable, hydration will rebuild",
+                    "commit is durable, a replica's open will rebuild",
                     project_id,
                     new_rev,
                     exc_info=True,
@@ -1234,7 +1189,7 @@ def create_commit(
         # g. release the caller's locks (explicit loop — no helper)
         released = []
         for tok in payload.lock_tokens:
-            released.extend(session.lock_table.release(user.id, tok))
+            released.extend(state.lock_table.release(user.id, tok))
         # h. broadcast commit delta + artifact + lock-release events (inside the
         #    mutex so enqueue order == rev order across concurrent commits).
         changed_elements = [
@@ -1262,7 +1217,7 @@ def create_commit(
             # reload banner instead. A migration batch's model delta is
             # therefore deliberately NOT
             # broadcast; the reload subsumes it.
-            session.hub.broadcast(
+            state.hub.broadcast(
                 rebind_event(
                     rev=new_rev,
                     from_metamodel_id=mm_res.from_metamodel_id if mm_res else None,
@@ -1271,7 +1226,7 @@ def create_commit(
                 )
             )
         else:
-            session.hub.broadcast(
+            state.hub.broadcast(
                 commit_event(
                     rev=new_rev,
                     prev_rev=prev_rev,
@@ -1290,10 +1245,10 @@ def create_commit(
                 )
             )
         broadcast_artifact_events(
-            session.hub, changed_artifact_headers, created_artifact_ids, art_res.deleted
+            state.hub, changed_artifact_headers, created_artifact_ids, art_res.deleted
         )
         if released:
-            session.hub.broadcast(
+            state.hub.broadcast(
                 lock_event(
                     "released",
                     [
@@ -1310,7 +1265,7 @@ def create_commit(
     # re-takes it briefly for the snapshot; Redis I/O must not sit inside a
     # commit's critical section)
     if released:
-        mirror_session_leases(project_id, session)
+        mirror_project_leases(project_id, state)
     return CommitResponse(
         model_rev=new_rev,
         id_map=merged_id_map,  # both families' temp ids in one map
@@ -1342,7 +1297,7 @@ def create_commit(
 def revert_commit(
     payload: RevertRequest,
     project_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CommitResponse | JSONResponse:
@@ -1356,12 +1311,12 @@ def revert_commit(
     a partial model of the rows the inverse ops need, the structural check, then
     the rows and the journal in one transaction.
     """
-    require_model(session)  # the 404; what it returns is read again under the mutex
-    with session.write_mutex:
+    require_metamodel(state)  # the 404; read again under the mutex
+    with state.write_mutex:
         # read under the mutex, as in create_commit
-        metamodel, mirror = require_model(session)
-        unwind = _CommitUnwind(session, db, mirror)
-        head_row, head_rev = _open_transaction(db, project_id, session, unwind)
+        metamodel = require_metamodel(state)
+        unwind = _CommitUnwind(state, db)
+        head_row, head_rev = _open_transaction(db, project_id, unwind)
         if payload.base_rev != head_rev:
             return unwind.refuse(
                 JSONResponse(
@@ -1464,7 +1419,7 @@ def revert_commit(
         affected = _affected_ids(commits)
         held = [
             le
-            for le in session.lock_table.active_leases(time.monotonic())
+            for le in state.lock_table.active_leases(time.monotonic())
             if le.resource_id in affected
         ]
         if held:
@@ -1546,16 +1501,14 @@ def revert_commit(
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
-        _follow_commit(
-            session, project_id, res.canonical_ops, rev=new_rev, digest=state_digest
-        )
+        state.model_rev = new_rev
         if persisted:
             try:
-                _maybe_periodic_snapshot(db, project_id, session, new_rev)
+                _maybe_periodic_snapshot(project_id, new_rev)
             except Exception:
                 logger.warning(
                     "post-revert snapshot failed for project %s at rev %s; "
-                    "commit is durable, hydration will rebuild",
+                    "commit is durable, a replica's open will rebuild",
                     project_id,
                     new_rev,
                     exc_info=True,
@@ -1570,7 +1523,7 @@ def revert_commit(
             RelationshipOut.from_core(model.relationships[rid]).model_dump()
             for rid in res.changed_relationship_ids
         ]
-        session.hub.broadcast(
+        state.hub.broadcast(
             commit_event(
                 rev=new_rev,
                 prev_rev=prev_rev,

@@ -16,10 +16,11 @@ from data_rover.api.db_models import Commit, Role, User
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 from data_rover.api.replica import TAIL_MAX_REVS, scope_of_ops, tail_is_complete
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     create_folder_via_commit,
     feed_url,
@@ -143,7 +144,7 @@ def client() -> TestClient:
 
 
 def _head() -> int:
-    return get_session().model_rev
+    return default_state().model_rev
 
 
 def _tail(client: TestClient, from_rev: int) -> dict[str, Any]:
@@ -440,7 +441,7 @@ def test_a_tail_is_incomplete_across_a_bump_with_no_row_at_head(
     r0 = _head()
     _ops(client, [_node("tmp_a", "A")])
     unjournaled_bump()
-    # nothing landed since: only the session's head reveals the hole
+    # nothing landed since: only the state's head reveals the hole
     _assert_incomplete(client, r0)
 
 
@@ -485,7 +486,7 @@ def test_an_incomplete_tail_loads_no_rows(
 
 def test_the_head_is_read_under_the_write_mutex(client: TestClient) -> None:
     _ops(client, [_node("tmp_a", "A")])
-    session = get_session()
+    session = default_state()
     answers: list[int] = []
 
     def ask() -> None:

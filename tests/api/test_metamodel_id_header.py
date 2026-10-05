@@ -12,11 +12,11 @@ from fastapi.testclient import TestClient
 from data_rover.api import content, db
 from data_rover.api.db_models import Commit
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.settings import DEFAULT_CORS_ORIGINS
 from data_rover.core.metamodel.loader import load_metamodel_str
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
+from .conftest import default_state, AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install
 
 _MM = """
 elements:
@@ -89,7 +89,7 @@ def test_the_header_follows_a_rebind(client: TestClient) -> None:
     res = client.post(
         papi("/commits"),
         json={
-            "base_rev": get_session().model_rev,
+            "base_rev": default_state().model_rev,
             "ops": [{"kind": "metamodel.rebind", "blob": _MM_V2}],
             "message": "rebind",
             "lock_tokens": [lock.json()["token"]],
@@ -97,7 +97,7 @@ def test_the_header_follows_a_rebind(client: TestClient) -> None:
     )
     assert res.status_code == 200, res.text
     with db.db_session() as s:
-        row = s.get(Commit, (DEFAULT_PROJECT_ID, get_session().model_rev))
+        row = s.get(Commit, (DEFAULT_PROJECT_ID, default_state().model_rev))
         assert row is not None and row.to_metamodel_id
         to_id = row.to_metamodel_id
     header = client.get(papi("/metamodel")).headers["x-metamodel-id"]
@@ -107,7 +107,7 @@ def test_the_header_follows_a_rebind(client: TestClient) -> None:
 
 def test_the_header_is_empty_without_a_model_row() -> None:
     c = _app()
-    get_session().set_metamodel(load_metamodel_str(_MM))
+    default_state().metamodel = load_metamodel_str(_MM)
     res = c.get(papi("/metamodel"))
     assert res.status_code == 200
     assert res.headers["x-metamodel-id"] == ""

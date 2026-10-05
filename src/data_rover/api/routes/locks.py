@@ -1,7 +1,7 @@
 """Resource-lease endpoints (check-out). Holder == authenticated user.
 
-Leases live in the per-project ``Session.lock_table`` (resolved via
-``get_request_session``, so membership is already authorized). All times use
+Leases live in the per-project ``ProjectState.lock_table`` (resolved via
+``get_project_state``, so membership is already authorized). All times use
 ``time.monotonic()`` — the same clock the lifespan sweeper uses.
 """
 
@@ -16,11 +16,12 @@ from sqlalchemy.orm import Session as DbSession
 
 from ..commit_load import subtree_ids
 from ..db import get_db
-from ..deps import Session, get_request_session, require_metamodel
+from ..deps import require_metamodel
 from ..feed import lock_event
 from ..identity import get_current_user
 from ..db_models import User
-from ..lock_mirror import mirror_session_leases
+from ..lock_mirror import mirror_project_leases
+from ..project_state import ProjectState, get_project_state
 from ..rebind_check import containment_types
 from ..locking import (
     METAMODEL_RESOURCE,
@@ -74,11 +75,11 @@ def _lease_out(le: Lease) -> LeaseOut:
 def acquire_locks(
     project_id: str,
     payload: LockRequest,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> LockResponse | JSONResponse:
-    metamodel = require_metamodel(session)
+    metamodel = require_metamodel(state)
 
     def _canonical(t: LockTargetIn) -> str:
         if t.type == "artifact":
@@ -93,17 +94,17 @@ def acquire_locks(
 
     targets = [(_canonical(t), LockMode(t.mode)) for t in payload.targets]
     containment = containment_types(metamodel)
-    # a delete's cascade is read from the head rows, never the session's model
+    # a delete's cascade is read from the head rows
     reqs = expand_targets(
         lambda root: subtree_ids(db, project_id, [root], containment),
-        session.views,
+        state.views,
         targets,
         LockIntent(payload.intent),
     )
     now = time.monotonic()
     ttl = float(get_settings().lock_ttl_seconds)
-    with session.write_mutex:
-        token, leases, conflicts = session.lock_table.acquire(
+    with state.write_mutex:
+        token, leases, conflicts = state.lock_table.acquire(
             user.id,
             reqs,
             now=now,
@@ -127,8 +128,8 @@ def acquire_locks(
                 ],
             },
         )
-    session.hub.broadcast(lock_event("acquired", _lease_event_dicts(leases)))
-    mirror_session_leases(project_id, session)
+    state.hub.broadcast(lock_event("acquired", _lease_event_dicts(leases)))
+    mirror_project_leases(project_id, state)
     return LockResponse(token=token, leases=[_lease_out(le) for le in leases])
 
 
@@ -136,14 +137,14 @@ def acquire_locks(
 def release_locks(
     project_id: str,
     payload: ReleaseRequest,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     user: User = Depends(get_current_user),
 ) -> dict[str, int]:
-    with session.write_mutex:
-        released = session.lock_table.release(user.id, payload.token)
+    with state.write_mutex:
+        released = state.lock_table.release(user.id, payload.token)
     if released:
-        session.hub.broadcast(lock_event("released", _lease_event_dicts(released)))
-        mirror_session_leases(project_id, session)
+        state.hub.broadcast(lock_event("released", _lease_event_dicts(released)))
+        mirror_project_leases(project_id, state)
     return {"released": len(released)}
 
 
@@ -151,21 +152,21 @@ def release_locks(
 def renew_locks(
     project_id: str,
     payload: RenewRequest,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     user: User = Depends(get_current_user),
 ) -> RenewResponse:
     now = time.monotonic()
     ttl = float(get_settings().lock_ttl_seconds)
-    with session.write_mutex:
-        ok = session.lock_table.renew(user.id, payload.token, now=now, ttl=ttl)
+    with state.write_mutex:
+        ok = state.lock_table.renew(user.id, payload.token, now=now, ttl=ttl)
     if ok:
-        mirror_session_leases(project_id, session)
+        mirror_project_leases(project_id, state)
     return RenewResponse(ok=ok)
 
 
 @router.get("/locks")
 def list_locks(
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
 ) -> dict[str, list[LeaseOut]]:
-    leases = session.lock_table.active_leases(time.monotonic())
+    leases = state.lock_table.active_leases(time.monotonic())
     return {"leases": [_lease_out(le) for le in leases]}

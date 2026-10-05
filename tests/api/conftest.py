@@ -34,33 +34,29 @@ from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E4
 from data_rover.api.identity import set_identity_provider  # noqa: E402
 from data_rover.api.importer import install_model  # noqa: E402
 from data_rover.api.lock_mirror import MemoryLeaseMirror, set_lease_mirror  # noqa: E402
+from data_rover.api.project_state import ProjectState  # noqa: E402
+from data_rover.core.model.model import Model  # noqa: E402
 from data_rover.api.routes._snapshot import build_model_from_dicts  # noqa: E402
 from data_rover.api.serialize import parse_model_json  # noqa: E402
 from data_rover.core.metamodel.loader import load_metamodel_str  # noqa: E402
-from data_rover.api.session import (  # noqa: E402
-    DEFAULT_PROJECT_ID,
-    get_registry,
-    install_persistent_registry,
-    reset_session,
-)
+from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry  # noqa: E402
 from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _fresh_db() -> Iterator[None]:
-    """Per-test clean schema + clean in-memory session registry + identity seam."""
+    """Per-test clean schema + clean in-memory project-state registry + identity seam."""
     db.init_engine("sqlite://")
     db.create_all()
-    reset_session()
+    get_registry().reset()
     set_snapshot_store(MemorySnapshotStore())
     set_lease_mirror(MemoryLeaseMirror())
-    install_persistent_registry()  # get() now hydrates from the (empty) DB
     set_identity_provider(None)  # forget any provider a test swapped in
     try:
         yield
     finally:
         db.drop_all()
-        reset_session()
+        get_registry().reset()
         set_snapshot_store(None)
         set_lease_mirror(None)
         set_identity_provider(None)
@@ -80,9 +76,14 @@ def cookie_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 #: identity header the data-test client authenticates as
 TEST_USER_ID = "test-user"
-#: data tests target the DEFAULT project so HTTP requests resolve the SAME
-#: in-memory Session that ``get_session()`` returns.
+#: data tests target the DEFAULT project, whose in-memory state is
+#: ``default_state()``.
 AUTH_HEADERS = {"x-user-id": TEST_USER_ID, "x-user-email": "test@example.com"}
+
+
+def default_state() -> ProjectState:
+    """The default project's live state."""
+    return get_registry().get(DEFAULT_PROJECT_ID)
 
 
 def seed_default_project() -> None:
@@ -147,9 +148,9 @@ def install(
 ) -> None:
     """Replace the project's metamodel and model at a fresh rev-0 baseline.
 
-    Creates the default project (owned by the test user) when it is missing.
-    The session mirror is warm afterwards (``install_model`` leaves a cold
-    project cold); the mirror goes with hydration."""
+    Creates the default project (owned by the test user) when it is missing. A
+    project state that is already warm takes the new metamodel and rev; a cold
+    one loads them when first asked."""
     if project_id == DEFAULT_PROJECT_ID:
         seed_default_project()
     gen = db.get_db()
@@ -158,7 +159,6 @@ def install(
         install_model(s, project_id, metamodel_yaml=metamodel, model_json=model)
     finally:
         gen.close()
-    get_registry().get(project_id)
 
 
 def install_unchecked(
@@ -176,8 +176,6 @@ def install_unchecked(
     with db.db_session() as s:
         write_baseline(s, project_id, mm, built)
     write_snapshot_from_rows(project_id)
-    get_registry().discard(project_id)
-    get_registry().get(project_id)
 
 
 @dataclass(frozen=True)
@@ -191,7 +189,7 @@ class Head:
 
 def head(project_id: str = "default") -> Head:
     """The project's current state as the server holds it: the head rows and the
-    revision on the model row (the session's, for a project without one)."""
+    revision on the model row (the project state's, for a project without one)."""
     with db.db_session() as s:
         row = content.get_model_row(s, project_id)
         elements, relationships = read_head(s, project_id)
@@ -202,6 +200,22 @@ def head(project_id: str = "default") -> Head:
         rev=rev,
         elements={e["id"]: e for e in elements},
         relationships={r["id"]: r for r in relationships},
+    )
+
+
+def rows_model(project_id: str = "default") -> Model:
+    """A full model of the project's head rows, in row order: the model the rows
+    say the project holds, for checks that need the core model's own readers."""
+    with db.db_session() as s:
+        row = content.get_model_row(s, project_id)
+        assert row is not None
+        mm_row = content.get_metamodel_row(s, row.metamodel_id)
+        assert mm_row is not None
+        elements, relationships = read_head(s, project_id)
+    return build_model_from_dicts(
+        load_metamodel_str(mm_row.blob),
+        {"elements": elements, "relationships": relationships},
+        strict=False,
     )
 
 
@@ -255,10 +269,9 @@ def commit_ops(
 def append_baseline_row(project_id: str = "default") -> int:
     """Write a mid-history opaque baseline: the whole model replaced, history
     cleared, one empty-ops commit row at the next rev. Returns that rev."""
-    session = get_registry().get(project_id)
-    assert session.model is not None
-    session.set_model(session.model, announce=False)
-    rev = session.model_rev
+    state = get_registry().get(project_id)
+    state.model_rev += 1
+    rev = state.model_rev
     with db.db_session() as s:
         content.clear_history(s, project_id)
         content.append_commit(
@@ -278,11 +291,11 @@ def append_baseline_row(project_id: str = "default") -> int:
 
 def unjournaled_bump(project_id: str = "default") -> None:
     """The revision moves with no journal row: on the model row and in the
-    session."""
-    session = get_registry().get(project_id)
-    session.set_model(session.model, announce=False)
+    project state."""
+    state = get_registry().get(project_id)
+    state.model_rev += 1
     with db.db_session() as s:
-        content.set_model_rev(s, project_id, session.model_rev)
+        content.set_model_rev(s, project_id, state.model_rev)
 
 
 def forget_entity_states(rev: int, project_id: str = "default") -> None:
@@ -294,23 +307,17 @@ def forget_entity_states(rev: int, project_id: str = "default") -> None:
         row.entity_states = None
 
 
-def without_session_model(
-    monkeypatch: pytest.MonkeyPatch, project_id: str = "default"
-) -> None:
-    """Take the project's session model away and make every way of building one
-    fail. A request that still answers read rows alone: evicting the session
-    would prove nothing, since the registry hydrates it again."""
-    from data_rover.api import hydration
+def no_model_built(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every way of building a whole model fail, so a request that still
+    answers has read rows alone."""
+    from data_rover.api import snapshot_codec
     from data_rover.api.routes import _snapshot
-
-    session = get_registry().get(project_id)
 
     def refuse(*_a: object, **_k: object) -> None:
         raise AssertionError("a model was built")
 
-    monkeypatch.setattr(hydration, "hydrate_session", refuse)
     monkeypatch.setattr(_snapshot, "build_model_from_dicts", refuse)
-    session.model = None
+    monkeypatch.setattr(snapshot_codec, "decode_snapshot", refuse)
 
 
 def model_rev(c: TestClient) -> int:

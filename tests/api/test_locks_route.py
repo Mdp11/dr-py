@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from data_rover.api import db as _db
 from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
 from .conftest import (
@@ -20,7 +20,7 @@ from .conftest import (
     papi,
     seed_default_project,
     head,
-    without_session_model,
+    no_model_built,
     install,
     EMPTY_MODEL,
     commit_ops,
@@ -283,9 +283,8 @@ def test_acquire_folder_lease_and_conflict(client: TestClient) -> None:
 def test_delete_intent_lock_covers_the_subtree_without_a_session_model(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A delete lock on a root is expanded over the head rows: the session has no
-    model, and nothing may build one (a session that is gone would be hydrated
-    again, so the hydration paths are made to fail instead)."""
+    """A delete lock on a root is expanded over the head rows: the server has no
+    model, and nothing may build one (every way of building one is made to fail)."""
     etype = _etype(client)
     ids = commit_ops(
         client,
@@ -305,7 +304,7 @@ def test_delete_intent_lock_covers_the_subtree_without_a_session_model(
         ],
     )["id_map"]
     root, child, grand, other = (ids[f"tmp_{n}"] for n in ("root", "child", "grand", "other"))
-    without_session_model(monkeypatch)
+    no_model_built(monkeypatch)
 
     r = client.post(
         papi("/locks"),

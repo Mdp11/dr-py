@@ -32,7 +32,7 @@ from data_rover.api.range_diff import (
     render_range,
 )
 from data_rover.api.schemas import ElementOut, RangeDiffOut, RelationshipOut
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
 from .conftest import (
@@ -47,7 +47,7 @@ from .conftest import (
     Head,
     append_baseline_row,
     unjournaled_bump,
-    without_session_model,
+    no_model_built,
 )
 from .test_commits_metamodel_ops import _acquire_mm
 
@@ -602,7 +602,7 @@ def test_route_reads_the_journal_without_a_session_model(
 ) -> None:
     b, head = _h_rewire(client)
     expected = _canon(_fold(b + 1, head))
-    without_session_model(monkeypatch)
+    no_model_built(monkeypatch)
     assert _canon(_served(client, b + 1, head)) == expected
 
 

@@ -109,8 +109,8 @@ def test_revert_the_revert_returns_to_head(client: TestClient) -> None:
 
 
 def test_revert_survives_eviction(client: TestClient) -> None:
-    from data_rover.api.session import get_registry
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import get_registry
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
     commit_create(client, "A")            # rev fixture+1
     target = model_rev(client)
@@ -121,7 +121,7 @@ def test_revert_survives_eviction(client: TestClient) -> None:
     ).status_code == 200
     assert element_count(client) == 1
     get_registry().evict(DEFAULT_PROJECT_ID)        # snapshot-then-drop
-    assert element_count(client) == 1                       # re-hydrate from journal
+    assert element_count(client) == 1                       # the rows, not the state, hold it
 
 
 def test_revert_db_failure_rolls_back_in_memory(
@@ -283,7 +283,7 @@ def test_revert_broadcasts_commit_event(client: TestClient) -> None:
 def test_revert_forbidden_for_viewer(client: TestClient) -> None:
     from data_rover.api import db
     from data_rover.api.db_models import Role, User
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
     commit_create(client, "A")

@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
-from data_rover.api.session import get_registry
+from data_rover.api.project_state import get_registry
 from tests.api.conftest import (
     AUTH_HEADERS,
     create_folder_via_commit,
@@ -19,7 +19,7 @@ MM = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 MODEL = Path("examples/smart-city.model.json").read_text(encoding="utf-8")
 
 
-def test_upload_survives_eviction_via_hydration() -> None:
+def test_upload_survives_eviction() -> None:
     seed_default_project()
     create_app()
     install(metamodel=MM, model=MODEL)
@@ -27,7 +27,7 @@ def test_upload_survives_eviction_via_hydration() -> None:
 
     get_registry().evict("default")  # snapshot-then-drop
 
-    after = head()  # re-hydrates
+    after = head()  # a fresh state, the rows unchanged
     assert len(after.elements) == len(before.elements)
     assert len(after.relationships) == len(before.relationships)
     assert after.rev == before.rev

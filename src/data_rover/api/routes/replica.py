@@ -11,7 +11,7 @@ from .. import content, replica
 from ..authz import require_membership
 from ..db import get_db
 from ..db_models import Membership, Snapshot
-from ..deps import Session, get_request_session
+from ..project_state import ProjectState, get_project_state
 from ..schemas import ReplicaTailOut, SnapshotDescriptorOut
 from ..snapshot_rows import write_snapshot_from_rows
 from ..storage import get_snapshot_store
@@ -104,11 +104,11 @@ def get_snapshot_blob(
 def get_tail(
     project_id: str,
     from_rev: int = Query(ge=0),
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
 ) -> ReplicaTailOut:
-    # Under the mutex no journal writer sits between its rev bump and its
-    # db.commit(), so every row up to this head is durable.
-    with session.write_mutex:
-        head = session.model_rev
+    # The state's rev moves only after a commit is durable, so every row up to
+    # this head is in the journal.
+    with state.write_mutex:
+        head = state.model_rev
     return ReplicaTailOut(**replica.build_tail(db, project_id, from_rev, head))

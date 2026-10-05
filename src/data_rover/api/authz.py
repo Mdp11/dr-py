@@ -5,7 +5,7 @@ project exists (404) and the current user is a member (403 — except global
 admins, who get implicit owner access to every project), and rejects writes
 by viewers (403). ``require_owner`` further restricts to owners (membership
 management). These are wired into every project-scoped route transitively via
-``deps.get_request_session``, so route handlers need no changes.
+``project_state.get_project_state``, so route handlers need no changes.
 
 Write detection is by HTTP method, with an allowlist of POST endpoints that are
 actually reads (search / batch fetch / validate) so viewers can use them.

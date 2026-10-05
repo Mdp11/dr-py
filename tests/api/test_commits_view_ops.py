@@ -12,9 +12,9 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
-from data_rover.api.session import get_session
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     container_lock_target,
     create_view,
@@ -34,7 +34,7 @@ def _seed_second_member(user_id: str, email: str) -> None:
     test_undo_view_ops.py."""
     from data_rover.api import db
     from data_rover.api.db_models import Role, User
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
     gen = db.get_db()
@@ -484,10 +484,10 @@ def test_delete_folder_commit_requires_lease_on_subtree_child(
 
     # nothing was applied: the lock check is the FIRST thing inside the
     # mutex. Read the durable row directly (eviction is a no-op while any
-    # lease is live — see SessionRegistry.evict) to prove it still shows
+    # lease is live — see ProjectStateRegistry.evict) to prove it still shows
     # D -> C.
     from data_rover.api import content, db
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
     gen = db.get_db()
     s = next(gen)
@@ -516,7 +516,7 @@ def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
     vid = create_view(client, "V")
     token = _view_lease(client, vid)
     base = _rev(client)
-    session = get_session()
+    session = default_state()
     elems_before = len(head().elements)
 
     def _boom(*_a: object, **_kw: object) -> None:

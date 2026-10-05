@@ -35,7 +35,7 @@ from ..artifact_kinds import get_spec
 from ..artifact_ops import artifact_header
 from ..db import get_db
 from ..db_models import ArtifactKind, ArtifactRow, User
-from ..deps import Session, get_request_session
+from ..project_state import ProjectState, get_project_state
 from ..feed import artifact_event
 from ..identity import get_current_user
 from ..locking import artifact_resource
@@ -97,10 +97,10 @@ def _apply_derived_metadata(kind: ArtifactKind, payload: dict[str, Any]) -> None
         spec.derive_metadata(payload)
 
 
-def _reject_if_peer_locked(session: Session, artifact_id: str, user_id: str) -> None:
+def _reject_if_peer_locked(state: ProjectState, artifact_id: str, user_id: str) -> None:
     """409 while a PEER holds a live lease on this artifact (see the module
     docstring: these routes honour `art:` leases without granting them)."""
-    conflicts = session.lock_table.peer_leases(
+    conflicts = state.lock_table.peer_leases(
         [artifact_resource(artifact_id)], user_id, now=time.monotonic()
     )
     if conflicts:
@@ -132,7 +132,7 @@ def _require_artifact(db: DbSession, project_id: str, artifact_id: str) -> Artif
 def list_artifacts(
     project_id: str,
     kind: ArtifactKind | None = None,
-    _session: Session = Depends(get_request_session),
+    _state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
 ) -> ArtifactListOut:
     rows = content.list_artifacts(db, project_id, kind)
@@ -143,7 +143,7 @@ def list_artifacts(
 def list_artifact_payloads(
     project_id: str,
     ids: list[str] | None = Query(None, alias="id"),
-    _session: Session = Depends(get_request_session),
+    _state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
 ) -> ArtifactPayloadListOut:
     """Every artifact with its payload, or the named ids the project has, in
@@ -157,7 +157,7 @@ def list_artifact_payloads(
 def get_artifact(
     project_id: str,
     artifact_id: str,
-    _session: Session = Depends(get_request_session),
+    _state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
 ) -> ArtifactOut:
     return _full(_require_artifact(db, project_id, artifact_id))
@@ -167,7 +167,7 @@ def get_artifact(
 def create_artifact(
     payload: ArtifactCreateIn,
     project_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ArtifactOut:
@@ -188,9 +188,7 @@ def create_artifact(
         updated_by=user.id,
     )
     db.commit()
-    session.hub.broadcast(
-        artifact_event("created", _header(row).model_dump(mode="json"))
-    )
+    state.hub.broadcast(artifact_event("created", _header(row).model_dump(mode="json")))
     return _full(row)
 
 
@@ -199,12 +197,12 @@ def update_artifact(
     payload: ArtifactUpdateIn,
     project_id: str,
     artifact_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ArtifactOut:
     row = _require_artifact(db, project_id, artifact_id)
-    _reject_if_peer_locked(session, artifact_id, user.id)
+    _reject_if_peer_locked(state, artifact_id, user.id)
     if payload.payload is not None:
         _validate_payload(row.kind, payload.payload)
         _apply_derived_metadata(row.kind, payload.payload)
@@ -233,9 +231,7 @@ def update_artifact(
             },
         ) from exc
     db.commit()
-    session.hub.broadcast(
-        artifact_event("updated", _header(row).model_dump(mode="json"))
-    )
+    state.hub.broadcast(artifact_event("updated", _header(row).model_dump(mode="json")))
     return _full(row)
 
 
@@ -243,14 +239,14 @@ def update_artifact(
 def delete_artifact(
     project_id: str,
     artifact_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
     row = _require_artifact(db, project_id, artifact_id)
-    _reject_if_peer_locked(session, artifact_id, user.id)
+    _reject_if_peer_locked(state, artifact_id, user.id)
     header = _header(row).model_dump(mode="json")
     content.delete_artifact(db, row)
     db.commit()
-    session.hub.broadcast(artifact_event("deleted", header))
+    state.hub.broadcast(artifact_event("deleted", header))
     return Response(status_code=204)

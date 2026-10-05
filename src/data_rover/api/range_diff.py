@@ -4,7 +4,7 @@ The fold reads the ``entity_states`` each commit in ``(from, to]`` captured
 (``commit_states``) and keeps, per id, the FIRST row's ``before`` and the LAST
 row's ``after``: an entity created in the range has a null first ``before``
 whatever later rows say, and one deleted and created again keeps its original
-``before``. It loads no model and touches no live ``Session``; its cost is the
+``before``. It loads no model and touches no live ``ProjectState``; its cost is the
 rows' JSON, so it applies only when the range is at most
 ``RANGE_DIFF_MAX_REVS`` commits and the rows are contiguous and carry states
 (``can_fold``). A rebind row changes no entity, so it contributes nothing and
@@ -14,7 +14,7 @@ from. ``render_range``'s equality ignores ``id`` and ``rev``: an entity that
 returns to its earlier state, with a newer ``rev``, is no change.
 
 This module is deliberately route-free: nothing here depends on FastAPI, a
-request, or a live ``Session``.
+request, or a live ``ProjectState``.
 """
 
 from __future__ import annotations

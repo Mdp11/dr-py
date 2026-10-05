@@ -11,7 +11,6 @@ from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 
-from ..schemas import ElementOut, RelationshipOut
 from .ops import TEMP_ID_PREFIX, is_reserved_id
 
 
@@ -37,8 +36,7 @@ def _reject_reserved_id(entity_id: str, *, element: bool) -> None:
 # ---------------------------------------------------------------------------
 # Shared load guards
 #
-# Every model-load surface (pydantic payloads below, raw-dict file loads in
-# build_model_from_dicts) funnels each entity through these two checkers so
+# Every model-load surface funnels each entity through these two checkers so
 # the guard semantics exist exactly once:
 #
 # - element/relationship type must exist in the metamodel
@@ -145,50 +143,6 @@ def _guard_relationship(
     seen_ids.add(entity_id)
 
 
-def _build_model_from_payload(
-    metamodel: Metamodel,
-    elements: list[ElementOut],
-    relationships: list[RelationshipOut],
-) -> Model:
-    """Materialize a `Model` from snapshot/inline payload data, applying the
-    shared guards listed above."""
-    model = Model(metamodel)
-
-    seen_element_ids: set[str] = set()
-    for e in elements:
-        _guard_element(metamodel, seen_element_ids, e.id, e.type_name)
-        model.elements[e.id] = Element(
-            id=e.id,
-            type_name=e.type_name,
-            properties=dict(e.properties),
-            rev=e.rev,
-        )
-
-    seen_relationship_ids: set[str] = set()
-    for r in relationships:
-        _guard_relationship(
-            metamodel,
-            model.elements,
-            seen_ids=seen_relationship_ids,
-            entity_id=r.id,
-            type_name=r.type_name,
-            source_id=r.source_id,
-            target_id=r.target_id,
-        )
-        model.relationships[r.id] = Relationship(
-            id=r.id,
-            type_name=r.type_name,
-            source_id=r.source_id,
-            target_id=r.target_id,
-            properties=dict(r.properties),
-            rev=r.rev,
-        )
-
-    # dicts were populated directly, bypassing the mutation boundary
-    model.indexes.rebuild()
-    return model
-
-
 # ---------------------------------------------------------------------------
 # Direct-dict builder (raw JSON load, no pydantic layer)
 # ---------------------------------------------------------------------------
@@ -237,11 +191,10 @@ def build_model_from_dicts(
 ) -> Model:
     """Materialize a `Model` directly from a parsed save-file JSON object.
 
-    Same guard semantics as `_build_model_from_payload` (shared checker
-    functions) but WITHOUT the per-entity pydantic layer: on an ~80 MB model
-    the pydantic validation pass costs multiples of the `json.load` itself
-    and buys nothing the lightweight shape checks here don't (id/type_name
-    strings, properties object, integer rev). The fresh-from-`json.load`
+    The shared guard checkers run per entity, without a per-entity pydantic
+    layer: on an ~80 MB model that pass costs multiples of the `json.load`
+    itself and buys nothing the lightweight shape checks here don't
+    (id/type_name strings, properties object, integer rev). The fresh-from-`json.load`
     property dicts are adopted as-is — no copies; the caller must not reuse
     *raw* afterwards.
 
@@ -251,14 +204,14 @@ def build_model_from_dicts(
     Missing ``elements``/``relationships`` keys mean empty lists.
 
     *strict* (default ``True``) controls whether unknown element/relationship
-    TYPES raise 422. Pass ``strict=False`` during snapshot hydration so that a
+    TYPES raise 422. Pass ``strict=False`` for a snapshot so that a
     project rebound onto a type-removing metamodel can still be loaded after
     eviction — the validation pipeline reports the conformance issues.
     Reserved-id, duplicate-id, abstract-type, and endpoint-existence guards
     still apply in both modes.
 
     ``on_progress(built, total)`` fires every 5000 entities and once at the
-    end (hydration progress reporting); it must be cheap and must not touch
+    end (progress reporting); it must be cheap and must not touch
     the model.
     """
     if not isinstance(raw, dict):

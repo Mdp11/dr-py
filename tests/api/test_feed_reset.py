@@ -14,9 +14,10 @@ from data_rover.api import content, feed
 from data_rover.api.db import db_session
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     papi,
     seed_default_project,
@@ -123,7 +124,7 @@ def _spy_on_resets(
     monkeypatch: pytest.MonkeyPatch, read: Callable[[], Any]
 ) -> list[Any]:
     """Records ``read()`` at the moment each ``reset`` is broadcast."""
-    hub = get_session().hub
+    hub = default_state().hub
     original = hub.broadcast
     seen: list[Any] = []
 
@@ -152,7 +153,7 @@ def test_an_install_announces_after_its_baseline(
             b'"relationships":[]}'
         )
         install(metamodel=_MM, model=body)
-        rev = get_session().model_rev
+        rev = default_state().model_rev
         assert _resets(_frames_before_join(client, ws)) == [
             {"type": "reset", "model_rev": rev}
         ]
@@ -178,7 +179,7 @@ def test_post_metamodel_announces_after_its_rows(
             headers={"content-type": "application/x-yaml"},
         )
         assert res.status_code == 200, res.text
-        rev = get_session().model_rev
+        rev = default_state().model_rev
         assert _resets(_frames_before_join(client, ws)) == [
             {"type": "reset", "model_rev": rev}
         ]
@@ -191,7 +192,7 @@ def test_a_metamodel_delete_announces_itself(client: TestClient) -> None:
     with client.websocket_connect(_feed_url()) as ws:
         _settle(ws)
         assert client.delete(papi("/metamodel")).status_code == 204
-        rev = get_session().model_rev
+        rev = default_state().model_rev
         assert _resets(_frames_before_join(client, ws)) == [
             {"type": "reset", "model_rev": rev}
         ]
@@ -212,7 +213,7 @@ def test_a_commit_does_not(client: TestClient) -> None:
         commit = client.post(
             papi("/commits"),
             json={
-                "base_rev": get_session().model_rev,
+                "base_rev": default_state().model_rev,
                 "ops": [
                     {
                         "kind": "update_element",
@@ -231,9 +232,9 @@ def test_a_commit_does_not(client: TestClient) -> None:
 
 
 def test_the_replica_routes_after_a_reset(client: TestClient) -> None:
-    before = get_session().model_rev
+    before = default_state().model_rev
     unjournaled_bump()
-    head = get_session().model_rev
+    head = default_state().model_rev
     assert head == before + 1
 
     tail = client.get(papi(f"/replica/tail?from_rev={before}"))

@@ -1,7 +1,7 @@
 """GET /metamodel/layout — shared metamodel-canvas positions.
 
-Deliberately does NOT depend on ``get_request_session``: reading a layout
-must not hydrate a cold project's model. Membership is enforced directly by
+Deliberately does NOT depend on ``get_project_state``: reading a layout
+must not load a cold project's state. Membership is enforced directly by
 ``authz.require_membership`` (method-based: any member GETs). No lease, no
 journal — presentation only: layout is last-write-wins because a lost drag
 is re-dragged, unlike model content where a lost write is corruption.

@@ -16,7 +16,7 @@ from data_rover.api.locking import (
     is_model_resource,
 )
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project, EMPTY_MODEL, install, head

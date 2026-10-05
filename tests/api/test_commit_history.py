@@ -99,7 +99,7 @@ def test_history_marks_rebind_commit(client: TestClient) -> None:
 def test_history_readable_by_viewer(client: TestClient) -> None:
     from data_rover.api import db
     from data_rover.api.db_models import Role, User
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
     gen = db.get_db()

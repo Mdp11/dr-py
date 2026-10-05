@@ -9,6 +9,7 @@ from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     papi,
     seed_default_project,
@@ -62,7 +63,6 @@ def test_client_vanishing_before_snapshot_unwinds_cleanly(
 
     from starlette.websockets import WebSocket, WebSocketDisconnect
 
-    from data_rover.api.session import get_session
 
     async def _gone(self: WebSocket, data: object, mode: str = "text") -> None:
         raise WebSocketDisconnect(code=1006)
@@ -74,9 +74,9 @@ def test_client_vanishing_before_snapshot_unwinds_cleanly(
     # that in production), so poll the hub instead of receiving.
     with client.websocket_connect(_feed_url()):
         deadline = time.monotonic() + 5.0
-        while get_session().hub.has_clients() and time.monotonic() < deadline:
+        while default_state().hub.has_clients() and time.monotonic() < deadline:
             time.sleep(0.01)
-    assert not get_session().hub.has_clients()
+    assert not default_state().hub.has_clients()
 
 
 def test_second_client_sees_presence_join(client: TestClient) -> None:

@@ -1,7 +1,7 @@
 """POST /snippets/format — the Reformat button's backend.
 
 Formatting is read-only with respect to the model: it never touches
-``session.model``, which is why the route sits in
+a project's model, which is why the route sits in
 ``authz._READ_ONLY_POST_SUFFIXES`` and a viewer may call it.
 """
 
@@ -63,7 +63,7 @@ def test_oversized_code_is_rejected(client: TestClient) -> None:
 
 def test_viewer_may_format(client: TestClient) -> None:
     from data_rover.api.db_models import Role, User
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
     gen = db.get_db()

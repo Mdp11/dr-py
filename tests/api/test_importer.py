@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from data_rover.api import content, db, hydration, importer
+from data_rover.api import content, db, head, importer
 from data_rover.api.db_models import Project, User
 from data_rover.api.importer import import_project
+from data_rover.api.project_state import get_registry
 from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store
 
 MM = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
@@ -19,7 +20,7 @@ def _env():
     set_snapshot_store(MemorySnapshotStore())
 
 
-def test_import_creates_project_baseline_and_hydrates() -> None:
+def test_import_creates_project_baseline_and_a_loadable_state() -> None:
     _env()
     try:
         importer.import_project(
@@ -33,14 +34,16 @@ def test_import_creates_project_baseline_and_hydrates() -> None:
             assert model_row is not None and model_row.model_rev == 0
             snap = content.latest_snapshot(s, "proj")
             assert snap is not None and snap.rev == 0
-        sess = hydration.hydrate_session("proj")
-        assert sess.model is not None and len(sess.model.elements) > 0
-        (view,) = sess.views.values()  # one view, named from the document
+            elements, _ = head.read_head(s, "proj")
+            assert len(elements) > 0
+        state = get_registry().get("proj")
+        assert state.metamodel is not None and state.model_rev == 0
+        (view,) = state.views.values()  # one view, named from the document
         assert view.name == "Operational"
         # the fixture's folders carry no ids at all (an un-migrated blob
         # shape); the importer's ensure_folder_ids call heals them at import
-        # time, one of its two entry points alongside hydration
-        # (tests/api/test_hydration.py::test_hydration_heals_missing_folder_ids).
+        # time, one of its two entry points alongside the state load
+        # (tests/api/test_project_state.py::test_loading_heals_missing_folder_ids_without_an_edit).
         assert all(len(f.id) == 32 for f in view.folders)
     finally:
         set_snapshot_store(None)

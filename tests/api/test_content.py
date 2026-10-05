@@ -196,7 +196,7 @@ def test_commits_between_is_bounded_and_ascending() -> None:
     from data_rover.api import content
     from data_rover.api.db import get_db
     from data_rover.api.db_models import Commit, Project
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
     gen = get_db()
     s = next(gen)
@@ -216,7 +216,7 @@ def test_first_rebind_after_finds_earliest_rebind() -> None:
     from data_rover.api import content
     from data_rover.api.db import get_db
     from data_rover.api.db_models import Commit, MetamodelRow, Project
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
     gen = get_db()
     s = next(gen)

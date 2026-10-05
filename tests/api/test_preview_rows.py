@@ -2,7 +2,7 @@
 
 The model half runs through the commit's own check (``load_and_apply``) in a
 transaction that is rolled back, so the rows, the refs, the revision and the
-session's metamodel are as they were. The session's model is never read.
+state's metamodel are as they were. No model is built.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from sqlalchemy import select
 from data_rover.api import db
 from data_rover.api.db_models import EntityRefRow
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
 
 from .conftest import (
     AUTH_HEADERS,
@@ -25,7 +25,7 @@ from .conftest import (
     install,
     papi,
     seed_default_project,
-    without_session_model,
+    no_model_built,
 )
 
 _MM = """
@@ -99,11 +99,11 @@ def _create(temp: str, type_name: str = "Node", **props: Any) -> dict[str, Any]:
     }
 
 
-def test_preview_answers_with_no_session_model(
+def test_preview_answers_with_no_model_built(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     before = head()
-    without_session_model(monkeypatch)
+    no_model_built(monkeypatch)
     r = _preview(
         client,
         [
@@ -140,16 +140,17 @@ def test_preview_refuses_what_the_applier_refuses(client: TestClient) -> None:
 def test_preview_base_rev_is_checked_against_the_model_row(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    without_session_model(monkeypatch)
+    no_model_built(monkeypatch)
     r = _preview(client, [], base_rev=9)
     assert r.status_code == 409
     assert r.json() == {"detail": "stale base_rev", "model_rev": 0}
 
 
-def test_preview_does_not_touch_the_session_revision(client: TestClient) -> None:
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    session.model_rev = 41  # the model row says 0, and it decides
+def test_preview_does_not_touch_the_state_revision(client: TestClient) -> None:
+    state = get_registry().get(DEFAULT_PROJECT_ID)
+    state.model_rev = 41  # the model row says 0, and it decides
     assert _preview(client, [_create("tmp_n")]).status_code == 200
+    assert state.model_rev == 41
 
 
 def test_preview_of_a_rebind_checks_the_rows_against_the_candidate(
@@ -169,8 +170,7 @@ def test_preview_of_a_rebind_runs_the_batch_under_the_candidate_and_changes_noth
     client: TestClient,
 ) -> None:
     before_refs = _refs()
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    prior = session.metamodel
+    prior = get_registry().get(DEFAULT_PROJECT_ID).metamodel
     candidate = _MM.replace("name: ref, datatype: string", "name: ref, datatype: Node")
     gadget_extra = candidate.replace(
         "  - name: Gadget\n",
@@ -187,7 +187,6 @@ def test_preview_of_a_rebind_runs_the_batch_under_the_candidate_and_changes_noth
     assert head().rev == 0
     assert _refs() == before_refs == set()
     assert get_registry().get(DEFAULT_PROJECT_ID).metamodel is prior
-    assert session.model is not None and session.model.metamodel is prior
     # the batch's own property needs the candidate: without it, a 422
     assert _preview(client, [_create("tmp_g", "Gadget", extra="x")]).status_code == 422
 

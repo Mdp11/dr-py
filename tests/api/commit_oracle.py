@@ -24,7 +24,7 @@ from data_rover.api import content, db
 from data_rover.api.commit_states import capture_entity_states
 from data_rover.api.db_models import EntityRefRow
 from data_rover.api.head import read_head
-from data_rover.api.hydration import deserialize_ops, serialize_ops
+from data_rover.api.schemas import deserialize_ops, serialize_ops
 from data_rover.api.artifact_ops import split_ops
 from data_rover.api.routes._snapshot import build_model_from_dicts
 from data_rover.api.routes.commits import _structural_ids

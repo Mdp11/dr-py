@@ -1,7 +1,7 @@
 """Folder identity helpers.
 
 Folder ids are assigned LAZILY: old blobs parse with ``Folder.id == ""`` and
-are healed by ``ensure_folder_ids`` at hydration / import time — there is
+are healed by ``ensure_folder_ids`` when a project's state loads / at import time — there is
 deliberately no Alembic migration for blob content. This module is
 the one place assignment and id-addressed traversal live so the API layer
 (op applier, lock-scope expansion) cannot grow a second, subtly different

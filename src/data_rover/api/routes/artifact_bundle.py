@@ -1,7 +1,7 @@
 """Bundle routes: export closure + stateless plan→confirm import.
 
 Export/preview read ONLY artifact rows (never the in-memory model), so they
-take no session dependency and sit in the read-only POST allowlist — viewers
+take no project-state dependency and sit in the read-only POST allowlist — viewers
 may export. Import plan and confirm are advisory-then-durable halves of the
 write flow, so both sit OUTSIDE that allowlist (a viewer must not be able to
 kick either one off).
@@ -39,7 +39,7 @@ from ..artifact_bundle import (
 from ..authz import require_membership
 from ..db import get_db
 from ..db_models import Membership, Project, User
-from ..deps import Session, get_request_session
+from ..project_state import ProjectState, get_project_state
 from ..identity import get_current_user
 from ..schemas import TEMP_ID_PREFIX, CommitRequest
 from .commits import create_commit
@@ -97,7 +97,7 @@ def import_plan(
 def import_confirm(
     body: ImportConfirmRequest,
     project_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ImportConfirmResponse | JSONResponse:
@@ -157,7 +157,7 @@ def import_confirm(
         f"Imported {len(ops)} {noun} from {body.bundle.source_project.name}"
     )
     req = CommitRequest(
-        base_rev=session.model_rev,
+        base_rev=state.model_rev,
         ops=list(ops),
         message=message,
         lock_tokens=[],
@@ -165,7 +165,7 @@ def import_confirm(
         ack_errors=True,
     )
     try:
-        result = create_commit(req, project_id, session=session, db=db, user=user)
+        result = create_commit(req, project_id, state=state, db=db, user=user)
     except HTTPException as exc:
         if exc.status_code == 422:
             # The batch was built from a plan derived moments ago against
@@ -183,7 +183,8 @@ def import_confirm(
         raise
     if isinstance(result, JSONResponse):
         # create_commit's own conflict responses (staleness / missing lease).
-        # base_rev is read off the live session and fresh-id creates overlap
+        # base_rev is read off the live project state and fresh-id creates
+        # overlap
         # nothing, so this is effectively unreachable — propagated verbatim
         # rather than reshaped, so a future path that does reach it surfaces
         # as itself instead of being disguised as an import-plan conflict.

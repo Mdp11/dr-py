@@ -7,9 +7,10 @@ from fastapi.testclient import TestClient
 
 from data_rover.api import content
 from data_rover.api.main import create_app
-from data_rover.api.session import get_session
 
 from .conftest import (
+    default_state,
+    head,
     AUTH_HEADERS,
     papi,
     seed_default_project,
@@ -56,7 +57,7 @@ def client() -> TestClient:
 
 
 def _rev(client: TestClient) -> int:
-    return get_session().model_rev
+    return default_state().model_rev
 
 
 def test_split_ops_separates_metamodel_family() -> None:
@@ -91,7 +92,7 @@ OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
 def _seed_second_member(user_id: str, email: str, role_name: str = "editor") -> None:
     from data_rover.api import db
     from data_rover.api.db_models import Role, User
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
     gen = db.get_db()
@@ -217,14 +218,13 @@ def test_migration_batch_lands_atomically(client: TestClient) -> None:
     assert body["model_rev"] == base + 1
     assert body["rebound"] is True and body["to_metamodel_id"]
     # the new schema is live and the element carries the new property
-    session = get_session()
+    session = default_state()
     assert session.metamodel is not None
     assert {p.name for p in session.metamodel.effective_element_properties("Node")} == {
         "label",
         "owner_name",
     }
-    assert session.model is not None
-    assert session.model.elements[eid].properties["owner_name"] == "ada"
+    assert head().elements[eid]["properties"]["owner_name"] == "ada"
     # journal: ONE row, rebind columns set, ops carry both families
     hist = client.get(papi("/commits"), params={"limit": 1}).json()["commits"][0]
     assert hist["rev"] == base + 1 and hist["is_rebind"] is True
@@ -363,7 +363,7 @@ def test_invalid_candidate_unwinds_cleanly(client: TestClient) -> None:
         },
     )
     assert r.status_code == 422
-    session = get_session()
+    session = default_state()
     assert session.model_rev == base
     assert session.metamodel is not None
     assert session.metamodel.effective_element_properties("Node")  # V1 intact
@@ -398,19 +398,16 @@ def test_mid_batch_model_failure_restores_the_old_schema(client: TestClient) -> 
         },
     )
     assert r.status_code == 422
-    session = get_session()
+    session = default_state()
     assert session.model_rev == base
     assert session.metamodel is not None
     assert session.metamodel.effective_element_properties("Node")  # V1 restored
-    assert session.model is not None
-    assert session.model.metamodel is session.metamodel
     # and the durable binding did not move either
     r2 = client.get(papi("/metamodel/raw"))
     assert r2.json()["blob"] == MM_V1
     # no journal row was written for the rejected batch
     hist = client.get(papi("/commits"), params={"limit": 5}).json()["commits"]
     assert all(not c["is_rebind"] for c in hist)
-    session.model.indexes.verify_consistent()
 
 
 def test_layout_only_commit_is_cheap_and_journalled(client: TestClient) -> None:
@@ -480,7 +477,7 @@ def test_stale_batch_below_a_rebind_conflicts_unconditionally(
 def test_layout_only_batch_lands_under_strict_mode(client: TestClient) -> None:
     """Strict mode is the client's to enforce: the server lands a layout-only
     batch regardless."""
-    get_session().strict_mode = True
+    default_state().strict_mode = True
     token = _acquire_mm(client)
     base = _rev(client)
     r = client.post(
@@ -509,7 +506,7 @@ def test_swap_is_unwound_when_post_swap_persistence_raises(
     """
     from data_rover.api import metamodel_ops
 
-    before = get_session().metamodel
+    before = default_state().metamodel
     assert before is not None
     base = _rev(client)
 
@@ -529,11 +526,9 @@ def test_swap_is_unwound_when_post_swap_persistence_raises(
                 "lock_tokens": [token],
             },
         )
-    session = get_session()
+    session = default_state()
     # the OLD metamodel object is back, identically — not a reparse
     assert session.metamodel is before
-    assert session.model is not None
-    assert session.model.metamodel is before
     assert before.effective_element_properties("Node")  # V1, not the candidate
     assert session.model_rev == base
     monkeypatch.undo()
@@ -541,11 +536,11 @@ def test_swap_is_unwound_when_post_swap_persistence_raises(
 
 
 def test_rebind_commit_forces_a_snapshot_at_the_new_rev(client: TestClient) -> None:
-    """The forced snapshot is the ONLY thing keeping the replay tail off a
-    schema boundary (hydration binds the CURRENT metamodel and would replay
-    pre-rebind ops under it), and the periodic policy would not fire here."""
+    """The forced snapshot is the ONLY thing keeping a replica's catch-up tail
+    off a schema boundary (its snapshot would otherwise be of the old schema),
+    and the periodic policy would not fire here."""
     from data_rover.api import db as _db
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
 
     token = _acquire_mm(client)
     base = _rev(client)
@@ -575,7 +570,7 @@ def test_rebind_broadcasts_rebind_event_not_commit_event(client: TestClient) -> 
     that create_commit picks it (test_rebind_event.py only covers the builder
     against the standalone route)."""
     events: list[dict] = []
-    session = get_session()
+    session = default_state()
     monkey = session.hub.broadcast
     session.hub.broadcast = events.append  # type: ignore[method-assign]
     try:
@@ -607,7 +602,7 @@ def test_layout_only_commit_broadcasts_the_metamodel_layout_scope(
     commit that reported only the default ["model"] would leave every peer's
     canvas stale."""
     events: list[dict] = []
-    session = get_session()
+    session = default_state()
     monkey = session.hub.broadcast
     session.hub.broadcast = events.append  # type: ignore[method-assign]
     try:
@@ -673,16 +668,16 @@ def test_preview_dry_runs_a_migration_batch(client: TestClient) -> None:
     # unchanged, and the element's property patch never survived the
     # rollback (owner_name is not even a V1 property, so its presence would
     # itself prove the swap leaked past the preview).
-    session = get_session()
+    session = default_state()
     assert session.model_rev == base
     assert session.metamodel is not None
     assert {
         p.name for p in session.metamodel.effective_element_properties("Node")
     } == {"label"}
     assert client.get(papi("/metamodel/raw")).json()["blob"] == MM_V1
-    assert session.model is not None
-    assert session.model.elements[eid].properties.get("label") == "hello"
-    assert "owner_name" not in session.model.elements[eid].properties
+    props = head().elements[eid]["properties"]
+    assert props.get("label") == "hello"
+    assert "owner_name" not in props
 
 
 def test_preview_422s_a_bad_candidate(client: TestClient) -> None:
@@ -723,13 +718,11 @@ def test_preview_restores_schema_when_model_ops_fail_mid_preview(
         },
     )
     assert r.status_code == 422, r.text
-    session = get_session()
+    session = default_state()
     assert session.model_rev == base
     assert session.metamodel is not None
     assert session.metamodel.effective_element_properties("Node")  # V1 restored
-    assert session.model is not None
-    assert session.model.metamodel is session.metamodel
-    assert session.model.elements[eid].properties["label"] == "x"
+    assert head().elements[eid]["properties"]["label"] == "x"
     assert client.get(papi("/metamodel/raw")).json()["blob"] == MM_V1
 
 
@@ -825,7 +818,7 @@ def test_orphan_db_commit_failure_unwinds_the_batch(
 
     import data_rover.api.routes.commits as commits_mod
 
-    session = get_session()
+    session = default_state()
     token = _acquire_mm(client)
     base = _rev(client)
 

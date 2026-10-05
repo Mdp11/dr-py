@@ -1,7 +1,7 @@
 """In-session resource leases — the pessimistic-locking primitive.
 
 A lease is a TTL grant on one resource (element or relationship id). Leases
-are held in the per-project ``Session`` (single-instance in-process;
+are held in the per-project ``ProjectState`` (single-instance in-process;
 write-through mirrored to Redis when configured — see lock_mirror.py) and
 renewed by client heartbeat; the lifespan sweeper auto-releases expired
 leases. ``acquire`` is all-or-nothing: either every requested lock is
@@ -290,11 +290,11 @@ class LockTable:
         ]
 
     def seed(self, leases: list[Lease]) -> None:
-        """Bulk-install restored leases (hydration-time mirror restore ONLY).
+        """Bulk-install restored leases (state-load mirror restore ONLY).
 
         No conflict checking on purpose: the mirror holds a snapshot of a
         table that was internally consistent when written, and seeding runs
-        inside the registry loader before the session serves any request —
+        inside the registry loader before the state serves any request —
         there is nothing to conflict with yet."""
         for le in leases:
             self._by_resource.setdefault(le.resource_id, []).append(le)

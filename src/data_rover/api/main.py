@@ -15,7 +15,7 @@ from .upload_cap import UploadCapMiddleware
 from .db import create_all, db_session, init_engine
 from .errors import register_exception_handlers
 from .feed import lock_event
-from .lock_mirror import mirror_session_leases
+from .lock_mirror import mirror_project_leases
 from .routes import (
     admin,
     artifact_bundle,
@@ -35,7 +35,7 @@ from .routes import (
     snippets,
     views,
 )
-from .session import get_registry, install_persistent_registry
+from .project_state import get_registry
 from .settings import Settings, get_settings
 from .storage import build_store_from_settings, set_snapshot_store
 
@@ -111,13 +111,13 @@ def _guard_prod_secret(settings: Settings) -> None:
 
 
 def _idle_sweep_once(now: float, ttl: float) -> list[str]:
-    """Evict (snapshot-then-drop) every session idle for >= ttl. Returns the
-    evicted project ids. Pure single-pass — the background loop calls this on a
+    """Drop the state of every project idle for >= ttl and with no lease or
+    feed client. Returns the ids that were idle, evicted or not. Pure single-pass — the background loop calls this on a
     timer; tests call it directly with a controlled ``now``."""
     reg = get_registry()
     stale = reg.idle(now=now, ttl=ttl)
     for pid in stale:
-        reg.evict(pid)
+        reg.evict(pid, now=now, ttl=ttl)
     return stale
 
 
@@ -136,20 +136,20 @@ def _start_idle_sweeper(ttl: float) -> tuple[threading.Thread, threading.Event]:
 
 
 def _sweep_expired_locks(now: float) -> int:
-    """Drop expired leases from every warm session. Returns count released.
+    """Drop expired leases from every warm project state. Returns count released.
 
     Iterates warm_items() so the sweeper neither refreshes last_access
-    (which would defeat the idle-evict sweeper) nor hydrates cold/evicted
+    (which would defeat the idle-evict sweeper) nor loads cold/evicted
     projects (which would undo the eviction).
 
-    Broadcasts lock{expired} for each session whose leases were swept,
+    Broadcasts lock{expired} for each state whose leases were swept,
     outside the write_mutex (enqueue is non-blocking; no mutex needed)."""
     released = 0
-    for pid, session in get_registry().warm_items():
-        with session.write_mutex:
-            expired = session.lock_table.sweep_expired(now)
+    for pid, state in get_registry().warm_items():
+        with state.write_mutex:
+            expired = state.lock_table.sweep_expired(now)
         if expired:
-            session.hub.broadcast(
+            state.hub.broadcast(
                 lock_event(
                     "expired",
                     [
@@ -163,7 +163,7 @@ def _sweep_expired_locks(now: float) -> int:
                     ],
                 )
             )
-            mirror_session_leases(pid, session)
+            mirror_project_leases(pid, state)
         released += len(expired)
     return released
 
@@ -186,7 +186,6 @@ def create_app() -> FastAPI:
     settings = get_settings()
     init_engine(settings.database_url)
     set_snapshot_store(build_store_from_settings(settings))
-    install_persistent_registry()
     _guard_prod_secret(settings)
     if settings.dev_seed:
         _ensure_dev_seed(settings)

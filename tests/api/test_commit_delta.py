@@ -1,7 +1,8 @@
 """What a replica follows a commit by: ``prev_rev``, ``state_digest`` and the
-``recreated_*`` lists on every carrier, and the session digest behind them —
-kept up per batch, true to a full recomputation, put back with a batch that
-is taken back, and unknown after whatever moves the model around it."""
+``recreated_*`` lists on every carrier, and the digest behind them on the model
+row: kept up per batch without a pass over the entities, true to a full
+recomputation, left as it was by a batch that is taken back, and whole across
+whatever moves the revision or the rows around it."""
 
 from __future__ import annotations
 
@@ -10,13 +11,14 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api import content, db
+from data_rover.api import content, db, head
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry, get_session
-from data_rover.api.state_digest import model_digest
+from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
+from data_rover.api.state_digest import entity_hash, format_digest
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     feed_url,
     papi,
@@ -77,9 +79,21 @@ def _ops(client: TestClient, ops: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _true_digest() -> str:
-    model = get_session().model
-    assert model is not None
-    return model_digest(model)
+    """The digest of the head rows by full recomputation, independent of
+    ``state_digest.digest_value`` (which the tests below make fail)."""
+    with db.db_session() as s:
+        elements, relationships = head.read_head(s, DEFAULT_PROJECT_ID)
+    value = 0
+    for entity in (*elements, *relationships):
+        value ^= entity_hash(entity["id"], entity["rev"])
+    return format_digest(value)
+
+
+def _row_digest() -> str | None:
+    with db.db_session() as s:
+        row = content.get_model_row(s, DEFAULT_PROJECT_ID)
+        assert row is not None
+        return row.state_digest
 
 
 def _journal_digest(rev: int) -> str | None:
@@ -90,26 +104,23 @@ def _journal_digest(rev: int) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# the session digest
+# the digest on the model row
 # ---------------------------------------------------------------------------
 
 
 def test_the_digest_is_kept_up_per_batch_and_stays_true(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = get_session()
-    session.state_digest_value = None  # start from an unknown digest
-
     first = _ops(client, [_node("tmp_a", "a"), _node("tmp_b", "b")])
     a, b = first["id_map"]["tmp_a"], first["id_map"]["tmp_b"]
-    assert first["state_digest"] == _true_digest()
-    assert session.state_digest_value is not None  # known from here on
+    assert first["state_digest"] == _true_digest() == _row_digest()
 
-    def _no_full_pass(model: object) -> int:
-        raise AssertionError("the session recomputed a digest it knew")
+    def _no_full_pass(*_: object) -> int:
+        raise AssertionError("a pass over every entity for a digest it knew")
 
     # every kind of touch, folded in without another pass over the model
-    monkeypatch.setattr("data_rover.api.session.digest_value", _no_full_pass)
+    monkeypatch.setattr("data_rover.api.state_digest.digest_value", _no_full_pass)
+    monkeypatch.setattr("data_rover.api.head.digest_value", _no_full_pass)
     batches: list[list[dict[str, Any]]] = [
         [_contains("tmp_r", a, b)],
         [{"kind": "update_element", "id": b, "properties_patch": {"label": "b2"}}],
@@ -120,32 +131,28 @@ def test_the_digest_is_kept_up_per_batch_and_stays_true(
     ]
     for ops in batches:
         body = _ops(client, ops)
-        assert body["state_digest"] == _true_digest(), ops
-        assert body["state_digest"] == session.state_digest()
+        assert body["state_digest"] == _true_digest() == _row_digest(), ops
 
 
-def test_whatever_moves_the_model_around_the_digest_leaves_it_unknown(
+def test_whatever_moves_the_revision_or_the_rows_leaves_the_digest_true(
     client: TestClient,
 ) -> None:
-    session = get_session()
     _ops(client, [_node("tmp_a", "a")])
-    assert session.state_digest_value is not None
 
-    # the model is swapped behind the op protocol (the row's revision moves with
-    # the session's, as a commit needs them to)
+    # the revision moves with no journal row, as a commit needs the rows to
+    # carry on from
     unjournaled_bump()
-    assert session.state_digest_value is None
     assert _ops(client, [_node("tmp_b", "b")])["state_digest"] == _true_digest()
 
-    # a model replaced whole
+    # the rows replaced whole
     install(metamodel=_MM, model=EMPTY_MODEL)
-    assert session.state_digest() == "0" * 16
+    assert _row_digest() == "0" * 16 == _true_digest()
 
 
-def test_a_batch_taken_back_takes_the_digest_back(
+def test_a_batch_taken_back_leaves_the_digest_as_it_was(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = get_session()
+    state = default_state()
     known = _ops(client, [_node("tmp_a", "a")])["state_digest"]
 
     def _boom(*args: Any, **kwargs: Any) -> bool:
@@ -154,13 +161,13 @@ def test_a_batch_taken_back_takes_the_digest_back(
     monkeypatch.setattr("data_rover.api.content.append_commit", _boom)
     res = client.post(
         papi("/commits"),
-        json={"base_rev": session.model_rev, "ops": [_node("tmp_b", "b")]},
+        json={"base_rev": state.model_rev, "ops": [_node("tmp_b", "b")]},
     )
     assert res.status_code == 500, res.text
-    assert session.state_digest() == known == _true_digest()
+    assert _row_digest() == known == _true_digest()
 
 
-def test_a_rehydrated_session_reaches_the_same_digest(client: TestClient) -> None:
+def test_the_digest_survives_eviction(client: TestClient) -> None:
     body = _ops(client, [_node("tmp_a", "a"), _node("tmp_b", "b")])
     a = body["id_map"]["tmp_a"]
     live = _ops(
@@ -168,11 +175,13 @@ def test_a_rehydrated_session_reaches_the_same_digest(client: TestClient) -> Non
         [{"kind": "update_element", "id": a, "properties_patch": {"label": "a2"}}],
     )["state_digest"]
 
-    get_registry().evict(DEFAULT_PROJECT_ID)  # snapshot, then drop
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    assert session.state_digest_value is None  # hydrated: unknown until read
-    with session.write_mutex:
-        assert session.state_digest() == live
+    assert get_registry().evict(DEFAULT_PROJECT_ID)
+    assert _row_digest() == live == _true_digest()
+    again = _ops(
+        client,
+        [{"kind": "update_element", "id": a, "properties_patch": {"label": "a3"}}],
+    )["state_digest"]
+    assert again == _true_digest() == _row_digest() != live
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +190,7 @@ def test_a_rehydrated_session_reaches_the_same_digest(client: TestClient) -> Non
 
 
 def test_ops_response_carries_the_delta_fields(client: TestClient) -> None:
-    rev = get_session().model_rev
+    rev = default_state().model_rev
     body = _ops(client, [_node("tmp_a", "a"), _node("tmp_b", "b")])
     a, b = body["id_map"]["tmp_a"], body["id_map"]["tmp_b"]
     assert body["prev_rev"] == rev
@@ -215,7 +224,7 @@ def test_commit_response_and_feed_event_carry_the_delta_fields(
 ) -> None:
     with client.websocket_connect(feed_url()) as ws:
         ws.receive_json()  # snapshot
-        rev = get_session().model_rev
+        rev = default_state().model_rev
         res = client.post(
             papi("/commits"),
             json={
@@ -241,11 +250,11 @@ def test_commit_response_and_feed_event_carry_the_delta_fields(
 
 def test_revert_carries_the_delta_fields(client: TestClient) -> None:
     _ops(client, [_node("tmp_a", "a")])
-    target = get_session().model_rev
+    target = default_state().model_rev
     _ops(client, [_node("tmp_b", "b")])
     with client.websocket_connect(feed_url()) as ws:
         ws.receive_json()  # snapshot
-        rev = get_session().model_rev
+        rev = default_state().model_rev
         res = client.post(
             papi("/commits/revert"), json={"target_rev": target, "base_rev": rev}
         )
@@ -260,10 +269,10 @@ def test_revert_carries_the_delta_fields(client: TestClient) -> None:
     assert _journal_digest(rev + 1) == body["state_digest"]
 
 
-def test_a_commit_that_could_not_be_persisted_takes_the_digest_back(
+def test_a_commit_that_could_not_be_persisted_leaves_the_digest_and_rev(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = get_session()
+    state = default_state()
     known = _ops(client, [_node("tmp_a", "a")])["state_digest"]
 
     def _boom(*args: Any, **kwargs: Any) -> bool:
@@ -273,11 +282,12 @@ def test_a_commit_that_could_not_be_persisted_takes_the_digest_back(
     res = client.post(
         papi("/commits"),
         json={
-            "base_rev": session.model_rev,
+            "base_rev": state.model_rev,
             "ops": [_node("tmp_b", "b")],
             "lock_tokens": [],
             "message": "lost",
         },
     )
     assert res.status_code == 500, res.text
-    assert session.state_digest() == known == _true_digest()
+    assert _row_digest() == known == _true_digest()
+    assert state.model_rev == 1

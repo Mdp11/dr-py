@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from data_rover.api import commit_load, content
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.core.model import model as model_mod
 from data_rover.core.model.ids import SequentialIdGenerator
 
@@ -36,7 +36,6 @@ from .commit_oracle import (
 from .conftest import (
     AUTH_HEADERS,
     head,
-    install,
     install_unchecked,
     post_commit,
     seed_default_project,
@@ -465,20 +464,6 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(create_app())
 
 
-def _rows_equal_mirror(oracle: Oracle, why: str) -> None:
-    from data_rover.api.session import get_registry
-
-    mirror = get_registry().get(DEFAULT_PROJECT_ID).model
-    assert mirror is not None
-    want_e, want_r = oracle.rows()
-    from dataclasses import asdict
-
-    assert [asdict(e) for e in mirror.elements.values()] == want_e, f"{why}: mirror"
-    assert [asdict(r) for r in mirror.relationships.values()] == want_r, (
-        f"{why}: mirror"
-    )
-
-
 def test_a_commit_on_head_rows_equals_the_full_model(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -575,7 +560,6 @@ def test_a_commit_on_head_rows_equals_the_full_model(
         ), why
         assert_rows(oracle, DEFAULT_PROJECT_ID, why)
         assert_commit_row(want, installed.rev + 1, DEFAULT_PROJECT_ID, why)
-        _rows_equal_mirror(oracle, why)
 
         # revert: the oracle takes the batch's inverse back out
         undo = oracle.run(res.inverse_ops(), restore=True)
@@ -594,7 +578,6 @@ def test_a_commit_on_head_rows_equals_the_full_model(
         reverted += 1
         assert_rows(oracle, DEFAULT_PROJECT_ID, f"{why} (revert)")
         assert_commit_row(undo, rev + 1, DEFAULT_PROJECT_ID, f"{why} (revert)")
-        _rows_equal_mirror(oracle, f"{why} (revert)")
         # the entities are the installed ones again
         back = head()
         assert {k: _content(v) for k, v in back.elements.items()} == {

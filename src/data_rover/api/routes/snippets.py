@@ -63,7 +63,7 @@ def format_snippet_code(
     """Reformat a snippet with ``ruff format``.
 
     Read-only (listed in ``authz._READ_ONLY_POST_SUFFIXES``): it never touches
-    ``session.model``, so a viewer may format their own draft. A missing
+    a project's state, so a viewer may format their own draft. A missing
     formatter is a 503 — degraded, never a 500.
     """
     try:

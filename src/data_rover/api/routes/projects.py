@@ -32,7 +32,7 @@ from ..authz import require_admin, require_membership
 from ..db import get_db
 from ..db_models import Membership, Project, Role, User
 from ..identity import get_current_user
-from ..session import get_registry
+from ..project_state import get_registry
 
 router = APIRouter()
 
@@ -169,8 +169,7 @@ def delete_project(
     db: Session = Depends(get_db),
 ) -> Response:
     tenancy.delete_project(db, project_id)
-    # discard, NOT evict: the DB rows are gone (committed), so the snapshot
-    # hook would hit a dangling project FK, and the live-leases/feed-clients
-    # guard would keep a dead project's session registered forever.
+    # discard, NOT evict: the live-leases/feed-clients guard would keep a dead
+    # project's state registered forever.
     get_registry().discard(project_id)
     return Response(status_code=204)

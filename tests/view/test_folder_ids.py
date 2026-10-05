@@ -1,6 +1,6 @@
 """Folder identity: ids are assigned lazily, never
 reassigned once present, and the reserved root id / duplicates are healed.
-`ensure_folder_ids` is the ONE assignment path — hydration and the importer
+`ensure_folder_ids` is the ONE assignment path — the project-state load and the importer
 both call it, so these tests pin the healing rules for both."""
 
 from __future__ import annotations

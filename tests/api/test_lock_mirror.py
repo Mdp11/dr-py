@@ -1,4 +1,4 @@
-"""Lease mirror: seam, clock conversion, write-through, restore-on-hydrate,
+"""Lease mirror: seam, clock conversion, write-through, restore-on-load,
 degradation. Redis itself is only touched by the integration-marked test in
 test_lock_mirror_redis.py."""
 
@@ -23,7 +23,7 @@ from data_rover.api.lock_mirror import (
 )
 from data_rover.api.locking import Lease, LockIntent, LockMode
 from data_rover.api.main import create_app
-from data_rover.api.session import reset_session
+from data_rover.api.project_state import ProjectState, get_registry
 from data_rover.api.settings import Settings
 
 from .conftest import (
@@ -141,7 +141,7 @@ def test_get_lease_mirror_sticky_fallback_on_build_failure(
     must be memoized: the second call must return the SAME Null fallback
     instance rather than re-attempting (and re-logging) the broken build,
     which would spam a traceback on every acquire/release/renew/commit and
-    every cold hydration forever.
+    every cold state load forever.
 
     Counts calls to the module's ``logger.warning`` directly rather than
     using ``caplog``: ``alembic.command.upgrade`` (exercised by
@@ -312,8 +312,7 @@ def test_write_throughs_are_serialized_in_snapshot_order() -> None:
     holding a released lease (the restart-phantom source). Deterministic, not
     a race reproduction: the first write blocks on a gate; the second
     write-through must wait for it rather than overtake it."""
-    from data_rover.api.lock_mirror import mirror_session_leases
-    from data_rover.api.session import Session
+    from data_rover.api.lock_mirror import mirror_project_leases
 
     class GatedRecordingMirror:
         def __init__(self) -> None:
@@ -335,21 +334,21 @@ def test_write_throughs_are_serialized_in_snapshot_order() -> None:
     mirror = GatedRecordingMirror()
     set_lease_mirror(mirror)
     try:
-        session = Session()
+        state = ProjectState(project_id="p1")
         lease = _lease(expires_at=time.monotonic() + 60.0)
-        session.lock_table.seed([lease])
+        state.lock_table.seed([lease])
 
         t1 = threading.Thread(
-            target=mirror_session_leases, args=("p1", session), daemon=True
+            target=mirror_project_leases, args=("p1", state), daemon=True
         )
         t1.start()
         assert mirror.entered.wait(timeout=5)  # t1 snapshotted {lease}, now gated
 
         # a later mutation + write-through: must queue behind t1, not overtake
-        with session.write_mutex:
-            session.lock_table.release("test-user", lease.token)
+        with state.write_mutex:
+            state.lock_table.release("test-user", lease.token)
         t2 = threading.Thread(
-            target=mirror_session_leases, args=("p1", session), daemon=True
+            target=mirror_project_leases, args=("p1", state), daemon=True
         )
         t2.start()
         assert not mirror.gate.is_set()
@@ -371,7 +370,7 @@ OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
 def _add_member(user_id: str, email: str) -> None:
     from data_rover.api import db as _db
     from data_rover.api.db_models import Role, User
-    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.project_state import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
     gen = _db.get_db()
@@ -390,11 +389,11 @@ def test_leases_survive_restart(client: TestClient) -> None:
     eid = _create_element(client)
     token = _acquire(client, eid)
 
-    # simulate a backend restart: drop every in-memory session; the process-
+    # simulate a backend restart: drop every in-memory project state; the process-
     # global MemoryLeaseMirror survives (it plays the role of Redis)
-    reset_session()
+    get_registry().reset()
 
-    # next request re-hydrates through the persistent loader -> restore
+    # the next request loads the state again -> restore
     r = client.post(papi("/locks/renew"), json={"token": token})
     assert r.status_code == 200 and r.json()["ok"] is True
 
@@ -422,7 +421,7 @@ def test_expired_mirrored_lease_not_restored(client: TestClient) -> None:
         [MirroredLease(eid, "exclusive", "test-user", "tok-old", "edit",
                        time.time() - 5.0)],
     )
-    reset_session()
+    get_registry().reset()
     assert client.get(papi("/locks")).json()["leases"] == []
 
 
@@ -437,8 +436,8 @@ def test_restore_failure_degrades_to_cold_start(client: TestClient) -> None:
     eid = _create_element(client)
     _acquire(client, eid)
     set_lease_mirror(ExplodingLoad())
-    reset_session()
-    # hydration succeeds; table is simply empty (today's cold start)
+    get_registry().reset()
+    # the load succeeds; table is simply empty (today's cold start)
     assert client.get(papi("/locks")).json()["leases"] == []
 
 

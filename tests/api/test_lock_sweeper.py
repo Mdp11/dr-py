@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from data_rover.api.feed import reset_loop
 from data_rover.api.locking import LockIntent, LockMode, RequiredLock
 from data_rover.api.main import create_app
-from data_rover.api.session import get_registry
+from data_rover.api.project_state import get_registry
 
 from .conftest import (
     AUTH_HEADERS,
@@ -97,8 +97,8 @@ def test_sweep_does_not_bump_last_access(client) -> None:
     )
 
 
-def test_sweep_does_not_hydrate_cold_project(client) -> None:
-    """_sweep_expired_locks must NOT hydrate a project that is not warm.
+def test_sweep_does_not_load_a_cold_project(client) -> None:
+    """_sweep_expired_locks must NOT load a project that is not warm.
 
     A cold project id absent from warm_items() must stay absent after a sweep —
     the sweeper must only visit sessions already in memory, never call
@@ -106,24 +106,24 @@ def test_sweep_does_not_hydrate_cold_project(client) -> None:
     from data_rover.api.main import _idle_sweep_once, _sweep_expired_locks
 
     registry = get_registry()
-    # Touch the default session (the client fixture called registry.get already
+    # Touch the default project state (the client fixture called registry.get already
     # via the request path; call it explicitly to be certain it is warm).
     registry.get("default")
     assert "default" in registry.project_ids(), "setup: default must be warm"
 
-    # Evict it so the session is cold (not in _sessions).
+    # Evict it so the state is cold (not in _sessions).
     _idle_sweep_once(now=time.monotonic() + 10_000, ttl=1.0)
     assert "default" not in registry.project_ids(), "setup: default must be evicted"
 
-    # A project that was never hydrated also must not appear.
-    cold_pid = "never-hydrated-project"
+    # A project that was never loaded also must not appear.
+    cold_pid = "never-loaded-project"
     assert cold_pid not in registry.project_ids()
 
     _sweep_expired_locks(time.monotonic())
 
     # Neither project should have been resurrected by the lock sweeper.
     assert "default" not in registry.project_ids(), (
-        "lock sweeper resurrected an evicted session"
+        "lock sweeper resurrected an evicted project state"
     )
     assert cold_pid not in registry.project_ids()
 

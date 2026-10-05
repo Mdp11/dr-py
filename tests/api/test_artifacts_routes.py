@@ -10,10 +10,11 @@ from fastapi.testclient import TestClient
 from data_rover.api import db
 from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.project_state import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
 from .conftest import (
+    default_state,
     AUTH_HEADERS,
     papi,
     seed_default_project,
@@ -244,7 +245,7 @@ def test_lease_holder_may_still_use_the_legacy_routes(client: TestClient) -> Non
 
 def test_writes_broadcast_artifact_events(client: TestClient) -> None:
     events: list[dict] = []
-    hub = get_session().hub
+    hub = default_state().hub
     original = hub.broadcast
     hub.broadcast = events.append  # type: ignore[method-assign]
     try:

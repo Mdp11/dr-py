@@ -1,6 +1,6 @@
 """Service functions over the content tables (metamodels/models/views/
 commits/snapshots). Mirrors ``tenancy.py``: the single place these queries
-live; routes and hydration call these instead of inlining SQL. Each function
+live; routes call these instead of inlining SQL. Each function
 takes a live ``Session`` and does NOT commit — callers own the unit of work
 (``db.db_session`` commits on exit; request code commits explicitly)."""
 
@@ -48,7 +48,7 @@ def get_model_row(db: Session, project_id: str) -> ModelRow | None:
 def lock_model_row(db: Session, project_id: str) -> ModelRow | None:
     """The project's ``ModelRow`` read ``FOR UPDATE``: on Postgres the lock holds
     until the transaction ends, and the row is refreshed from the database, so
-    ``model_rev`` is the committed one. SQLite takes no row lock; the session's
+    ``model_rev`` is the committed one. SQLite takes no row lock; the project state's
     ``write_mutex`` is what serializes commits there."""
     return db.execute(
         select(ModelRow)
@@ -158,7 +158,7 @@ def get_commit(db: Session, project_id: str, rev: int) -> Commit | None:
 
     Point lookup on the composite PK, for readers that render ONE commit (the
     diff endpoint) rather than a replay range — distinct from ``commits_after``/
-    ``commits_between``, which exist to feed hydration."""
+    ``commits_between``, which read ranges of the journal."""
     return db.execute(
         select(Commit).where(Commit.project_id == project_id, Commit.rev == rev)
     ).scalar_one_or_none()
@@ -283,8 +283,7 @@ def list_commits(
 
     The page-by cursor is ``before_rev`` (exclusive): pass the smallest ``rev``
     of the previous page to fetch the next, older page. Distinct from
-    ``commits_after`` (ascending replay tail used by hydration) — this is the
-    descending read for a history browser.
+    ``commits_after`` (the ascending tail) — this is the descending read for a history browser.
     """
     q = select(Commit).where(Commit.project_id == project_id)
     if before_rev is not None:
@@ -417,10 +416,10 @@ def upsert_view(
     """Replace an existing view's blob.
 
     ``bump_rev`` distinguishes a real edit (the view half of
-    ``POST /commits``) from a NORMALIZATION write (lazy folder-id healing at
-    hydration): healing must not look like an edit, so it passes
+    ``POST /commits``) from a NORMALIZATION write (folder-id healing when
+    the project's state loads): healing must not look like an edit, so it passes
     ``bump_rev=False`` and ``view_rev`` is left untouched. Raises ``KeyError``
-    for an unknown view — callers resolve the view from ``session.views``
+    for an unknown view — callers resolve the view from ``state.views``
     first, so a miss here is a bug, not a client error."""
     row = get_view(db, project_id, view_id)
     if row is None:
@@ -540,7 +539,7 @@ def stage_metamodel_layout(db: Session, project_id: str, blob: dict) -> None:
     its ``Commit`` row, so this function must never commit on its own. It
     also never needs to guard the check-then-insert below against a
     concurrent first write: every caller reaches this only from a
-    metamodel-op batch applied under the per-session ``write_mutex``, so no
+    metamodel-op batch applied under the per-project ``write_mutex``, so no
     second writer can ever observe the same missing row at the same time."""
     row = db.get(MetamodelLayoutRow, project_id)
     if row is None:

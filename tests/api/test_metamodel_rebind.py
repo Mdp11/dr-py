@@ -7,7 +7,7 @@ keeps two things:
 1. A tombstone proving ``POST /metamodel/rebind`` answers 404/405, next to a
    sibling on the same ``/metamodel`` prefix answering 200 — so a wholesale
    router-mounting mistake can't hide behind the tombstone.
-2. ``test_rebind_commit_survives_eviction``: a rebound project re-hydrating
+2. ``test_rebind_commit_survives_eviction``: a rebound project loading its state again
    after eviction under the new metamodel, with its pre-existing element
    intact. A rebind that drops a type still in use is refused before it lands
    (``test_rebind_rows.py``).
@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
 
 from .conftest import (
     AUTH_HEADERS,
@@ -103,16 +103,16 @@ def test_rebind_commit_survives_eviction(client: TestClient) -> None:
     get_registry().evict(DEFAULT_PROJECT_ID)
     assert DEFAULT_PROJECT_ID not in get_registry().project_ids()
 
-    # (a) the rebound metamodel is live after re-hydration
+    # (a) the rebound metamodel is live after the state is loaded again
     mm_resp = client.get(papi("/metamodel"), headers=AUTH_HEADERS)
     assert mm_resp.status_code == 200, f"expected 200, got {mm_resp.status_code}: {mm_resp.text}"
     mm = mm_resp.json()
     assert any(e["name"] == "Widget" for e in mm["elements"])
     assert any(e["name"] == "Node" for e in mm["elements"])
 
-    # (b) the pre-existing Node element survived re-hydration
+    # (b) the pre-existing Node element survived the state being loaded again
     ids_after = set(head().elements)
     assert node_id in ids_after, (
-        f"Node element {node_id!r} was lost after eviction+rehydration; "
+        f"Node element {node_id!r} was lost after eviction and a fresh state load; "
         f"elements present: {ids_after}"
     )

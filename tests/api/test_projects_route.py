@@ -93,28 +93,35 @@ def test_delete_project_is_admin_only(client: TestClient) -> None:
     assert client.get(f"/api/v1/projects/{pid}", headers=_h("u1")).status_code == 404
 
 
-def test_delete_hydrated_project_discards_session_without_snapshot(
+def test_delete_loaded_project_discards_its_state(
     client: TestClient,
 ) -> None:
-    """U-7: deleting a project whose in-memory session holds a model must 204.
-
-    The DB delete commits before the registry is asked to drop the session, so
-    the snapshot-on-evict hook must NOT run here — it would insert a Snapshot
-    row whose project FK was just deleted (IntegrityError -> 500 after the
-    delete already succeeded, which is exactly the symptom the owner saw:
-    error under the card, project gone on reload).
-    """
+    """U-7: deleting a project whose project state is loaded, with a lease held
+    and a feed client connected, must 204 and drop the state: the evict guard
+    would otherwise keep a dead project's state registered forever."""
+    import asyncio
+    import time
     from pathlib import Path
 
-    from data_rover.api.session import get_registry
+    from data_rover.api.feed import ClientConn
+    from data_rover.api.locking import LockIntent, LockMode, RequiredLock
+    from data_rover.api.project_state import get_registry
 
     pid = _seed_project("P", "u1")
     mm = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
     model = Path("examples/smart-city.model.json").read_text(encoding="utf-8")
     base = f"/api/v1/projects/{pid}"
     install(pid, metamodel=mm, model=model)
-    assert get_registry().get(pid).model is not None  # hydrates the session
-    assert pid in get_registry().project_ids()
+    state = get_registry().get(pid)  # loads the project state
+    assert state.metamodel is not None and pid in get_registry().project_ids()
+    # arm both conditions the evict guard refuses on
+    state.lock_table.acquire(
+        "u1",
+        [RequiredLock("e1", LockMode.EXCLUSIVE, LockIntent.EDIT)],
+        now=time.monotonic(),
+        ttl=300.0,
+    )
+    state.hub.register(ClientConn(user_id="u1", queue=asyncio.Queue()))
 
     _seed_user("boss", is_admin=True)
     assert client.delete(base, headers=_h("boss")).status_code == 204

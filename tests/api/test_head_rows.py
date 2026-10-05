@@ -1,7 +1,9 @@
-"""The head tables (``elements``, ``relationships``, ``entity_refs`` and the new
-``ModelRow`` columns) are written beside the session model on every path that
-changes it, and equal it after each one: same entities in the same order, the
-same ``entity_refs`` as the model's referencer index, the same counts and digest.
+"""The head tables (``elements``, ``relationships``, ``entity_refs`` and the
+``ModelRow`` columns) are written by every path that changes the model, and equal
+a full model after each one: same entities in the same order, the same
+``entity_refs`` as the model's referencer index, the same counts and digest. That
+model is replayed here from the project's rev-0 snapshot and its journal, the way
+the rows never are.
 """
 
 from __future__ import annotations
@@ -25,11 +27,17 @@ from data_rover.api.db_models import (
     Project,
     RelationshipRow,
 )
-from data_rover.api.hydration import hydrate_session
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+from data_rover.api.artifact_ops import split_ops
+from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
+from data_rover.api.routes._snapshot import build_model_from_dicts
+from data_rover.api.routes.ops import _apply_batch
+from data_rover.api.schemas import deserialize_ops
+from data_rover.api.snapshot_codec import decode_snapshot
+from data_rover.api.storage import get_snapshot_store
 from data_rover.api.state_digest import model_digest
 from data_rover.core.metamodel.loader import load_metamodel_str
+from data_rover.core.model.model import Model
 
 from .conftest import (
     AUTH_HEADERS,
@@ -37,6 +45,8 @@ from .conftest import (
     SMART_CITY_MM,
     SMART_CITY_MODEL,
     commit_ops,
+    default_state,
+    head,
     install,
     papi,
     post_commit,
@@ -85,22 +95,43 @@ def _db() -> Iterator[DbSession]:
         gen.close()
 
 
-def _assert_rows_equal_session(project_id: str = DEFAULT_PROJECT_ID) -> None:
-    """Every head table equals the session model; a session without a model
-    stands for an empty one."""
-    session = get_registry().get(project_id)
-    model = session.model
-    if model is None:
-        want_e: list[dict] = []
-        want_r: list[dict] = []
-        want_refs: set[tuple[str, str]] = set()
-        want_digest = "0000000000000000"
+def _replayed_model(s: DbSession, project_id: str) -> Model:
+    """The full model the journal says the project holds: the rev-0 snapshot (an
+    empty model when the project has none), then every commit after it applied in
+    restore mode, a rebind switching the metamodel at its commit."""
+    row = content.get_model_row(s, project_id)
+    assert row is not None
+    snap = content.get_snapshot(s, project_id, 0)
+    mm_id = snap.metamodel_id if snap is not None else row.metamodel_id
+    assert mm_id is not None
+    mm_row = content.get_metamodel_row(s, mm_id)
+    assert mm_row is not None
+    metamodel = load_metamodel_str(mm_row.blob)
+    if snap is None:
+        model = Model(metamodel)
     else:
+        raw = decode_snapshot(get_snapshot_store().get(snap.key))
+        model = build_model_from_dicts(metamodel, raw, strict=False)
+    for commit in content.commits_after(s, project_id, 0):
+        if commit.to_metamodel_id is not None:
+            to_row = content.get_metamodel_row(s, commit.to_metamodel_id)
+            assert to_row is not None
+            model.metamodel = load_metamodel_str(to_row.blob)
+            model.indexes.rebuild()
+        ops = split_ops(deserialize_ops(commit.ops))[0]
+        if ops:
+            _apply_batch(model, ops, restore=True)
+    return model
+
+
+def _assert_rows_equal_replay(project_id: str = DEFAULT_PROJECT_ID) -> None:
+    """Every head table equals the model replayed from the journal."""
+    with _db() as s:
+        model = _replayed_model(s, project_id)
         want_e = [asdict(e) for e in model.elements.values()]
         want_r = [asdict(r) for r in model.relationships.values()]
         want_refs = {(r, t) for t, rs in model.indexes.ref_targets.items() for r in rs}
         want_digest = model_digest(model)
-    with _db() as s:
         got_e, got_r = head_mod.read_head(s, project_id)
         got_refs = {
             (r, t)
@@ -119,7 +150,6 @@ def _assert_rows_equal_session(project_id: str = DEFAULT_PROJECT_ID) -> None:
         assert row.element_count == len(want_e)
         assert row.relationship_count == len(want_r)
         assert row.state_digest == want_digest
-        assert session.state_digest() == want_digest
         assert row.next_seq is not None
         for table in (ElementRow, RelationshipRow):
             top = s.execute(
@@ -130,11 +160,12 @@ def _assert_rows_equal_session(project_id: str = DEFAULT_PROJECT_ID) -> None:
 
 def test_install_writes_rows_in_model_order() -> None:
     install()
-    _assert_rows_equal_session()
-    session = get_registry().get(DEFAULT_PROJECT_ID)
-    assert session.model is not None
-    assert len(session.model.elements) > 0 and len(session.model.relationships) > 0
+    _assert_rows_equal_replay()
     with _db() as s:
+        n_elements, n_relationships = (
+            len(t) for t in head_mod.read_head(s, DEFAULT_PROJECT_ID)
+        )
+        assert n_elements > 0 and n_relationships > 0
         row = content.get_model_row(s, DEFAULT_PROJECT_ID)
         assert row is not None
         # baseline: seq 0..n-1 in each table, one allocation counter above both
@@ -147,16 +178,14 @@ def test_install_writes_rows_in_model_order() -> None:
             .scalars()
             .all()
         )
-        assert seqs == list(range(len(session.model.elements)))
-        assert row.next_seq == max(
-            len(session.model.elements), len(session.model.relationships)
-        )
+        assert seqs == list(range(n_elements))
+        assert row.next_seq == max(n_elements, n_relationships)
 
 
 def test_reinstall_replaces_the_rows() -> None:
     install()
     install(metamodel=_MM, model=EMPTY_MODEL)
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
     with _db() as s:
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == ([], [])
         assert (
@@ -168,9 +197,9 @@ def test_reinstall_replaces_the_rows() -> None:
 
 
 def _random_ops(
-    rng: random.Random, session_ids: tuple[list[str], list[str]]
+    rng: random.Random, entity_ids: tuple[list[str], list[str]]
 ) -> list[dict]:
-    els, rels = session_ids
+    els, rels = entity_ids
     ops: list[dict] = []
     fresh = 0
     dead: set[str] = set()
@@ -298,9 +327,8 @@ def test_rows_follow_random_commits(client: TestClient) -> None:
     while done < 200:
         attempts += 1
         assert attempts < 1500, "the generator no longer lands commits"
-        session = get_registry().get(DEFAULT_PROJECT_ID)
-        assert session.model is not None
-        rev = session.model_rev
+        current = head()
+        rev = current.rev
         if rev > 3 and rng.random() < 0.15:
             target = rng.randint(max(0, rev - 6), rev - 1)
             r = client.post(
@@ -310,13 +338,13 @@ def test_rows_follow_random_commits(client: TestClient) -> None:
             )
             reverts += r.status_code == 200
         else:
-            ids = (list(session.model.elements), list(session.model.relationships))
+            ids = (list(current.elements), list(current.relationships))
             r = post_commit(client, _random_ops(rng, ids))
         assert r.status_code in (200, 422), r.text
         seen_422 = seen_422 or r.status_code == 422
         done += r.status_code == 200
         # a refused batch leaves the rows as they were, so equality holds either way
-        _assert_rows_equal_session()
+        _assert_rows_equal_replay()
     assert reverts >= 5 and seen_422
 
 
@@ -336,7 +364,7 @@ def test_failed_commit_leaves_rows_unchanged(
     )
     with _db() as s:
         before = head_mod.read_head(s, DEFAULT_PROJECT_ID)
-    rev = get_registry().get(DEFAULT_PROJECT_ID).model_rev
+    rev = default_state().model_rev
 
     def boom(*a: object, **k: object) -> None:
         raise RuntimeError("refs write failed")
@@ -357,11 +385,11 @@ def test_failed_commit_leaves_rows_unchanged(
     )
     assert r.status_code == 500
     monkeypatch.undo()
-    assert get_registry().get(DEFAULT_PROJECT_ID).model_rev == rev
+    assert default_state().model_rev == rev
     with _db() as s:
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == before
         assert content.get_commit(s, DEFAULT_PROJECT_ID, rev + 1) is None
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
 
 
 def test_failed_revert_leaves_rows_unchanged(
@@ -377,7 +405,7 @@ def test_failed_revert_leaves_rows_unchanged(
     )
     with _db() as s:
         before = head_mod.read_head(s, DEFAULT_PROJECT_ID)
-    rev = get_registry().get(DEFAULT_PROJECT_ID).model_rev
+    rev = default_state().model_rev
 
     def boom(*a: object, **k: object) -> None:
         raise RuntimeError("refs write failed")
@@ -392,11 +420,11 @@ def test_failed_revert_leaves_rows_unchanged(
     monkeypatch.undo()
     with _db() as s:
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == before
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
 
 
 def test_nonfinite_float_arriving_by_op_is_refused(client: TestClient) -> None:
-    rev = get_registry().get(DEFAULT_PROJECT_ID).model_rev
+    rev = default_state().model_rev
     body = (
         '{"base_rev": %d, "ops": [{"kind": "create_element", "temp_id": "tmp_n",'
         ' "type_name": "Node", "properties": {"x": NaN}}]}' % rev
@@ -408,8 +436,8 @@ def test_nonfinite_float_arriving_by_op_is_refused(client: TestClient) -> None:
     )
     assert r.status_code == 422, r.text
     assert "Non-finite" in r.text
-    assert get_registry().get(DEFAULT_PROJECT_ID).model_rev == rev
-    _assert_rows_equal_session()
+    assert default_state().model_rev == rev
+    _assert_rows_equal_replay()
     with _db() as s:
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == ([], [])
 
@@ -420,7 +448,7 @@ def test_nonfinite_float_arriving_by_op_is_refused(client: TestClient) -> None:
 def test_nonfinite_float_in_update_patch_is_refused(
     client: TestClient, literal: str
 ) -> None:
-    rev = get_registry().get(DEFAULT_PROJECT_ID).model_rev
+    rev = default_state().model_rev
     body = (
         '{"base_rev": %d, "ops": [{"kind": "create_element", "temp_id": "tmp_a",'
         ' "type_name": "Node", "properties": {"label": "a"}},'
@@ -433,8 +461,8 @@ def test_nonfinite_float_in_update_patch_is_refused(
         headers={**AUTH_HEADERS, "content-type": "application/json"},
     )
     assert r.status_code == 422, r.text
-    assert get_registry().get(DEFAULT_PROJECT_ID).model_rev == rev
-    _assert_rows_equal_session()
+    assert default_state().model_rev == rev
+    _assert_rows_equal_replay()
     with _db() as s:
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == ([], [])
 
@@ -444,7 +472,7 @@ def test_nonfinite_float_in_update_patch_is_refused(
 def test_nonfinite_float_on_a_relationship_is_refused(
     client: TestClient, literal: str, final: str
 ) -> None:
-    rev = get_registry().get(DEFAULT_PROJECT_ID).model_rev
+    rev = default_state().model_rev
     node = (
         '{"kind": "create_element", "temp_id": "tmp_%s", "type_name": "Node",'
         ' "properties": {}}'
@@ -470,8 +498,8 @@ def test_nonfinite_float_on_a_relationship_is_refused(
     )
     assert r.status_code == 422, r.text
     assert "Non-finite" in r.text
-    assert get_registry().get(DEFAULT_PROJECT_ID).model_rev == rev
-    _assert_rows_equal_session()
+    assert default_state().model_rev == rev
+    _assert_rows_equal_replay()
     with _db() as s:
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == ([], [])
 
@@ -508,7 +536,7 @@ def test_float_and_bigint_survive(client: TestClient) -> None:
         k: repr(v) for k, v in values.items()
     }
     assert repr(got["x"]) == "1.0" and repr(got["n"]) == repr(2**60)
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
 
 
 def test_installed_model_floats_survive() -> None:
@@ -579,7 +607,7 @@ def test_rebind_rebuilds_refs(client: TestClient) -> None:
     rebound = _MM.replace(
         "{name: label, datatype: string}", "{name: label, datatype: Node}"
     )
-    rev = get_registry().get(DEFAULT_PROJECT_ID).model_rev
+    rev = default_state().model_rev
     token = _acquire_mm(client)
     r = client.post(
         papi("/commits"),
@@ -599,7 +627,7 @@ def test_rebind_rebuilds_refs(client: TestClient) -> None:
             )
         }
     assert refs == {("b", "a")}
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
 
 
 def test_dangling_reference_survives_target_deletion(client: TestClient) -> None:
@@ -624,31 +652,13 @@ def test_dangling_reference_survives_target_deletion(client: TestClient) -> None
     r = post_commit(client, [{"kind": "delete_element", "id": "a"}])
     # a dangling reference is a structural blocker; the refused batch changes nothing
     assert r.status_code == 422
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
 
 
 # --- the other writers ---------------------------------------------------------
 
 
-def test_backfill_on_hydrate() -> None:
-    install()
-    reg = get_registry()
-    with _db() as s:
-        for table in (EntityRefRow, ElementRow, RelationshipRow):
-            s.query(table).delete()
-        row = content.get_model_row(s, DEFAULT_PROJECT_ID)
-        assert row is not None
-        row.next_seq = None
-        row.element_count = row.relationship_count = 0
-        row.state_digest = None
-        s.commit()
-    reg.evict(DEFAULT_PROJECT_ID)
-    assert DEFAULT_PROJECT_ID not in reg.project_ids()
-    reg.get(DEFAULT_PROJECT_ID)
-    _assert_rows_equal_session()
-
-
-def test_hydrate_leaves_written_rows_alone(client: TestClient) -> None:
+def test_loading_a_state_leaves_written_rows_alone(client: TestClient) -> None:
     commit_ops(
         client,
         [{"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node"}],
@@ -656,12 +666,12 @@ def test_hydrate_leaves_written_rows_alone(client: TestClient) -> None:
     with _db() as s:
         before = head_mod.read_head(s, DEFAULT_PROJECT_ID)
     get_registry().evict(DEFAULT_PROJECT_ID)
-    hydrate_session(DEFAULT_PROJECT_ID)
+    get_registry().get(DEFAULT_PROJECT_ID)
     with _db() as s:
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == before
 
 
-def test_rows_survive_commits_after_hydrate(client: TestClient) -> None:
+def test_rows_survive_commits_after_eviction(client: TestClient) -> None:
     commit_ops(
         client,
         [{"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node"}],
@@ -671,7 +681,7 @@ def test_rows_survive_commits_after_hydrate(client: TestClient) -> None:
         client,
         [{"kind": "create_element", "temp_id": "tmp_b", "type_name": "Node"}],
     )
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
 
 
 def test_import_project_writes_rows_with_the_baseline() -> None:
@@ -682,9 +692,10 @@ def test_import_project_writes_rows_with_the_baseline() -> None:
         metamodel_yaml=SMART_CITY_MM,
         model_json=SMART_CITY_MODEL,
     )
-    session = get_registry().get("p-imp")
-    assert session.model is not None and session.model.elements
-    _assert_rows_equal_session("p-imp")
+    with _db() as s:
+        elements, relationships = head_mod.read_head(s, "p-imp")
+    assert elements and relationships
+    _assert_rows_equal_replay("p-imp")
 
 
 def test_import_project_with_an_unbuildable_model_leaves_no_project() -> None:
@@ -732,7 +743,7 @@ def test_clone_copies_the_rows(client: TestClient) -> None:
     )
     r = client.post(papi("/clone"), json={"name": "copy"}, headers=AUTH_HEADERS)
     assert r.status_code == 201, r.text
-    _assert_rows_equal_session(r.json()["id"])
+    _assert_rows_equal_replay(r.json()["id"])
 
 
 def test_metamodel_upload_over_an_empty_model_resets_the_head() -> None:
@@ -746,7 +757,7 @@ def test_metamodel_upload_over_an_empty_model_resets_the_head() -> None:
         headers={**AUTH_HEADERS, "content-type": "application/x-yaml"},
     )
     assert r.status_code == 200, r.text
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
     with _db() as s:
         row = content.get_model_row(s, DEFAULT_PROJECT_ID)
         assert row is not None
@@ -785,7 +796,7 @@ def test_rebuild_refs_streams_in_chunks(
         s.query(EntityRefRow).delete()
         head_mod.rebuild_refs(s, DEFAULT_PROJECT_ID, load_metamodel_str(_MM))
         s.commit()
-    _assert_rows_equal_session()
+    _assert_rows_equal_replay()
 
 
 def test_deleting_the_project_removes_its_rows(client: TestClient) -> None:

@@ -1,4 +1,4 @@
-"""Chunked JSON serialization of the session model for save/download.
+"""Chunked JSON serialization of a model for save/download.
 
 The save-file contract is what the frontend writes today:
 ``JSON.stringify({elements, relationships}, null, 2)`` of the snapshot-shaped

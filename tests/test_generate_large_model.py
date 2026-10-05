@@ -4,8 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from data_rover.api.routes._snapshot import _build_model_from_payload
-from data_rover.api.schemas import ElementOut, RelationshipOut
+from data_rover.api.routes._snapshot import build_model_from_dicts
 from data_rover.core.metamodel.loader import load_metamodel_file
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
@@ -37,9 +36,7 @@ def test_generated_tiny_model_structure(tmp_path):
 
     mm = load_metamodel_file(METAMODEL_PATH)
     assert all(mm.element_type(e["type_name"]) is not None for e in elements)
-    assert all(
-        mm.relationship_type(r["type_name"]) is not None for r in relationships
-    )
+    assert all(mm.relationship_type(r["type_name"]) is not None for r in relationships)
 
     # relationship endpoints resolve to generated elements
     ids = set(element_ids)
@@ -68,11 +65,7 @@ def test_generated_model_is_validator_clean(tmp_path):
 
     raw = json.loads(out.read_text(encoding="utf-8"))
     metamodel = load_metamodel_file(METAMODEL_PATH)
-    elements = [ElementOut.model_validate(e) for e in raw.get("elements", [])]
-    relationships = [
-        RelationshipOut.model_validate(r) for r in raw.get("relationships", [])
-    ]
-    model = _build_model_from_payload(metamodel, elements, relationships)
+    model = build_model_from_dicts(metamodel, raw)
 
     issues = default_pipeline().validate(model, Scope.all())
     assert issues == []

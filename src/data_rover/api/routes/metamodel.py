@@ -10,21 +10,21 @@ import yaml
 
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.metamodel.schema import Metamodel
-from data_rover.core.model.model import Model
 
 from .. import content, head
 from ..db import get_db
 from ..db_models import User
-from ..deps import Session, get_request_session, require_metamodel
+from ..deps import require_metamodel
 from ..identity import get_current_user
 from ..locking import METAMODEL_RESOURCE
 from ..metamodel_ops import serialize_metamodel_blob
+from ..project_state import ProjectState, get_project_state
 from ..schemas import RawMetamodelResponse
 
 router = APIRouter()
 
 
-def _peer_mm_conflict(session: Session, user_id: str) -> JSONResponse | None:
+def _peer_mm_conflict(state: ProjectState, user_id: str) -> JSONResponse | None:
     """409 payload when a PEER holds the ``mm`` lease, else None.
 
     Honor-don't-require: the caller's own lease never blocks, and no lease
@@ -34,7 +34,7 @@ def _peer_mm_conflict(session: Session, user_id: str) -> JSONResponse | None:
     the `mm` lease at `POST /commits`, so this honor-only check covers only
     the two routes left in this module.
     """
-    peers = session.lock_table.peer_leases(
+    peers = state.lock_table.peer_leases(
         [METAMODEL_RESOURCE], user_id, now=time.monotonic()
     )
     if peers:
@@ -52,13 +52,13 @@ def _peer_mm_conflict(session: Session, user_id: str) -> JSONResponse | None:
 async def upload_metamodel(
     request: Request,
     project_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Metamodel | JSONResponse:
     # The mm lease honor rule comes FIRST, before the model-not-empty
     # check, so a locked metamodel refuses all writers uniformly.
-    conflict = _peer_mm_conflict(session, user.id)
+    conflict = _peer_mm_conflict(state, user.id)
     if conflict is not None:
         return conflict
     # This destructive path is initial-bind only. Once a model has
@@ -79,9 +79,10 @@ async def upload_metamodel(
     else:
         blob = body
     metamodel = load_metamodel_str(blob)
-    # clears the in-memory model (core semantics); announced once the rows
-    # below are committed, or when writing them fails, since the rev has moved
-    session.set_metamodel(metamodel, announce=False)
+    # the rev moves with the metamodel; announced once the rows below are
+    # committed, or when writing them fails, since the rev has moved
+    state.metamodel = metamodel
+    state.model_rev += 1
     try:
         # persist the metamodel + (re)bind the project's model row; changing the
         # metamodel clears the model, so drop durable history too. Non-empty
@@ -92,11 +93,11 @@ async def upload_metamodel(
         mm_row = content.create_metamodel(db, name="", version=1, blob=blob)
         content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
         content.clear_history(db, project_id)
-        content.set_model_rev(db, project_id, session.model_rev)
-        head.write_baseline(db, project_id, metamodel, Model(metamodel))
+        content.set_model_rev(db, project_id, state.model_rev)
+        head.write_empty_baseline(db, project_id)
         db.commit()
     finally:
-        session.announce_reset()
+        state.announce_reset()
     return metamodel
 
 
@@ -104,13 +105,13 @@ async def upload_metamodel(
 def get_metamodel(
     project_id: str,
     response: Response,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
 ) -> Metamodel:
     """The metamodel document, with the id of the metamodel row the project is
     bound to in ``X-Metamodel-Id`` (``""`` without one). Lock-free: a rebind
     between the two reads is healed by the ``rebind_event`` that follows it."""
-    metamodel = require_metamodel(session)
+    metamodel = require_metamodel(state)
     model_row = content.get_model_row(db, project_id)
     response.headers["X-Metamodel-Id"] = (
         (model_row.metamodel_id or "") if model_row else ""
@@ -121,16 +122,16 @@ def get_metamodel(
 @router.get("/metamodel/raw")
 def get_metamodel_raw(
     project_id: str,
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     db: DbSession = Depends(get_db),
 ) -> RawMetamodelResponse:
     """The current metamodel's source YAML for the live editor.
 
-    Prefers the stored blob (author's comments/formatting intact); a session
+    Prefers the stored blob (author's comments/formatting intact); a state
     whose metamodel never landed in a durable row (legacy/test setups)
     degrades to re-serializing the in-memory object rather than failing.
     """
-    metamodel = require_metamodel(session)
+    metamodel = require_metamodel(state)
     model_row = content.get_model_row(db, project_id)
     if model_row is not None and model_row.metamodel_id is not None:
         mm_row = content.get_metamodel_row(db, model_row.metamodel_id)
@@ -143,11 +144,13 @@ def get_metamodel_raw(
 
 @router.delete("/metamodel", status_code=204, response_model=None)
 def clear_metamodel(
-    session: Session = Depends(get_request_session),
+    state: ProjectState = Depends(get_project_state),
     user: User = Depends(get_current_user),
 ) -> Response | JSONResponse:
-    conflict = _peer_mm_conflict(session, user.id)
+    conflict = _peer_mm_conflict(state, user.id)
     if conflict is not None:
         return conflict
-    session.set_metamodel(None)
+    state.metamodel = None
+    state.model_rev += 1
+    state.announce_reset()
     return Response(status_code=204)

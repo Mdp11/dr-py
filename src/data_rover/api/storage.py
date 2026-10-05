@@ -2,7 +2,7 @@
 
 Writes stream (``put`` takes an iterable of byte chunks straight from
 ``snapshot_codec.encode_snapshot_v2``) and reads buffer the whole blob (``get``
-returns bytes; hydration then ``decode_snapshot`` + ``build_model_from_dicts``).
+returns bytes).
 The blob is a gzip member of the ``datarover.snapshot/v2`` text — ~5 % of the
 indented save-file size.
 
