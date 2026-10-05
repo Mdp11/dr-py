@@ -241,36 +241,45 @@ class Model:
         The ordered dict REPLACES the attribute instead of being refilled in
         place: read paths iterate these dicts without the session's write
         mutex, and a rebind shows them either dict whole, never an empty one.
-        Do not keep a reference to either dict across this call.
+        Do not keep a reference to either dict across this call. A partial
+        model's dicts are its own and keep their class, so they are reordered in
+        place.
         """
         if self._elements_unsettled:
             order = self.indexes.element_order
             elements = self.elements
-            self.elements = {
-                eid: elements[eid] for eid in sorted(elements, key=order.__getitem__)
-            }
+            if type(elements) is dict:
+                self.elements = {
+                    eid: elements[eid]
+                    for eid in sorted(elements, key=order.__getitem__)
+                }
+            else:
+                _reorder_in_place(elements, order)
             self._elements_unsettled = False
         if self._relationships_unsettled:
             order = self.indexes.relationship_order
             relationships = self.relationships
-            self.relationships = {
-                rid: relationships[rid]
-                for rid in sorted(relationships, key=order.__getitem__)
-            }
+            if type(relationships) is dict:
+                self.relationships = {
+                    rid: relationships[rid]
+                    for rid in sorted(relationships, key=order.__getitem__)
+                }
+            else:
+                _reorder_in_place(relationships, order)
             self._relationships_unsettled = False
 
     # The index-backed helpers below return relationships in unspecified set
     # iteration order; no caller depends on the order.
     def relationships_from(self, element_id: str) -> list[Relationship]:
-        rel_ids = self.indexes.out_rels.get(element_id) or ()
+        rel_ids = self.indexes.outgoing_ids(element_id)
         return [self.relationships[rid] for rid in rel_ids]
 
     def relationships_to(self, element_id: str) -> list[Relationship]:
-        rel_ids = self.indexes.in_rels.get(element_id) or ()
+        rel_ids = self.indexes.incoming_ids(element_id)
         return [self.relationships[rid] for rid in rel_ids]
 
     def _containment_children(self, element_id: str) -> list[Relationship]:
-        rel_ids = self.indexes.out_rels.get(element_id) or ()
+        rel_ids = self.indexes.outgoing_ids(element_id)
         rels = (self.relationships[rid] for rid in rel_ids)
         return [r for r in rels if self.metamodel.is_containment(r.type_name)]
 
@@ -294,8 +303,8 @@ class Model:
             if child_id in self.elements:
                 self.delete_element(child_id, visiting)
         # remove any remaining relationships touching this element
-        outgoing = self.indexes.out_rels.get(element_id) or set()
-        incoming = self.indexes.in_rels.get(element_id) or set()
+        outgoing = self.indexes.outgoing_ids(element_id)
+        incoming = self.indexes.incoming_ids(element_id)
         for rel_id in list(outgoing | incoming):
             self.disconnect(rel_id)
         element = self.elements.pop(element_id)
@@ -309,7 +318,15 @@ def _lands_out_of_place(
     ``order`` sits behind one with a larger number."""
     if order is None or not entities:
         return False
-    return numbers[next(reversed(entities))] > order
+    return numbers[next(dict.__reversed__(entities))] > order
+
+
+def _reorder_in_place(entities: dict[str, Any], numbers: dict[str, int]) -> None:
+    """Refill ``entities`` in the order of ``numbers``. Reads the dict through
+    ``dict``'s own methods: a partial model's dict refuses enumeration."""
+    ordered = sorted(dict.items(entities), key=lambda item: numbers[item[0]])
+    entities.clear()
+    entities.update(ordered)
 
 
 def build_rebind_view(live_model: Model, candidate: Metamodel) -> Model:

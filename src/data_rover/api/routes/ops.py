@@ -525,7 +525,9 @@ def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _Batch
     left exactly as before the batch. The expected validation failures
     (KeyError/ValueError from the mutation boundary) become a 422; anything
     else is a bug and propagates (as a 500) AFTER the rollback, so even an
-    unforeseen exception cannot leave the model half-mutated.
+    unforeseen exception cannot leave the model half-mutated. A partial
+    model's ``NotLoaded`` is neither of the two: it propagates, rolled back,
+    for the caller to load more rows.
     """
     res = _BatchResult()
     try:

@@ -34,7 +34,7 @@ or, when no key is declared, on all properties.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Hashable, Iterator, Set, Sequence
+from collections.abc import Hashable, Iterable, Iterator, Set, Sequence
 from typing import TYPE_CHECKING, Any
 
 from ._sorted import Pair, SortedPairs
@@ -176,6 +176,10 @@ class IndexSet:
     def referencers_of(self, element_id: str) -> Set[str]:
         """Live view of entity ids that reference this element — do NOT mutate."""
         return self.ref_targets.get(element_id) or frozenset()
+
+    def contained_ids(self) -> Iterable[str]:
+        """Live view of the ids that have a containment parent — do NOT mutate."""
+        return self.containment_parents.keys()
 
     def roots_count(self) -> int:
         """Number of containment roots — O(1)."""
@@ -327,7 +331,7 @@ class IndexSet:
 
         # relationships first so containment parents are known before grouping
         rel_order: dict[str, int] = {}
-        for i, rel in enumerate(self._model.relationships.values()):
+        for i, rel in enumerate(dict.values(self._model.relationships)):
             rel_order[rel.id] = i
             self.out_rels.setdefault(rel.source_id, set()).add(rel.id)
             self.in_rels.setdefault(rel.target_id, set()).add(rel.id)
@@ -340,7 +344,7 @@ class IndexSet:
                 )
                 self._containment_rel_ids.setdefault(rel.target_id, []).append(rel.id)
         order: dict[str, int] = {}
-        for i, element in enumerate(self._model.elements.values()):
+        for i, element in enumerate(dict.values(self._model.elements)):
             order[element.id] = i
             self.elements_by_type.setdefault(element.type_name, set()).add(element.id)
             self._add_to_group(element)
@@ -452,12 +456,12 @@ class IndexSet:
         """
         rels = self._model.relationships
         if kr.direction == "out":
-            rel_ids = self.out_rels.get(element_id) or ()
+            rel_ids = self.outgoing_ids(element_id)
             endpoints = [
                 rels[r].target_id for r in rel_ids if rels[r].type_name == kr.rel_type
             ]
         else:
-            rel_ids = self.in_rels.get(element_id) or ()
+            rel_ids = self.incoming_ids(element_id)
             endpoints = [
                 rels[r].source_id for r in rel_ids if rels[r].type_name == kr.rel_type
             ]

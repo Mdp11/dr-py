@@ -47,7 +47,7 @@ class ContainmentValidator(EntityValidator):
         if scope.ids is None:
             # exhaustive sweep: report the first containment cycle reached from
             # any contained element (one representative issue per run)
-            for start in indexes.containment_parents:
+            for start in indexes.contained_ids():
                 if _walk_reaches_cycle(indexes, start, safe):
                     issues.append(
                         Issue(
