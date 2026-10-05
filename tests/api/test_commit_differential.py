@@ -36,6 +36,8 @@ from .commit_oracle import (
 from .conftest import AUTH_HEADERS, head, install, post_commit, seed_default_project
 
 SEEDS = range(300)
+#: seeds whose batch is built around a hinted create named by both its ids
+ALIAS_SEEDS = range(1000, 1060)
 
 
 @dataclass
@@ -177,6 +179,8 @@ class Batch:
         self.ops: list[dict[str, Any]] = []
         self.live = list(facts.elements)
         self.tmps: list[str] = []
+        #: hinted creates: a later op may name the entity by either id
+        self.hints: dict[str, str] = {}
         self.tmp_rels: list[str] = []
         self.tmp_links: list[str] = []
         self.dead: list[str] = []
@@ -185,6 +189,12 @@ class Batch:
     def fresh(self, prefix: str) -> str:
         self.n += 1
         return f"{prefix}{self.tag}_{self.n}"
+
+    def name(self, tmp: str) -> str:
+        """The temp id of a create, or its hint on every other op (no draw, so
+        the batches of the other seeds do not move)."""
+        hint = self.hints.get(tmp)
+        return hint if hint is not None and len(self.ops) % 2 else tmp
 
     def any_element(self) -> str:
         pool = [*self.live, *self.tmps]
@@ -195,7 +205,7 @@ class Batch:
                 return self.rng.choice(self.facts.ghosts)
             if self.rng.random() < 0.02:
                 return "nope"
-        return self.rng.choice(pool) if pool else "nope"
+        return self.name(self.rng.choice(pool)) if pool else "nope"
 
     def props(self) -> dict[str, Any]:
         rng = self.rng
@@ -242,6 +252,8 @@ class Batch:
             op["id"] = hint
         self.add(op)
         self.tmps.append(tmp)
+        if hint is not None:
+            self.hints[tmp] = hint
         return tmp
 
     def create_rel(
@@ -271,6 +283,25 @@ class Batch:
         if not self.clean and self.rng.random() < 0.03:
             return "nope-rel"
         return self.rng.choice(pool) if pool else "nope-rel"
+
+    def alias_batch(self) -> list[dict[str, Any]]:
+        """A hinted create P, three to twelve roots attached below it (or below
+        P's own parent X), then P (or X) deleted: each op names P by its temp
+        id or by its hint, whichever the draw gives."""
+        rng = self.rng
+        f = self.facts
+        hint = self.fresh("h")
+        names = [self.create_element(hint), hint]
+        roots = [e for e in f.elements if e not in f.parent]
+        below = rng.choice(names)
+        victim = below
+        if rng.random() < 0.5:
+            victim = rng.choice([e for e in f.elements if e not in roots] or roots)
+            self.create_rel("Contains", victim, rng.choice(names))
+        for kid in rng.sample(roots, min(len(roots), rng.randint(3, 12))):
+            self.create_rel("Contains", rng.choice(names), kid)
+        self.add({"kind": "delete_element", "id": victim})
+        return self.ops
 
     def build(self) -> list[dict[str, Any]]:
         rng = self.rng
@@ -321,7 +352,12 @@ class Batch:
                     # an id that is no element
                     self.add({"kind": "delete_element", "id": self.any_rel()})
                 elif rng.random() < 0.15 and self.tmps:
-                    self.add({"kind": "delete_element", "id": rng.choice(self.tmps)})
+                    self.add(
+                        {
+                            "kind": "delete_element",
+                            "id": self.name(rng.choice(self.tmps)),
+                        }
+                    )
                 else:
                     eid = self.pick_by_shape()
                     self.add({"kind": "delete_element", "id": eid})
@@ -349,8 +385,12 @@ class Batch:
                         [e for e in f.parent if e in self.live] or f.elements
                     )
                 elif mode == "tmp" and self.tmps:
-                    src = rng.choice(self.tmps) if rng.random() < 0.5 else src
-                    dst = rng.choice(self.tmps) if rng.random() < 0.5 else dst
+                    src = (
+                        self.name(rng.choice(self.tmps)) if rng.random() < 0.5 else src
+                    )
+                    dst = (
+                        self.name(rng.choice(self.tmps)) if rng.random() < 0.5 else dst
+                    )
                 self.create_rel("Contains", src, dst)
             elif kind == "link":
                 self.create_rel("Link", self.any_element(), self.any_element())
@@ -448,8 +488,8 @@ def test_a_commit_on_head_rows_equals_the_full_model(
         rounds.clear()  # the helper retries a request that lacked locks
         return real_lock(*a, **k)
 
-    # every third seed runs with a planner that foresees no subtree and no
-    # attachment, so the re-run loop answers real batches, one miss at a time
+    # every third seed (the alias seeds excepted) runs with a planner that
+    # foresees no subtree and no attachment, so the re-run loop answers real batches, one miss at a time
     blind = [False]
     real_scan = commit_load._scan
     real_subtree = commit_load.subtree_ids
@@ -475,19 +515,23 @@ def test_a_commit_on_head_rows_equals_the_full_model(
     most = 0
     accepted = rejected = reverted = multi_round = 0
     multi_accepted = multi_rejected = 0
-    for seed in SEEDS:
+    for seed in [*SEEDS, *ALIAS_SEEDS]:
         why = f"seed {seed}"
-        blind[0] = seed % 3 == 0
+        blind[0] = seed % 3 == 0 and seed not in ALIAS_SEEDS
         monkeypatch.setattr(commit_load, "MAX_ROUNDS", 64 if blind[0] else 8)
         rng = random.Random(seed)
         text, facts = make_model(rng, seed)
         install(metamodel=MM, model=text)
         installed = head()
         oracle = Oracle(text)
-        ops = Batch(rng, facts, f"s{seed}").build()
+        batch = Batch(rng, facts, f"s{seed}")
+        ops = batch.alias_batch() if seed in ALIAS_SEEDS else batch.build()
         want = oracle.run(model_ops(ops))
         r = post_commit(client, ops)
         most = max(most, len(rounds))
+        if seed in ALIAS_SEEDS:
+            # the rounds do not grow with the elements attached below the create
+            assert len(rounds) <= 2, f"{why}: {len(rounds)} rounds"
         if len(rounds) > 1:
             multi_round += 1
             if want.status == 200:

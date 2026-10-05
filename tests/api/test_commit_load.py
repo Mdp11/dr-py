@@ -728,6 +728,36 @@ def test_a_miss_on_a_judged_referencer_loads_all_its_targets_at_once(
     _check_against_the_oracle(client, monkeypatch, model, ops, 2)
 
 
+@pytest.mark.parametrize("fallback", [True, False])
+@pytest.mark.parametrize("case", list(_move_out_models()))
+def test_past_max_skipped_the_plan_judges_more_and_answers_the_same(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, case: str, fallback: bool
+) -> None:
+    """The batch also deletes more relationships than ``MAX_SKIPPED``. Past it
+    the plan no longer excludes them from the deleted subtree (it subtracts the
+    roots alone), so it judges the detached subtree's referencers all the same
+    and the answer is the full model's, in one round."""
+    filler = 6
+    monkeypatch.setattr(commit_load, "MAX_SKIPPED", filler if fallback else 100)
+    model, ops = _move_out_models()[case]
+    body = json.loads(model)
+    body["elements"].append(_el("L"))
+    body["relationships"] += [_rel(f"l{i}", "Link", "L", "L") for i in range(filler)]
+    ops = [{"kind": "delete_relationship", "id": f"l{i}"} for i in range(filler)] + ops
+    skipped: list[int] = []
+    real = commit_load.subtree_ids
+
+    def spy(db: Any, project: str, roots: Any, types: Any, skip: Any = ()) -> Any:
+        skipped.append(len(skip))
+        return real(db, project, roots, types, skip)
+
+    monkeypatch.setattr(commit_load, "subtree_ids", spy)
+    _check_against_the_oracle(client, monkeypatch, json.dumps(body), ops, 1)
+    # the batch deletes filler + 1 relationships: the walk that excludes them
+    # runs only below the limit
+    assert (filler + 1 in skipped) is not fallback
+
+
 def test_attach_then_disconnect_then_delete_judges_a_referencer_below(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -835,6 +865,83 @@ def test_many_attached_elements_then_a_delete_take_one_round(
     assert rounds.n == 1
     assert head().elements == {}
     assert_rows(oracle, DEFAULT_PROJECT_ID, "attached then deleted")
+
+
+def _hinted(temp: str, hint: str) -> dict[str, Any]:
+    return {
+        "kind": "create_element",
+        "temp_id": temp,
+        "id": hint,
+        "type_name": "Node",
+        "properties": {},
+    }
+
+
+def _alias_batches(n: int) -> dict[str, list[dict[str, Any]]]:
+    """Batches that name a hinted create by its temp id in one op and by its
+    hint in another: the one element has two names."""
+    kids = range(n)
+    return {
+        "attach via hint, delete via temp": [
+            _hinted("tmp_p", "P"),
+            *(_contains("P", f"c{i}", f"tmp_{i}") for i in kids),
+            _delete("tmp_p"),
+        ],
+        "attach via temp, delete via hint": [
+            _hinted("tmp_p", "P"),
+            *(_contains("tmp_p", f"c{i}", f"tmp_{i}") for i in kids),
+            _delete("P"),
+        ],
+        "attach under a real root via temp, below it via hint": [
+            _hinted("tmp_p", "P"),
+            _contains("X", "tmp_p", "tmp_xp"),
+            *(_contains("P", f"c{i}", f"tmp_{i}") for i in kids),
+            _delete("X"),
+        ],
+        "attach under a real root via hint, below it via temp": [
+            _hinted("tmp_p", "P"),
+            _contains("X", "P", "tmp_xp"),
+            *(_contains("tmp_p", f"c{i}", f"tmp_{i}") for i in kids),
+            _delete("X"),
+        ],
+    }
+
+
+@pytest.mark.parametrize("case", list(_alias_batches(1)))
+def test_the_two_names_of_a_hinted_create_are_one_element_to_the_plan(
+    case: str, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rounds do not grow with the elements attached below a hinted create,
+    whichever of its names each op uses."""
+    n = commit_load.MAX_ROUNDS + 4
+    model = json.dumps(
+        {
+            "elements": [_el("X"), *(_el(f"{k}{i}") for i in range(n) for k in "cd")],
+            "relationships": [
+                _rel(f"k{i}", "Contains", f"c{i}", f"d{i}") for i in range(n)
+            ],
+        }
+    )
+    install(metamodel=MM, model=model)
+    ops = _alias_batches(n)[case]
+    oracle = Oracle(model)
+    want = oracle.run(model_ops(ops))
+    assert want.status == 200, case
+    rounds = _Rounds(monkeypatch)
+    r = post_commit(client, ops)
+    assert (r.status_code, rounds.n) == (200, 1), case
+    assert_rows(oracle, DEFAULT_PROJECT_ID, case)
+
+
+def test_the_plan_names_a_hinted_create_once() -> None:
+    """Attached below the hint and deleted by the temp id (and the reverse): the
+    attached element is a delete root, so the plan loads its subtree."""
+    for ops in (
+        [_hinted("tmp_p", "P"), _contains("P", "A", "tmp_1"), _delete("tmp_p")],
+        [_hinted("tmp_p", "P"), _contains("tmp_p", "A", "tmp_1"), _delete("P")],
+    ):
+        elements, _ = _ids(_plan(ops))
+        assert {"A", "A1", "A2", "A1a", "A1b"} <= elements
 
 
 # --- the transaction ----------------------------------------------------------------

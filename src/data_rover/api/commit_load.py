@@ -26,6 +26,18 @@ relationship ends, id hints, and the ids held by element-valued properties):
   relationship end, a referencer): its containment parents and its ancestor
   chain, each complete in parents, and the targets of its references.
 
+A hinted create has two names, its ``temp_id`` and its hint, and later ops may
+use either; the plan counts both as the one element.
+
+The relationships a batch deletes are not followed when the plan works out which
+referencers certainly go with a delete (a subtree the batch detaches first
+survives). Past ``MAX_SKIPPED`` of them the plan stops excluding and subtracts
+only the delete roots, which judges more referencers, never fewer.
+
+After a miss the plan is ``thorough``: it also judges the referencers inside the
+deleted subtree, and judges nothing it loaded for other reasons, so a retry
+loads about what the first round did.
+
 The deleted subtree, the referencers and the ancestors are what the check reads
 beyond the entities it names; the rest is the batch's own.
 """
@@ -174,6 +186,22 @@ def _reinstated_id(op: CreateElementOp | CreateRelationshipOp) -> str | None:
     return op.temp_id
 
 
+def _aliases(ops: Sequence[ModelOpIn]) -> dict[str, frozenset[str]]:
+    """For each name a hinted create has (its ``temp_id`` and its hint), every
+    name of that element: later ops resolve either one to the same entity."""
+    names: dict[str, set[str]] = {}
+    for op in ops:
+        if (
+            isinstance(op, CreateElementOp | CreateRelationshipOp)
+            and op.temp_id.startswith(TEMP_ID_PREFIX)
+            and op.id is not None
+        ):
+            both = {op.temp_id, op.id}
+            for name in both:
+                names.setdefault(name, set()).update(both)
+    return {name: frozenset(group) for name, group in names.items()}
+
+
 def _scan(metamodel: Metamodel, ops: Sequence[ModelOpIn]) -> _Named:
     rp = ref_props(metamodel)
     # the names that are element-valued on any type: a patch does not say which
@@ -181,10 +209,15 @@ def _scan(metamodel: Metamodel, ops: Sequence[ModelOpIn]) -> _Named:
     names = sorted(
         {n for by in (rp.element, rp.relationship) for ns in by.values() for n in ns}
     )
+    aliases = _aliases(ops)
     named = _Named()
 
+    def every_name(entity_id: str) -> frozenset[str]:
+        return aliases.get(entity_id, frozenset((entity_id,)))
+
     def refs(properties: dict[str, Any]) -> None:
-        named.ids |= refs_of(properties, names)
+        for ref in refs_of(properties, names):
+            named.ids |= every_name(ref)
 
     for op in ops:
         if isinstance(op, CreateElementOp):
@@ -193,23 +226,28 @@ def _scan(metamodel: Metamodel, ops: Sequence[ModelOpIn]) -> _Named:
                 named.touched.add(hinted)
             refs(op.properties)
         elif isinstance(op, UpdateElementOp):
-            named.touched.add(op.id)
+            named.touched |= every_name(op.id)
             refs(op.properties_patch)
         elif isinstance(op, DeleteElementOp):
-            named.delete_roots.add(op.id)
+            named.delete_roots |= every_name(op.id)
         elif isinstance(op, CreateRelationshipOp):
             if (hinted := _reinstated_id(op)) is not None:
                 named.hinted.add(hinted)
-            named.touched.update((op.source_id, op.target_id))
+            ends = every_name(op.source_id) | every_name(op.target_id)
+            named.touched |= ends
             if metamodel.is_containment(op.type_name):
-                named.attachments.append((op.source_id, op.target_id))
+                named.attachments.extend(
+                    (source, target)
+                    for source in every_name(op.source_id)
+                    for target in every_name(op.target_id)
+                )
             refs(op.properties)
         elif isinstance(op, UpdateRelationshipOp):
-            named.relationships.add(op.id)
+            named.relationships |= every_name(op.id)
             refs(op.properties_patch)
         elif isinstance(op, DeleteRelationshipOp):
-            named.relationships.add(op.id)
-            named.deleted_relationships.add(op.id)
+            named.relationships |= every_name(op.id)
+            named.deleted_relationships |= every_name(op.id)
         else:
             assert_never(op)
     named.ids |= named.touched | named.delete_roots | named.relationships | named.hinted
@@ -363,9 +401,9 @@ def plan_load(
 ) -> PartialRows:
     """The rows ``ops`` need, read from the head tables (see the module
     docstring). Every id in ``extra`` is a delete root and a judged element:
-    what a round found missing. ``thorough`` judges every element it loads, with
-    its ancestor chain and all its reference targets: the plan for a batch that
-    has already missed once."""
+    what a round found missing. ``thorough``, the plan for a batch that has
+    already missed once, also judges the referencers inside the deleted subtree
+    (the others are judged either way), never the rest of what it loads."""
     named = _scan(metamodel, ops)
     types = _containment_types(metamodel)
     rows = _Rows(db, project_id)
@@ -409,27 +447,17 @@ def plan_load(
         if (rel := rows.relationships.get(rid)) is not None
         for end in (rel["source_id"], rel["target_id"])
     }
-    judged = {
-        i
-        for i in (
-            set(rows.elements)
-            if thorough
-            else named.touched | extra | ends | (referencers - deleted)
-        )
-        if i in rows.elements
-    }
+    # After a miss the referencers inside the deleted subtree are judged too:
+    # something the rows cannot say may have taken one out of it.
+    candidates = named.touched | extra | ends
+    candidates |= referencers if thorough else referencers - deleted
+    judged = {i for i in candidates if i in rows.elements}
     chain = ancestor_ids(db, project_id, judged, types)
     rows.load_elements(chain)
     rows.incoming_containment(chain, types)
     rows.reference_targets(
         judged
-        | (
-            set(rows.relationships)
-            if thorough
-            else {
-                r for r in named.relationships | referencers if r in rows.relationships
-            }
-        )
+        | {r for r in named.relationships | referencers if r in rows.relationships}
     )
 
     return PartialRows(
