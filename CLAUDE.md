@@ -38,6 +38,7 @@ pixi run dr-tidy                          # format + lint everywhere; ruff, mypy
 
 # Python
 pixi run core-test                        # pytest
+pixi run core-test-pg                     # opt-in Postgres lane, tests/api/pg (docker compose up -d postgres first)
 pixi run -e core-dev pytest tests/model/test_model.py::test_name
 pixi run -e core-dev pytest -k uniqueness
 pixi run core-lint                        # core only; backend-lint for the API package

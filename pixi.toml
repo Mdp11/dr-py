@@ -108,6 +108,12 @@ description = "Run the pytest suite"
 cmd = "pytest"
 default-environment = "core-dev"
 
+[feature.core-dev.tasks.core-test-pg]
+description = "Run the opt-in Postgres lane (docker compose up -d postgres first); creates the data_rover_test database when missing"
+cmd = "pytest -m pg tests/api/pg"
+env = { DATA_ROVER_TEST_DATABASE_URL = "postgresql+psycopg://data_rover:data_rover@127.0.0.1:5432/data_rover_test" }
+default-environment = "core-dev"
+
 [feature.core-dev.tasks.engine-bench-data]
 description = "Write benchmarks/large.model.json as the v2 snapshot that engine-bench opens, and its gzip for engine-bench-browser"
 cmd = "python scripts/snapshot_v2.py --model benchmarks/large.model.json --metamodel examples/smart-city.metamodel.yaml --out benchmarks/large.snapshot.v2 --gzip"
