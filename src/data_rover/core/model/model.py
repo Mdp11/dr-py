@@ -316,7 +316,7 @@ def _lands_out_of_place(
 ) -> bool:
     """Whether an entity appended to ``entities`` under sequence number
     ``order`` sits behind one with a larger number."""
-    if order is None or not entities:
+    if order is None or not dict.__len__(entities):
         return False
     return numbers[next(dict.__reversed__(entities))] > order
 

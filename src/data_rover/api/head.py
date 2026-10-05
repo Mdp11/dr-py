@@ -329,8 +329,9 @@ def write_batch(
         elements=[*kept_elements, *new_elements],
         relationships=[*kept_relationships, *new_relationships],
     )
-    row.element_count = len(model.elements)
-    row.relationship_count = len(model.relationships)
+    # by delta: a partial model cannot say how many entities the project has
+    row.element_count += len(new_elements) - len(deleted_elements)
+    row.relationship_count += len(new_relationships) - len(deleted_relationships)
     row.next_seq = next_seq
 
 

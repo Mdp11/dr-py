@@ -73,21 +73,37 @@ class PartialRows:
 class _Known:
     """What the partial model knows it knows; shared by its dicts and indexes."""
 
-    __slots__ = ("absent", "created", "edges", "loaded", "parents", "referencers")
+    __slots__ = (
+        "absent",
+        "created",
+        "edges",
+        "loaded",
+        "looked_for",
+        "parents",
+        "referencers",
+        "unreferenced",
+    )
 
     def __init__(self, rows: PartialRows, loaded: frozenset[str]) -> None:
         #: ids with no entity: the loader's, and every id deleted here. An absent
         #: id has no incident relationship (an endpoint always exists), so it
         #: has no edges or parents; its referencers are known only if loaded.
         self.absent = set(rows.absent)
+        #: the ids the loader looked for and did not find
+        self.looked_for = rows.absent
         self.edges = rows.edges_complete
         self.parents = rows.parents_complete | rows.edges_complete
         self.referencers = rows.referencers_complete
         #: the loaded elements
         self.loaded = loaded
-        #: elements created here under an id that was not loaded: nothing of
-        #: theirs is missing from the model, whatever the loader knew
+        #: elements created here under an id that was not loaded: no edge or
+        #: parent of theirs is missing from the model
         self.created: set[str] = set()
+        #: created here and no referencer of theirs can exist outside the
+        #: model: the id was never the loader's to look for (a fresh id). An id
+        #: the loader looked for and did not find may still be the target of a
+        #: dangling reference in the database, so creating it settles nothing.
+        self.unreferenced: set[str] = set()
 
 
 class _Entities[V](dict[str, V]):
@@ -150,11 +166,20 @@ class _Entities[V](dict[str, V]):
             self._known.absent.add(key)
         return value
 
+    def __len__(self) -> int:
+        raise WholeModelRead("counting the entities")
+
     def __iter__(self) -> Iterator[str]:
         raise WholeModelRead("iterating the entities")
 
     def __reversed__(self) -> Iterator[str]:
         raise WholeModelRead("iterating the entities")
+
+    def setdefault(self, *args: Any, **kwargs: Any) -> Any:  # pyright: ignore[reportIncompatibleMethodOverride]
+        raise TypeError("a partial model's entities are written by the Model only")
+
+    def popitem(self) -> tuple[str, V]:
+        raise TypeError("a partial model's entities are removed by the Model only")
 
     def keys(self):  # type: ignore[override]
         raise WholeModelRead("listing the entity ids")
@@ -211,7 +236,7 @@ class PartialIndexSet(IndexSet):
 
     def referencers_of(self, element_id: str) -> Set[str]:
         known = self._known
-        if element_id not in known.referencers and element_id not in known.created:
+        if element_id not in known.referencers and element_id not in known.unreferenced:
             raise NotLoaded((element_id,))
         return super().referencers_of(element_id)
 
@@ -231,8 +256,11 @@ class PartialIndexSet(IndexSet):
 
     def on_element_created(self, element: Element, order: int | None = None) -> None:
         super().on_element_created(element, order)
-        if element.id not in self._known.loaded:
-            self._known.created.add(element.id)
+        known = self._known
+        if element.id not in known.loaded:
+            known.created.add(element.id)
+            if element.id not in known.looked_for:
+                known.unreferenced.add(element.id)
 
     # -- no uniqueness groups -----------------------------------------------
 

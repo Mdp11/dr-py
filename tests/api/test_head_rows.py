@@ -439,6 +439,43 @@ def test_nonfinite_float_in_update_patch_is_refused(
         assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == ([], [])
 
 
+@pytest.mark.parametrize("literal", ["NaN", "-Infinity", "[1.0, Infinity]"])
+@pytest.mark.parametrize("final", ["create_relationship", "update_relationship"])
+def test_nonfinite_float_on_a_relationship_is_refused(
+    client: TestClient, literal: str, final: str
+) -> None:
+    rev = get_registry().get(DEFAULT_PROJECT_ID).model_rev
+    node = (
+        '{"kind": "create_element", "temp_id": "tmp_%s", "type_name": "Node",'
+        ' "properties": {}}'
+    )
+    rel = (
+        '{"kind": "create_relationship", "temp_id": "tmp_r", "type_name": "Link",'
+        ' "source_id": "tmp_a", "target_id": "tmp_b", "properties": %s}'
+    )
+    ops = [node % "a", node % "b"]
+    if final == "create_relationship":
+        ops.append(rel % ('{"via": %s}' % literal))
+    else:
+        ops.append(rel % "{}")
+        ops.append(
+            '{"kind": "update_relationship", "id": "tmp_r",'
+            ' "properties_patch": {"via": %s}}' % literal
+        )
+    body = '{"base_rev": %d, "ops": [%s]}' % (rev, ", ".join(ops))
+    r = client.post(
+        papi("/commits"),
+        content=body,
+        headers={**AUTH_HEADERS, "content-type": "application/json"},
+    )
+    assert r.status_code == 422, r.text
+    assert "Non-finite" in r.text
+    assert get_registry().get(DEFAULT_PROJECT_ID).model_rev == rev
+    _assert_rows_equal_session()
+    with _db() as s:
+        assert head_mod.read_head(s, DEFAULT_PROJECT_ID) == ([], [])
+
+
 # --- the properties text ----------------------------------------------------
 
 

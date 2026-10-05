@@ -4,14 +4,17 @@ data it does not hold."""
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import random
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
 from fastapi import HTTPException
 
 from data_rover.api.locking import required_locks
+from data_rover.api.routes.commits import _structural_ids
 from data_rover.api.routes.ops import _apply_batch, _BatchResult, _rollback
 from data_rover.api.schemas import (
     CreateElementOp,
@@ -251,7 +254,7 @@ def test_model_helpers_read_through_the_guard() -> None:
 
 
 def test_created_element_answers_every_accessor() -> None:
-    m = _partial()
+    m = _partial(referencers_complete=frozenset({"c", "x"}))
     inserted = m.insert_element("x", "Item", {"name": "n"}, 0)  # a known-absent id
     created = m.create_element("Item")
     for eid in (inserted.id, created.id):
@@ -275,8 +278,22 @@ def test_created_element_answers_every_accessor() -> None:
         m.indexes.outgoing_ids("q")
 
 
-def test_created_element_has_the_referencers_it_gained() -> None:
+def test_an_element_created_under_an_absent_id_still_needs_its_referencers() -> None:
+    # the loader found no "x", but the database may hold a dangling reference
+    # to it; creating it (edges and parents are then complete) does not tell
     m = _partial()
+    m.insert_element("x", "Item", {}, 0)
+    assert set(m.indexes.outgoing_ids("x")) == set()
+    assert m.indexes.first_parent("x") is None
+    with pytest.raises(NotLoaded) as info:
+        m.indexes.referencers_of("x")
+    assert info.value.ids == {"x"}
+    # a fresh id has no referencer anywhere
+    assert set(m.indexes.referencers_of(m.create_element("Item").id)) == set()
+
+
+def test_created_element_has_the_referencers_it_gained() -> None:
+    m = _partial(referencers_complete=frozenset({"c", "x"}))
     inserted = m.insert_element("x", "Item", {}, 0)
     holder = m.create_element("Item")
     m.set_property(holder, "ref", inserted.id)
@@ -346,6 +363,9 @@ def test_enumerating_the_entity_dicts_is_refused() -> None:
         lambda: list(m.elements.values()),
         lambda: list(m.relationships.items()),
         lambda: list(m.relationships.keys()),
+        lambda: len(m.elements),
+        lambda: len(m.relationships),
+        lambda: bool(m.elements),
     ):
         with pytest.raises(WholeModelRead):
             read()
@@ -356,6 +376,54 @@ def test_enumerating_the_entity_dicts_is_refused() -> None:
         list(m.indexes.iter_roots())
     with pytest.raises(WholeModelRead):
         ValidationPipeline([ContainmentValidator()]).validate(m)
+
+
+def test_the_entity_dicts_take_writes_from_the_model_only() -> None:
+    m = _partial()
+    with pytest.raises(TypeError):
+        m.elements.setdefault("y", Element(id="y", type_name="Item"))
+    with pytest.raises(TypeError):
+        m.relationships.popitem()
+    with pytest.raises(NotLoaded):
+        assert "y" in m.elements
+
+
+def _dangling_ref_batch() -> list[ModelOpIn]:
+    return [
+        CreateElementOp(
+            kind="create_element", temp_id="tmp_1", type_name="Item", id="X"
+        ),
+        DeleteElementOp(kind="delete_element", id="tmp_1"),
+    ]
+
+
+def test_deleting_an_element_created_under_an_absent_id_sees_its_referencers() -> None:
+    # p holds a reference to "X", which does not exist. Creating X and deleting
+    # it again leaves p dangling as before, but the check must reach p to say so.
+    rows = _rows(
+        elements=[_el("p", name="p", ref="X"), _el("c"), _el("q")],
+        absent=frozenset({"X"}),
+        edges_complete=frozenset({"c", "p"}),
+    )
+    full = _full_model(rows.elements, rows.relationships)
+    res = _apply_batch(full, _dangling_ref_batch(), restore=False)
+    want = structural_blockers(full, _structural_ids(full, res))
+    assert [i.target_ids for i in want] == [["p"]]
+
+    # the loader has not loaded p, nor X's referencers: the answer is withheld
+    unloaded = _rows(absent=frozenset({"X"}))
+    m = build_partial_model(_mm(), unloaded)
+    with pytest.raises(NotLoaded) as info:
+        _apply_batch(m, _dangling_ref_batch(), restore=False)
+    assert info.value.ids == {"X"}
+
+    # once it has, the partial model gives the full model's blockers
+    loaded = dataclasses.replace(
+        rows, referencers_complete=rows.referencers_complete | {"X"}
+    )
+    m = build_partial_model(_mm(), loaded)
+    res = _apply_batch(m, _dangling_ref_batch(), restore=False)
+    assert structural_blockers(m, _structural_ids(m, res)) == want
 
 
 def test_build_refuses_rows_that_break_the_contract() -> None:
@@ -602,7 +670,9 @@ def _seed_rows(rng: random.Random) -> tuple[list[dict], list[dict]]:
     return elements, rels
 
 
-def _full_model(elements: list[dict], rels: list[dict]) -> Model:
+def _full_model(
+    elements: Sequence[Mapping[str, Any]], rels: Sequence[Mapping[str, Any]]
+) -> Model:
     m = Model(_mm(), SequentialIdGenerator("n"))
     for e in elements:
         m.elements[e["id"]] = Element(
@@ -777,31 +847,154 @@ def _result_view(res: _BatchResult) -> dict[str, Any]:
     }
 
 
-def _run(model: Model, ops: list[ModelOpIn]) -> Any:
+def _random_restore_batch(rng: random.Random, model: Model) -> list[ModelOpIn]:
+    """A batch shaped like a revert's: creates carry their final ids."""
+    elements = list(model.elements)
+    rels = list(model.relationships)
+    made: list[str] = []
+    ops: list[ModelOpIn] = []
+
+    def element_id() -> str:
+        if rng.random() < 0.06:
+            return rng.choice(_GHOSTS)
+        return rng.choice([*elements, *made] or _GHOSTS)
+
+    for _ in range(rng.randint(1, 5)):
+        kind = rng.choice(["ce", "ce", "cr", "de", "dr", "ue"])
+        if kind == "ce":
+            eid = rng.choice(_HINTS)
+            ops.append(
+                CreateElementOp(
+                    kind="create_element",
+                    temp_id=eid,
+                    type_name="Item",
+                    properties={"name": f"n{rng.randrange(5)}"},
+                )
+            )
+            made.append(eid)
+        elif kind == "cr":
+            rid = rng.choice(_HINTS)
+            ops.append(
+                CreateRelationshipOp(
+                    kind="create_relationship",
+                    temp_id=rid,
+                    type_name=rng.choice(["Holds", "Link"]),
+                    source_id=element_id(),
+                    target_id=element_id(),
+                )
+            )
+        elif kind == "de":
+            ops.append(DeleteElementOp(kind="delete_element", id=element_id()))
+        elif kind == "dr":
+            rid = rng.choice(rels or _GHOSTS)
+            ops.append(DeleteRelationshipOp(kind="delete_relationship", id=rid))
+        else:
+            ops.append(
+                UpdateElementOp(
+                    kind="update_element",
+                    id=element_id(),
+                    properties_patch={"ref": element_id()},
+                )
+            )
+    return ops
+
+
+def _attempt(model: Model, ops: list[ModelOpIn], restore: bool) -> Any:
+    """What a commit check would see of a batch: the result, the ids whose
+    structure it can have changed and the blockers there."""
     try:
-        return ("ok", _result_view(_apply_batch(model, ops, restore=False)))
+        res = _apply_batch(model, ops, restore=restore)
     except HTTPException as exc:
         return ("refused", exc.status_code, exc.detail)
+    ids = _structural_ids(model, res)
+    return ("ok", _result_view(res), ids, structural_blockers(model, ids))
 
 
-@pytest.mark.parametrize("seed", [14, 15, 16])
-def test_parity_with_a_full_model_over_random_batches(seed: int) -> None:
-    rng = random.Random(seed)
-    elements, rels = _seed_rows(rng)
-    full = _full_model(elements, rels)
-    everything = frozenset(e["id"] for e in elements)
+def _rows_of(model: Model) -> tuple[list[dict], list[dict]]:
+    return (
+        [
+            {
+                "id": e.id,
+                "type_name": e.type_name,
+                "properties": dict(e.properties),
+                "rev": e.rev,
+            }
+            for e in model.elements.values()
+        ],
+        [
+            {
+                "id": r.id,
+                "type_name": r.type_name,
+                "source_id": r.source_id,
+                "target_id": r.target_id,
+                "properties": dict(r.properties),
+                "rev": r.rev,
+            }
+            for r in model.relationships.values()
+        ],
+    )
+
+
+def _clone(model: Model) -> Model:
+    twin = _full_model(*_rows_of(model))
+    twin._ids = copy.copy(model._ids)
+    twin.indexes.element_order = dict(model.indexes.element_order)
+    twin.indexes.relationship_order = dict(model.indexes.relationship_order)
+    twin.indexes._next_order = model.indexes._next_order
+    twin.indexes._next_relationship_order = model.indexes._next_relationship_order
+    return twin
+
+
+def _partial_of(full: Model, loaded_hints: set[str]) -> Model:
+    """The partial model a loader would build for ``full``'s current state:
+    every row, every set complete, except the referencers of the hint ids
+    nothing holds yet, which only ``loaded_hints`` have."""
+    elements, rels = _rows_of(full)
+    present = {row["id"] for row in [*elements, *rels]}
+    hints = frozenset(_HINTS) - present
+    ids = frozenset(row["id"] for row in elements)
+    # a loader looks up what the loaded properties point at: dangling targets
+    dangling = frozenset(
+        value
+        for row in elements
+        if isinstance(value := row["properties"].get("ref"), str)
+        and value not in present
+    )
     partial = build_partial_model(
         _mm(),
         PartialRows(
             elements=elements,
             relationships=rels,
-            absent=frozenset(_GHOSTS + _HINTS),
-            edges_complete=everything,
-            parents_complete=everything,
-            referencers_complete=everything | frozenset(_GHOSTS + _HINTS),
+            absent=hints | frozenset(_GHOSTS) | dangling,
+            edges_complete=ids,
+            parents_complete=ids,
+            referencers_complete=ids
+            | frozenset(_GHOSTS)
+            | (dangling - hints)
+            | (hints & loaded_hints),
         ),
-        id_generator=SequentialIdGenerator("n"),
+        id_generator=copy.copy(full._ids),
     )
+    # the full model's sequence numbers are sparse after churn; only their
+    # order carries, and the comparison is on the numbers
+    partial.indexes.element_order = dict(full.indexes.element_order)
+    partial.indexes.relationship_order = dict(full.indexes.relationship_order)
+    partial.indexes._next_order = full.indexes._next_order
+    partial.indexes._next_relationship_order = full.indexes._next_relationship_order
+    return partial
+
+
+@pytest.mark.parametrize(
+    ("seed", "referencers_of_hints_loaded"),
+    [(14, True), (15, False), (16, False), (17, False)],
+)
+def test_parity_with_a_full_model_over_random_batches(
+    seed: int, referencers_of_hints_loaded: bool
+) -> None:
+    rng = random.Random(seed)
+    full = _full_model(*_seed_rows(rng))
+    loaded_hints = set(_HINTS) if referencers_of_hints_loaded else set()
+    partial = _partial_of(full, loaded_hints)
     assert _state(partial) == _state(full)
     seen = dict.fromkeys(
         (
@@ -811,16 +1004,32 @@ def test_parity_with_a_full_model_over_random_batches(seed: int) -> None:
             "recreated_element_ids",
             "recreated_relationship_ids",
             "deleted_relationship_ids",
+            "restore",
+            "reloaded",
         ),
         0,
     )
     blocked = 0
     for step in range(100):
-        ops = _random_batch(rng, full)
-        want = _run(full, ops)
-        got = _run(partial, ops)
+        restore = rng.random() < 0.3
+        ops = (_random_restore_batch if restore else _random_batch)(rng, full)
+        before = _clone(full)
+        want = _attempt(full, ops, restore)
+        for _ in range(8):
+            try:
+                got = _attempt(partial, ops, restore)
+                break
+            except NotLoaded as exc:
+                # the loader would look again: it learns these referencers
+                assert exc.ids <= set(_HINTS), f"batch {step}: {exc}"
+                loaded_hints |= exc.ids
+                seen["reloaded"] += 1
+                partial = _partial_of(before, loaded_hints)
+        else:
+            pytest.fail(f"batch {step}: still not loaded")
         assert got == want, f"batch {step}"
         seen[want[0]] += 1
+        seen["restore"] += restore
         if want[0] == "ok":
             for name in seen.keys() & want[1].keys():
                 seen[name] += bool(want[1][name])
@@ -831,6 +1040,11 @@ def test_parity_with_a_full_model_over_random_batches(seed: int) -> None:
         assert structural_blockers(partial, ids) == expected, f"batch {step}"
     # the run must reach every path the guard sits on: accepted and refused
     # batches (a refusal rolls back, which settles the order), cascading
-    # deletes, entities deleted and created again, and issues to find
-    assert all(count > 0 for count in seen.values()), seen
+    # deletes, entities deleted and created again, revert-shaped batches,
+    # and issues to find
+    assert all(
+        count > 0
+        for name, count in seen.items()
+        if name != "reloaded" or not referencers_of_hints_loaded
+    ), seen
     assert blocked > 0
