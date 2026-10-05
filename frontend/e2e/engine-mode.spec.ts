@@ -1,16 +1,16 @@
 /**
  * The workspace read by the engine: every read surface answered by the
  * replica in the real sandbox, against the real backend, with a second API
- * client as the peer — and a tab whose engine cannot start reads from the
- * server. The evaluations are `eval-navigation.spec.ts`'s.
+ * client as the peer — and a tab whose engine cannot start is blocked with
+ * the reason. The evaluations are `eval-navigation.spec.ts`'s.
  */
 
-import { test, expect, engineMode, watchShadow } from './fixtures';
+import { test, expect } from './fixtures';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
-import { login, openDefaultProject } from './helpers/auth';
+import { openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';
 import { commitStaged } from './helpers/commit';
 import { expectReplicaReady, replica, watchPhases } from './helpers/replica';
@@ -144,28 +144,8 @@ function recordModelReads(page: Page): string[] {
 
 test('the workspace is served by the engine', async ({ page }) => {
 	test.setTimeout(120_000);
-	const shadowed = recordModelReads(page);
-	await openReady(page);
-	await walk(page);
-	// Shadow on: each surface's read went to the server a second time.
-	const expected: Array<[string, RegExp]> = [
-		['summary', /^GET \/model\/summary/],
-		['tree', /^GET \/model\/(containment\/roots|elements\/[^/?]+\/children)/],
-		['search', /^GET \/model\/elements\?.*q=/],
-		['elements', /^GET \/model\/elements\/[^/?]+$/],
-		['relationships', /^GET \/model\/elements\/[^/?]+\/relationships/]
-	];
-	for (const [surface, pattern] of expected) {
-		await expect
-			.poll(() => shadowed.some((line) => pattern.test(line)), { message: surface })
-			.toBe(true);
-	}
-
-	await page.evaluate(() => localStorage.removeItem('dr.shadow'));
 	const direct = recordModelReads(page);
-	await page.reload();
-	await expectLiveFeed(page);
-	await expectReplicaReady(page);
+	await openReady(page);
 	await walk(page);
 	const served = direct.filter((line) =>
 		/^\w+ \/model\/(summary|elements|containment\/)/.test(line)
@@ -284,32 +264,20 @@ test("a peer's rebind with a new element shows after Reload", async ({ page }) =
 	await expect(poolRow(page, 'After rebind')).toBeVisible({ timeout: 10_000 });
 });
 
-test('the boot fallback', async ({ browser }) => {
+test('a workspace whose engine cannot start shows the blocking overlay with its reason', async ({
+	browser
+}) => {
 	test.setTimeout(120_000);
-	// The sandbox's host: the app refuses to embed it, so the engine never starts.
-	const context = await browser.newContext({ baseURL: 'http://localhost:5173' });
+	const context = await browser.newContext();
 	try {
-		const shadow = watchShadow(context);
-		await engineMode(context);
+		// The sandbox never loads, so the engine never starts.
+		await context.route('http://localhost:5174/**', (route) => route.abort());
 		const page = await context.newPage();
-		// The session cookie is per host: this context logs in on its own.
-		await login(page);
-		await page.getByText('Smart City').click();
-		await page.waitForURL('**/p/**');
+		await openDefaultProject(page);
 
-		await expect(replica(page)).toHaveAttribute('data-phase', 'server', { timeout: 30_000 });
-		const notice = page.getByTestId('replica-notice');
-		await expect(notice).toBeVisible();
-		await expect(notice).toContainText(
-			'The in-browser engine could not start — this tab reads from the server instead. Reload the page to try again.'
-		);
-
-		await expandFirstRoot(page);
-		await searchAndOpen(page, SEARCHED.name, SEARCHED.id);
-
-		await notice.getByRole('button', { name: 'Dismiss' }).click();
-		await expect(notice).toBeHidden();
-		expect(shadow, 'shadow comparison').toEqual([]);
+		await expect(replica(page)).toHaveAttribute('data-phase', 'unavailable', { timeout: 30_000 });
+		await expect(page.getByTestId('replica-blocked')).toBeVisible();
+		await expect(page.getByTestId('replica-blocked-reason')).not.toBeEmpty();
 	} finally {
 		await context.close();
 	}

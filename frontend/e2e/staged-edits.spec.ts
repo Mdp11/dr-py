@@ -1,13 +1,11 @@
 /**
  * A staged model edit visible in the tree before it commits: with `staging`
- * on the engine by default, the five read surfaces are served by the
+ * on the engine, the five read surfaces are served by the
  * replica's own working copy, so a create/rename/delete staged in the
  * browser shows up in the tree (or the "Not in view" pool, for an element no
  * view places), search and the Inspector without a commit — and a peer's
  * commit that invalidates a staged edit parks it as a conflict instead of
- * silently losing it. Shadow comparison is gated off while anything is
- * staged, so the `shadowWatch` fixture failing on any `[shadow]` line
- * doubles as proof the gate holds.
+ * silently losing it.
  */
 
 import { test, expect } from './fixtures';

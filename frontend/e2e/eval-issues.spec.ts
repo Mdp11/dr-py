@@ -1,6 +1,6 @@
 /**
  * Live validation issues served by the engine over the working copy, in the
- * real sandbox against the real backend, with shadow on: a staged facet
+ * real sandbox against the real backend: a staged facet
  * violation shows in the Issues panel before any commit and Discard clears
  * it, strict mode blocks the commit dialog on it, Validate marks it "new" in
  * the overlay, and after the commit it reads "on server".

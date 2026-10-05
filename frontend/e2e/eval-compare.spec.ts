@@ -1,11 +1,10 @@
 /**
- * The Compare and Apply CR dialog, each on the engine and on the server
- * against the real backend, shadow on. The other file is the server's own
+ * The Compare and Apply CR dialog on the engine against the real backend.
+ * The other file is the server's own
  * download with one element renamed, one leaf deleted and one added; Preview
  * lists those three, Replace stages the edits that make the model match, and
  * a CR saved with Create CR previews to the same counts. With an edit staged
- * the engine answers over it and stages on top, where the server's Replace
- * stays disabled.
+ * the engine answers over it and stages on top.
  *
  * The model is four Blocks: Alpha contains Child (`BlockHasPart`), Beta and
  * Gamma are alone.
@@ -61,19 +60,11 @@ function json(name: string, body: object) {
 	return { name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(body)) };
 }
 
-async function bootstrap(page: Page, side: 'engine' | 'server'): Promise<void> {
-	await page.addInitScript(
-		(surfaces) => {
-			// Create CR takes the `.download` fallback: no native file picker.
-			delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
-			try {
-				localStorage.setItem('dr.surfaces', JSON.stringify(surfaces));
-			} catch {
-				// A frame without storage has nothing to set.
-			}
-		},
-		{ compare: side }
-	);
+async function bootstrap(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		// Create CR takes the `.download` fallback: no native file picker.
+		delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+	});
 	page.on('dialog', (dialog) => void dialog.accept());
 	await openDefaultProject(page);
 	await loadFiles(page, {
@@ -170,89 +161,73 @@ async function stageAlphaEdit(page: Page): Promise<void> {
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(1);
 }
 
-for (const side of ['engine', 'server'] as const) {
-	test.describe(`with the compare on the ${side}`, () => {
-		test('a file previews as one added, one modified, one deleted, and Replace stages its ops', async ({
-			page
-		}) => {
-			test.setTimeout(180_000);
-			await bootstrap(page, side);
+test('a file previews as one added, one modified, one deleted, and Replace stages its ops', async ({
+	page
+}) => {
+	test.setTimeout(180_000);
+	await bootstrap(page);
 
-			const dialog = await previewOtherFile(page);
-			await expect(dialog.getByTestId('mcd-staged-note')).toHaveCount(0);
+	const dialog = await previewOtherFile(page);
+	await expect(dialog.getByTestId('mcd-staged-note')).toHaveCount(0);
 
-			await dialog.getByTestId('mcd-replace').click();
-			await expect(dialog).toBeHidden({ timeout: 30_000 });
-			try {
-				await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(FILE_OPS);
-			} finally {
-				await discardAll(page);
-			}
-		});
+	await dialog.getByTestId('mcd-replace').click();
+	await expect(dialog).toBeHidden({ timeout: 30_000 });
+	try {
+		await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(FILE_OPS);
+	} finally {
+		await discardAll(page);
+	}
+});
 
-		test('with an edit staged, the engine answers over it and Replace stages; the server disables Replace', async ({
-			page
-		}) => {
-			test.setTimeout(180_000);
-			await bootstrap(page, side);
-			await stageAlphaEdit(page);
+test('with an edit staged, the engine answers over it and Replace stages', async ({ page }) => {
+	test.setTimeout(180_000);
+	await bootstrap(page);
+	await stageAlphaEdit(page);
 
-			try {
-				// The engine diffs the working copy, where Alpha's staged name differs from the
-				// file's too; the server diffs the committed model.
-				const dialog = await previewOtherFile(page, side === 'engine' ? 2 : 1);
-				if (side === 'engine') {
-					await expect(dialog.getByTestId('mcd-staged-note')).toHaveText('Includes staged changes');
-					await expect(dialog.getByTestId('mcd-replace')).toBeEnabled();
-					await dialog.getByTestId('mcd-replace').click();
-					await expect(dialog).toBeHidden({ timeout: 30_000 });
-					// Alpha's staged name goes back to the committed one the file has, so it
-					// nets out; Beta renamed, Gamma deleted and Delta added remain.
-					await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(FILE_OPS);
-					// The staged state is the file: its names, its Delta, no Gamma, and Alpha's
-					// staged name replaced by the file's.
-					await expect(row(page, RENAMED)).toBeVisible({ timeout: 10_000 });
-					await expect(row(page, 'Delta')).toBeVisible();
-					await expect(row(page, 'Alpha')).toBeVisible();
-					await expect(tree(page).getByText(/Staged-/)).toHaveCount(0);
-					await expect(tree(page).getByText('Gamma')).toHaveCount(0);
-				} else {
-					await expect(dialog.getByTestId('mcd-replace')).toBeDisabled();
-					await expect(dialog.getByTestId('mcd-gate-hint')).toHaveText(
-						'Commit or discard your staged edits first.'
-					);
-					await page.keyboard.press('Escape');
-				}
-			} finally {
-				await discardAll(page);
-			}
-		});
+	try {
+		// The engine diffs the working copy, where Alpha's staged name differs from the
+		// file's too.
+		const dialog = await previewOtherFile(page, 2);
+		await expect(dialog.getByTestId('mcd-staged-note')).toHaveText('Includes staged changes');
+		await expect(dialog.getByTestId('mcd-replace')).toBeEnabled();
+		await dialog.getByTestId('mcd-replace').click();
+		await expect(dialog).toBeHidden({ timeout: 30_000 });
+		// Alpha's staged name goes back to the committed one the file has, so it
+		// nets out; Beta renamed, Gamma deleted and Delta added remain.
+		await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(FILE_OPS);
+		// The staged state is the file: its names, its Delta, no Gamma, and Alpha's
+		// staged name replaced by the file's.
+		await expect(row(page, RENAMED)).toBeVisible({ timeout: 10_000 });
+		await expect(row(page, 'Delta')).toBeVisible();
+		await expect(row(page, 'Alpha')).toBeVisible();
+		await expect(tree(page).getByText(/Staged-/)).toHaveCount(0);
+		await expect(tree(page).getByText('Gamma')).toHaveCount(0);
+	} finally {
+		await discardAll(page);
+	}
+});
 
-		test('a CR saved with Create CR previews to the same counts through Apply CR', async ({
-			page
-		}) => {
-			test.setTimeout(180_000);
-			await bootstrap(page, side);
+test('a CR saved with Create CR previews to the same counts through Apply CR', async ({ page }) => {
+	test.setTimeout(180_000);
+	await bootstrap(page);
 
-			const compare = await openDialog(page, 'Compare…');
-			await compare.getByTestId('mcd-file-input').setInputFiles(await otherFile(page));
-			const downloading = page.waitForEvent('download', { timeout: 60_000 });
-			await compare.getByTestId('mcd-create-cr').click();
-			const download = await downloading;
-			const cr = await readFile(await download.path());
-			await page.keyboard.press('Escape');
-			await expect(compare).toBeHidden({ timeout: 10_000 });
+	const compare = await openDialog(page, 'Compare…');
+	await compare.getByTestId('mcd-file-input').setInputFiles(await otherFile(page));
+	const downloading = page.waitForEvent('download', { timeout: 60_000 });
+	await compare.getByTestId('mcd-create-cr').click();
+	const download = await downloading;
+	const cr = await readFile(await download.path());
+	await page.keyboard.press('Escape');
+	await expect(compare).toBeHidden({ timeout: 10_000 });
 
-			const apply = await openDialog(page, 'Apply CR…');
-			await apply.getByTestId('mcd-file-input').setInputFiles({
-				name: download.suggestedFilename(),
-				mimeType: 'application/json',
-				buffer: cr
-			});
-			await apply.getByTestId('mcd-preview').click();
-			await expectCounts(apply);
-			await page.keyboard.press('Escape');
-			await expect.poll(() => stagedChangeCount(page)).toBe(0);
-		});
+	const apply = await openDialog(page, 'Apply CR…');
+	await apply.getByTestId('mcd-file-input').setInputFiles({
+		name: download.suggestedFilename(),
+		mimeType: 'application/json',
+		buffer: cr
 	});
-}
+	await apply.getByTestId('mcd-preview').click();
+	await expectCounts(apply);
+	await page.keyboard.press('Escape');
+	await expect.poll(() => stagedChangeCount(page)).toBe(0);
+});

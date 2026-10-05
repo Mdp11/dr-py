@@ -1,7 +1,6 @@
 /**
  * Exports rendered by the engine over the working copy, in the real sandbox
- * against the real backend, with shadow on and the `exports` surface forced
- * to the engine: a table's CSV is the server's bytes, an exporter with two
+ * against the real backend: a table's CSV is the server's bytes, an exporter with two
  * entries and a manifest downloads a zip whose entries and `model_rev` are
  * the expected ones, a staged rename lands in the file behind the
  * `export-staged-note`, and a table with a script column exports the engine's
@@ -108,11 +107,6 @@ async function openReady(page: Page): Promise<void> {
 	// The `.download` fallback path: no native file picker.
 	await page.addInitScript(() => {
 		delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
-		try {
-			localStorage.setItem('dr.surfaces', JSON.stringify({ exports: 'engine' }));
-		} catch {
-			// A frame without storage has nothing to set.
-		}
 	});
 	page.on('dialog', (dialog) => void dialog.accept());
 	await openDefaultProject(page);
@@ -152,7 +146,6 @@ test("a table's CSV is the server's bytes", async ({ page }) => {
 	const download = await exportTable(page, 'csv');
 	expect(download.suggestedFilename()).toMatch(/\.csv$/);
 	const engineBytes = await readFile(await download.path());
-	await expect(page.getByRole('tabpanel').getByTestId('export-fallback')).toHaveCount(0);
 
 	// The page asks the server for the same definition, with the API client's headers.
 	const serverBytes = await page.evaluate(
@@ -183,7 +176,6 @@ test('an exporter with two entries and a manifest downloads a zip', async ({ pag
 	await tabpanel.getByTestId('exporter-run').click();
 	const download = await downloading;
 	expect(download.suggestedFilename()).toMatch(/\.zip$/);
-	await expect(tabpanel.getByTestId('export-fallback')).toHaveCount(0);
 
 	const entries = unzipSync(new Uint8Array(await readFile(await download.path())));
 	expect(Object.keys(entries).sort()).toEqual(['alpha.json', 'manifest.json', 'sub/beta.csv']);
@@ -239,5 +231,4 @@ test('a table with a script column exports the engine-computed cells', async ({ 
 	expect(lines[0]).toContain('Computed');
 	expect(lines).toHaveLength(13);
 	expect(lines.slice(1).every((line) => line.trim().endsWith('2'))).toBeTruthy();
-	await expect(tabpanel.getByTestId('export-fallback')).toHaveCount(0);
 });

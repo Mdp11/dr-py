@@ -1,9 +1,9 @@
 /**
  * Tables served by the engine over the working copy, in the real sandbox
- * against the real backend, with shadow on: a table reads a staged
+ * against the real backend: a table reads a staged
  * navigation before any commit, an open table sorted by name re-sorts after
  * a staged rename in the side panel (and Discard restores the order), a
- * script column is evaluated by the engine with no fallback marker, and
+ * script column is evaluated by the engine, and
  * staging a script step onto a table's navigation column keeps an open
  * table served by the engine.
  *
@@ -191,7 +191,6 @@ test('a table over a staged navigation shows its rows before any commit', async 
 	const tabpanel = page.getByRole('tabpanel');
 	await expect(tabpanel.getByTestId('table-grid')).toBeVisible({ timeout: 15_000 });
 	await expect(tabpanel.getByTestId('table-row')).toHaveCount(12, { timeout: 15_000 });
-	await expect(tabpanel.getByTestId('table-fallback')).toHaveCount(0);
 
 	// Clean up: discard the staged create (footer Undo only pops MODEL ops,
 	// not artifact ones) so later tests see a clean project.
@@ -273,9 +272,7 @@ test('an open table sorted by name re-sorts after a staged rename in the side pa
 	await expect.poll(cellTexts, { timeout: 15_000 }).toEqual(before);
 });
 
-test('a table with a script column is evaluated by the engine, with no fallback marker', async ({
-	page
-}) => {
+test('a table with a script column is evaluated by the engine', async ({ page }) => {
 	test.setTimeout(120_000);
 	page.on('dialog', (dialog) => void dialog.accept());
 	await openReady(page);
@@ -283,8 +280,6 @@ test('a table with a script column is evaluated by the engine, with no fallback 
 	const tabpanel = await openSoftwareSystemTable(page);
 	const rows = tabpanel.getByTestId('table-row');
 	const scriptColIndex = 1; // after the Start element column (index 0)
-	const fallback = tabpanel.getByTestId('table-fallback');
-	await expect(fallback).toHaveCount(0);
 
 	await tabpanel.getByTestId('table-settings-button').click();
 	const settings = page.getByRole('dialog', { name: 'Columns' });
@@ -296,7 +291,7 @@ test('a table with a script column is evaluated by the engine, with no fallback 
 	await settings.getByTestId('settings-save').click();
 	await expect(settings).toBeHidden();
 
-	// The engine evaluates the script: no fallback marker, no engine notice.
+	// The engine evaluates the script: no engine notice.
 	await expect(tabpanel.getByTestId('scripts-need-engine')).toHaveCount(0);
 
 	// Its cells settle to the computed constant.
@@ -312,10 +307,9 @@ test('a table with a script column is evaluated by the engine, with no fallback 
 
 	const cells = await readColumnCells(rows, scriptColIndex);
 	expect(cells.every((c) => !c.isError && c.text === '2')).toBeTruthy();
-	await expect(fallback).toHaveCount(0);
 });
 
-test("staging a script step onto a table's navigation column evaluates on the engine with no marker; unstaging leaves it unchanged", async ({
+test("staging a script step onto a table's navigation column evaluates on the engine; unstaging leaves it unchanged", async ({
 	page
 }) => {
 	test.setTimeout(180_000);
@@ -337,7 +331,6 @@ test("staging a script step onto a table's navigation column evaluates on the en
 	// below across tab switches rather than reassigned.
 	const tabpanel = page.getByRole('tabpanel');
 	const rows = tabpanel.getByTestId('table-row');
-	const fallback = tabpanel.getByTestId('table-fallback');
 	await expect(tabpanel.getByTestId('table-grid')).toBeVisible({ timeout: 15_000 });
 	await expect(rows).toHaveCount(12, { timeout: 15_000 });
 
@@ -355,7 +348,6 @@ test("staging a script step onto a table's navigation column evaluates on the en
 	await navEditor.getByLabel('Saved navigation for column').selectOption({ label: refNav.name });
 	await settings.getByTestId('settings-save').click();
 	await expect(settings).toBeHidden();
-	await expect(fallback).toHaveCount(0);
 	await expect(rows).toHaveCount(12, { timeout: 15_000 });
 
 	// Elsewhere, stage a script step onto the referenced navigation.
@@ -373,10 +365,9 @@ test("staging a script step onto a table's navigation column evaluates on the en
 	await expect.poll(() => stagedChangeCount(page), { timeout: 15_000 }).toBe(1);
 
 	// Back at the table, without a reload, the engine still serves it: no
-	// marker, no engine notice, all rows present.
+	// engine notice, all rows present.
 	await page.getByRole('tab', { name: tableTabName }).click();
 	await expect(rows).toHaveCount(12, { timeout: 15_000 });
-	await expect(fallback).toHaveCount(0);
 	await expect(tabpanel.getByTestId('scripts-need-engine')).toHaveCount(0);
 
 	// Unstage the script step (discard the one staged artifact update — the
@@ -392,6 +383,5 @@ test("staging a script step onto a table's navigation column evaluates on the en
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(0);
 
 	await page.getByRole('tab', { name: tableTabName }).click();
-	await expect(fallback).toHaveCount(0);
 	await expect(rows).toHaveCount(12, { timeout: 15_000 });
 });

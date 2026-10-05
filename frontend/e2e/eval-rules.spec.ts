@@ -1,6 +1,6 @@
 /**
  * Custom validation rules served by the engine over the working copy, in the
- * real sandbox against the real backend, with shadow on: a rule set saved in
+ * real sandbox against the real backend: a rule set saved in
  * the Rules tab is staged, and the Issues panel lists its issues before any
  * commit, marked "new", with its drifted rule in the skipped banner; Discard
  * removes both. Committed, its issues stay, now "on server". A staged edit

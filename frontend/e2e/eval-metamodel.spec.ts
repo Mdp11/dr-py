@@ -1,12 +1,10 @@
 /**
  * Metamodel previews answered by the engine over the working copy, in the
- * real sandbox against the real backend, with the `metamodel` surface on the
- * engine, its default, and shadow on except where a case says otherwise: a
+ * real sandbox against the real backend: a
  * required property appended to a type lists the elements it fails in "Now
  * failing" with no staged note, a staged element edit shows the note and moves
  * the counts, the commit drawer's preview of the staged rebind never sends the
- * rebind to the server (shadow off, to watch the requests), and the same
- * preview with shadow on is compared to the server's and stays silent.
+ * rebind to the server.
  *
  * Fixture facts (examples/smart-city.metamodel.yaml, smart-city.model.json):
  * 12 SoftwareSystem elements, each with a string `name`; the type's property
@@ -170,15 +168,6 @@ test("the commit drawer's rebind preview never sends the rebind to the server", 
 }) => {
 	test.setTimeout(180_000);
 	const previews: string[] = [];
-	// The shadow re-asks the server for the whole batch; this spec watches what the
-	// answer itself sends, so it runs with the shadow off.
-	await page.addInitScript(() => {
-		try {
-			localStorage.removeItem('dr.shadow');
-		} catch {
-			// A frame without storage has nothing to remove.
-		}
-	});
 	page.on('request', (request) => {
 		if (request.url().includes('/commits/preview')) previews.push(request.postData() ?? '');
 	});
@@ -195,38 +184,6 @@ test("the commit drawer's rebind preview never sends the rebind to the server", 
 	await expect(drawer.getByText(/loading changes/i)).toBeHidden({ timeout: 30_000 });
 	await expect(drawer.getByRole('button', { name: /^Commit/ })).toBeEnabled({ timeout: 30_000 });
 	expect(previews.filter((body) => body.includes('metamodel.rebind'))).toEqual([]);
-	await page.keyboard.press('Escape');
-	await expect(drawer).toBeHidden({ timeout: 10_000 });
-	await discardAll(page);
-});
-
-test("the commit drawer's rebind preview agrees with the server's under the shadow", async ({
-	page
-}) => {
-	test.setTimeout(180_000);
-	await openReady(page);
-	const content = await openYaml(page);
-	await appendRequiredProperty(page, content);
-	await preview(page);
-	await stageTooLongName(page);
-
-	// The shadow asks the server for the whole batch, rebind included; its answer
-	// is compared before the fixture judges the run.
-	const probe = page.waitForResponse(
-		(response) =>
-			response.url().includes('/commits/preview') &&
-			(response.request().postData() ?? '').includes('metamodel.rebind'),
-		{ timeout: 60_000 }
-	);
-	await page.getByRole('button', { name: 'Commit', exact: true }).click();
-	const drawer = page.getByRole('dialog', { name: /commit changes/i });
-	await expect(drawer).toBeVisible({ timeout: 10_000 });
-	await expect(drawer.getByText(/loading changes/i)).toBeHidden({ timeout: 30_000 });
-	await expect(drawer.getByRole('button', { name: /^Commit/ })).toBeEnabled({ timeout: 30_000 });
-	expect((await probe).status()).toBe(200);
-	// The comparison runs after the answer lands, and a mismatch is re-tested
-	// before it is reported.
-	await page.waitForTimeout(3_000);
 	await page.keyboard.press('Escape');
 	await expect(drawer).toBeHidden({ timeout: 10_000 });
 	await discardAll(page);

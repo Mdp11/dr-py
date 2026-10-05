@@ -1,6 +1,6 @@
 /**
  * Navigations and criteria searches served by the engine over the working
- * copy, in the real sandbox against the real backend, with shadow on: a
+ * copy, in the real sandbox against the real backend: a
  * navigation reads a staged navigation it refers to before any commit, one
  * that reaches a script is answered by the engine, a criteria
  * search finds a staged rename, and after a commit and a reload the same
@@ -159,8 +159,6 @@ test('a navigation reads the staged navigation it refers to, then the committed 
 		timeout: 15_000
 	});
 	await expect(dock).toContainText('Organization-001');
-	// Shadow on and nothing staged: the server was asked the same.
-	await expect.poll(() => evaluations.length, { timeout: 10_000 }).toBeGreaterThan(0);
 	await closeTab(page, referring.name);
 
 	// Stage the referred navigation onto the 10 EdgeGateways.
@@ -182,7 +180,6 @@ test('a navigation reads the staged navigation it refers to, then the committed 
 	await tabpanel.getByRole('button', { name: /^Save( \*)?$/ }).click();
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(1);
 	await closeTab(page, referred.name);
-	const staged = evaluations.length;
 
 	// The referring one reads the staged one: 10 EdgeGateways and 8 Projects.
 	tabpanel = await openNavigation(page, referring.id);
@@ -203,17 +200,13 @@ test('a navigation reads the staged navigation it refers to, then the committed 
 		timeout: 15_000
 	});
 	await expect(dock).toContainText('EdgeGateway-001');
-	await expect(dock.getByTestId('nav-fallback')).toHaveCount(0);
 	await tabpanel.getByRole('button', { name: /^Save( \*)?$/ }).click();
 	await expect(tabpanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
-	// While anything is staged the engine answers alone: the server was never asked.
-	expect(evaluations.length).toBe(staged);
 
 	await commitStaged(page, 'eval navigation: staged refs');
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(0);
 
 	// A tab restored by the reload may evaluate before the replica's indicator is read.
-	const afterReload = recordPosts(page, '/navigations/evaluate');
 	await page.reload();
 	await expectLiveFeed(page);
 	await expectReplicaReady(page);
@@ -224,9 +217,8 @@ test('a navigation reads the staged navigation it refers to, then the committed 
 		timeout: 15_000
 	});
 	await expect(dock).toContainText('EdgeGateway-001');
-	await expect(dock.getByTestId('nav-fallback')).toHaveCount(0);
-	// Nothing staged: the shadow held the engine's answer to the server's.
-	await expect.poll(() => afterReload.length, { timeout: 10_000 }).toBeGreaterThan(0);
+	// The engine answered every evaluation: the server was never asked.
+	expect(evaluations).toEqual([]);
 });
 
 test('a navigation that reaches a script is answered by the engine', async ({ page }) => {
@@ -243,7 +235,6 @@ test('a navigation that reaches a script is answered by the engine', async ({ pa
 	await page.keyboard.press('Escape');
 	const status = dock.getByTestId('results-status');
 	await expect(status).toContainText('✓ 12 chains', { timeout: 15_000 });
-	await expect(dock.getByTestId('nav-fallback')).toHaveCount(0);
 
 	await tabpanel.getByTestId('add-script-step').click();
 	const stepRow = tabpanel.getByTestId('script-step');
@@ -255,14 +246,13 @@ test('a navigation that reaches a script is answered by the engine', async ({ pa
 	await page.keyboard.insertText(STEP_CODE);
 
 	// The engine runs the step: every SoftwareSystem expands, so the chain
-	// count grows past the 12 starts, with no marker and no warnings.
+	// count grows past the 12 starts, with no warnings.
 	await expect
 		.poll(async () => Number(/✓ (\d+) chains/.exec((await status.textContent()) ?? '')?.[1] ?? 0), {
 			timeout: 30_000
 		})
 		.toBeGreaterThan(12);
 	await expect(dock.locator('tbody tr').first()).toBeVisible();
-	await expect(dock.getByTestId('nav-fallback')).toHaveCount(0);
 	await expect(dock.getByTestId('nav-warnings')).toBeHidden();
 	await expect(dock.getByTestId('scripts-need-engine')).toHaveCount(0);
 });
@@ -292,12 +282,11 @@ test('the advanced search finds a staged rename', async ({ page }) => {
 		return panel;
 	};
 
-	// Committed: the engine answers, the shadow asks the server the same.
+	// Committed: the engine answers.
 	let panel = await search('Organization-002');
 	await expect(panel.getByRole('button', { name: /Organization-002/ })).toBeVisible({
 		timeout: 10_000
 	});
-	await expect.poll(() => searches.length, { timeout: 10_000 }).toBeGreaterThan(0);
 	await panel.getByRole('button', { name: /Organization-002/ }).click();
 	const nameInput = page.getByTestId('inspector').locator('input[type="text"]').first();
 	await expect(nameInput).toHaveValue('Organization-002', { timeout: 10_000 });
@@ -307,13 +296,10 @@ test('the advanced search finds a staged rename', async ({ page }) => {
 	await nameInput.fill(renamed);
 	await nameInput.blur();
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(1);
-	const before = searches.length;
 	panel = await search(renamed);
 	await expect(panel.getByRole('button', { name: new RegExp(renamed) })).toBeVisible({
 		timeout: 10_000
 	});
-	// Staged: the engine answered alone, the server never asked.
-	expect(searches.length).toBe(before);
 	await panel.getByRole('button', { name: 'Close results' }).click();
 
 	await page.getByRole('button', { name: 'Commit', exact: true }).click();
@@ -324,4 +310,6 @@ test('the advanced search finds a staged rename', async ({ page }) => {
 	await discardAll.click();
 	await expect(drawer).toBeHidden({ timeout: 10_000 });
 	await expect.poll(() => stagedChangeCount(page), { timeout: 10_000 }).toBe(0);
+	// The engine answered every search: the server was never asked.
+	expect(searches).toEqual([]);
 });
