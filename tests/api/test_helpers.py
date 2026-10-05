@@ -49,3 +49,20 @@ def test_commit_ops_advances_head(client: TestClient) -> None:
     state = head()
     assert state.rev == 1
     assert body["id_map"]["tmp_t"] in state.elements
+
+
+def test_commit_ops_takes_and_releases_the_leases_an_edit_needs(
+    client: TestClient,
+) -> None:
+    install(metamodel=_NODE_MM, model='{"elements": [], "relationships": []}')
+    eid = commit_ops(
+        client,
+        [{"kind": "create_element", "temp_id": "tmp_t", "type_name": "Node", "properties": {}}],
+    )["id_map"]["tmp_t"]
+    # an update needs the element's lease, which the test does not hold
+    body = commit_ops(
+        client, [{"kind": "update_element", "id": eid, "properties_patch": {}}]
+    )
+    assert body["model_rev"] == head().rev == 2
+    leases = client.get("/api/v1/projects/default/locks").json()["leases"]
+    assert leases == []

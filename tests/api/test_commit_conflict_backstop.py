@@ -25,6 +25,7 @@ from .conftest import (
     EMPTY_MODEL,
     install,
     head,
+    append_baseline_row,
 )
 
 #: the view every view op in this module edits — set by ``_seed_view``
@@ -291,6 +292,25 @@ def test_short_tail_from_unjournaled_mutation_409(client: TestClient) -> None:
 
     r_patch = client.patch(papi(f"/model/elements/{aid}"), json={"properties": {}})
     assert r_patch.status_code == 200, r_patch.text
+
+    r2 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_z",
+                           "type_name": "Node", "properties": {}}], base)
+    assert r2.status_code == 409
+    assert r2.json()["detail"] == "stale base_rev"
+
+
+def test_baseline_reset_always_conflicts(client: TestClient) -> None:
+    """A whole-model replacement leaves ONE marker commit with EMPTY ops at
+    the new rev. The tail fully accounts for the rev gap (one row, one rev, so
+    the short-tail check does NOT catch it), but names no resources at all —
+    the dedicated empty-ops-in-tail branch must catch it, or a stale batch
+    would silently land against a wholesale-replaced model."""
+    r = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",
+                          "type_name": "Node", "properties": {}}], _rev(client))
+    assert r.status_code == 200, r.text
+    base = _rev(client)
+
+    append_baseline_row()
 
     r2 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_z",
                            "type_name": "Node", "properties": {}}], base)

@@ -46,6 +46,7 @@ from .conftest import (
     install,
     head,
     commit_ops,
+    append_baseline_row,
 )
 from .test_commits_metamodel_ops import _acquire_mm
 
@@ -611,8 +612,7 @@ def test_route_shares_the_fold_with_diff_range(client: TestClient) -> None:
 def loaded(client: TestClient) -> tuple[TestClient, int]:
     """A project whose journal starts with a baseline row (no states) at the
     rev a model load lands on; every later row is an ops batch."""
-    install(metamodel=_MM, model=EMPTY_MODEL)
-    base = _rev(client)
+    base = append_baseline_row()
     with _db() as s:
         row = content.get_commit(s, DEFAULT_PROJECT_ID, base)
         assert row is not None and row.entity_states is None
@@ -666,6 +666,22 @@ def test_route_range_after_a_loaded_baseline_row_folds(
     assert out.source == "journal"
     assert _ids(out.elements.added) == ["a"]
     assert out.elements.added[0].properties == {"label": "two"}
+
+
+def test_route_range_including_a_baseline_row_reconstructs(
+    loaded: tuple[TestClient, int],
+) -> None:
+    client, base = loaded
+    _ops(client, [_create("a", label="one")])
+    head = _rev(client)
+    with _db() as s:
+        marks = content.commit_range_marks(
+            s, DEFAULT_PROJECT_ID, after_rev=base - 1, max_rev=head
+        )
+    assert marks[0] == (base, False, False)
+    out = _served(client, base - 1, head)
+    assert out.source == "reconstruction"
+    assert _canon(out) == _expected_reconstruction(base - 1, head)
 
 
 def test_route_reconstructs_when_a_row_lacks_states(client: TestClient) -> None:

@@ -28,6 +28,7 @@ from .conftest import (
     EMPTY_MODEL,
     install,
     commit_ops,
+    append_baseline_row,
 )
 
 # --- the completeness rule --------------------------------------------------
@@ -379,6 +380,16 @@ def test_a_tail_from_the_middle_starts_there(client: TestClient) -> None:
     body = _assert_complete(client, _head() - 1)
     (delta,) = body["deltas"]
     assert delta["prev_rev"] == _head() - 1
+
+
+def test_a_tail_is_incomplete_across_a_baseline(client: TestClient) -> None:
+    _ops(client, [_node("tmp_a", "A")])
+    r1 = _head()
+    append_baseline_row()
+    _assert_incomplete(client, r1)
+    _ops(client, [_node("tmp_b", "B")])
+    _assert_incomplete(client, r1)
+    _assert_complete(client, _head() - 1)
 
 
 def test_a_tail_is_incomplete_across_a_commit_over_the_entity_states_cap(

@@ -30,7 +30,8 @@ os.environ.setdefault("DATA_ROVER_IDENTITY_PROVIDER", "header")
 os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL", "")
 os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD", "")
 
-from data_rover.api import db  # noqa: E402
+from data_rover.api import content, db  # noqa: E402
+from data_rover.api.hydration import write_snapshot  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
 from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E402
 from data_rover.api.identity import set_identity_provider  # noqa: E402
@@ -227,6 +228,30 @@ def commit_ops(
     assert r.status_code == 200, r.text
     body: dict = r.json()
     return body
+
+
+def append_baseline_row(project_id: str = "default") -> int:
+    """Write a mid-history opaque baseline: the whole model replaced, history
+    cleared, one empty-ops commit row at the next rev. Returns that rev."""
+    session = get_registry().get(project_id)
+    assert session.model is not None
+    session.set_model(session.model, announce=False)
+    rev = session.model_rev
+    with db.db_session() as s:
+        content.clear_history(s, project_id)
+        content.append_commit(
+            s,
+            project_id,
+            rev=rev,
+            commit_id="baseline",
+            author_id=None,
+            ops=[],
+            inverse_ops=[],
+            id_map={},
+        )
+        content.set_model_rev(s, project_id, rev)
+    write_snapshot(project_id, session, rev)
+    return rev
 
 
 def model_rev(c: TestClient) -> int:
