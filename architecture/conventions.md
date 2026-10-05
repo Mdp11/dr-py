@@ -18,7 +18,7 @@ current code; this file holds the rules.
 | `frontend/` | SvelteKit UI | yes |
 | `engine/` | TypeScript engine package — created by sub-project A | yes |
 | `sandbox/` | Sandbox page and engine worker: a static Vite site, the only place with DOM and WebWorker typings — created by sub-project B | yes |
-| `headless/` | Node headless service — created by sub-project E | yes |
+| `cli/` | Node export CLI — created by sub-project E (AD-35) | yes |
 | `tests/<area>/` | Python tests, mirroring the source packages | yes |
 | `examples/` | Small reference artifacts (`smart-city.*`) | yes |
 | `spikes/` | Throwaway experiments (MR-5) | yes, minus vendored binaries |
@@ -29,7 +29,7 @@ current code; this file holds the rules.
 
 **RC-2 · Everything runs through pixi.** There is no global `python` or `node`. New tooling is
 added as a pixi environment or task, never as a global install. The `frontend` environment
-(Node 22) serves `frontend/`, `engine/`, `sandbox/` and `headless/`.
+(Node 22) serves `frontend/`, `engine/`, `sandbox/` and `cli/`.
 
 **RC-3 · Python.** Version 3.14; `ruff`, `mypy` and `pyright` MUST all pass (`pixi run
 dr-tidy`). Use modern stdlib freely.

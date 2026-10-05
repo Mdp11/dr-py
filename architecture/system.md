@@ -18,7 +18,7 @@ The target system. Rationale lives in [decisions.md](decisions.md); wire formats
  THIN SERVER (FastAPI): auth, tenancy, locks, commit check, journal, feed, artifacts, views, metamodel
    ├─ Postgres: head rows + journal + tenancy
    ├─ GCS: gzip snapshots, handed out as signed URLs
-   └─ HEADLESS HOST (Node + the same engine + Pyodide), scales to zero; serves CI exports
+   └─ (no headless host: an export without a browser runs in a CLI on the caller, AD-35)
 ```
 
 ## Rules
@@ -50,7 +50,7 @@ The target system. Rationale lives in [decisions.md](decisions.md); wire formats
 | Engine worker | Replica, working copy, indexes, navigation, search, tables, exports, validation, rules, compare, script cell cache | Opens a connection; sees a credential |
 | Script workers | Running user Python against the facade | Hold model state; outlive their wall timeout |
 | Thin server | Identity, authorization, leases, commit check, journal, feed, snapshots, artifact/view/metamodel rows, payload schema checks | Loads a model; evaluates; trusts client-supplied inverses or `entity_states` |
-| Headless host | One export per request, byte-identical to the browser's | Calls out; holds a credential; reuses a process across runs |
+| Export CLI (caller's machine, AD-35) | One export per run, byte-identical to the browser's | Runs a script in its own process; runs against a server whose contracts it does not match |
 
 ## Flows
 
@@ -82,9 +82,9 @@ later deltas and staged ops evict by read-set.
 
 **Browser export.** Engine renders bytes → transfers them to the UI → UI triggers the download.
 
-**Headless export.** CI calls the server → server authorizes, gathers snapshot bytes, tail,
-metamodel and the export's artifact closure → sends them to the headless host → returns its
-bytes to the caller.
+**Export without a browser** (AD-35, built with E). The CLI authenticates with an API token →
+fetches the snapshot, tail, metamodel and artifact payloads as the shell does → runs the export
+on the engine, its scripts in a permission-limited child process → writes the bytes locally.
 
 ## Thin server (end state)
 
@@ -104,10 +104,11 @@ bytes to the caller.
   payload schemas (artifact kind adapters, rules parse) and the pure-AST snippet lint with its
   entry-point derivation. The snippet `lint` and `format` routes read no model and stay.
 
-## Headless host (end state)
+## Export CLI (end state)
 
-Node service, same engine package, same Pyodide version, concurrency 1, scale-to-zero,
-callable only by the thin server. Inputs arrive in the request; isolation per CN-20.
+A Node CLI on the caller, same engine package, same Pyodide version; it checks its version
+against the server's contracts before a run. Isolation per CN-20. There is no server-side
+headless host (AD-35).
 
 ## Current → target
 

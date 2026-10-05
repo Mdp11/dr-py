@@ -25,10 +25,10 @@ Pyodide*: no headroom (CN-22).
 320k elements, hot kernels MAY move to wasm behind CT-4 without changing any contract.
 
 ## AD-3 · One engine, two hosts
-**Decision.** The same engine package runs in a browser worker and in Node; the headless host
-is Node + Pyodide, the same Pyodide version as the browser.
-**Why.** CI exports (`GET /exports/run-by-name`) are essential and MUST equal the browser's
-bytes. Products that split client and server engines diverge.
+**Decision.** The same engine package runs in a browser worker and in Node; an export without a
+browser runs on Node + Pyodide, the same Pyodide version as the browser (AD-35).
+**Why.** An export without a browser MUST equal the browser's bytes. Products that split client
+and server engines diverge.
 **Rejected.** A native or Python server-side engine; the wasmtime CPython-WASI sandbox for
 headless scripts (a second script bridge).
 
@@ -106,9 +106,7 @@ costs ≈ 0.9 GB per project *(measured)* and is the dominant bulk-load cost.
 lookups; leases make replay conflicts rare.
 **Rejected.** A copy-on-write overlay consulted on every read.
 
-## AD-15 · In the headless host the container is the security boundary (CN-20)
-**Why.** Headless runs untrusted Python with no browser origin around it, and Pyodide is not
-a boundary (CN-18).
+## AD-15 · In the headless host the container is the security boundary — superseded by AD-35
 
 ## AD-16 · One dedicated engine worker per tab
 **Deferred.** A `SharedWorker` replica across tabs, only if multi-tab memory proves a problem.
@@ -351,7 +349,8 @@ read-set). There is no option: a service with a script host always evaluates scr
 without answers `ReadError(503, 'no script host')` only when a pass needs a fill. A client that
 runs scripts itself sends `X-Data-Rover-Scripts: engine-only`, and the server answers 409 `scripts
 need the engine` where a request reaches a script instead of running it on committed state;
-without the header, and for a run by name, the server still runs scripts (CI exports, until E).
+without the header, and for a run by name, the server still runs scripts (exports without a
+browser, until E or F, AD-35).
 This ends AD-31's 501 fallback for scripts: a call that reaches one is the engine's, over the
 working copy, and with no engine the app shows the state, not script results.
 **Why.** The oracle's evaluators are synchronous and the script host is not: a pass that records
@@ -378,3 +377,29 @@ round, and answers once a round fits between two transitions: accepted, since th
 re-pages after an edit anyway and exports and long fills wait for edits to pause (`K-114` (10)).
 The fill memo and the code-id map are unbounded within their lifetimes (`K-114`). The script-cell budget is measured through an engine export
 (`K-100`).
+
+## AD-35 · Exports without a browser run in a CLI on the caller; deferred until there is a caller
+**Decision.** An export with no browser (CI, a scheduled job) runs in a Node CLI on the caller's
+own machine: it authenticates with an API token, fetches the snapshot, tail, metamodel and
+artifact payloads through the replica routes the shell already uses, and runs the export on the
+same engine and Pyodide as the browser, its scripts in a child process under Node's permission
+model. Sub-project E builds it, and only once a real caller exists; today there is no CI and no
+headless use, and `GET /exports/run-by-name` has no known caller.
+**Why.** It needs no second deployed service and runs no untrusted Python in our infrastructure:
+the server only serves the bytes a browser already downloads, and the caller pays the CPU. API
+tokens, its one new server feature, are wanted for other automation anyway. Bytes equal the
+browser's for the same reason as AD-3.
+**Rejected.** *A headless Node service behind the server* (the former E: the server gathers the
+inputs and proxies `run-by-name` and `/exports/run` to it, one fresh child process per run
+inside a container with no network and no credentials): a second service to deploy, isolate
+and pay for, and a server-side proxy, for a caller that does not exist yet. *Spawning Node from
+the API process*: user code beside the database credentials.
+**Consequences.** The CLI must check its version against the server's wire contracts (CT-1,
+CT-2) and refuse clearly when stale, since a CLI pinned in a CI job can fall behind the server;
+its releases are versioned. Its script isolation protects the caller, not us: a script written by
+any project member runs next to the caller's secrets, so the child process gets no file writes,
+no child processes, read access to the engine and Pyodide only, and an empty environment.
+Node 22's permission model does not block the network, and Emscripten's `NODEFS` calls
+`process.binding("constants")`, which that model refuses, so Pyodide does not boot under it
+unshimmed *(measured, Node 22.22.3)*. Until E or F, `run-by-name` and a server-side
+export without the `engine-only` header keep running on the server's Python path (MR-3).

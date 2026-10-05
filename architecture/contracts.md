@@ -98,8 +98,8 @@ cancel    {cancel: id}
 event     {event, …}                     engine → client, unsolicited
 ```
 
-- Transport-agnostic: a `MessagePort` in the browser; an in-process call in the headless host
-  and in tests.
+- Transport-agnostic: a `MessagePort` in the browser; an in-process call in Node (tests, the
+  export CLI).
 - Port hand-over. Four handshake messages over `window.postMessage`: the sandbox page posts
   `{type: 'sandbox-ready', crossOriginIsolated}` once its worker exists, and
   `{type: 'csp-violation', directive, blocked}` / `{type: 'worker-error', message}` as they
@@ -396,8 +396,8 @@ event     {event, …}                     engine → client, unsolicited
   batch continues. 1.5 s later, if the call has not ended, the pool ends the worker (the hard
   stop). The rest of the batch answers `timeout` only after a hard stop, a spent batch budget or
   a stopped module-level window. The replica survives either stop. On the Node host a worker
-  shares the process, so that host runs trusted code only until E gives the headless service a
-  process boundary (`K-106`).
+  shares the process, so that host runs trusted code only until E gives the export CLI a
+  process boundary (`K-106`, AD-35).
 - Warm: `scriptWarm` (no params; a bench and test aid, which the app does not call) prewarms the
   host and answers `{spares}` once the pool holds `cap` ready spares. It is refused as
   `scriptCalls` is: 409 `replica is not ready` without a ready replica, 501 without a script

@@ -1,7 +1,7 @@
 # Backlog — client-engine program
 
 Everything known but not done in the client-engine program: the move of computation into the
-browser against a full model replica, with a thin server and a headless export host. The
+browser against a full model replica, with a thin server and a CLI for exports without a browser. The
 target, its decisions and its build order live in `architecture/` (`program.md` for status);
 this file holds only what is open. Everything else — the app as it runs today — stays in
 `BACKLOG.md`.
@@ -47,7 +47,7 @@ to the engine: a bug or a feature there lands on both sides with a fixture until
 
 ### R-3 · Client-engine program · `in progress`
 Computation moves into the browser against a full model replica, with a thin server and a
-headless export host. Source of truth: `architecture/` — decisions `AD-n`, contracts `CT-n`,
+CLI for exports without a browser. Source of truth: `architecture/` — decisions `AD-n`, contracts `CT-n`,
 constraints `CN-n`, build order and status in `architecture/program.md`. Six sub-projects
 A → F. A (engine foundation) has landed: package, value layer and golden-fixture pipeline;
 Python snapshot v2 and state digest; metamodel, record-graph store, indexes and mutation
@@ -1008,10 +1008,12 @@ later workers load (`engine/src/script/harness.generated.ts` through the facade 
 text, Pyodide's `python_stdlib.zip`), read the host's environment or call `js.process.kill`
 on the host. `test/script/pool.test.ts` forges through the real `parentPort` the same way,
 and shows the pool keeps that to the batch's own answer, but nothing stops file or process
-access. Until sub-project E gives the headless service a process boundary the Node host runs
-trusted code only (tests, benches). Fix direction: run the Node host's workers in a child
-process under Node's `--permission` model (no file writes, no child processes, no network),
-which is also what CT-6 and CN-20 already say the headless transport ends with.
+access. The Node host runs trusted code only (tests, benches) until sub-project E, now deferred
+(AD-35), builds the export CLI. Fix direction (CN-20): run the CLI's engine and workers in a
+child process under Node's `--permission` model (no file writes, no child processes, an empty
+environment). Node 22's model does not block the network, and Pyodide does not boot under it
+as is: Emscripten's `NODEFS` calls `process.binding("constants")`, which it refuses, so the
+child needs a shim for that call.
 
 ### K-107 · The script harness and its trusted copy carry small gaps · `open` · *2026-10-01*
 (1) Done (the engine refuses `transform` with the console, 422). (2) A stop that

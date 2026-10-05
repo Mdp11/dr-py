@@ -127,11 +127,10 @@ committed-use discount, single-zone database, ±15 %; one hot project per 5 conc
 | 100 | $95 | $125 | $180 | Cloud Run 2 GiB; database → 2 vCPU / 7.5 GB ($99) for L |
 | 500 | $260 | $300 | $440 | 2 Cloud Run instances ($116) + Redis ($36) + database $99 / $197; HA database +$100…$230 |
 
-Snapshot storage < $1; egress $1–32; headless runs $0–5, mostly inside the free tier.
+Snapshot storage < $1; egress $1–32; headless runs $0 to us, since they run on the caller (AD-35).
 
 **CN-8 · Cost drivers.** Thin-server cost is nearly flat in model size (size touches database
-disk, egress and snapshot CPU only). Engine language moves no line but headless run time
-(≤ $5/month). The server-heavy design needs ≈ 1.4 GB RAM per hot M project *(measured:
+disk, egress and snapshot CPU only). Engine language moves no line. The server-heavy design needs ≈ 1.4 GB RAM per hot M project *(measured:
 0.5 GB model and indexes + 0.9 GB trigram index)*: $135–310 at 20 users and M, $1,200–1,700 at
 500 *(estimate)*, and past ≈ 50 users it needs per-project sharding that does not exist.
 
@@ -173,17 +172,18 @@ registrable domain (SameSite cookies are scoped by site, not origin), static fil
 `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self';
 frame-ancestors <app origin>`. Only the app's own origin may embed it. No `'unsafe-eval'`.
 
-**CN-18.** Pyodide is not a security boundary. In the browser the origin is; in the headless
-host the container is.
+**CN-18.** Pyodide is not a security boundary. In the browser the origin is; in the export CLI
+the child process and Node's permission model are, protecting the caller (AD-35).
 
 **CN-19.** The server MUST derive inverse ops and `entity_states` itself and MUST NOT accept
 them from a client. Client-reported validation results are advisory records, never inputs to a
 server decision.
 
-**CN-20 · Headless isolation.** No outbound network; no database or bucket credentials; a
-service account with no roles; callable only by the `api` service; inputs arrive in the
-request; concurrency 1; a fresh child process per run; the parent process never executes user
-code.
+**CN-20 · Export CLI isolation.** Scripts run in a child process under Node's permission
+model: no file writes, no child processes, read access to the engine and Pyodide only, an empty
+environment; the parent process never executes user code and holds the API token. Node 22's
+permission model does not block the network, so a caller that needs that runs the CLI where the
+network is closed (AD-35).
 
 **CN-21.** A script can only propose ops (CT-6). Guest-proposed artifact, view and metamodel
 ops are refused, as today.
