@@ -27,13 +27,16 @@ os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL", "")
 os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD", "")
 
 from data_rover.api import content, db  # noqa: E402
-from data_rover.api.head import read_head  # noqa: E402
+from data_rover.api.head import read_head, write_baseline  # noqa: E402
 from data_rover.api.snapshot_rows import write_snapshot_from_rows  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
 from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E402
 from data_rover.api.identity import set_identity_provider  # noqa: E402
 from data_rover.api.importer import install_model  # noqa: E402
 from data_rover.api.lock_mirror import MemoryLeaseMirror, set_lease_mirror  # noqa: E402
+from data_rover.api.routes._snapshot import build_model_from_dicts  # noqa: E402
+from data_rover.api.serialize import parse_model_json  # noqa: E402
+from data_rover.core.metamodel.loader import load_metamodel_str  # noqa: E402
 from data_rover.api.session import (  # noqa: E402
     DEFAULT_PROJECT_ID,
     get_registry,
@@ -144,7 +147,9 @@ def install(
 ) -> None:
     """Replace the project's metamodel and model at a fresh rev-0 baseline.
 
-    Creates the default project (owned by the test user) when it is missing."""
+    Creates the default project (owned by the test user) when it is missing.
+    The session mirror is warm afterwards (``install_model`` leaves a cold
+    project cold); the mirror goes with hydration."""
     if project_id == DEFAULT_PROJECT_ID:
         seed_default_project()
     gen = db.get_db()
@@ -153,6 +158,26 @@ def install(
         install_model(s, project_id, metamodel_yaml=metamodel, model_json=model)
     finally:
         gen.close()
+    get_registry().get(project_id)
+
+
+def install_unchecked(
+    project_id: str = "default",
+    *,
+    metamodel: str,
+    model: str | bytes,
+) -> None:
+    """``install`` for a model the import refuses, which a head can still come
+    to hold: a reference to no element, a property its type does not declare. The
+    rows are written from the model the way a baseline writes them."""
+    install(project_id, metamodel=metamodel, model=EMPTY_MODEL)
+    mm = load_metamodel_str(metamodel)
+    built = build_model_from_dicts(mm, parse_model_json(model))
+    with db.db_session() as s:
+        write_baseline(s, project_id, mm, built)
+    write_snapshot_from_rows(project_id)
+    get_registry().discard(project_id)
+    get_registry().get(project_id)
 
 
 @dataclass(frozen=True)
@@ -206,7 +231,9 @@ def post_commit(
         token = lock.json()["token"]
         payload["lock_tokens"] = [token]
         r = client.post(f"{base}/commits", json=payload, headers=AUTH_HEADERS)
-        client.post(f"{base}/locks/release", json={"token": token}, headers=AUTH_HEADERS)
+        client.post(
+            f"{base}/locks/release", json={"token": token}, headers=AUTH_HEADERS
+        )
     return r
 
 
@@ -305,7 +332,14 @@ def commit_create(c: TestClient, label: str | None = None) -> str:
     props = {} if label is None else {"label": label}
     body = commit_ops(
         c,
-        [{"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node", "properties": props}],
+        [
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_n",
+                "type_name": "Node",
+                "properties": props,
+            }
+        ],
     )
     nid: str = body["id_map"]["tmp_n"]
     return nid

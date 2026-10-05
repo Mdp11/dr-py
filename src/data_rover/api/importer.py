@@ -9,24 +9,44 @@ project's durable rev-0 baseline. Reused by the dev-seed and runnable as a CLI:
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import BinaryIO
 
+from fastapi import HTTPException
+from sqlalchemy import insert, literal, select
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.loader import load_metamodel_str
+from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import Folder, View
 
-from . import content, head, tenancy
-from .artifact_bundle import ArtifactBundle, BundleArtifact, SkippedEntry
+from . import content, tenancy
+from .artifact_bundle import (
+    ArtifactBundle,
+    BundleArtifact,
+    ClosureResult,
+    SkippedEntry,
+    build_bundle,
+)
 from .artifact_kinds import get_spec, rewrite_refs
 from .db import db_session, init_engine
-from .db_models import ArtifactKind, Membership, Project, Role
-from .routes._snapshot import build_model_from_dicts
-from .serialize import parse_model_json
+from .db_models import (
+    ArtifactKind,
+    ElementRow,
+    EntityRefRow,
+    Membership,
+    ModelRow,
+    Project,
+    RelationshipRow,
+    Role,
+)
+from .hydration import hydrate_session
+from .import_stream import ingest_model
 from .session import get_registry
 from .snapshot_rows import write_snapshot_from_rows
 from .settings import get_settings
@@ -127,13 +147,128 @@ def _landable_artifacts(
     return landable, skipped
 
 
+def _model_source(model_json: str | bytes | BinaryIO) -> BinaryIO:
+    if isinstance(model_json, str):
+        return io.BytesIO(model_json.encode("utf-8"))
+    if isinstance(model_json, bytes):
+        return io.BytesIO(model_json)
+    return model_json
+
+
+def _load_metamodel(metamodel_yaml: str) -> Metamodel:
+    try:
+        return load_metamodel_str(metamodel_yaml)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"invalid upload: {exc}") from exc
+
+
+def _parse_bundle(artifact_bundle: str) -> ArtifactBundle:
+    # ENVELOPE-only, and deliberately so: a malformed envelope is the whole
+    # upload being wrong, while a per-artifact problem must not cost the user
+    # the rest of the bundle (see ``_landable_artifacts``).
+    try:
+        return ArtifactBundle.model_validate_json(artifact_bundle)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail=f"invalid artifact bundle: {exc}"
+        ) from exc
+
+
+def _parse_views(view_docs: Sequence[str]) -> list[View]:
+    views: list[View] = []
+    for doc in view_docs:
+        try:
+            view = View.model_validate_json(doc)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"invalid view: {exc}") from exc
+        ensure_folder_ids(view)
+        views.append(view)
+    return views
+
+
+def _start_project(
+    s: DbSession,
+    project_id: str,
+    *,
+    name: str,
+    owner_id: str,
+    metamodel_yaml: str,
+) -> ModelRow:
+    """The project, its owner, its metamodel and its model row at rev 0 with the
+    ``import`` commit; the head rows come after."""
+    tenancy.upsert_user(s, owner_id, "")
+    s.add(Project(id=project_id, name=name))
+    s.add(Membership(user_id=owner_id, project_id=project_id, role=Role.owner))
+    mm_row = content.create_metamodel(s, name=name, version=1, blob=metamodel_yaml)
+    model_row = content.upsert_model_row(s, project_id, metamodel_id=mm_row.id)
+    content.append_commit(
+        s,
+        project_id,
+        rev=0,
+        commit_id="import",
+        author_id=owner_id,
+        ops=[],
+        inverse_ops=[],
+        id_map={},
+    )
+    content.set_model_rev(s, project_id, 0)
+    return model_row
+
+
+def _land_artifacts_and_views(
+    s: DbSession,
+    project_id: str,
+    *,
+    bundle: ArtifactBundle | None,
+    trust_artifacts: bool,
+    views: Sequence[View],
+) -> list[SkippedEntry]:
+    """Every landed artifact gets a FRESH id; the map below feeds both the
+    payload ref rewrite and the view-blob rewrite. It is built for the landable
+    set FIRST so a ref to a sibling resolves regardless of order, and a ref to a
+    SKIPPED artifact stays unmapped, i.e. keeps its literal bundle id
+    (tolerant-dangler stance). A view is named from its document (``"Default"``
+    when blank); a clash inside one import is suffixed rather than refused,
+    since a baseline import has no user to answer."""
+    artifact_id_map: dict[str, str] = {}
+    skipped: list[SkippedEntry] = []
+    if bundle is not None:
+        landable, skipped = _landable_artifacts(bundle, trusted=trust_artifacts)
+        for art, _kind, _payload in landable:
+            artifact_id_map[art.id] = uuid.uuid4().hex
+        for art, kind, payload in landable:
+            content.create_artifact(
+                s,
+                project_id,
+                kind=kind,
+                name=art.name,
+                payload=rewrite_refs(payload, artifact_id_map),
+                updated_by=None,
+                artifact_id=artifact_id_map[art.id],
+            )
+    for view in views:
+        if artifact_id_map:
+            _remap_view_artifact_refs(view, artifact_id_map)
+        base = view.name.strip() or "Default"
+        for n in range(1, 1000):
+            view.name = base if n == 1 else f"{base} ({n})"
+            try:
+                content.create_view(
+                    s, project_id, name=view.name, blob=view.model_dump_json()
+                )
+                break
+            except content.DuplicateViewNameError:
+                continue
+    return skipped
+
+
 def import_project(
     *,
     project_id: str,
     name: str,
     owner_id: str,
     metamodel_yaml: str,
-    model_json: str,
+    model_json: str | bytes | BinaryIO,
     view_json: str | None = None,
     view_jsons: Sequence[str] = (),
     artifact_bundle: str | None = None,
@@ -141,114 +276,180 @@ def import_project(
 ) -> list[SkippedEntry]:
     """Create the project baseline. Idempotent: no-op if the project exists.
 
+    ``model_json`` is the model document as text, bytes or a binary file, which
+    is streamed (``import_stream.ingest_model``): no ``Model`` is built. The
+    project, its rows, its artifacts and its views land in ONE transaction that
+    commits only when every check passes; a refusal is a 422
+    (``HTTPException``) and leaves no project, no rows and no snapshot. The
+    rev-0 snapshot is written after the commit.
+
     Returns the bundle artifacts that were reported-and-skipped (empty on the
     trusted path in practice). ``trust_artifacts`` defaults to the SAFE side:
-    a caller that forgets it gets validation, and only ``clone_project`` — the
-    one caller whose bundle never left this database — opts out. See
-    :func:`_landable_artifacts`.
+    a caller that forgets it gets validation. See :func:`_landable_artifacts`.
     """
     with db_session() as s:
         if s.get(Project, project_id) is not None:
             return []  # already imported
-        # built first and inside the transaction: a model that does not build
-        # leaves no project behind, and its head rows land with the baseline
-        metamodel = load_metamodel_str(metamodel_yaml)
-        model = build_model_from_dicts(metamodel, parse_model_json(model_json))
-        tenancy.upsert_user(s, owner_id, "")
-        s.add(Project(id=project_id, name=name))
-        s.add(Membership(user_id=owner_id, project_id=project_id, role=Role.owner))
-        mm_row = content.create_metamodel(s, name=name, version=1, blob=metamodel_yaml)
-        content.upsert_model_row(s, project_id, metamodel_id=mm_row.id)
-        content.append_commit(
+        # the cheap documents first, so a bad one costs no parse of the model
+        metamodel = _load_metamodel(metamodel_yaml)
+        bundle = _parse_bundle(artifact_bundle) if artifact_bundle is not None else None
+        views = _parse_views(
+            ([view_json] if view_json is not None else []) + list(view_jsons)
+        )
+        _start_project(
+            s, project_id, name=name, owner_id=owner_id, metamodel_yaml=metamodel_yaml
+        )
+        ingest_model(s, project_id, metamodel, _model_source(model_json))
+        skipped = _land_artifacts_and_views(
             s,
             project_id,
-            rev=0,
-            commit_id="import",
-            author_id=owner_id,
-            ops=[],
-            inverse_ops=[],
-            id_map={},
+            bundle=bundle,
+            trust_artifacts=trust_artifacts,
+            views=views,
         )
-        content.set_model_rev(s, project_id, 0)
-        head.write_baseline(s, project_id, metamodel, model)
-
-        # Every landed artifact gets a FRESH id; the map below feeds both the
-        # payload ref rewrite here and the view-blob rewrite further down. It
-        # is built for the landable set FIRST so a ref to a sibling resolves
-        # regardless of order — and a ref to a SKIPPED artifact stays unmapped,
-        # i.e. keeps its literal bundle id (tolerant-dangler stance).
-        artifact_id_map: dict[str, str] = {}
-        skipped: list[SkippedEntry] = []
-        if artifact_bundle is not None:
-            bundle = ArtifactBundle.model_validate_json(artifact_bundle)
-            landable, skipped = _landable_artifacts(bundle, trusted=trust_artifacts)
-            for art, _kind, _payload in landable:
-                artifact_id_map[art.id] = uuid.uuid4().hex
-            for art, kind, payload in landable:
-                content.create_artifact(
-                    s,
-                    project_id,
-                    kind=kind,
-                    name=art.name,
-                    payload=rewrite_refs(payload, artifact_id_map),
-                    updated_by=None,
-                    artifact_id=artifact_id_map[art.id],
-                )
-
-        # ``view_json`` is the one-file convenience (CLI / wizard); ``view_jsons``
-        # carries a clone's whole set. Each view is named from its document
-        # (``"Default"`` when blank); a clash inside one import is suffixed
-        # rather than refused, since a baseline import has no user to answer.
-        for doc in ([view_json] if view_json is not None else []) + list(view_jsons):
-            view = View.model_validate_json(doc)
-            ensure_folder_ids(view)
-            if artifact_id_map:
-                _remap_view_artifact_refs(view, artifact_id_map)
-            base = view.name.strip() or "Default"
-            for n in range(1, 1000):
-                view.name = base if n == 1 else f"{base} ({n})"
-                try:
-                    content.create_view(
-                        s, project_id, name=view.name, blob=view.model_dump_json()
-                    )
-                    break
-                except content.DuplicateViewNameError:
-                    continue
-
-    # the rev-0 snapshot (outside the txn above; the commit/model/head rows are
-    # already durable and the snapshot row is its own)
+    # the rev-0 snapshot, after the commit above. Synchronous: hydrating a
+    # session reads it, and a session built without one is an empty model.
     write_snapshot_from_rows(project_id)
     return skipped
 
 
-def install_model(
-    db: DbSession, project_id: str, *, metamodel_yaml: str, model_json: str | bytes
+def _copy_rows(
+    s: DbSession,
+    table: type[ElementRow] | type[RelationshipRow] | type[EntityRefRow],
+    source_id: str,
+    project_id: str,
 ) -> None:
-    """Replace the project's metamodel and model with these documents at a fresh baseline (rev 0, no history)."""
-    metamodel = load_metamodel_str(metamodel_yaml)
-    model = build_model_from_dicts(metamodel, parse_model_json(model_json))
-    session = get_registry().get(project_id)
-    session.set_metamodel(metamodel, announce=False)
-    # set_model bumps the rev, so start one below the baseline
-    session.model_rev = -1
-    session.set_model(model, announce=False)
-    mm_row = content.create_metamodel(db, name="", version=1, blob=metamodel_yaml)
-    content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
-    content.clear_history(db, project_id)
-    content.append_commit(
-        db,
-        project_id,
-        rev=0,
-        commit_id="import",
-        author_id=None,
-        ops=[],
-        inverse_ops=[],
-        id_map={},
+    """``INSERT ... SELECT`` every row of ``source_id`` into ``project_id``."""
+    columns = [c.key for c in table.__table__.columns if c.key != "project_id"]
+    s.execute(
+        insert(table).from_select(
+            ["project_id", *columns],
+            select(literal(project_id), *(getattr(table, c) for c in columns)).where(
+                table.project_id == source_id
+            ),
+        )
     )
-    content.set_model_rev(db, project_id, 0)
-    head.write_baseline(db, project_id, metamodel, model)
-    db.commit()
+
+
+def clone_project(*, source_id: str, project_id: str, name: str, owner_id: str) -> None:
+    """Copy a project's CURRENT state into a new project owned by ``owner_id`` at
+    a fresh rev-0 baseline; commit history is not carried over.
+
+    The head rows are copied in SQL (no row passes through Python), under the
+    source's model-row lock so no commit lands between the statements: the new
+    project's rows, digest, counts and ``next_seq`` are the source's. Artifacts
+    and views are copied through the importer's landing, which gives each
+    artifact a fresh id and remaps the refs to it. One transaction, then the
+    rev-0 snapshot."""
+    with db_session() as s:
+        tenancy.upsert_user(s, owner_id, "")
+        src = s.get(Project, source_id)
+        if src is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        source = content.lock_model_row(s, source_id)
+        if source is None:
+            raise HTTPException(
+                status_code=409, detail="project has no content to clone"
+            )
+        if source.next_seq is None or source.state_digest is None:
+            raise HTTPException(
+                status_code=409, detail="project has no head rows: re-import it"
+            )
+        mm_row = content.get_metamodel_row(s, source.metamodel_id)
+        if mm_row is None:
+            raise HTTPException(status_code=409, detail="project metamodel missing")
+        views = _parse_views([r.blob for r in content.list_views(s, source_id)])
+        # Every artifact row rides along, VERBATIM: a clone is a copy, not a
+        # validation gate, so this deliberately does NOT run `compute_closure`
+        # — a closure walk is pointless when every row is a root anyway, and it
+        # would drop rows the registry doesn't know (legacy `diagram`).
+        rows = content.list_artifacts(s, source_id)
+        bundle = (
+            _parse_bundle(
+                build_bundle(
+                    src,
+                    ClosureResult(rows=rows, dangling_refs=[]),
+                    roots=[r.id for r in rows],
+                ).model_dump_json()
+            )
+            if rows
+            else None
+        )
+        model_row = _start_project(
+            s, project_id, name=name, owner_id=owner_id, metamodel_yaml=mm_row.blob
+        )
+        s.flush()
+        for table in (ElementRow, RelationshipRow, EntityRefRow):
+            _copy_rows(s, table, source_id, project_id)
+        model_row.state_digest = source.state_digest
+        model_row.element_count = source.element_count
+        model_row.relationship_count = source.relationship_count
+        model_row.next_seq = source.next_seq
+        _land_artifacts_and_views(
+            s,
+            project_id,
+            bundle=bundle,
+            # the ONE trusted caller: this bundle was built from rows two
+            # statements ago, so validating it could only reject data a clone
+            # is obliged to carry (see _landable_artifacts)
+            trust_artifacts=True,
+            views=views,
+        )
     write_snapshot_from_rows(project_id)
+
+
+def install_model(
+    db: DbSession,
+    project_id: str,
+    *,
+    metamodel_yaml: str,
+    model_json: str | bytes | BinaryIO,
+) -> None:
+    """Replace the project's metamodel and model with these documents at a fresh
+    baseline (rev 0, no history).
+
+    One transaction: a refused model (422) leaves the project as it was. A warm
+    session's mirror follows the new rows and its feed clients get a reset."""
+    metamodel = load_metamodel_str(metamodel_yaml)
+    try:
+        mm_row = content.create_metamodel(db, name="", version=1, blob=metamodel_yaml)
+        content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
+        content.clear_history(db, project_id)
+        ingest_model(db, project_id, metamodel, _model_source(model_json))
+        content.append_commit(
+            db,
+            project_id,
+            rev=0,
+            commit_id="import",
+            author_id=None,
+            ops=[],
+            inverse_ops=[],
+            id_map={},
+        )
+        content.set_model_rev(db, project_id, 0)
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    write_snapshot_from_rows(project_id)
+    _refresh_mirror(project_id)
+
+
+def _refresh_mirror(project_id: str) -> None:
+    """Bring a warm session's model mirror to the rows just installed, in place,
+    so its feed clients and leases stay attached, and tell its feed clients. A
+    cold project has no mirror: it hydrates from the rev-0 snapshot when first
+    asked. This is the one place the install builds a ``Model``, only while a
+    legacy mirror is warm."""
+    session = get_registry().peek(project_id)
+    if session is None:
+        return
+    fresh = hydrate_session(project_id)
+    with session.write_mutex:
+        session.metamodel = fresh.metamodel
+        session.model = fresh.model
+        session.model_rev = fresh.model_rev
+        session.state_digest_value = None
     session.announce_reset()
 
 
@@ -267,17 +468,18 @@ def main(argv: list[str] | None = None) -> int:
     # A CLI bundle is a file someone hands the importer, so it goes through the
     # untrusted path (the default) like the wizard's upload. Skips are printed
     # rather than swallowed: this is the only surface a CLI user has.
-    skipped = import_project(
-        project_id=args.project_id,
-        name=args.name,
-        owner_id=args.owner_id,
-        metamodel_yaml=args.metamodel.read_text(encoding="utf-8"),
-        model_json=args.model.read_text(encoding="utf-8"),
-        view_json=args.view.read_text(encoding="utf-8") if args.view else None,
-        artifact_bundle=args.artifacts.read_text(encoding="utf-8")
-        if args.artifacts
-        else None,
-    )
+    with args.model.open("rb") as model_file:
+        skipped = import_project(
+            project_id=args.project_id,
+            name=args.name,
+            owner_id=args.owner_id,
+            metamodel_yaml=args.metamodel.read_text(encoding="utf-8"),
+            model_json=model_file,
+            view_json=args.view.read_text(encoding="utf-8") if args.view else None,
+            artifact_bundle=args.artifacts.read_text(encoding="utf-8")
+            if args.artifacts
+            else None,
+        )
     print(f"Imported project {args.project_id!r}")
     for entry in skipped:
         print(f"  skipped artifact {entry.bundle_id}: {entry.reason}")

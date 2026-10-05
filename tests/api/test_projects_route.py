@@ -113,6 +113,7 @@ def test_delete_hydrated_project_discards_session_without_snapshot(
     model = Path("examples/smart-city.model.json").read_text(encoding="utf-8")
     base = f"/api/v1/projects/{pid}"
     install(pid, metamodel=mm, model=model)
+    assert get_registry().get(pid).model is not None  # hydrates the session
     assert pid in get_registry().project_ids()
 
     _seed_user("boss", is_admin=True)

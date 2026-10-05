@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import tenancy
 from .csrf import CSRFMiddleware
+from .upload_cap import UploadCapMiddleware
 from .db import create_all, db_session, init_engine
 from .errors import register_exception_handlers
 from .feed import lock_event
@@ -221,6 +222,7 @@ def create_app() -> FastAPI:
         description="HTTP surface for the data-rover MBSE metamodel engine.",
         lifespan=lifespan,
     )
+    app.add_middleware(UploadCapMiddleware, path="/api/v1/projects")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

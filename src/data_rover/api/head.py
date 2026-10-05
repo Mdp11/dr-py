@@ -135,9 +135,7 @@ def _relationship_values(
     }
 
 
-def _insert_refs(
-    db: Session, project_id: str, pairs: Sequence[tuple[str, str]]
-) -> None:
+def insert_refs(db: Session, project_id: str, pairs: Sequence[tuple[str, str]]) -> None:
     for chunk in batched(pairs, CHUNK):
         db.execute(
             insert(EntityRefRow),
@@ -170,7 +168,7 @@ def write_baseline(
     if row is None:
         raise LookupError(f"project {project_id!r} has no model row")
     db.flush()
-    _clear(db, project_id)
+    clear_rows(db, project_id)
     rp = ref_props(metamodel)
     elements = list(model.elements.values())
     relationships = list(model.relationships.values())
@@ -180,7 +178,7 @@ def write_baseline(
             insert(ElementRow),
             [_element_values(project_id, e, first + i) for i, e in enumerate(chunk)],
         )
-        _insert_refs(db, project_id, _entity_refs(chunk, rp.element))
+        insert_refs(db, project_id, _entity_refs(chunk, rp.element))
     for page, rchunk in enumerate(batched(relationships, CHUNK)):
         first = page * CHUNK
         db.execute(
@@ -190,14 +188,14 @@ def write_baseline(
                 for i, r in enumerate(rchunk)
             ],
         )
-        _insert_refs(db, project_id, _entity_refs(rchunk, rp.relationship))
+        insert_refs(db, project_id, _entity_refs(rchunk, rp.relationship))
     row.element_count = len(elements)
     row.relationship_count = len(relationships)
     row.state_digest = format_digest(digest_value(model))
     row.next_seq = max(len(elements), len(relationships))
 
 
-def _clear(db: Session, project_id: str) -> None:
+def clear_rows(db: Session, project_id: str) -> None:
     for table in (EntityRefRow, RelationshipRow, ElementRow):
         db.execute(
             delete(table)
@@ -355,7 +353,7 @@ def _replace_refs(
             )
             .execution_options(synchronize_session=False)
         )
-    _insert_refs(
+    insert_refs(
         db,
         project_id,
         [
@@ -396,7 +394,7 @@ def rebuild_refs(db: Session, project_id: str, metamodel: Metamodel) -> None:
                     pairs.extend(
                         (entity_id, t) for t in refs_of(parse_model_json(text), names)
                     )
-            _insert_refs(db, project_id, pairs)
+            insert_refs(db, project_id, pairs)
             last = page[-1].seq
 
 

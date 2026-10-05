@@ -18,6 +18,7 @@ from .conftest import (
     commit_ops,
     head,
     install,
+    install_unchecked,
     papi,
     post_commit,
     seed_default_project,
@@ -52,7 +53,7 @@ def _contains(rid: str, source: str, target: str) -> dict:
 
 
 def _install(elements: list[dict], relationships: list[dict] | None = None) -> None:
-    install(
+    install_unchecked(
         metamodel=_MM,
         model=json.dumps(
             {"elements": elements, "relationships": relationships or []}

@@ -18,7 +18,7 @@ This is the central design and the thing most likely to surprise you. The model 
   - `GET /artifacts/payloads` (`routes/artifacts.py`, `ArtifactPayloadListOut`) hands the replica's artifact follower the project's artifacts with their payloads, in `content.list_artifacts` order: every one, or with repeated `id` parameters only the named ids the project has — an unknown or foreign id is left out, never an error. Member-gated, so viewer-allowed; declared before `/artifacts/{artifact_id}`, which would read `payloads` as an id. Each item is an `ArtifactPayloadOut`: the `ArtifactOut` keys, then `rules` — `parse_result` of the payload's `yaml` for a `validation_rules` row (a payload without one parses `""`, the empty set), `null` for any other kind.
   - `POST /rules/parse {yaml}` (`routes/rules.py`) answers `RulesParseOut {ok, document, errors}` for a staged rule set the engine compiles. `document` is `rules_document(defn)`: `json.dumps` of `model_dump(mode="python", by_alias=True, exclude_unset=True)`, compact — aliased keys (`in`, `not`), only the fields the author wrote, in field order. It is a STRING that the shell hands on untouched and the engine reads with its exact parser, since `JSON.parse` would lose a float's `.0` and integers past 2^53 (`model_dump(mode="json")` is no substitute: it writes `in_` / `not_` and every unset test as `null`, and `model_dump_json` writes `inf` as `null`). A parse failure is `ok: false`, `document: null` and the one `LintErrorOut` `/rules/lint` gives for the same text (both build it through `_lint_error`); an empty document is `"{}"`. 200 for a string `yaml` the grammar parses or refuses; 422 for a malformed envelope, a `yaml` over `RULES_MAX_YAML_BYTES`, or — as on lint — a YAML scalar PyYAML cannot construct (`2001-13-45`, `!!float abc`), whose `ValueError` escapes `parse_rule_set` unwrapped (`K-67`); the shell counts a 422 as a failed parse. It depends on `require_membership` alone, so it never hydrates the project, and is not in the read-only allowlist: a viewer gets a 403, as on lint.
 - **The server reads, validates, evaluates and exports nothing.** The browser engine keeps the full model replica and answers every read, search, validation, table, export and script call (`engine/README.md`); the server's model surface is the replica routes above, `POST /commits`, `/commits/preview`, `/commits/revert` and the commit-history reads. A commit keeps one server check, the structural gate (`api/structural.py`); conformance and rule verdicts are the engine's, reported with the commit.
-- **Upload cap** — `max_request_body_bytes` (`DATA_ROVER_MAX_REQUEST_BODY_BYTES`, default 512 MiB, 0 disables) is the ceiling on the body of an upload request; the project import enforces it.
+- **Upload cap** — `max_request_body_bytes` (`DATA_ROVER_MAX_REQUEST_BODY_BYTES`, default 512 MiB, 0 disables) is the ceiling on the body of an upload request. `upload_cap.UploadCapMiddleware` enforces it on `POST /api/v1/projects`, the one multipart upload (Starlette parses the form before the route runs, so the route cannot count): a `Content-Length` over it is a 413 before a byte is read, and the running total is enforced while the parser streams, since the header is client-supplied and absent on a chunked body.
 
 The frontend edits through the check-out/commit flow (staged-edit buffers committed via POST /commits — see frontend/README.md "State model"); the op shapes below are shared by both paths. **`frontend/README.md` documents the frontend architecture in depth — read it before touching `frontend/src/lib/state/`.**
 
@@ -62,7 +62,7 @@ over a durable journal**, hydrated on cache-miss; snapshots are written from the
   falls through to plain `json.loads`, so every row written before compression (indented JSON
   under a `.json` key) still loads: the `.json.gz` key suffix is naming only, readers NEVER
   branch on it, and there is no migration, `encoding` column or backfill. The indented
-  `iter_model_json` writes the indented document (project clone, `scripts/download_large.py`). `encode_snapshot_v2` writes the line-delimited `datarover.snapshot/v2` form from a model (CT-1: a header line carrying the entity counts, the `metamodel_id` and the `state_digest` of `api/state_digest.py`, then one `serialize.iter_entity_lines` line per entity); it is kept for the contract test and the scripts. Every server writer goes through ONE funnel, `snapshot_rows.write_snapshot_from_rows(project_id)`: it opens its own DB session (`REPEATABLE READ` on Postgres), reads `ModelRow` (rev, `metamodel_id`, digest, counts), streams `ElementRow` then `RelationshipRow`, each table in `seq` order with `yield_per(2000)`, through `snapshot_codec.encode_snapshot_v2_rows` into the store, and records the `Snapshot` row from the same values. A row's `properties` text is the line encoder's, so a line is concatenated, not re-encoded, and the blob is byte-identical to `encode_snapshot_v2`'s for the same model. It needs no session, model or `write_mutex`, and raises `LookupError` for a project without a model row. `GcsSnapshotStore.put` streams into `blob.open("wb", content_type="application/gzip", chunk_size=8 MiB)`, with no `content_encoding`. `scripts/snapshot_v2.py` writes one from a model file, inflated, for the engine's benchmark; the engine's `openSnapshot` reads it; and `decode_snapshot` recognizes it by its first bytes, returns the same `{"elements", "relationships"}` document and raises `ValueError` on a line count that disagrees with the header.
+  `iter_model_json` writes the indented document (`scripts/download_large.py`). `encode_snapshot_v2` writes the line-delimited `datarover.snapshot/v2` form from a model (CT-1: a header line carrying the entity counts, the `metamodel_id` and the `state_digest` of `api/state_digest.py`, then one `serialize.iter_entity_lines` line per entity); it is kept for the contract test and the scripts. Every server writer goes through ONE funnel, `snapshot_rows.write_snapshot_from_rows(project_id)`: it opens its own DB session (`REPEATABLE READ` on Postgres), reads `ModelRow` (rev, `metamodel_id`, digest, counts), streams `ElementRow` then `RelationshipRow`, each table in `seq` order with `yield_per(2000)`, through `snapshot_codec.encode_snapshot_v2_rows` into the store, and records the `Snapshot` row from the same values. A row's `properties` text is the line encoder's, so a line is concatenated, not re-encoded, and the blob is byte-identical to `encode_snapshot_v2`'s for the same model. It needs no session, model or `write_mutex`, and raises `LookupError` for a project without a model row. `GcsSnapshotStore.put` streams into `blob.open("wb", content_type="application/gzip", chunk_size=8 MiB)`, with no `content_encoding`. `scripts/snapshot_v2.py` writes one from a model file, inflated, for the engine's benchmark; the engine's `openSnapshot` reads it; and `decode_snapshot` recognizes it by its first bytes, returns the same `{"elements", "relationships"}` document and raises `ValueError` on a line count that disagrees with the header.
 - **`content.py`** — service functions over the content tables (the `tenancy.py`
   of model content). **`hydration.py`** — `hydrate_session` (nearest snapshot +
   replay commit tail through the restore-mode applier) and
@@ -84,8 +84,10 @@ over a durable journal**, hydrated on cache-miss; snapshots are written from the
   equally), writes nothing for a project without a model row, and logs-and-drops failures; one
   job per project at a time, in a process-wide slot. `DATA_ROVER_SNAPSHOT_SYNC=true` (the test
   conftest) runs it inline. The rebind-forced, rev-0 baseline (`install_model`,
-  `import_project`) and descriptor-miss snapshots stay synchronous — they are correctness,
-  not bounding. The rebind's is written from the rows whether or not the session mirror
+  `import_project`, `clone_project`) and descriptor-miss snapshots stay synchronous — they are
+  correctness, not bounding: `hydrate_session` reads the newest snapshot and builds an EMPTY
+  model from none, so a rev-0 snapshot written on a thread could be missed by a request that
+  hydrates the mirror first. The rebind's is written from the rows whether or not the session mirror
   followed the commit.
 - **Head tables** (`head.py`, Alembic `0018`). `elements`, `relationships` and `entity_refs`
   hold the project's current state as rows, written on every path that changes it. They are
@@ -117,8 +119,8 @@ over a durable journal**, hydrated on cache-miss; snapshots are written from the
     themselves: `write_batch` (`POST /commits` and `/commits/revert` through
     `routes/ops._write_head`, after the digest is folded and before `_stage_commit`; it does
     nothing without a `ModelRow` or while `next_seq` is NULL, which a commit prevents by
-    writing the rows from the session model first), `write_baseline` (`importer.install_model`, the model build and
-    write inside `import_project`'s transaction, `POST /metamodel` with an empty model), and
+    writing the rows from the session model first), `write_baseline` (`POST /metamodel` with an empty model; the importer no longer
+    builds a model, it streams its rows: see `import_stream.py`), and
     the backfill in `hydrate_session` for a project whose `next_seq` is NULL.
 - **`Commit.entity_states`** (nullable JSON) is the full before/after state of every model
   entity a batch touched, captured by every journal writer (`POST /commits`, `/commits/revert`) via `api/commit_states.capture_entity_states` — the applier
@@ -143,8 +145,46 @@ over a durable journal**, hydrated on cache-miss; snapshots are written from the
 - **`importer.py`** (`python -m data_rover.api.importer`) turns
   `(metamodel.yaml + model.json + view.json)` into a project's rev-0 baseline;
   the importer CLI / New Project wizard load `examples/smart-city.*` on demand (no autoload).
-  `install_model(db, project_id, metamodel_yaml=, model_json=)` replaces an existing project's metamodel and model
-  at a fresh rev-0 baseline (no history) and refreshes the live session; API tests seed through it.
+  No `Model` is built on any import path.
+  - `import_project` runs in ONE transaction: the project, owner, metamodel, `ModelRow`, rev-0
+    `import` commit, the head rows from `import_stream.ingest_model`, then artifacts and views. It
+    commits only if every check passes, so a refusal (422, `HTTPException`: a bad metamodel, bundle
+    envelope, view or model) leaves no project, no rows and no snapshot; the rev-0 snapshot is
+    written after the commit. `POST /projects` hands it the model's spooled upload file (never
+    `.read()` whole; the small parts are read as text) and does no pre-validation of its own.
+    `model_json` is text, bytes or a binary file.
+  - `import_stream.ingest_model(db, project_id, metamodel, source)` reads the document with ijson
+    (the pure-Python backend: the C one fails on an integer past 2**63, and the conda-forge
+    package is noarch anyway, about 5 MB/s) in one pass, `elements` and `relationships` in
+    whatever order the file holds them. Per entity: shape (string `id`/`type_name`/ends, object
+    `properties`, integer `rev`), no reserved `tmp_` id, a known type, a non-abstract element
+    type, only declared property keys; each is written as a row (each table numbered from 0 in
+    file order, exactly what `head.write_baseline` writes, and `next_seq` is the larger table's
+    size), with its `entity_refs`, and its `(id, rev)` folded into the digest. Refusals are
+    collected by check (the first five ids, then a count) and raised after the parse; once one is
+    recorded nothing more is written. Duplicate ids within a table are caught per insert chunk
+    (a primary-key probe), not with a set of every id. Then SQL checks over the rows, each naming
+    its check and the first ids: an id on both an element and a relationship (K-29), a
+    relationship end that is no element, a reference to no element
+    (`rebind_check.dangling_references`), an element with two containment parents or on a cycle
+    (`rebind_check.containment_violations`).
+  - Bare `NaN`/`Infinity`/`-Infinity` are not JSON; `parse_model_json` reads them as the strings
+    `"NaN"`/`"Infinity"`/`"-Infinity"` and `import_stream._NonFiniteFilter` rewrites them to
+    exactly those strings outside strings (a literal in key position is left for the parser to
+    refuse), whatever the read boundaries. `1.0` and integers past 2**53 are kept exact
+    (`use_float=True`); `1e999` is refused (`-1e999` becomes `-inf`, which no writer emits, and
+    is refused as `non-finite number`). ijson also accepts a leading `+` on a number that
+    `json.loads` refuses.
+  - `clone_project(source_id, project_id, name, owner_id)` copies in one transaction: `INSERT ...
+    SELECT` of `elements`, `relationships` and `entity_refs` under the source's model-row lock,
+    the source's digest, counts and `next_seq`, a rev-0 commit; artifacts (fresh ids, payload and
+    view refs remapped) and views go through the importer's landing, `trust_artifacts=True`; then
+    the rev-0 snapshot. A source without head rows is a 409.
+  - `install_model(db, project_id, metamodel_yaml=, model_json=)` replaces an existing project's
+    metamodel and model at a fresh rev-0 baseline (no history) in one transaction (a refused model
+    leaves the project as it was) and refreshes a WARM session's mirror in place (the one place
+    it builds a `Model`, until the mirror goes); API tests seed through it
+    (`tests/api/conftest.py::install`, `install_unchecked` for a head the import refuses).
 
 ## Check-out/commit + locking
 
@@ -174,7 +214,7 @@ Server-to-client WebSocket feed.
 
 - **`feed.py` — `FeedHub`** holds a per-`Session` set of `ClientConn`s (each with a bounded `asyncio.Queue`). `broadcast` is sync and thread-safe: it schedules enqueues on the event-loop thread via `loop.call_soon_threadsafe` so it is safe to call while holding the `write_mutex`. A client that falls behind has its queue drained, receives `CLOSE_SENTINEL`, and is dropped; its sender pump closes the socket with 4408 and the client reconnects. The event loop is captured lazily on the first WebSocket connect via `set_loop_if_unset`; `reset_loop` provides test isolation. The event builders (`snapshot_event`, `commit_event`, `reset_event`, `lock_event`, `presence_event`, …) return plain dicts serialized by `ws.send_json`.
 - **`routes/feed.py` — `@router.websocket("/feed")`** mounts under the `/{project_id}` prefix. Authentication uses the `IdentityProvider` seam (typed to `HTTPConnection`, the shared base of `Request`/`WebSocket`): the default `CookieIdentityProvider` reads the session cookie the browser sends on the same-origin WS upgrade (no query params); `DevHeaderIdentityProvider` falls back to `?x-user-id=`/`?x-user-email=` query params (dev/tests). Close codes: 4401 (no identity), 4403 (non-member), 4404 (unknown project), 4408 (dropped-behind). On connect: capture the event loop, auth+authz over a short-lived DB session, register `ClientConn`, broadcast a presence-join, send an initial snapshot (current `model_rev` + active leases + connected users), then run a sender pump (`_pump`) alongside a receive loop that only observes disconnect. On disconnect: unregister and broadcast a presence-leave.
-- **Broadcast hook sites** — commit delta + lock release after `POST /commits` (in `routes/commits.py`); lock acquire in `POST /locks` and release in `POST /locks/release` (in `routes/locks.py`); lock expiry in the lifespan lock-sweeper (`main.py`); `Session.announce_reset()` — a header-only `reset_event` (`{type, model_rev}`) for a `model_rev` bump that writes no journal row, fired by `set_model` and `set_metamodel` unless they are passed `announce=False`. Two callers pass it and announce late, after their durable writes (in a `finally`, so a failed write still announces the bump): `importer.install_model` after its durable writes, and `POST /metamodel` after its rows are committed — an earlier event would send a replica to `GET /replica/snapshot` between the bump and those writes, to open from the rows they are about to replace (and, for an upload, to write a second snapshot). `POST /locks/renew` is silent (heartbeat only, no peer-visible state change).
+- **Broadcast hook sites** — commit delta + lock release after `POST /commits` (in `routes/commits.py`); lock acquire in `POST /locks` and release in `POST /locks/release` (in `routes/locks.py`); lock expiry in the lifespan lock-sweeper (`main.py`); `Session.announce_reset()` — a header-only `reset_event` (`{type, model_rev}`) for a `model_rev` bump that writes no journal row, fired by `set_model` and `set_metamodel` unless they are passed `announce=False`. Two callers pass it and announce late, after their durable writes (in a `finally`, so a failed write still announces the bump): `importer.install_model` after its durable writes (it announces through the warm session it refreshes), and `POST /metamodel` after its rows are committed — an earlier event would send a replica to `GET /replica/snapshot` between the bump and those writes, to open from the rows they are about to replace (and, for an upload, to write a second snapshot). `POST /locks/renew` is silent (heartbeat only, no peer-visible state change).
 - **`identity.py` (WS detail)** — `identify` is typed to `HTTPConnection`; on a WebSocket the cookie provider reads the session cookie and `DevHeaderIdentityProvider` reads `conn.query_params` instead of `conn.headers` (browsers can't set WS headers). See the auth section above.
 - **Evict guard extension** — `SessionRegistry.evict` skips eviction while `session.hub.has_clients()` returns true (mirrors the live-leases guard); `feed_queue_max` setting controls per-client queue depth.
 

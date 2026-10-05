@@ -33,7 +33,14 @@ from .commit_oracle import (
     model_ops,
     session,
 )
-from .conftest import AUTH_HEADERS, head, install, post_commit, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    head,
+    install,
+    install_unchecked,
+    post_commit,
+    seed_default_project,
+)
 
 SEEDS = range(300)
 #: seeds whose batch is built around a hinted create named by both its ids
@@ -521,7 +528,7 @@ def test_a_commit_on_head_rows_equals_the_full_model(
         monkeypatch.setattr(commit_load, "MAX_ROUNDS", 64 if blind[0] else 8)
         rng = random.Random(seed)
         text, facts = make_model(rng, seed)
-        install(metamodel=MM, model=text)
+        install_unchecked(metamodel=MM, model=text)
         installed = head()
         oracle = Oracle(text)
         batch = Batch(rng, facts, f"s{seed}")

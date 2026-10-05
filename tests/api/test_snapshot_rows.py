@@ -32,6 +32,7 @@ from .conftest import (
     SMART_CITY_MODEL,
     commit_ops,
     install,
+    install_unchecked,
     papi,
     post_commit,
     seed_default_project,
@@ -93,7 +94,7 @@ def test_rows_snapshot_equals_fixture_model() -> None:
     blob = gzip.compress(doc["text"].encode("utf-8"))
     model_json = json.dumps(decode_snapshot(blob), allow_nan=False)
     seed_default_project()
-    install(metamodel=metamodel_yaml, model=model_json)
+    install_unchecked(metamodel=metamodel_yaml, model=model_json)
     rev = write_snapshot_from_rows(DEFAULT_PROJECT_ID)
     assert _stored(rev) == _expected(metamodel_yaml, model_json)
 

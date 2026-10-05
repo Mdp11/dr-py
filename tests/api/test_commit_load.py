@@ -31,6 +31,7 @@ from .conftest import (
     commit_ops,
     head,
     install,
+    install_unchecked,
     papi,
     post_commit,
     seed_default_project,
@@ -104,7 +105,7 @@ def client(_fresh_db: None) -> TestClient:
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
     seed_default_project()
-    install(metamodel=MM, model=json.dumps(_tree()))
+    install_unchecked(metamodel=MM, model=json.dumps(_tree()))  # Y holds a dangling ref
     return c
 
 
@@ -289,7 +290,7 @@ def test_subtree_and_ancestor_ids_follow_only_the_containment_types() -> None:
 
 
 def test_the_walks_end_on_a_containment_cycle() -> None:
-    install(
+    install_unchecked(
         metamodel=MM,
         model=json.dumps(
             {
