@@ -45,6 +45,19 @@ def get_model_row(db: Session, project_id: str) -> ModelRow | None:
     ).scalar_one_or_none()
 
 
+def lock_model_row(db: Session, project_id: str) -> ModelRow | None:
+    """The project's ``ModelRow`` read ``FOR UPDATE``: on Postgres the lock holds
+    until the transaction ends, and the row is refreshed from the database, so
+    ``model_rev`` is the committed one. SQLite takes no row lock; the session's
+    ``write_mutex`` is what serializes commits there."""
+    return db.execute(
+        select(ModelRow)
+        .where(ModelRow.project_id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+
+
 def upsert_model_row(
     db: Session, project_id: str, *, metamodel_id: str, name: str = "model"
 ) -> ModelRow:

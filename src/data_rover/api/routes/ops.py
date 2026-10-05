@@ -1,13 +1,14 @@
 """The op applier and the journal append behind ``POST /commits``.
 
-The session model is the source of truth and clients mutate it by sending
-small op batches (the op union in ``schemas.py``) instead of pushing
-whole-model snapshots.
+Clients mutate the model by sending small op batches (the op union in
+``schemas.py``) instead of pushing whole-model snapshots. The applier runs on
+whatever ``Model`` it is given: a commit hands it a partial one loaded from the
+head rows (``commit_load``), a preview or a rebind the session model.
 
 Atomicity without deep copies
 -----------------------------
 Batches are atomic, but the model is NOT deep-copied per request (it can be
-~80 MB): ops are applied directly to the live session model while the state
+~80 MB): ops are applied directly to the model while the state
 of every entity is noted before its first touch. If an op fails mid-batch,
 ``_rollback`` puts each touched entity back from that before-image —
 properties, ``rev`` and place in insertion order — and the request fails with
@@ -564,7 +565,7 @@ def _stage_commit(
     _state_digest: str | None = None,
 ) -> bool:
     """Stage the accepted batch in the durable journal and advance model_rev.
-    The caller writes the head rows and commits (``_commit_head``).
+    The caller has written the head rows (``_write_head``) and commits.
 
     The batch arrives as three explicit lists rather than a ``_BatchResult``
     because a commit can span BOTH content families: ``POST /commits`` merges
@@ -591,9 +592,9 @@ def _stage_commit(
     ``commit_diff``'s metamodel arm — is what MAKES a journal row a rebind.
 
     ``_entity_states`` is ``capture_entity_states(model, res)`` for the
-    applied batch — the diff reader's journal-only input; None (over-cap or
-    a writer that has no model batch) means the reader reconstructs.
-    ``_state_digest`` is the session's state digest after the batch; it lands
+    applied batch — the diff reader's journal-only input; None (a writer that
+    has no model batch) means the reader reconstructs.
+    ``_state_digest`` is the state digest after the batch; it lands
     on the model row.
 
     Returns True if a durable row existed and the commit was staged,
@@ -624,7 +625,7 @@ def _stage_commit(
     return True
 
 
-def _commit_head(
+def _write_head(
     db: DbSession,
     project_id: str,
     model: Model,
@@ -632,13 +633,13 @@ def _commit_head(
     *,
     rebound: bool = False,
 ) -> None:
-    """Write the staged batch's head rows and commit the transaction, so the
-    ``Commit`` row, the ``ModelRow`` update and the rows land together. A
-    rebind changes which properties are references, so its refs are rebuilt."""
+    """Stage the applied batch's head rows (``head.write_batch``) on the caller's
+    transaction, which commits them with the ``Commit`` and ``ModelRow`` writes.
+    ``model`` is the model the batch was applied to, partial or whole. A rebind
+    changes which properties are references, so its refs are rebuilt."""
     head.write_batch(db, project_id, model.metamodel, model, res)
     if rebound:
         head.rebuild_refs(db, project_id, model.metamodel)
-    db.commit()
 
 
 def _maybe_periodic_snapshot(

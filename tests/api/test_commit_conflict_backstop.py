@@ -13,8 +13,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api import content, db
 from data_rover.api.main import create_app
-from data_rover.api.session import get_session
+from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 
 from .conftest import (
     AUTH_HEADERS,
@@ -279,23 +280,23 @@ def test_future_base_rev_still_409(client: TestClient) -> None:
 
 
 def test_short_tail_from_unjournaled_mutation_409(client: TestClient) -> None:
-    """A model replacement outside the commit protocol:
-    ``Session.set_model()`` bumps ``model_rev`` but writes NO ``Commit``
-    row at all. The tail is then too SHORT to explain the gap, so a stale
-    batch must fail closed even though its own touched id never appears
-    anywhere in the (empty) tail — there is nothing to inspect for that rev."""
+    """A revision that moves outside the commit protocol: the model row's
+    ``model_rev`` advances but NO ``Commit`` row is written. The tail is then
+    too SHORT to explain the gap, so a stale batch must fail closed even though
+    its own touched id never appears anywhere in the (empty) tail — there is
+    nothing to inspect for that rev."""
     r = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",
                           "type_name": "Node", "properties": {}}], _rev(client))
     assert r.status_code == 200, r.text
     base = _rev(client)
 
-    session = get_session()
-    session.set_model(session.model, announce=False)
+    with db.db_session() as s:
+        content.set_model_rev(s, DEFAULT_PROJECT_ID, base + 1)
 
     r2 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_z",
                            "type_name": "Node", "properties": {}}], base)
     assert r2.status_code == 409
-    assert r2.json()["detail"] == "stale base_rev"
+    assert r2.json() == {"detail": "stale base_rev", "model_rev": base + 1}
 
 
 def test_baseline_reset_always_conflicts(client: TestClient) -> None:

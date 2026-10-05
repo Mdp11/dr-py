@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api import commit_states, content, db
+from data_rover.api import content, db
 from data_rover.api.commit_states import (
     EntityStates,
     capture_entity_states,
@@ -274,13 +274,11 @@ def test_a_row_without_the_recreated_key_loads_with_none_named() -> None:
     assert loaded.recreated_relationship_ids == []
 
 
-def test_over_cap_batch_captures_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(commit_states, "ENTITY_STATES_MAX", 1)
+def test_a_big_batch_captures_every_entity() -> None:
     m = _model()
-    res = _apply_batch(m, [_create("tmp_a"), _create("tmp_b")], restore=False)
-    assert capture_entity_states(m, res) is None
-    res = _apply_batch(m, [_create("tmp_c")], restore=False)
-    assert capture_entity_states(m, res) is not None  # exactly at the cap is fine
+    res = _apply_batch(m, [_create(f"tmp_{i}") for i in range(6)], restore=False)
+    states = capture_entity_states(m, res)
+    assert states is not None and len(states["elements"]) == 6
 
 
 def test_load_round_trips_capture() -> None:
@@ -435,15 +433,13 @@ def test_revert_persists_states(client: TestClient) -> None:
     assert states["elements"][eid]["after"]["properties"] == {"label": "a"}
 
 
-def test_over_cap_commit_persists_null(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(commit_states, "ENTITY_STATES_MAX", 1)
+def test_a_big_commit_persists_every_entity_state(client: TestClient) -> None:
     body = _commit(
         client,
         [
-            {"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node"},
-            {"kind": "create_element", "temp_id": "tmp_b", "type_name": "Node"},
+            {"kind": "create_element", "temp_id": f"tmp_{i}", "type_name": "Node"}
+            for i in range(6)
         ],
     )
-    assert _states_at(body["model_rev"]) is None
+    states = _states_at(body["model_rev"])
+    assert states is not None and len(states["elements"]) == 6

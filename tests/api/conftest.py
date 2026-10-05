@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -27,6 +27,7 @@ os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL", "")
 os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD", "")
 
 from data_rover.api import content, db  # noqa: E402
+from data_rover.api.head import read_head  # noqa: E402
 from data_rover.api.hydration import write_snapshot  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
 from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E402
@@ -164,15 +165,18 @@ class Head:
 
 
 def head(project_id: str = "default") -> Head:
-    """The project's current state as the server holds it."""
-    session = get_registry().get(project_id)
-    model = session.model
-    if model is None:
-        return Head(rev=session.model_rev, elements={}, relationships={})
+    """The project's current state as the server holds it: the head rows and the
+    revision on the model row (the session's, for a project without one)."""
+    with db.db_session() as s:
+        row = content.get_model_row(s, project_id)
+        elements, relationships = read_head(s, project_id)
+        rev = row.model_rev if row is not None else None
+    if rev is None:
+        rev = get_registry().get(project_id).model_rev
     return Head(
-        rev=session.model_rev,
-        elements={i: asdict(e) for i, e in model.elements.items()},
-        relationships={i: asdict(r) for i, r in model.relationships.items()},
+        rev=rev,
+        elements={e["id"]: e for e in elements},
+        relationships={r["id"]: r for r in relationships},
     )
 
 
@@ -243,6 +247,24 @@ def append_baseline_row(project_id: str = "default") -> int:
         content.set_model_rev(s, project_id, rev)
     write_snapshot(project_id, session, rev)
     return rev
+
+
+def unjournaled_bump(project_id: str = "default") -> None:
+    """The revision moves with no journal row: on the model row and in the
+    session."""
+    session = get_registry().get(project_id)
+    session.set_model(session.model, announce=False)
+    with db.db_session() as s:
+        content.set_model_rev(s, project_id, session.model_rev)
+
+
+def forget_entity_states(rev: int, project_id: str = "default") -> None:
+    """The commit at ``rev`` stores no entity states, as a row written before the
+    column existed."""
+    with db.db_session() as s:
+        row = content.get_commit(s, project_id, rev)
+        assert row is not None and row.entity_states is not None
+        row.entity_states = None
 
 
 def model_rev(c: TestClient) -> int:

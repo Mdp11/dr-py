@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import zlib
 
+import pytest
+
 from data_rover.api.routes.ops import _apply_batch
 from data_rover.api.schemas import ModelOpIn
 from data_rover.api.state_digest import (
@@ -12,6 +14,7 @@ from data_rover.api.state_digest import (
     fold_batch,
     format_digest,
     model_digest,
+    parse_digest,
 )
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.ids import SequentialIdGenerator
@@ -35,6 +38,14 @@ def _model() -> Model:
     model.set_property(a, "name", "A")
     model.connect("Link", a.id, b.id)
     return model
+
+
+def test_parse_digest_reads_what_format_digest_writes() -> None:
+    for value in (0, 1, 0xDEADBEEF, 2**64 - 1):
+        assert parse_digest(format_digest(value)) == value
+    for bad in ("", "abc", "0" * 17, "z" * 16):
+        with pytest.raises(ValueError):
+            parse_digest(bad)
 
 
 def test_entity_hash_vectors() -> None:

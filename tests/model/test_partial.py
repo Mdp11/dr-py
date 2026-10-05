@@ -225,6 +225,15 @@ def test_absent_id_has_no_edges_or_parents_but_unknown_referencers() -> None:
         m.indexes.referencers_of("x")
 
 
+def test_a_relationship_id_has_no_edges_or_parents_but_unknown_referencers() -> None:
+    m = _partial()
+    assert set(m.indexes.outgoing_ids("h1")) == set()
+    assert set(m.indexes.incoming_ids("h1")) == set()
+    assert m.indexes.first_parent("h1") is None
+    with pytest.raises(NotLoaded):
+        m.indexes.referencers_of("h1")
+
+
 def test_unknown_id_is_not_loaded_for_every_accessor() -> None:
     m = _partial()
     for accessor in (

@@ -33,6 +33,13 @@ def format_digest(value: int) -> str:
     return f"{value:016x}"
 
 
+def parse_digest(text: str) -> int:
+    """The integer behind the wire form ``format_digest`` writes."""
+    if len(text) != 16:
+        raise ValueError(f"not a state digest: {text!r}")
+    return int(text, 16)
+
+
 def digest_value(model: Model) -> int:
     """The digest of ``model`` as an integer: one pass over every entity."""
     value = 0

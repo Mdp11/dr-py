@@ -29,6 +29,8 @@ from .conftest import (
     install,
     commit_ops,
     append_baseline_row,
+    forget_entity_states,
+    unjournaled_bump,
 )
 
 # --- the completeness rule --------------------------------------------------
@@ -392,13 +394,13 @@ def test_a_tail_is_incomplete_across_a_baseline(client: TestClient) -> None:
     _assert_complete(client, _head() - 1)
 
 
-def test_a_tail_is_incomplete_across_a_commit_over_the_entity_states_cap(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_a_tail_is_incomplete_across_a_commit_without_entity_states(
+    client: TestClient,
 ) -> None:
     r0 = _head()
-    monkeypatch.setattr("data_rover.api.commit_states.ENTITY_STATES_MAX", 1)
     _ops(client, [_node("tmp_a", "A"), _node("tmp_b", "B")])
     over = _head()
+    forget_entity_states(over)
     _ops(client, [_node("tmp_c", "C")])
     _assert_incomplete(client, r0)
     _assert_complete(client, over)
@@ -432,18 +434,12 @@ def test_a_tail_is_incomplete_across_a_rebind(client: TestClient) -> None:
     _assert_complete(client, rebind)
 
 
-def _unjournaled_bump(client: TestClient) -> None:
-    """A rev that moves with no journal row."""
-    session = get_session()
-    session.set_model(session.model, announce=False)
-
-
 def test_a_tail_is_incomplete_across_a_bump_with_no_row_at_head(
     client: TestClient,
 ) -> None:
     r0 = _head()
     _ops(client, [_node("tmp_a", "A")])
-    _unjournaled_bump(client)
+    unjournaled_bump()
     # nothing landed since: only the session's head reveals the hole
     _assert_incomplete(client, r0)
 
@@ -453,7 +449,7 @@ def test_a_tail_is_incomplete_across_a_bump_with_no_row_in_the_middle(
 ) -> None:
     r0 = _head()
     _ops(client, [_node("tmp_a", "A")])
-    _unjournaled_bump(client)
+    unjournaled_bump()
     hole = _head()
     _ops(client, [_node("tmp_b", "B")])
     _assert_incomplete(client, r0)

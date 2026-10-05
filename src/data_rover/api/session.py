@@ -12,10 +12,9 @@ from data_rover.core.view.schema import View
 
 from .feed import FeedHub, reset_event
 from .locking import LockTable
-from .state_digest import digest_value, fold_batch, format_digest
+from .state_digest import digest_value, format_digest
 
 if TYPE_CHECKING:
-    from .routes.ops import _BatchResult
     from .snapshot_job import SnapshotJob
 
 
@@ -71,9 +70,8 @@ class Session:
     snapshot_job: SnapshotJob | None = field(default=None, repr=False)
     #: the state digest of ``model`` (``state_digest.py``) as an integer, or
     #: None while it is not known: on a fresh or hydrated session, and after
-    #: ``set_model``. A landed batch folds into it in
-    #: O(batch); a batch that is rolled back needs nothing, the rollback being
-    #: exact. Read and written under ``write_mutex``.
+    #: ``set_model``. A commit sets it to the digest it folded on the rows.
+    #: Read and written under ``write_mutex``.
     state_digest_value: int | None = field(default=None, repr=False)
 
     def state_digest(self) -> str:
@@ -84,16 +82,6 @@ class Session:
                 digest_value(self.model) if self.model is not None else 0
             )
         return format_digest(self.state_digest_value)
-
-    def advance_state_digest(self, res: _BatchResult) -> str:
-        """Take a batch that has just landed on ``model`` into the digest and
-        return it. A caller that may still take the batch back keeps
-        ``state_digest_value`` from before the call and restores it then."""
-        if self.state_digest_value is not None and self.model is not None:
-            self.state_digest_value = fold_batch(
-                self.state_digest_value, self.model, res
-            )
-        return self.state_digest()
 
     def announce_reset(self) -> None:
         """Broadcast a ``reset`` for the current ``model_rev``: the rev moved

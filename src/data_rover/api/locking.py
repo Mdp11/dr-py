@@ -435,7 +435,8 @@ def required_locks(
     (and, for folder ops, the pre-apply view each op names by ``view_id``).
 
     Ids created earlier in the same batch (temp ids) are not yet shared, so
-    they require no lock; relationships are locked via their source element.
+    they require no lock and are never looked up in the model (a partial model
+    cannot answer for them); relationships are locked via their source element.
 
     Folder ops: `create_folder` locks its PARENT (CREATE_CHILD, so a
     peer creating a sibling and a peer deleting the parent both get caught);
@@ -469,6 +470,8 @@ def required_locks(
             reqs.append(RequiredLock(resource_id=rid, mode=mode, intent=intent))
 
     def rel_source(rel_id: str) -> str | None:
+        if rel_id.startswith(TEMP_ID_PREFIX):
+            return None
         rel = model.relationships.get(rel_id)
         return rel.source_id if rel is not None else None
 
@@ -482,6 +485,8 @@ def required_locks(
         elif isinstance(op, UpdateElementOp):
             add(op.id, LockMode.EXCLUSIVE, LockIntent.EDIT)
         elif isinstance(op, DeleteElementOp):
+            if op.id.startswith(TEMP_ID_PREFIX):
+                continue
             for member in containment_subtree(model, op.id):
                 add(member, LockMode.EXCLUSIVE, LockIntent.DELETE)
         elif isinstance(op, UpdateRelationshipOp):

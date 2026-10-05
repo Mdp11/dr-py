@@ -16,9 +16,9 @@ Column shape::
 ``before: null`` = did not exist before the commit; ``after: null`` = does
 not exist after it. ``recreated`` names the ids the commit deleted and then
 created again — new entities at the end of their dict, which a before/after
-pair cannot say — and is absent from rows older than the key. A batch touching more than ``ENTITY_STATES_MAX`` entities
-stores NULL instead (the row would otherwise grow with the batch — a subtree
-delete can touch a large share of the model), and NULL means "reconstruct".
+pair cannot say — and is absent from rows older than the key. Every commit
+stores its states, however many entities it touched; a NULL column is a row
+from before the key.
 """
 
 from __future__ import annotations
@@ -33,10 +33,6 @@ from .schemas import ElementOut, RelationshipOut
 
 if TYPE_CHECKING:
     from .routes.ops import _BatchResult
-
-#: touched-entity cap (elements + relationships) above which a commit stores
-#: no states; same order as ISSUES_RESPONSE_MAX, bounding the row size.
-ENTITY_STATES_MAX = 5000
 
 ElementPair = tuple[ElementOut | None, ElementOut | None]
 RelationshipPair = tuple[RelationshipOut | None, RelationshipOut | None]
@@ -57,19 +53,11 @@ def _dump(out: ElementOut | RelationshipOut | None) -> dict[str, Any] | None:
     return out.model_dump(mode="json") if out is not None else None
 
 
-def capture_entity_states(model: Model, res: _BatchResult) -> dict[str, Any] | None:
-    """The ``entity_states`` column value for an applied batch, or None when
-    the batch exceeds ``ENTITY_STATES_MAX``. ``model`` is the POST-apply model
-    (changed entities present, deleted ones gone); the before side comes from
-    the applier's first-touch snapshots (``_BatchResult.before_*``)."""
-    touched = (
-        len(res.changed_element_ids)
-        + len(res.deleted_element_ids)
-        + len(res.changed_relationship_ids)
-        + len(res.deleted_relationship_ids)
-    )
-    if touched > ENTITY_STATES_MAX:
-        return None
+def capture_entity_states(model: Model, res: _BatchResult) -> dict[str, Any]:
+    """The ``entity_states`` column value for an applied batch. ``model`` is the
+    POST-apply model (changed entities present, deleted ones gone); the before
+    side comes from the applier's first-touch snapshots
+    (``_BatchResult.before_*``)."""
     elements: dict[str, Any] = {}
     for eid in res.changed_element_ids:
         elements[eid] = {

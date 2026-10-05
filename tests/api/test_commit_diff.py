@@ -29,6 +29,7 @@ from .conftest import (
     install,
     head,
     commit_ops,
+    forget_entity_states,
 )
 from .test_commits_metamodel_ops import _acquire_mm
 
@@ -1005,12 +1006,7 @@ def test_null_states_fall_back_to_reconstruction_byte_identically(
         assert d.json()["scope"] == journal[rev]["scope"]
 
 
-def test_over_cap_commit_diff_still_renders(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from data_rover.api import commit_states
-
-    monkeypatch.setattr(commit_states, "ENTITY_STATES_MAX", 1)
+def test_a_commit_row_without_states_still_renders(client: TestClient) -> None:
     r = client.post(
         papi("/commits"),
         json={
@@ -1024,6 +1020,7 @@ def test_over_cap_commit_diff_still_renders(
     )
     assert r.status_code == 200, r.text
     rev = r.json()["model_rev"]
+    forget_entity_states(rev)
     d = client.get(papi(f"/commits/{rev}/diff"))
     assert d.status_code == 200, d.text
     assert len(d.json()["elements"]["added"]) == 2  # reconstruction fallback

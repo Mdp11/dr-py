@@ -14,9 +14,10 @@ artifact CRUD routes use (``routes/artifacts._header`` is an alias of it) — sa
 created, updated AND deleted events, so no two write paths can drift.
 
 A commit can carry artifact ops as well as model ops
-(``artifact_ops.split_ops`` separates the two families). Model ops mutate
-the in-memory model; artifact ops stage DB rows — see ``create_commit``'s
-docstring for how the two are kept atomic.
+(``artifact_ops.split_ops`` separates the two families). The model half is
+checked on a partial model loaded from the head rows (``commit_load``) and
+written to them; artifact ops stage DB rows — see ``create_commit``'s
+docstring for how the halves are kept atomic.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, assert_never, get_args
 
@@ -46,12 +47,13 @@ from ..artifact_ops import (
 )
 from ..authz import require_membership
 from ..commit_diff import diff_commit
+from ..commit_load import Refused, load_and_apply
 from ..commit_states import capture_entity_states
 from ..range_diff import diff_range
 from ..feed import commit_event, lock_event, rebind_event
-from .. import content
+from .. import content, head
 from ..db import get_db
-from ..db_models import Commit, Membership, Role, User
+from ..db_models import Commit, Membership, ModelRow, Role, User
 from ..deps import Session, get_request_session, require_model
 from ..hydration import deserialize_ops, write_snapshot
 from ..identity import get_current_user
@@ -59,6 +61,7 @@ from ..lock_mirror import mirror_session_leases
 from ..locking import (
     ARTIFACT_PREFIX,
     METAMODEL_RESOURCE,
+    RequiredLock,
     is_model_resource,
     required_locks,
 )
@@ -68,7 +71,9 @@ from ..metamodel_ops import (
     load_candidate,
     split_rebind,
 )
+from ..session import get_registry
 from ..settings import get_settings
+from ..state_digest import fold_batch, format_digest, parse_digest
 from ..structural import structural_blockers
 from ..view_ops import (
     ViewBatchResult,
@@ -126,9 +131,9 @@ from .ops import (
     _apply_batch,
     _BatchResult,
     _maybe_periodic_snapshot,
-    _commit_head,
     _stage_commit,
     _rollback,
+    _write_head,
 )
 
 logger = logging.getLogger(__name__)
@@ -230,7 +235,10 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
 
 
 def _batch_touched_ids(
-    model: Model, views: Mapping[str, View], ops: list[OpIn]
+    model: Model,
+    views: Mapping[str, View],
+    ops: list[OpIn],
+    reqs: list[RequiredLock] | None = None,
 ) -> set[str]:
     """Conservative touched-set for the conflict backstop: a batch conflicts
     with the commit tail iff their touched-id sets overlap.
@@ -244,6 +252,7 @@ def _batch_touched_ids(
     relationship) must still register as touching it. A create's temp id
     never appears in `_affected_ids` (canonical ops carry the assigned id),
     so temp ids are filtered out at the end rather than tracked specially.
+    ``reqs`` is that ``required_locks`` answer when the caller already has it.
     ``views`` is threaded straight through to ``required_locks`` so
     folder-op lease derivation resolves correctly; the view ops themselves
     additionally run through ``view_ops.view_touched_resources`` below, which
@@ -262,7 +271,9 @@ def _batch_touched_ids(
     type error here rather than a silent hole (same discipline
     ``_apply_one``'s ``assert_never`` gives the applier).
     """
-    ids = {r.resource_id for r in required_locks(model, views, ops)}
+    if reqs is None:
+        reqs = required_locks(model, views, ops)
+    ids = {r.resource_id for r in reqs}
     for op in ops:
         if isinstance(
             op,
@@ -347,32 +358,31 @@ class _CommitUnwind:
     failure paths.
 
     A commit batch can span three content families living in three places
-    (see ``create_commit``'s "Mixed-batch atomicity" docstring): the model is
-    mutated IN PLACE, artifact rows are staged on this request's DB
-    transaction, and the view is mutated IN PLACE plus staged as a blob on
-    that same transaction. Every rejection/failure path therefore has to
-    undo *however many halves are live at that point*.
+    (see ``create_commit``'s "Mixed-batch atomicity" docstring): the model half
+    is applied to a throwaway partial model and reaches the rows and the
+    session mirror only once the transaction has committed, artifact rows are
+    staged on this request's DB transaction, and the view is mutated IN PLACE
+    plus staged as a blob on that same transaction. Every rejection/failure
+    path therefore has to undo *however many halves are live at that point*.
 
     The ledger tracks this by having each stage REGISTER what
     went live, at the moment it goes live and NEVER LATER (``model_res``
-    after the model apply, one ``view_results`` entry per view group after
-    its apply,
-    ``rev_bumped`` after the rev bump; ``db_staged``
-    BEFORE the first call that stages rows, and ``prior_metamodel`` DURING
-    ``apply_metamodel_ops`` via its ``on_swap`` callback — those last two
-    register ahead of the state going live because the very statement that
-    makes it live can itself raise, and a handle registered after the fact
-    would be missing on exactly that path), and every failure path calls
+    after a rebind batch's apply to the session model, one ``view_results``
+    entry per view group after its apply, ``db_open`` as soon as the
+    ``ModelRow`` lock is taken, and ``prior_metamodel`` DURING
+    ``apply_metamodel_ops`` via its ``on_swap`` callback — registered ahead of
+    the state going live because the very statement that makes it live can
+    itself raise, and a handle registered after the fact would be missing on
+    exactly that path), and every failure path calls
     ``unwind()`` exactly once and then returns/raises. A new stage touches
     ONE registration site instead of every downstream block.
 
     ``unwind()`` runs under ``session.write_mutex`` — every caller already
-    holds it (the sole pre-mutex failure paths register nothing and return
-    plain 409s without a ledger). Field-order invariants, preserved from the
+    holds it. Field-order invariants, preserved from the
     inline blocks this replaces:
 
-    - ``model_res`` rollback first (restores the in-place model), then the
-      metamodel swap, then the rev decrement.
+    - ``model_res`` rollback first (restores the session model a rebind batch
+      applied to in place), then the metamodel swap.
     - ``prior_metamodel`` unwinds AFTER ``model_res``,
       reversing apply order: the rebind is HOISTED to apply first (so the
       batch's model ops validate against the candidate schema), therefore it
@@ -383,12 +393,12 @@ class _CommitUnwind:
     - ``view_results`` roll back newest group first; each entry pairs the
       live ``View`` object with its batch result, so the unwind never has
       to re-resolve a view id.
-    - ``prior_digest`` goes back only when ``rev_bumped``: the state digest
-      advances at the instant the rev bumps (step d), never earlier; before
-      it, the exact model rollback leaves the digest true as it stands.
-    - ``db.rollback()`` last, and only once ``db_staged`` — the paths
-      before any staging (missing-lock 409, model-apply failure) never
-      rolled the request transaction back and still must not.
+    - ``db.rollback()`` last, and only once ``db_open``: it discards the staged
+      rows and ends the transaction the row lock lives in, so every refusal
+      releases the project.
+
+    The session's ``model_rev`` and state digest are not here: they follow the
+    rows once the transaction has committed, so there is nothing to put back.
 
     NOT part of the ledger, on purpose: lock release (leases survive a
     failed commit — release is step g, strictly after a durable commit).
@@ -396,6 +406,8 @@ class _CommitUnwind:
 
     session: Session
     db: DbSession
+    #: the session model: the one a rebind batch is applied to, and the one a
+    #: schema swap rebuilds
     model: Model
     model_res: _BatchResult | None = None
     view_results: list[tuple[View, ViewBatchResult]] = field(default_factory=list)
@@ -407,11 +419,7 @@ class _CommitUnwind:
     #: state at all (``db.rollback()`` alone discards the staged
     #: ``metamodel_layouts`` row).
     prior_metamodel: Metamodel | None = None
-    #: ``session.state_digest_value`` from before the batch was folded into
-    #: it (None = it was not known then either). Meaningful once ``rev_bumped``.
-    prior_digest: int | None = None
-    db_staged: bool = False
-    rev_bumped: bool = False
+    db_open: bool = False
 
     def unwind(self) -> None:
         if self.model_res is not None:
@@ -422,13 +430,15 @@ class _CommitUnwind:
             self.session.metamodel = self.prior_metamodel
             self.model.metamodel = self.prior_metamodel
             self.model.indexes.rebuild()
-        if self.rev_bumped:
-            self.session.model_rev -= 1
-            self.session.state_digest_value = self.prior_digest
         for view, vres in reversed(self.view_results):
             rollback_view(view, vres.inverse_units)
-        if self.db_staged:
+        if self.db_open:
             self.db.rollback()
+
+    def refuse(self, response: JSONResponse) -> JSONResponse:
+        """Undo every live half and answer ``response``."""
+        self.unwind()
+        return response
 
 
 def _structural_ids(model: Model, res: _BatchResult) -> list[str]:
@@ -446,7 +456,7 @@ def _structural_ids(model: Model, res: _BatchResult) -> list[str]:
         rel = model.relationships[rel_id]
         ids.extend((rel.source_id, rel.target_id))
     for element_id in res.deleted_element_ids:
-        ids.extend(model.indexes.referencers_of(element_id))
+        ids.extend(sorted(model.indexes.referencers_of(element_id)))
     return ids
 
 
@@ -632,6 +642,72 @@ def commit_diff_endpoint(
     return diff_commit(db, project_id, row)
 
 
+def _open_transaction(
+    db: DbSession, project_id: str, session: Session, unwind: _CommitUnwind
+) -> tuple[ModelRow | None, int]:
+    """Take the project's ``ModelRow`` lock and read its revision: the
+    transaction every check and write of a commit runs in, so the revision and
+    the tail read under it are the committed ones. ``unwind`` learns the
+    transaction is open. A project without a row has no durable state; the
+    session's revision stands for it. A row whose head rows are not written yet
+    (a database from before the head tables that was never hydrated) gets them
+    from the session model first, since the check reads only rows."""
+    row = content.lock_model_row(db, project_id)
+    unwind.db_open = True
+    if row is None:
+        return None, session.model_rev
+    if row.next_seq is None or row.state_digest is None:
+        assert session.metamodel is not None and session.model is not None
+        head.write_baseline(db, project_id, session.metamodel, session.model)
+    return row, row.model_rev
+
+
+def _digest_before(session: Session, row: ModelRow | None) -> int:
+    """The state digest of the head rows before the batch."""
+    if row is not None:
+        assert row.state_digest is not None
+        return parse_digest(row.state_digest)
+    return parse_digest(session.state_digest())
+
+
+def _follow_commit(
+    session: Session,
+    project_id: str,
+    ops: Sequence[ModelOpIn],
+    *,
+    rev: int,
+    digest: str,
+) -> None:
+    """Take a commit that has landed in the rows into the session model, which
+    mirrors them, and into the session's revision and digest. Under the write
+    mutex. A mirror that cannot follow is dropped, and the next request
+    hydrates it again from the journal, which holds the commit."""
+    try:
+        assert session.model is not None
+        _apply_batch(session.model, list(ops), restore=True)
+    except Exception:
+        logger.exception(
+            "the session model of project %s could not follow rev %s; dropping it",
+            project_id,
+            rev,
+        )
+        get_registry().discard(project_id)
+    session.model_rev = rev
+    session.state_digest_value = parse_digest(digest)
+
+
+def _structural_response(structural: list[Any]) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "structural validation blocker",
+            "structural_blockers": [
+                IssueOut.from_core(i).model_dump() for i in structural
+            ],
+        },
+    )
+
+
 @router.post("/commits", response_model=None)
 def create_commit(
     payload: CommitRequest,
@@ -643,9 +719,9 @@ def create_commit(
 ) -> CommitResponse | JSONResponse:
     """Lock-verified, structural-gated commit.
 
-    Flow:
-    1. Staleness check (before the mutex — mirrors preview).
-       A future ``base_rev`` always 409s. A behind-head ``base_rev`` uses a
+    Flow, all under the write mutex and in one database transaction:
+    1. Take the ``ModelRow`` lock and read ``model_rev`` from it. A future
+       ``base_rev`` always 409s. A behind-head ``base_rev`` uses a
        GENERALIZED rule: the batch conflicts iff the
        resources it touches overlap what landed in ``(base_rev, head]`` — see
        ``_batch_touched_ids``/``_affected_ids``. Leases already prevent most
@@ -659,7 +735,7 @@ def create_commit(
          - the tail is SHORTER than the rev gap — the completeness invariant
            (one journaled batch == one rev == one row, spelled out at the
            check itself below) means a short tail can only mean some rev in
-           the gap advanced without a journal row (``set_model(...)``), so there
+           the gap advanced without a journal row, so there
            is no way to know what it touched;
          - a rebind is in the tail (the metamodel changed under the client,
            so its element ops were computed against a schema that no longer
@@ -670,43 +746,54 @@ def create_commit(
            fully accounts for the rev gap here, but names no resources at
            all, so the overlap check alone would find nothing and let a
            stale batch land against a wholesale-replaced model.
-       Only once none of these apply does the overlap check itself run.
-    2. Under the write mutex:
-       a. Verify the caller still holds every required lock (409 if any gone).
-       a2. Quiet-peers guard for rebind-carrying batches (409 while a PEER
-          holds a model-scope lease).
-       a3. Apply the metamodel half FIRST: the schema swap
-          is hoisted ahead of every other family so the batch's model ops
-          validate against the NEW schema — that is what makes an atomic
-          migration batch a migration batch.
-       b. Apply the model ops (422 on mutation-boundary error from
-          _apply_batch), then the artifact ops (staged on this request's DB
-          transaction).
-       b3. Apply the view half (all-or-nothing via apply_view_ops_atomic) —
-          auto-creating an empty view for a project that never had one.
-       c. Hard-reject structural blockers (422; rolls back every half),
-          checked over the batch's touched entities and the referencers of
-          the elements it deleted (the whole model for a rebind). Conformance is never rejected: the client
-          reports its validation count and issues, stored as given.
-       d. Bump rev, record batch.
-       e. Persist to the durable journal (500 + full rollback on failure); the
-          view blob (if touched) and the layout blob (ditto) are staged on the
-          SAME DB transaction as the Commit row, so all land or none do. A
-          rebind additionally sets the row's from/to_metamodel_id columns.
-       f. Snapshot: periodic normally, FORCED after a rebind (so the replay
-          tail never spans a schema boundary).
-       g. Release the caller's locks (explicit loop).
-       h. Broadcast commit delta + artifact + lock-release events (inside mutex
-          for enqueue-order == rev-order guarantee; broadcast is non-blocking).
-          A rebind broadcasts ``rebind_event`` INSTEAD of ``commit_event``:
-          peers cannot apply a delta across a schema swap, so they get the
-          reload banner.
+       Only once none of these apply does the overlap check itself run, on the
+       partial model of step 2.
+    2. Load the rows the model ops need and build a partial model from them
+       (``commit_load``); on each round, before the batch is applied:
+       a. the overlap check above;
+       a1. resolve every view the batch names (422);
+       a2. verify the caller still holds every required lock (409 if any gone).
+       Then apply the model ops (422 on mutation-boundary error from
+       ``_apply_batch``) and run the structural check over what the batch
+       touched and the referencers of what it deleted. A read the loaded rows
+       cannot answer loads them and runs it all again on a fresh partial model;
+       the bound is ``commit_load.MAX_ROUNDS`` (500 past it).
+       A rebind-carrying batch keeps the session model instead: it is applied to
+       it in place after a3, and checked over every entity.
+    a2b. Quiet-peers guard for rebind-carrying batches (409 while a PEER
+       holds a model-scope lease).
+    a3. Apply the metamodel half: for a rebind the schema swap
+       is hoisted ahead of every other family so the batch's model ops
+       validate against the NEW schema — that is what makes an atomic
+       migration batch a migration batch.
+    b2. Apply the artifact ops (staged on this request's DB transaction).
+    b3. Apply the view half (all-or-nothing via apply_view_ops_atomic) —
+       auto-creating an empty view for a project that never had one.
+    c. Hard-reject structural blockers (422; rolls back every half).
+       Conformance is never rejected: the client reports its validation count
+       and issues, stored as given.
+    d. Fold the batch into the rows' state digest, write the head rows, then
+       stage the journal entry (500 + full rollback on failure) and commit; the
+       view blob (if touched) and the layout blob (ditto) are staged on the
+       SAME DB transaction as the Commit row, so all land or none do. A rebind
+       additionally sets the row's from/to_metamodel_id columns.
+    e. Take the batch into the session model, which mirrors the rows, and the
+       session's revision and digest.
+    f. Snapshot: periodic normally, FORCED after a rebind (so the replay
+       tail never spans a schema boundary).
+    g. Release the caller's locks (explicit loop).
+    h. Broadcast commit delta + artifact + lock-release events (inside mutex
+       for enqueue-order == rev-order guarantee; broadcast is non-blocking).
+       A rebind broadcasts ``rebind_event`` INSTEAD of ``commit_event``:
+       peers cannot apply a delta across a schema swap, so they get the
+       reload banner.
     3. Return CommitResponse with full delta + commit metadata.
 
     Mixed-batch atomicity
     ---------------------------------------------------------------------
     A batch can span all four content families, and each lives in a
-    different place: model ops mutate the in-memory model IN PLACE, artifact
+    different place: the model half is applied to a throwaway partial model
+    and lands in the head rows with the transaction, artifact
     ops stage row changes on this request's DB transaction, view ops
     mutate ``session.views[view_id]`` IN PLACE plus (once accepted) stage
     that view's blob row on the same DB transaction as the artifact rows, and metamodel ops do BOTH at
@@ -717,20 +804,19 @@ def create_commit(
     is ``_CommitUnwind``'s job, not each site's: every stage registers what
     it just made live on the ledger, and each failure path calls
     ``unwind()`` once. See that class's docstring for the field-order
-    invariants (rev decrement before cache invalidation, and so on).
+    invariants.
 
     What makes the ledger's field semantics correct: ``apply_artifact_ops``
     deliberately has no internal rollback path (it only flushes), so that
     ``db.rollback()`` is the ONLY thing that discards staged artifact rows —
-    hence ``db_staged`` is registered BEFORE that call, not after it;
+    which is why the ledger holds the transaction open from the row lock on;
     ``apply_view_ops_atomic`` DOES roll its own prefix back on failure (see
     its docstring), so a failure raised BY it never needs an explicit
     ``rollback_view`` call — hence a ``view_results`` entry is registered
     only AFTER it returns, and only failures raised after that point roll
     that view back;
     ``apply_metamodel_ops`` follows the ARTIFACT stance (no internal rollback
-    at all — see its module docstring), so ``db_staged`` is likewise
-    registered BEFORE the call — but ``prior_metamodel`` is registered from
+    at all — see its module docstring) — but ``prior_metamodel`` is registered from
     that applier's ``on_swap`` callback, i.e. DURING the call, at the instant
     of the swap: after the candidate blob parses (so an invalid blob's 422
     costs no unwind work — nothing was swapped) and immediately before
@@ -741,7 +827,7 @@ def create_commit(
     — the ledger would have no handle and the session would keep serving the
     candidate schema against a DB still bound to the old one.
     """
-    _, model = require_model(session)
+    metamodel, mirror = require_model(session)
     model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
     # Pre-mutex, because both are pure rejections that touch nothing: the
     # one-rebind-per-batch 422 (split_rebind) and the owner gate. Splitting
@@ -759,151 +845,130 @@ def create_commit(
         )
     # The unwind ledger every failure path below shares — see _CommitUnwind.
     # INVARIANT: every MUTATION of a view in this function happens under
-    # session.write_mutex; the pre-mutex overlap check below only READS
-    # ``session.views`` (a dict complete since hydration — a view id that
-    # resolves to nothing is a client error, never a cold-cache miss).
-    unwind = _CommitUnwind(session, db, model)
-    if payload.base_rev > session.model_rev:
-        return _conflict_response(session.model_rev, "stale base_rev")
-    if payload.base_rev < session.model_rev:
-        # Generalized staleness — see the docstring above
-        # for the full rationale; branch order mirrors it: no-journal /
-        # short-tail / baseline-or-rebind / overlap, cheapest-and-safest
-        # first, each a fail-closed 409 before the real overlap check runs.
-        if content.get_model_row(db, project_id) is None:
-            return _conflict_response(session.model_rev, "stale base_rev")
-        tail = content.commits_after(db, project_id, payload.base_rev)
-        if len(tail) != session.model_rev - payload.base_rev:
-            # Completeness invariant (db_models.Commit's own docstring: "one
-            # accepted ops batch == one revision == one journal row"): every
-            # journaled batch bumps model_rev by exactly 1 and writes exactly
-            # 1 row (create_commit/revert each do both under the same
-            # mutex). So a FULL tail always has len(tail) == head - base_rev.
-            # A SHORT tail means some rev in the gap moved without a journal
-            # row at all — e.g. set_model() — so there
-            # is nothing to inspect for that rev and no way to know it didn't
-            # touch this batch's resources. Fail closed.
-            return _conflict_response(session.model_rev, "stale base_rev")
-        if any(
-            c.from_metamodel_id is not None
-            or c.to_metamodel_id is not None
-            or not c.ops
-            for c in tail
-        ):
-            # Two distinct always-conflict cases, same treatment: a rebind
-            # changed the metamodel under the client (its element ops were
-            # computed against a schema that no longer exists), and an
-            # EMPTY-ops commit that still consumed a rev is
-            # the marker for "the whole model was replaced opaquely" (a
-            # baseline reset). Both fully account for the rev
-            # gap (so the short-tail check above doesn't catch them) but
-            # name no resources the overlap check could ever match against,
-            # so without this branch a stale batch would silently land
-            # against a metamodel/model that no longer matches what it was
-            # computed against.
-            return _conflict_response(session.model_rev, "stale base_rev")
-        # Resolve a LOCAL view for the overlap check ONLY, immediately
-        # before the one check in this block that needs it — not any
-        # earlier, so the three fail-closed checks above (which never
-        # consult view content at all) can never pay for the derivation on
-        # their own return paths.
-        if _affected_ids(tail) & _batch_touched_ids(model, session.views, payload.ops):
-            return _conflict_response(
-                session.model_rev, "conflicting concurrent commits"
-            )
-    if not payload.ops:
-        # Empty batch: nothing to apply. Mirrors revert's
-        # no-op early return — current state, no rev bump. It
-        # matters MORE here: an empty-ops journal row is
-        # the marker for "the whole model was replaced
-        # opaquely", which the staleness guard above reads as an
-        # unconditional 409 for every client below that rev. A message-only
-        # "checkpoint" commit would therefore permanently disable the overlap
-        # rule for the project — fail-closed, but wrong. Keeping the invariant
-        # (empty ops in the journal ⟺ opaque baseline reset) true is this
-        # branch's real job; the saved rev is a bonus.
-        return CommitResponse(
-            model_rev=session.model_rev,
-            id_map={},
-            changed_elements=[],
-            changed_relationships=[],
-            deleted_element_ids=[],
-            deleted_relationship_ids=[],
-            commit_id="",
-            message="",
-            validation_error_count=0,
-        )
+    # session.write_mutex.
+    unwind = _CommitUnwind(session, db, mirror)
     with session.write_mutex:
-        # Resolve every view the batch names FIRST: a 422 here costs nothing
-        # (no half is live yet), whereas discovering it at b3 would apply and
-        # roll back the model half for a batch that could never land.
-        # required_locks below needs the same mapping so folder_subtree/
-        # locate_folder expand against the real trees.
-        for vid in group_by_view(view_ops):
-            resolve_view(session.views, vid)
-        # a. verify the caller still holds every required lock. `payload.ops`
-        #    (not `model_ops`) so the `art:`-namespaced leases artifact ops
-        #    need are derived and checked too.
-        reqs = required_locks(model, session.views, payload.ops)
-        missing = session.lock_table.verify_held(
-            user.id, payload.lock_tokens, reqs, now=time.monotonic()
-        )
-        if missing:
-            # nothing is live yet — unwind is a no-op kept for uniformity
+        head_row, head_rev = _open_transaction(db, project_id, session, unwind)
+        # 1. staleness — see the docstring above for the full rationale; branch
+        #    order mirrors it: no-journal / short-tail / baseline-or-rebind,
+        #    cheapest-and-safest first, each a fail-closed 409 before the
+        #    overlap check runs.
+        tail_ids: set[str] | None = None
+        if payload.base_rev > head_rev:
+            return unwind.refuse(_conflict_response(head_rev, "stale base_rev"))
+        if payload.base_rev < head_rev:
+            if head_row is None:
+                return unwind.refuse(_conflict_response(head_rev, "stale base_rev"))
+            tail = content.commits_after(db, project_id, payload.base_rev)
+            if len(tail) != head_rev - payload.base_rev:
+                # Completeness invariant (db_models.Commit's own docstring: "one
+                # accepted ops batch == one revision == one journal row"): every
+                # journaled batch bumps model_rev by exactly 1 and writes exactly
+                # 1 row (create_commit/revert each do both in one transaction).
+                # So a FULL tail always has len(tail) == head - base_rev. A
+                # SHORT tail means some rev in the gap moved without a journal
+                # row at all, so there is nothing to inspect for that rev and no
+                # way to know it didn't touch this batch's resources. Fail closed.
+                return unwind.refuse(_conflict_response(head_rev, "stale base_rev"))
+            if any(
+                c.from_metamodel_id is not None
+                or c.to_metamodel_id is not None
+                or not c.ops
+                for c in tail
+            ):
+                # Two distinct always-conflict cases, same treatment: a rebind
+                # changed the metamodel under the client (its element ops were
+                # computed against a schema that no longer exists), and an
+                # EMPTY-ops commit that still consumed a rev is
+                # the marker for "the whole model was replaced opaquely" (a
+                # baseline reset). Both fully account for the rev
+                # gap (so the short-tail check above doesn't catch them) but
+                # name no resources the overlap check could ever match against,
+                # so without this branch a stale batch would silently land
+                # against a metamodel/model that no longer matches what it was
+                # computed against.
+                return unwind.refuse(_conflict_response(head_rev, "stale base_rev"))
+            tail_ids = _affected_ids(tail)
+        if not payload.ops:
+            # Empty batch: nothing to apply. Mirrors revert's
+            # no-op early return — current state, no rev bump. It
+            # matters MORE here: an empty-ops journal row is
+            # the marker for "the whole model was replaced
+            # opaquely", which the staleness guard above reads as an
+            # unconditional 409 for every client below that rev. A message-only
+            # "checkpoint" commit would therefore permanently disable the overlap
+            # rule for the project — fail-closed, but wrong. Keeping the invariant
+            # (empty ops in the journal ⟺ opaque baseline reset) true is this
+            # branch's real job; the saved rev is a bonus.
             unwind.unwind()
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": "required lock not held",
-                    "missing": [
-                        {"resource_id": m.resource_id, "mode": m.mode.value}
-                        for m in missing
-                    ],
-                },
+            return CommitResponse(
+                model_rev=head_rev,
+                id_map={},
+                changed_elements=[],
+                changed_relationships=[],
+                deleted_element_ids=[],
+                deleted_relationship_ids=[],
+                commit_id="",
+                message="",
+                validation_error_count=0,
             )
-        # a2. quiet-peers guard (rebind batches only). Today's rebind
-        #     guarantee, scoped to PEERS: a schema swap must not invalidate
-        #     someone else's open model check-out. The CALLER's own leases are
-        #     the point of a migration batch — it holds locks on the very
-        #     elements it is fixing — so only OTHER holders block. Artifact/
-        #     folder/mm leases never block (artifacts degrade tolerantly under
-        #     a new metamodel; the mm lease is the one this caller holds).
-        if rebind_op is not None:
-            peer_model = [
-                le
-                for le in session.lock_table.active_leases(time.monotonic())
-                if le.holder != user.id and is_model_resource(le.resource_id)
-            ]
-            if peer_model:
-                unwind.unwind()  # at most this request's own view hydration
-                return JSONResponse(
-                    status_code=409,
-                    content={"detail": "active locks; rebind requires a quiet project"},
+
+        def check_before(before: Model) -> None:
+            """Overlap with the tail, view ids, held locks: all judged on the
+            model as it is before the batch."""
+            reqs = required_locks(before, session.views, payload.ops)
+            if tail_ids is not None and tail_ids & _batch_touched_ids(
+                before, session.views, payload.ops, reqs
+            ):
+                raise Refused(
+                    _conflict_response(head_rev, "conflicting concurrent commits")
                 )
-        # a3. apply the metamodel half FIRST — the hoist that makes a migration
-        #     batch atomic: everything below validates against the CANDIDATE
-        #     schema. It stages rows via db.flush() and has no internal
-        #     rollback (module docstring), so db_staged is registered BEFORE
-        #     the call, exactly like the artifact half at b2.
-        #
-        #     The swap handle is registered from the applier's ``on_swap``
-        #     callback, NOT from its return value, and this is load-bearing:
-        #     the applier swaps the in-memory metamodel and THEN stages
-        #     MetamodelRow/ModelRow via db.flush(), which can raise. Assigning
-        #     after the call would leave that failure path with
-        #     prior_metamodel still None — db.rollback() would discard the
-        #     rows while the process-wide session went on serving the
-        #     CANDIDATE schema against a DB that still points at the old one.
-        #     The callback fires at the exact instant the state goes dirty, so
-        #     registration is neither early (an invalid-candidate 422 swapped
-        #     nothing and pays no O(model) indexes.rebuild()) nor late.
+            # Resolve every view the batch names: a 422 here costs nothing
+            # (no half is live yet), whereas discovering it at b3 would apply
+            # and roll back the model half for a batch that could never land.
+            for vid in group_by_view(view_ops):
+                resolve_view(session.views, vid)
+            # a2. verify the caller still holds every required lock.
+            #     `payload.ops` (not `model_ops`) so the `art:`-namespaced leases
+            #     artifact ops need are derived and checked too.
+            missing = session.lock_table.verify_held(
+                user.id, payload.lock_tokens, reqs, now=time.monotonic()
+            )
+            if missing:
+                raise Refused(
+                    JSONResponse(
+                        status_code=409,
+                        content={
+                            "detail": "required lock not held",
+                            "missing": [
+                                {"resource_id": m.resource_id, "mode": m.mode.value}
+                                for m in missing
+                            ],
+                        },
+                    )
+                )
+
         mm_res: MetamodelBatchResult | None = None
-        if metamodel_ops:
+
+        def apply_metamodel_half() -> None:
+            # a3. It stages rows via db.flush() and has no internal rollback
+            #     (module docstring of metamodel_ops), so the ledger rolls the
+            #     transaction back, and the swap handle is registered from the
+            #     applier's ``on_swap`` callback, NOT from its return value, and
+            #     this is load-bearing: the applier swaps the in-memory metamodel
+            #     and THEN stages MetamodelRow/ModelRow via db.flush(), which can
+            #     raise. Assigning after the call would leave that failure path
+            #     with prior_metamodel still None — db.rollback() would discard
+            #     the rows while the process-wide session went on serving the
+            #     CANDIDATE schema against a DB that still points at the old one.
+            #     The callback fires at the exact instant the state goes dirty, so
+            #     registration is neither early (an invalid-candidate 422 swapped
+            #     nothing and pays no O(model) indexes.rebuild()) nor late.
+            nonlocal mm_res
 
             def _register_swap(prior: Metamodel) -> None:
                 unwind.prior_metamodel = prior
 
-            unwind.db_staged = True
             try:
                 mm_res = apply_metamodel_ops(
                     db, project_id, session, metamodel_ops, on_swap=_register_swap
@@ -911,24 +976,75 @@ def create_commit(
             except Exception:
                 unwind.unwind()  # undo every live half — see _CommitUnwind
                 raise
-        # b. apply the model half against the (possibly just-swapped) schema.
-        #    _apply_batch already rolled ITSELF back on a mutation-boundary
-        #    error, but the ledger still has to run: the metamodel half may
-        #    already be live in memory AND staged in the transaction (a3).
-        try:
-            res = _apply_batch(model, model_ops, restore=False)
-        except Exception:
-            unwind.unwind()
-            raise
-        unwind.model_res = res
+
+        rebound = rebind_op is not None
+        structural: list[Any] | None = None
+        if not rebound:
+            # b. the model half, on a partial model of the rows. The session
+            #    model is not touched: nothing here needs undoing but the
+            #    transaction.
+            try:
+                model, res, structural = load_and_apply(
+                    db,
+                    project_id,
+                    metamodel,
+                    model_ops,
+                    restore=False,
+                    pre_apply=check_before,
+                    post_apply=lambda m, r: structural_blockers(
+                        m, _structural_ids(m, r)
+                    ),
+                )
+            except Refused as refused:
+                return unwind.refuse(refused.response)
+            except Exception:
+                unwind.unwind()
+                raise
+            if metamodel_ops:  # layout moves only
+                apply_metamodel_half()
+        else:
+            # A rebind retypes the whole model: it is applied to the session
+            # model in place, and checked over every entity.
+            model = mirror
+            try:
+                check_before(model)
+            except Refused as refused:
+                return unwind.refuse(refused.response)
+            except Exception:
+                unwind.unwind()
+                raise
+            # a2b. quiet-peers guard (rebind batches only). A schema swap must
+            #     not invalidate someone else's open model check-out. The
+            #     CALLER's own leases are the point of a migration batch — it
+            #     holds locks on the very elements it is fixing — so only OTHER
+            #     holders block. Artifact/folder/mm leases never block
+            #     (artifacts degrade tolerantly under a new metamodel; the mm
+            #     lease is the one this caller holds).
+            peer_model = [
+                le
+                for le in session.lock_table.active_leases(time.monotonic())
+                if le.holder != user.id and is_model_resource(le.resource_id)
+            ]
+            if peer_model:
+                return unwind.refuse(
+                    JSONResponse(
+                        status_code=409,
+                        content={
+                            "detail": "active locks; rebind requires a quiet project"
+                        },
+                    )
+                )
+            apply_metamodel_half()
+            try:
+                res = _apply_batch(model, model_ops, restore=False)
+            except Exception:
+                unwind.unwind()
+                raise
+            unwind.model_res = res
         # b2. apply the artifact half, staged on this request's DB transaction.
         #     Seeded with the model id_map so an artifact payload may reference
         #     an element created earlier in the SAME batch. On failure both
         #     halves are undone (see the docstring's atomicity note).
-        # DB staging begins here, so register it BEFORE the call: a partial
-        # apply_artifact_ops flush must be discarded even though art_res never
-        # got assigned.
-        unwind.db_staged = True
         try:
             art_res = apply_artifact_ops(
                 db,
@@ -946,8 +1062,8 @@ def create_commit(
             unwind.unwind()  # undo every live half — see _CommitUnwind
             raise
         # b3. apply the view half IN PLACE, one all-or-nothing group per view
-        #     (every view id was resolved near the top of this SAME mutex
-        #     block, so the lookups below cannot miss). Seeded with both prior
+        #     (every view id was resolved by ``check_before``, so the lookups
+        #     below cannot miss). Seeded with both prior
         #     id_maps so a placement may reference an element or artifact
         #     created earlier in the SAME batch; the map accumulates across
         #     groups so a later group sees an earlier group's folder ids.
@@ -971,7 +1087,6 @@ def create_commit(
             view_results.append((vid, target, vres))
             view_id_map.update(vres.id_map)
         all_view_res = [vres for _vid, _view, vres in view_results]
-        rebound = mm_res is not None and mm_res.rebound
         # c. hard-reject structural blockers. Model content only: an artifact
         #    op's own validity was settled at apply time (b2), and an artifact
         #    row can never make the MODEL structurally invalid. The check is
@@ -980,42 +1095,32 @@ def create_commit(
         #    A schema swap can break entities the batch never touched (a type
         #    turned containment, a property turned element-valued), so a
         #    rebind checks the whole model.
-        structural = structural_blockers(
-            model,
-            [*model.elements, *model.relationships]
-            if rebound
-            else _structural_ids(model, res),
-        )
-        if structural:
-            unwind.unwind()  # undo every live half — see _CommitUnwind
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "detail": "structural validation blocker",
-                    "structural_blockers": [
-                        IssueOut.from_core(i).model_dump() for i in structural
-                    ],
-                },
+        if rebound:
+            structural = structural_blockers(
+                model, [*model.elements, *model.relationships]
             )
-        # d. commit accepted: bump rev, record batch
-        prev_rev = session.model_rev
-        unwind.prior_digest = session.state_digest_value
-        session.model_rev += 1
-        state_digest = session.advance_state_digest(res)
+        if structural:
+            return unwind.refuse(_structural_response(structural))
+        # d. commit accepted: fold the digest, record the batch
+        prev_rev = head_rev
+        new_rev = head_rev + 1
+        state_digest = format_digest(
+            fold_batch(_digest_before(session, head_row), model, res)
+        )
         # ONE journal entry per commit, spanning all four families: model
         # ops first, then artifact ops, then view ops, then metamodel ops.
         # The first three are mutually independent (see split_ops), so their
         # relative order carries no meaning — but metamodel LAST in the
         # INVERSE list is LOAD-BEARING, not cosmetic. Apply order is
-        # metamodel -> model -> artifact -> view (the rebind is hoisted so the
-        # model ops validate against the new schema), an inverse batch is
-        # replayed front-to-back, and an unwind must reverse apply order — so
-        # the metamodel inverse has to be the LAST thing undo applies. Move it
-        # earlier and undo would restore the OLD schema first and then run the
-        # model inverse against it, which is a 422 on exactly the migration
-        # batches this feature exists for. The FORWARD list keeps metamodel
-        # last purely for symmetry: no replay path applies metamodel ops at
-        # all (hydration skips the family, revert 409s across it), so its
+        # metamodel -> model -> artifact -> view (the rebind is hoisted to apply
+        # first, so the model ops validate against the new schema), an inverse
+        # batch is replayed front-to-back, and an unwind must reverse apply
+        # order — so the metamodel inverse has to be the LAST thing undo
+        # applies. Move it earlier and undo would restore the OLD schema first
+        # and then run the model inverse against it, which is a 422 on exactly
+        # the migration batches this feature exists for. The FORWARD list keeps
+        # metamodel last purely for symmetry: no replay path applies metamodel
+        # ops at all (hydration skips the family, revert 409s across it), so its
         # position there is inert today — but do not "tidy" the inverse list
         # to match some other order.
         # The view id_maps are seeded with the model+artifact maps (see b3),
@@ -1039,17 +1144,16 @@ def create_commit(
             *(op for vres in reversed(all_view_res) for op in vres.inverse_ops()),
             *(mm_res.inverse_ops() if mm_res else []),
         ]
-        unwind.rev_bumped = True
-        # e. persist to the durable journal; 500 + full rollback
-        #    on failure. The view blob (if touched) is staged INSIDE this same
-        #    try, on the same DB transaction _commit_head's
-        #    db.commit() will flush — so the view row and the Commit row
-        #    land or roll back together. It MUST be inside the try: staging
-        #    is a db.flush() (content.upsert_view), which can raise
-        #    on its own (FK/constraint/connection error) — the same failure
-        #    class this try/except exists to catch. Staging it outside would
-        #    let that exception escape every rollback below with model_rev
-        #    already bumped.
+        # e. write the head rows, stage the journal entry and commit: 500 + full
+        #    rollback on failure. The view blob (if touched) is staged INSIDE
+        #    this same try, on the same DB transaction ``db.commit()`` flushes —
+        #    so the view row and the Commit row land or roll back together. It
+        #    MUST be inside the try: staging is a db.flush() (content.upsert_view),
+        #    which can raise on its own (FK/constraint/connection error) — the
+        #    same failure class this try/except exists to catch. A project without
+        #    a model row journals nothing, but its artifact rows, view blobs and
+        #    metamodel/layout rows are real DB state that must not silently vanish
+        #    when the request session closes: the commit covers them too.
         commit_id = uuid.uuid4().hex
         issues_json = [i.model_dump() for i in payload.issues]
         new_view_revs: dict[str, int] = {}
@@ -1060,10 +1164,11 @@ def create_commit(
                         db, project_id, vid, blob=target.model_dump_json()
                     )
                     new_view_revs[vid] = view_row.view_rev
+            _write_head(db, project_id, model, res, rebound=rebound)
             persisted = _stage_commit(
                 db,
                 project_id,
-                rev=session.model_rev,
+                rev=new_rev,
                 author_id=user.id,
                 ops=canonical_ops,
                 inverse_ops=inverse_ops,
@@ -1080,40 +1185,23 @@ def create_commit(
                 _entity_states=capture_entity_states(model, res),
                 _state_digest=state_digest,
             )
-            if persisted:
-                _commit_head(db, project_id, model, res, rebound=rebound)
+            db.commit()
         except Exception as exc:
             # undo every live half — see _CommitUnwind. By this point that is
-            # all of them: the rev bump included, and the
-            # db.rollback() also discards the staged artifact + view +
-            # metamodel/layout rows.
+            # all of them: the db.rollback() also discards the
+            # staged head, artifact, view and metamodel/layout rows.
             unwind.unwind()
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
-        if (artifact_ops or view_ops or metamodel_ops) and not persisted:
-            # No durable model row (in-memory-only legacy project), so
-            # _stage_commit left the transaction open — but artifact rows,
-            # view blobs and metamodel/layout rows are real DB state that must
-            # not silently vanish when the request session closes. Commit them
-            # on their own; the journal entry is the only thing this project
-            # forgoes. (A rebind cannot actually reach here: its applier calls
-            # upsert_model_row, which self-creates the missing row — but the
-            # layout-only case can, and the guard costs nothing.)
-            #
-            # Inside the SAME try/except shape as the persist step above, and
-            # for the same reason: this is still a
-            # db.commit(), it can still raise on its own (constraint,
-            # connection), and by this point model_rev is bumped — an
-            # escaping raise would leave it standing with nothing rolled back. The ledger's db.rollback() also discards the
-            # staged artifact/view/metamodel rows this commit was flushing.
-            try:
-                db.commit()
-            except Exception as exc:
-                unwind.unwind()  # undo every live half — see _CommitUnwind
-                raise HTTPException(
-                    status_code=500, detail="failed to persist commit"
-                ) from exc
+        # e2. the rows are durable: the session model follows them
+        if not rebound:
+            _follow_commit(
+                session, project_id, res.canonical_ops, rev=new_rev, digest=state_digest
+            )
+        else:  # the session model took the batch in place
+            session.model_rev = new_rev
+            session.state_digest_value = parse_digest(state_digest)
         # f. snapshot — periodic normally (so a hot
         #    commit-only project doesn't accumulate an unbounded replay tail),
         #    FORCED after a rebind. The durable commit has
@@ -1127,15 +1215,15 @@ def create_commit(
                     # FORCED, not periodic: keeps "the replay tail never spans
                     # a rebind boundary" (hydration binds the CURRENT metamodel
                     # and would otherwise replay pre-rebind ops under it).
-                    write_snapshot(project_id, session, session.model_rev)
+                    write_snapshot(project_id, session, new_rev)
                 else:
-                    _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
+                    _maybe_periodic_snapshot(db, project_id, session, new_rev)
             except Exception:
                 logger.warning(
                     "post-commit snapshot failed for project %s at rev %s; "
                     "commit is durable, hydration will rebuild",
                     project_id,
-                    session.model_rev,
+                    new_rev,
                     exc_info=True,
                 )
         # f2. artifact half of the response/feed delta — shared with
@@ -1177,7 +1265,7 @@ def create_commit(
             # broadcast; the reload subsumes it.
             session.hub.broadcast(
                 rebind_event(
-                    rev=session.model_rev,
+                    rev=new_rev,
                     from_metamodel_id=mm_res.from_metamodel_id if mm_res else None,
                     to_metamodel_id=(mm_res.to_metamodel_id or "") if mm_res else "",
                     validation_error_count=payload.validation_error_count,
@@ -1186,7 +1274,7 @@ def create_commit(
         else:
             session.hub.broadcast(
                 commit_event(
-                    rev=session.model_rev,
+                    rev=new_rev,
                     prev_rev=prev_rev,
                     state_digest=state_digest,
                     commit_id=commit_id,
@@ -1225,7 +1313,7 @@ def create_commit(
     if released:
         mirror_session_leases(project_id, session)
     return CommitResponse(
-        model_rev=session.model_rev,
+        model_rev=new_rev,
         id_map=merged_id_map,  # both families' temp ids in one map
         changed_elements=[
             ElementOut.from_core(model.elements[eid]) for eid in res.changed_element_ids
@@ -1265,46 +1353,57 @@ def revert_commit(
     to a *range*): apply the inverse_ops of every commit after target_rev,
     newest-first, in restore mode, recorded as ONE new forward commit. The
     journal stays append-only; model_rev only moves forward; the revert is
-    itself revertible.
+    itself revertible. It runs as ``create_commit`` does: the ``ModelRow`` lock,
+    a partial model of the rows the inverse ops need, the structural check, then
+    the rows and the journal in one transaction.
     """
-    _, model = require_model(session)
-    if payload.base_rev != session.model_rev:
-        return JSONResponse(
-            status_code=409,
-            content={"detail": "stale base_rev", "model_rev": session.model_rev},
-        )
-    if payload.target_rev < 0 or payload.target_rev > session.model_rev:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "detail": "target_rev out of range",
-                "model_rev": session.model_rev,
-            },
-        )
-    if payload.target_rev == session.model_rev:
-        # no-op: nothing to revert —
-        # return current state WITHOUT bumping model_rev or recording a commit.
-        return CommitResponse(
-            model_rev=session.model_rev,
-            id_map={},
-            changed_elements=[],
-            changed_relationships=[],
-            deleted_element_ids=[],
-            deleted_relationship_ids=[],
-            commit_id="",
-            message="",
-            validation_error_count=0,
-        )
+    metamodel, mirror = require_model(session)
+    unwind = _CommitUnwind(session, db, mirror)
     with session.write_mutex:
+        head_row, head_rev = _open_transaction(db, project_id, session, unwind)
+        if payload.base_rev != head_rev:
+            return unwind.refuse(
+                JSONResponse(
+                    status_code=409,
+                    content={"detail": "stale base_rev", "model_rev": head_rev},
+                )
+            )
+        if payload.target_rev < 0 or payload.target_rev > head_rev:
+            return unwind.refuse(
+                JSONResponse(
+                    status_code=422,
+                    content={
+                        "detail": "target_rev out of range",
+                        "model_rev": head_rev,
+                    },
+                )
+            )
+        if payload.target_rev == head_rev:
+            # no-op: nothing to revert —
+            # return current state WITHOUT bumping model_rev or recording a commit.
+            unwind.unwind()
+            return CommitResponse(
+                model_rev=head_rev,
+                id_map={},
+                changed_elements=[],
+                changed_relationships=[],
+                deleted_element_ids=[],
+                deleted_relationship_ids=[],
+                commit_id="",
+                message="",
+                validation_error_count=0,
+            )
         commits = content.commits_after(db, project_id, payload.target_rev)
         for c in commits:
             if c.from_metamodel_id is not None or c.to_metamodel_id is not None:
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "detail": "revert across a metamodel swap is not yet supported",
-                        "rebind_rev": c.rev,
-                    },
+                return unwind.refuse(
+                    JSONResponse(
+                        status_code=409,
+                        content={
+                            "detail": "revert across a metamodel swap is not yet supported",
+                            "rebind_rev": c.rev,
+                        },
+                    )
                 )
         for c in commits:
             # Deliberate boundary, not a stub: reverting an artifact
@@ -1316,12 +1415,14 @@ def revert_commit(
             # naming the offending commit, checked on the RAW journal dicts so
             # it fires before anything is deserialized or applied.
             if any(op.get("kind") in ARTIFACT_OP_KINDS for op in c.ops):
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "detail": "revert across artifact changes is not yet supported",
-                        "artifact_commit_rev": c.rev,
-                    },
+                return unwind.refuse(
+                    JSONResponse(
+                        status_code=409,
+                        content={
+                            "detail": "revert across artifact changes is not yet supported",
+                            "artifact_commit_rev": c.rev,
+                        },
+                    )
                 )
         for c in commits:
             # PERMANENT refusal, unlike the artifact refusal above: a range
@@ -1330,12 +1431,14 @@ def revert_commit(
             # (folder ids reused after the target rev), and the view family
             # has no plan to lift this boundary.
             if any(op.get("kind") in VIEW_OP_KINDS for op in c.ops):
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "detail": "revert across view changes is not yet supported",
-                        "view_commit_rev": c.rev,
-                    },
+                return unwind.refuse(
+                    JSONResponse(
+                        status_code=409,
+                        content={
+                            "detail": "revert across view changes is not yet supported",
+                            "view_commit_rev": c.rev,
+                        },
+                    )
                 )
         for c in commits:
             # Same permanent boundary as the view family: a range revert
@@ -1348,12 +1451,14 @@ def revert_commit(
             # "artifact/view/metamodel ops reached the revert applier" 500
             # below instead of a clean, explainable 409.
             if any(op.get("kind") in METAMODEL_OP_KINDS for op in c.ops):
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "detail": "revert across metamodel changes is not supported",
-                        "metamodel_commit_rev": c.rev,
-                    },
+                return unwind.refuse(
+                    JSONResponse(
+                        status_code=409,
+                        content={
+                            "detail": "revert across metamodel changes is not supported",
+                            "metamodel_commit_rev": c.rev,
+                        },
+                    )
                 )
         affected = _affected_ids(commits)
         held = [
@@ -1362,19 +1467,21 @@ def revert_commit(
             if le.resource_id in affected
         ]
         if held:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": "resource locked by a peer",
-                    "conflicts": [
-                        {
-                            "resource_id": le.resource_id,
-                            "mode": le.mode.value,
-                            "holder_id": le.holder,
-                        }
-                        for le in held
-                    ],
-                },
+            return unwind.refuse(
+                JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "resource locked by a peer",
+                        "conflicts": [
+                            {
+                                "resource_id": le.resource_id,
+                                "mode": le.mode.value,
+                                "holder_id": le.holder,
+                            }
+                            for le in held
+                        ],
+                    },
+                )
             )
         # apply inverse_ops newest-first; deserialize the stored JSON op dicts.
         # split_ops is here as the TYPE narrowing only (deserialize_ops answers
@@ -1390,41 +1497,39 @@ def revert_commit(
             # dropping artifact/view/metamodel ops on the floor is precisely
             # the outcome this boundary exists to prevent, so a
             # narrowed guard must fail loudly instead of half-reverting.
+            unwind.unwind()
             raise HTTPException(
                 status_code=500,
                 detail="artifact/view/metamodel ops reached the revert applier",
             )
-        res = _apply_batch(model, combined, restore=True)
-        # Same ledger create_commit uses (see _CommitUnwind), narrowed to the
-        # model-only subset: revert refuses artifact/view batches above, so
-        # view_results stays empty and is never touched.
-        unwind = _CommitUnwind(session, db, model, model_res=res)
-        structural = structural_blockers(model, _structural_ids(model, res))
-        if structural:
-            unwind.unwind()  # undo every live half — see _CommitUnwind
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "detail": "structural validation blocker",
-                    "structural_blockers": [
-                        IssueOut.from_core(i).model_dump() for i in structural
-                    ],
-                },
+        try:
+            model, res, structural = load_and_apply(
+                db,
+                project_id,
+                metamodel,
+                combined,
+                restore=True,
+                post_apply=lambda m, r: structural_blockers(m, _structural_ids(m, r)),
             )
-        prev_rev = session.model_rev
-        unwind.prior_digest = session.state_digest_value
-        session.model_rev += 1
-        state_digest = session.advance_state_digest(res)
-        unwind.rev_bumped = True
+        except Exception:
+            unwind.unwind()
+            raise
+        if structural:
+            return unwind.refuse(_structural_response(structural))
+        prev_rev = head_rev
+        new_rev = head_rev + 1
+        state_digest = format_digest(
+            fold_batch(_digest_before(session, head_row), model, res)
+        )
         commit_id = uuid.uuid4().hex
         message = payload.message or f"Revert to rev {payload.target_rev}"
         issues_json: list[dict] = []
-        unwind.db_staged = True
         try:
+            _write_head(db, project_id, model, res)
             persisted = _stage_commit(
                 db,
                 project_id,
-                rev=session.model_rev,
+                rev=new_rev,
                 author_id=user.id,
                 ops=res.canonical_ops,
                 inverse_ops=res.inverse_ops(),
@@ -1436,22 +1541,24 @@ def revert_commit(
                 _entity_states=capture_entity_states(model, res),
                 _state_digest=state_digest,
             )
-            if persisted:
-                _commit_head(db, project_id, model, res)
+            db.commit()
         except Exception as exc:
             unwind.unwind()  # undo every live half — see _CommitUnwind
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
+        _follow_commit(
+            session, project_id, res.canonical_ops, rev=new_rev, digest=state_digest
+        )
         if persisted:
             try:
-                _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
+                _maybe_periodic_snapshot(db, project_id, session, new_rev)
             except Exception:
                 logger.warning(
                     "post-revert snapshot failed for project %s at rev %s; "
                     "commit is durable, hydration will rebuild",
                     project_id,
-                    session.model_rev,
+                    new_rev,
                     exc_info=True,
                 )
         # broadcast commit delta (mirrors create_commit steps g/h, minus lock
@@ -1466,7 +1573,7 @@ def revert_commit(
         ]
         session.hub.broadcast(
             commit_event(
-                rev=session.model_rev,
+                rev=new_rev,
                 prev_rev=prev_rev,
                 state_digest=state_digest,
                 commit_id=commit_id,
@@ -1485,7 +1592,7 @@ def revert_commit(
             )
         )
     return CommitResponse(
-        model_rev=session.model_rev,
+        model_rev=new_rev,
         id_map=dict(res.id_map),
         changed_elements=[
             ElementOut.from_core(model.elements[eid]) for eid in res.changed_element_ids

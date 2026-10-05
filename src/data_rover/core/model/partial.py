@@ -223,6 +223,9 @@ class PartialIndexSet(IndexSet):
             element_id not in complete
             and element_id not in known.absent
             and element_id not in known.created
+            # one id namespace: a loaded relationship's id is no element, so it
+            # has no edges or parents
+            and not dict.__contains__(self._model.relationships, element_id)
         ):
             raise NotLoaded((element_id,))
 

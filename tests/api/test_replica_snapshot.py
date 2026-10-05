@@ -33,6 +33,8 @@ from .conftest import (
     EMPTY_MODEL,
     install,
     commit_ops,
+    forget_entity_states,
+    unjournaled_bump,
 )
 from .test_snapshot_writers import _ProbingStore
 
@@ -174,12 +176,6 @@ def _rebind(client: TestClient) -> None:
     assert res.status_code == 200, res.text
 
 
-def _unjournaled_bump(client: TestClient) -> None:
-    """A rev that moves with no journal row."""
-    session = get_session()
-    session.set_model(session.model, announce=False)
-
-
 # --- ways no stored snapshot qualifies ----------------------------------------
 
 
@@ -194,12 +190,12 @@ def _no_snapshot_rows(client: TestClient, mp: pytest.MonkeyPatch) -> None:
         s.execute(delete(Snapshot))
 
 
-def _over_the_cap(client: TestClient, mp: pytest.MonkeyPatch) -> None:
-    mp.setattr("data_rover.api.commit_states.ENTITY_STATES_MAX", 1)
+def _without_entity_states(client: TestClient, mp: pytest.MonkeyPatch) -> None:
     _ops(
         client,
         [_node("A"), {**_node("B"), "temp_id": "tmp_b"}],
     )
+    forget_entity_states(_head())
 
 
 def _rebind_without_its_snapshot(client: TestClient, mp: pytest.MonkeyPatch) -> None:
@@ -216,13 +212,13 @@ def _past_the_revision_cap(client: TestClient, mp: pytest.MonkeyPatch) -> None:
 
 def _unjournaled_bump_hole(client: TestClient, mp: pytest.MonkeyPatch) -> None:
     _ops(client, [_node("A")])
-    _unjournaled_bump(client)
+    unjournaled_bump()
 
 
 _NONE_QUALIFIES: dict[str, Callable[[TestClient, pytest.MonkeyPatch], None]] = {
     "only-v1": _only_v1,
     "no-snapshot-rows": _no_snapshot_rows,
-    "over-the-entity-states-cap": _over_the_cap,
+    "without-entity-states": _without_entity_states,
     "rebind-without-its-snapshot": _rebind_without_its_snapshot,
     "past-the-revision-cap": _past_the_revision_cap,
     "unjournaled-bump": _unjournaled_bump_hole,

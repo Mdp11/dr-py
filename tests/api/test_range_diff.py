@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session as DbSession
 
-from data_rover.api import commit_states, content, db, importer, range_diff
+from data_rover.api import content, db, importer, range_diff
 from data_rover.api.commit_states import EntityStates
 from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
@@ -47,6 +47,7 @@ from .conftest import (
     head,
     commit_ops,
     append_baseline_row,
+    unjournaled_bump,
 )
 from .test_commits_metamodel_ops import _acquire_mm
 
@@ -693,13 +694,11 @@ def test_route_reconstructs_when_a_row_lacks_states(client: TestClient) -> None:
     assert _ids(out.elements.added) == ["a"]
 
 
-def test_route_reconstructs_an_over_cap_batch(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_route_reconstructs_a_batch_without_states(client: TestClient) -> None:
     b = _rev(client)
-    monkeypatch.setattr(commit_states, "ENTITY_STATES_MAX", 1)
     _ops(client, [_create("a"), _create("b")])
     head = _rev(client)
+    _null_states(head)
     out = _served(client, b, head)
     assert out.source == "reconstruction"
     assert _ids(out.elements.added) == ["a", "b"]
@@ -709,8 +708,7 @@ def test_route_reconstructs_an_over_cap_batch(
 def test_route_reconstructs_across_a_hole(client: TestClient) -> None:
     b = _rev(client)
     _ops(client, [_create("a", label="one")])
-    session = get_session()
-    session.set_model(session.model, announce=False)
+    unjournaled_bump()
     _ops(client, [_create("c", label="three")])
     head = _rev(client)
     with _db() as s:
