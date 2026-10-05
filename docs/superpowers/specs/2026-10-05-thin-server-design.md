@@ -510,3 +510,48 @@ One plan, ordered so each task leaves the branch green.
 - E's CLI.
 - Moving leases or the feed hub to Redis or Postgres (CN-10, not before about 500 users).
 - K-113, K-114, K-115.
+
+## Rulings from the plan inventory (2026-10-05)
+
+The plan's inventory, taken at `700b39f0`, found these points where the code contradicts or
+goes beyond the sections above. Each ruling overrides those sections.
+
+1. **`core/metamodel/diff.py` stays.** `POST /metamodel/structural-diff` (the engine's Preview
+   calls it, `frontend/src/lib/api/metamodel.ts:76`) and the history diff of rebind commits
+   (`api/commit_diff.py:58,335`) use it. It reads no model.
+2. **`core/search/criteria.py` keeps its `Criterion` models.** The navigation and table schemas
+   import them. Only the matchers go.
+3. **`migration/` needs the whole validation pipeline** (`migration/legacy.py:27,591`).
+   `core/validation`'s pipeline, scope, issue and all six validators stay. The server stops
+   calling them, except the structural gate.
+4. **`POST /rules/lint` stays, and `core/validation/rules/compile.py` with it.** The rules
+   editor calls the route, and it reads no model.
+5. **`/snippets/docs` keeps `core/script/facade_src.py`.**
+6. **Generated engine sources.** The golden driver writes 8 engine source files from Python. The
+   ones whose source survives (Unicode and regex tables from the stdlib, `facade.generated.ts`
+   from `facade_src`, the xlsx tables) get a small generator under `scripts/`, with a staleness
+   test. `harness.generated.ts` is engine-owned from now on, since its Python source goes.
+   `scripts/script_corpus_snapshot.py` gets its corpus inline.
+7. **Bench inputs.** An oracle writer under `scripts/` stays if it imports no deleted module.
+   Otherwise its bench case is deleted with it.
+8. **Seeding API tests.** Many API test files seed and assert through removed routes:
+   `POST /model` (52 files), `/model/summary` (40), `/model/ops` (34), `/model/undo` (15),
+   `/model/upload` (17). They move to test helpers before the routes go. The helpers are built
+   on an `install_model` importer function and a `head()` reader, whose implementations change
+   underneath them as the plan proceeds. Undo tests are deleted or become revert tests.
+9. **The trigram index leaves `IndexSet`** (`core/model/indexes.py` 263, 506, 534, 851-890).
+10. **Client-reported counts.** `CommitRequest` gains `validation_error_count` and `issues`,
+    which the frontend sends from its preview. A revert has no client preview, so it stores
+    `validation_error_count` as NULL (the column becomes nullable), and the history shows "—".
+11. **Rebind checks tighten.** Today a rebind that drops a type still in use, or a property
+    still set, lands with conformance issues. After F it is refused with a 422 naming the first
+    offending entities, because the thin server cannot hold rows its applier does not
+    understand. The user deletes or migrates them first.
+12. **Open progress.** The journey does not read the engine's sweep progress
+    (`open-journey.ts:422-427`). Removing the `/model/status` poll drops the server half of
+    `journeyStatus`, and nothing replaces it.
+13. **A closed replica gate.** While the replica is opening or not yet seeded, `route()` used
+    to send calls to the server. Now it waits for the gate to open.
+14. **The snapshot contract test** compares the rows writer with the kept encoder,
+    `encode_snapshot_v2(build_model_from_dicts(...))`, over smart-city and the `snapshot_v2`
+    fixture model. There is no per-golden-model v2 fixture family.
