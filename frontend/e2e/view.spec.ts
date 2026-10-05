@@ -395,12 +395,12 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 	await expect(drawer.getByText(/^Removed .* from /)).toBeVisible();
 });
 
-test('excluded pool: collapsed by default (no fetch), expands, and state persists', async ({
+test('excluded pool: collapsed by default, expands from the replica, and state persists', async ({
 	page
 }) => {
 	test.setTimeout(120_000);
 
-	// Record excluded-pool fetches across the whole session.
+	// The pool reads from the replica: the server's excluded-roots route is never requested.
 	const excludedHits: string[] = [];
 	page.on('request', (r) => {
 		if (new URL(r.url()).pathname.endsWith('/model/containment/roots/excluded')) {
@@ -410,15 +410,15 @@ test('excluded pool: collapsed by default (no fetch), expands, and state persist
 
 	await loadView(page);
 
-	// Collapsed by default: header visible, body absent, and NO excluded fetch fired.
+	// Collapsed by default: header visible, body absent.
 	await expect(poolHeader(page)).toBeVisible();
 	await expect(pool(page)).toHaveCount(0);
 	expect(excludedHits).toHaveLength(0);
 
-	// Expanding fetches (or reuses the already-fetched first page) and shows the pooled element.
+	// Expanding shows the pooled element.
 	await poolHeader(page).click();
 	await expect(poolRow(page, 'Beta')).toBeVisible();
-	expect(excludedHits.length).toBeGreaterThan(0);
+	expect(excludedHits).toHaveLength(0);
 
 	// Expanded state persists across a reload.
 	await page.reload();
