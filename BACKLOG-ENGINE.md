@@ -1130,6 +1130,30 @@ fixture generator, the request id 90 collides with an auto-numbered 90 in group 
 `_model()` aliases module-level property dicts into each group's model (deepcopy would isolate
 them), and there is no dangling-far-endpoint case nor a write dict missing `type_name`/`id`.
 
+### K-124 · Ten frontend tests drive a canned engine seam, not the real engine · `open` · *2026-10-07*
+`frontend/src/lib/api/__tests__/engine-stub.ts` stands in for the engine in ten test files,
+against the rule that tests run the real engine. Fix direction: move each file onto the
+in-process engine link (`dispose()` it) and delete the stub, one file at a time.
+
+### K-125 · `checkout.artifact.test.ts` fakes `setInterval` · `open` · *2026-10-07*
+`frontend/src/lib/state/__tests__/checkout.artifact.test.ts` replaces `setInterval`, against
+the no-fake-timers rule. Fix direction: drive the poll through the store's own tick or wait on
+the observable state.
+
+### K-126 · Two e2e assertions cannot fail · `open` · *2026-10-07*
+The retired-route check in `frontend/e2e/engine-mode.spec.ts` and the
+`/model/containment/roots/excluded` response listener in `frontend/e2e/view.spec.ts:406` watch
+routes the server no longer serves, so they pass whatever the app does. Fix: assert on what
+the engine path does instead (a request that must not happen, counted from the page), or drop them.
+
+### K-127 · The Metamodel tab's "Preview changes" stays green for an in-use type rename · `open` · *2026-10-07*
+Renaming a type that has instances is refused (spec ruling 11; a retype op would lift that).
+The commit drawer blocks it and the form note warns, but `candidateIssues` (Metamodel tab
+"Preview changes") reports no issue. Make it report the engine's refusal. Also: the four golden
+`preview_rebind` steps in `engine/fixtures/golden/metamodel_candidate.json` are superseded by
+ruling 11 (`NOW_BLOCKED` in `engine/test/service/candidate.test.ts:748` holds the new answers);
+the frozen fixture takes a reviewed note or regeneration saying so.
+
 ### Considered by the exports plan and deferred
 
 Left out of C's plan 5, each on purpose:

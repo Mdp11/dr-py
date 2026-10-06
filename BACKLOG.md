@@ -1270,6 +1270,56 @@ passing the value through for validation to report. The same unguarded test in
 (`isinstance(value, str) and value in FLOAT_INFINITIES`). Fix: the same guard, with a
 migration test holding a dict and a nested list on a float property.
 
+### K-116 · `POST /metamodel` is a check-then-act race · `open` · *2026-10-07*
+`api/routes/metamodel.py:25` reads `element_count` without the model-row lock, then sets
+`state.metamodel` and `state.model_rev` (:41) outside `write_mutex` before `db.commit()`
+(:54). A first commit landing between the read and the commit is wiped by
+`head.write_empty_baseline` (:53), and two writers can mint the same rev. Pre-existing and
+API-only, but the route now clears head rows. Fix: take the model-row lock first, re-check
+`element_count` under it, and swap state under `write_mutex` after the commit succeeds.
+
+### K-117 · The commit load queries `subtree_ids` once per attachment-frontier step · `open` · perf · *2026-10-07*
+`api/commit_load.py:463` runs one recursive-CTE query per frontier step of the attachment
+fixpoint, under `write_mutex`: a chain of n row attachments costs n queries. A viewer reaches it
+through `POST /commits/preview`. Fix direction: batch the frontier's roots per pass (the
+queries already take a root set), or bound the fixpoint's passes and refuse past it.
+
+### K-118 · Cloning a project holds the source's row lock for the whole copy · `open` · *2026-10-07*
+`api/importer.py:348` takes `content.lock_model_row(s, source_id)` (`FOR UPDATE`) so no commit
+lands mid-copy, and any member, a viewer included, can clone, which stalls the source's
+commits for the copy's duration. Fix direction: copy in a `REPEATABLE READ` transaction
+(one snapshot, no row lock); keep the lock only if SQLite dev mode needs it.
+
+### K-119 · `CommitRequest.issues` is unbounded · `open` · *2026-10-07*
+`api/schemas.py:711` accepts any number of `IssueOut`, stored with the commit as given. The
+engine answers at most `ISSUES_RESPONSE_MAX` (5000, `engine/src/validation/bodies.ts:7`), so a
+longer list is not from the engine. Fix: `max_length=5000` on the field (422 past it), with a
+test at the cap and one over it.
+
+### K-120 · File SQLite dev mode runs without WAL · `open` · *2026-10-07*
+`api/db.py:54-73` sets only `PRAGMA foreign_keys=ON` on a file DSN, so the snapshot job's read
+transaction and a commit's write can fail with "database is locked" in dev. Fix: for a file
+DSN, set `journal_mode=WAL` (and a `busy_timeout`) in the connect listener.
+
+### K-121 · A rebind's O(model) row checks run before the lease check · `open` · *2026-10-07*
+In `api/routes/commits.py` `apply_metamodel_half()` (:989) runs the candidate row checks
+(`rebind_check.py`) before `check_before` (:898), whose `verify_held` (:916) is the lease
+check, so a caller without the `mm` lease pays the whole-project scans before the 409. Fix:
+verify the lease for a rebind before the metamodel half, as the non-rebind path does.
+
+### K-122 · `rebind_check.py`'s "first five ids" follow the database collation · `open` · *2026-10-07*
+The two id `ORDER BY` clauses (`api/rebind_check.py:99` `target_id`, `:163` `referencer_id`)
+sort by the column's collation, so on Postgres with a non-C collation the first five ids differ
+from the engine's code-point order that the parity fixture `rebind_rows.json` holds. Fix:
+`.collate("C")` on both, then re-run the Postgres lane (`T-17`).
+
+### K-123 · The in-transaction `ANALYZE` during import serializes concurrent imports · `open` · perf · *2026-10-07*
+`api/import_stream.py:535` runs `ANALYZE elements, relationships, entity_refs` inside the
+import transaction, which holds `SHARE UPDATE EXCLUSIVE` on the head tables until it commits,
+so imports of different projects serialize from that point (no deadlock). Admin-only and not
+measured on a multi-project database. Fix direction: measure with two concurrent imports on
+Postgres; if it matters, analyze after commit or per-partition.
+
 The client-engine program's issues (`K-29` → `K-63`, but for `K-33` and `K-34` above) are in
 `BACKLOG-ENGINE.md`.
 
@@ -1298,6 +1348,8 @@ The client-engine program's issues (`K-29` → `K-63`, but for `K-33` and `K-34`
 | C-17 | `done` (2026-08-28, feat/table-ux-batch) — `columnRefs` returns `{index, why}`; the error now reads `column N reads input "x" from column M` for a script input. | script-column-inputs final review, 2026-08-27 |
 | C-18 | `ScriptInputsEditor.svelte` calls `nameError(inp.name, i)` twice per row per render (the `{#if}` guard and the span body); a per-row `$derived` errors array is tidier. Imperceptible at ≤50 inputs. | script-column-inputs final review, 2026-08-27 |
 | C-19 | Mid-file imports appended by TDD steps in `tests/table/test_schema.py`, `tests/script/test_embed_cache.py`, `tests/api/test_script_sweep.py` (ruff E402 — invisible because no task lints `tests/`, see C-11); plus `core/script/README.md` ~§142 states the `step`/`transform` one-arg rule twice within four lines. | script-column-inputs final review, 2026-08-27 |
+| C-24 | The api package keeps model-building code only scripts and tests call: `routes/_snapshot.py::build_model_from_dicts` and its load guards (`Model(` construction, `seen_ids`), `snapshot_codec.decode_snapshot`, `importer.install_model` / `_refresh_mirror` (test-only callers). Move them to `scripts/` or test helpers and drop them from the package; the K-29, K-35 and K-95 closing notes say they stay. | 2026-10-07 |
+| C-25 | Thin-server minor cleanups, still true at HEAD: `tests/api/conftest.py:190` `head()` is O(model) per call, and `model_rev`/`element_count` go through it; `snapshot_job._jobs` (:43) is never pruned; CLAUDE.md's "The Python core's evaluators are gone" is overbroad (`structural.py` and `migration/legacy.py` keep validators); `BACKLOG-ENGINE.md:493` ("so the freeze allows it") reads wrong; `engine/test/service/candidate.test.ts:305` "skips an unreadable working rule set" asserts only that nothing throws. | 2026-10-07 |
 
 `C-20` is in `BACKLOG-ENGINE.md`.
 
@@ -1430,6 +1482,18 @@ observed rate (5 of 14 paired, 2 of 2 full) is higher than the base's (2 of 11, 
 samples do not distinguish the two, so a higher rate on the branch is not ruled out. Not
 analysed further. Fix direction: wait on the drop's staged op instead of the badge's clock, or
 find why the drag sometimes lands without staging.
+
+### T-16 · `test_admin.py::test_demote_and_delete_one_of_two_admins_succeeds` fails once in a while with 401 "missing session" · `open` · *2026-10-07*
+Seen once in a full `core-test` run (1621 passed, 1 failed) right after a cookie login, and
+16 of 16 in three re-runs of the file; no auth change in the branch it appeared on. Suspected
+cause: WSL clock stepping against the session cookie's expiry. Fix direction: freeze the clock
+the cookie provider reads in the test, so no step can expire a fresh session.
+
+### T-17 · The Postgres lane has not run since `6a32dbe1` · `open` · *2026-10-07*
+`pixi run core-test-pg` (`tests/api/pg`) last ran at `6a32dbe1`, before the rebind row checks
+(`api/rebind_check.py`, fixture `rebind_rows.json`), the import changes and the head-row
+statistics step. Re-run it once Docker is back (`docker compose up -d postgres`), and
+recheck `K-122` (collation) and `K-123` (concurrent imports) there.
 
 ### O-1 · `.env.example` ships the lease mirror commented out · `open` · by design
 `docker-compose` starts a `redis` service unconditionally, but `DATA_ROVER_REDIS_URL` is
