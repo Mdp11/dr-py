@@ -77,7 +77,7 @@ describe('validateAll', () => {
 
 		const issues = await validateAll();
 
-		expect(spy).toHaveBeenCalledWith({ ops: [op], baseRev: 0, batchIds: [1] }, undefined);
+		expect(spy).toHaveBeenCalledWith({ batchIds: [1] });
 		expect(issues).toEqual([
 			{
 				severity: 'error',
@@ -97,7 +97,7 @@ describe('validateAll', () => {
 
 		await expect(validateAll()).resolves.toEqual([]);
 
-		expect(spy).toHaveBeenCalledWith({ batchIds: [] }, undefined);
+		expect(spy).toHaveBeenCalledWith({ batchIds: [] });
 		expect(bodies).toEqual([]);
 	});
 
@@ -121,7 +121,7 @@ describe('validateAll', () => {
 			const spy = vi.spyOn(validationApi, 'validateModel');
 			const issues = await validateAll();
 
-			expect(spy).toHaveBeenCalledWith({ batchIds: [] }, undefined);
+			expect(spy).toHaveBeenCalledWith({ batchIds: [] });
 			expect(issues.filter((issue) => issue.origin === 'uncommitted')).toEqual(
 				ruleIssues('de-or-fr', NOT_DE_OR_FR, 'uncommitted')
 			);

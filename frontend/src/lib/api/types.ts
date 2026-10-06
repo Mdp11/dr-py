@@ -57,18 +57,6 @@ export const CreateRelationshipRequestSchema = z.object({
 });
 export type CreateRelationshipRequest = z.infer<typeof CreateRelationshipRequestSchema>;
 
-export const InlineModelSchema = z.object({
-	elements: z.array(ElementSchema),
-	relationships: z.array(RelationshipSchema)
-});
-export type InlineModel = z.infer<typeof InlineModelSchema>;
-
-export const ValidateRequestSchema = z.object({
-	scope: z.array(z.string()).optional(),
-	inline: InlineModelSchema.optional()
-});
-export type ValidateRequest = z.infer<typeof ValidateRequestSchema>;
-
 export const PropertyDefSchema = z.object({
 	name: z.string(),
 	datatype: z.string(),

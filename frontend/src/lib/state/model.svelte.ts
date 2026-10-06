@@ -1,7 +1,7 @@
 import type { Issue } from '$lib/api/types';
 import { validateModel } from '../api/validation';
 import * as engine from './model-engine.svelte';
-import { getClientConfig, getModelRev, resetSharedStore } from './model-shared.svelte';
+import { resetSharedStore } from './model-shared.svelte';
 import type { ModelOp } from './ops';
 
 /**
@@ -79,9 +79,7 @@ export function captureStaged(): { ops: ModelOp[]; batchIds: number[] } {
  */
 export async function validateAll(): Promise<Issue[]> {
 	await engine.stagedSettled();
-	const { ops, batchIds } = captureStaged();
-	const options = ops.length > 0 ? { ops, baseRev: getModelRev(), batchIds } : { batchIds };
-	return validateModel(options, getClientConfig());
+	return validateModel({ batchIds: captureStaged().batchIds });
 }
 
 /** Drop every cache, counter, queue, and error — for tests and for replacing the model (load/upload flows call this, then refreshSummary()). */

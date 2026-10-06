@@ -35,72 +35,9 @@ import {
 } from './issues-engine';
 import { server } from './server';
 
-const BASE = 'http://api.test/api/v1';
-const cfg = { baseUrl: BASE };
-
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
-
-describe('validateModel on the server', () => {
-	it('POSTs with inline body and parses Issue[]', async () => {
-		let body: unknown;
-		server.use(
-			http.post(`${BASE}/model/validate`, async ({ request }) => {
-				body = await request.json();
-				return HttpResponse.json([{ severity: 'error', message: 'oops', target_ids: ['e1'] }]);
-			})
-		);
-		const inline = {
-			elements: [{ id: 'e1', type_name: 'Block', properties: {}, rev: 0 }],
-			relationships: []
-		};
-		const result = await validateModel({ inline }, cfg);
-		expect(body).toEqual({ inline, scope: undefined });
-		expect(result).toEqual([
-			{ severity: 'error', message: 'oops', target_ids: ['e1'], check: '', origin: 'on_server' }
-		]);
-	});
-
-	it('POSTs with scope only and parses warnings', async () => {
-		let body: unknown;
-		server.use(
-			http.post(`${BASE}/model/validate`, async ({ request }) => {
-				body = await request.json();
-				return HttpResponse.json([{ severity: 'warning', message: 'hint', target_ids: [] }]);
-			})
-		);
-		const result = await validateModel({ scope: ['e1', 'e2'] }, cfg);
-		expect(body).toEqual({ inline: undefined, scope: ['e1', 'e2'] });
-		expect(result[0].severity).toBe('warning');
-	});
-
-	it('POSTs staged ops with base_rev when ops are present', async () => {
-		let body: unknown;
-		server.use(
-			http.post(`${BASE}/model/validate`, async ({ request }) => {
-				body = await request.json();
-				return HttpResponse.json([
-					{ severity: 'error', message: 'bad', target_ids: ['e1'], origin: 'uncommitted' }
-				]);
-			})
-		);
-		const ops = [{ kind: 'update_element', id: 'e1', properties_patch: { p: 1 } }] as const;
-		const result = await validateModel({ ops: [...ops], baseRev: 7 }, cfg);
-		expect(body).toEqual({ ops: [...ops], base_rev: 7 });
-		expect(result[0].origin).toBe('uncommitted');
-	});
-
-	it('a server answer defaults origin to on_server when it omits it', async () => {
-		server.use(
-			http.post(`${BASE}/model/validate`, async () =>
-				HttpResponse.json([{ severity: 'warning', message: 'x', target_ids: ['e1'] }])
-			)
-		);
-		const result = await validateModel({ scope: ['e1'] }, cfg);
-		expect(result[0].origin).toBe('on_server');
-	});
-});
 
 describe('the issues on the engine', () => {
 	const made: { dispose(): void }[] = [];
@@ -160,7 +97,7 @@ describe('the issues on the engine', () => {
 		const ops = [rename('e_000001', 'fixed')];
 		const batch = await engine.stage(ops);
 
-		const issues = await validateModel({ ops, baseRev: project.rev, batchIds: [batch] });
+		const issues = await validateModel({ batchIds: [batch] });
 
 		expect(issues).toEqual([
 			{ ...tooLong('on_server'), target_ids: ['e_000002'] },
@@ -200,28 +137,12 @@ describe('the issues on the engine', () => {
 		expect(issues.some((issue) => issue.message.startsWith('Containment cycle'))).toBe(true);
 	});
 
-	it('an inline model or a scope, and ops no batch names, go to the server', async () => {
-		const engine = await issuesEngine(made);
-		const inline = { elements: [], relationships: [] };
-		const ops = [rename('e_000001', TOO_LONG)];
-
-		await validateModel({ inline });
-		await validateModel({ scope: ['e_000001'] });
-		await validateModel({ ops, baseRev: 0 });
-
-		expect(engine.requests).toEqual([
-			{ route: 'validate', body: { inline } },
-			{ route: 'validate', body: { scope: ['e_000001'] } },
-			{ route: 'validate', body: { ops, base_rev: 0 } }
-		]);
-	});
-
 	it('a batch the engine does not stage is its 409, after one more try', async () => {
 		const engine = await issuesEngine(made);
 		const ops = [rename('e_000001', TOO_LONG)];
 		const batch = await engine.stage(ops);
 
-		const stale = validateModel({ ops, baseRev: 0, batchIds: [batch + 1] });
+		const stale = validateModel({ batchIds: [batch + 1] });
 
 		await expect(stale).rejects.toBeInstanceOf(ConflictError);
 		await expect(stale).rejects.toMatchObject({ status: 409, message: 'stale staged batches' });
@@ -238,7 +159,7 @@ describe('the issues on the engine', () => {
 		const local = { strict: false, batchIds: [batch] };
 
 		const list = await getModelIssues();
-		const validated = await validateModel({ ops, baseRev: project.rev, batchIds: [batch] });
+		const validated = await validateModel({ batchIds: [batch] });
 		const preview = await previewCommit(project.rev, ops, undefined, local);
 
 		for (const issues of [list.issues, validated, preview.issues]) {
@@ -356,7 +277,7 @@ describe('the issues on the engine', () => {
 			const batch = await engine.stage(ops);
 
 			const list = await getModelIssues();
-			await validateModel({ ops, baseRev: 0, batchIds: [batch] });
+			await validateModel({ batchIds: [batch] });
 			await previewCommit(0, ops, undefined, { strict: false, batchIds: [batch] });
 
 			expect(list.rules_status?.skipped).toMatchObject([{ artifact_id: 'r1', set_name: 'Rules' }]);

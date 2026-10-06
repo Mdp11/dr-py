@@ -320,9 +320,9 @@
 		// rebind commit always forces a snapshot there.
 		markStructureChanged();
 		await refreshSummary();
-		// The cheap read of the server's maintained issue store — NOT
-		// runValidation(), which is POST /model/validate with no ops, i.e. the
-		// full pipeline over a model that can be ~80 MB. (It would also install a
+		// The cheap read of the engine's maintained issue store — NOT
+		// runValidation(), the full validation pipeline over a model that can be
+		// ~80 MB. (It would also install a
 		// Validate overlay from a run the user never asked for, switching the
 		// whole UI into overlay mode after someone else's rebind.) The
 		// committer's own rebind refetches the same way (`adoptReboundMetamodel`).
