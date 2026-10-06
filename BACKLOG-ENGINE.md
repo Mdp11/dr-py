@@ -135,7 +135,7 @@ Size: very large.
 
 ## 2. Diagnosed issues
 
-### K-29 · The bulk loader accepts a relationship whose id an element already holds · `open` · *2026-09-18*
+### K-29 · The bulk loader accepts a relationship whose id an element already holds · `done` · *2026-09-18*
 `routes/_snapshot.py`'s guards keep one `seen_ids` set per kind, so `build_model_from_dicts`
 loads an element and a relationship sharing an id, while the mutation boundary
 (`restore_element` / `restore_relationship`) refuses exactly that and the state digest (CT-3)
@@ -143,6 +143,7 @@ folds both kinds into one namespace — a same-`rev` pair cancels out of it. The
 loader refuses such a snapshot (`Relationship id 'x' is already an element id`), so a project
 imported with one would open on the server and not in the browser. Fix: check the other
 kind's ids in `_guard_relationship`; the file is outside the MR-3 freeze.
+Closed: the server's bulk loader is gone from the import path; the streamed import checks, in SQL, an id on both an element and a relationship. `routes/_snapshot.py::build_model_from_dicts` and its guards stay without a server caller. Commit fa7efc0d.
 
 ### K-32 · The `ord` re-sort after a rewind is watched · `open` · perf · *2026-09-18*
 The first ordered iteration after a rewind that put an entity back at an old `ord` re-sorts
@@ -159,7 +160,7 @@ the first read after it takes 0.2 ms — an update is rewound in place; the firs
 unstaging one deleted element re-sorts in 20 ms; 100 single-op batches stage in 22 ms and a
 delta rebases over them in 12 ms *(measured, 2026-09-22)*.
 
-### K-35 · The server's v2 decoder accepts a line holding two documents; the engine refuses it · `open` · *2026-09-19*
+### K-35 · The server's v2 decoder accepts a line holding two documents; the engine refuses it · `done` · *2026-09-19*
 `api/snapshot_codec.py::_decode_v2` joins the entity lines with `,` and parses the lot as one
 JSON array, so a line holding `{…},{…}` parses as two entities — shifting every entity after
 it, and the element/relationship split with them — while only the line count is checked. The
@@ -167,8 +168,9 @@ engine's `parseLines` refuses such a line. No writer emits one, so
 nothing breaks today; a hand-made or corrupted blob could hydrate on the server and fail in the
 browser. Decide whether the server should refuse it too (cost: `K-34`'s decode path, the
 place to change) or whether the engine's stricter reading is enough.
+Closed: the server no longer decodes a snapshot to open a project (hydration is gone), and the engine's stricter reading is the only one on a replica's path. `snapshot_codec.decode_snapshot` stays for tests. Commit 34c1e51d.
 
-### K-36 · The tail's "no entity states" test is unverified on Postgres · `open` · *2026-09-19*
+### K-36 · The tail's "no entity states" test is unverified on Postgres · `done` · *2026-09-19*
 `content.commit_tail_marks` treats a row as lacking `entity_states` when the column is SQL NULL
 OR `CAST(entity_states AS VARCHAR) = 'null'` — a Python `None` in a JSON column is stored as
 JSON `null`. The hermetic suite runs it on SQLite only; on Postgres it rests on `json → varchar`
@@ -177,6 +179,7 @@ plan 2 landed. Check once against the dev stack:
 `select cast('null'::json as varchar) = 'null', cast(null::json as varchar) is null;` must
 answer `t, t`. If it does not, the descriptor and the tail would call an over-cap commit
 expressible and serve a delta with no entities.
+Closed: `tests/api/pg/test_pg.py::test_tail_null_cast` runs the cast on Postgres (`pixi run core-test-pg`). Commit 8b1b9352.
 
 ### K-37 · A `model_rev` bump with no journal row is silent to a replica · `done` · *2026-09-22*
 `POST /model/upload`, `POST /metamodel`, `DELETE /metamodel` and the legacy element routes
@@ -682,7 +685,7 @@ limit in 1 of 4 full `engine-test` runs at a load average of about 25, and passe
 the other three. Fix direction: find what the test waits on that a loaded host stretches, and wait
 on that signal instead of the clock.
 
-### K-80 · The server's `/metamodel/diff` stays O(model) under the write mutex, open to viewers · `open` · perf · *2026-09-29*
+### K-80 · The server's `/metamodel/diff` stays O(model) under the write mutex, open to viewers · `done` · perf · *2026-09-29*
 With the `metamodel` surface on the engine, the editor's Preview no longer reaches
 `POST /metamodel/diff` and a rebound commit's preview no longer reaches `POST /commits/preview`
 with the rebind, but both routes stay: they are the fallback (a `gone` engine, a lint that gives no
@@ -692,6 +695,7 @@ mutex, so it is O(model) there, and a viewer may call it (`model_half` itself ru
 mutex). Fix direction: none before F, which retires the server's evaluation; until then a caller
 outside the shell (a script, a peer) can hold the mutex for seconds, and a role check or a
 whole-model budget on the route is the stopgap.
+Closed: `POST /metamodel/diff` and `candidate_issues` are deleted; the editor's Preview is the engine's, and the server keeps `POST /metamodel/structural-diff`, which reads no model. Commit 92aa2f8a.
 
 ### K-81 · "Includes staged changes" can show over a preview the engine did not answer from the working copy · `open` · *2026-09-29*
 The editor records `metamodelIncludesStaged()` with the preview when its answer lands
@@ -778,13 +782,14 @@ sit off the heap until the transfer. Fix direction: find what the longest step h
 `Meter`'s 1,024-entity step over large entities, or the part writer's encode and copy at a part
 boundary) and make it end sooner; the heap row wants an `arrayBuffers` figure beside it.
 
-### K-90 · The server's download is buffered into a Blob before the save starts · `open` · *2026-09-29*
+### K-90 · The server's download is buffered into a Blob before the save starts · `done` · *2026-09-29*
 `downloadModel()` answers a `Blob` on both sides so the `always` digest shadow can read one
 value; on the server side that buffers `GET /model/download`'s whole body (about 120 MB at M)
 in the browser before the save picker's writable receives any of it, where the raw `Response`
 used to stream into it. The engine side builds its Blob from the 4 MiB parts the same way.
 Fix direction: on the server side, tee the body into the save while the digest reads the other
 branch, or drop the server side when the engine's is the only one left (F).
+Closed: the frontend has no server side of the download; the engine's Blob is built from its 4 MiB parts. Commit a622161e.
 
 ### K-91 · The download route's tests time out under a loaded full run · `open` · *2026-09-29*
 `frontend/src/lib/api/__tests__/download-route.test.ts` "answers the engine's committed bytes as

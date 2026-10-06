@@ -14,7 +14,7 @@ are promoted into this directory.
 | C | Evaluation | done — eight plans built (tables evaluated in the engine, staged artifacts included: row build, sort and every cell ported from the Python oracle into `engine/src/table/`, a 16-entry order cache keyed on the resolved definition's semantic text and stamped `(rev, staged_version)`, `artifacts_version` added to `changed` so a staged table or navigation edit re-pages an open table without a reload, a table that reaches a script served by the server from committed state behind a `table-fallback` marker, and two Python table bugs fixed on both sides with fixtures — a capped build now runs every later column over the kept keys, so a capped table's rows are a prefix of the uncapped build's, and a mixed-shape property sort no longer 500s; at M the table gate (112,200-row scope capped at 50,000 rows: build + sort + every cell) is 591 ms of CN-3's 3 s, its longest step 13.3 ms; `evaluateTable`'s first page (500 rows) 194 ms in Node and in Chromium, a cached page 5.9 ms / 9.9 ms; parity with the oracle equal over the 50,000 rows and over 18,523 issues; installing rules in the browser (compile + rescan) 372 ms, its longest slice 50 ms, not optimized here (`K-71`) *(measured, Node 22.22.3, Chromium 141, 4 vCPU Xeon 2.1 GHz, 2026-09-25)*; plan 5 serves every export from the engine over the working copy, staged edits and staged artifacts included: the four formats (CSV, JSON, JSONL, xlsx), the split zip, and an exporter run with its manifest (`model_rev` the committed rev), rendered in `engine/src/export/` with the Python writers as oracle (held to `export_bytes.json`, and byte-equal at M: CSV 1,946,256 B, JSON 5,815,429 B), the xlsx and the zip written by the engine's own writers in `zipSync`'s layout (`fflate` 0.8.3 is the engine's first runtime dependency), rendering sliced across steps and the bytes transferred across the port as parts; the `exports` surface defaults to the engine behind the dev shadow (which compares digests of the files), the table's and the exporter's Export controls say "Includes staged changes" while edits are staged, and a table that reaches a script is the server's file on committed state behind an `export-fallback` marker; at M, 50,000 rows: CSV 597 ms with a 9.5 ms longest step, JSON 797 ms / 15 ms, xlsx 1,064–1,091 ms / 17–18 ms, a 50,000-member split zip 3.3–3.5 s / 143–155 ms (its longest step partitions and names the files, `K-78`); in Chromium the longest export slice is 23 ms (491 ms before slicing), xlsx 676 ms, CSV 322 ms; the degraded-cell path is unreachable in the engine until D (`K-74`) *(measured, Node, WSL2 host, 2026-09-28)*); plan 7, built before 6 (it needs plans 2 and 3 only), answers the metamodel editor's Preview and a staged rebind's commit preview from the engine over the working copy, staged edits and rules included: the server's diff route splits into the model half (`api/metamodel_candidate.py`, the oracle) and `POST /metamodel/structural-diff`, `/metamodel/lint` answers the parsed `document`, and the engine's `candidateIssues` and `previewCommit` with `rebind` are held to the `metamodel_candidate` fixtures and to the oracle at M (8,153 issues now failing, 580 now passing, equal); the candidate scan is a whole-model run, the core's `Scope.all()` pipeline over a candidate structure built in steps, not `validateSplit` slices, so containment reports one cycle per model and uniqueness reports group by group (`C-23` is decided on that side); the `metamodel` surface defaults to the engine behind the dev shadow, and the editor says "Includes staged changes" over a preview answered while the working copy or the staged artifacts held edits (`K-81`); a rebind preview whose staged ops the candidate does not admit (a type it lacks, a property it drops, a delete while containment moves) is refused 501 and answered by the server, its 422 included; the server's `/metamodel/diff` remains as fallback and stays O(model) under the write mutex (`K-80`); at M in Node the candidate structure is 325 ms and the scan 1,021 ms with a 9.3 ms longest step and +60 MB heap, but the diff against the store runs unstepped in the scan's last block: 9 ms over M's issue-free store, 60–69 ms over `engine-parity-large`'s violated one (18,523 issues, 26,096 under the candidate; the rebind preview's body 5 ms), so the longest block there is the last step plus the diff (`K-82`); in Chromium `candidateIssues` is 775 ms with a longest slice of 27 ms, over the 16 ms budget, as the open (51 ms) and the rescan (36 ms) rows also are (`K-82`) *(measured, Ryzen 9 3900X, WSL2, Node 22.22.3, Chromium 148, 2026-09-29)*); plan 6a, built after 7, serves the model download and a view's warnings from the engine: `downloadModel {}` writes `GET /model/download`'s file over committed state in 4 MiB parts, whatever is staged, held to the `model_download` fixtures and byte-equal at M (118,076,420 bytes, equal again with a staged edit), and `validateView {view}` ports `core/view/validation.py` over the view as staged, the working model and the working artifacts, held to the `view_warnings` fixtures; the `download` surface (no gate, shadowed `always` by a `{type, size, sha256}` digest) and the `views` surface (gated as `issues` is, shadowed `unstaged`; the view store recomputes its warnings on each load, staged view op and replica change) both default to the engine, with the dev shadow clean in e2e, where `eval-download-views.spec.ts` pairs each with its server side; at M the download is 2,493 ms in Node with a 27 ms longest step and a peak heap 21.6 MB above baseline (the roughly 118 MB of parts sit off the heap), and 1,944 ms in Chromium with a 20 ms longest slice, both over the 16 ms slice bound (`K-89`) *(measured, host DESKTOP-5QK3FA5, Ryzen 9 3900X, Node 22, Chromium 148, medians of 3, 2026-09-29)*; plan 6b, built after 6a, serves Compare and Apply CR from the engine over the working copy, staged edits included: `compareModel {file, created_at}` decodes, parses and shapes the uploaded file (its first block, cached across a restarted scan), diffs it against the working copy with Python's equality and answers `POST /model/compare`'s body, and `proposeCr {crs, created_at}` applies 1–20 change requests over a copy-on-write overlay with the server's conflict phases, gate and ops, a conflict answered as an ok result; both are held to the `change_request` fixtures' `compare` and `apply_cr` steps and, at M, to the Python answers (compare equal over the 170,254 elements and 126,238 relationships of the derived file, apply-CR equal over 6,974 ops); the duplicate delete in one change request no longer raises on either side (a fixture holds it); the `compare` surface (gated as `issues`, shadowed `unstaged` with `createdAt` masked; the file's bytes are transferred to the engine) now defaults to the engine, and the dialog enables Replace and Stage edits over staged edits there, says "Includes staged changes" over an engine answer given while edits were staged, caches no engine answer, and refuses to stage a server answer over staged edits; a file or change request the engine does not read as the server does is the server's (501, unmarked); `eval-compare.spec.ts` pairs each side against the real backend; at M in Node the uploaded file's decode, parse and shape is 2,746 ms in one block and the diff 3,142 ms in all, its longest step after the parse 44 ms, the parsed file adding a peak heap of 285 MB beside the replica's 240 MB (about 525 MB against CN-3's 400 MB), and apply-CR 104 ms with a 62 ms longest step; in Chromium `compareModel` is 2,371 ms with a longest staged round trip of 2,086 ms and `proposeCr` 277 ms / 138 ms, all over the 16 ms slice bound (`K-92`), and a change request crosses the frontend as parsed JSON, so an integral float in it stages as an int (`K-93`) *(measured, host DESKTOP-5QK3FA5, Ryzen 9 3900X, Node 22, Chromium 148, medians of 3, on a near-idle host, 2026-09-30)*; plan 8 answers the history drawer's two-revision Compare with `GET /commits/diff`, a fold of the journal's entity states over `(from, to]` in O(entities touched), reconstructed on the server when a row has no states, is a rebind, is missing, or the range exceeds 1,000 revs, and held equal to the diff of two reconstructions over randomized histories; it is server only, with no engine surface; no measurement was taken |
 | D | Scripts in the browser | done — plans 1 to 4 built: `scriptCalls` (CT-4) runs user Python in Pyodide on a pool of script workers nested in the engine worker, one batch per worker and a fresh worker for each, booted from a memory image (about 0.3 s against 2.1 s cold in Chromium), concurrent up to `max(1, min(4, hardwareConcurrency - 2))`, with a soft and a hard stop, pinned determinism on both hosts and the sandbox's CSP kept (CT-6; the dispatcher ported from `bridge.py` and held to the oracle by fixture, the harness hoisted and shared with the server); the pool keeps `cap` hot spares once asked; at M, 10,000 script cells through the real frame and client take 2,284 ms prewarmed (image and spares ready) against CN-3's 3 s, within budget, in 10,850 bridge trips, the cold first use after open reported (2,102 ms) and not gated (`K-100`, closed, holds the split and what did not help) *(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-01)*; plan 3 evaluates scripts in the engine (AD-34): navigation script steps, table script columns, export transforms and the script-error recap, with a cell cache evicted by read-set; the same ten scripts as table columns exported as csv, 10,000 cells, take 2,765 ms prewarmed against 3,000 (`K-100`) *(measured, Chromium 148, Ryzen 9 3900X under WSL2, median of 3, 2026-10-02)*; plan 4 removes the option, the `pending` cells and the server's script fallback for a client with an engine (`X-Data-Rover-Scripts: engine-only`, 409 `scripts need the engine`), runs the console on the engine (`runSnippet`, CT-4) and settles a fill round in scheduler slices; the headless service's process boundary (`K-106`) is not built |
 | E | Exports without a browser | deferred — redefined as a CLI on the caller (AD-35); built once a real caller exists, none does today |
-| F | Thin server and deploy | not started |
+| F | Thin server and deploy | done, the deploy deferred to its own spec — head tables and `entity_refs`; the commit check on a partial model read from head rows (`ProjectState` replaces `Session`; the server loads no model and answers no model read); revert on the same path; snapshots streamed from head rows; import streamed with set-based SQL checks; a rebind refused with 422 when it leaves rows the new metamodel cannot hold; the server's model-reading routes, script runner and dead core deleted, the surface switches and the dev comparison removed, the golden fixtures frozen; commits store client-reported validation counts (null on a revert). Measured on host DESKTOP-5QK3FA5 (WSL2 Linux 6.18.40.1, 24 CPUs), Python 3.14.5, Postgres 16.14, SQLAlchemy 2.0.51, psycopg 3.2.13, 2026-10-06, commit `6a32dbe1`, `scripts/measure_thin_server.py` with the default `--load import`, medians of 3, model M (170,340 elements, 126,820 relationships): import of M 43.60 s (43.36, 43.60, 46.22); a 1,000-op commit right after the import 0.38 s (0.38, 0.46, 0.37); delete of a 10,000-element subtree 2.76 s (2.76, 2.76, 2.61); snapshot from rows 3.21 s (3.28, 3.18, 3.21). The import detects duplicate ids in memory and runs `ANALYZE` on the head tables inside the import transaction on Postgres; before that one import run took 677 s and a second did not finish. GCP deployment (CN-9…CN-13) is not built |
 
 `BACKLOG-ENGINE.md` tracks the program as `R-3`, with its open items.
 
@@ -48,7 +48,7 @@ rollback, recreated entities, digest and `prev_rev` on every delta carrier; (2) 
 writers and the snapshot descriptor, blob and tail routes; (3) the engine service — CT-4
 dispatcher, scheduler, sliced index build and digest check, the reads; (4) sandbox and shell,
 the replica opening and following in the background, seen through an indicator; (5) the
-transport swap, surface by surface, with shadow comparison and the browser benchmark, with the
+transport swap, surface by surface, with a dev-time comparison and the browser benchmark, with the
 wait for `ready`, the open-journey slices, the boot-fallback notice and the re-bootstrap
 banner; (6) the forked store.
 **Done when.** Those surfaces and staging are served by the engine by default; cold open and
@@ -86,87 +86,29 @@ process (CN-20). API tokens are server work that can run beside it.
 Chromium, bytes compared) is green.
 
 ### F · Thin server and deploy
-**Scope.** Head tables, `entity_refs`, partial-model commit check, revert and undo on it,
-snapshot job, streamed import, set-based structural checks, removal of `Session` hydration and
-every model-reading route, deletion of the dropped Python core and its tests, removal of
-surface switches and shadow comparison, GCP deployment ([system.md](system.md), CN-9…CN-13),
-re-import of projects (AD-17). If E is not built by then, F retires `GET /exports/run-by-name`
-with the server's script runner (AD-35).
-**Depends on.** D, and E only if a caller of exports without a browser exists by then.
-**Done when.** No server code path loads a model; the deployed bill matches CN-7.
+**Scope.** Head tables, `entity_refs`, partial-model commit check, revert on it, snapshot from
+rows, streamed import, set-based structural checks, removal of the server's model loading and every
+model-reading route, deletion of the dropped Python core and its tests, removal of surface
+switches and the dev comparison. Built. GCP deployment ([system.md](system.md), CN-9…CN-13) is
+deferred to its own spec. Projects are re-imported from their files (AD-17).
+**Depends on.** D.
+**Done when.** No server code path loads a model *(met)*; the deployed bill matches CN-7 *(the
+deploy spec)*.
 
-**Why this order.** Each step ships user-visible value while the current server keeps working
-as fallback and oracle. The GCP bill drops only at F: the server cannot stop loading models
-until evaluation (C) and scripts (D) no longer need it, nor exports without a browser (E, or
-their retirement in F).
+**Why this order.** Each step shipped user-visible value while the server kept working as the
+fallback. The server could stop loading models only once evaluation (C) and scripts (D) no longer
+needed it, and exports without a browser (E) left it.
 
 ## Migration rules
 
-**MR-1 · `main` stays shippable.** Every migrated surface has a switch between engine and
-server. It defaults to the engine once the surface passes; the server route stays until F.
+**MR-1, MR-2, MR-3 · Retired.** The engine-or-server switches (MR-1), the dev-time comparison
+(MR-2) and the freeze on the Python areas being ported (MR-3) served the migration while the
+server could still answer every read. F removed the switches, the comparison and the server's
+model-reading paths, and the golden fixtures are frozen (`architecture/conventions.md`), so none
+of the three applies.
 
-**MR-2 · Shadow comparison.** In development and e2e runs a migrated `lib/api` function can
-call both sides and log any difference. Removed in F.
-
-**MR-3 · Freeze rule.** An area of the Python core is frozen for behaviour changes from the
-start of its port until its surface defaults to the engine. After that, features for the area
-land in TypeScript only. A bug fixed during a port lands on both sides, with a fixture, and so
-does a bug found after the default flips, for as long as the server path lives (MR-1, until F).
-`routes/read.py`'s route functions and `routes/elements.py::get_element` left the freeze for
-features with B's fifth plan, when the five read surfaces defaulted to the engine; `core/model`,
-`core/metamodel` and the model-op applier stay frozen. `core/table`'s evaluator
-(`core/table/{evaluate,cells,nav_memo,resolve,schema}.py`) left the FEATURE freeze with plan 4, which
-ported it (`tables` defaults to the engine), and its exports exception lifted with plan 5, which
-flipped `exports` to the engine: `/tables/export`, `/tables/json-preview` and `routes/exports.py`
-read the Python evaluator only as the `exports` surface's server path (the switch, and CI
-exports of a table that reaches a script). `core/navigation`, `core/search`, `api/search.py` and
-the `search_model` and `evaluate_navigation` route functions leave the feature freeze then too, as
-do the writers (`core/table/{csv_export,json_export,export_layout,exporter,naming,split,cell_text}.py`),
-`api/table_export*.py` and `api/export_manifest.py`, which froze at plan 5's start: a feature in
-any of them lands in TypeScript only. A bug found in `core/table`'s evaluator, in the writers or in
-any of these areas, wherever it is reached from, lands on both sides, with a fixture, until F
-(MR-1), as MR-3's opening rule already says. A table that reaches a script (a script column, or a
-navigation with a script step) was the one exception until D's third plan: the engine now evaluates
-it, so a new script-table feature lands in TypeScript only. The server's path, which builds such a
-table entirely in Python (its rows, its order, every cell and its export), answers 409 to a client
-that sends `X-Data-Rover-Scripts: engine-only` and stays for exports without a browser until E or F (AD-35). `api/search.py` and the route
-functions are also the 501 fallback's server side from C's first plan on (AD-31) — an
-unsupported pattern reads them whatever plan C is on (a script did until D's fourth plan) — and `api/artifact_kinds.py` validates
-every committed navigation payload with `NAVIGATION_ADAPTER`.
-`core/table/resolve.py` (ref resolution and script reach) is frozen from C's plan 1 on.
-`core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's conformance half
-(`routes/commits.py::preview_commit`'s model half, `api/rules.py::attributable_issues`) are
-frozen for behaviour from C's plan 2 on, and are the exception to the rule above: they stay
-frozen past that plan's flip of `issues` to the engine, and until F a feature there lands on
-both sides with a fixture step, as a bug does, since the server pipeline still decides strict
-commits (`attributable_issues`) and `validation_error_count`, and answers every fallback: an
-unreadable rule set, an unsupported pattern, `staging: legacy` and the window before the replica's
-first sweep. Two bugs landed on both sides under this rule during C's plan 2: `value_conforms`'s
-float branch, which raised `TypeError` on an unhashable value and now answers `False`, and the
-dirty hooks, which missed a key relationship's endpoints' uniqueness groups on connect,
-disconnect and cascade delete until 6b3cdb6. The second widens strict mode's `base_dirty`:
-connecting, disconnecting or cascading away a relationship named in a key now makes the keyed
-ends' old and new group members attributable, so a strict commit that used to land can get a
-422, as a key-property edit already could. `core/validation/rules` and `api/rules.py` are frozen
-from C's plan 3 on, which ports them: a bug or a feature there lands on both sides with a fixture
-until F. The diff route's model half (`api/metamodel_candidate.py`) and `build_rebind_view` are
-frozen for behaviour from C's plan 7 on; `diff_metamodels` is not.
-`api/serialize.py::iter_model_json` and the download route (`GET /model/download`), and
-`core/view/validation.py` and the `GET /views/{id}` route that serves its warnings, are frozen for
-behaviour from C's plan 6a on; the engine replays them from the `model_download` and
-`view_warnings` fixtures. `core/model/change_request.py`, `api/change_request_ops.py`,
-`api/routes/change_request.py` (`POST /model/compare`, `POST /model/apply-cr`),
-`api/routes/_snapshot.py::build_model_from_dicts` and `api/serialize.py::parse_model_json` are
-frozen for behaviour from C's plan 6b on; the engine replays them from the `py_eq` and
-`change_request` fixtures. One bug landed on both sides under this rule during plan 6b: a CR
-that listed an id twice in `deleted` raised `KeyError` on the second delete, which the server
-answered 404; the ids are now one delete, and a `change_request` fixture step holds it. Areas
-not yet being ported carry on as normal.
-
-**MR-4 · Tests follow the surface.** A migrated read surface is tested by running the real
-engine on a small fixture model. The route-level mock tests of its server path stay while
-that path does (MR-1) and are deleted with it in F. Tests of write and tenancy routes stay.
-Python tests of a dropped area are deleted in F with the code.
+**MR-4 · Tests follow the surface.** A read surface is tested by running the real engine on a
+small fixture model. Tests of write and tenancy routes run against the server.
 
 **MR-5 · Spike code is throwaway.** Nothing under `spikes/` is promoted into the engine,
 `frontend/` or `src/`.

@@ -17,7 +17,7 @@ This file is the map. How the code works lives in the README next to it; read th
 | Where the system is going: decisions `AD-n`, contracts `CT-n`, constraints `CN-n`, build order `MR-n`. Read before designing or planning anything touching the engine, sync, evaluation, scripts or deployment | `architecture/README.md`, then `architecture/program.md` for what exists yet |
 | Repo rules: layout, git, comments, tests (`RC-n`) | `architecture/conventions.md` |
 | Python core: metamodel, `Model`, validation pipeline, custom validation rules | `src/data_rover/core/README.md` |
-| Backend: project state, ops and the commit delta, replica routes, tenancy/auth, persistence, locking, feed, metamodel editing | `src/data_rover/api/README.md` |
+| Backend: `ProjectState`, head rows, partial-model commit check, ops and the commit delta, replica routes, import and snapshot from rows, tenancy/auth, persistence, locking, feed, metamodel editing | `src/data_rover/api/README.md` |
 | Snippet facade reference | `src/data_rover/core/script/README.md` |
 | TypeScript engine | `engine/README.md` |
 | Sandbox site and engine worker | `sandbox/README.md` |
@@ -63,13 +63,15 @@ pixi run engine-scripts-browser # script parity corpus + runaway cases in Chromi
 Gotchas:
 - Frontend, engine and sandbox tasks set their own cwd; `pixi run -e frontend npm test` from the repo root fails with "Missing script". Use the tasks.
 - e2e reuses a server already on :8000/:5173/:5174. A stale sandbox `vite preview` serves its OLD `dist/`, so stop it first.
-- Open the app at `http://127.0.0.1:5173`, not `localhost`: the sandbox is `localhost:5174` and must be a different site (CN-17). On `localhost` the app refuses the engine and reads from the server.
+- Open the app at `http://127.0.0.1:5173`, not `localhost`: the sandbox is `localhost:5174` and must be a different site (CN-17). A request on `localhost:5173` is redirected (302) to `127.0.0.1:5173` by the dev server.
 - Python is 3.14 everywhere (runtime, ruff `py314`, pyright); use modern stdlib freely.
 
 ## Rules that span the codebase
 
 - **One mutation boundary per store** (RC-8): Python `Model` (`core/model/model.py`), engine op applier (`engine/src/ops/`). Indexes are maintained there; a bulk loader that fills dicts directly must rebuild them. Property values are replaced wholesale, never mutated in place: the op log's inverse patches alias prior values.
 - **`Metamodel` is frozen after load.** Go through its cached lookups; never re-walk `extends` chains by hand.
+- **The server loads no model and is no reference implementation.** It answers no model read and evaluates nothing: the engine does both. Validation (conformance, rules, strict mode) is the engine's and the client reports its counts; the server checks structure only, on a partial model read from head rows. The Python core's evaluators are gone, and the frozen golden fixtures are the spec the engine is held to.
+- **Head-row properties are stored as the JSON text the snapshot encoder writes**, never as JSONB: `1.0` and integers past 2^53 stay exact.
 - **The model can be ~80 MB.** A per-request path never copies or scans it. The server answers no model reads and runs no whole-model work (the engine does both); a commit's structural gate is O(batch) over `model.indexes` and metamodel caches.
 - **Validation pipelines carry per-metamodel memos**: build one per request/thread, never share one.
 - **Golden fixtures are frozen.** A fixture change is a reviewed edit; the Python reader tests (`tests/golden/`) hold the server's kept code to them.

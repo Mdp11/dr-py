@@ -332,8 +332,8 @@ class Commit(Base):
     )
     #: Full before/after state of every model entity this commit touched
     #: (``commit_states`` has the shape). NULL means "not captured": rows
-    #: written before the column existed — the diff reader reconstructs the
-    #: model instead. Never backfilled.
+    #: written before the column existed — those commits have no model diff
+    #: (409). Never backfilled.
     entity_states: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     #: State digest (``state_digest.py``) of the model after this commit, 16
     #: hex digits. NULL on rows written before the column existed and on the

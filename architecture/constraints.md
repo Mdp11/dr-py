@@ -129,6 +129,8 @@ committed-use discount, single-zone database, ±15 %; one hot project per 5 conc
 
 Snapshot storage < $1; egress $1–32; headless runs $0 to us, since they run on the caller (AD-35).
 
+*Note: the corporate load balancer and SSO are settled in the deploy spec.*
+
 **CN-8 · Cost drivers.** Thin-server cost is nearly flat in model size (size touches database
 disk, egress and snapshot CPU only). Engine language moves no line. The server-heavy design needs ≈ 1.4 GB RAM per hot M project *(measured:
 0.5 GB model and indexes + 0.9 GB trigram index)*: $135–310 at 20 users and M, $1,200–1,700 at
@@ -150,7 +152,7 @@ bills the inflated size.
 **CN-12.** Signed URLs defeat the HTTP cache. The shell caches snapshot bytes itself, keyed
 `(project, rev)`.
 
-**CN-13.** No load balancer and no CDN ($18.25/month fixed; egress is a few dollars).
+**CN-13.** No load balancer and no CDN ($18.25/month fixed; egress is a few dollars). *Note: the corporate load balancer and SSO are settled in the deploy spec.*
 
 ## Browser
 

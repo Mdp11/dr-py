@@ -591,7 +591,7 @@ def _stage_commit(
 
     ``_entity_states`` is ``capture_entity_states(model, res)`` for the
     applied batch — the diff reader's journal-only input; None (a writer that
-    has no model batch) means the reader reconstructs.
+    has no model batch) leaves the commit without a model diff.
     ``_state_digest`` is the state digest after the batch; it lands
     on the model row.
 

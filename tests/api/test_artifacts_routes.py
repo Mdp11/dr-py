@@ -183,8 +183,8 @@ def _seed_second_member(user_id: str, email: str) -> None:
 
 
 def _seed_empty_model(client: TestClient) -> None:
-    """POST /locks goes through ``require_model``, so a lease test needs a
-    loaded (if empty) model even though artifacts are not model content."""
+    """POST /locks needs the project's metamodel, so a lease test installs an
+    empty model even though artifacts are not model content."""
     install(metamodel="elements:\n  - name: Node\n", model=EMPTY_MODEL)
 
 

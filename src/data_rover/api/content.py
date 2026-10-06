@@ -171,8 +171,8 @@ def commits_between(
 ) -> list[Commit]:
     """Commits with ``after_rev < rev <= max_rev``, ascending (replay order).
 
-    Bounded variant of ``commits_after`` for historical reconstruction: replay
-    only the tail from the chosen snapshot up to (and including) a target rev.
+    Bounded variant of ``commits_after``: the journal rows up to (and including)
+    a target rev.
     """
     return list(
         db.execute(

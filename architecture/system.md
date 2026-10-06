@@ -66,7 +66,7 @@ time discards the replica and restarts this flow (CT-2, CT-3).
 **Edit.** UI acquires leases from the server as today → hands ops to the engine → engine
 applies them to the working copy, records inverses, emits `changed`.
 
-**Commit.** Engine validates the working copy locally (this replaces `POST /commits/preview`)
+**Commit.** Engine validates the working copy locally (conformance is not the server's)
 → UI sends `POST /commits` with `base_rev`, ops, lock tokens, message and the client's
 validation result → server runs the commit check and answers with the delta and `id_map` →
 engine rewinds staged ops, applies the delta, remaps temp ids, replays what is left (CT-5).
@@ -86,20 +86,27 @@ later deltas and staged ops evict by read-set.
 fetches the snapshot, tail, metamodel and artifact payloads as the shell does → runs the export
 on the engine, its scripts in a permission-limited child process → writes the bytes locally.
 
-## Thin server (end state)
+## Thin server
 
-- **Head tables.** `elements` and `relationships`: id, type, JSONB properties, per-entity
-  `rev`, insertion sequence (preserves CT-1 order). Indexes on relationship source and target.
-  `entity_refs` holds element-valued property references, maintained per commit.
+- **Head tables.** `elements` and `relationships`: id, type, properties as the JSON text the
+  snapshot encoder writes (not JSONB, so `1.0` and integers past 2^53 stay exact, AD-26),
+  per-entity `rev`, insertion sequence (preserves CT-1 order). Indexes on relationship source
+  and target. `entity_refs` holds element-valued property references, maintained per commit.
 - **Commit check — O(batch), one transaction.** A row lock on the project's `ModelRow`
   serializes commits. The server loads the partial model (touched entities, deleted subtrees,
   incident relationships, ancestor chains, referencers), runs the existing op applier and the
-  structural checks on it, writes changed rows, updates the digest, inserts the `Commit` row,
+  structural checks on it. The partial model refuses every read it cannot answer from the rows
+  it holds (`NotLoaded`; enumeration is `WholeModelRead`), so a missing row is never a silent
+  accept or reject: the batch runs again on a fresh partial model that also holds the missing
+  rows, writes changed rows, updates the digest, inserts the `Commit` row,
   broadcasts the delta. Revert and undo take the same path.
 - **O(model) work that remains**, none of it in server memory: snapshot job (streams head rows
   in sequence order inside a repeatable-read transaction); import (line-by-line ingest, then
-  set-based SQL structural checks); metamodel rebind (the same set-based checks, plus an
-  `entity_refs` rebuild).
+  set-based SQL structural checks); metamodel rebind (set-based checks over the rows, plus an
+  `entity_refs` rebuild). A rebind that leaves a row the new metamodel cannot hold (a type it
+  lacks, an abstract element type, an undeclared property) is refused with 422 naming the first
+  entities, because the thin server cannot hold rows its applier does not understand; the user
+  deletes or migrates them first.
 - **Kept from the Python core:** `core/model`, `core/metamodel`, the structural validators,
   payload schemas (artifact kind adapters, rules parse) and the pure-AST snippet lint with its
   entry-point derivation. The snippet `lint` and `format` routes read no model and stay.
@@ -110,16 +117,19 @@ A Node CLI on the caller, same engine package, same Pyodide version; it checks i
 against the server's contracts before a run. Isolation per CN-20. There is no server-side
 headless host (AD-35).
 
-## Current → target
+## Replaced by the thin server
 
-| Today | Target |
+| Was | Is |
 |---|---|
-| `Session`: model in server RAM, `IndexSet`, trigram index, hydration | Replica in the engine; no server session; no trigram index (AD-13) |
+| `Session`: model in server RAM, `IndexSet`, trigram index, model loading | `ProjectState` over head rows and the journal; no model, no trigram index (AD-13) |
 | Read routes: element pages, tree, search, neighborhoods | Engine |
-| Tables, navigation, validation, rules, exports, compare/apply-CR, save/download, metamodel diff, history Compare | Engine |
-| `WasmScriptRunner`, script sweeps, server cell cache, `pending` cells, 202 retries | Script workers + engine cell cache; synchronous results |
-| `GET /model/issues`, `GET /model/status`, `POST /commits/preview` | Engine-local |
-| Rule YAML parsed and compiled in the server session (`core/validation/rules`) | The server parses rule YAML for the engine (`POST /rules/parse`, `rules` on `GET /artifacts/payloads`); the engine compiles and evaluates (AD-33) |
-| Commits, locks, feed, journal | Stay; the commit check reads head rows |
+| Tables, navigation, validation, rules, exports, compare/apply-CR, save/download, metamodel diff, history Compare | Engine; history Compare folds the journal (`GET /commits/diff`) |
+| Server script runner, script sweeps, server cell cache, `pending` cells, 202 retries | Script workers + engine cell cache; synchronous results |
+| `GET /model/issues`, `GET /model/status`, conformance in `POST /commits/preview` | Engine-local; `POST /commits/preview` stays as a dry run of the commit's structural check |
+| Rule YAML parsed and compiled in the server session | The server parses rule YAML for the engine (`POST /rules/parse`, `rules` on `GET /artifacts/payloads`); the engine compiles and evaluates (AD-33) |
+| Commits, locks, feed, journal | Unchanged; the commit check reads head rows |
 | Snapshots encoded from the live model | Snapshots streamed from head rows |
 | Auth, tenancy, admin, projects; artifact, view and metamodel rows | Unchanged |
+
+The corporate load balancer, SSO and the GCP deployment are settled in the deploy spec, which is
+not written yet (CN-7, CN-13).

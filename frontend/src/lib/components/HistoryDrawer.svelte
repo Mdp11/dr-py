@@ -55,8 +55,8 @@
 		}
 	}
 
-	// Two revisions: the server folds the journal over the range, or
-	// reconstructs both sides itself when the journal cannot answer.
+	// Two revisions: the server folds the journal over the range, and
+	// answers 409 when the journal cannot.
 	async function showRangeDiff(fromRev: number, toRev: number): Promise<void> {
 		beginDiff(`r${fromRev} → r${toRev}`, spanCrossesRebind(fromRev, toRev));
 		try {

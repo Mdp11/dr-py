@@ -43,6 +43,7 @@ relationship  {"id", "type_name", "source_id", "target_id", "properties", "rev"}
  "recreated_element_ids","recreated_relationship_ids"}
 ```
 
+- `validation_error_count` is the client's own count, and null on a revert, which has no client preview.
 - The feed's `commit_event`. `changed_*` hold full post-commit entities in first-touch order;
   `deleted_*` include cascade deletions; `recreated_*` name the changed ids the commit
   deleted and created again under the same id — an apply-CR rewire does that — each a new
@@ -439,19 +440,17 @@ event     {event, …}                     engine → client, unsolicited
   32 MiB of keys and result texts, a result over 64 KiB not stored, a read-set over 128 keys
   stored as "depends on everything"; a value, a `runtime` and a `syntax` error are stored, a
   `timeout`, `cancelled`, `memory`, `unavailable`, `pending` or `limit` is not. A
-  transition evicts the entries that read a key it touched, in the oracle's keys
-  (`api/invalidation.py`), the union over the state it leaves and the state it makes, and every
-  entry that depends on everything; one that changed nothing evicts nothing. A cascade is in it:
+  transition evicts the entries that read a key it touched, the union over the state it
+  leaves and the state it makes, and every entry that depends on everything; one that changed nothing evicts nothing. A cascade is in it:
   the contained elements and incident relationships a delete removed. A result is stored only
   if no transition moved since the pass that asked for it began, so nothing computed before a
   transition enters the cache after its eviction. The cache is dropped at `close`, a new
   `open` and a divergence.
 
-## CT-7 · Fidelity to the oracle
+## CT-7 · Fidelity to the golden fixtures
 
-The engine MUST reproduce the Python core's observable behaviour. Golden fixtures, generated
-by the oracle, are the test; they stay in the repo as frozen regression data after the Python
-core is deleted.
+The engine MUST reproduce the Python core's observable behaviour. The golden fixtures, recorded
+from the Python core, are the test; they are frozen regression data.
 
 | Area | Rule |
 |---|---|
@@ -462,4 +461,4 @@ core is deleted.
 | Dates | `date` values parse exactly as `datetime.date.fromisoformat` on Python 3.14. |
 | Order | No `Intl`, no locale comparison, no dependence on hash order. `Map` insertion order stands in for `dict` order. Sorts are stable. A plain object stands in for a property `dict`; it lists a canonical array-index key (`"0"`, `"42"`) first whatever the insertion order, so the engine refuses an entity carrying one at any depth of its properties. |
 | Arithmetic | `+ − × ÷` and comparisons only in evaluation paths; no transcendental `Math` functions. |
-| Exports | `json`, `jsonl`, `csv` and `manifest.json` match the oracle byte for byte. `xlsx` matches by cell content, and is byte-identical across the engine's two hosts: sub-project C holds that in Node only, and E's cross-host test (one export in Node and in Chromium, bytes compared) closes it. |
+| Exports | `json`, `jsonl`, `csv` and `manifest.json` match the golden fixtures byte for byte. `xlsx` matches by cell content, and is byte-identical across the engine's two hosts: sub-project C holds that in Node only, and E's cross-host test (one export in Node and in Chromium, bytes compared) closes it. |

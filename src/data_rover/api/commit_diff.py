@@ -27,7 +27,7 @@ ever read here, so an old commit's view diff stays correct after the folder
 in question has since been renamed again or deleted.
 
 Metamodel + layout: a rebind-carrying commit's structural
-half is rendered neither from the model reconstruction nor from the ops
+half is rendered neither from entity states nor from the ops
 journal, but recomputed from the two immutable ``MetamodelRow`` blobs named
 by the commit's ``from_metamodel_id``/``to_metamodel_id`` columns
 (``_metamodel_structural``) — the same "recompute, never store" stance as the

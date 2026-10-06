@@ -27,13 +27,13 @@ export function getCommitHistory(
 }
 
 /** GET /commits/{rev}/diff — one commit's changes, rendered by the server
- * from the journal row (no model reconstruction on either side). */
+ * from the journal row (from the commit's captured entity states). */
 export function getCommitDiff(rev: number, cfg?: ClientConfig): Promise<CommitDiff> {
 	return apiFetch(`/commits/${rev}/diff`, { method: 'GET', schema: CommitDiffSchema }, cfg);
 }
 
 /** GET /commits/diff — the net change between two revisions; the server
- * folds the journal over the range or reconstructs both sides itself. */
+ * folds the journal over the range, and answers 409 when it cannot. */
 export function getCommitsDiff(
 	fromRev: number,
 	toRev: number,

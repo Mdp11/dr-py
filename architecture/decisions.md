@@ -58,8 +58,9 @@ applier on that partial model, and derives inverse ops and `entity_states` itsel
 **Why.** Undo, revert and per-commit diff depend on inverses and `entity_states`; they cannot
 be client-supplied (CN-19). Reusing the applier keeps one implementation of mutation rules
 on the server.
-**Consequences.** Head tables, `entity_refs`, set-based SQL checks for import and rebind
-([system.md](system.md)).
+**Consequences.** Built: head tables, `entity_refs`, set-based SQL checks for import and rebind
+([system.md](system.md)). The server keeps per-project state over the head rows and the commit
+journal (`api/project_state.py`) and holds no model.
 
 ## AD-8 · Conformance validation and strict mode are enforced by the client
 **Decision.** The server enforces structural integrity, declared types and property names,
@@ -116,10 +117,10 @@ lookups; leases make replay conflicts rare.
 re-imported from their JSON/YAML files.
 **Why.** No production data exists (owner, 2026-09-18).
 
-## AD-18 · Migration goes through `frontend/src/lib/api`; the current server is the oracle until F
+## AD-18 · Server calls go through `frontend/src/lib/api`
 **Why.** Every server call already passes through `lib/api/client.ts`; no component builds a
 URL or calls `fetch`. Swapping a module's transport leaves its callers untouched.
-**Consequences.** Migration rules MR-1…MR-5 ([program.md](program.md)).
+**Consequences.** The engine took over each surface by swapping its module's transport. The migration rules MR-1…MR-3 are retired ([program.md](program.md)): the server answers no model read, so there is no second side to compare with.
 
 ## AD-19 · Baseline is evergreen desktop browsers
 **Decision.** No dependency on a Chromium-only API. Development and CI measure on Chromium.
@@ -167,20 +168,17 @@ and never the UI; 100 ms is where a discrete action stops feeling instant. Measu
 `BACKLOG-ENGINE.md`, `K-32`.
 **Rejected.** Resumable staging, with reads blocked or served from committed state mid-batch.
 
-## AD-24 · The model store forks; the legacy half lives until F
-**Decision.** In engine mode staged edits live in the engine's working copy and
-`frontend/src/lib/state/model.svelte.ts` is a view over it. Today's store — fetched-subset
-cache, optimistic overlay, staged-delete guards — stays behind the switch as the server-mode
-implementation and is deleted in F. The engine-backed store is built last in sub-project B,
-after the read surfaces have moved as a plain transport swap. Layout: `model.svelte.ts` is a
-thin facade dispatching every entity read/write to whichever half `staging` names;
-`model-shared.svelte.ts` holds what both halves agree on (summary, `model_rev`, structure rev,
-issues); `model-legacy.svelte.ts` is today's entity half, frozen; `model-caches.ts` holds the
-pure id-remap helpers both halves' `applyDelta` shares.
-**Why.** A server read is committed-only, so server mode cannot work without the overlay
-(MR-1); and one staged state has to exist before evaluation reads it (sub-project C).
-**Rejected.** *Transport swap only*: from C on, the engine's working copy and the store's
-overlay would be two implementations of staged state. *No fallback*: MR-1.
+## AD-24 · The model store is a view over the engine's working copy
+**Decision.** Staged edits live in the engine's working copy and
+`frontend/src/lib/state/model.svelte.ts` is a view over it. There is no second store: the
+fetched-subset cache, the optimistic overlay and the staged-delete guards are gone, along with
+`model-legacy.svelte.ts`. `model-shared.svelte.ts` holds what the store and its callers agree on
+(summary, `model_rev`, structure rev, issues); `model-caches.ts` holds the pure id-remap helpers
+`applyDelta` uses.
+**Why.** One staged state has to exist before evaluation reads it, and a server read is
+committed-only, so it could not carry staged edits.
+**Rejected.** *Transport swap only*: the engine's working copy and the store's overlay would be
+two implementations of staged state.
 
 ## AD-25 · The workspace waits for the replica
 **Decision.** In engine mode every engine-served read waits for `ready`; the open progress
@@ -249,6 +247,9 @@ commit; while a commit's payloads are fetched, the entries it carried stay in th
 no evaluation reads a committed artifact as missing.
 
 ## AD-31 · Before scripts run in the browser, a call that reaches a script is the server's
+**Superseded** by AD-34 for scripts and by the thin server for the rest: the server evaluates no
+navigation, table or search, so there is no server side to fall back to. What follows is the
+record of the rule.
 **Decision.** (Narrowed for scripts by AD-34, which ended the script half.) Until sub-project D, the engine refuses a navigation that reaches a configured
 script step — and a criterion pattern it cannot match exactly as Python's `re` does — with 501
 before any work, and the client asks the server instead, whole.
@@ -349,13 +350,12 @@ read-set). There is no option: a service with a script host always evaluates scr
 without answers `ReadError(503, 'no script host')` only when a pass needs a fill. A client that
 runs scripts itself sends `X-Data-Rover-Scripts: engine-only`, and the server answers 409 `scripts
 need the engine` where a request reaches a script instead of running it on committed state;
-without the header, and for a run by name, the server still runs scripts (exports without a
-browser, until E or F, AD-35).
+the server runs no scripts.
 This ends AD-31's 501 fallback for scripts: a call that reaches one is the engine's, over the
 working copy, and with no engine the app shows the state, not script results.
-**Why.** The oracle's evaluators are synchronous and the script host is not: a pass that records
-what it lacks and an engine that fills between passes keep the evaluators single-sourced with
-the oracle and leave the model lane free of awaits. A round's batches run outside the scheduler
+**Why.** The Python evaluators the engine was ported from were synchronous and the script host is not: a pass that records
+what it lacks and an engine that fills between passes keep the evaluators single-sourced
+and leave the model lane free of awaits. A round's batches run outside the scheduler
 and its settle, which enters the results in the cache, runs in scheduler slices of 256 calls, so a
 stage or a delta lands between passes, or at most one slice into a settle, and the answer reflects
 it; a counter of transitions that change the model, read when a pass's scan starts and checked at
@@ -384,13 +384,13 @@ own machine: it authenticates with an API token, fetches the snapshot, tail, met
 artifact payloads through the replica routes the shell already uses, and runs the export on the
 same engine and Pyodide as the browser, its scripts in a child process under Node's permission
 model. Sub-project E builds it, and only once a real caller exists; today there is no CI and no
-headless use, and `GET /exports/run-by-name` has no known caller.
+headless use, and the former route that ran an exporter by name had no known caller.
 **Why.** It needs no second deployed service and runs no untrusted Python in our infrastructure:
 the server only serves the bytes a browser already downloads, and the caller pays the CPU. API
 tokens, its one new server feature, are wanted for other automation anyway. Bytes equal the
 browser's for the same reason as AD-3.
 **Rejected.** *A headless Node service behind the server* (the former E: the server gathers the
-inputs and proxies `run-by-name` and `/exports/run` to it, one fresh child process per run
+inputs and proxies the by-name run and `/exports/run` to it, one fresh child process per run
 inside a container with no network and no credentials): a second service to deploy, isolate
 and pay for, and a server-side proxy, for a caller that does not exist yet. *Spawning Node from
 the API process*: user code beside the database credentials.
@@ -401,5 +401,4 @@ any project member runs next to the caller's secrets, so the child process gets 
 no child processes, read access to the engine and Pyodide only, and an empty environment.
 Node 22's permission model does not block the network, and Emscripten's `NODEFS` calls
 `process.binding("constants")`, which that model refuses, so Pyodide does not boot under it
-unshimmed *(measured, Node 22.22.3)*. Until E or F, `run-by-name` and a server-side
-export without the `engine-only` header keep running on the server's Python path (MR-3).
+unshimmed *(measured, Node 22.22.3)*. The server runs no scripts and has no route that runs an exporter by name.

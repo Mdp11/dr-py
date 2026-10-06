@@ -827,8 +827,8 @@ class CommitArtifactDiffs(BaseModel):
 
 class ViewDiffEntryOut(BaseModel):
     """One canonical view op, rendered for history. The view family is
-    fine-grained on the wire, so the ops ARE the diff — no before/after
-    reconstruction. ``name_before`` (rename/delete) comes from the commit's
+    fine-grained on the wire, so the ops ARE the diff.
+    ``name_before`` (rename/delete) comes from the commit's
     inverse half. Folder ids referenced by other entries are NOT resolved to
     names here (journal-only stance): the client resolves against its live
     view and degrades to the bare id for folders deleted since."""

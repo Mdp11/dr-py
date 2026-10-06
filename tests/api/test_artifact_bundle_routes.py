@@ -28,10 +28,9 @@ def client() -> TestClient:
     reset_loop()  # each TestClient creates its own event loop; clear the cached one
     c = TestClient(create_app())
     c.headers.update(AUTH_HEADERS)
-    # Import confirm lands its batch through POST /commits, which requires a
-    # loaded metamodel + model (require_model) and a durable model row to
-    # journal against — so the fixture seeds both, mirroring
-    # tests/api/test_commits_artifact_ops.py. Export/plan tests don't care.
+    # Import confirm lands its batch through POST /commits, which needs a
+    # metamodel and model installed as head rows to journal against, so the
+    # fixture seeds both, mirroring tests/api/test_commits_artifact_ops.py. Export/plan tests don't care.
     install(metamodel=_MM, model=EMPTY_MODEL)
     return c
 

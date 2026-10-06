@@ -202,7 +202,7 @@ def test_cloned_artifacts_survive_eviction(client: TestClient) -> None:
     ).json()["items"]
     assert [a["name"] for a in before] == ["n"]
 
-    # the GET above went through get_request_session, so the clone is warm —
+    # the GET above loaded the project's state, so the clone is warm —
     # without this the eviction below could pass vacuously
     assert new_id in get_registry().project_ids()
     get_registry().evict(new_id)

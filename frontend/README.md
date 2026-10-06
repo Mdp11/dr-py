@@ -183,9 +183,9 @@ the whole model, and editing follows a pessimistic **check-out → stage →
 commit** loop. The edits are staged in the replica's working copy, detailed in
 "The engine store":
 
-1. The store caches only the **fetched subset** of the model — entities
-   brought in by paged reads, searches, neighborhoods, and commit deltas —
-   plus model-wide counters (`/model/summary`) for headers and the status bar.
+1. The store holds no model: it is a view over the replica, which has the whole
+   model, so reads (pages, searches, neighborhoods) and the model-wide counters
+   for headers and the status bar come from the engine.
 2. The user's edits are emitted as **ops** (`create_element`,
    `update_element`, `delete_element`, and the matching three for
    relationships). Each op is applied to the local caches **optimistically**
@@ -514,10 +514,9 @@ commit** loop. The edits are staged in the replica's working copy, detailed in
      artifact-only rev would 409 the next preview); only the `onCommitEvent`
      taps are handed `scope`. An absent `scope` defaults to
      `['model']` — the defensive direction is the one that does more work.
-7. Reads are **paged/on-demand**: element pages and fuzzy search
-   (`/model/elements`), containment tree roots/children
-   (`/model/containment/*`), and BFS neighborhoods for the graph view
-   (`/model/elements/{id}/neighborhood`).
+7. Reads are **paged/on-demand** and answered by the engine: element pages and
+   fuzzy search, containment tree roots/children, and BFS neighborhoods for the
+   graph view. The server has no model-read routes.
    Nothing a read answers can resurrect a staged delete: the replica's answers
    already hold the staged edits, so a staged-deleted element is absent from
    them. `isStagedDeleted` in `model.svelte.ts` is the predicate the
@@ -525,11 +524,11 @@ commit** loop. The edits are staged in the replica's working copy, detailed in
    not-found instead of an eternal skeleton; a staged-deleted id is NOT added
    to `_missingElementIds`, which means "the engine answered it does not
    exist".
-8. **Export** streams the last committed session state to a file: a picked
-   file goes up as a raw `fetch` body (`POST /model/upload`, no JS-side parse)
-   or by server path (`POST /model/load`); export saves `downloadModel()`'s
+8. **Export** writes the last committed state to a file: a model file goes up
+   once, with project creation (`POST /projects`, which streams it into the head
+   rows); export saves `downloadModel()`'s
    Blob — the replica's own file of committed state — into a File System
-   Access writable (or writes server-side via `POST /model/save`), so the
+   Access writable, so the
    browser never materializes the serialized model as a string. TopBar opens
    the save picker within the click, before the Blob has arrived (the picker
    needs the click's user activation, which lapses long before a large model
@@ -751,7 +750,7 @@ getLiveIssues()`. All five consumers (issues panel, containment tree,
 The live map is refilled by `adoptIssues(issues, counts, rev, truncated)`, which
 drops only **strictly older** revs: an EQUAL rev must be adopted, because the
 backend's background validation sweep grows the server's store _without_ bumping
-`model_rev`. `refetchIssues()` is the best-effort `GET /model/issues` wrapper
+`model_rev`. `refetchIssues()` is the best-effort wrapper that reads the engine's issue store
 around it (generation-guarded, so a response for the project we just left is
 dropped). Triggers, all of them best-effort:
 
@@ -817,9 +816,8 @@ the overlay too: a Validate result lasts until the next edit. So do `resetModelS
 `_lastError`: a failed Validate's error strip must survive a peer commit.
 
 The founding constraint behind all of this: **no open/commit path may run the
-full validation pipeline.** `POST /model/validate` with no ops is an O(model)
-sweep over what can be an ~80 MB model, so it stays reachable only from an
-explicit user click. `GET /model/issues` is the cheap read used everywhere else.
+full validation pipeline on the server.** The engine's whole-model sweep is O(model) over what can
+be an ~80 MB model, so it runs in steps, and the issue store is the cheap read used everywhere else.
 
 ### Replica (engine shell)
 
@@ -2188,8 +2186,8 @@ toggle`), a collapsed disclosure that expands to the shared
   phase and never anything worse, because this surface must never be what
   breaks a table view.
 - **Staged definition edits (the settings dialog).** `updateTableDefinition`
-  normally re-evaluates the whole table — a fresh backend cache key, and for a
-  script column a fresh sweep. Inside the settings dialog the user is
+  normally re-evaluates the whole table — a fresh engine evaluation, and for a
+  script column a fresh fill of its cells. Inside the settings dialog the user is
   _composing_ (typing a snippet, trying a chain, undoing it), and every
   intermediate state would pay for that, on a grid the panel has made `inert`
   anyway. So `TableView.openSettings` calls `suspendTableEvaluation(tabId)`
@@ -2435,14 +2433,13 @@ browses the project's durable commit journal:
   feed (commit events trigger a page reload while the drawer is open).
 - **Per-commit diff** — clicking a row's "Diff" button fetches
   `GET /commits/{rev}/diff` (`getCommitDiff`), which the server renders from
-  the commit row's captured entity states — no model reconstruction on either
-  side — and converts it with `crToDiff` for `CompareDiff`, so the click costs
+  the commit row's captured entity states, and converts it with `crToDiff` for `CompareDiff`, so the click costs
   O(commit) regardless of model size.
 - **Two-commit compare** — the "Compare" toggle lets the user select any two
   revisions A and B; one `GET /commits/diff` (`getCommitsDiff`) answers the net
   change, which `crToDiff` converts for `CompareDiff`. The server folds the
-  journal over the range and reconstructs both sides itself only when the
-  journal cannot answer, so the drawer has one path. A warning banner is shown
+  journal over the range and answers 409 when the journal cannot, which the
+  drawer shows as an error. A warning banner is shown
   when the range spans a rebind-carrying commit.
 - **Revert-to-commit** (`POST /commits/revert`) — gated on a quiet project:
   `state/quiet.ts`'s `isProjectQuiet()`, a five-term predicate (no staged
@@ -2495,8 +2492,8 @@ Rebind button — the buffer is staged commit CONTENT and lands through the same
   advisory in both directions: positioned errors become CodeMirror gutter
   diagnostics, message-only errors become the strip under the editor, and a
   failed lint call clears the gutter rather than blocking anything.
-- **Preview** — on demand, never on a timer: `POST /metamodel/diff` sandboxes
-  the candidate and returns which model issues would start/stop failing plus a
+- **Preview** — on demand, never on a timer: the engine sandboxes
+  the candidate and reports which model issues would start/stop failing, plus a
   structural diff (`MetamodelPreviewPanel`). The replica
   answers the model half over
   the working copy and `POST /metamodel/structural-diff` the document half,
@@ -2895,7 +2892,7 @@ blob does:
 - **Issues panel integration.** Rule issues stamp `check = "rule:<name>"`, so
   `Workspace/IssuesPanel.svelte` strips the `rule:` prefix and renders one
   filter chip per rule alongside the existing validator chips. A
-  `rules-skipped-banner` (collapsible, off `GET /model/issues`'s
+  `rules-skipped-banner` (collapsible, off the engine's
   `rules_status.skipped`) reports rules the metamodel can no longer satisfy —
   drift never appears as a phantom issue with no owning element.
 

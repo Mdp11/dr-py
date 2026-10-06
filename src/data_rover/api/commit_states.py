@@ -3,9 +3,8 @@
 The journal's inverse ops cannot render a ``modified`` diff entry on their
 own — an update's inverse ``properties_patch`` carries only the touched
 keys, not the whole entity — so the full before/after state of every entity
-a batch touched is captured while the live model is still in scope and
-stored on the ``Commit`` row (``entity_states``). The diff reader then never
-reconstructs the model for a commit that carries it.
+a batch touched is captured while the applied batch is in hand and stored
+on the ``Commit`` row (``entity_states``). The diff reader reads them back.
 
 Column shape::
 
