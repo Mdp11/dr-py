@@ -1108,7 +1108,7 @@ Load-sensitive, not looked into. The final run of the console-removal plan added
 ### T-12 · `replica.spec` "a silent bump is healed by the next delta" flakes · `open` · *2026-09-30*
 Failed 1 run in 3 of the full e2e run during the scripts plan (engine rev 5 against server
 rev 6 on a background `getModelIssues`); not proven to predate the branch, and not the same
-as `T-11` (`view.spec.ts`). Not analysed.
+as `T-11` (`view.spec.ts`). Not analysed. The spec is gone: the server has no write outside the journal.
 
 ### T-13 · The script host and service have thin tests · `open` · *2026-09-30*
 `script-worker.ts` has no automated test (proof was by hand in Chromium; a >1 MiB reply and a
