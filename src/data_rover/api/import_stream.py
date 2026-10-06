@@ -40,7 +40,7 @@ from .rebind_check import (
     containment_violations,
     dangling_references,
 )
-from .routes._snapshot import _reject_reserved_id
+from .schemas import is_reserved_id
 from .state_digest import entity_hash, format_digest
 
 _parser = ijson.get_backend("python")
@@ -62,7 +62,8 @@ _STRING_BODY = rb'[^"\\]*(?:\\.[^"\\]*)*'
 _TOKEN = re.compile(
     rb'(?P<str>"' + _STRING_BODY + rb'")'
     rb'|(?P<open>"' + _STRING_BODY + rb"(?P<bs>\\)?\Z)"
-    rb"|(?P<lit>-?Infinity|NaN)",
+    rb"|(?P<lit>-?Infinity|NaN)"
+    rb"|(?P<plus>\+)",
     re.DOTALL,
 )
 #: the rest of a string a previous buffer left open
@@ -89,6 +90,7 @@ class _NonFiniteFilter:
         self._source = source
         self._carry = b""
         self._in_string = False
+        self._last = b""
 
     def read(self, size: int = -1) -> bytes:
         if size == 0:  # the parser probes with read(0) for the kind of file
@@ -97,16 +99,22 @@ class _NonFiniteFilter:
             chunk = self._source.read(size if size > 0 else _READ_SIZE)
             eof = not chunk
             out, self._carry, self._in_string = _rewrite(
-                self._carry + chunk, self._in_string, eof=eof
+                self._carry + chunk, self._in_string, self._last, eof=eof
             )
+            self._last = out[-1:] or self._last
             if out or eof:
                 return out
 
 
-def _rewrite(buf: bytes, in_string: bool, *, eof: bool) -> tuple[bytes, bytes, bool]:
+def _rewrite(
+    buf: bytes, in_string: bool, last: bytes, *, eof: bool
+) -> tuple[bytes, bytes, bool]:
     """``buf`` with its literals rewritten, up to the first bytes the end of the
     buffer may cut; those bytes (all of them at ``eof``); and whether the
-    buffer ends inside a string. ``in_string`` says it starts inside one."""
+    buffer ends inside a string. ``in_string`` says it starts inside one and
+    ``last`` is the byte emitted before it. A ``+`` outside a string that does
+    not follow an exponent's ``e`` is a ``ValueError``: the parser reads a
+    number with a leading plus, which JSON does not."""
     pos = 0
     if in_string:
         rest = _STRING_REST.match(buf)
@@ -134,6 +142,11 @@ def _rewrite(buf: bytes, in_string: bool, *, eof: bool) -> tuple[bytes, bytes, b
             break
         scanned = m.end()
         if kind == "str":
+            continue
+        if kind == "plus":
+            before = buf[m.start() - 1 : m.start()] if m.start() > 0 else last
+            if before not in (b"e", b"E"):
+                raise ValueError("a number cannot begin with '+'")
             continue
         space = _SPACE.match(buf, m.end())
         assert space is not None
@@ -269,14 +282,14 @@ class _Ingest:
                     self._element(index, value)
                 else:
                     self._relationship(index, value)
+            self._flush()
         except (ijson.JSONError, ValueError) as exc:
             raise _refuse(f"invalid JSON: {exc}") from exc
-        self._flush()
         if self.failures:
             raise _refuse(self.failures.detail())
 
     def _shape(
-        self, where: str, section: str, value: Any, *keys: str
+        self, where: str, value: Any, *keys: str
     ) -> tuple[str, dict[str, Any], dict[str, Any], int] | None:
         """The id, the properties and the rev of an entity of the right shape,
         or ``None`` after recording the refusal."""
@@ -297,15 +310,13 @@ class _Ingest:
         ):
             self.failures.add("invalid entity", label)
             return None
-        try:
-            _reject_reserved_id(entity_id, element=section == "elements")
-        except HTTPException:
+        if is_reserved_id(entity_id):
             self.failures.add("reserved id", entity_id)
             return None
         return entity_id, value, props if props is not None else {}, rev
 
     def _element(self, index: int, value: Any) -> None:
-        shaped = self._shape(f"elements[{index}]", "elements", value, "type_name")
+        shaped = self._shape(f"elements[{index}]", value, "type_name")
         if shaped is None:
             return
         entity_id, entity, props, rev = shaped
@@ -342,7 +353,6 @@ class _Ingest:
     def _relationship(self, index: int, value: Any) -> None:
         shaped = self._shape(
             f"relationships[{index}]",
-            "relationships",
             value,
             "type_name",
             "source_id",

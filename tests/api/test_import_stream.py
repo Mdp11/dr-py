@@ -496,6 +496,11 @@ CASES = [
         "reserved id: 1 entity, first tmp_a",
     ),
     (
+        "reserved-relationship-id",
+        _doc([_node("a")], [_rel("tmp_r", "a", "a")]),
+        "reserved id: 1 entity, first tmp_r",
+    ),
+    (
         "shapeless-entity",
         '{"elements": [{"id": "a", "type_name": "Node", "rev": "0"}], "relationships": []}',
         "invalid entity: 1 entity, first a",
@@ -534,6 +539,23 @@ CASES = [
     (
         "bare-garbage",
         '{"elements": [{"id": "a", "type_name": "Node", "properties": {"x": Infinit}}]}',
+        "invalid JSON",
+    ),
+    (
+        "number-with-a-leading-plus",
+        '{"elements": [{"id": "a", "type_name": "Node", "properties": {"n": +1}}]}',
+        "invalid JSON",
+    ),
+    (
+        "number-with-a-leading-plus-in-an-array",
+        '{"elements": [{"id": "a", "type_name": "Node", "properties": {"refs": [1, +2]}}]}',
+        "invalid JSON",
+    ),
+    (
+        # a lone surrogate reaches the database in the last flush, which raises
+        # a ValueError there
+        "text-the-database-cannot-store",
+        '{"elements": [{"id": "a", "type_name": "Node", "properties": {"label": "\\ud800"}}]}',
         "invalid JSON",
     ),
 ]
@@ -755,6 +777,26 @@ def test_the_filter_rewrites_literals_wherever_the_reads_fall(
     while chunk := f.read(size):
         parts.append(chunk)
     assert b"".join(parts) == want
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 64 * 1024])
+def test_the_filter_keeps_the_plus_of_an_exponent_wherever_the_reads_fall(
+    size: int,
+) -> None:
+    text = b'["+", 1e+5, 2E+3, {"k+": -1.5e+10}]'
+    f = _NonFiniteFilter(io.BytesIO(text))
+    assert b"".join(iter(lambda: f.read(size), b"")) == text
+
+
+@pytest.mark.parametrize("text", [b"[+1]", b'{"a": +1}', b"[1, +2]", b"[1e5+1]", b"+1"])
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 64 * 1024])
+def test_the_filter_refuses_a_plus_that_is_no_exponent_wherever_the_reads_fall(
+    text: bytes, size: int
+) -> None:
+    f = _NonFiniteFilter(io.BytesIO(text))
+    with pytest.raises(ValueError, match="cannot begin with '\\+'"):
+        while f.read(size):
+            pass
 
 
 def test_the_filter_probe_read_of_zero_consumes_nothing() -> None:
