@@ -30,9 +30,11 @@ When behaviour changes, update the README that owns it in the same commit (RC-10
 
 ## Commands
 
-Everything runs through **pixi**; there is no global `python` or `node`. Environments: `core`, `core-dev` (lint/test, includes api), `api`, `frontend` (Node 22).
+Everything runs through **pixi**; there is no global `python` or `node`. Environments: `core`, `core-dev` (lint/test, includes api), `api`, `frontend` (Node 22), `dev` (the `dr-*` tasks, which reach the others through task dependencies).
 
 ```sh
+pixi run dr-start                         # whole local stack from any clone: .env, npm installs, docker, migrate, then backend + frontend + sandbox
+pixi run dr-stop / dr-logs / dr-reset     # stop it (keeps data), attach its logs, stop and wipe the docker volumes
 pixi run dr-test                          # core pytest + frontend, engine and sandbox vitest (not e2e)
 pixi run dr-tidy                          # format + lint everywhere; ruff, mypy AND pyright must all pass
 

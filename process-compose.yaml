@@ -10,7 +10,7 @@
 # tear them down. That keeps each tool doing what it is best at — docker owns the
 # containers, process-compose owns the host processes + the migration ordering.
 #
-#   pixi run dr-start   # services-start, then this graph as a background daemon
+#   pixi run dr-start   # .env, npm installs, services-start, db-upgrade, then this graph as a background daemon
 #   pixi run dr-logs    # attach the TUI (live per-process logs, restart keys)
 #   pixi run dr-stop    # stop these processes, then services-stop
 #   pixi run dr-reset   # stop, then wipe the docker volumes for a clean slate
@@ -24,7 +24,7 @@ processes:
   # (services-start waited), so no docker dependency is needed here.
   #
   # Each command pins its pixi environment with `-e`: this daemon is spawned from
-  # `pixi run dr-start` (the `api` env), and a bare nested `pixi run <task>` only
+  # `pixi run dr-start` (the `dev` env), and a bare nested `pixi run <task>` only
   # resolves tasks in that already-activated env — so `frontend-start` (a
   # `frontend`-env task) is not found. `-e` selects the right env unambiguously.
   db-upgrade:

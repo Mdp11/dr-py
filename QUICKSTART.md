@@ -11,33 +11,41 @@
 ```sh
 git clone git@github.com:Mdp11/dr-py.git data-rover-py
 cd data-rover-py
-pixi install -e api
-pixi install -e frontend
-
-cp .env.example .env        # defaults match docker-compose + set the dev admin
-
-pixi run services-start        # Postgres + fake-gcs (waits until ready)
-pixi run db-upgrade         # apply Postgres schema (Alembic)
-pixi run backend-start      # http://127.0.0.1:8000
-pixi run frontend-start     # http://127.0.0.1:5173  (separate terminal)
-pixi run sandbox-start      # http://localhost:5174  (built files, separate terminal)
+pixi run dr-start    # everything below, then backend + frontend + sandbox (non-blocking)
 ```
+
+On a fresh clone `dr-start` does every setup step itself, as task dependencies:
+creates `.env` from `.env.example` when it is missing (defaults match
+docker-compose and set the dev admin), runs `npm install` for the frontend,
+engine and sandbox (skipped while their `package.json` and `package-lock.json`
+are unchanged), starts Postgres + fake-gcs and waits until they are ready, and
+applies the Alembic schema. Pixi installs each environment the first time a
+task needs it. Then it starts the backend, the frontend and the sandbox as a
+detached `process-compose` daemon (see `process-compose.yaml`).
+
+```sh
+pixi run dr-logs     # attach live per-process logs (Ctrl-b q to detach; leaves it running)
+pixi run dr-stop     # stop backend + frontend + sandbox + dockers (keeps data volumes)
+pixi run dr-reset    # stop everything + wipe the Postgres/fake-gcs volumes (clean slate;
+                     # next dr-start rebuilds fully fresh — does NOT restart)
+```
+
+The `dr-*` tasks live in their own `dev` environment and reach every package
+through task dependencies, so they run from the repo root with no `-e`.
 
 Redis backs the optional lease mirror; set
 `DATA_ROVER_REDIS_URL=redis://localhost:6379/0` to enable it — the backend
 runs fine without it (locks are then in-process only).
 
-### One-shot workflow (shortcut)
-
-The steps above are bundled into three commands (docker + backend + frontend, via
-a detached `process-compose` daemon — see `process-compose.yaml`):
+### Running the pieces by hand
 
 ```sh
-pixi run dr-start    # start dockers, migrate, then backend + frontend (non-blocking)
-pixi run dr-logs     # attach live per-process logs (Ctrl-b q to detach; leaves it running)
-pixi run dr-stop     # stop backend + frontend + dockers (keeps data volumes)
-pixi run dr-reset    # stop everything + wipe the Postgres/fake-gcs volumes (clean slate;
-                     # next dr-start rebuilds fully fresh — does NOT restart)
+pixi run dev-env            # .env from .env.example when missing
+pixi run services-start     # Postgres + fake-gcs (waits until ready)
+pixi run db-upgrade         # apply Postgres schema (Alembic)
+pixi run backend-start      # http://127.0.0.1:8000
+pixi run frontend-start     # http://127.0.0.1:5173  (separate terminal; installs its npm deps)
+pixi run sandbox-start      # http://localhost:5174  (built files, separate terminal; installs engine + sandbox npm deps)
 ```
 
 Open <http://127.0.0.1:5173> (not `localhost` — the sandbox site above serves

@@ -36,7 +36,6 @@ ijson = ">=3.5,<4"
 openpyxl = "3.1.*"
 types-openpyxl = "3.1.*"
 xlsxwriter = "3.2.*"
-process-compose = "1.*"
 ruff = "0.15.*"
 
 [feature.api.tasks.backend-start]
@@ -53,54 +52,6 @@ default-environment = "api"
 description = "Autogenerate a new Alembic migration"
 args = [{ arg = "message", default = "migration" }]
 cmd = "alembic revision --autogenerate -m \"{{ message }}\""
-default-environment = "api"
-
-[feature.api.tasks.services-start]
-description = "Start docker infra, wait until ready"
-cmd = "docker compose up -d --wait"
-default-environment = "api"
-
-[feature.api.tasks.services-stop]
-description = "Stop docker infra"
-cmd = "docker compose down"
-default-environment = "api"
-
-[feature.api.tasks.services-reset]
-description = "Stop docker infra and wipe data volumes"
-cmd = "docker compose down -v"
-default-environment = "api"
-
-[feature.api.tasks.services-logs]
-description = "Tail docker infra logs"
-cmd = "docker compose logs -f"
-default-environment = "api"
-
-[feature.api.tasks.dr-start]
-description = "Start the full local stack: docker + migrate + backend + frontend"
-cmd = """
-docker compose up -d --wait && bash scripts/pc.sh up --detached
-"""
-default-environment = "api"
-
-[feature.api.tasks.dr-stop]
-description = "Stop the full local stack"
-cmd = """
-bash scripts/pc.sh down || true
-docker compose down
-"""
-default-environment = "api"
-
-[feature.api.tasks.dr-reset]
-description = "Stop the stack and wipe docker volumes for a clean slate"
-cmd = """
-bash scripts/pc.sh down || true
-docker compose down -v
-"""
-default-environment = "api"
-
-[feature.api.tasks.dr-logs]
-description = "Attach the process-compose TUI to the running stack"
-cmd = "bash scripts/pc.sh attach"
 default-environment = "api"
 
 [feature.core-dev.tasks.core-test]
@@ -179,25 +130,87 @@ depends-on = [
     { task = "backend-lint", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
-[feature.core-dev.tasks.dr-tidy]
+[feature.dev.dependencies]
+process-compose = "1.*"
+
+[feature.dev.tasks.dev-env]
+description = "Create .env from .env.example when it is missing"
+cmd = "test -f .env || cp .env.example .env"
+default-environment = "dev"
+
+[feature.dev.tasks.services-start]
+description = "Start docker infra, wait until ready"
+cmd = "docker compose up -d --wait"
+default-environment = "dev"
+
+[feature.dev.tasks.services-stop]
+description = "Stop docker infra"
+cmd = "docker compose down"
+default-environment = "dev"
+
+[feature.dev.tasks.services-reset]
+description = "Stop docker infra and wipe data volumes"
+cmd = "docker compose down -v"
+default-environment = "dev"
+
+[feature.dev.tasks.services-logs]
+description = "Tail docker infra logs"
+cmd = "docker compose logs -f"
+default-environment = "dev"
+
+[feature.dev.tasks.dr-start]
+description = "Start the full local stack from any clone: .env, npm installs, docker, migrate, then backend + frontend + sandbox"
+cmd = "bash scripts/pc.sh up --detached"
+default-environment = "dev"
+depends-on = [
+    { task = "dev-env" },
+    { task = "frontend-install", environment = "frontend" },
+    { task = "engine-install", environment = "frontend" },
+    { task = "sandbox-install", environment = "frontend" },
+    { task = "services-start" },
+    { task = "db-upgrade", environment = "api" },
+]
+
+[feature.dev.tasks.dr-stop]
+description = "Stop the full local stack"
+cmd = """
+bash scripts/pc.sh down || true
+docker compose down
+"""
+default-environment = "dev"
+
+[feature.dev.tasks.dr-reset]
+description = "Stop the stack and wipe docker volumes for a clean slate"
+cmd = """
+bash scripts/pc.sh down || true
+docker compose down -v
+"""
+default-environment = "dev"
+
+[feature.dev.tasks.dr-logs]
+description = "Attach the process-compose TUI to the running stack"
+cmd = "bash scripts/pc.sh attach"
+default-environment = "dev"
+
+[feature.dev.tasks.dr-tidy]
 description = "Format + lint the whole codebase"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "true"
-default-environment = "core-dev"
+default-environment = "dev"
 depends-on = [
     { task = "frontend-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
     { task = "engine-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
     { task = "sandbox-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
-    { task = "core-tidy", args = [{ check_only = "{{ check_only }}" }] },
-    { task = "backend-tidy", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "core-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "core-dev" },
+    { task = "backend-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "core-dev" },
 ]
 
-[feature.core-dev.tasks.dr-test]
+[feature.dev.tasks.dr-test]
 description = "Run every test suite: core pytest + frontend vitest + engine vitest + sandbox vitest"
 cmd = "true"
-default-environment = "core-dev"
+default-environment = "dev"
 depends-on = [
-    { task = "core-test" },
+    { task = "core-test", environment = "core-dev" },
     { task = "frontend-test", environment = "frontend" },
     { task = "engine-test", environment = "frontend" },
     { task = "sandbox-test", environment = "frontend" },
@@ -210,6 +223,9 @@ nodejs = "22.*"
 description = "Install frontend npm dependencies"
 cmd = "npm install"
 cwd = "frontend"
+# Skipped while the manifests and the installed tree are unchanged.
+inputs = ["frontend/package.json", "frontend/package-lock.json"]
+outputs = ["frontend/node_modules/.package-lock.json"]
 
 [feature.frontend.tasks.frontend-start]
 description = "Run the SvelteKit dev server on :5173"
@@ -264,6 +280,9 @@ depends-on = [
 description = "Install engine npm dependencies"
 cmd = "npm install"
 cwd = "engine"
+# Skipped while the manifests and the installed tree are unchanged.
+inputs = ["engine/package.json", "engine/package-lock.json"]
+outputs = ["engine/node_modules/.package-lock.json"]
 
 [feature.frontend.tasks.engine-test]
 description = "Run the engine vitest suite"
@@ -330,6 +349,9 @@ depends-on = [
 description = "Install sandbox npm dependencies"
 cmd = "npm install"
 cwd = "sandbox"
+# Skipped while the manifests and the installed tree are unchanged.
+inputs = ["sandbox/package.json", "sandbox/package-lock.json"]
+outputs = ["sandbox/node_modules/.package-lock.json"]
 
 [feature.frontend.tasks.sandbox-build]
 description = "Build the sandbox site into sandbox/dist"
@@ -340,6 +362,7 @@ cwd = "sandbox"
 description = "Build the sandbox site, rebuild on change and serve it on localhost:5174"
 cmd = "npm run start"
 cwd = "sandbox"
+depends-on = [{ task = "engine-install" }, { task = "sandbox-install" }]
 
 [feature.frontend.tasks.sandbox-test]
 description = "Run the sandbox vitest suite"
@@ -379,3 +402,4 @@ core = { features = ["core"] }
 core-dev = { features = ["core", "core-dev", "api"] }
 api = { features = ["core", "api"] }
 frontend = { features = ["frontend"] }
+dev = { features = ["dev"] }
