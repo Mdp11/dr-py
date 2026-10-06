@@ -433,7 +433,9 @@ export const PreviewResponseSchema = z.object({
 	conformance_error_count: z.number().int(),
 	structural_blockers: z.array(IssueOutSchema).default([]),
 	issues: z.array(IssueOutSchema).default([]),
-	would_block: z.boolean().default(false)
+	would_block: z.boolean().default(false),
+	/** The server's 422 detail for a rebind its commit would refuse; set with `would_block`. */
+	block_reason: z.string().optional()
 });
 export type PreviewResponse = z.infer<typeof PreviewResponseSchema>;
 

@@ -134,7 +134,8 @@
 				<p class="text-[10px] text-destructive" data-testid="mm-rel-name-error">{nameError}</p>
 			{/if}
 			<p class="text-[10px] text-muted-foreground/70">
-				Renaming re-types instances on rebind (shows as remove + add in Preview).
+				A type with instances cannot be renamed: the commit is refused. Delete or migrate its
+				instances in an earlier commit first.
 			</p>
 		</div>
 

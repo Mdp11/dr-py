@@ -148,7 +148,9 @@ export function candidateDiff(
 /**
  * `POST /commits/preview`'s body for a batch that rebinds the metamodel: the
  * whole working state's issues under the candidate, every one `on_server`,
- * the structural ones also as blockers. A rebind never blocks.
+ * the structural ones also as blockers. It does not block: what the server's
+ * rebind commit refuses on the committed rows is `rebindRefusal`'s, and the
+ * scan does not run then.
  */
 export function rebindPreviewBody(issues: readonly Issue[]): PreviewBody {
 	const body: PreviewBody = {

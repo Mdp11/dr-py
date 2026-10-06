@@ -61,6 +61,7 @@ import {
 	type StagedRefusal
 } from '../validation/candidate.ts';
 import type { Issue } from '../validation/issue.ts';
+import { rebindBlockedBody, rebindRefusal } from '../validation/rebind.ts';
 import { deltaEnds, deltaIds, LiveIssues, type SweepStep } from '../validation/live.ts';
 import { parseExact } from '../value/parse.ts';
 import { pyRepr } from '../value/repr.ts';
@@ -520,7 +521,9 @@ const METHODS: { readonly [method: string]: Method } = {
 				doc: rebind.metamodel,
 				layer: 'committed',
 				check,
+				rows: rebindRefusal,
 				refuses: stagedRefusal,
+				blocked: rebindBlockedBody,
 				answer: (_live, issues) => rebindPreviewBody(issues)
 			});
 		}
@@ -618,15 +621,19 @@ const MOVED = Symbol('moved');
 /**
  * A call over the working copy under a candidate metamodel: the document, the
  * layer whose rule sets are compiled under it, the check that refuses a stale
- * call, whether the working copy is one the server reaches under the
- * candidate (always, when absent), and the answer over the store and the
- * candidate's issues.
+ * call, whether the committed state is one the server's rebind commit holds
+ * (`rows`: its refusal text, and `blocked` its answer; always, when absent),
+ * whether the working copy is one the server reaches under the candidate
+ * (always, when absent), and the answer over the store and the candidate's
+ * issues.
  */
 type CandidateCall = {
 	readonly doc: unknown;
 	readonly layer: 'working' | 'committed';
 	readonly check: (wc: WorkingCopy) => void;
+	readonly rows?: (wc: WorkingCopy, candidate: Metamodel) => Steps<string | null>;
 	readonly refuses?: (wc: WorkingCopy, candidate: Metamodel) => StagedRefusal | null;
+	readonly blocked?: (reason: string) => unknown;
 	readonly answer: (live: LiveIssues, issues: readonly Issue[]) => unknown;
 };
 
@@ -1425,7 +1432,9 @@ class Service {
 	/**
 	 * One run of a candidate scan: `MOVED` unless the store is seeded and
 	 * settled when it begins and stands where it began after its last step.
-	 * Staged ops the candidate does not admit are refused before any scanning.
+	 * Committed rows the candidate cannot hold answer `blocked` and staged ops
+	 * it does not admit are refused, before any scanning, in the order the
+	 * server's commit checks them.
 	 */
 	private *candidateSteps(spec: CandidateCall, prepared: { value: Prepared }): Steps<unknown> {
 		const live = this.live();
@@ -1439,6 +1448,10 @@ class Service {
 		};
 		prepared.value = this.prepare(spec, prepared.value);
 		const { candidate } = prepared.value;
+		const blocked = spec.rows === undefined ? null : yield* spec.rows(live.wc, candidate.metamodel);
+		if (blocked !== null) {
+			return this.movedFrom(stamp) ? MOVED : spec.blocked!(blocked);
+		}
 		const refusal = spec.refuses?.(live.wc, candidate.metamodel) ?? null;
 		if (refusal !== null) throw new Refused(refusal.status, refusal.detail);
 		const issues = yield* candidateScan(live.wc.model, candidate);

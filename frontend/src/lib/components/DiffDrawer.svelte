@@ -249,6 +249,9 @@
 	const errorCount = $derived(preview?.conformance_error_count ?? 0);
 	const structuralBlockers = $derived(preview?.structural_blockers ?? []);
 	const wouldBlock = $derived(preview?.would_block ?? false);
+	// A rebind the server's commit refuses on the committed rows: the engine's
+	// preview carries the server's 422 text as the reason.
+	const blockReason = $derived(preview?.block_reason ?? null);
 	const commitBlocked = $derived(structuralBlockers.length > 0 || wouldBlock);
 
 	const issueIndex = $derived(indexIssues(getEffectiveIssues()));
@@ -685,7 +688,19 @@
 						>
 					</div>
 				{/if}
-				{#if wouldBlock}
+				{#if blockReason !== null}
+					<div
+						class="flex flex-col gap-1 rounded border border-destructive/40 bg-destructive/15 px-2 py-1 text-[11px] text-destructive"
+						role="alert"
+						data-testid="rebind-block"
+					>
+						<p class="break-words">Commit blocked: {blockReason}</p>
+						<p>
+							Delete or migrate those rows in an earlier commit, then commit the metamodel change.
+							Renaming a type that has instances is refused.
+						</p>
+					</div>
+				{:else if wouldBlock}
 					<div
 						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1 text-[11px] text-destructive"
 						role="alert"

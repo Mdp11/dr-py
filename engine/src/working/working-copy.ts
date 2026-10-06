@@ -318,6 +318,12 @@ export class WorkingCopy {
 		return element === undefined ? null : elementImage(element);
 	}
 
+	/** Whether the element has committed state, whatever is staged on top. */
+	hasCommittedElement(id: string): boolean {
+		const image = this.committedElements.get(id);
+		return image !== undefined ? image !== null : this.model.findElement(id) !== undefined;
+	}
+
 	committedRelationship(id: string): RelImage | null {
 		const image = this.committedRelationships.get(id);
 		if (image !== undefined) return image;

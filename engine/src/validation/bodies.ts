@@ -59,12 +59,17 @@ export function storeListBody(
 	};
 }
 
-/** `POST /commits/preview`'s body, in its field order. */
+/**
+ * `POST /commits/preview`'s body, in its field order. `block_reason` is the
+ * server's 422 detail for a rebind its commit would refuse, and absent
+ * otherwise.
+ */
 export type PreviewBody = {
 	conformance_error_count: number;
 	structural_blockers: IssueOut[];
 	issues: IssueOut[];
 	would_block: boolean;
+	block_reason?: string;
 };
 
 /** An issue's identity when working and committed issues are matched: `check` aside. */

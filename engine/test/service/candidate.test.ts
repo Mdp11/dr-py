@@ -6,6 +6,7 @@ import {
 	type IssueListBody,
 	type IssueOut,
 	type MetamodelDoc,
+	type Model,
 	type ModelOp,
 	type PreviewBody,
 	type StageResult
@@ -54,6 +55,61 @@ async function ready(host = autoHost(), rules: object[] = []): Promise<Client> {
 	await client.call('staged');
 	return client;
 }
+
+/**
+ * `ready` over the smart-city model with `ops` landed before the replica
+ * opens, as the committed state: the candidates a staged op is refused under
+ * are then ones no committed row is refused under.
+ */
+async function readyAfter(ops: (model: Model) => ModelOp[]): Promise<Client> {
+	const client = connect();
+	const { model, doc } = smartCity();
+	applyBatch(model, ops(model));
+	await openReplica(client, model, doc);
+	await until(client, isSwept);
+	await client.call('staged');
+	return client;
+}
+
+/** Ops that unset `property` on every element of `type` that holds it. */
+const unset =
+	(type: string, property: string) =>
+	(model: Model): ModelOp[] =>
+		[...model.elements()]
+			.filter((el) => el.typeName === type && property in el.props)
+			.map((el) => ({
+				kind: 'update_element',
+				id: el.id,
+				properties_patch: { [property]: null }
+			}));
+
+/** Ops that unset `property` on every relationship of `type` that holds it. */
+const unsetOnRelationships =
+	(type: string, property: string) =>
+	(model: Model): ModelOp[] =>
+		[...model.relationships()]
+			.filter((rel) => rel.typeName === type && property in rel.props)
+			.map((rel) => ({
+				kind: 'update_relationship',
+				id: rel.id,
+				properties_patch: { [property]: null }
+			}));
+
+/** Ops that delete every element of `type`, and with it what is incident to them. */
+const deleteElements =
+	(type: string) =>
+	(model: Model): ModelOp[] =>
+		[...model.elements()]
+			.filter((el) => el.typeName === type)
+			.map((el) => ({ kind: 'delete_element', id: el.id }));
+
+/** Ops that delete every relationship of `type`. */
+const deleteRelationships =
+	(type: string) =>
+	(model: Model): ModelOp[] =>
+		[...model.relationships()]
+			.filter((rel) => rel.typeName === type)
+			.map((rel) => ({ kind: 'delete_relationship', id: rel.id }));
 
 /** `ready`, with nothing left in the background, each unit of work then a slice turned by hand. */
 async function held(rules: object[] = []) {
@@ -576,7 +632,12 @@ describe('previewCommit with a rebind', () => {
 	};
 
 	it('refuses 422 staged ops naming a property the candidate drops, as the server does', async () => {
-		const client = await ready();
+		// The server checks its rows first: none holds a property the candidates drop.
+		const client = await readyAfter((model) => [
+			...unset('Organization', 'industry')(model),
+			...unset('Team', 'size')(model),
+			...unsetOnRelationships('MemberOf', 'is_lead')(model)
+		]);
 		const refused = [
 			// the patch that removes the key, as the one that sets it
 			[[dropIndustry], NO_INDUSTRY],
@@ -621,11 +682,13 @@ describe('previewCommit with a rebind', () => {
 	});
 
 	it('refuses 422 a staged create of a type the candidate removes or makes abstract', async () => {
-		const client = await ready();
-		for (const [ops, doc, detail] of [
-			[[newTeam], NO_TEAM, "Unknown element type 'Team'"],
-			[[newTeam], ABSTRACT_TEAM, "Cannot instantiate abstract type 'Team'"],
-			[[newMember], NO_MEMBER_OF, "Unknown relationship type 'MemberOf'"]
+		// The server checks its rows first: none is of a type the candidates remove.
+		const noTeams = await readyAfter(deleteElements('Team'));
+		const noMemberOf = await readyAfter(deleteRelationships('MemberOf'));
+		for (const [client, ops, doc, detail] of [
+			[noTeams, [newTeam], NO_TEAM, "Unknown element type 'Team'"],
+			[noTeams, [newTeam], ABSTRACT_TEAM, "Cannot instantiate abstract type 'Team'"],
+			[noMemberOf, [newMember], NO_MEMBER_OF, "Unknown relationship type 'MemberOf'"]
 		] as const) {
 			await stageOnly(client, [...ops]);
 			expect(await refusal(previewStaged(client, doc)), JSON.stringify(ops)).toEqual({
@@ -670,6 +733,27 @@ describe('previewCommit with a rebind', () => {
 		expect((await previewStaged(client, CONTAINMENT)).would_block).toBe(false);
 	});
 
+	/**
+	 * The golden run's steps whose committed rows the server's rebind commit now
+	 * refuses, before it applies the batch's ops: the oracle recorded them as
+	 * previews that answer the rows' issues and never block, or the staged op's
+	 * refusal. The texts are the server's, over the model after the run's batch:
+	 * 30 entities the candidates cannot hold (the 15 NonFunctionalRequirements
+	 * and the 15 PerformanceRequirements, whose supertype is gone, in state
+	 * order), and `fr-c`, the one element two `Refines` contain.
+	 */
+	const CANNOT_HOLD =
+		'rebind leaves 30 entities the new metamodel cannot hold: ' +
+		'e_000231, e_000232, e_000233, e_000234, e_000235';
+	const NOW_BLOCKED: { [step: string]: string } = {
+		containment:
+			'rebind leaves containment the new metamodel forbids ' +
+			'(an element with two parents, or a cycle): fr-c',
+		removed: CANNOT_HOLD,
+		'removed-patch': CANNOT_HOLD,
+		'removed-create': CANNOT_HOLD
+	};
+
 	it('answers each preview_rebind step of the golden run as the oracle does', async () => {
 		const [rulesStep, batchStep, seedStep, ...steps] = previews!.steps;
 		expect([rulesStep!.do, batchStep!.do, seedStep!.do]).toEqual(['rules', 'batch', 'seed']);
@@ -690,7 +774,16 @@ describe('previewCommit with a rebind', () => {
 				batch_ids: [batch.id],
 				strict: step.strict
 			});
-			if (step.error === null) {
+			const blocked = NOW_BLOCKED[step.case ?? ''];
+			if (blocked !== undefined) {
+				expect(await answered, step.case).toEqual({
+					conformance_error_count: 0,
+					structural_blockers: [],
+					issues: [],
+					would_block: true,
+					block_reason: blocked
+				});
+			} else if (step.error === null) {
 				expect(JSON.stringify(await answered), step.case).toBe(JSON.stringify(step.result));
 			} else {
 				const refused = await refusal(answered);

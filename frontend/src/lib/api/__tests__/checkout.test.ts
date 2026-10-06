@@ -439,24 +439,87 @@ describe('previewCommit on the engine', () => {
 			expect(engine.over.methods()).not.toContain('previewCommit');
 		});
 
-		it("staged ops the candidate refuses are the engine's 422, and the server is not asked", async () => {
-			const project = fakeProject();
-			// The candidate drops `name`, which the staged rename sets.
+		/** The live document without `NamedElement.name`, which every committed element holds. */
+		const withoutName = (project: ReturnType<typeof fakeProject>) => {
 			const candidate = JSON.parse(JSON.stringify(project.doc)) as {
 				elements: { name: string; properties: { name: string }[] }[];
 			};
 			const named = candidate.elements.find((element) => element.name === 'NamedElement')!;
 			named.properties = named.properties.filter((property) => property.name !== 'name');
+			return candidate;
+		};
+
+		it("a candidate the committed rows cannot satisfy is blocked with the server's 422 text", async () => {
+			const project = fakeProject();
 			const engine = await issuesEngine(made, {
 				project,
-				lint: () => ({ ok: true, errors: [], document: candidate })
+				lint: () => ({ ok: true, errors: [], document: withoutName(project) })
+			});
+			const { ops, batchIds } = await staged(engine);
+			const first = [...project.model.elements()].slice(0, 5).map((element) => element.id);
+
+			const preview = await previewCommit(0, [rebind, ...ops], undefined, {
+				strict: false,
+				batchIds
+			});
+
+			expect(preview).toEqual({
+				conformance_error_count: 0,
+				structural_blockers: [],
+				issues: [],
+				would_block: true,
+				block_reason:
+					`rebind leaves ${project.model.elementCount} entities the new metamodel cannot hold: ` +
+					first.join(', ')
+			});
+			expect(engine.requests.map((request) => request.route)).toEqual(['lint']);
+		});
+
+		it("the block survives the merge with the server's half of the other ops", async () => {
+			const project = fakeProject();
+			const engine = await issuesEngine(made, {
+				project,
+				lint: () => ({ ok: true, errors: [], document: withoutName(project) })
+			});
+			const { ops, batchIds } = await staged(engine);
+			server.use(
+				http.post(`${project.baseUrl}/commits/preview`, () =>
+					HttpResponse.json({ conformance_error_count: 0, structural_blockers: [], issues: [] })
+				)
+			);
+
+			const preview = await previewCommit(0, [rebind, ...ops, moveNode], undefined, {
+				strict: false,
+				batchIds
+			});
+
+			expect(preview.would_block).toBe(true);
+			expect(preview.block_reason).toMatch(
+				/^rebind leaves \d+ entities the new metamodel cannot hold: /
+			);
+		});
+
+		it("staged ops the candidate refuses are the engine's 422, and the server is not asked", async () => {
+			const project = fakeProject();
+			// No committed element holds `name` when the candidate drops it.
+			project.silentCommit(
+				[...project.model.elements()].map((element) => ({
+					kind: 'update_element' as const,
+					id: element.id,
+					properties_patch: { name: null }
+				}))
+			);
+			const engine = await issuesEngine(made, {
+				project,
+				lint: () => ({ ok: true, errors: [], document: withoutName(project) })
 			});
 			const { ops, batchIds } = await staged(engine);
 			const all = [rebind, ...ops, moveNode];
 
-			const failure = await previewCommit(0, all, undefined, { strict: false, batchIds }).catch(
-				(error: unknown) => error
-			);
+			const failure = await previewCommit(project.rev, all, undefined, {
+				strict: false,
+				batchIds
+			}).catch((error: unknown) => error);
 
 			expect(failure).toBeInstanceOf(ValidationError);
 			expect(failure).toMatchObject({ status: 422 });

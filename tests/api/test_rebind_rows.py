@@ -26,6 +26,7 @@ from data_rover.api.db_models import EntityRefRow
 from data_rover.api.main import create_app
 from data_rover.api.project_state import DEFAULT_PROJECT_ID, get_registry
 from data_rover.core.metamodel.loader import load_metamodel_str
+from tests.golden.reader import load_fixture
 
 from .conftest import AUTH_HEADERS, head, install, papi, seed_default_project
 
@@ -514,3 +515,38 @@ def test_dangling_references_names_each_referencer_once(client: TestClient) -> N
         head_mod.rebuild_refs(s, DEFAULT_PROJECT_ID, mm)
         assert rebind_check.dangling_references(s, DEFAULT_PROJECT_ID) == ["a"]
         s.rollback()
+
+
+# --- the engine's rebind preview is held to the same cases --------------------
+
+_ROWS = load_fixture("rebind_rows")
+_YAML = {"content-type": "application/x-yaml"}
+
+
+@pytest.mark.parametrize("case", _ROWS["cases"], ids=lambda c: c["case"])
+def test_the_rows_cases_the_engine_preview_is_held_to(
+    client: TestClient, case: dict[str, Any]
+) -> None:
+    """``engine/test/service/rebind-rows.test.ts`` answers each case of the
+    fixture from the replica: the same refusal text for the same rows, or no
+    block. Here the server's preview and its commit answer them."""
+    for blob, document in (
+        (_ROWS["metamodel_yaml"], _ROWS["metamodel"]),
+        (case["candidate_yaml"], case["candidate"]),
+    ):
+        lint = client.post(papi("/metamodel/lint"), content=blob, headers=_YAML)
+        assert lint.json()["document"] == document, "the fixture's documents are served"
+    install(metamodel=_ROWS["metamodel_yaml"], model=json.dumps(case["model"]))
+    rebind = {"kind": "metamodel.rebind", "blob": case["candidate_yaml"]}
+    preview = client.post(
+        papi("/commits/preview"), json={"base_rev": head().rev, "ops": [rebind]}
+    )
+    commit = _rebind(client, case["candidate_yaml"])
+    if case["detail"] is None:
+        assert preview.status_code == 200, preview.text
+        assert commit.status_code == 200, commit.text
+    else:
+        assert preview.status_code == 422, preview.text
+        assert preview.json()["detail"] == case["detail"]
+        assert commit.status_code == 422, commit.text
+        assert commit.json()["detail"] == case["detail"]

@@ -60,7 +60,10 @@ const MODEL_OP_KINDS = new Set<string>([
  * whole model under the new metamodel: with `local`, its blob is linted, the
  * engine previews the working copy under the parsed document, and the server
  * previews the ops that are neither model ops nor the rebind; a blob the lint
- * refuses is the server's whole request, which answers its 422. Without
+ * refuses is the server's whole request, which answers its 422. A rebind the
+ * server's commit would refuse on the committed rows (an entity the candidate
+ * cannot hold, a containment second parent or cycle, a dangling reference) is
+ * answered `would_block` with the 422 text as `block_reason`. Without
  * `local` the server previews the whole request.
  */
 export async function previewCommit(
@@ -97,13 +100,17 @@ export async function previewCommit(
 	return rest.length === 0 ? model : mergePreviews(model, await serverPreview(rest));
 }
 
+const blockReason = (reason: string | undefined) =>
+	reason === undefined ? {} : { block_reason: reason };
+
 /** The engine's model half, then the server's half of the other ops. */
 function mergePreviews(model: PreviewResponse, rest: PreviewResponse): PreviewResponse {
 	return {
 		conformance_error_count: model.conformance_error_count + rest.conformance_error_count,
 		structural_blockers: [...model.structural_blockers, ...rest.structural_blockers],
 		issues: [...model.issues, ...rest.issues],
-		would_block: model.would_block || rest.would_block
+		would_block: model.would_block || rest.would_block,
+		...blockReason(model.block_reason ?? rest.block_reason)
 	};
 }
 

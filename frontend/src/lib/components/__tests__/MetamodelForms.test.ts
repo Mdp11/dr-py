@@ -175,6 +175,21 @@ describe('ElementTypeForm', () => {
 		unmount(c);
 	});
 
+	it('says that a type with instances cannot be renamed until they are deleted or migrated', () => {
+		const c = mount(ElementTypeForm, {
+			target: document.body,
+			props: { mm: MM, name: 'Zone', readOnly: false, onRequestDelete: () => {} }
+		});
+		flushSync();
+
+		expect(document.body.textContent?.replace(/\s+/g, ' ')).toContain(
+			'A type with instances cannot be renamed: the commit is refused. ' +
+				'Delete or migrate its instances in an earlier commit first.'
+		);
+
+		unmount(c);
+	});
+
 	it('refuses a rename onto a name the datatype space already holds', () => {
 		const c = mount(ElementTypeForm, {
 			target: document.body,

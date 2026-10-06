@@ -482,6 +482,7 @@ export {
 	type CandidateDiff
 } from './validation/candidate.ts';
 export { addNeighbourhood, DirtyCollector } from './validation/dirty.ts';
+export { rebindBlockedBody, rebindRefusal } from './validation/rebind.ts';
 export {
 	candidateKey,
 	issueKey,

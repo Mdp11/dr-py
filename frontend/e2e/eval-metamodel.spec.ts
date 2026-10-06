@@ -4,11 +4,13 @@
  * required property appended to a type lists the elements it fails in "Now
  * failing" with no staged note, a staged element edit shows the note and moves
  * the counts, the commit drawer's preview of the staged rebind never sends the
- * rebind to the server.
+ * rebind to the server, and a rename of a type that has instances is blocked
+ * there with the server's own 422 text.
  *
  * Fixture facts (examples/smart-city.metamodel.yaml, smart-city.model.json):
  * 12 SoftwareSystem elements, each with a string `name`; the type's property
- * list is one `repository_url` line.
+ * list is one `repository_url` line. 10 SLA elements, e_000925 on, which no
+ * relationship or type refers to.
  */
 
 import { test, expect } from './fixtures';
@@ -29,6 +31,7 @@ const METAMODEL_PATH = join(EXAMPLES, 'smart-city.metamodel.yaml');
 const ANCHOR =
 	'      - {name: repository_url, datatype: string, multiplicity: "0..1", pattern: \'^https://.+\'}\n';
 const NEW_PROPERTY = '      - {name: e2e_owner, datatype: string, multiplicity: "1"}\n';
+const SLA = '  - name: SLA\n';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -184,6 +187,37 @@ test("the commit drawer's rebind preview never sends the rebind to the server", 
 	await expect(drawer.getByText(/loading changes/i)).toBeHidden({ timeout: 30_000 });
 	await expect(drawer.getByRole('button', { name: /^Commit/ })).toBeEnabled({ timeout: 30_000 });
 	expect(previews.filter((body) => body.includes('metamodel.rebind'))).toEqual([]);
+	await page.keyboard.press('Escape');
+	await expect(drawer).toBeHidden({ timeout: 10_000 });
+	await discardAll(page);
+});
+
+test('renaming a type that has instances is blocked in the commit drawer with the 422 text', async ({
+	page
+}) => {
+	test.setTimeout(180_000);
+	await openReady(page);
+	const content = await openYaml(page);
+	const yaml = await readFile(METAMODEL_PATH, 'utf8');
+	expect(yaml).toContain(SLA);
+	await content.click();
+	await page.keyboard.press('ControlOrMeta+a');
+	await page.keyboard.press('Delete');
+	await page.keyboard.insertText(yaml.replace(SLA, '  - name: ServiceLevel\n'));
+	await preview(page);
+	await stageTooLongName(page);
+
+	await page.getByRole('button', { name: 'Commit', exact: true }).click();
+	const drawer = page.getByRole('dialog', { name: /commit changes/i });
+	await expect(drawer).toBeVisible({ timeout: 10_000 });
+	const block = drawer.getByTestId('rebind-block');
+	await expect(block).toBeVisible({ timeout: 30_000 });
+	await expect(block).toContainText(
+		'Commit blocked: rebind leaves 10 entities the new metamodel cannot hold: ' +
+			'e_000925, e_000926, e_000927, e_000928, e_000929'
+	);
+	await expect(block).toContainText('Delete or migrate those rows in an earlier commit');
+	await expect(drawer.getByRole('button', { name: /^Commit/ })).toBeDisabled();
 	await page.keyboard.press('Escape');
 	await expect(drawer).toBeHidden({ timeout: 10_000 });
 	await discardAll(page);

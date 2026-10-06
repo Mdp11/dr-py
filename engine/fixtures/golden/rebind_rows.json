@@ -1,0 +1,2162 @@
+{
+ "metamodel_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+ "metamodel": {
+  "enums": {},
+  "elements": [
+   {
+    "name": "Node",
+    "abstract": false,
+    "extends": null,
+    "properties": [
+     {
+      "name": "label",
+      "datatype": "string",
+      "multiplicity": "0..1",
+      "min": null,
+      "max": null,
+      "pattern": null,
+      "max_length": null
+     },
+     {
+      "name": "ref",
+      "datatype": "string",
+      "multiplicity": "0..1",
+      "min": null,
+      "max": null,
+      "pattern": null,
+      "max_length": null
+     }
+    ],
+    "key": null
+   },
+   {
+    "name": "Gadget",
+    "abstract": false,
+    "extends": null,
+    "properties": [],
+    "key": null
+   }
+  ],
+  "relationships": [
+   {
+    "name": "Link",
+    "abstract": false,
+    "extends": null,
+    "containment": false,
+    "source": "Node",
+    "target": "Node",
+    "mappings": [
+     {
+      "source": "Node",
+      "target": "Node"
+     }
+    ],
+    "source_multiplicity": "0..*",
+    "target_multiplicity": "0..*",
+    "properties": [
+     {
+      "name": "w",
+      "datatype": "integer",
+      "multiplicity": "0..1",
+      "min": null,
+      "max": null,
+      "pattern": null,
+      "max_length": null
+     }
+    ]
+   }
+  ]
+ },
+ "cases": [
+  {
+   "case": "dropped-type-in-use",
+   "model": {
+    "elements": [
+     {
+      "id": "n1",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "g0",
+      "type_name": "Gadget",
+      "properties": {}
+     },
+     {
+      "id": "g1",
+      "type_name": "Gadget",
+      "properties": {}
+     },
+     {
+      "id": "g2",
+      "type_name": "Gadget",
+      "properties": {}
+     },
+     {
+      "id": "g3",
+      "type_name": "Gadget",
+      "properties": {}
+     },
+     {
+      "id": "g4",
+      "type_name": "Gadget",
+      "properties": {}
+     },
+     {
+      "id": "g5",
+      "type_name": "Gadget",
+      "properties": {}
+     },
+     {
+      "id": "g6",
+      "type_name": "Gadget",
+      "properties": {}
+     }
+    ],
+    "relationships": []
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves 7 entities the new metamodel cannot hold: g0, g1, g2, g3, g4"
+  },
+  {
+   "case": "dropped-relationship-type-in-use",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "b",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "a",
+      "target_id": "b",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": []
+   },
+   "detail": "rebind leaves 1 entities the new metamodel cannot hold: l1"
+  },
+  {
+   "case": "dropped-property-still-set",
+   "model": {
+    "elements": [
+     {
+      "id": "n1",
+      "type_name": "Node",
+      "properties": {
+       "label": "x"
+      }
+     },
+     {
+      "id": "n2",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": []
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves 1 entities the new metamodel cannot hold: n1"
+  },
+  {
+   "case": "dropped-relationship-property-still-set",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "b",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "a",
+      "target_id": "b",
+      "properties": {
+       "w": 3
+      }
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": []
+     }
+    ]
+   },
+   "detail": "rebind leaves 1 entities the new metamodel cannot hold: l1"
+  },
+  {
+   "case": "abstract-type-in-use",
+   "model": {
+    "elements": [
+     {
+      "id": "g1",
+      "type_name": "Gadget",
+      "properties": {}
+     },
+     {
+      "id": "n1",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": []
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\n    abstract: true\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": true,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves 1 entities the new metamodel cannot hold: g1"
+  },
+  {
+   "case": "elements-before-relationships",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "b",
+      "type_name": "Gadget",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "a",
+      "target_id": "a",
+      "properties": {
+       "w": 1
+      }
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     }
+    ],
+    "relationships": []
+   },
+   "detail": "rebind leaves 2 entities the new metamodel cannot hold: b, l1"
+  },
+  {
+   "case": "containment-second-parent",
+   "model": {
+    "elements": [
+     {
+      "id": "p1",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "p2",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "c",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "c",
+      "properties": {}
+     },
+     {
+      "id": "l2",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "c",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: true\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": true,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves containment the new metamodel forbids (an element with two parents, or a cycle): c"
+  },
+  {
+   "case": "containment-cycle",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "b",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "c",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "free",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "a",
+      "target_id": "b",
+      "properties": {}
+     },
+     {
+      "id": "l2",
+      "type_name": "Link",
+      "source_id": "b",
+      "target_id": "c",
+      "properties": {}
+     },
+     {
+      "id": "l3",
+      "type_name": "Link",
+      "source_id": "c",
+      "target_id": "a",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: true\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": true,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves containment the new metamodel forbids (an element with two parents, or a cycle): b"
+  },
+  {
+   "case": "containment-self-loop",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "a",
+      "target_id": "a",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: true\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": true,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves containment the new metamodel forbids (an element with two parents, or a cycle): a"
+  },
+  {
+   "case": "containment-second-parents-bounded",
+   "model": {
+    "elements": [
+     {
+      "id": "p1",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "p2",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "k0",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "k1",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "k2",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "k3",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "k4",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "k5",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "k6",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "ak0",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "k0",
+      "properties": {}
+     },
+     {
+      "id": "ak1",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "k1",
+      "properties": {}
+     },
+     {
+      "id": "ak2",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "k2",
+      "properties": {}
+     },
+     {
+      "id": "ak3",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "k3",
+      "properties": {}
+     },
+     {
+      "id": "ak4",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "k4",
+      "properties": {}
+     },
+     {
+      "id": "ak5",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "k5",
+      "properties": {}
+     },
+     {
+      "id": "ak6",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "k6",
+      "properties": {}
+     },
+     {
+      "id": "bk0",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "k0",
+      "properties": {}
+     },
+     {
+      "id": "bk1",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "k1",
+      "properties": {}
+     },
+     {
+      "id": "bk2",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "k2",
+      "properties": {}
+     },
+     {
+      "id": "bk3",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "k3",
+      "properties": {}
+     },
+     {
+      "id": "bk4",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "k4",
+      "properties": {}
+     },
+     {
+      "id": "bk5",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "k5",
+      "properties": {}
+     },
+     {
+      "id": "bk6",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "k6",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: true\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": true,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves containment the new metamodel forbids (an element with two parents, or a cycle): k0, k1, k2, k3, k4"
+  },
+  {
+   "case": "second-parent-before-cycle",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "b",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "c",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "x",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "y",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "a",
+      "target_id": "b",
+      "properties": {}
+     },
+     {
+      "id": "l2",
+      "type_name": "Link",
+      "source_id": "b",
+      "target_id": "a",
+      "properties": {}
+     },
+     {
+      "id": "l3",
+      "type_name": "Link",
+      "source_id": "x",
+      "target_id": "c",
+      "properties": {}
+     },
+     {
+      "id": "l4",
+      "type_name": "Link",
+      "source_id": "y",
+      "target_id": "c",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: true\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": true,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves containment the new metamodel forbids (an element with two parents, or a cycle): c"
+  },
+  {
+   "case": "dangling-reference",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     },
+     {
+      "id": "b",
+      "type_name": "Node",
+      "properties": {
+       "ref": "a"
+      }
+     }
+    ],
+    "relationships": []
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: Node, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "Node",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves element references that point to no element, held by: a"
+  },
+  {
+   "case": "reference-to-relationship-id",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {
+       "ref": "l1"
+      }
+     },
+     {
+      "id": "b",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "a",
+      "target_id": "b",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: Node, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "Node",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves element references that point to no element, held by: a"
+  },
+  {
+   "case": "dangling-holders-in-id-order-bounded",
+   "model": {
+    "elements": [
+     {
+      "id": "d3",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     },
+     {
+      "id": "d1",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     },
+     {
+      "id": "d2",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     },
+     {
+      "id": "d5",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     },
+     {
+      "id": "d4",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     },
+     {
+      "id": "d6",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     },
+     {
+      "id": "d0",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     }
+    ],
+    "relationships": []
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: Node, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "Node",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves element references that point to no element, held by: d0, d1, d2, d3, d4"
+  },
+  {
+   "case": "rows-before-containment",
+   "model": {
+    "elements": [
+     {
+      "id": "g",
+      "type_name": "Gadget",
+      "properties": {}
+     },
+     {
+      "id": "p1",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "p2",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "c",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "c",
+      "properties": {}
+     },
+     {
+      "id": "l2",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "c",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\nrelationships:\n  - name: Link\n    containment: true\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": true,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves 1 entities the new metamodel cannot hold: g"
+  },
+  {
+   "case": "containment-before-references",
+   "model": {
+    "elements": [
+     {
+      "id": "p1",
+      "type_name": "Node",
+      "properties": {
+       "ref": "ghost"
+      }
+     },
+     {
+      "id": "p2",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "c",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "p1",
+      "target_id": "c",
+      "properties": {}
+     },
+     {
+      "id": "l2",
+      "type_name": "Link",
+      "source_id": "p2",
+      "target_id": "c",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: Node, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: true\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "Node",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": true,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": "rebind leaves containment the new metamodel forbids (an element with two parents, or a cycle): c"
+  },
+  {
+   "case": "dropped-property-nobody-sets",
+   "model": {
+    "elements": [
+     {
+      "id": "n1",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "n2",
+      "type_name": "Node",
+      "properties": {
+       "ref": "n1"
+      }
+     }
+    ],
+    "relationships": []
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": null
+  },
+  {
+   "case": "unused-type-made-abstract",
+   "model": {
+    "elements": [
+     {
+      "id": "n1",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": []
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\n    abstract: true\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": true,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": null
+  },
+  {
+   "case": "containment-chain",
+   "model": {
+    "elements": [
+     {
+      "id": "e0",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "e1",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "e2",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "e3",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "e4",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "e5",
+      "type_name": "Node",
+      "properties": {}
+     }
+    ],
+    "relationships": [
+     {
+      "id": "l0",
+      "type_name": "Link",
+      "source_id": "e0",
+      "target_id": "e1",
+      "properties": {}
+     },
+     {
+      "id": "l1",
+      "type_name": "Link",
+      "source_id": "e1",
+      "target_id": "e2",
+      "properties": {}
+     },
+     {
+      "id": "l2",
+      "type_name": "Link",
+      "source_id": "e2",
+      "target_id": "e3",
+      "properties": {}
+     },
+     {
+      "id": "l3",
+      "type_name": "Link",
+      "source_id": "e3",
+      "target_id": "e4",
+      "properties": {}
+     },
+     {
+      "id": "l4",
+      "type_name": "Link",
+      "source_id": "e4",
+      "target_id": "e5",
+      "properties": {}
+     }
+    ]
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: string, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: true\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": true,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": null
+  },
+  {
+   "case": "references-that-resolve",
+   "model": {
+    "elements": [
+     {
+      "id": "a",
+      "type_name": "Node",
+      "properties": {
+       "ref": "b"
+      }
+     },
+     {
+      "id": "b",
+      "type_name": "Node",
+      "properties": {}
+     },
+     {
+      "id": "c",
+      "type_name": "Node",
+      "properties": {
+       "ref": "b"
+      }
+     }
+    ],
+    "relationships": []
+   },
+   "candidate_yaml": "elements:\n  - name: Node\n    properties:\n      - {name: label, datatype: string}\n      - {name: ref, datatype: Node, multiplicity: \"0..1\"}\n  - name: Gadget\nrelationships:\n  - name: Link\n    containment: false\n    source: Node\n    target: Node\n    properties:\n      - {name: w, datatype: integer}\n",
+   "candidate": {
+    "enums": {},
+    "elements": [
+     {
+      "name": "Node",
+      "abstract": false,
+      "extends": null,
+      "properties": [
+       {
+        "name": "label",
+        "datatype": "string",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       },
+       {
+        "name": "ref",
+        "datatype": "Node",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ],
+      "key": null
+     },
+     {
+      "name": "Gadget",
+      "abstract": false,
+      "extends": null,
+      "properties": [],
+      "key": null
+     }
+    ],
+    "relationships": [
+     {
+      "name": "Link",
+      "abstract": false,
+      "extends": null,
+      "containment": false,
+      "source": "Node",
+      "target": "Node",
+      "mappings": [
+       {
+        "source": "Node",
+        "target": "Node"
+       }
+      ],
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "0..*",
+      "properties": [
+       {
+        "name": "w",
+        "datatype": "integer",
+        "multiplicity": "0..1",
+        "min": null,
+        "max": null,
+        "pattern": null,
+        "max_length": null
+       }
+      ]
+     }
+    ]
+   },
+   "detail": null
+  }
+ ]
+}

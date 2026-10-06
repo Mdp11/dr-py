@@ -1418,14 +1418,16 @@ batchIds}`) and no `metamodel.rebind` op is `previewCommit {base_rev,
 batch_ids, strict}`: the engine previews the model ops from its own staged
   batches and, when any op is not a model op, the server previews those
   alone, the halves summed (counts added, lists concatenated engine first,
-  `would_block` or-ed). An inline model, a scope, ops no batch ids name and a
-  `previewCommit` without `local` are the server's whole request. The server has
-  no `POST /model/validate` route, so the first three fail there; only
-  `POST /commits/preview`, a dry run of the commit's structural check, answers. With a `metamodel.rebind`
+  `would_block` or-ed, a `block_reason` kept). A `previewCommit` without `local`
+  is the server's whole request, which `POST /commits/preview`, a dry run of the
+  commit's structural check, answers. `validateModel({batchIds})` is the
+  engine's alone. With a `metamodel.rebind`
   op the blob is linted first (`POST /metamodel/lint`): a blob the lint
   refuses is the server's whole request, which answers its own 422, and else
   `previewCommit {base_rev, batch_ids, strict, rebind: {metamodel: document}}`
-  is the working copy under the candidate with the committed rules, the
+  is the working copy under the candidate with the committed rules (or, when the
+  committed rows are ones the server's rebind commit refuses, a blocked answer
+  carrying the commit's 422 text as `block_reason`), the
   other non-model ops previewed by the server and merged. `diffMetamodel`
   lints the candidate, throws a `ValidationError` 422 `Invalid metamodel` when
   the lint refuses it, and answers `candidateIssues {metamodel: document}`
@@ -2415,11 +2417,16 @@ exposes project-level configuration:
   relationships the commit batch touched (no whole-model re-validation), so it
   is safe to enable on an already-non-conforming project: pre-existing issues
   elsewhere do not block a commit.
-- **Rebind is exempt** — a `POST /commits` batch carrying a `metamodel.rebind`
-  op never passes through the strict gate (the backend runs a full-model sweep
-  for a rebind batch and is deliberately exempt from the conformance
-  hard-reject there); swapping the metamodel always succeeds regardless of the
-  setting. Structural blockers still hard-reject as usual.
+- **Rebind is exempt from strict mode** — a rebind preview never turns
+  conformance issues into `would_block`: swapping the metamodel is not held to
+  the setting. It blocks on the committed rows instead: the engine answers
+  `would_block: true` with `block_reason`, the server's 422 text, when the
+  candidate cannot hold an entity, leaves a containment second parent or cycle,
+  or leaves a reference to no element (`engine/README.md`). The `DiffDrawer`
+  shows `Commit blocked: {block_reason}` with the way out (delete or migrate
+  those rows in an earlier commit; renaming a type that has instances is
+  refused) in place of the strict-mode alert, and disables Commit. Structural
+  blockers still hard-reject as usual.
 
 ### Commit history browser (History drawer)
 

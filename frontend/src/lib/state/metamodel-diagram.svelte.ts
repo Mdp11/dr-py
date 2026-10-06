@@ -641,7 +641,10 @@ function keyMove(cmd: YamlEditCommand): { from: string; to: string | null } | nu
 }
 
 /** Keep the canvas still across a rename (the box stays where the user put it)
- * and stage the key migration that goes with it. */
+ * and stage the key migration that goes with it. The rename itself is a
+ * rebind the commit refuses while the type has instances: those rows are
+ * deleted or migrated in an earlier commit, which the forms and the commit
+ * drawer say. */
 function applyKeyMove(move: { from: string; to: string | null }): void {
 	const next = { ..._positions };
 	const pos = next[move.from];
