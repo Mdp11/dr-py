@@ -14,7 +14,14 @@ import { openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';
 import { commitStaged } from './helpers/commit';
 import { expectReplicaReady, replica, watchPhases } from './helpers/replica';
-import { headRev, peer, peerCommit, peerRebind, projectIdByName } from './helpers/api-client';
+import {
+	elementProperties,
+	headRev,
+	peer,
+	peerCommit,
+	peerRebind,
+	projectIdByName
+} from './helpers/api-client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = join(__dirname, '..', '..', 'examples');
@@ -180,9 +187,7 @@ test('an own commit shows in the tree and the search', async ({ page }) => {
 test("a peer's commit shows", async ({ page }) => {
 	test.setTimeout(120_000);
 	await openReady(page);
-	const current = await api.get(`projects/${projectId}/model/elements/${RENAMED_BY_PEER}`);
-	expect(current.ok(), await current.text()).toBeTruthy();
-	const name = ((await current.json()) as { properties: { name: string } }).properties.name;
+	const name = (await elementProperties(api, projectId, RENAMED_BY_PEER)).name as string;
 	await searchAndOpen(page, name, RENAMED_BY_PEER);
 
 	const renamed = `engine-peer-${Date.now()}`;
@@ -192,32 +197,6 @@ test("a peer's commit shows", async ({ page }) => {
 	});
 	await expect(replica(page)).toHaveAttribute('data-rev', String(rev), { timeout: 10_000 });
 	await expect(nameInput(page)).toHaveValue(renamed, { timeout: 10_000 });
-});
-
-test('a model replaced outside the journal heals', async ({ page }) => {
-	test.setTimeout(120_000);
-	await openReady(page);
-	const phases = await watchPhases(page);
-
-	const name = `engine-legacy-${Date.now()}`;
-	const created = await api.post(`projects/${projectId}/model/elements`, {
-		data: { type: 'Organization', properties: { name } }
-	});
-	expect(created.ok(), await created.text()).toBeTruthy();
-	const id = ((await created.json()) as { id: string }).id;
-	const rev = await headRev(api, projectId);
-
-	await expect(replica(page)).toHaveAttribute('data-rev', String(rev), { timeout: 30_000 });
-	await expect(replica(page)).toHaveAttribute('data-phase', 'ready');
-	const seen = await phases();
-	expect(seen[0]).toBe('ready');
-	expect(seen).toContain('resyncing');
-	expect(seen[seen.length - 1]).toBe('ready');
-
-	await searchInput(page).fill(name);
-	await expect(page.getByRole('option').and(page.locator(`[title="${id}"]`))).toBeVisible({
-		timeout: 10_000
-	});
 });
 
 test("a peer's rebind with a new element shows after Reload", async ({ page }) => {

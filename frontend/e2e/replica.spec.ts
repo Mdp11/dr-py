@@ -20,7 +20,6 @@ import {
 	peer,
 	peerCommit,
 	projectIdByName,
-	silentBump,
 	snapshotRev
 } from './helpers/api-client';
 
@@ -142,36 +141,6 @@ test("a peer's commit reaches it", async ({ page }) => {
 	await expect(replica(page)).toHaveAttribute('data-rev', String(rev), { timeout: 10_000 });
 	await expect(replica(page)).toHaveAttribute('data-phase', 'ready');
 	expect(await phases()).toEqual(['ready']);
-});
-
-test('a silent bump is healed by the next delta', async ({ page }) => {
-	test.setTimeout(120_000);
-	await openReady(page);
-	const phases = await watchPhases(page);
-	const replicaCalls: string[] = [];
-	page.on('request', (request) => {
-		const path = new URL(request.url()).pathname;
-		if (path.includes('/replica/')) replicaCalls.push(path.replace(/^.*\/replica\//, ''));
-	});
-
-	const silent = await silentBump(api, projectId, {
-		elementId: targets[2],
-		patch: { name: `replica-silent-${Date.now()}` }
-	});
-	// The feed said nothing: the replica stays where it was.
-	expect(await replicaRev(page)).toBe(silent - 1);
-
-	const rev = await peerCommit(api, projectId, {
-		elementId: targets[1],
-		patch: { name: `replica-after-${Date.now()}` }
-	});
-	expect(rev).toBe(silent + 1);
-	await expect(replica(page)).toHaveAttribute('data-rev', String(rev), { timeout: 20_000 });
-	await expect(replica(page)).toHaveAttribute('data-phase', 'ready');
-	test.info().annotations.push({
-		type: 'road',
-		description: `phases ${JSON.stringify(await phases())}, replica calls ${JSON.stringify(replicaCalls)}`
-	});
 });
 
 /** The snapshot rev the page's cache holds for the project, or null. */

@@ -1,3 +1,4 @@
+import { gunzipSync } from 'node:zlib';
 import { expect, type APIRequestContext, type PlaywrightWorkerArgs } from '@playwright/test';
 
 /** The backend itself, not the dev server's proxy. */
@@ -48,17 +49,80 @@ export async function snapshotRev(api: APIRequestContext, projectId: string): Pr
 	return (await json<{ rev: number }>(api, `projects/${projectId}/replica/snapshot`)).rev;
 }
 
+export type Entity = {
+	id: string;
+	type_name: string;
+	properties: Record<string, unknown>;
+	rev: number;
+	source_id?: string;
+	target_id?: string;
+};
+
+export type ModelFile = { elements: Entity[]; relationships: Entity[] };
+
+type Tail = {
+	complete: boolean;
+	deltas: {
+		changed_elements: Entity[];
+		changed_relationships: Entity[];
+		deleted_element_ids: string[];
+		deleted_relationship_ids: string[];
+	}[];
+};
+
+/**
+ * The model at the server's head, as a replica builds it: the snapshot the
+ * descriptor names, then the commits after it. The server serves no other
+ * model read. A page's request context passes `/api/v1/` as `prefix`. Elements and relationships keep the snapshot's order, with
+ * created ones last.
+ */
+export async function readModel(
+	api: APIRequestContext,
+	projectId: string,
+	prefix = ''
+): Promise<ModelFile> {
+	const base = `${prefix}projects/${projectId}/replica`;
+	const descriptor = await json<{ rev: number; url: string }>(api, `${base}/snapshot`);
+	const blob = await api.get(descriptor.url);
+	expect(blob.ok(), `snapshot: ${blob.status()}`).toBeTruthy();
+	const lines = gunzipSync(await blob.body())
+		.toString('utf8')
+		.split('\n')
+		.filter((line) => line !== '');
+	const header = JSON.parse(lines[0]) as { elements: number };
+	const entities = lines.slice(1).map((line) => JSON.parse(line) as Entity);
+	const elements = new Map(entities.slice(0, header.elements).map((e) => [e.id, e]));
+	const relationships = new Map(entities.slice(header.elements).map((e) => [e.id, e]));
+
+	const tail = await json<Tail>(api, `${base}/tail?from_rev=${descriptor.rev}`);
+	expect(tail.complete, 'the tail after the snapshot is complete').toBeTruthy();
+	for (const delta of tail.deltas) {
+		for (const e of delta.changed_elements) elements.set(e.id, e);
+		for (const r of delta.changed_relationships) relationships.set(r.id, r);
+		for (const id of delta.deleted_element_ids) elements.delete(id);
+		for (const id of delta.deleted_relationship_ids) relationships.delete(id);
+	}
+	return { elements: [...elements.values()], relationships: [...relationships.values()] };
+}
+
 /** The ids of the first `limit` elements, in model order. */
 export async function elementIds(
 	api: APIRequestContext,
 	projectId: string,
 	limit = 10
 ): Promise<string[]> {
-	const page = await json<{ items: { id: string }[] }>(
-		api,
-		`projects/${projectId}/model/elements?limit=${limit}`
-	);
-	return page.items.map((e) => e.id);
+	return (await readModel(api, projectId)).elements.slice(0, limit).map((e) => e.id);
+}
+
+/** An element's current properties. */
+export async function elementProperties(
+	api: APIRequestContext,
+	projectId: string,
+	id: string
+): Promise<Record<string, unknown>> {
+	const element = (await readModel(api, projectId)).elements.find((e) => e.id === id);
+	if (element === undefined) throw new Error(`no element ${id}`);
+	return element.properties;
 }
 
 export type ElementPatch = { elementId: string; patch: Record<string, unknown> };
@@ -157,23 +221,4 @@ export async function peerRebind(
 	} finally {
 		await releaseLock(api, base, token);
 	}
-}
-
-/**
- * A batch through the legacy unlocked path: journaled like a commit, but the
- * feed is not told. Resolves to the new `model_rev`.
- */
-export async function silentBump(
-	api: APIRequestContext,
-	projectId: string,
-	{ elementId, patch }: ElementPatch
-): Promise<number> {
-	const res = await api.post(`projects/${projectId}/model/ops`, {
-		data: {
-			base_rev: await headRev(api, projectId),
-			ops: [{ kind: 'update_element', id: elementId, properties_patch: patch }]
-		}
-	});
-	expect(res.ok(), await res.text()).toBeTruthy();
-	return ((await res.json()) as { model_rev: number }).model_rev;
 }

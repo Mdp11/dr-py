@@ -20,6 +20,7 @@ import { openDefaultProject } from './helpers/auth';
 import { changeBadge } from './helpers/commit';
 import { expectLiveFeed } from './helpers/feed';
 import { expectReplicaReady } from './helpers/replica';
+import { readModel } from './helpers/api-client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -89,13 +90,9 @@ function projectId(page: Page): string {
 	return match[1];
 }
 
-type Entity = { id: string; type_name: string; properties: Record<string, unknown>; rev: number };
-
-/** The server's download with Beta renamed, Gamma deleted and Delta added. */
+/** The server's model with Beta renamed, Gamma deleted and Delta added. */
 async function otherFile(page: Page) {
-	const res = await page.request.get(`/api/v1/projects/${projectId(page)}/model/download`);
-	expect(res.ok(), await res.text()).toBeTruthy();
-	const body = (await res.json()) as { elements: Entity[]; relationships: unknown[] };
+	const body = await readModel(page.request, projectId(page), '/api/v1/');
 	const elements = body.elements
 		.filter((e) => e.id !== GAMMA)
 		.map((e) => (e.id === BETA ? { ...e, properties: { ...e.properties, name: RENAMED } } : e));

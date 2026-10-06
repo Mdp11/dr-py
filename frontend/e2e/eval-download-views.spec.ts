@@ -17,6 +17,7 @@ import { openDefaultProject } from './helpers/auth';
 import { changeBadge } from './helpers/commit';
 import { expectLiveFeed } from './helpers/feed';
 import { expectReplicaReady } from './helpers/replica';
+import { readModel, type ModelFile } from './helpers/api-client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -97,10 +98,21 @@ function projectId(page: Page): string {
 	return match[1];
 }
 
-async function serverDownload(page: Page): Promise<Buffer> {
-	const res = await page.request.get(`/api/v1/projects/${projectId(page)}/model/download`);
-	expect(res.ok(), await res.text()).toBeTruthy();
-	return Buffer.from(await res.body());
+/** The committed model as the server's replica routes give it, by id. */
+async function committedModel(page: Page): Promise<ModelFile> {
+	const model = await readModel(page.request, projectId(page), '/api/v1/');
+	const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
+	return {
+		elements: model.elements.sort(byId),
+		relationships: model.relationships.sort(byId)
+	};
+}
+
+/** The exported file, parsed and ordered by id like `committedModel`. */
+function parsedExport(bytes: Buffer): ModelFile {
+	const file = JSON.parse(bytes.toString('utf8')) as ModelFile;
+	const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
+	return { elements: file.elements.sort(byId), relationships: file.relationships.sort(byId) };
 }
 
 /** Exports through the model menu; resolves to the downloaded file's bytes. */
@@ -139,14 +151,15 @@ async function openIssues(page: Page): Promise<void> {
 	await page.getByRole('tab', { name: 'Issues' }).click();
 }
 
-test('the export is the server bytes, with nothing staged and with an edit staged', async ({
+test('the export is the committed model, with nothing staged and with an edit staged', async ({
 	page
 }) => {
 	test.setTimeout(180_000);
 	await bootstrap(page, VIEW);
 
-	const committed = await serverDownload(page);
-	expect((await exportedBytes(page)).equals(committed)).toBeTruthy();
+	const committed = await committedModel(page);
+	const unstaged = await exportedBytes(page);
+	expect(parsedExport(unstaged)).toEqual(committed);
 
 	// Stage a property edit: the file stays the committed state.
 	await expandFolder(page, 'Grouped');
@@ -160,8 +173,8 @@ test('the export is the server bytes, with nothing staged and with an edit stage
 
 	try {
 		const staged = await exportedBytes(page);
-		expect(staged.equals(committed)).toBeTruthy();
-		expect(staged.equals(await serverDownload(page))).toBeTruthy();
+		expect(staged.equals(unstaged)).toBeTruthy();
+		expect(parsedExport(staged)).toEqual(await committedModel(page));
 	} finally {
 		await discardAll(page);
 	}

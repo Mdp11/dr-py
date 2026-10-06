@@ -17,7 +17,13 @@ import { openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';
 import { changeBadge, commitStaged } from './helpers/commit';
 import { expectReplicaReady, replica } from './helpers/replica';
-import { headRev, peer, projectIdByName, snapshotRev } from './helpers/api-client';
+import {
+	elementProperties,
+	headRev,
+	peer,
+	projectIdByName,
+	snapshotRev
+} from './helpers/api-client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = join(__dirname, '..', '..', 'examples');
@@ -386,11 +392,7 @@ test('a committed create shows under its server id, and a peer commit parks a st
 	// the peer's delete by exactly the discarded commit, and the element it
 	// touched carries the new name
 	expect(await headRev(api, projectId)).toBe(peerRev + 1);
-	const restEl = await api.get(`projects/${projectId}/model/elements/${REST_ID}`);
-	expect(restEl.ok(), await restEl.text()).toBeTruthy();
-	expect(((await restEl.json()) as { properties: { name: string } }).properties.name).toBe(
-		restName
-	);
+	expect((await elementProperties(api, projectId, REST_ID)).name).toBe(restName);
 	await searchInput(page).fill(restName);
 	await expect(page.getByRole('option').filter({ hasText: restName })).toBeVisible({
 		timeout: 10_000
@@ -416,9 +418,5 @@ test('a committed create shows under its server id, and a peer commit parks a st
 
 	await expect(page.getByRole('button', { name: 'Commit', exact: true })).toBeDisabled();
 	expect(await stagedChangeCount(page)).toBe(0);
-	const afterReloadEl = await api.get(`projects/${projectId}/model/elements/e_000004`);
-	expect(afterReloadEl.ok(), await afterReloadEl.text()).toBeTruthy();
-	expect(((await afterReloadEl.json()) as { properties: { name: string } }).properties.name).toBe(
-		'Organization-004'
-	);
+	expect((await elementProperties(api, projectId, 'e_000004')).name).toBe('Organization-004');
 });
