@@ -9,37 +9,10 @@ this file holds only what is open. Everything else — the app as it runs today 
 **How to use it.** The rules of `BACKLOG.md` apply: stable ids, the same status vocabulary
 (`open`, `in progress`, `done`, `won't do`), and an item closes in the commit that fixes it.
 Ids are unique across both files — a new item takes the next free number of its letter in
-either — so an id never needs to say which file it is in. The Python core is under the MR-3
-freeze: a fix that touches `core/model`, `core/metamodel` or the model-op applier lands on
-both sides with a fixture. `routes/read.py`'s route functions and
-`routes/elements.py::get_element` left the freeze for FEATURES with B's fifth plan, when the
-five read surfaces defaulted to the engine. `core/search`, `core/navigation`, `api/search.py`,
-`routes/read.py::search_model` and `routes/artifacts.py::evaluate_navigation` stay frozen past
-C's first plan flipping navigation and criteria search to the engine until C's plan 5, which
-flipped `exports` to the engine: `core/table`'s evaluator and `api/routes/{tables,exports}.py`
-read them only as the `tables` and `exports` surfaces' server paths now, and `api/search.py` and
-the route functions are also the 501 fallback's server side (AD-31); `api/artifact_kinds.py`
-validates every committed navigation payload against them. The freeze has lifted for FEATURES in
-all of them and in the export writers (`core/table/{csv_export,json_export,export_layout,exporter,naming,split,cell_text}.py`,
-`api/table_export*.py`, `api/export_manifest.py`), a table that reaches a script included since D's third
-plan (a feature there lands in TypeScript only; the server's script path answers 409 to a client that
-sends `X-Data-Rover-Scripts: engine-only`); a bug found in any of them still lands on both sides with a
-fixture until F (MR-1) regardless. `core/table/resolve.py` (ref resolution and script reach) is frozen from C's
-first plan on. `core/validation` minus `rules/`, `api/validation_sweep.py` and the preview's
-conformance half (`routes/commits.py::preview_commit`'s model half,
-`api/rules.py::attributable_issues`) are frozen for behaviour from C's plan 2 on and stay so
-past its flip of `issues` to the engine: until F a feature there lands on both sides with a
-fixture step, as a bug does, since the server pipeline still decides strict commits
-(`attributable_issues`) and `validation_error_count`, and answers every fallback: an unreadable
-rule set, an unsupported pattern, `staging: legacy` and the window before the replica's first
-sweep. Two bugs landed on both sides under it: `value_conforms`'s float branch, which raised
-`TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed a
-key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete until
-6b3cdb6. The second widens strict mode's `base_dirty`: connecting, disconnecting or cascading
-away a relationship named in a key now makes the keyed ends' old and new group members
-attributable, so a strict commit that used to land can get a 422, as a key-property edit already
-could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on, which ports them
-to the engine: a bug or a feature there lands on both sides with a fixture until F.
+either — so an id never needs to say which file it is in. The migration rules MR-1 to MR-3 are retired
+(`architecture/program.md`): the server evaluates nothing, the Python evaluators are deleted, and
+the golden fixtures are frozen (`architecture/conventions.md`), so a fix lands in the engine, held
+to the fixtures.
 
 ---
 
@@ -80,55 +53,21 @@ server's does (`K-65`); an `issues` call waits for a rule-set change's rescan, a
 the engine cannot read sends it to the server (501 `reaches unreadable rules`). The plan also
 lists the sweep in steps (`K-59`), caches uniqueness key texts in the engine (`K-60`'s engine
 half) and tags the panel's list without a probe per keystroke (`K-61`).
-The freeze rule (`MR-3`) covers `core/model`, `core/metamodel` and the model-op applier from
-the start of A's second plan; `routes/read.py`'s route functions and
-`routes/elements.py::get_element` left it for features once B's fifth plan flipped the
-surfaces' defaults. `core/search`, `core/navigation`, `api/search.py` and the `search_model`
-and `evaluate_navigation` route functions stay frozen past C's first plan's flip of navigation
-and criteria search until C's plan 5 flipped `exports` to the engine, when they left the
-feature freeze (`core/table`'s evaluator and `api/routes/{tables,exports}.py` read them only as
-the server paths of the `tables` and `exports` surfaces now, and the export writers left it too, a script
-table included since D's third plan); `api/search.py` and the route functions are also the 501
-fallback's server side; `api/artifact_kinds.py` validates every committed navigation payload
-against them; `core/table/resolve.py` (ref resolution and
-script reach) is frozen from C's first plan on too. `core/validation` minus `rules/`,
-`api/validation_sweep.py` and the preview's conformance half
-(`routes/commits.py::preview_commit`'s model half, `api/rules.py::attributable_issues`) are
-frozen for behaviour from C's plan 2 on and stay so past its flip of `issues` to the engine:
-until F a feature there lands on both sides with a fixture step, since the server pipeline still
-decides strict commits (`attributable_issues`) and `validation_error_count`, and answers every
-fallback: an unreadable rule set, an unsupported pattern, `staging: legacy` and the window
-before the replica's first sweep. A bug fixed during a port, or found in any of these areas
-afterward, lands on both sides with a fixture until F (MR-1), whether or not the feature freeze
-has lifted for that area. Two landed by C's plan 2: `value_conforms`'s float branch, which raised
-`TypeError` on an unhashable value and now answers `False`, and the dirty hooks, which missed a
-key relationship's endpoints' uniqueness groups on connect, disconnect and cascade delete until
-6b3cdb6. The second widens strict mode's `base_dirty`: connecting, disconnecting or cascading
-away a relationship named in a key now makes the keyed ends' old and new group members
-attributable, so a strict commit that used to land can get a 422, as a key-property edit already
-could. `core/validation/rules` and `api/rules.py` are frozen from C's plan 3 on: a bug or a
-feature there lands on both sides with a fixture until F. The diff route's model half
-(`api/metamodel_candidate.py`) and `build_rebind_view` are frozen for behaviour from C's plan 7 on;
-`diff_metamodels` is not.
-`api/serialize.py::iter_model_json` and the download route (`GET /model/download`), and
-`core/view/validation.py` and the `GET /views/{id}` route that serves its warnings, are frozen for
-behaviour from C's plan 6a on; the engine replays them from the `model_download` and
-`view_warnings` fixtures.
+The Python areas those plans ported are deleted, and the freeze (MR-3) is retired: the engine is held to the golden fixtures.
 D (scripts in the browser) is done, its fourth plan built: `scriptCalls` runs user Python
 in Pyodide on a pool of script workers, one batch per worker, booted from a memory image; the engine
 evaluates navigation script steps, table script columns, export transforms and the script-error
 recap through a cell cache evicted by read-set (AD-34), with no option, and runs the console's
-snippets (`runSnippet`, CT-4); a client with an engine sends `X-Data-Rover-Scripts: engine-only` and
-the server answers 409 `scripts need the engine` instead of running scripts.
+snippets (`runSnippet`, CT-4); the server runs no scripts.
 At M, in Chromium, 10,000 script cells take 2,405 ms prewarmed through `scriptCalls` and 2,714 ms as table
 columns exported as csv, against CN-3's 3 s (`K-100`) *(measured, Chromium 148, Ryzen 9 3900X under WSL2,
 median of 3, 2026-10-02)*. Findings of those plans still open: `K-102`, `K-103`, `K-104`,
 `K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `K-115`, `T-12` to `T-15`.
-Open: `K-29`, `K-32`, `K-35`, `K-36`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
+Open: `K-32`, `K-38`, `K-41`, `K-42`, `K-45`, `K-46`, `K-47`, `K-48`,
 `K-49`, `K-50`, `K-51`, `K-52`, `K-53`, `K-54`, `K-55`, `K-56`, `K-57`, `K-58`, `K-60`, `K-62`,
 `K-63`, `K-65`, `K-66`, `K-67`, `K-68`, `K-69`, `K-70`, `K-71`, `K-72`, `K-73`, `K-75`,
-`K-76`, `K-77`, `K-78`, `K-79`, `K-80`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
-`K-88`, `K-89`, `K-90`, `K-91`, `K-92`, `K-93`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `K-115`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
+`K-76`, `K-77`, `K-78`, `K-79`, `K-81`, `K-82`, `K-83`, `K-84`, `K-85`, `K-86`, `K-87`,
+`K-88`, `K-89`, `K-91`, `K-92`, `K-93`, `K-102`, `K-103`, `K-104`, `K-106`, `K-107`, `K-108`, `K-110`, `K-111`, `K-112`, `K-113`, `K-114`, `K-115`, `T-12`, `T-13`, `T-14`, `T-15`, `C-21`, `C-22`, `C-23` in this file; `K-33`, `K-34`, `T-10` in `BACKLOG.md`.
 Size: very large.
 
 ---
@@ -142,7 +81,7 @@ loads an element and a relationship sharing an id, while the mutation boundary
 folds both kinds into one namespace — a same-`rev` pair cancels out of it. The engine's
 loader refuses such a snapshot (`Relationship id 'x' is already an element id`), so a project
 imported with one would open on the server and not in the browser. Fix: check the other
-kind's ids in `_guard_relationship`; the file is outside the MR-3 freeze.
+kind's ids in `_guard_relationship`.
 Closed: the server's bulk loader is gone from the import path; the streamed import checks, in SQL, an id on both an element and a relationship. `routes/_snapshot.py::build_model_from_dicts` and its guards stay without a server caller. Commit fa7efc0d.
 
 ### K-32 · The `ord` re-sort after a rewind is watched · `open` · perf · *2026-09-18*
@@ -473,8 +412,7 @@ each scoped member's primary by a `min` over the group (`validators/uniqueness.p
 scoped run over k members of a group pays O(k × group) — the server's sweep once per chunk —
 and `DirtyCollector.add_uniqueness_group_of` sorts the group on every call, so a commit or an
 ops batch that touches one member pays O(group log group) inside its write. Fix direction: the
-primary once per group and run, as the engine's validator finds it; `core/validation` and
-`core/model` are frozen (MR-3), so it waits for the freeze to lift.
+primary once per group and run, as the engine's validator finds it; the Python side of this is no longer on a server path.
 **Done for the engine,** whose `uniqGroupOf` re-keyed every member of the bucket on each call
 (a `pyKey` serialization each, about 27 ms per sweep step over a 20,000-member group):
 `IndexSet.keyText` caches the text of every member of a bucket of two or more, written as an
@@ -1091,7 +1029,7 @@ None blocks: each is an oracle-vs-engine difference on a rare input the goldens 
 The harness swaps `sys.stdout` around each call without a lock, so the sweep threads of a scripted oracle run
 can leave a `_CappedStdout` installed and the child answered nothing; `tests/golden/scripted.py` writes its
 answer through `sys.__stdout__` to get past it. A real fix is a lock or a per-thread stream in
-`core/script/harness_src.py` (frozen: lands on both sides with a fixture).
+the harness (`engine/src/script/harness.generated.ts` is its only source now, frozen: a change is a reviewed edit).
 It does not block: a Pyodide worker is single-threaded, so the engine has no sweep threads to race.
 
 ### K-113 · The exports' longest slice is 32 ms with cached script cells, 23 ms without · `open` · perf · *2026-10-02*

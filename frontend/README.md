@@ -342,7 +342,7 @@ commit** loop. The edits are staged in the replica's working copy, detailed in
      its name/format controls — `updateExporterEntry(tabId, i, { folder })`.
      Neither input validates client-side: per the strict-at-export /
      never-block-Save rule, a bad token or an absolute/traversal folder saves
-     fine and only 422s at `POST /exports/run`, naming the offending entry.
+     fine and is refused only when the export runs (the engine's `runExporter`), naming the offending entry.
    - **The transform hook.** Each JSON-family entry row
      (`isJsonFamily(entry.format)`) shows `Export/TransformSourceEditor.svelte`
      over `entry.transform`, collapsed under the entry row via the shared
@@ -380,8 +380,7 @@ commit** loop. The edits are staged in the replica's working copy, detailed in
      `SnippetTestPanel`: the document a transform receives only exists in
      the context of an entry, so the panel posts the WHOLE entry as drafted
      (unsaved inline code included) to the engine's `previewTransform`
-     (`api/exports.ts`; the server's `POST /exports/preview-transform` answers
-     409 `scripts need the engine`) and renders, per file the
+     (`api/exports.ts`; the server has no preview route) and renders, per file the
      export would write (`TransformPreviewOut.files[]`), prints, then
      before | after panes of the server-rendered JSON text — never
      re-serialized client-side (`Export/TransformTestFile.svelte` is that
@@ -1410,7 +1409,7 @@ truncated}` into the `ExportResult`: a `Blob` of the parts with
   downloads its file; there is no 202 and no `preparing` result.
   `downloadModel {}` answers `{parts, filename, content_type}`
   (`EngineModelFileSchema`), a `Blob` of the committed model written as
-  `GET /model/download` wrote it, byte for byte, whatever is staged.
+  the model file, whatever is staged.
 - Issues: `getModelIssues` is the engine's `getModelIssues {}`;
   `validateModel` with no inline model or scope — and, when it sends ops, the
   engine batch ids they are (`batchIds`) — is `validateModel {batch_ids}`;
@@ -1420,8 +1419,9 @@ batch_ids, strict}`: the engine previews the model ops from its own staged
   batches and, when any op is not a model op, the server previews those
   alone, the halves summed (counts added, lists concatenated engine first,
   `would_block` or-ed). An inline model, a scope, ops no batch ids name and a
-  `previewCommit` without `local` are `POST /model/validate` and `POST
-/commits/preview`, the server's whole request. With a `metamodel.rebind`
+  `previewCommit` without `local` are the server's whole request. The server has
+  no `POST /model/validate` route, so the first three fail there; only
+  `POST /commits/preview`, a dry run of the commit's structural check, answers. With a `metamodel.rebind`
   op the blob is linted first (`POST /metamodel/lint`): a blob the lint
   refuses is the server's whole request, which answers its own 422, and else
   `previewCommit {base_rev, batch_ids, strict, rebind: {metamodel: document}}`
@@ -1723,11 +1723,11 @@ and a conflict is an `{ok: false, …}` result, not an error:
   (`compareModel`, asked again each time; inverted client-side
   by `invertChangeRequest` when swapped) · **Create CR** (saves the possibly-
   inverted CR via `saveJsonToFile`/`composeCrFilename`, `complete` stripped) ·
-  **Replace** (session → file by definition, so disabled while swapped; posts
-  the compare CR to `POST /model/apply-cr` and stages the result).
+  **Replace** (session → file by definition, so disabled while swapped; the
+  engine's `proposeCr` turns the compare CR into ops, which are staged).
 - **Apply CR…**: an ordered list of CR files (multi-select, ↑/↓/✕; each checked
   for `format === 'datarover.cr/v1'`) → **Preview diff** / **Stage edits**, both
-  `POST /model/apply-cr` with the list in display order; a 409 renders
+  the engine's `proposeCr` with the list in display order; a conflict renders
   "CR #k conflicts".
 - **Staging** goes through `state/stage-proposed.ts`'s
   `stageProposedOps(ops, modelRev, prestate)` — the snippet-run primitive
@@ -1741,9 +1741,8 @@ and a conflict is an `{ok: false, …}` result, not an error:
   `mcd-staged-note` ("Includes staged changes") shows when edits were staged
   as the answer was given. Nothing is cached: `ensureCompared` asks for the
   diff again, since an answer depends on staged state. In compare mode
-  Preview and Create CR are viewer-allowed (`POST /model/compare` is a read-only
-  POST); in apply-cr mode Preview is gated on `canEdit()` too, since it goes
-  through `POST /model/apply-cr`, which is deliberately treated as a write.
+  Preview and Create CR are viewer-allowed (the engine's `compareModel` changes nothing); in apply-cr mode Preview is
+  gated on `canEdit()` too, since `proposeCr` is treated as a write.
   Create CR refuses a change request that names a temporary id
   (`crHasTempIds`): an engine diff over a staged create would save an id no
   committed model will hold.
@@ -2350,7 +2349,7 @@ Its own addition beyond the panel is a `json_doc` control group — `shape` +
 tolerant-ignore of shape/pretty on `jsonl`), `on_error` shown for the whole
 json family — read/written directly against the entry's `json_doc` rather
 than through the panel; the live sample below them still renders the array
-shape regardless of `shape`, since `POST /tables/json-preview` predates
+shape regardless of `shape`, since the sample (`previewTableJson`) predates
 document shaping. Per the strict-at-export / never-block-Save rule, Save is
 never gated on a missing `key_column` under the object shape, nor on an
 invalid `json_split` filename template — that check only drives an inline
@@ -2390,10 +2389,10 @@ export-time 422 is the entire contract.
   `lib/table/columns.ts` (the backend normalizes defensively on read, but the
   client remaps precisely on move/insert/remove/clone, `sort` keys
   included).
-- **`defaultJsonKeys`** mirrors the backend's key derivation, but ONLY to fill
-  input placeholders — the sample pane fetches `POST /tables/json-preview` with
+- **`defaultJsonKeys`** mirrors the engine's key derivation, but ONLY to fill
+  input placeholders — the sample pane asks the engine (`previewTableJson`) with
   the definition (its `sort` included), so the grouping algorithm is never
-  reimplemented in TypeScript and the pane cannot disagree with the download.
+  reimplemented in the UI and the pane cannot disagree with the download.
 
 ### Settings dialog + strict-mode toggle
 
