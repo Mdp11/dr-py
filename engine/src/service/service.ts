@@ -170,7 +170,7 @@ function stagedDiff(wc: WorkingCopy): StagedDiffResult {
 /** Past this many changed entities, `stage` answers their ids alone. */
 const STAGE_POST_STATE_MAX = 500;
 
-/** The refusals the client answers from the server (501), and the ones it retries there (409). */
+/** The 409 refusals the client retries once the replica is ready again, awaiting `whenReady`. */
 const NOT_READY = 'replica is not ready';
 const STALE_BATCHES = 'stale staged batches';
 const STALE_BASE = 'stale base_rev';

@@ -48,8 +48,8 @@ class ProjectState:
     #: ``write_mutex``: a commit, a revert, a metamodel upload. Clients echo it
     #: as ``base_rev``.
     model_rev: int = 0
-    #: the project's strict-mode policy (``ModelRow.validation_policy``): when
-    #: True the commit path promotes scoped conformance issues to a hard 422.
+    #: the project's strict-mode policy (``ModelRow.validation_policy``). The
+    #: server only stores and serves it; the client enforces it on its preview.
     #: Flipped by the owner-gated PATCH /settings route under ``write_mutex``.
     strict_mode: bool = False
     #: serializes commit, revert, lock, view and settings writes for THIS

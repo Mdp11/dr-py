@@ -18,8 +18,8 @@ cannot supply for an update-only commit is the artifact's KIND (neither an
 update op nor its inverse carries one), so that single field falls back to the
 row, and to ``"unknown"`` when a later commit deleted it.
 
-View: also journal-only, but unlike artifacts there is no before/after
-reconstruction at all — the view ops family is fine-grained enough on the
+View: also journal-only, but unlike artifacts there is no before/after state
+to rebuild — the view ops family is fine-grained enough on the
 wire that the canonical ops themselves ARE the diff. Only the "prior name"
 fields (rename/delete) need the inverse half, the same one-name-not-a-state
 narrowness the artifact section's ``kind`` fallback has. No ``ViewRow`` is
@@ -30,8 +30,7 @@ Metamodel + layout: a rebind-carrying commit's structural
 half is rendered neither from entity states nor from the ops
 journal, but recomputed from the two immutable ``MetamodelRow`` blobs named
 by the commit's ``from_metamodel_id``/``to_metamodel_id`` columns
-(``_metamodel_structural``) — the same "recompute, never store" stance as the
-model half, but off metamodel rows instead of model revs, since the rebind op
+(``_metamodel_structural``) — "recompute, never store", since the rebind op
 itself carries only the raw YAML, not a structural diff. The layout half is
 journal-only like artifacts/view, but reads the FORWARD ops alone
 (``_layout_moves``): a ``metamodel.move_node`` write has no cascade, so the

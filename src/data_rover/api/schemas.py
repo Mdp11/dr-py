@@ -902,7 +902,7 @@ class RangeDiffOut(BaseModel):
 
     from_rev: int
     to_rev: int
-    source: Literal["journal", "reconstruction"]
+    source: Literal["journal"]
     elements: CrElementOps = Field(default_factory=CrElementOps)
     relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
 
