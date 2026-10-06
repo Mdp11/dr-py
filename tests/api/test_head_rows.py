@@ -426,7 +426,7 @@ def test_failed_revert_leaves_rows_unchanged(
 def test_nonfinite_float_arriving_by_op_is_refused(client: TestClient) -> None:
     rev = default_state().model_rev
     body = (
-        '{"base_rev": %d, "ops": [{"kind": "create_element", "temp_id": "tmp_n",'
+        '{"base_rev": %d, "ops": [{"kind": "create_element", "temp_id": "tmp_n",'  # noqa: UP031
         ' "type_name": "Node", "properties": {"x": NaN}}]}' % rev
     )
     r = client.post(
@@ -450,7 +450,7 @@ def test_nonfinite_float_in_update_patch_is_refused(
 ) -> None:
     rev = default_state().model_rev
     body = (
-        '{"base_rev": %d, "ops": [{"kind": "create_element", "temp_id": "tmp_a",'
+        '{"base_rev": %d, "ops": [{"kind": "create_element", "temp_id": "tmp_a",'  # noqa: UP031
         ' "type_name": "Node", "properties": {"label": "a"}},'
         ' {"kind": "update_element", "id": "tmp_a",'
         ' "properties_patch": {"x": %s}}]}' % (rev, literal)
@@ -483,14 +483,14 @@ def test_nonfinite_float_on_a_relationship_is_refused(
     )
     ops = [node % "a", node % "b"]
     if final == "create_relationship":
-        ops.append(rel % ('{"via": %s}' % literal))
+        ops.append(rel % ('{"via": %s}' % literal))  # noqa: UP031
     else:
         ops.append(rel % "{}")
         ops.append(
-            '{"kind": "update_relationship", "id": "tmp_r",'
+            '{"kind": "update_relationship", "id": "tmp_r",'  # noqa: UP031
             ' "properties_patch": {"via": %s}}' % literal
         )
-    body = '{"base_rev": %d, "ops": [%s]}' % (rev, ", ".join(ops))
+    body = '{"base_rev": %d, "ops": [%s]}' % (rev, ", ".join(ops))  # noqa: UP031
     r = client.post(
         papi("/commits"),
         content=body,

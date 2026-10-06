@@ -1,11 +1,19 @@
 import pytest
 from pydantic import ValidationError
+from data_rover.core.script.schema import SnippetDefinition, SnippetSource
 from data_rover.core.table.schema import (
-    TABLE_ADAPTER,
     SCHEMA_VERSION,
+    TABLE_ADAPTER,
     ChainRows,
+    ColumnRef,
+    ElementColumn,
     NavigationColumn,
+    PropertyColumn,
     RowSlot,
+    ScopeRows,
+    ScriptColumn,
+    ScriptInput,
+    TableDefinition,
 )
 
 
@@ -234,18 +242,6 @@ def test_table_definition_transform_both_set_is_rejected():
 
 
 # ---- script inputs ----------------------------------------------------------
-
-from data_rover.core.script.schema import SnippetDefinition, SnippetSource
-from data_rover.core.table.schema import (
-    ColumnRef,
-    ElementColumn,
-    PropertyColumn,
-    ScopeRows,
-    ScriptColumn,
-    ScriptInput,
-    TableDefinition,
-)
-
 
 def _code(code: str) -> SnippetSource:
     return SnippetSource(definition=SnippetDefinition(code=code))

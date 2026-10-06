@@ -9,7 +9,7 @@ from data_rover.api.feed import ClientConn, FeedHub
 
 
 @pytest.fixture(autouse=True)
-def _reset_loop() -> "object":
+def _reset_loop() -> object:
     feed.reset_loop()
     yield
     feed.reset_loop()

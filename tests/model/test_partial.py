@@ -43,7 +43,6 @@ from data_rover.core.model.partial import (
     build_partial_model,
 )
 from data_rover.core.validation.pipeline import ValidationPipeline
-from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.validators.containment import ContainmentValidator
 
 
