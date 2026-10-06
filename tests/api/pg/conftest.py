@@ -1,9 +1,11 @@
 """The opt-in Postgres lane: the API suite's seams, on a real Postgres.
 
 ``DATA_ROVER_TEST_DATABASE_URL`` names a database that the lane owns: it is
-created when missing, its schema is rebuilt by ``alembic upgrade head`` once per
-session, and every table is truncated between tests. Without the URL, or when the
-server is unreachable, every test in this directory skips.
+created when missing, its schema is dropped and rebuilt by ``alembic upgrade head``
+once per session, and every table is truncated between tests. The database name must
+end in ``_test``; any other name fails the session before it touches the server.
+Without the URL, or when the server is unreachable, every test in this directory
+skips.
 """
 
 from __future__ import annotations
@@ -36,6 +38,17 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.pg)
 
 
+def refuse_unless_test_database(url: URL) -> None:
+    """Fail the session unless the database is named for tests: the lane drops
+    its ``public`` schema, so a URL that names a real database must never reach it."""
+    if not (url.database or "").endswith("_test"):
+        pytest.fail(
+            f"{URL_ENV} names the database {url.database!r}: the lane drops its "
+            "public schema, so the name must end in '_test'",
+            pytrace=False,
+        )
+
+
 def _ensure_database(url: URL) -> None:
     """Create the named database when the server lacks it."""
     admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
@@ -57,6 +70,7 @@ def pg_url() -> Iterator[str]:
     if not raw:
         pytest.skip(f"{URL_ENV} is not set")
     url = make_url(raw)
+    refuse_unless_test_database(url)
     try:
         _ensure_database(url)
         engine = create_engine(url)

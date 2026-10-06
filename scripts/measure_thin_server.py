@@ -9,7 +9,8 @@ a test: run it on a quiet machine, with the compose Postgres up.
     pixi run -e api python scripts/measure_thin_server.py
 
 The database (``data_rover_measure`` by default) is created when missing and its
-schema is rebuilt on every run. Requests go through the app in-process (the
+schema is dropped and rebuilt on every run, so its name must end in ``_test`` or
+``_measure``; any other needs ``--i-know-this-drops``. Requests go through the app in-process (the
 commit's route, its lock check and its transaction); the snapshot goes to the
 in-memory store, so the numbers carry the database and the encoding, not a blob
 store's network.
@@ -40,6 +41,22 @@ COMMIT_OPS = 1_000
 SUBTREE = 10_000
 USER = "measure"
 HEADERS = {"x-user-id": USER, "x-user-email": "measure@example.com"}
+
+
+SAFE_SUFFIXES = ("_test", "_measure")
+
+
+def refuse_unless_droppable(url: str, *, allowed: bool) -> None:
+    """Exit unless the schema of ``url`` may be dropped: its database is named
+    for tests or measures, or the caller said so."""
+    from sqlalchemy.engine import make_url
+
+    name = make_url(url).database or ""
+    if not allowed and not name.endswith(SAFE_SUFFIXES):
+        raise SystemExit(
+            f"refusing to drop the public schema of {name!r}: the name must end in "
+            f"{' or '.join(SAFE_SUFFIXES)}, or pass --i-know-this-drops"
+        )
 
 
 def fresh_database(url: str) -> None:
@@ -155,7 +172,13 @@ def main() -> None:
         help="how M gets into the database: the import route's code (timed, three "
         "runs) or the baseline writer (not timed, for the phases after the import)",
     )
+    parser.add_argument(
+        "--i-know-this-drops",
+        action="store_true",
+        help="drop the public schema of a database not named *_test or *_measure",
+    )
     args = parser.parse_args()
+    refuse_unless_droppable(args.database_url, allowed=args.i_know_this_drops)
     if not args.model.exists():
         raise SystemExit(f"{args.model} is missing: run `pixi run engine-bench-data`")
 
